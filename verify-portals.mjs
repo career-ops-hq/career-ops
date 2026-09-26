@@ -38,11 +38,52 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { isIP } from 'net';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
+
+// The portal probes are the one place that keeps following redirects: they hit
+// the ATS vendors' own hosts, and a moved board answers with a 3xx. `_http.mjs`
+// refuses redirects by default (#4079), so the probes follow them here, one hop
+// at a time under redirect:'manual', and each hop is checked like the first
+// request. A hostname is checked where it resolves (providers/_ip-guard.mjs),
+// but a literal address is dialled without a lookup, so it is checked here.
+const MAX_PROBE_REDIRECTS = 5;
+
+/** Where a refused 3xx points, or null when the probe must not go there. */
+function probeRedirectTarget(err, from) {
+  const status = err?.status;
+  if (typeof status !== 'number' || status < 300 || status >= 400 || !err.location) return null;
+  let next;
+  try {
+    next = new URL(err.location, from);
+  } catch {
+    return null;
+  }
+  if (next.protocol !== 'https:' && next.protocol !== 'http:') return null;
+  const host = next.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host) && isBlockedAddress(host)) return null;
+  return next.href;
+}
+
+const followRedirects = (fetchFn) => async (url, opts = {}) => {
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    try {
+      return await fetchFn(current, { ...opts, redirect: 'manual' });
+    } catch (err) {
+      const next = hop < MAX_PROBE_REDIRECTS ? probeRedirectTarget(err, current) : null;
+      if (next === null) throw err;
+      current = next;
+    }
+  }
+};
+const probeFetchJson = followRedirects(defaultFetchJson);
+const probeFetchText = followRedirects(defaultFetchText);
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
@@ -251,7 +292,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson, eu = false } = {},
+  { fetchJson = probeFetchJson, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -426,6 +467,21 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
 }
 
 /**
+ * Strip control characters from text before it reaches a terminal.
+ *
+ * Owner names come from a remote board page's ``<title>``, so a hostile or
+ * merely broken board can put ANSI escapes in our CLI output. Escape sequences
+ * can recolour or rewrite prior lines, which is a misleading report rather than
+ * a cosmetic problem: this command's whole job is telling an operator what is
+ * live. Tab and newline are dropped too, since the row is one line.
+ */
+function sanitizeForTerminal(text) {
+  if (typeof text !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 120).trim();
+}
+
+/**
  * Probe slug variants across all ATSes; prefer live boards over empty ones.
  *
  * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
@@ -437,6 +493,12 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
  */
 async function discoverAlternates(name, { fetchJson, fetchText }) {
   let bestEmpty = null;
+  // A live board whose identity could not be confirmed is NOT a suggestion: it is
+  // never adopted, and `fix-slugs` still refuses to write it. It is worth
+  // reporting all the same, because "your slug 404s and there is a live board at
+  // ashby/<slug> owned by someone else" and "your slug 404s and nothing answers"
+  // are different facts about a company and the summary showed neither (#4230).
+  let bestRejected = null;
   // One owner lookup per (ats, eu, slug) per company, so the added identity check
   // cannot multiply requests when candidates repeat across the probe order.
   const cache = new Map();
@@ -450,13 +512,24 @@ async function discoverAlternates(name, { fetchJson, fetchText }) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
         if (r.status !== 'live' && r.status !== 'empty') continue;
         const owner = await ownerConfirmed(ats, slug, name, { fetchJson, fetchText, eu, cache });
-        if (!owner.ok) continue;
+        if (!owner.ok) {
+          // Only a live board is worth reporting. An empty unconfirmed board says
+          // nothing the operator can act on, and `!bestRejected` keeps the first
+          // (widest-derived) candidate rather than the last one probed.
+          if (r.status === 'live' && !bestRejected) {
+            bestRejected = { ...r, ownerReason: owner.reason, ownerBoardName: owner.boardName || '' };
+          }
+          continue;
+        }
         if (r.status === 'live') return r;
         if (!bestEmpty) bestEmpty = r;
       }
     }
   }
-  return bestEmpty;
+  // The winner still wins; the rejection rides along so the caller can report it
+  // without the gate moving.
+  if (bestEmpty) return { ...bestEmpty, rejectedAlternate: bestRejected };
+  if (bestRejected) return { rejectedAlternate: bestRejected };
 }
 
 /**
@@ -569,7 +642,7 @@ export async function probeProvider(entry, provider, baseCtx) {
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, fetchText = probeFetchText, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -628,7 +701,7 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, providers = null, httpCtx = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
@@ -653,7 +726,7 @@ const ERROR_KIND_LABEL = {
   unknown: 'unresolved',
 };
 
-function printResults(results) {
+export function printResults(results) {
   for (const r of results) {
     const icon = ICON[r.status] || '?';
     // ATS rows carry ats/slug; provider-layer rows carry the provider id.
@@ -666,8 +739,26 @@ function printResults(results) {
     } else if (r.status === 'missing') {
       const kind = ERROR_KIND_LABEL[r.errorKind] || 'unresolved';
       detail = `${source} (${kind}) — ${r.reason || 'unresolved'}`;
-      if (r.suggested) {
+      // Only an *adoptable* suggestion gets the "try" line. A rejected-only
+      // result carries `rejectedAlternate` and no top-level ats/slug, so gating
+      // on `r.suggested` alone rendered `try undefined/undefined`.
+      if (r.suggested && r.suggested.ats && r.suggested.slug) {
         detail += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
+      }
+      // A live alternate whose identity could not be confirmed is reported, never
+      // suggested: the operator learns the board exists and why it was refused,
+      // and `fix-slugs` still will not write it (#4230).
+      const rejected = r.suggested?.rejectedAlternate;
+      if (rejected) {
+        // The observed owner and the refusal reason are two different facts: the
+        // first is what the board calls itself, the second is why we would not
+        // adopt it. Printing one in place of the other told the operator
+        // "identity unconfirmed" even when the identity was confirmed and simply
+        // did not match.
+        const board = sanitizeForTerminal(rejected.ownerBoardName);
+        const reason = rejected.ownerReason || 'identity unconfirmed';
+        const who = board ? `owned by "${board}" — ${reason}` : reason;
+        detail += `; also found live ${rejected.ats}/${rejected.slug} ${who}`;
       }
     } else {
       detail = r.reason || '';
@@ -750,7 +841,7 @@ async function main() {
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   const strict = hasFlag(args, '--strict');
-  const fetchJson = defaultFetchJson;
+  const fetchJson = probeFetchJson;
 
   if (hasFlag(args, '--add')) {
     await runAdd(flagValue(args, '--add') || '', { fetchJson });

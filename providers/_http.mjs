@@ -8,11 +8,35 @@ import {
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
 import { providerFetchContext } from './_ip-guard.mjs';
+import { normalizeUrl } from '../url-key.mjs';
+
+/** @typedef {import('./_types.js').Context} Context */
+/** @typedef {import('./_types.js').FetchOptions} FetchOptions */
+/**
+ * An `Error` carrying the HTTP response metadata this module attaches on a
+ * non-2xx: `status`, the raw `body`, the `Retry-After` value, and (only under
+ * `redirect: 'manual'`) the `Location` it would have followed. `attempts` is
+ * added by the retry loop — the real request count, not the `retries + 1`
+ * ceiling.
+ *
+ * @typedef {Error & { status?: number, body?: string, retryAfter?: (string | null), location?: (string | null), attempts?: number }} HttpError
+ */
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
+/** Per-request abort deadline; override per call with `opts.timeoutMs`. */
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/**
+ * Run a fetch under an `AbortController` timeout, inside the provider-fetch
+ * async context so the patched DNS lookup validates the addresses it resolves.
+ * `consume` reads the body while the timer is still armed.
+ *
+ * @param {string} url
+ * @param {FetchOptions} [opts]
+ * @param {(res: Response) => Promise<any>} consume
+ * @returns {Promise<any>}
+ */
 async function fetchWithTimeout(url, opts = {}, consume) {
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
@@ -27,7 +51,17 @@ async function fetchWithTimeout(url, opts = {}, consume) {
   return providerFetchContext.run({ url: String(url) }, () => fetchInContext(url, opts, consume));
 }
 
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
+// redirect defaults to 'error': a provider fetch must never follow a 3xx, or a
+// server-side redirect could point the request at a private address after the
+// ip guard already passed the original host (#4079). Callers that really need
+// to follow redirects opt in explicitly.
+/**
+ * @param {string} url
+ * @param {FetchOptions} [opts]
+ * @param {(res: Response) => Promise<any>} consume
+ * @returns {Promise<any>}
+ */
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -51,6 +85,7 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       redirect,
       signal: controller.signal,
     });
+    onResponse?.(res);
     if (!res.ok) {
       const responseText = await res.text().catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
@@ -82,6 +117,14 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
   }
 }
 
+/**
+ * Fetch and parse a JSON response, with the shared timeout and non-2xx guard.
+ *
+ * @param {string} url
+ * @param {FetchOptions} [opts]
+ * @returns {Promise<any>} Parsed JSON.
+ * @throws {HttpError} On a non-2xx response.
+ */
 export async function fetchJson(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.json());
 }
@@ -96,8 +139,9 @@ export async function fetchJson(url, opts = {}) {
  * this stops at maxBytes and cancels the body.
  *
  * @param {string} url
- * @param {{maxBytes?: number}} [opts]
+ * @param {{ maxBytes?: number }} [opts]
  * @returns {Promise<string>} The first maxBytes of the body, decoded as UTF-8.
+ * @throws {HttpError} On a non-2xx response.
  */
 export async function fetchTextHead(url, opts = {}) {
   const maxBytes = opts.maxBytes ?? 8192;
@@ -124,6 +168,14 @@ export async function fetchTextHead(url, opts = {}) {
   });
 }
 
+/**
+ * Fetch a response body as text, with the shared timeout and non-2xx guard.
+ *
+ * @param {string} url
+ * @param {FetchOptions} [opts]
+ * @returns {Promise<string>}
+ * @throws {HttpError} On a non-2xx response.
+ */
 export async function fetchText(url, opts = {}) {
   return fetchWithTimeout(url, opts, (res) => res.text());
 }
@@ -131,8 +183,8 @@ export async function fetchText(url, opts = {}) {
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
 // response headers — csod.mjs reads Set-Cookie to prime the session its search
 // API requires — can route through ctx instead of re-implementing fetch. Pass
-// redirect:'error' like every other provider call so a 3xx can't be followed to
-// a private IP.
+// redirect:'error' is the default here like everywhere else, so a 3xx can't be
+// followed to a private IP.
 //
 // The body is read here, inside the timer window, and handed back as an
 // equivalent Response. Two reasons: returning the live Response would let a
@@ -143,6 +195,17 @@ export async function fetchText(url, opts = {}) {
 // preserve bug-compatibility with. Header identity, including repeated
 // Set-Cookie (getSetCookie()), survives the reconstruction.
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+/**
+ * Like {@link fetchJson} / {@link fetchText}, but resolves to a reconstructed
+ * `Response` (body already read inside the timeout window) so a provider can
+ * read response headers — csod.mjs reads Set-Cookie to prime its session. Pass
+ * `redirect: 'error'` like every other provider call.
+ *
+ * @param {string} url
+ * @param {FetchOptions} [opts]
+ * @returns {Promise<Response>}
+ * @throws {HttpError} On a non-2xx response.
+ */
 export async function fetchResponse(url, opts = {}) {
   return await fetchWithTimeout(url, opts, async (res) => {
     const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.text();
@@ -175,7 +238,16 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
  */
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
-/** Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock wait. */
+/**
+ * Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock
+ * wait. `ctx` is the SECOND argument — a swapped `sleep(ctx, ms)` hands an
+ * object to `setTimeout` and resolves on the next tick instead of pacing.
+ *
+ * @param {number} ms - Delay in milliseconds.
+ * @param {{ sleep?: (ms: number) => Promise<void> }} [ctx] - Transport context; a
+ *   `sleep` clock on it (tests supply one) is awaited instead of `setTimeout`.
+ * @returns {Promise<void>}
+ */
 export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -184,6 +256,9 @@ export function sleep(ms, ctx) {
 /**
  * Milliseconds from a Retry-After header, in either permitted form (delta
  * seconds or an HTTP-date). Null when absent or unparseable.
+ *
+ * @param {(string | null | undefined)} value - Raw `Retry-After` header value.
+ * @returns {(number | null)}
  */
 export function parseRetryAfterMs(value) {
   if (!value) return null;
@@ -224,6 +299,9 @@ export function isRefusedRedirectError(err) {
  * TypeError with no .status — the same shape as a transient network error —
  * but it's deterministic and will never succeed on retry. See
  * isRefusedRedirectError() above for how it's distinguished.
+ *
+ * @param {any} err - A thrown value: an Error with an optional `.status`, or anything else.
+ * @returns {boolean}
  */
 export function isRetryableError(err) {
   const status = err?.status;
@@ -258,8 +336,9 @@ export function isRetryableError(err) {
  * #1639).
  *
  * @param {() => Promise<any>} request - Performs one attempt.
- * @param {{sleep?: Function}} ctx - Transport context (may supply a test clock).
- * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
+ * @param {{ sleep?: (ms: number) => Promise<void> }} ctx - Transport context (may supply a test clock).
+ * @param {{ retries?: number, baseDelayMs?: number, maxDelayMs?: number }} [policy]
+ * @returns {Promise<any>} Whatever `request` resolves to on its first success.
  */
 async function withRetry(request, ctx, policy = {}) {
   const { retries, baseDelayMs, maxDelayMs } = { ...RETRY_DEFAULTS, ...policy };
@@ -299,10 +378,10 @@ async function withRetry(request, ctx, policy = {}) {
 /**
  * Fetch JSON with bounded retry on transient failures.
  *
- * @param {{fetchJson: Function, sleep?: Function}} ctx - Transport context.
+ * @param {{ fetchJson: (url: string, opts?: FetchOptions) => Promise<any>, sleep?: (ms: number) => Promise<void> }} ctx - Transport context.
  * @param {string} url - Absolute URL.
- * @param {object} [opts] - Passed through to ctx.fetchJson.
- * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
+ * @param {FetchOptions} [opts] - Passed through to ctx.fetchJson.
+ * @param {{ retries?: number, baseDelayMs?: number, maxDelayMs?: number }} [policy]
  * @returns {Promise<any>} Parsed JSON.
  */
 export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
@@ -322,21 +401,49 @@ export async function fetchJsonWithRetry(ctx, url, opts = {}, policy = {}) {
  * DNS/TLS/connection blip on it failed the whole provider before a single
  * page was ever fetched.
  *
- * @param {{fetchText: Function, sleep?: Function}} ctx - Transport context.
+ * @param {{ fetchText: (url: string, opts?: FetchOptions) => Promise<string>, sleep?: (ms: number) => Promise<void> }} ctx - Transport context.
  * @param {string} url - Absolute URL.
- * @param {object} [opts] - Passed through to ctx.fetchText.
- * @param {{retries?: number, baseDelayMs?: number, maxDelayMs?: number}} [policy]
+ * @param {FetchOptions} [opts] - Passed through to ctx.fetchText.
+ * @param {{ retries?: number, baseDelayMs?: number, maxDelayMs?: number }} [policy]
  * @returns {Promise<string>} Response body.
  */
 export async function fetchTextWithRetry(ctx, url, opts = {}, policy = {}) {
   return withRetry(() => ctx.fetchText(url, opts), ctx, policy);
 }
 
-export function makeHttpCtx() {
-  return {
+/**
+ * Build the default HTTP transport context passed to `provider.fetch()` when
+ * no test stub is injected.
+ *
+ * @param {{ onRequest?: () => void, onResponse?: (status: number) => void }} [observer]
+ * @returns {Context}
+ */
+export function makeHttpCtx(observer) {
+  const ctx = {
     transport: 'http',
     fetchJson,
     fetchText,
     fetchResponse,
+    // The canonical posting-URL key, so a provider can deduplicate its own
+    // results the way the tracker and scanner do. Handing it over through ctx
+    // is what keeps the behaviour identical: `url-key.mjs` is dependency-free,
+    // so a standalone provider receives the same function the core calls rather
+    // than importing the file or copying its body (#4218).
+    normalizePostingUrl: normalizeUrl,
   };
+  if (!observer) return ctx;
+  for (const method of ['fetchJson', 'fetchText', 'fetchResponse']) {
+    const original = ctx[method];
+    ctx[method] = (url, opts = {}) => {
+      observer.onRequest?.();
+      return original(url, {
+        ...opts,
+        onResponse: response => {
+          opts.onResponse?.(response);
+          observer.onResponse?.(response.status);
+        },
+      });
+    };
+  }
+  return ctx;
 }

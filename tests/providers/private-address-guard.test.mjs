@@ -49,6 +49,9 @@ test('blocks loopback, private, link-local and reserved ranges', () => {
     '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', 'fe80::1%eth0', 'ff02::1',
     '::ffff:127.0.0.1',     // IPv4-mapped loopback
     '::ffff:169.254.169.254',
+    '::ffff:7f00:1',        // the same two in hex, as the URL parser prints them
+    '::ffff:a9fe:a9fe',
+    '::7f00:1',             // IPv4-compatible loopback in hex
   ]) {
     assert.equal(isBlockedAddress(address), true, `${address} should be blocked`);
   }
@@ -61,6 +64,7 @@ test('allows ordinary public addresses, including the range boundaries', () => {
     '100.63.255.255',                  // just below 100.64.0.0/10
     '192.169.0.1',                     // just above 192.168.0.0/16
     '2606:4700::1111', '2001:4860:4860::8888', '::ffff:8.8.8.8',
+    '::ffff:808:808',                  // 8.8.8.8, IPv4-mapped in hex
   ]) {
     assert.equal(isBlockedAddress(address), false, `${address} should be allowed`);
   }

@@ -43,6 +43,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -290,6 +291,43 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // Spanish — the same failure again: with no entries here, a Spanish CV
+  // rendered in the documented modes/pdf.md order (Experiencia before Formación)
+  // was rejected against a cv.md listing Formación first, and --allow-reorder was
+  // the only way through. The vocabulary is what generated Spanish CVs render
+  // (Perfil Profesional, Competencias Clave, Experiencia Profesional, Formación,
+  // Certificaciones, Habilidades) plus each section's everyday synonyms. Keys are
+  // folded through foldDiacritics below, so accented and unaccented spellings
+  // both resolve.
+  ['perfil', 'summary'],
+  ['perfil profesional', 'summary'],
+  ['resumen', 'summary'],
+  ['resumen profesional', 'summary'],
+  ['competencias', 'competencies'],
+  ['competencias clave', 'competencies'],
+  ['competencias principales', 'competencies'],
+  ['experiencia', 'experience'],
+  ['experiencia profesional', 'experience'],
+  ['experiencia laboral', 'experience'],
+  ['trayectoria profesional', 'experience'],
+  ['proyectos', 'projects'],
+  ['proyectos destacados', 'projects'],
+  ['proyectos personales', 'projects'],
+  ['proyectos y laboratorios', 'projects'],
+  ['formación', 'education'],
+  ['formación académica', 'education'],
+  ['educación', 'education'],
+  ['estudios', 'education'],
+  ['certificaciones', 'certifications'],
+  ['certificados', 'certifications'],
+  ['premios', 'awards'],
+  ['reconocimientos', 'awards'],
+  ['premios y reconocimientos', 'awards'],
+  ['habilidades', 'skills'],
+  ['habilidades técnicas', 'skills'],
+  ['conocimientos técnicos', 'skills'],
+  ['herramientas e idiomas', 'skills'],
+  ['intereses', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -1130,9 +1168,14 @@ export function isWorkspaceOutputPath(pathValue, rootDir = currentWorkspaceRoot(
   }
 }
 
-export function injectPrintPageCss(html, format = 'a4') {
-  const normalizedFormat = String(format || 'a4').toLowerCase();
-  const pageSize = normalizedFormat === 'letter' ? 'Letter' : 'A4';
+export function injectPrintPageCss(html, format) {
+  // The only place the sheet size is set: page.pdf() below runs with
+  // preferCSSPageSize, so this @page rule IS the paper. It resolves through
+  // lib/page-format.mjs so a caller that passes nothing gets the user's
+  // configured size instead of a fallback private to this file.
+  const pageSize = PAGE_CSS_SIZE[resolvePageFormat(format, {
+    profilePath: resolve(workspaceRoot, 'config', 'profile.yml'),
+  })];
   // Read --page-margin (set by the template's own :root default, and overridden
   // by injectThemeStyle's block when style.margin is configured) instead of
   // hardcoding PDF_PAGE_MARGIN outright — this @page rule is injected last, so a
@@ -1210,7 +1253,9 @@ async function generatePDF() {
   let skipFactCheck = false;
 
   // Parse arguments
-  let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
+  // No flag seen yet: null, not a paper size. The default belongs to
+  // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
+  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false;
   let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
@@ -1240,6 +1285,20 @@ async function generatePDF() {
     console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
     process.exit(1);
   }
+
+  // Resolve the format before the batch branch, so a batch and a single render
+  // inherit the same configured size and a bad --format fails the same way in
+  // both. An explicit flag is still rejected loudly: falling through to the
+  // profile would print a typo on whatever size happened to be configured.
+  if (format !== null) {
+    const normalized = normalizePageFormat(format);
+    if (!normalized) {
+      console.error(`Invalid format "${format}". Use: ${[...PAGE_FORMATS].join(', ')}`);
+      process.exit(1);
+    }
+    format = normalized;
+  }
+  format = resolvePageFormat(format, { profilePath: resolve(workspaceRoot, 'config', 'profile.yml') });
 
   // Batch mode (#2384): render every document in the manifest through one
   // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
@@ -1294,13 +1353,6 @@ async function generatePDF() {
   }
   if (!isWorkspaceOutputPath(outputPath, workspaceRoot)) {
     console.error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
-    process.exit(1);
-  }
-
-  // Validate format
-  const validFormats = ['a4', 'letter'];
-  if (!validFormats.includes(format)) {
-    console.error(`Invalid format "${format}". Use: ${validFormats.join(', ')}`);
     process.exit(1);
   }
 
@@ -1433,7 +1485,6 @@ async function runBatchFromManifest(manifestPath, globals) {
     process.exit(1);
   }
 
-  const validFormats = ['a4', 'letter'];
   const results = new Array(manifest.length).fill(null);
   const entries = [];
 
@@ -1445,11 +1496,11 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  // One profile governs the whole batch, so the declared order is read once
-  // rather than per entry. Anchored to workspaceRoot for the same reason the
-  // single render is: it is the anchor readStyleTokens() and the cv.md read
-  // already use, so one profile.yml supplies every setting.
-  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
+  // Read one workspace profile for the batch. The working directory must not
+  // choose a different theme from the single-document render.
+  const profilePath = resolve(workspaceRoot, 'config', 'profile.yml');
+  const cvSectionOrder = readCvSectionOrder(profilePath);
+  const styleTokens = readStyleTokens(profilePath);
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -1458,9 +1509,10 @@ async function runBatchFromManifest(manifestPath, globals) {
         throw new Error('each entry needs a string "input" and "output"');
       }
 
-      const entryFormat = (spec.format || globals.format).toLowerCase();
-      if (!validFormats.includes(entryFormat)) {
-        throw new Error(`invalid format "${entryFormat}" (use: ${validFormats.join(', ')})`);
+      const declaredFormat = spec.format || globals.format;
+      const entryFormat = normalizePageFormat(declaredFormat);
+      if (!entryFormat) {
+        throw new Error(`invalid format "${declaredFormat}" (use: ${[...PAGE_FORMATS].join(', ')})`);
       }
 
       const entryReport = (spec.reportNum ?? '').toString().trim();
@@ -1502,6 +1554,7 @@ async function runBatchFromManifest(manifestPath, globals) {
         inputPath: entryInput,
         maxPages: globals.maxPages,
         strictPages: globals.strictPages,
+        styleTokens,
       });
     } catch (err) {
       console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
@@ -1676,8 +1729,8 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 async function renderInPage(browser, html, outputPath, opts = {}) {
-  const format = opts.format || 'a4';
   const outputRoot = opts.workspaceRoot || workspaceRoot;
+  const format = resolvePageFormat(opts.format, { profilePath: resolve(outputRoot, 'config', 'profile.yml') });
   const requestedBaseDir = resolve(opts.baseDir || outputRoot);
   // Temporary HTML is an output too: never let an external input path or
   // caller-supplied baseDir choose an arbitrary directory. If the requested
@@ -1703,7 +1756,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // properties so the templates' var(--x, <default>) reads pick them up (#1837).
   // No `style:` block → no tokens → byte-identical output. Both the CV path and
   // the cover-letter path flow through here, so both are themed from one place.
-  const styleTokens = opts.styleTokens ?? readStyleTokens();
+  const styleTokens = opts.styleTokens ?? readStyleTokens(resolve(outputRoot, 'config', 'profile.yml'));
   html = injectThemeStyle(html, styleTokens);
 
   html = injectPrintPageCss(html, format);

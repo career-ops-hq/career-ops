@@ -7,9 +7,9 @@
  * newly introduced system paths without touching user data.
  */
 
-import { readFileSync, existsSync, rmSync } from 'fs';
+import { readFileSync, existsSync, rmSync, realpathSync } from 'fs';
 import { execFileSync, spawnSync } from 'child_process';
-import { dirname, join } from 'path';
+import { dirname, join, sep } from 'path';
 import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
 
 let passed = 0;
@@ -53,16 +53,45 @@ try {
 // budget on any connection slow enough (`exit null, signal SIGTERM`).
 //
 // Removal is keyed on whether `.git` existed BEFORE this script ran, never on
-// the toplevel comparison below. That comparison is unreliable (#3732: on
-// Windows it never matches, so the init branch runs inside the real checkout),
-// and a cleanup keyed on it could delete a real repository. A `.git` this
-// script did not create is never touched, a linked worktree's `.git` file
+// the toplevel comparison below: a cleanup keyed on a path comparison could
+// delete a real repository the day that comparison is wrong again. A `.git`
+// this script did not create is never touched, a linked worktree's `.git` file
 // included. The handler is registered before `git init` so a setup that fails
 // halfway still leaves the copy as it found it.
+
+// Two spellings of one directory must compare equal (#3732). git prints the
+// toplevel with forward slashes and Node's process.cwd() uses backslashes on
+// Windows, so a plain string comparison never matched there and a standalone
+// run from the checkout root took the init branch inside the real repository,
+// overwriting its repo-local identity. Both paths exist, so resolve each to
+// its canonical on-disk form before comparing.
+function sameDirectory(a, b) {
+  return realpathSync.native(a) === realpathSync.native(b);
+}
+
+{
+  const cwd = process.cwd();
+  const spellings = [
+    ['forward slashes, as git prints a Windows toplevel', cwd.split(sep).join('/')],
+    ['a trailing separator', cwd + sep],
+  ];
+  for (const [label, spelling] of spellings) {
+    if (sameDirectory(spelling, cwd)) pass(`toplevel guard matches the cwd spelled with ${label} (#3732)`);
+    else fail(`toplevel guard matches the cwd spelled with ${label} (#3732)`);
+  }
+  // A checkout at a filesystem root is its own parent, so there is nothing
+  // distinct to compare against there.
+  const parent = dirname(cwd);
+  if (parent !== cwd) {
+    if (!sameDirectory(parent, cwd)) pass('toplevel guard still tells the parent directory apart');
+    else fail('toplevel guard still tells the parent directory apart');
+  }
+}
+
 try {
   const cwd = process.cwd();
   const toplevel = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8' }).trim();
-  if (toplevel !== cwd) {
+  if (!sameDirectory(toplevel, cwd)) {
     const fixtureGitDir = join(cwd, '.git');
     if (!existsSync(fixtureGitDir)) {
       process.on('exit', () => {
@@ -406,11 +435,22 @@ const twoPassManifestChecks = [
     pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
   },
   {
-    // A checkout failure is only an expected skip when the path is truly absent
-    // from FETCH_HEAD; timeouts/permission errors must rethrow, not report
-    // success (#1998 CodeRabbit review).
-    name: 'a checkout failure only skips when the path is absent upstream, else rethrows (#1998)',
-    pattern: /catch \{ absentUpstream = true; \}\s*if \(!absentUpstream\) throw err;/,
+    // A checkout failure is an expected skip only when `probeAbsentUpstream`
+    // returns true (a SUCCESSFUL empty `ls-tree` — the path is truly gone from
+    // FETCH_HEAD), or — for a directory whose upstream content could not be
+    // enumerated (#3824) — when the exclusions cancelled the pathspec out. A
+    // thrown probe, a timeout or a permission error must rethrow, not report
+    // success (#1998). The catch must NOT set `absentUpstream` any other way:
+    // an inline `catch { absentUpstream = true }` is exactly the regression.
+    name: 'the checkout catch derives absentUpstream only from probeAbsentUpstream (#1998, #3824)',
+    pattern: /const absentUpstream = probeAbsentUpstream\(spec\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) throw err;/,
+  },
+  {
+    name: 'the checkout catch never assigns absentUpstream = true directly (#1998 regression)',
+    // The old blanket `catch { absentUpstream = true }` — must not reappear in
+    // the per-path checkout loop.
+    pattern: /absentUpstream = true;?\s*\}/,
+    expectAbsent: true,
   },
   {
     // `git checkout HEAD -- docs/` restores tracked content but never removes
@@ -448,7 +488,9 @@ const twoPassManifestChecks = [
 ];
 
 for (const check of twoPassManifestChecks) {
-  if (check.pattern.test(source)) pass(check.name);
+  const present = check.pattern.test(source);
+  const want = check.expectAbsent ? !present : present;
+  if (want) pass(check.name);
   else fail(check.name);
 }
 
