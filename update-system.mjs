@@ -189,6 +189,7 @@ const SYSTEM_PATHS = [
   'modes/titles.md',
   'modes/upskill.md',
   'modes/intake.md',
+  'modes/ats-score.md',
   'documents/.gitkeep',
   'documents/README.md',
   'modes/update.md',
