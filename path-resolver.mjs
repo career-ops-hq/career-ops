@@ -52,6 +52,8 @@ export function canonicalizeTrackerPath(path) {
 /**
  * Returns the canonical path to the tracker applications.md file for reading.
  * Priority: process.env.CAREER_OPS_TRACKER > root/data/applications.md > root/applications.md.
+ * Relative environment overrides are anchored to the codebase root, not cwd
+ * or rootDir (which may be an external data directory).
  *
  * @param {string} rootDir The career-ops data root directory
  * @returns {string} Canonical absolute path to the tracker file
@@ -59,7 +61,7 @@ export function canonicalizeTrackerPath(path) {
 export function resolveTrackerPath(rootDir) {
   const env = process.env.CAREER_OPS_TRACKER?.trim();
   const raw = env
-    ? env
+    ? resolve(__dirname, env)
     : existsSync(join(rootDir, 'data/applications.md'))
       ? join(rootDir, 'data/applications.md')
       : join(rootDir, 'applications.md');
@@ -80,8 +82,7 @@ export function resolveTrackerPathForWrite(root) {
     // Same canonicalization as the read path (see the re-export above): an
     // un-canonicalized env override derives divergent lock paths on symlinked
     // tmpdirs and breaks shared writer exclusion.
-    return canonicalizeTrackerPath(env);
+    return canonicalizeTrackerPath(resolve(__dirname, env));
   }
   return join(root, 'data/applications.md');
 }
-
