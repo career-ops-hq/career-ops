@@ -1,3 +1,4 @@
+import { buildConversationContext } from "@/lib/assistant-history.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
@@ -73,8 +74,9 @@ export async function POST(req: Request) {
   }
   const { spec, binPath } = resolved;
 
-  const history = (body.history ?? []).slice(-8);
-  const convo = history.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
+  let convo: string;
+  try { convo = buildConversationContext(body.history ?? []); }
+  catch { return Response.json({ error: "Invalid conversation history" }, { status: 400 }); }
   const pageLine = pageContext
     ? `\n\nCURRENT PAGE (the user is looking at this right now): ${pageContext}\nWhen the user's message is ambiguous ("this", "it", "apply", "evaluate this", "draft it"), assume it refers to what's on the current page.`
     : "";

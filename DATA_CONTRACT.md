@@ -8,6 +8,7 @@ These files contain your personal data, customizations, and work product. Update
 
 | File | Purpose |
 |------|---------|
+| `.career-ops-web/chats/*.json` | Local assistant conversation history (gitignored, not verified profile facts); only the chat API writes these files |
 | `cv.md` | Your CV in markdown |
 | `config/profile.yml` | Your identity, targets, comp range |
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |

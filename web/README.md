@@ -106,3 +106,25 @@ Three constraints follow from all this:
 `tests/web-test-layout.test.mjs` in the **root** suite enforces all of the above
 on every PR, including that `npm test` never goes back to listing suites by name
 ([#2360](https://github.com/career-ops-hq/career-ops/issues/2360)).
+
+### Assistant conversations
+
+The assistant saves conversations in `.career-ops-web/chats/` under the resolved
+user data root. New chat keeps the previous conversation; use the history picker
+to switch, rename, or delete it. Clearing browser storage does not delete saved
+conversations. The old `career-ops:chat` browser entry is migrated once and only
+removed after its disk write succeeds. Empty greetings are not saved.
+
+Writes are atomic and revision-checked: a stale tab cannot overwrite newer
+messages. Save failures stay visible, and switching waits for the current save.
+Files with invalid JSON are reported rather than treated as empty. A crashed
+writer can leave a `.json.lock` file; after stopping the web server, remove that
+lock and restart to retry. Conversation files contain personal text and should
+stay local and gitignored. They are conversation history, not new verified CV
+facts or a replacement for the canonical profile files.
+
+Stored messages are not truncated. Model input is bounded to 24 recent messages
+(up to 24,000 characters) plus literal excerpts of earlier user messages (up to
+8,000 characters). Long excerpts may be shortened; this is not unlimited model
+memory. Conversations are limited to 2,000 messages and 1 MB; a larger save is
+rejected visibly without overwriting the previous file.

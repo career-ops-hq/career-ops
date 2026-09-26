@@ -532,6 +532,7 @@ const BOOTSTRAP_PATHS = [
  * having an opinion about it (#2480).
  */
 export const USER_PATHS = [
+  '.career-ops-web/',
   'cv.md',
   'config/profile.yml',
   'modes/_profile.md',
