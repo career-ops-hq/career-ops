@@ -65,14 +65,16 @@ func TestFunnelHistoryDuplicateRanksAndSkip(t *testing.T) {
 			{Number: 8, Status: "SKIP"},
 			{Number: 9, Status: "skip"},
 			{Number: 10, Status: "Discarded"},
+			{Number: 11, Status: "**SKIP**"},
+			{Number: 12, Status: "No Aplicar"},
 		}
 		if reverse {
 			for i, j := 0, len(apps)-1; i < j; i, j = i+1, j-1 {
 				apps[i], apps[j] = apps[j], apps[i]
 			}
 		}
-		pm := ComputeProgressMetrics(apps, map[int]int{7: 2, 8: 4, 9: 3, 10: 3})
-		for i, want := range []int{5, 2, 2, 2, 1} {
+		pm := ComputeProgressMetrics(apps, map[int]int{7: 2, 8: 4, 9: 3, 10: 3, 11: 4, 12: 4})
+		for i, want := range []int{7, 2, 2, 2, 1} {
 			if pm.FunnelStages[i].Count != want {
 				t.Errorf("reverse=%v stage %d: got %d want %d", reverse, i, pm.FunnelStages[i].Count, want)
 			}

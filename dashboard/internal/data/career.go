@@ -1035,7 +1035,7 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 		ranks := make(map[int]int)
 		var unnumberedRanks []int
 		for _, app := range apps {
-			if strings.EqualFold(app.Status, "skip") {
+			if NormalizeStatus(app.Status) == "skip" {
 				continue
 			}
 			rank := funnelRank(app.Status)
