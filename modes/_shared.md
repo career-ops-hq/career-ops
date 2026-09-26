@@ -170,7 +170,9 @@ Classify the offer by archetype. `modes/_profile.md` → *Your Target Roles* is
 authoritative: where it defines archetypes, detect against **that** table and
 use the one below only as a fallback for what it does not cover. This mirrors
 the precedence already stated above — user customizations in `_profile.md`
-override the defaults in this file.
+override the defaults in this file. If `_profile.md` is missing, has no
+*Your Target Roles* section, or that table has no rows, the default table below
+is the target set: classify against it, and a match there counts as targeted.
 
 The table below is a default, not a closed set. It reflects one particular
 search (see AGENTS.md → Origin) and will not describe every user's field: a
@@ -178,7 +180,7 @@ silicon design-verification engineer, a quant, a clinician have no archetype
 here at all.
 
 **If an offer matches no archetype the user actually targets, say so plainly
-and score North Star alignment low.** That is a real and useful signal.
+and score North Star alignment 1.** That is a real and useful signal.
 Forcing it into the nearest available label — or into a "hybrid" of two —
 manufactures a confident fit narrative for a job the user is not applying for,
 which is worse than a low score because it reads as analysis.
@@ -188,14 +190,15 @@ targets.** Where `_profile.md` defines archetypes, "targeted" means one of
 those. An offer that lands cleanly on a default row and on nothing in
 `_profile.md` is still an unmatched offer: name the default archetype if it
 helps explain the role, and score North Star as unmatched anyway. Reading the
-fallback as a target is the exact failure this section exists to stop — it is
-how a program-management req came back as "Technical AI PM / AI Transformation
-Lead (hybrid)" for a candidate who targets neither.
+fallback as a target is the exact failure this section exists to stop.
 
-On the number: `modes/ofertas.md` already anchors this dimension at
-`5 = exact target role, 1 = unrelated`. Unmatched sits at the bottom of that
-scale, not in the middle — the offer is not one the user is looking for, and a
-mid score reads as a partial fit that does not exist.
+**On the number: an unmatched offer scores North Star 1.** `modes/ofertas.md`
+anchors this dimension at `5 = exact target role, 1 = unrelated`, and unmatched
+is the `1` end of that scale, not the middle — the offer is not one the user is
+looking for, and a 2 or 3 reads as a partial fit that does not exist. An offer
+that does match one of the user's targets, fully or as a hybrid of two, is
+scored on the rest of that same scale as usual; this section adds no second
+scale beside it.
 
 | Archetype | Key signals in JD |
 |-----------|-------------------|

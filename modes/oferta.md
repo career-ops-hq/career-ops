@@ -48,16 +48,20 @@ If deeper company research is useful, recommend running `/career-ops deep` separ
 ## Step 0 — Archetype Detection
 
 Classify the job against the archetypes in `_shared.md` — which means the user's
-own, from `modes/_profile.md` → *Your Target Roles*, where those exist. If it is
-a hybrid of two of the user's targets, indicate both.
+own, from `modes/_profile.md` → *Your Target Roles*, where those exist. If
+`_profile.md` is missing, has no *Your Target Roles* section, or that table has
+no rows, classify against `_shared.md`'s default table instead, and treat a
+match there as a target. If it is a hybrid of two of the user's targets,
+indicate both.
 
 **"None of these" is a valid outcome and must be reported as one.** If the role
 matches nothing the user targets, do not pick the nearest label and do not call
-it a hybrid: say so, score North Star at the bottom of its scale, and continue
+it a hybrid: say so, score North Star 1, and continue
 the evaluation on the other dimensions — the rest of the report is still worth
 having, and a low alignment score with an honest reason is more useful than a
-confident fit narrative for a job the user is not applying for. A match against
-`_shared.md`'s default table alone is not a match against the user's targets.
+confident fit narrative for a job the user is not applying for. Where
+`_profile.md` does define targets, a match against `_shared.md`'s default table
+alone is not a match against them.
 
 This determines:
 - Which proof points to prioritize in block B
