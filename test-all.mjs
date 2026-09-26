@@ -58,6 +58,7 @@ import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
+import { failureExcerpt } from './lib/failure-excerpt.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -220,8 +221,13 @@ async function runDiscovered(filter = null) {
         const detail = lastRunFailure();
         fail(`${rel} — node:test suite failed (exit ${detail?.status ?? '?'})`);
         // Surface the runner's own summary; a bare "failed" is not actionable.
-        const tail = (detail?.stderr || detail?.stdout || '').split('\n').filter(Boolean).slice(-12);
-        for (const line of tail) console.log(`      ${line}`);
+        // The trailing window alone is not actionable either: node prints the
+        // error message above the frames, so a twelve-line tail kept
+        // `actual: false, expected: true` and dropped the interpolated value
+        // that says WHICH assertion and by how much (#4017).
+        for (const line of failureExcerpt(detail?.stderr || detail?.stdout || '')) {
+          console.log(`      ${line}`);
+        }
       } else {
         // Both reporters: TAP prints "# pass N", the default spec reporter
         // prints "ℹ pass N". Cosmetic — the pass/fail verdict is the exit code.
