@@ -36,6 +36,10 @@
  * can adopt the same key later without the definitions drifting.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
 // names are absent.
@@ -43,6 +47,202 @@ const TRACKING_PARAMS = [
   /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i,
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
 ];
+
+// Multi-employer job boards that re-list requisitions hosted elsewhere. One
+// opening routinely carries a LinkedIn URL, an Indeed URL and the employer's
+// own ATS URL at the same time, so two of these URLs are two spellings of an
+// unknown posting rather than two postings. Registrable domains only; keep the
+// list literal and conservative, for the same reason TRACKING_PARAMS is. Adding
+// an employer-controlled host here would let a fuzzy title collision merge two
+// genuinely distinct requisitions, which is the silent failure direction.
+// The scraper list is shared with scan.mjs (data-static/aggregator-domains.txt,
+// #4263) so a newly discovered reposter is added in ONE place.
+//
+// It does not answer this module's question on its own. That file lists hosts
+// that SCRAPE AND REPOST, and deliberately omits the big job boards because
+// companies post to them directly as a primary board — its header says exactly
+// that about indeed.com. url-key.mjs asks something broader: is this URL
+// EMPLOYER-CONTROLLED? For a board that carries a company's own posting under
+// its own URL the answer is still no, because the same requisition also lives
+// on the employer's ATS, which is the duplicate this module exists to collapse.
+//
+// So the shared file is the base and these are layered on top, each named with
+// the reason it is absent there. Dropping any of them would silently un-fix the
+// case this whole change is for: one posting seen on LinkedIn and on the
+// employer board landing twice.
+const AGGREGATOR_SUPPLEMENT = [
+  'indeed.com',      // primary board; excluded from the shared file by its header
+  'linkedin.com',    // primary board; employers post directly
+  'glassdoor.com',   // primary board; employers post directly
+  'ziprecruiter.com', // primary board; employers post directly
+  'dice.com',        // primary board for tech; employers post directly
+  'wellfound.com',   // primary board for startups; employers post directly
+];
+
+/** Path to the shared scraper list, overridable the same way scan.mjs allows. */
+const AGGREGATOR_DOMAINS_PATH = process.env.CAREER_OPS_AGGREGATOR_DOMAINS
+  || join(dirname(fileURLToPath(import.meta.url)), 'data-static/aggregator-domains.txt');
+
+// Read once, lazily: this module is imported by merge-tracker.mjs and scan.mjs
+// on every run, and it stays a pure function module until something actually
+// asks about an aggregator.
+//
+// Read directly rather than importing scan.mjs's loader: scan.mjs already
+// imports THIS module, so depending on it back would be a cycle and would pull
+// scan.mjs's whole import graph into merge-tracker's path.
+let aggregatorDomainsCache = null;
+function aggregatorDomains() {
+  if (aggregatorDomainsCache) return aggregatorDomainsCache;
+  const domains = new Set(AGGREGATOR_SUPPLEMENT);
+  try {
+    for (let line of readFileSync(AGGREGATOR_DOMAINS_PATH, 'utf-8').replace(/\r/g, '').split('\n')) {
+      line = line.trim();
+      if (!line || line.startsWith('#')) continue;
+      const domain = line.split('#')[0].trim().toLowerCase();
+      if (domain) domains.add(domain);
+    }
+  } catch (err) {
+    // Losing the shared file is NOT a no-op, and an earlier version of this
+    // comment claimed it was. Every domain in that file is one this module
+    // turns on, so without it those hosts stop reading as aggregators and
+    // their URL mismatches start counting as employer-controlled evidence,
+    // which BLOCKS a merge. That is the under-merge direction — a visible
+    // duplicate row the user can fix — rather than the silent over-merge, so
+    // carrying on is the right call. It is still a behaviour change worth
+    // being loud about.
+    //
+    // A missing file at the DEFAULT path is the one case that stays quiet: a
+    // partial checkout legitimately lacks it. Anything else is the operator
+    // being wrong about something they asked for — a bad
+    // CAREER_OPS_AGGREGATOR_DOMAINS path, a directory, an unreadable file —
+    // and swallowing all of those identically is how a misconfiguration runs
+    // for months looking like normal operation.
+    const overridden = Boolean(process.env.CAREER_OPS_AGGREGATOR_DOMAINS);
+    if (err?.code !== 'ENOENT' || overridden) {
+      console.warn(
+        `Warning: could not read aggregator domains from ${AGGREGATOR_DOMAINS_PATH} (${err?.code || err}). `
+        + 'Falling back to the built-in supplement; hosts listed only in that file will not be treated as '
+        + 'aggregators, so some duplicate rows may stop collapsing.',
+      );
+    }
+  }
+  aggregatorDomainsCache = domains;
+  return aggregatorDomainsCache;
+}
+
+/**
+ * Fold a hostname to its comparison form: lowercase, with the DNS root label
+ * dropped.
+ *
+ * `example.com.` and `example.com` are the same name — the terminal dot is the
+ * root label written explicitly — but WHATWG URL preserves it verbatim. Both
+ * exported functions below parse the host themselves, so without one shared
+ * fold the same posting yields two keys in `normalizeUrl` (dedup sees two rows
+ * where there is one) AND slips past `isAggregatorUrl` (an aggregator gets
+ * treated as an employer board, which is the direction that turns a non-signal
+ * back into false evidence of a distinct requisition).
+ *
+ * Exactly one dot is stripped. `example.com..` is not a valid host, so it is
+ * left alone rather than silently repaired into a key that would match a real
+ * posting, and a bare root host is left as-is — rejecting it is a separate
+ * decision this does not make.
+ *
+ * @param {string} host - A hostname from a parsed URL.
+ * @returns {string} The folded hostname.
+ */
+function foldHostname(host) {
+  const h = String(host).toLowerCase();
+  return h.length > 1 && h.endsWith('.') && !h.endsWith('..') ? h.slice(0, -1) : h;
+}
+
+// Posting-ID extractors, keyed by the registrable aggregator domain above.
+//
+// WHY AN ID AND NOT THE HOST. "Aggregator on either side → unknown" is too
+// coarse: it also swallows two DIFFERENT requisitions listed on the SAME board,
+// and folding those rewrites an Applied row's URL to a posting nobody applied
+// to. The host itself cannot separate the two cases — the posting ID can.
+//
+// ONLY VERIFIED SHAPES GO IN HERE, and an unmapped board is not a defect. A
+// guessed regex that reads two spellings of one posting as two IDs splits that
+// posting into two rows, which is the failure direction this file exists to
+// avoid; a missing extractor merely leaves the pair UNKNOWN, i.e. exactly the
+// behaviour shipped for #3652. The two below are the shapes this repo already
+// resolves in liveness-api.mjs (see its `linkedin` provider) and exercises in
+// tests/liveness-api-linkedin.test.mjs — not inferred from the URLs' looks.
+//
+// Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
+// also Workable's employer-board shape, where it means something else.
+const AGGREGATOR_POSTING_ID = {
+  // linkedin.com/jobs/view/{id} · .../jobs/view/{title-slug}-{id} · any page
+  // that carries the posting in ?currentJobId= (search and collection views).
+  'linkedin.com': (u) => {
+    const path = u.pathname.match(/^\/jobs\/view\/(?:.*-)?(\d+)\/?$/);
+    if (path) return path[1];
+    const current = u.searchParams.get('currentJobId');
+    return current && /^\d+$/.test(current) ? current : null;
+  },
+  // indeed.com/viewjob?jk={id}; a results page carries the focused posting as
+  // ?vjk={id}. The job key is the requisition, so region hosts (uk./www./de.)
+  // and the two page shapes all reduce to it.
+  'indeed.com': (u) => {
+    const jk = u.searchParams.get('jk') ?? u.searchParams.get('vjk');
+    return jk && /^[\w-]+$/.test(jk) ? jk : null;
+  },
+};
+
+/**
+ * Parse a posting URL and resolve the aggregator it is hosted on.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {{url: URL, domain: string}|null} null when it is not on a known one.
+ */
+function parseAggregator(raw) {
+  if (typeof raw !== 'string') return null;
+  let url;
+  try { url = new URL(raw.trim()); } catch { return null; }
+  const host = foldHostname(url.hostname);
+  // Label boundary, never a substring: `linkedin.com.evil.example` and
+  // `myindeed.com` both contain an aggregator domain and are neither.
+  let domain = null;
+  for (const d of aggregatorDomains()) {
+    if (host === d || host.endsWith(`.${d}`)) { domain = d; break; }
+  }
+  return domain ? { url, domain } : null;
+}
+
+/**
+ * Is this posting URL hosted by a multi-employer aggregator?
+ *
+ * Callers use it to decide whether a URL mismatch is evidence about identity.
+ * Between two employer-controlled boards it is; as soon as an aggregator is on
+ * either side the HOSTS alone say nothing, because the same requisition appears
+ * on both — see aggregatorPostingId for the signal that survives that.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {boolean} True only for a parseable URL on a known aggregator.
+ */
+export function isAggregatorUrl(raw) {
+  return parseAggregator(raw) !== null;
+}
+
+/**
+ * Extract the requisition identity an aggregator URL carries.
+ *
+ * Two of these are comparable ONLY when `domain` matches: one opening is listed
+ * on LinkedIn and on Indeed at the same time, so a LinkedIn id and an Indeed id
+ * differing is a statement about two boards, not about two postings.
+ *
+ * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
+ * @returns {{domain: string, id: string}|null} null means UNKNOWN — not on a
+ *   known aggregator, no extractor for that board yet, or no id in the URL.
+ *   Callers must never read null as "the same posting".
+ */
+export function aggregatorPostingId(raw) {
+  const agg = parseAggregator(raw);
+  if (!agg) return null;
+  const id = AGGREGATOR_POSTING_ID[agg.domain]?.(agg.url) ?? null;
+  return id ? { domain: agg.domain, id } : null;
+}
 
 /**
  * Promote a known identity-bearing SPA fragment into a functional query key
@@ -96,7 +296,7 @@ export function normalizeUrl(raw) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
 
   u.protocol = 'https:';            // http vs https is the same posting
-  u.hostname = u.hostname.toLowerCase();
+  u.hostname = foldHostname(u.hostname);
   promoteKnownFragmentIdentity(u);
   u.hash = '';                      // unrecognized fragments do not identify it
 

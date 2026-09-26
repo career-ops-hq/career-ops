@@ -9,7 +9,7 @@
 // CLI end-to-end, and the merge path is a different thing to prove.
 import { pass, fail } from './helpers.mjs';
 import assert from 'node:assert';
-import { normalizeUrl } from '../url-key.mjs';
+import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from '../url-key.mjs';
 
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 
@@ -59,3 +59,156 @@ ok('anything that is not an http(s) posting yields NO key', () => {
   }
 });
 
+// Ported here with #3653, which is what introduces isAggregatorUrl and
+// aggregatorPostingId. They were written against merge-tracker-url-dedup's
+// copy of these unit cases, and #4072 moved that copy into this file while
+// #3653 was open. Landing the merge by taking either side alone would have
+// dropped ten cases or duplicated the suite.
+ok('a fully-qualified host with the root label is the same posting', () => {
+  // `example.com.` and `example.com` are the same DNS name — the trailing dot
+  // is the root label written explicitly. WHATWG URL preserves it, so without
+  // normalization one posting yields two keys and dedup sees two rows where
+  // there is one. This is NOT aggregator-specific: an employer board splits the
+  // same way, which is why it belongs here rather than in isAggregatorUrl.
+  assert.equal(
+    normalizeUrl('https://linkedin.com./jobs/1'),
+    normalizeUrl('https://linkedin.com/jobs/1'));
+  assert.equal(
+    normalizeUrl('https://job-boards.greenhouse.io./acme/jobs/7'),
+    normalizeUrl('https://job-boards.greenhouse.io/acme/jobs/7'));
+  // Case and the root label are independent; both must fold.
+  assert.equal(
+    normalizeUrl('https://WWW.LinkedIn.COM./jobs/1'),
+    normalizeUrl('https://www.linkedin.com/jobs/1'));
+  // Only ONE terminal dot is the root label. A doubled dot is not a valid host
+  // and must not be silently repaired into a key that matches a real posting.
+  assert.notEqual(
+    normalizeUrl('https://linkedin.com../jobs/1'),
+    normalizeUrl('https://linkedin.com/jobs/1'));
+  // A bare root host keeps whatever key it had: rejecting it is a separate
+  // decision from folding the root label, and this change does not make it.
+  assert.equal(normalizeUrl('https://./jobs/1'), 'https://./jobs/1');
+});
+
+// ───────────────────────── isAggregatorUrl (unit) ─────────────────────────
+console.log('\nisAggregatorUrl()');
+ok('recognizes an aggregator at its apex and on any subdomain', () => {
+  for (const u of [
+    'https://linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://uk.indeed.com/viewjob?jk=abc',
+    'https://www.glassdoor.com/job-listing/x',
+    'https://www.ziprecruiter.com/c/Acme/Job/Director-of-Marketing',
+  ]) assert.equal(isAggregatorUrl(u), true, `${u} must be recognized`);
+});
+ok('employer-controlled boards are never aggregators', () => {
+  for (const u of [
+    'https://boards.greenhouse.io/acme/jobs/7001',
+    'https://jobs.lever.co/acme/abc-123',
+    'https://jobs.ashbyhq.com/acme/abc',
+    'https://acme.wd1.myworkdayjobs.com/acme/job/Remote/Director_R1',
+    'https://careers.acme.example/jobs/7001',
+  ]) assert.equal(isAggregatorUrl(u), false, `${u} must not be treated as an aggregator`);
+});
+ok('matches on the registrable domain, not a bare substring', () => {
+  // A lookalike host must not pass. `host.includes('linkedin.com')` would.
+  assert.equal(isAggregatorUrl('https://notlinkedin.com.evil.example/jobs/1'), false);
+  assert.equal(isAggregatorUrl('https://linkedin.com.evil.example/jobs/1'), false);
+  assert.equal(isAggregatorUrl('https://myindeed.com/jobs/1'), false);
+});
+ok('anything that is not a URL is not an aggregator', () => {
+  for (const v of ['', null, 'N/A', 'local:jds/foo.md']) assert.equal(isAggregatorUrl(v), false);
+});
+ok('the root label does not hide an aggregator', () => {
+  // isAggregatorUrl parses the host itself rather than going through
+  // normalizeUrl, so it needs the same folding or a trailing dot downgrades a
+  // known aggregator to "employer board" — which is the direction that turns a
+  // non-signal back into false evidence of a distinct requisition.
+  assert.equal(isAggregatorUrl('https://linkedin.com./jobs/1'), true);
+  assert.equal(isAggregatorUrl('https://www.indeed.com./viewjob?jk=1'), true);
+  assert.equal(isAggregatorUrl('https://WWW.LinkedIn.COM./jobs/1'), true);
+  // The lookalike guard must survive the folding.
+  assert.equal(isAggregatorUrl('https://linkedin.com.evil.example./jobs/1'), false);
+});
+
+// The domain set is the shared scraper list PLUS a named supplement. Both
+// halves are asserted, because each can fail silently in a different way: a
+// broken file read leaves only the supplement, and a literal switch to the
+// shared file alone would drop LinkedIn and Indeed — the exact pair this change
+// exists to collapse.
+ok('the shared aggregator list feeds isAggregatorUrl', () => {
+  // Entries that exist ONLY in data-static/aggregator-domains.txt, so they can
+  // only be recognized if the file is actually being read.
+  for (const u of [
+    'https://recruit.net/job/x',
+    'https://lensa.com/job/x',
+    'https://jora.com/job/x',
+  ]) assert.equal(isAggregatorUrl(u), true, `${u} must come from the shared list`);
+});
+
+// Coverage floor. Before this change url-key.mjs owned a 13-domain literal; now
+// 7 of those live in data-static/aggregator-domains.txt, which is maintained on
+// its own schedule and for its own purpose. Dropping one there would silently
+// narrow THIS module with nothing failing, so the pre-existing 13 are pinned
+// here as a floor. This does not freeze the shared file: it only says url-key
+// may not lose ground it already held.
+ok('no domain from the pre-existing literal lost coverage', () => {
+  for (const d of [
+    'adzuna.com', 'builtin.com', 'careerbuilder.com', 'dice.com', 'glassdoor.com',
+    'indeed.com', 'jooble.org', 'linkedin.com', 'monster.com', 'simplyhired.com',
+    'talent.com', 'wellfound.com', 'ziprecruiter.com',
+  ]) assert.equal(isAggregatorUrl(`https://www.${d}/job/1`), true,
+    `${d} was an aggregator before this change and must stay one`);
+});
+
+ok('the supplement survives: boards the shared list deliberately omits', () => {
+  // data-static/aggregator-domains.txt lists scrapers and leaves the big boards
+  // out because employers post to them directly. This module still has to treat
+  // them as not-employer-controlled, or one posting on LinkedIn and on the
+  // employer's ATS lands twice — the bug this PR fixes.
+  for (const u of [
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://uk.indeed.com/viewjob?jk=abc',
+    'https://glassdoor.com/job-listing/x',
+    'https://ziprecruiter.com/c/x/job/y',
+    'https://dice.com/jobs/detail/1',
+    'https://wellfound.com/jobs/1',
+  ]) assert.equal(isAggregatorUrl(u), true, `${u} must stay an aggregator`);
+});
+
+// ───────────────────────── aggregatorPostingId (unit) ─────────────────────────
+console.log('\naggregatorPostingId()');
+ok('LinkedIn: bare id, title slug and currentJobId are one posting id', () => {
+  // The three shapes liveness-api.mjs already resolves to a single posting.
+  assert.deepEqual(aggregatorPostingId('https://www.linkedin.com/jobs/view/4001'),
+    { domain: 'linkedin.com', id: '4001' });
+  assert.deepEqual(aggregatorPostingId('https://uk.linkedin.com/jobs/view/director-of-marketing-at-acme-4001/'),
+    { domain: 'linkedin.com', id: '4001' });
+  assert.deepEqual(aggregatorPostingId('https://www.linkedin.com/jobs/search/?currentJobId=4001&keywords=x'),
+    { domain: 'linkedin.com', id: '4001' });
+  // Different ids are different postings — that is the whole point.
+  assert.notEqual(aggregatorPostingId('https://www.linkedin.com/jobs/view/4002').id, '4001');
+});
+ok('Indeed: jk (and vjk on a results page) is the posting id, the region host is not', () => {
+  assert.deepEqual(aggregatorPostingId('https://uk.indeed.com/viewjob?jk=abc123'),
+    { domain: 'indeed.com', id: 'abc123' });
+  assert.deepEqual(aggregatorPostingId('https://www.indeed.com/jobs?q=marketing&vjk=abc123'),
+    { domain: 'indeed.com', id: 'abc123' });
+});
+ok('no extractable id is UNKNOWN, never a guessed one', () => {
+  // An aggregator whose id shape this module does not yet know, a URL on a
+  // mapped aggregator that carries no id, an employer board, and a non-URL all
+  // return null — callers must read that as "unknown", not "same posting".
+  assert.equal(aggregatorPostingId('https://www.linkedin.com/jobs/view/not-a-number'), null);
+  assert.equal(aggregatorPostingId('https://www.glassdoor.com/job-listing/x'), null);
+  assert.equal(aggregatorPostingId('https://boards.greenhouse.io/acme/jobs/7001'), null);
+  // Same /jobs/view/{id} path shape, employer-controlled host: the extractors
+  // are keyed on the aggregator domain, never on the path alone.
+  assert.equal(aggregatorPostingId('https://apply.workable.com/acme/jobs/view/ABC123'), null);
+  for (const v of ['', null, 'N/A', 'local:jds/foo.md']) assert.equal(aggregatorPostingId(v), null);
+});
+ok('the lookalike-host and root-label guards hold for the id too', () => {
+  assert.equal(aggregatorPostingId('https://linkedin.com.evil.example/jobs/view/4001'), null);
+  assert.deepEqual(aggregatorPostingId('https://linkedin.com./jobs/view/4001'),
+    { domain: 'linkedin.com', id: '4001' });
+});
