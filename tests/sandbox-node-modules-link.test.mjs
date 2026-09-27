@@ -185,12 +185,36 @@ try {
       // defect itself.
       const name = bound && bound[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const guard = bound && new RegExp(`\\bif\\s*\\(\\s*${name}\\b`);
+      const guardAt = bound ? callSite.search(guard) : -1;
+      // Branching is only half of the contract. The branch also has to LEAVE
+      // the block. Where dependencies are installed the reason is falsy, so a
+      // guard whose body stopped breaking out still passes every ordinary run
+      // while the dangling-link sandbox it exists to prevent comes straight
+      // back. Asserting the `if` alone is therefore vacuous against exactly the
+      // edit most likely to happen: someone keeps the warn and drops the break.
+      // Walk the braces of the matched `if` and require an exit inside its own
+      // body. Comments are already stripped, so only an unbalanced brace inside
+      // a string literal could mis-slice this; that direction fails loudly
+      // rather than passing quietly, which is the right way for it to be wrong.
+      const guardBody = () => {
+        const open = callSite.indexOf('{', guardAt);
+        if (open === -1) return '';
+        let depth = 0;
+        for (let i = open; i < callSite.length; i++) {
+          if (callSite[i] === '{') depth++;
+          else if (callSite[i] === '}' && --depth === 0) return callSite.slice(open + 1, i);
+        }
+        return '';
+      };
+      const EXITS_BLOCK = /\b(?:break\s+[A-Za-z_$][\w$]*|return)\s*;/;
       if (!bound) {
         fail('test-all.mjs calls linkNodeModules() without binding the reason, so it cannot skip on one');
-      } else if (guard.test(callSite)) {
-        pass('test-all.mjs branches on the reason linkNodeModules returns');
-      } else {
+      } else if (guardAt === -1) {
         fail(`test-all.mjs binds linkNodeModules() to ${bound[1]} and never branches on it; an absent tree would sandbox dangling again`);
+      } else if (!EXITS_BLOCK.test(guardBody())) {
+        fail(`test-all.mjs branches on ${bound[1]}, but that branch never breaks or returns, so an absent tree falls through into the sandboxed run anyway`);
+      } else {
+        pass('test-all.mjs branches on the reason linkNodeModules returns, and that branch leaves the block');
       }
     }
   }
