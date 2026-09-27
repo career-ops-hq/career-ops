@@ -83,16 +83,18 @@ export async function POST(req: Request) {
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
-      // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
-      // is granted here. Tell non-Claude users plainly instead of failing opaquely.
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
+
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith(".pdf")) {
+        const { parsePdfBuffer } = await import("@/lib/cv/pdf-parser");
+        const parsed = await parsePdfBuffer(buffer);
+        promptSource = TEXT_SRC(parsed.rawText);
+      } else {
+        const text = buffer.toString("utf8");
+        promptSource = TEXT_SRC(text);
       }
-      const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
-      tempFile = path.join(dir, `cv${ext}`); // outside the repo, basename-only
-      fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
-      promptSource = FILE_SRC(tempFile);
     } else {
       return Response.json({ error: "unsupported content-type" }, { status: 400 });
     }

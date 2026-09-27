@@ -30,12 +30,14 @@ const STYLE = `
 export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("input");
+  const [parseMode, setParseMode] = useState<"fast" | "ai">("fast");
   const [paste, setPaste] = useState("");
   const [over, setOver] = useState(false);
   const [trace, setTrace] = useState("");
   const [md, setMd] = useState("");
   const [seed, setSeed] = useState<CvSeed | null>(null);
   const [err, setErr] = useState("");
+  const [aiEnhancing, setAiEnhancing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const readiness = md ? cvReadiness(md) : null;
@@ -43,7 +45,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   // Stream the ingest, parsing markers live.
   const runStream = useCallback(async (init: RequestInit) => {
     setPhase("parsing");
-    setTrace("Reading your CV…");
+    setTrace("Reading your CV with AI…");
     setErr("");
     try {
       const r = await fetch("/api/cv/ingest", init);
@@ -60,7 +62,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
-      for (;;) {
+      for (; ;) {
         const { value, done } = await reader.read();
         if (done) break;
         buf += dec.decode(value, { stream: true });
@@ -70,7 +72,11 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           setPhase("error");
           return;
         }
-        if (parsed.trace) setTrace(parsed.trace.split("\n").filter(Boolean).slice(-1)[0] || "Reading your CV…");
+        if (parsed.trace) {
+          const lines = parsed.trace.split("\n").map((l) => l.trim()).filter(Boolean);
+          const activeStep = lines.filter((l) => !l.includes("cannot be permission-restricted") && !l.includes("⚠️")).slice(-1)[0];
+          setTrace(activeStep || "AI is structuring your CV…");
+        }
         if (parsed.markdown) setMd(parsed.markdown);
         if (parsed.seed) setSeed(parsed.seed);
       }
@@ -96,50 +102,84 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       setPhase("error");
       return;
     }
-    // Pasted text is already readable. Same path as a .md/.txt drop — no CLI.
-    // (PDF/DOCX still need a CLI below.)
-    const id = cliId();
-    if (!id) {
-      setSeed(null);
-      setMd(trimmed);
-      setPhase("review");
+    if (parseMode === "ai") {
+      const id = cliId();
+      if (!id) {
+        setErr("needs-cli");
+        setPhase("error");
+        return;
+      }
+      void runStream({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: trimmed, cliId: id }),
+      });
       return;
     }
-    void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: trimmed, cliId: id }) });
+    // Fast path: instant preview
+    setSeed(null);
+    setMd(trimmed);
+    setPhase("review");
   };
 
-  const ingestFile = (file: File) => {
-    // .md/.txt/.markdown fast path — plain text, NO CLI needed, instant.
-    if (/\.(md|markdown|txt)$/i.test(file.name)) {
-      file
-        .text()
-        .then((t) => {
-          if (!t.trim()) {
-            setErr("That file looks empty — paste your CV instead.");
-            setPhase("error");
-            return;
-          }
-          setSeed(null);
-          setMd(t.trim());
-          setPhase("review");
-        })
-        .catch(() => {
-          setErr("Couldn't read that file — paste your CV instead.");
-          setPhase("error");
-        });
+  const ingestFile = async (file: File) => {
+    if (parseMode === "ai") {
+      const id = cliId();
+      if (!id) {
+        setErr("needs-cli");
+        setPhase("error");
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      form.append("cliId", id);
+      void runStream({ method: "POST", body: form });
       return;
     }
-    // PDF/other → the user's CLI parses it. Needs a configured CLI.
+
+    setPhase("parsing");
+    setTrace(`Parsing ${file.name}…`);
+    setErr("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/cv/upload", {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || "Failed to process CV file");
+      }
+      const data = await res.json();
+      setMd(data.markdown || "");
+      setSeed(data.seed || null);
+      setPhase("review");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't read file — paste your CV text instead.");
+      setPhase("error");
+    }
+  };
+
+  const enhanceWithAi = async () => {
     const id = cliId();
     if (!id) {
-      setErr("needs-cli");
-      setPhase("error");
+      setSaveErr("Connect an AI CLI in Config to use AI enhancement.");
       return;
     }
-    const form = new FormData();
-    form.append("file", file);
-    form.append("cliId", id);
-    void runStream({ method: "POST", body: form });
+    setAiEnhancing(true);
+    setSaveErr("");
+    try {
+      await runStream({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: md, cliId: id }),
+      });
+    } catch {
+      setSaveErr("AI enhancement failed. Keeping current CV text.");
+    } finally {
+      setAiEnhancing(false);
+    }
   };
 
   const [saveErr, setSaveErr] = useState("");
@@ -151,11 +191,15 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     setSaveErr("");
     setPhase("saving");
     try {
-      const r = await fetch("/api/cv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: md }) });
+      const r = await fetch("/api/cv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: md }),
+      });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         setSaveErr(d.error || "Couldn't save your CV — try again.");
-        setPhase("review"); // keep the parsed CV so they don't lose it
+        setPhase("review");
         return;
       }
     } catch {
@@ -164,11 +208,6 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       return;
     }
     onSaved?.();
-    // WOW #1 — land in the Explorer with the CV-derived filters in the URL + run=1,
-    // so the Explorer auto-fires the FREE scan itself (robust, no push/replaceState race).
-    // GENEROUS first scan so it never comes back empty (that would kill the wow): roles
-    // only + a wide 30-day window; location stays a refinement for the deepen step, NOT a
-    // hard exclude (allow=[] passes everything). Recall over precision for the first reveal.
     const roles = seed?.roles?.length ? seed.roles : seed?.title ? [seed.title] : [];
     const f = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats], positive: roles, sinceDays: 30 };
     const qs = filtersToParams(f);
@@ -178,8 +217,37 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   // ── INPUT ──
   if (phase === "input" || phase === "error") {
     return (
-      <div className="space-y-3">
+      <div className="space-y-4">
         <style>{STYLE}</style>
+
+        {/* Parsing mode switch */}
+        <div className="flex items-center gap-2 p-1 bg-surface rounded-xl border border-border w-fit text-xs">
+          <button
+            type="button"
+            onClick={() => setParseMode("fast")}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-medium transition-colors",
+              parseMode === "fast"
+                ? "bg-brand text-white shadow-sm"
+                : "text-muted hover:text-foreground"
+            )}
+          >
+            ⚡ Fast Local Parse (0 tokens)
+          </button>
+          <button
+            type="button"
+            onClick={() => setParseMode("ai")}
+            className={cn(
+              "px-3 py-1.5 rounded-lg font-medium transition-colors",
+              parseMode === "ai"
+                ? "bg-brand text-white shadow-sm"
+                : "text-muted hover:text-foreground"
+            )}
+          >
+            ✨ AI Deep Parse (Local CLI / LLM)
+          </button>
+        </div>
+
         <div
           className="co-cvdrop p-6"
           data-over={over}
@@ -202,7 +270,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && paste.trim()) ingestText(paste.trim());
             }}
             placeholder="Paste your CV here — or drop a PDF / .md file below. Even a rough paste works; we'll clean it up."
-            className="h-32 w-full resize-none bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-faint"
+            className="h-32 w-full resize-none bg-transparent text-[14px] leading-relaxed outline-none placeholder:text-faint text-foreground"
           />
           <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
             <button
@@ -214,15 +282,15 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             </button>
             <input ref={fileRef} type="file" accept=".pdf,.md,.markdown,.txt,.docx" hidden onChange={(e) => e.target.files?.[0] && ingestFile(e.target.files[0])} />
             <span className="inline-flex items-center gap-1 text-[11px] text-faint">
-              <Lock className="size-3" /> Stays on your machine. Parsed by your own AI.
+              <Lock className="size-3" /> Stays on your machine.
             </span>
             <button
               type="button"
               disabled={!paste.trim()}
               onClick={() => ingestText(paste.trim())}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
+              className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
             >
-              Read my CV <ArrowRight className="size-4" />
+              {parseMode === "ai" ? "Parse with AI" : "Read my CV"} <ArrowRight className="size-4" />
             </button>
           </div>
         </div>
@@ -230,7 +298,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           (err === "needs-cli" ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-700 dark:text-amber-300">
               <AlertTriangle className="size-3.5 shrink-0" />
-              <span>To read a PDF or Word file, connect an AI CLI in Config. Paste or drop .md / .txt to start without one.</span>
+              <span>To use AI Deep Parse, connect an AI CLI in Config. You can also switch to Fast Local Parse.</span>
               <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-700 transition hover:bg-amber-500/30 dark:text-amber-200">
                 Connect your AI CLI <ArrowRight className="size-3.5" />
               </Link>
@@ -244,7 +312,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     );
   }
 
-  // ── PARSING (the 10s bridge) ──
+  // ── PARSING ──
   if (phase === "parsing") {
     return (
       <div className="rounded-2xl border border-border bg-surface/60 p-6 backdrop-blur-sm">
@@ -253,15 +321,24 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           <Loader2 className="size-4 animate-spin text-brand" />
           <span className={`${instrumentSerif.className} text-lg text-foreground`}>{trace || "Reading your CV…"}</span>
         </div>
-        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-          <span className="size-1.5 rounded-full bg-emerald-500" /> 0 tokens · $0.00 · local
+        <div className="mt-3 flex items-center justify-between">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+            <span className="size-1.5 rounded-full bg-emerald-500" /> {parseMode === "ai" ? "AI Engine Active" : "0 tokens · $0.00 · local"}
+          </div>
+          <button
+            type="button"
+            onClick={() => setPhase("input")}
+            className="text-xs text-muted hover:text-foreground hover:underline"
+          >
+            Cancel &amp; paste text
+          </button>
         </div>
         {md && <div className="co-cvtrace mt-4 max-h-40 overflow-hidden rounded-lg border border-border bg-surface/40 p-3 text-[11px] text-faint">{md.slice(0, 400)}…</div>}
       </div>
     );
   }
 
-  // ── REVIEW (propose → confirm) ──
+  // ── REVIEW ──
   return (
     <div className="rounded-2xl border border-border bg-surface/60 p-4 backdrop-blur-sm md:p-5">
       <style>{STYLE}</style>
@@ -290,7 +367,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         <textarea
           value={md}
           onChange={(e) => setMd(e.target.value)}
-          className="h-72 w-full resize-none rounded-lg border border-border bg-surface/40 p-3 font-mono text-[12px] leading-relaxed outline-none focus:border-brand/40"
+          className="h-72 w-full resize-none rounded-lg border border-border bg-surface/40 p-3 font-mono text-[12px] leading-relaxed outline-none focus:border-brand/40 text-foreground"
         />
         <div className="prose prose-sm dark:prose-invert h-72 max-w-none overflow-y-auto rounded-lg border border-border bg-surface/40 p-3 text-[13px]">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
@@ -300,11 +377,20 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         <button
           type="button"
           onClick={save}
-          disabled={phase === "saving"}
-          className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-60"
+          disabled={phase === "saving" || aiEnhancing}
+          className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 disabled:opacity-60"
         >
           {phase === "saving" ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
           Save &amp; find my matches
+        </button>
+        <button
+          type="button"
+          onClick={enhanceWithAi}
+          disabled={aiEnhancing}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-brand/40 bg-brand-soft px-4 py-2.5 text-xs font-semibold text-brand transition hover:bg-brand/20 disabled:opacity-50"
+        >
+          {aiEnhancing ? <Loader2 className="size-3.5 animate-spin" /> : "✨"}
+          {aiEnhancing ? "Enhancing with AI..." : "Enhance with AI"}
         </button>
         <button
           type="button"
@@ -318,7 +404,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           <RotateCcw className="size-3.5" /> Start over
         </button>
         <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-faint">
-          <Lock className="size-3" /> Saved locally to cv.md
+          <Lock className="size-3" /> Saved locally to cv.md &amp; profile.yml
         </span>
       </div>
     </div>
