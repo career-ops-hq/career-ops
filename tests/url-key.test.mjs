@@ -9,7 +9,27 @@
 // CLI end-to-end, and the merge path is a different thing to prove.
 import { pass, fail } from './helpers.mjs';
 import assert from 'node:assert';
-import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from '../url-key.mjs';
+import { fileURLToPath } from 'node:url';
+
+// Pin the shipped domain list, then take a FRESH module instance.
+//
+// test-all.mjs imports every discovered suite into one process, and
+// tests/providers/mokahr.test.mjs imports url-key.mjs before this file runs. A
+// plain `import` here would therefore reuse that evaluation, which captured
+// CAREER_OPS_AGGREGATOR_DOMAINS as it stood then and cached the domain set on
+// its first lookup. An operator with that variable set to their own list would
+// see the shared-list and coverage-floor cases below read THEIR file and fail,
+// which is a green-to-red flip with nothing wrong in the code. The query suffix
+// makes this a distinct module key, so the assignment above is the list the
+// assertions actually test against.
+const inheritedDomainsPath = process.env.CAREER_OPS_AGGREGATOR_DOMAINS;
+process.env.CAREER_OPS_AGGREGATOR_DOMAINS =
+  fileURLToPath(new URL('../data-static/aggregator-domains.txt', import.meta.url));
+const { normalizeUrl, isAggregatorUrl, aggregatorPostingId } =
+  await import('../url-key.mjs?shipped-aggregator-list');
+// Put the environment back: the suites after this one share the process.
+if (inheritedDomainsPath === undefined) delete process.env.CAREER_OPS_AGGREGATOR_DOMAINS;
+else process.env.CAREER_OPS_AGGREGATOR_DOMAINS = inheritedDomainsPath;
 
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 
