@@ -106,9 +106,12 @@ export function PipelineView({
       const needle = q.toLowerCase();
       rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
     }
+    // scoreNum is the real score parser (it handles the tracker's "4.2/5"
+    // cells); sortRows takes it rather than keeping a second copy (#4333).
     return sortRows(
       rows,
       sort,
+      scoreNum,
       (row) => companyPresentation(row).label,
     );
   }, [applications, tab, q, sort, minFilter]);
