@@ -51,6 +51,8 @@ with tempfile.TemporaryDirectory() as temporary:
     checkpoint.commit()
     checkpoint.close()
     assert call(directory, "submit", "42", "--confirmed", "--idempotency-key", "submit-42")["reused"]
+    cross_action = call(directory, "transition", "42", "applied", "--source", "candidate-confirmed", "--idempotency-key", "submit-42", ok=False)
+    assert "Idempotency key conflicts" in cross_action["error"]
     reused_after_progress = call(directory, "transition", "42", "interview", "--source", "candidate-confirmed", "--idempotency-key", "interview-42")
     assert reused_after_progress["status"] == "interview"
     assert call(directory, "submit", "42", "--confirmed", "--idempotency-key", "submit-42")["reused"]
@@ -86,6 +88,8 @@ with tempfile.TemporaryDirectory() as temporary:
 
     outcome = call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")
     assert outcome["status"] == "offer"
+    cross_outcome = call(directory, "transition", "42", "offer", "--payload", '{"outcome":"offer_received"}', "--idempotency-key", "offer-42", ok=False)
+    assert "Idempotency key conflicts" in cross_outcome["error"]
     assert call(directory, "activity", "42", "offer_prepared", "--confirmed", "--payload", '{"evidence":{"path":"/review/offer-notes.md","sha256":"offer-sha"}}', "--idempotency-key", "offer-prep-42")["recorded"] == "offer_prepared"
     assert call(directory, "outcome", "42", "hired", "--idempotency-key", "hired-42")["status"] == "hired"
 
@@ -145,5 +149,8 @@ with tempfile.TemporaryDirectory() as temporary:
     )
     database.close()
     assert call(directory, "view", "7")["events"][0]["toStatus"] == "applied"
+    assert call(directory, "submit", "7", "--confirmed", "--idempotency-key", "legacy-event-1")["reused"]
+    legacy_collision = call(directory, "transition", "7", "applied", "--idempotency-key", "legacy-event-1", ok=False)
+    assert "Idempotency key conflicts" in legacy_collision["error"]
 
 print("workflow application lifecycle: transitions, activities, outcomes and idempotency passed")

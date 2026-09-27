@@ -71,6 +71,7 @@ class ApplicationStore:
               opportunity_id TEXT NOT NULL,
               from_status TEXT,
               to_status TEXT NOT NULL,
+              action TEXT NOT NULL,
               source TEXT NOT NULL,
               payload TEXT NOT NULL,
               package_result_key TEXT,
@@ -109,6 +110,8 @@ class ApplicationStore:
         event_columns = {row[1] for row in self.db.execute("PRAGMA table_info(application_events)")}
         if "package_result_key" not in event_columns:
             self.db.execute("ALTER TABLE application_events ADD COLUMN package_result_key TEXT")
+        if "action" not in event_columns:
+            self.db.execute("ALTER TABLE application_events ADD COLUMN action TEXT")
         activity_columns = {row[1] for row in self.db.execute("PRAGMA table_info(application_activity)")}
         if "source" not in activity_columns:
             self.db.execute("ALTER TABLE application_activity ADD COLUMN source TEXT")
@@ -142,7 +145,7 @@ class ApplicationStore:
     def replay(self, state: ApplicationState) -> dict | None:
         key = state["idempotency_key"]
         event = self.db.execute(
-            "SELECT opportunity_id,to_status,source,payload FROM application_events WHERE operation_id=?", (key,)
+            "SELECT opportunity_id,from_status,to_status,action,source,payload FROM application_events WHERE operation_id=?", (key,)
         ).fetchone()
         activity = self.db.execute(
             "SELECT opportunity_id,type,source,payload FROM application_activity WHERE operation_id=?", (key,)
@@ -158,12 +161,17 @@ class ApplicationStore:
             payload = {**payload, "outcome": state["value"]}
         if event:
             target = "applied" if state["action"] == "submit" else OUTCOMES.get(state["value"], state["value"])
+            event_payload = json.loads(event["payload"])
+            event_action = event["action"] or (
+                "submit" if event["from_status"] is None else
+                "outcome" if "outcome" in event_payload else "transition"
+            )
             same = (
-                state["action"] != "activity"
+                state["action"] == event_action
                 and str(event["opportunity_id"]) == state["opportunity_id"]
                 and event["to_status"] == target
                 and event["source"] == state["source"]
-                and json.loads(event["payload"]) == payload
+                and event_payload == payload
             )
             result = {"status": event["to_status"], "reused": True}
         elif activity:
@@ -292,9 +300,9 @@ class ApplicationStore:
                     package_result_key = self.submitted_package_key(state)
                 self.db.execute(
                     """INSERT INTO application_events
-                       (operation_id,opportunity_id,from_status,to_status,source,payload,package_result_key)
-                       VALUES(?,?,?,?,?,?,?)""",
-                    (state["idempotency_key"], opportunity_id, current, target, state["source"],
+                       (operation_id,opportunity_id,from_status,to_status,action,source,payload,package_result_key)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (state["idempotency_key"], opportunity_id, current, target, state["action"], state["source"],
                      json.dumps(payload, ensure_ascii=False, sort_keys=True), package_result_key),
                 )
                 if state["action"] == "outcome":

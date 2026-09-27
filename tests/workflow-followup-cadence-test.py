@@ -63,8 +63,8 @@ with tempfile.TemporaryDirectory() as temporary:
     store.db.executescript(
         """
         INSERT INTO application_lifecycle(opportunity_id,status,updated_at) VALUES(42,'applied','2026-09-21 00:00:00');
-        INSERT INTO application_events(operation_id,opportunity_id,to_status,source,payload,created_at)
-          VALUES('submit-42',42,'applied','candidate-confirmed','{"submitted_at":"2026-09-20","via":"Agency","notes":"Receipt retained"}','2026-09-21 00:00:00');
+        INSERT INTO application_events(operation_id,opportunity_id,to_status,action,source,payload,created_at)
+          VALUES('submit-42',42,'applied','submit','candidate-confirmed','{"submitted_at":"2026-09-20","via":"Agency","notes":"Receipt retained"}','2026-09-21 00:00:00');
         """
     )
     view = store.followups(today=today)
