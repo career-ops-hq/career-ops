@@ -45,6 +45,34 @@ try {
     assert.equal(readFileSync(tracker, 'utf8'), after);
   }
   pass('rejects missing or empty replacement arguments before writing');
+  for (const existing of ['sent CV', 'resent', 'CV sent', 'sent CV; resent; CV sent']) {
+    reset(existing);
+    const before = readFileSync(tracker, 'utf8');
+    r = run(['--replace-note', 'sent', '--note', 'applied'], 'Interview');
+    assert.equal(r.status, 1, `must reject substring-only OLD in ${existing}`);
+    assert.equal(r.data.code, 'replace-note-not-found');
+    assert.equal(readFileSync(tracker, 'utf8'), before);
+  }
+  pass('substring-only OLD fails without changing the note or status');
+  reset('sent; sent CV; resent; sent; CV sent; sent');
+  r = run(['--replace-note', 'sent', '--note', 'applied']);
+  assert.equal(r.status, 0);
+  assert.ok(readFileSync(tracker, 'utf8').includes('applied; sent CV; resent; applied; CV sent; applied'));
+  assert.equal(run(['--replace-note', 'sent', '--note', 'applied']).data.changed, false);
+  pass('replaces whole notes at every position while preserving longer notes');
+  reset('applied CV');
+  const substringNew = readFileSync(tracker, 'utf8');
+  r = run(['--replace-note', 'sent', '--note', 'applied']);
+  assert.equal(r.status, 1);
+  assert.equal(r.data.code, 'replace-note-not-found');
+  assert.equal(readFileSync(tracker, 'utf8'), substringNew);
+  pass('substring-only NEW does not falsely mark a replacement as complete');
+  reset('keep me; sent; sent; awaiting reply');
+  const compound = ['--replace-note', 'sent', '--note', 'sent; awaiting reply'];
+  assert.equal(run(compound).status, 0);
+  assert.ok(readFileSync(tracker, 'utf8').includes('keep me; sent; awaiting reply; sent; awaiting reply'));
+  assert.equal(run(compound).data.changed, false);
+  pass('delimiter-containing replacement stays idempotent at whole-note boundaries');
   reset('CV ready, not applied; keep me');
   r = run(['--replace-note', 'CV ready, not applied', '--note', 'CV ready']);
   assert.equal(r.status, 0);

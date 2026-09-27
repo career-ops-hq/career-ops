@@ -43,8 +43,8 @@
  * aliases resolve to the canonical label; anything else is rejected before the
  * tracker is touched). --note appends to the Notes cell with "; " and is
  * idempotent — re-running the same command is always safe. With --replace-note
- * OLD, --note NEW instead corrects matching text in place (including retries
- * where NEW contains OLD); a missing match fails without writing anything.
+ * OLD, --note NEW instead replaces whole notes at "; " boundaries (including
+ * idempotent retries); a missing match fails without writing anything.
  *
  * The read-modify-write runs under the shared tracker lock (tracker-utils.mjs,
  * same lock as merge-tracker.mjs) and the file is replaced atomically. Only the
@@ -118,7 +118,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
-  --replace-note "OLD" Replace OLD with --note text; fail if neither is present
+  --replace-note "OLD" Replace whole OLD notes with --note text; fail if neither is present
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
@@ -579,13 +579,19 @@ if (note) {
   }
   const existing = parts[colmap.notes] ?? '';
   if (replacedNote !== null) {
-    // Protect already-replaced spans: NEW may itself contain OLD. Replace only
-    // outside those spans so a retry cannot grow the same note again.
-    const updated = note.includes(replacedNote)
-      ? existing.split(note).map(part => part.split(replacedNote).join(note)).join(note)
-      : existing.split(replacedNote).join(note);
-    if (updated === existing && !existing.includes(note)) {
-      failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note text nor --note text exists in the Notes cell');
+    // Use the same whole-note boundaries as append idempotency. Prefer the
+    // longer complete span so NEW containing OLD (including "; ") is not
+    // expanded again on retry, and OLD containing NEW is still replaced.
+    const alternatives = [note, replacedNote].sort((a, b) => b.length - a.length)
+      .map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const wholeNotes = new RegExp(`(^|; )(${alternatives.join('|')})(?=; |$)`, 'g');
+    let found = false;
+    const updated = existing.replace(wholeNotes, (_match, prefix, entry) => {
+      found = true;
+      return prefix + (entry === replacedNote ? note : entry);
+    });
+    if (!found) {
+      failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note nor --note matches a whole note in the Notes cell');
     }
     parts[colmap.notes] = updated;
     noteChanged = updated !== existing;
