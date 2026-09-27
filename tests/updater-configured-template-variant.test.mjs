@@ -57,8 +57,8 @@ if (zeroDependencyConfigured.cv === 'bw' && zeroDependencyConfigured.cover === '
 let zeroDependencyMalformedRejected = false;
 try {
   configuredTemplateVariantsFromProfileSource('cv:\n  template: [unterminated\n');
-} catch {
-  zeroDependencyMalformedRejected = true;
+} catch (err) {
+  zeroDependencyMalformedRejected = err.message === 'Unsupported YAML value for cv.template';
 }
 if (zeroDependencyMalformedRejected) {
   pass('zero-dependency profile reader rejects ambiguous template syntax');
