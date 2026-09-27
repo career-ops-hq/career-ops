@@ -4,8 +4,12 @@ name: No user data in PRs
 # These live ONLY on the candidate's machine per DATA_CONTRACT.md and must never
 # enter the repo — they are personal job-search data. Sample/fixture data belongs
 # under examples/. Tracked scaffolding (.gitkeep keepers, dir READMEs) is exempt.
-# Paths mirror USER_PATHS in update-system.mjs. Uses the API (listFiles) so it
-# works for fork PRs too.
+# Overlaps USER_PATHS in update-system.mjs without mirroring it: that list says
+# what an update must never overwrite, this one says what must never enter the
+# repo. batch/ is where the two part company - its tracked scripts are shipped
+# by the system, so they are SYSTEM_PATHS there, while the worker output written
+# beside them is private data (#4531). Uses the API (listFiles) so it works for
+# fork PRs too.
 
 on:
   pull_request:
@@ -44,9 +48,22 @@ jobs:
               /^output\//,
               /^jds\//,
               /^writing-samples\//,
+              /^batch\//,
             ];
             // Tracked scaffolding that legitimately lives under those dirs.
-            const isScaffold = (f) => /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f);
+            // batch/ is blanket-blocked because the workers write user-layer
+            // output into it (tailored CV and cover-letter JSON, prefetched JD
+            // text, per-run state), so its tracked sources are named here one
+            // by one rather than matched by shape. An extension heuristic would
+            // pass the next .md or .json a worker learns to write; a name has
+            // to be added on purpose.
+            const BATCH_SOURCES = new Set([
+              'batch/aggregate-tokens.mjs',
+              'batch/batch-prompt.md',
+              'batch/batch-runner.sh',
+            ]);
+            const isScaffold = (f) =>
+              /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f) || BATCH_SOURCES.has(f);
 
             const bad = files
               .filter((f) => f.status !== 'removed')
