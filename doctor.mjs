@@ -5,7 +5,7 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
@@ -30,14 +30,15 @@ const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen'
 // silently diagnosed THIS checkout instead of the one asked for. Handled via
 // lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
 // flags before --help so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--target', '--json', '--strict', '--cli', '--help', '-h'];
+const KNOWN_FLAGS = ['--target', '--json', '--init-templates', '--strict', '--cli', '--help', '-h'];
 
 // Both take their value as the next argv token.
 const VALUE_FLAGS = ['--target', '--cli'];
 
 const USAGE = `Usage:
   node doctor.mjs                    # run the setup diagnostic
-  node doctor.mjs --json             # machine-readable onboarding state
+  node doctor.mjs --json             # read-only machine-readable onboarding state
+  node doctor.mjs --json --init-templates # create missing personalization files for onboarding
   node doctor.mjs --strict           # also probe portals.yml entries (network)
   node doctor.mjs --target <path>    # diagnose another career-ops checkout
   node doctor.mjs --cli <name>       # check a specific CLI's integration
@@ -57,6 +58,11 @@ const targetIdx = argv.indexOf('--target');
 const projectRoot =
   targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : getCareerOpsRoot();
 const JSON_OUT = argv.includes('--json');
+const INIT_TEMPLATES = argv.includes('--init-templates');
+if (INIT_TEMPLATES && !JSON_OUT) {
+  console.error('Error: --init-templates requires --json');
+  process.exit(1);
+}
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
@@ -721,8 +727,8 @@ async function main() {
 //     into every A-F evaluation, so offers are scored against a stranger.
 //   _brief.md unedited hands the triage first pass literal `{placeholders}`
 //     instead of the candidate's archetypes, comp floor and hard DQ criteria.
-// doctor auto-copies both from their templates on first run, so "the file
-// exists" is guaranteed and tells us nothing — only its CONTENT does.
+// Explicit onboarding copies both from their templates, so existence alone
+// tells us nothing about personalization — only the CONTENT does.
 const PERSONALIZATION_FILES = [
   {
     path: 'modes/_profile.md',
@@ -749,7 +755,8 @@ function unpersonalizedFiles(root) {
   const out = [];
   for (const { path, template, impact } of PERSONALIZATION_FILES) {
     const targetPath = join(root, ...path.split('/'));
-    const templatePath = join(root, ...template.split('/'));
+    const rootTemplatePath = join(root, ...template.split('/'));
+    const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
     if (!existsSync(targetPath) || !existsSync(templatePath)) continue;
     let target, tpl;
     try {
@@ -803,9 +810,11 @@ function onboardingState(root) {
     const targetPath = join(root, ...target.split('/'));
     const rootTemplatePath = join(root, ...template.split('/'));
     const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
-    if (!existsSync(targetPath) && existsSync(templatePath)) {
+    // Diagnosis must not create user files. Copy only during explicit onboarding.
+    if (INIT_TEMPLATES && !existsSync(targetPath) && existsSync(templatePath)) {
       try {
-        copyFileSync(templatePath, targetPath);
+        mkdirSync(dirname(targetPath), { recursive: true });
+        copyFileSync(templatePath, targetPath, constants.COPYFILE_EXCL);
         autoCopied.push(target);
       } catch {
         // Gracefully handle read-only filesystems (e.g., CI/CD or containerized environments)

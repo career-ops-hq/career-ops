@@ -13061,7 +13061,7 @@ try {
   rmSync(ready, { recursive: true, force: true });
 
   // Auto-copy template: when modes/_profile.md or modes/_custom.md is missing but template exists,
-  // doctor --json auto-copies them, records them in autoCopied, and does not report them as missing (#1369).
+  // doctor --json --init-templates copies them, records them in autoCopied, and does not report them as missing (#1369).
   const autoCopy = mkdtempSync(join(tmpdir(), 'co-autocopy-'));
   mkdirSync(join(autoCopy, 'config'), { recursive: true });
   mkdirSync(join(autoCopy, 'modes'), { recursive: true });
@@ -13070,7 +13070,7 @@ try {
   }
   writeFileSync(join(autoCopy, 'modes/_profile.template.md'), '# profile template\n');
   writeFileSync(join(autoCopy, 'modes/_custom.template.md'), '# custom template\n');
-  const ac = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', autoCopy]) || '{}');
+  const ac = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--init-templates', '--target', autoCopy]) || '{}');
   if (
     ac.onboardingNeeded === false &&
     Array.isArray(ac.missing) &&
@@ -13083,9 +13083,9 @@ try {
     existsSync(join(autoCopy, 'modes/_custom.md')) &&
     readFileSync(join(autoCopy, 'modes/_custom.md'), 'utf-8') === '# custom template\n'
   ) {
-    pass('Auto-copy template → modes/_profile.md and modes/_custom.md copied silently in --json mode (#1369)');
+    pass('Explicit onboarding → modes/_profile.md and modes/_custom.md copied with --init-templates (#1369)');
   } else {
-    fail(`Auto-copy template failed in --json mode: ${JSON.stringify(ac)}`);
+    fail(`Template initialization failed: ${JSON.stringify(ac)}`);
   }
   rmSync(autoCopy, { recursive: true, force: true });
 
