@@ -52,11 +52,16 @@ const LANE_STYLES = {
   general: { accent_color: '#334155', secondary_color: '#0f172a' }, // slate -> ink
 };
 
+// Every headline leads with the moat (regulated-industry delivery) or, for the
+// founder lane, the thing being founded. GenAI evaluation and human-in-the-loop
+// are TOOLS and sit in Skills -- advertising them in the headline contradicted
+// the competency spine directly beneath it. Enforced by verify-cv-style.mjs, so
+// do not reintroduce a demoted skill here. See modes/_custom.md.
 const LANE_HEADLINES = {
-  'ai-product-manager': 'AI Product Manager | GenAI evaluation | human-in-the-loop workflows',
+  'ai-product-manager': 'AI Product Manager | GxP-regulated delivery | hands-on LLM agents',
   'solutions-consultant': 'Solutions Consultant | GxP-regulated delivery | AI transformation',
-  'startup-ops': 'Founder & AI-ops operator | two shipped ventures | Deloitte USI alum',
-  'strategy-mid': 'Strategy consultant | MBA (IIM Rohtak) | Deloitte USI delivery',
+  'startup-ops': 'Founder, AI-ops consultancy | two shipped ventures | GxP delivery background',
+  'strategy-mid': 'Strategy consultant | GxP-regulated delivery | ex-Deloitte USI (IIM Rohtak)',
   general: 'Product & solutions | regulated-industry delivery | hands-on AI automation',
 };
 
@@ -111,14 +116,14 @@ function baseExperience() {
       company: 'SigmaX Labs',
       role: 'Founder & AI Solutions Consultant',
       location: 'Gurugram, India',
-      dates: 'Feb 2026 -- Present',
+      dates: 'Nov 2025 -- Present',
       bullets: [],
     },
     {
       company: 'The Goodtime Co.',
       role: 'Co-founder',
       location: 'Delhi-NCR, India',
-      dates: 'May 2025 -- Nov 2025',
+      dates: 'May 2025 -- Oct 2025',
       bullets: [],
     },
     {
@@ -149,43 +154,49 @@ function buildPayload(archetype, mined) {
   const kw = topKeywords(mined[archetype]);
   const exp = baseExperience();
 
+  // One line, <= 20 words, no metric stacking — a peer review flagged the
+  // previous 60-word data dump as the first thing a reader hit. Per
+  // modes/_custom.md "Summary — one line, no metric stacking". The keyword
+  // tail that used to be appended here is deliberately gone: a list labelled
+  // "Core themes from recent target roles" advertises itself as machine-written.
   const summaries = {
     'ai-product-manager':
-      'AI Product Manager with hands-on LLM agent development, model routing, and workflow automation delivery. Shipped Hermes-Router (OpenRouter), client n8n automations, and regulated-industry product work at Deloitte USI (GxP life sciences). IBM AI Product Manager certified. Focus: product discovery, roadmap, GenAI evaluation, human-in-the-loop workflows, and adoption metrics.',
+      'AI product manager - GxP delivery discipline, hands-on LLM agents.',
     'solutions-consultant':
-      'Solutions Consultant and AI transformation lead with GxP-regulated delivery at Deloitte USI and client-facing scoping at SigmaX Labs. Track record in stakeholder workshops, requirements translation, agile product delivery, and pre-sales style solution design for Indian SMEs and US life-sciences clients. MBA (IIM Rohtak).',
+      'AI solutions consultant designing and shipping automation for regulated industries.',
     'startup-ops':
-      'Founder with two shipped ventures: SigmaX Labs (AI-ops automation consultancy, 2026) and The Goodtime Co. (experiential events, monetised launch within months). Operator across GTM, vendor coordination, and hands-on AI tooling. Deloitte USI alum with MBA (IIM Rohtak). Built for startup operations, growth, and founder-track roles.',
+      'Founder of two ventures - one events business, one AI automation agency.',
     'strategy-mid':
-      'Strategy-shaped consultant with MBA (IIM Rohtak) and Deloitte USI delivery inside a GxP-regulated life-sciences environment. Structured problem-solving, case hygiene, data-driven KPI work, and slide discipline. Target: mid/boutique strategy and operations consulting.',
+      'Structured problem-solving backed by regulated-industry delivery experience.',
     general:
-      'Product and solutions professional combining regulated-industry compliance (GxP), agile delivery, and hands-on AI automation. Deloitte USI consultant (Donor Portal, SPARK analytics MVP, Network Modelling Tool), founder of SigmaX Labs (kbcompress.com, sigmaxlabs.in, client workflow prototypes) and The Goodtime Co. MBA, B.Tech.',
+      'AI product manager and solutions consultant, grounded in GxP-regulated delivery.',
   };
 
+  // PM lanes carry the full PM spine — that is what target JDs and ATS keyword
+  // screens look for. Tool names stay in the Skills block: a competencies line
+  // reading "Proficient in n8n..." advertises a tool list where a recruiter
+  // expects a job description. "Outcome Measurement", never "A/B testing" —
+  // see modes/_custom.md "Competencies — PM spine, tools in Skills".
   const competencies = {
     'ai-product-manager': [
-      'AI Product Management',
-      'LLM Agents & RAG',
-      'Product Roadmap & Discovery',
-      'Model Evaluation & Routing',
-      'Human-in-the-Loop Workflows',
-      'Agile/Scrum Delivery',
-      'n8n Workflow Automation',
-      'Adoption & Success Metrics',
-      'Prompt Engineering',
-      'B2B SaaS Product',
+      'Product Discovery & User Research',
+      'Requirements, PRDs & User Stories',
+      'Product Roadmapping & Prioritisation',
+      'Agile/Scrum & Cross-functional Delivery',
+      'Stakeholder Management & Alignment',
+      'Product Analytics, KPIs & Outcome Measurement',
+      'Product Lifecycle Ownership',
+      'GxP-regulated Product Delivery',
     ],
     'solutions-consultant': [
-      'Solutions Consulting',
+      'Stakeholder Management & Alignment',
       'Client Discovery & Scoping',
-      'Stakeholder Management',
-      'GxP / Regulated Delivery',
-      'Requirements & User Stories',
+      'Requirements, PRDs & User Stories',
       'Pre-Sales Solution Design',
-      'Agile Product Delivery',
       'Workshop Facilitation',
-      'AI Transformation',
-      'Life Sciences Domain',
+      'Solutions Architecture & Integration',
+      'Agile Product Delivery',
+      'GxP-regulated Delivery',
     ],
     'startup-ops': [
       'Startup Operations',
@@ -227,7 +238,7 @@ function buildPayload(archetype, mined) {
 
   const sigmaBullets = {
     'ai-product-manager': [
-      'Founded SigmaX Labs; scoped and shipped fixed-scope AI automation sprints for Indian SMEs',
+      'Founded SigmaX Labs after an events venture exposed that ops-heavy businesses still run on spreadsheets and WhatsApp groups; now ships fixed-scope AI automation sprints for Indian SMEs',
       'Built Hermes-Router, a Node/Express model router over OpenRouter with cost/quality routing and fallback chains',
       'Designed Basilica intake-to-reporting prototype (n8n + Google Sheets + Telegram) for an interior design firm, from brief to approved workflow spec',
       'Shipped kbcompress.com (client-side image compression for Indian exam portal upload limits)',
@@ -258,21 +269,29 @@ function buildPayload(archetype, mined) {
     ],
   };
 
+  // Goodtime is dormant and past tense. No capital language, and never any
+  // claim about profitability in either direction — see modes/_custom.md
+  // "The Goodtime Co. — the guard".
   const goodtimeBullets = {
     'startup-ops': [
-      'Co-founded and ran an experiential events venture; built a monetised experiential-value model with engagement frameworks in place',
-      'Led vendor coordination and end-to-end operational execution; launched first flagship event 5 Jul 2025',
+      'Co-founded and ran an experiential events venture with one full-time and one part-time co-founder, handling every operations function between the two of us; launched the first flagship event 5 Jul 2025 (venture now dormant)',
+      'Ran the business on spreadsheets, WhatsApp groups and cold confirmations; built spreadsheet automation and Google Sheets scripting to cut the manual handoff work -- the capability later sold to clients',
     ],
     general: [
-      'Co-founded an experiential events venture; monetised experiential-value model; first flagship event delivered Jul 2025',
+      'Co-founded and ran an experiential events venture May--Oct 2025 (one full-time, one part-time co-founder, all ops handled between the two); ran it on spreadsheets, WhatsApp groups and cold confirmations, and automated the manual handoffs; first flagship event 5 Jul 2025 (now dormant)',
     ],
   };
 
+  // The NMT bullet is present in EVERY lane and is never trimmed — it anchors
+  // the Deloitte tenure and the GxP moat. Wording is precision-controlled: the
+  // client was GxP-regulated, he did not perform validation. So "a GxP-
+  // regulated client depended on" and "validation-ready", never "GxP-compliant"
+  // or "validated". See modes/_custom.md "NMT — the GxP precision rule".
   const deloitteBullets = {
     'ai-product-manager': [
       'Drove Agile development of a bilingual Donor Engagement Portal; 25% faster release cycles; 18% client retention via 20+ features from user feedback',
       'Delivered SPARK analytics MVP for real-time clinical and regulatory KPIs; $500K projected cost savings',
-      'Led Network Modelling Tool migration in a GxP-regulated environment with phased cutover preserving supply continuity',
+      'Owned migration of the Network Modelling Tool, a system a GxP-regulated client depended on for supply operations -- designed the architecture and phased cutover that kept it running through day one',
       'Improved CI/CD pipelines, cutting deployment time 40%; redesigned reporting modules for 35% better data accuracy',
       'Applause Award, 2023',
     ],
@@ -280,20 +299,21 @@ function buildPayload(archetype, mined) {
       'Delivered system architecture, analytics, and agile product work for US life-sciences clients on US standards from Gurgaon',
       'Translated donor and clinical stakeholder feedback into shipped portal features (20+ releases)',
       'SPARK analytics MVP: real-time KPI visibility for regulated clinical teams; $500K projected savings',
-      'Network Modelling Tool migration: architecture, integration, and validation-ready cutover planning in GxP context',
+      'Network Modelling Tool migration for a GxP-regulated client: owned architecture, integration, and validation-ready phased cutover planning that preserved supply continuity on day one',
       'Applause Award, 2023',
     ],
     'startup-ops': [
       'Delivered on US-client standards and hours from Gurgaon; 18% retention lift and 25% faster release cycles on the Donor Portal',
       'Owned the KPI and reporting story (SPARK analytics MVP, $500K projected savings) an operator reads',
+      'Network Modelling Tool cutover for a GxP-regulated client: owned the architecture and phased cutover that preserved supply continuity on day one',
     ],
     'strategy-mid': [
       'Structured, evidence-driven delivery in a GxP-regulated life-sciences environment; translated stakeholder feedback into shipped features',
       'SPARK analytics MVP: KPI visibility for regulated clinical teams; $500K projected cost savings',
-      'Network Modelling Tool migration: architecture, integration, and validation-ready cutover planning',
+      'Network Modelling Tool migration for a GxP-regulated client: architecture, integration, and validation-ready phased cutover planning',
     ],
     general: [
-      'Led migration and integration of the Network Modelling Tool in a GxP-regulated environment',
+      'Owned migration and integration of the Network Modelling Tool, a system a GxP-regulated client depended on for supply operations, with a phased cutover preserving day-one continuity',
       'Drove Agile development of a bilingual Donor Engagement Portal; 25% faster release cycles; 18% client retention improvement via 20+ features shipped from user feedback',
       'Delivered the SPARK analytics MVP for real-time clinical and regulatory KPIs -- $500K projected cost savings',
       'Optimised CI/CD pipelines, cutting deployment time 40%; redesigned reporting modules for 35% better data accuracy',
@@ -305,30 +325,35 @@ function buildPayload(archetype, mined) {
   exp[1].bullets = goodtimeBullets[archetype] || goodtimeBullets.general;
   exp[2].bullets = deloitteBullets[archetype] || deloitteBullets.general;
 
+  // Every lane's skills block must carry a GxP/regulated line — it is the
+  // differentiator, and a lane without it reads as a generic AI candidate.
+  // See modes/_custom.md "GxP / regulated line — mandatory in every lane".
   const skillSets = {
     'ai-product-manager': [
-      { category: 'AI / automation', items: ['LLM agents', 'RAG', 'MCP', 'prompt engineering', 'OpenRouter', 'n8n', 'model evaluation', 'human-in-the-loop', 'workflow automation'] },
-      { category: 'Product', items: ['product discovery', 'roadmapping', 'backlog prioritisation', 'Agile/Scrum', 'adoption metrics', 'A/B iteration'] },
+      { category: 'AI / automation', items: ['LLM agents', 'RAG', 'MCP', 'prompt engineering', 'OpenRouter', 'n8n', 'model evaluation and routing', 'human-in-the-loop', 'workflow automation'] },
+      { category: 'Product', items: ['product discovery and user research', 'requirements and PRDs', 'user stories', 'roadmapping', 'backlog prioritisation', 'Agile/Scrum', 'product analytics and outcome measurement'] },
+      { category: 'Regulated', items: ['GxP', 'validation and audit-ready workflows', 'data integrity', 'risk management'] },
       { category: 'Technical', items: ['Node/Express', 'Python', 'Supabase', 'Vercel', 'API integration', 'Google Workspace automation'] },
     ],
     'solutions-consultant': [
-      { category: 'Consulting', items: ['client discovery', 'solution scoping', 'workshops', 'requirements documentation', 'stakeholder management', 'pre-sales support'] },
-      { category: 'Domain', items: ['GxP', 'life sciences', 'validation-ready workflows', 'data integrity', 'risk management'] },
-      { category: 'Delivery', items: ['Agile/Scrum', 'cross-functional execution', 'analytics MVP delivery', 'CI/CD improvement'] },
+      { category: 'Consulting', items: ['client discovery', 'solution scoping', 'workshops', 'requirements and PRDs', 'user stories', 'stakeholder management', 'pre-sales support'] },
+      { category: 'Regulated', items: ['GxP', 'life sciences', 'validation-ready workflows', 'data integrity', 'risk management'] },
+      { category: 'Delivery', items: ['Agile/Scrum', 'cross-functional execution', 'analytics MVP delivery', 'CI/CD improvement', 'solution architecture', 'API integration'] },
     ],
     'startup-ops': [
       { category: 'Operating', items: ['go-to-market', 'vendor management', 'monetisation design', 'budgeting basics', 'team coordination', 'event operations'] },
       { category: 'AI / automation', items: ['n8n', 'LLM agent design', 'API integration', 'workflow automation', 'prompt engineering'] },
+      { category: 'Regulated', items: ['GxP', 'regulated-industry delivery', 'data integrity', 'risk management'] },
       { category: 'Foundation', items: ['MBA (IIM Rohtak)', 'Deloitte USI discipline', 'stakeholder management', 'cross-functional execution'] },
     ],
     'strategy-mid': [
       { category: 'Strategy', items: ['structured problem-solving', 'market sizing', 'competitor analysis', 'strategic roadmapping', 'slide discipline', 'deliverable quality'] },
-      { category: 'Domain', items: ['GxP', 'life sciences', 'regulated-industry workflows', 'data integrity'] },
+      { category: 'Regulated', items: ['GxP', 'life sciences', 'regulated-industry workflows', 'data integrity'] },
       { category: 'Foundation', items: ['MBA (IIM Rohtak)', 'data & KPI thinking', 'agile delivery', 'workshop facilitation'] },
     ],
     general: [
       { category: 'AI/automation', items: ['n8n', 'LLM agent design', 'RAG', 'MCP', 'prompt engineering', 'OpenRouter', 'API integration'] },
-      { category: 'Product', items: ['discovery', 'roadmapping', 'backlog prioritisation', 'Agile/Scrum delivery', 'stakeholder management'] },
+      { category: 'Product', items: ['discovery and user research', 'requirements and PRDs', 'user stories', 'roadmapping', 'backlog prioritisation', 'Agile/Scrum delivery', 'product analytics and outcome measurement', 'stakeholder management'] },
       { category: 'Regulated', items: ['GxP', 'validation and audit-ready workflows', 'data integrity', 'risk management'] },
       { category: 'Technical', items: ['Node/Express (hands-on)', 'Python (working fluency)', 'Supabase', 'Vercel'] },
     ],
@@ -346,30 +371,30 @@ function buildPayload(archetype, mined) {
       { name: 'SPARK Analytics MVP', badge: 'Deloitte / GxP', tech: 'Analytics', description: 'Real-time clinical and regulatory KPI dashboard; $500K projected cost savings' },
       { name: 'Donor Engagement Portal', badge: 'Agile delivery', tech: 'Bilingual product', description: '20+ features from user feedback; 25% faster releases; 18% retention lift' },
       { name: 'kbcompress.com', badge: 'Shipped', tech: 'Web app', description: 'Free image compression tool for Indian exam portal upload limits' },
-      { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers, Granite 4.0', description: 'Governance-aware reporting prototype; became the seed of SigmaX Labs' },
+      { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers, Granite 4.0', description: 'Governance-aware reporting prototype; the first shipped build under SigmaX Labs (Feb 2026)' },
     ],
     'startup-ops': [
-      { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers', description: 'Governance-aware executive reporting prototype (position isolation, governance gating); built ~1 month after the IBM AI PM certification; seed of SigmaX' },
+      { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers', description: 'Governance-aware executive reporting prototype (position isolation, governance gating); first shipped build under SigmaX Labs, Feb 2026 -- three months after the company was founded in Nov 2025' },
       { name: 'kbcompress.com', badge: 'Shipped', tech: 'Web app', description: 'Free image compression tool for Indian exam portal upload limits' },
       { name: 'Hermes-Router', badge: 'SigmaX tool', tech: 'Node/Express', description: 'Model router over OpenRouter for client automations' },
     ],
     'strategy-mid': [
       { name: 'SPARK Analytics MVP', badge: 'Deloitte / GxP', tech: 'Analytics', description: 'Real-time clinical and regulatory KPI dashboard; $500K projected cost savings' },
-      { name: 'ClearState', badge: 'Case study: strategy-to-ship', url: CLEARSTATE_URL, tech: 'Governance prototype', description: 'From positioning to shipped prototype in ~1 month post-certification' },
+      { name: 'ClearState', badge: 'Case study: strategy-to-ship', url: CLEARSTATE_URL, tech: 'Governance prototype', description: 'From positioning to shipped prototype in ~1 month; the first shipped build under SigmaX Labs (Feb 2026)' },
     ],
     general: [
       { name: 'Hermes-Router', badge: 'SigmaX', tech: 'Node/Express', description: 'Model router over OpenRouter for client automations' },
       { name: 'SPARK Analytics MVP', badge: 'Deloitte', tech: 'Regulated analytics', description: '$500K projected cost savings from real-time KPI visibility' },
       { name: 'kbcompress.com', badge: 'Shipped', tech: 'Web app', description: 'Free image compression tool for exam portal upload limits' },
-      { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers', description: 'Governance-aware executive reporting prototype; seed of SigmaX' },
+      { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers', description: 'Governance-aware executive reporting prototype; the first shipped build under SigmaX Labs (Feb 2026)' },
     ],
   };
 
-  let summary = summaries[archetype];
-  if (kw.length) {
-    const extra = kw.slice(0, 6).filter((k) => !summary.toLowerCase().includes(k));
-    if (extra.length) summary += ` Core themes from recent target roles: ${extra.join(', ')}.`;
-  }
+  // No keyword tail here. See the note above `summaries`: appending mined
+  // report keywords to a CV summary reads as machine-written and costs more
+  // credibility than the keywords win. The mined keywords still reach
+  // keywords.tsv per lane, which is where an evaluator can use them.
+  const summary = summaries[archetype];
 
   return {
     lang: 'en',

@@ -123,21 +123,76 @@ def build_styles(level, accent=None, secondary=None):
     return styles, (m_top, m_bot, m_lr)
 
 
+_ALLOWED_SCHEMES = ("mailto:", "tel:", "http:", "https:")
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*:", re.I)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def sanitize_url(url):
+    """Allowlist mailto/tel/http(s), coerce bare emails and domains, XML-escape.
+
+    Mirrors sanitizeUrl() in build-cv-html.mjs so a PDF and an HTML build can
+    never disagree about what counts as a link. A bare email becomes mailto:,
+    a bare domain becomes https:. An explicit but disallowed scheme
+    (javascript:, data:, ...) is rejected outright rather than coerced.
+    """
+    if not url:
+        return ""
+    u = str(url).strip()
+    if not u:
+        return ""
+    if not u.lower().startswith(_ALLOWED_SCHEMES):
+        if _SCHEME_RE.match(u):
+            return ""
+        u = ("mailto:" + u) if _EMAIL_RE.match(u) else ("https://" + u)
+    return u.replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
+
+
+def link_markup(display, href):
+    """Render display text as a real PDF hyperlink annotation.
+
+    A contact line of plain text is what a peer review flagged: the reader has
+    to retype every address. reportlab's <a href> emits a /URI annotation, so
+    the PDF is actually clickable. Falls back to plain text when the href is
+    unusable, so a malformed value can never break the build.
+    """
+    text = to_markup(display)
+    url = sanitize_url(href)
+    if not url:
+        return text
+    return f'<a href="{url}">{text}</a>'
+
+
 def build_contact_line(candidate):
-    pieces = []
-    if candidate.get("phone"):
-        pieces.append(candidate["phone"])
-    if candidate.get("email"):
-        pieces.append(candidate["email"])
+    links = []
+    plain = []
+
+    phone = candidate.get("phone")
+    if phone:
+        digits = re.sub(r"[^\d+]", "", str(phone))
+        links.append((phone, "tel:" + digits if digits else phone))
+
+    email = candidate.get("email")
+    if email:
+        links.append((email, email))
+
     for key in ("linkedin", "github", "portfolio"):
         v = candidate.get(key)
-        if isinstance(v, dict) and v.get("display"):
-            pieces.append(v["display"])
-        elif isinstance(v, str) and v:
-            pieces.append(v)
-    if candidate.get("location"):
-        pieces.append(candidate["location"])
-    return " | ".join(to_markup(p) for p in pieces)
+        if isinstance(v, dict):
+            display = v.get("display") or v.get("url")
+            href = v.get("url") or display
+        else:
+            display = href = v
+        if display:
+            links.append((display, href))
+
+    location = candidate.get("location")
+    if location:
+        plain.append(location)
+
+    pieces = [link_markup(d, h) for d, h in links]
+    pieces.extend(to_markup(p) for p in plain)
+    return " | ".join(p for p in pieces if p)
 
 
 def section_heading(story, styles, title, accent=None):
