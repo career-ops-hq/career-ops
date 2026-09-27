@@ -92,7 +92,7 @@ language:
   # `en` or `zh-CN`.
   output: en
 
-# Optional follow-up cadence preferences for `node followup-cadence.mjs`.
+# Optional follow-up cadence preferences for `application followups` and the legacy Node CLI.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
 # followup_cadence:
 #   applied_first_days: 7

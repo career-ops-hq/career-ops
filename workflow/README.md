@@ -27,8 +27,11 @@ workflow/.venv/bin/python workflow/career_ops.py application submit <opportunity
 workflow/.venv/bin/python workflow/career_ops.py application transition <opportunity-id> <status> --source <source> --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application activity <opportunity-id> <type> --confirmed --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application outcome <opportunity-id> <outcome> --idempotency-key <operation-id>
+workflow/.venv/bin/python workflow/career_ops.py application schedule <opportunity-id> <YYYY-MM-DD> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python workflow/career_ops.py application retire <opportunity-id> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python workflow/career_ops.py application reopen <opportunity-id> --confirmed --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application view [opportunity-id]
-workflow/.venv/bin/python workflow/career_ops.py application followups
+workflow/.venv/bin/python workflow/career_ops.py application followups [--overdue-only] [--applied-days <days>]
 ```
 
 All commands emit JSON. `discover` calls the existing Node provider scanner as
@@ -57,3 +60,11 @@ the draft. Confirmation checks the current inputs, review, PDF, and actual file
 bytes before committing the whole package; failed exports can resume on the
 same task. Apply pauses for user review/confirmation. No path submits an
 application or sends a message.
+`application submit` records only a user-confirmed actual submission, not an
+apply-package confirmation. Pass `--payload '{"submitted_at":"YYYY-MM-DD"}'`
+when the submission date is known; otherwise follow-up dates are explicitly
+labelled as proxies. If several confirmed packages exist, also provide the
+actual `package_result_key` in that payload; the CLI rejects ambiguous evidence.
+`followup_sent` activity may similarly carry `sent_at`.
+Follow-up queries compute the retained cadence from business history and
+profile overrides; schedule/retire/reopen record manual decisions, not sends.

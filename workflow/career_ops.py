@@ -1506,13 +1506,15 @@ def parser() -> argparse.ArgumentParser:
     cancel = commands.add_parser("cancel")
     cancel.add_argument("task_id")
     application = commands.add_parser("application")
-    application.add_argument("action", choices=("submit", "transition", "activity", "outcome", "view", "followups"))
+    application.add_argument("action", choices=("submit", "transition", "activity", "outcome", "schedule", "retire", "reopen", "view", "followups"))
     application.add_argument("opportunity", nargs="?")
     application.add_argument("value", nargs="?")
     application.add_argument("--source", default="candidate-confirmed")
     application.add_argument("--confirmed", action="store_true")
     application.add_argument("--payload", default="{}")
     application.add_argument("--idempotency-key")
+    application.add_argument("--overdue-only", action="store_true")
+    application.add_argument("--applied-days", type=int)
     return cli
 
 
@@ -1559,13 +1561,13 @@ def main() -> None:
                 if args.action == "view":
                     result = store.application(args.opportunity) if args.opportunity else store.views()
                 elif args.action == "followups":
-                    result = store.followups()
+                    result = store.followups(overdue_only=args.overdue_only, applied_days=args.applied_days)
                 else:
-                    if not args.opportunity or (args.action != "submit" and not args.value):
+                    if not args.opportunity or (args.action in {"transition", "activity", "outcome", "schedule"} and not args.value):
                         raise ValueError("application mutation requires opportunity and value")
                     if not args.idempotency_key:
                         raise ValueError("application mutation requires --idempotency-key")
-                    if args.action in {"submit", "activity"} and not args.confirmed:
+                    if args.action in {"submit", "activity", "schedule", "retire", "reopen"} and not args.confirmed:
                         raise ValueError(f"application {args.action} requires --confirmed")
                     store.close()
                     store = None
