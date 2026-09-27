@@ -549,6 +549,10 @@ def mutate(
             result = ApplicationWorkflow(store).graph(saver).invoke(
                 state, {"configurable": {"thread_id": f"application:{operation_id}"}}
             )
-        return {"opportunity_id": str(opportunity_id), **result["result"]}
+        response = {"opportunity_id": str(opportunity_id), **result["result"]}
+        if action == "outcome":
+            response["outcome"] = value
+            response["preserved_artifacts"] = store.application(str(opportunity_id))["artifacts"]
+        return response
     finally:
         store.close()

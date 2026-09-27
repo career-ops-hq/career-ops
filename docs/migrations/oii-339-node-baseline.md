@@ -8,7 +8,7 @@
 | `application-lifecycle.mjs followups` | `application followups` |
 | `application-lifecycle.mjs transition` | LangGraph `validate -> commit` transition |
 | `application-lifecycle.mjs activity` | LangGraph `validate -> commit` activity |
-| `application-outcome.mjs` outcome mapping | LangGraph `validate -> commit` outcome |
+| `application-outcome.mjs` outcome mapping and preserved-artifact response | LangGraph `validate -> commit` outcome with current artifact references |
 | `followup-cadence.mjs` active states, profile/default intervals, urgency, cold cutoff and overdue filter | `application followups` over canonical lifecycle and sent-activity dates |
 | `followup-cadence.mjs` intermediary, notes, sent-history and report context | `application followups` fields from submission, activity and retained score result |
 | `followup-seed.mjs` next-date pins and `followup-cadence.mjs` cleared directives | idempotent LangGraph `application schedule`, `retire`, and `reopen` directives |

@@ -89,7 +89,10 @@ with tempfile.TemporaryDirectory() as temporary:
     assert call(directory, "activity", "42", "followup_sent", "--confirmed", "--idempotency-key", "offer-42:activity")["recorded"] == "followup_sent"
     outcome = call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")
     assert outcome["status"] == "offer"
-    assert call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")["reused"]
+    assert outcome["outcome"] == "offer_received"
+    assert outcome["preserved_artifacts"] == [{"kind": "verified-application-pdf", "path": "/review/resume.pdf", "sha256": "sha-42"}]
+    replayed_outcome = call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")
+    assert replayed_outcome["reused"] and replayed_outcome["preserved_artifacts"] == outcome["preserved_artifacts"]
     cross_outcome = call(directory, "transition", "42", "offer", "--payload", '{"outcome":"offer_received"}', "--idempotency-key", "offer-42", ok=False)
     assert "Idempotency key conflicts" in cross_outcome["error"]
     assert call(directory, "activity", "42", "offer_prepared", "--confirmed", "--payload", '{"evidence":{"path":"/review/offer-notes.md","sha256":"offer-sha"}}', "--idempotency-key", "offer-prep-42")["recorded"] == "offer_prepared"
