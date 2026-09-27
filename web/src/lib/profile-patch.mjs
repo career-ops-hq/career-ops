@@ -14,9 +14,8 @@ export function profilePatchError(value) {
   if ("roles" in value && (!Array.isArray(value.roles) || value.roles.some((role) => typeof role !== "string"))) {
     return "roles must be an array of strings";
   }
-  if (("compMin" in value) !== ("compMax" in value)) {
-    return "compMin and compMax must be supplied together";
-  }
+  // The action can send a lone bound. The writer ignores it while saving
+  // other fields, so do not require a pair here.
   for (const field of ["compMin", "compMax"]) {
     if (field in value && (typeof value[field] !== "number" || !Number.isFinite(value[field]) || value[field] <= 0)) {
       return `${field} must be a positive finite number`;

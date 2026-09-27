@@ -26,7 +26,7 @@ register(`data:text/javascript,${encodeURIComponent(loader)}`, pathToFileURL(web
 
 
 const { POST } = await import("../../src/app/api/profile/route.ts");
-const source = "# Original fixture comment\ncandidate:\n  full_name: Fixture Candidate\n  email: fixture@example.invalid\ncompensation:\n  currency: USD\n";
+const source = "# Original fixture comment\ncandidate:\n  full_name: Fixture Candidate\n  email: fixture@example.invalid\ncompensation:\n  currency: USD\n  target_range: 80-90\n";
 async function fixture(t, body) {
   const root = mkdtempSync(path.join(tmpdir(), "profile-input-"));
   const previous = process.env.CAREER_OPS_ROOT;
@@ -55,8 +55,6 @@ for (const [name, body] of [
   ["boolean location", '{"location":true}'],
   ["mixed roles", '{"roles":["Engineer",42]}'],
   ["null roles", '{"roles":null}'],
-  ["only minimum with another update", '{"name":"Updated Fixture","compMin":100}'],
-  ["only maximum with another update", '{"name":"Updated Fixture","compMax":200}'],
   ["string salary", '{"compMin":"100","compMax":200}'],
   ["infinite salary", '{"compMin":1e400,"compMax":200}'],
   ["negative salary", '{"compMin":-1,"compMax":200}'],
@@ -70,6 +68,22 @@ for (const [name, body] of [
     assert.equal(typeof (await response.json()).error, "string");
     assert.equal(readFileSync(file, "utf8"), source);
     assert.deepEqual(readdirSync(config), ["profile.yml"]);
+  });
+}
+
+for (const bound of ["compMin", "compMax"]) {
+  test(`a lone ${bound} is ignored while other profile updates are saved`, async (t) => {
+    const { response, file, config } = await fixture(t, JSON.stringify({
+      name: "Updated Fixture", [bound]: 100,
+    }));
+    assert.equal(response.status, 200);
+    assert.deepEqual(yaml.load(readFileSync(file, "utf8")), {
+      candidate: { full_name: "Updated Fixture", email: "fixture@example.invalid" },
+      compensation: { currency: "USD", target_range: "80-90" },
+    });
+    const backups = readdirSync(config).filter((f) => f.startsWith("profile.yml.bak-"));
+    assert.equal(backups.length, 1);
+    assert.equal(readFileSync(path.join(config, backups[0]), "utf8"), source);
   });
 }
 
