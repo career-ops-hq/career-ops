@@ -72,7 +72,7 @@ Every evaluated offer is registered. `data/applications.md` is the canonical tra
 Safely pulls new system files from upstream without touching user data. It backs up, fetches, re-execs the target updater (resolving its import closure so a new import can't break the upgrade), then checks out only `SYSTEM_PATHS`. `BOOTSTRAP_PATHS` covers very old installs.
 
 ### Multi-CLI entry files
-Each CLI reads its own entry file, all of which point at the canonical `AGENTS.md`: `CLAUDE.md` (full), and thin `@AGENTS.md` redirect wrappers `OPENCODE.md`, `CODEX.md`, `GEMINI.md`, plus the `.agents/skills/` skill entrypoints. This is the [open agent skill standard](https://agentskills.io).
+Each CLI reads its own entry file, all of which point at the canonical `AGENTS.md`: thin `@AGENTS.md` redirect wrappers `CLAUDE.md`, `OPENCODE.md`, `CODEX.md`, plus the `.agents/skills/` skill entrypoints. This is the [open agent skill standard](https://agentskills.io). `GEMINI.md` is a legacy no-op guard, so Antigravity does not load the project instructions twice.
 
 ### Dashboard (optional)
 A standalone Go TUI under `dashboard/` for browsing the pipeline. Isolated from the core — never required.
