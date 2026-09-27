@@ -170,25 +170,37 @@ tailoring that made the application relevant.
 
 **Resolve the tailored CV before drafting or filling anything:**
 
-1. Look the matched report number up in `data/pdf-index.tsv`
-   (`report \t pdf \t html \t format \t date \t kind`, written by `generate-pdf.mjs`).
-   Take the row whose `kind` is `cv`; a cover letter for the same report is its own
-   row and is not the CV. `node find.mjs {report#}` resolves the same linkage from
-   the tracker side.
-2. Read the `html` column rather than the `pdf` — same content, readable directly,
-   and it resolves both layouts (a bundle's `cv/tailored/vNNN/cv.html` and a flat
-   `output/cv-{candidate}-{company}.html`).
-3. No `kind=cv` row for the report? Only `generate-pdf.mjs` writes the manifest, so
-   a CV built through the `latex` / `latex-tex` path never has one. Fall back to a
+1. **The bundle first, because its path needs no lookup.** An application with a
+   bundle keeps its tailored CV at a path derived from the report number, the
+   company and the role, so nothing has to stay in sync for it to resolve:
+   `node application-artifacts.mjs --report {report#} --company "{company}" --role "{role}"`
+   prints every path as JSON, and `cv.tailored.html` is the document. That is where
+   `modes/pdf.md` writes it. Read the `.html` and not the `.pdf`: same content,
+   readable directly.
+2. Several tailoring versions? The bundle keys them `v001`, `v002`, and so on. Take
+   the highest one that exists on disk, and pass it back as `--version N` when you
+   want the other paths beside it.
+3. No bundle, so a flat `output/cv-{candidate}-{company}-{YYYY-MM-DD}.html`.
+   `data/pdf-index.tsv` can shorten the search here, but it is a hint and not an
+   answer. Its columns are `report \t pdf \t html \t format \t date` and there is
+   no document-kind column: `generate-pdf.mjs` drops every earlier row for a report
+   number when it writes a new one, and `generate-cover-letter.mjs` renders through
+   that same function with the same report, so the row for a report can name the
+   cover letter rather than the CV. Read the path before trusting it, and remember a
+   `cover-…` file is never a CV. `node find.mjs {report#}` surfaces the same manifest
+   from the tracker side and returns only the PDF path, so it cannot tell you which
+   kind of document that is either. A CV built through the `latex` / `latex-tex`
+   path is not in the manifest at all, since only `generate-pdf.mjs` writes it.
+4. Manifest silent or pointing at the wrong kind of document? Fall back to a
    filename match in `output/`: a `cv-…` artifact for this application's company,
    preferring `.html` or `.tex` (readable) over `.pdf`. Match the company slug at a
-   token boundary — `cv-…-meta-…` must not resolve Metabase's CV — and note that a
-   `cover-…` file is never a CV. These filenames carry the company and a date but
-   not the role, so if `output/` holds more than one CV for that company, do not
-   take the newest: ask which one was built for this report. Two roles at one
-   employer is exactly the case where the newest file is the wrong document.
-4. Nothing found, or the file the manifest names is missing → there is no tailored
-   CV for this application. Say so explicitly, then fall back to `cv.md`.
+   token boundary — `cv-…-meta-…` must not resolve Metabase's CV. These filenames
+   carry the company and a date but not the role, so if `output/` holds more than
+   one CV for that company, do not take the newest: ask which one was built for this
+   report. Two roles at one employer is exactly the case where the newest file is
+   the wrong document.
+5. Nothing found, or the file a path names is missing → there is no tailored CV for
+   this application. Say so explicitly, then fall back to `cv.md`.
 
 **Which source owns which field:**
 

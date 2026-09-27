@@ -3183,6 +3183,15 @@ if (
 if (
   applyMode.includes('## Step 4b — Resolve the tailored CV') &&
   applyMode.includes('data/pdf-index.tsv') &&
+  // The bundle path is the deterministic resolver and has to be named. An
+  // earlier draft of this step resolved the CV through a document-kind column
+  // the manifest writer does not write, so the prose described a lookup that
+  // could not succeed. The two negatives below pin that exact wording: both
+  // strings are in the previous revision of modes/apply.md, so neither passes
+  // vacuously.
+  applyMode.includes('application-artifacts.mjs --report') &&
+  !applyMode.includes('whose `kind` is `cv`') &&
+  !applyMode.includes('a cover letter for the same report is its own') &&
   applyMode.includes('the tailored CV wins') &&
   applyMode.includes('## Step 7b — Pre-Save required-field sweep') &&
   // The heading alone is not the contract. Pinning only it leaves the sweep's
