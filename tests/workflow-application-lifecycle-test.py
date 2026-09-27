@@ -29,6 +29,7 @@ with tempfile.TemporaryDirectory() as temporary:
         CREATE TABLE tasks(task_id TEXT PRIMARY KEY,opportunity_id TEXT,module TEXT,status TEXT,input_hash TEXT,attempt INTEGER,waiting_reason TEXT,workflow_version TEXT,input_payload TEXT);
         CREATE TABLE results(result_key TEXT PRIMARY KEY,task_id TEXT UNIQUE,opportunity_id TEXT,module TEXT,input_hash TEXT,payload TEXT);
         CREATE TABLE opportunities(id INTEGER PRIMARY KEY,url TEXT,company TEXT,role TEXT,source TEXT,state TEXT,application_state TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE evaluations(opportunity_id INTEGER PRIMARY KEY,created_at TEXT);
         CREATE TABLE artifacts(id INTEGER PRIMARY KEY,opportunity_id INTEGER,kind TEXT,path TEXT,sha256 TEXT);
         INSERT INTO opportunities(id,url,company,role,source,state,application_state) VALUES(42,'https://example.com/job/42','Example','Engineer','provider','discovered','none');
         INSERT INTO artifacts VALUES(1,42,'verified-application-pdf','/review/resume.pdf','sha-42');
@@ -134,6 +135,7 @@ with tempfile.TemporaryDirectory() as temporary:
         CREATE TABLE application_events(id INTEGER PRIMARY KEY,opportunity_id INTEGER,from_status TEXT,to_status TEXT,source TEXT,payload TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE application_activity(id INTEGER PRIMARY KEY,opportunity_id INTEGER,type TEXT,payload TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE opportunities(id INTEGER PRIMARY KEY,url TEXT,company TEXT,role TEXT,source TEXT,state TEXT,application_state TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE evaluations(opportunity_id INTEGER PRIMARY KEY,created_at TEXT);
         CREATE TABLE artifacts(id INTEGER PRIMARY KEY,opportunity_id INTEGER,kind TEXT,path TEXT,sha256 TEXT);
         CREATE TABLE results(result_key TEXT PRIMARY KEY,task_id TEXT,opportunity_id TEXT,module TEXT,input_hash TEXT,payload TEXT);
         INSERT INTO opportunities(id,url,company,role,source,state,application_state) VALUES(7,'https://example.com/job/7','Legacy','Engineer','provider','evaluated','submitted');

@@ -10,11 +10,18 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from workflow.application_lifecycle import ApplicationStore
-from workflow.followup_cadence import DEFAULT_CADENCE, cadence, cadence_config
+from workflow.followup_cadence import DEFAULT_CADENCE, applied_date_from_notes, cadence, cadence_config
 
 
 today = date(2026, 9, 27)
 applied = date(2026, 9, 20)
+assert applied_date_from_notes("Applied 2026-09-20; replied 2026-09-24") == applied
+assert applied_date_from_notes("Applied 2026-02-30; applied 2026-09-20") == applied
+assert applied_date_from_notes("#154 applied 2026-08-04; applied 2026-09-20") == applied
+assert applied_date_from_notes("#154 is live; applied 2026-08-04") is None
+assert applied_date_from_notes("Req #1311 - applied 2026-09-20") == applied
+assert applied_date_from_notes("#154 was slow. Applied 2026-09-20") == applied
+assert applied_date_from_notes("#154 applied 2026-08-04 | applied 2026-09-20") == applied
 assert cadence("applied", applied, None, 0, today=today, config=DEFAULT_CADENCE) == {
     "daysSinceApplication": 7,
     "daysSinceLastFollowup": None,
@@ -44,8 +51,10 @@ with tempfile.TemporaryDirectory() as temporary:
     db.executescript(
         """
         CREATE TABLE opportunities(id INTEGER PRIMARY KEY,url TEXT,company TEXT,role TEXT,created_at TEXT);
+        CREATE TABLE evaluations(opportunity_id INTEGER PRIMARY KEY,created_at TEXT);
         CREATE TABLE results(result_key TEXT PRIMARY KEY,opportunity_id TEXT,module TEXT,payload TEXT);
         INSERT INTO opportunities VALUES(42,'https://jobs.example.com/42','Realistic Employer','Engineer','2026-09-18 00:00:00');
+        INSERT INTO evaluations VALUES(42,'2026-09-19 00:00:00');
         INSERT INTO results VALUES('score-42','42','score','{"artifact":{"score":{"lower":61,"upper":74,"coverage":0.8},"path":"/review/score.md","report_sha256":"report-sha"}}');
         """
     )
@@ -103,7 +112,13 @@ with tempfile.TemporaryDirectory() as temporary:
     assert resumed["urgency"] == "cold"
     assert resumed["nextOverride"] is None
     assert resumed["nextFollowupDate"] is None
+    store.db.execute("UPDATE application_events SET payload=? WHERE operation_id='submit-42'", ('{"notes":"#154 applied 2026-08-04; Applied 2026-09-20"}',))
+    assert store.followups(today=today)["entries"][0]["appDateSource"] == "notes"
+    assert store.followups(today=today)["entries"][0]["appliedDate"] == "2026-09-20"
     store.db.execute("UPDATE application_events SET payload='{}' WHERE operation_id='submit-42'")
+    assert store.followups(today=today)["entries"][0]["appDateSource"] == "evaluation-date-proxy"
+    assert store.followups(today=today)["entries"][0]["appliedDate"] == "2026-09-19"
+    store.db.execute("DELETE FROM evaluations WHERE opportunity_id=42")
     assert store.followups(today=today)["entries"][0]["appDateSource"] == "opportunity-date-proxy"
     store.close()
 

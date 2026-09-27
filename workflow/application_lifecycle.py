@@ -14,9 +14,9 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 try:
-    from workflow.followup_cadence import DEFAULT_CADENCE, cadence, cadence_config, calendar_day
+    from workflow.followup_cadence import DEFAULT_CADENCE, applied_date_from_notes, cadence, cadence_config, calendar_day
 except ModuleNotFoundError:
-    from followup_cadence import DEFAULT_CADENCE, cadence, cadence_config, calendar_day
+    from followup_cadence import DEFAULT_CADENCE, applied_date_from_notes, cadence, cadence_config, calendar_day
 
 
 STATUSES = {"applied", "responded", "interview", "offer", "rejected", "discarded", "hired"}
@@ -371,9 +371,11 @@ class ApplicationStore:
         today = today or date.today()
         rows = self.db.execute(
             """SELECT o.id AS opportunityId,o.url,o.company,o.role,o.created_at AS opportunityCreatedAt,
+                      ev.created_at AS evaluatedAt,
                       l.status,l.updated_at AS lastTransitionAt,
                       e.payload AS submissionPayload,e.created_at AS submissionRecordedAt
                FROM application_lifecycle l JOIN opportunities o ON o.id=l.opportunity_id
+               LEFT JOIN evaluations ev ON ev.opportunity_id=o.id
                JOIN application_events e ON e.id=(
                    SELECT id FROM application_events WHERE opportunity_id=l.opportunity_id
                    AND to_status='applied' ORDER BY id LIMIT 1)
@@ -383,12 +385,17 @@ class ApplicationStore:
         for row in rows:
             submission = json.loads(row["submissionPayload"])
             explicit = calendar_day(submission.get("submitted_at"))
+            noted = applied_date_from_notes(submission.get("notes"))
+            evaluated = calendar_day(row["evaluatedAt"][:10]) if row["evaluatedAt"] else None
             proxy = calendar_day(row["opportunityCreatedAt"][:10]) if row["opportunityCreatedAt"] else None
             recorded = calendar_day(row["submissionRecordedAt"][:10])
-            applied = explicit or proxy or recorded
+            applied = explicit or noted or evaluated or proxy or recorded
             if applied is None:
                 continue
-            source = "submitted_at" if explicit else "opportunity-date-proxy" if proxy else "recorded-at-proxy"
+            source = (
+                "submitted_at" if explicit else "notes" if noted else "evaluation-date-proxy" if evaluated
+                else "opportunity-date-proxy" if proxy else "recorded-at-proxy"
+            )
             sent = self.db.execute(
                 """SELECT payload,created_at FROM application_activity
                    WHERE opportunity_id=? AND type='followup_sent' ORDER BY id""",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+import re
 
 import yaml
 
@@ -35,6 +36,39 @@ def calendar_day(value: str | None) -> date | None:
     except ValueError:
         return None
     return day if day.isoformat() == value else None
+
+
+APPLIED_DATE = re.compile(r"\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])", re.I)
+ROW_REFERENCE = re.compile(r"#\d+\b")
+REQUISITION_LABEL = re.compile(
+    r"\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$", re.I
+)
+
+
+def applied_date_from_notes(notes: str | None) -> date | None:
+    """Take the first valid own submission date, excluding sibling-row citations."""
+    if not isinstance(notes, str):
+        return None
+    for match in APPLIED_DATE.finditer(notes):
+        day = calendar_day(match.group(1))
+        if day and not _cross_referenced(notes, match.start()):
+            return day
+    return None
+
+
+def _cross_referenced(notes: str, index: int) -> bool:
+    window = notes[max(0, index - 120):index]
+    reference_end = -1
+    for match in ROW_REFERENCE.finditer(window):
+        if not REQUISITION_LABEL.search(window[:match.start()]):
+            reference_end = match.end()
+    if reference_end == -1:
+        return False
+    since_reference = window[reference_end:]
+    if re.search(r"[.!?]\s", since_reference):
+        return False
+    separators = list(re.finditer(r"[;|]", since_reference))
+    return not (separators and APPLIED_DATE.search(since_reference[:separators[-1].start()]))
 
 
 def cadence_config(profile: Path, *, applied_days: int | None = None) -> dict[str, int]:
