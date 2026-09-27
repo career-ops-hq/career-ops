@@ -101,6 +101,8 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     ['templates/cv-template.bw.html', true],
     ['templates/cover-letter-template.concise.html', true],
     ['templates/cv-template.bw.tex', true],
+    ['templates/my-pack/cv-template.bw.html', true],
+    ['templates/my-pack/cover-letter-template.concise.html', true],
   ];
   const shouldNotMatch = [
     ['templates/cv-template.zh-minimal.html', false], // real shipped variant, not the configured one
@@ -109,6 +111,7 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     ['templates/cover-letter-template.html', false],
     ['templates/cv-template.bw.png', false], // wrong extension, not html/tex
     ['output/cv-template.bw.html', false], // right basename shape, wrong directory
+    ['templates/my-pack/sections/cv-template.bw.html', false], // packs are one level only
     ['templates/resume-template.bw.html', false], // not one of the two recognized prefixes
   ];
 
@@ -164,6 +167,19 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
     } else {
       fail(`apply snapshot did not preserve the data-root variant: ${JSON.stringify(snapshot.preservedPaths)}`);
     }
+    mkdirSync(join(dir, 'templates', 'my-pack'), { recursive: true });
+    writeFileSync(join(dir, 'templates', 'my-pack', 'cv-template.bw.html'), '<h1>packed user variant</h1>\n');
+    const packedSnapshot = await snapshotConfiguredTemplateVariants({
+      dataRoot: dir,
+      remoteFiles: ['templates/my-pack/cv-template.bw.html'],
+      readRemoteContent: () => '<h1>upstream packed variant</h1>\n',
+    });
+    if (packedSnapshot.preservedPaths.length === 1
+      && packedSnapshot.preservedPaths[0] === 'templates/my-pack/cv-template.bw.html') {
+      pass('apply snapshot protects a configured named variant inside a one-level template pack');
+    } else {
+      fail(`apply snapshot did not preserve the packed variant: ${JSON.stringify(packedSnapshot.preservedPaths)}`);
+    }
     const unreadableSnapshot = await snapshotConfiguredTemplateVariants({
       dataRoot: dir,
       remoteFiles: ['templates/cv-template.bw.html'],
@@ -199,13 +215,14 @@ if (REEXEC_FALLBACK_FILES.includes('cv-templates.mjs')
         dataRoot: dir,
         remoteFiles: ['templates/cv-template.bw.html'],
       });
-    } catch {
-      malformedProfileRejected = true;
+    } catch (err) {
+      malformedProfileRejected = err.message.includes(join(dir, 'config', 'profile.yml'))
+        && err.message.includes('Fix the YAML syntax');
     }
     if (malformedProfileRejected) {
       pass('a malformed existing profile aborts before checkout or stale pruning');
     } else {
-      fail('a malformed existing profile silently disabled configured-variant protection');
+      fail('a malformed existing profile did not report its path and an actionable YAML fix');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

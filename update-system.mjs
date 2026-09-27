@@ -1043,7 +1043,10 @@ export function isGeneratedTemplateArtifact(file) {
 // convention (KINDS.cv.prefix = 'cv-template', KINDS.cover.prefix =
 // 'cover-letter-template'; parseFilename() there recognizes exactly this
 // `<prefix>.<name>.<html|tex>` shape).
-const TEMPLATE_VARIANT_RE = /^templates\/(cv-template|cover-letter-template)\.([a-z0-9-]+)\.(html|tex)$/;
+// Variants may be flat or live one level down in a template pack (#3202).
+// Deliberately do not recurse further: cv-templates.mjs discovers packs only
+// one level deep, and pack sections must not be classified as templates.
+const TEMPLATE_VARIANT_RE = /^templates\/(?:[^/]+\/)?(cv-template|cover-letter-template)\.([a-z0-9-]+)\.(html|tex)$/;
 const TEMPLATE_VARIANT_KIND = { 'cv-template': 'cv', 'cover-letter-template': 'cover' };
 
 /**
@@ -1262,9 +1265,19 @@ export async function snapshotConfiguredTemplateVariants({
       configuredVariantPaths.push(`templates/${prefix}.${name}.${extension}`);
     }
   }
+  // A configured template can live in a one-level pack. Remote paths are the
+  // authoritative candidates that checkout could overwrite; include matching
+  // packed variants alongside the historical flat fallback paths.
+  for (const file of remoteFiles) {
+    const normalized = normalizeRepoPath(file);
+    if (isUserConfiguredTemplateVariant(normalized, configuredVariants)) {
+      configuredVariantPaths.push(normalized);
+    }
+  }
+  const uniqueConfiguredVariantPaths = [...new Set(configuredVariantPaths)];
   const localContents = {};
   const remoteContents = {};
-  const localFiles = configuredVariantPaths.filter((file) => {
+  const localFiles = uniqueConfiguredVariantPaths.filter((file) => {
     const localPath = join(dataRoot, ...file.split('/'));
     try {
       localContents[file] = readLocalContent(localPath);

@@ -225,7 +225,12 @@ export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, s
   try {
     doc = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
   } catch (err) {
-    if (strict) throw err;
+    if (strict) {
+      throw new Error(
+        `Failed to parse profile YAML at ${profilePath}. Fix the YAML syntax and retry the update. ${err?.message || err}`,
+        { cause: err },
+      );
+    }
     return null;
   }
   let node = doc;
