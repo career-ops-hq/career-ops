@@ -18,19 +18,21 @@ import { injectPinnedExperience } from './cv-pinned-experience.mjs';
 import { styleTokensFrom, injectThemeStyle } from './theme-style.mjs';
 
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { loadCandidateIdentity, missingFields } from './lib/candidate-identity.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const REPORTS = join(DATA_ROOT, 'reports');
 const OUT_BASE = join(DATA_ROOT, 'output', 'master cv');
 
-const BASE_CANDIDATE = {
-  name: 'Shivanand Shah',
-  phone: '+91-9873724226',
-  email: 'career.shivanand@gmail.com',
-  linkedin: { url: 'linkedin.com/in/shivashah', display: 'linkedin.com/in/shivashah' },
-  portfolio: { url: 'https://sigmaxlabs.in', display: 'sigmaxlabs.in' },
-  location: 'Gurugram, Delhi-NCR, India',
-};
+// Identity is USER data and lives in the gitignored config/profile.yml, not in
+// this SYSTEM_PATHS file — an update would otherwise restore this script and
+// silently drop the candidate's contact details. See lib/candidate-identity.mjs.
+const BASE_CANDIDATE = loadCandidateIdentity();
+if (missingFields(BASE_CANDIDATE).length) {
+  console.warn(
+    `⚠️  Candidate identity incomplete — fill these in config/profile.yml: ${missingFields(BASE_CANDIDATE).join(', ')}`,
+  );
+}
 
 const ARCHETYPE_FILTERS = {
   'ai-product-manager': /\b(ai product|llm|genai|generative|agent|rag|mcp|model|mlops|prompt|workflow automation|creative engine)\b/i,

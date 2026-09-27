@@ -62,9 +62,9 @@ const TENURE_CLAIM_RE = /\b(\d+(?:\.\d+)?)\s*\+?\s*years?\b/gi;
  * material only (modes/_profile.md timeline item 2).
  *
  * The exclusions are load-bearing, not decoration. The candidate's own CV
- * already contains `career.shivanand@gmail.com` and describes InstaCure as a
- * "Health-tech startup", so a naive /care|health/ scan fires on legitimate
- * content and would have forced a bad edit. Match personal CONTEXT only.
+ * already carries a contact email and describes InstaCure as a "Health-tech
+ * startup", so a naive /care|health/ scan fires on legitimate content and would
+ * have forced a bad edit. Match personal CONTEXT only.
  */
 const PERSONAL_DISCLOSURE = [
   { re: /\b(?:mother|mum|mom|parents?)\b(?=[^.\n]{0,40}\b(?:health|ill|hospital|care|condition))/i, why: 'family health disclosure' },
@@ -511,7 +511,7 @@ function runSelfTest() {
     ["a parent's failing health is caught", checkJsonPayload({ summary: "My mother's health failed and I was the one handling that, and I also took charge of designing and supervising a home project end to end.", experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), true],
     ['caregiving language is caught', checkJsonPayload({ summary: 'Spent the period in caregiving for a family member, then returned to full-time delivery work across regulated industries.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), true],
     ['Health-tech industry descriptor is allowed', checkJsonPayload({ summary: 'Health-tech startup regional sales operations, 30% vendor base growth; then regulated-industry delivery for life-sciences clients across many engagements.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), false],
-    ['career email address is allowed', checkJsonPayload({ summary: 'Contact career.shivanand@gmail.com; consultant with 6+ years across delivery and founding, building regulated-industry automation for clients.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), false],
+    ['career email address is allowed', checkJsonPayload({ summary: 'Contact candidate@example.com; consultant with 6+ years across delivery and founding, building regulated-industry automation for clients.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), false],
     ['the markdown path enforces the same band', checkTextFile('## Professional Summary\n\nAI product manager with hands-on LLM agents.\n', 't').some((f) => f.code === 'summary-too-thin'), true],
   ];
   let failed = 0;
