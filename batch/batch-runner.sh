@@ -842,11 +842,18 @@ process_offer() {
   fi
   local date
   date=$(date +%Y-%m-%d)
-  # Use mktemp instead of a predictable /tmp path: a fixed name like
+  # Use mktemp instead of a predictable path: a fixed name like
   # /tmp/batch-jd-${id}.txt is guessable, so an attacker on a shared machine
   # could pre-create it as a symlink and redirect or clobber the write.
+  # Always project-local, never ${TMPDIR}: the worker CLI has to be able to read
+  # this file, and CLIs that auto-reject external_directory (/tmp/*) — opencode
+  # does — cannot read anything outside the project. Honouring TMPDIR here would
+  # re-open that hole whenever TMPDIR is the usual /tmp. mktemp still randomizes
+  # the name, so the symlink-guessability property above is unchanged.
+  local jd_tmp_dir="$PROJECT_DIR/batch/tmp"
+  mkdir -p "$jd_tmp_dir"
   local jd_file
-  jd_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-${id}.XXXXXX")"
+  jd_file="$(mktemp "$jd_tmp_dir/batch-jd-${id}.XXXXXX")"
   # The worker is a native process. Under Git Bash / MSYS the path above is a
   # POSIX one (/tmp/... or /c/...) that a Windows binary cannot open, so every
   # worker read "JD source unavailable" even when curl had filled the file.
@@ -902,6 +909,10 @@ process_offer() {
         : > "$jd_file"
         break
       else
+        # Headers are read by curl/bash only — never by the worker — so this one
+        # stays on ${TMPDIR:-/tmp} and the expression stays self-contained (the
+        # prefetch block is extracted and run in isolation by
+        # tests/batch-runner-jd-prefetch.test.mjs, where $jd_tmp_dir is not set).
         redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
         curl_status=0
         curl --silent --show-error --location --max-redirs 0 \
@@ -1269,7 +1280,13 @@ process_offer() {
     # no file on disk, silently freeing that number for a second, unrelated
     # offer to claim (a real collision). Verify the file before trusting
     # "completed" -- fail closed, not open.
-    if [[ -z "$(compgen -G "$REPORTS_DIR/${report_num}-*.md")" ]]; then
+    # The reservation sentinel ({num}-RESERVED.md) must NOT count as the
+    # report: it is created before the worker runs, so an unfiltered glob
+    # matches it and the guard is defeated every single time (found 2026-09-22:
+    # 16 no-op workers recorded as "completed" with score "-").
+    local report_files
+    report_files=$(compgen -G "$REPORTS_DIR/${report_num}-*.md" 2>/dev/null | grep -vE -- '-RESERVED\.md$' || true)
+    if [[ -z "$report_files" ]]; then
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi

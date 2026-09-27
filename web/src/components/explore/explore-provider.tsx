@@ -226,8 +226,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
                 break;
               case "progress":
-                // `matches` is the GLOBAL running total (the engine batches the
-                // offer list to the very end), so it drives the live hero counter.
+                // `matches` is the engine's running total. Live `offer` events
+                // (stderr JSON in --json mode) populate the card list; this
+                // number still drives the hero counter.
                 setMatchCount((m) => Math.max(m, ev.matches));
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", done: ev.scanned, total: ev.total } }));
                 break;
@@ -237,6 +238,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
               case "offer":
                 acc.push(ev.offer);
                 setOffers((o) => [...o, ev.offer]);
+                setMatchCount((m) => Math.max(m, acc.length));
                 break;
               case "summary": {
                 companiesScannedAcc = ev.companiesScanned;

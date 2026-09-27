@@ -80,6 +80,8 @@ Write a JSON file with this structure. `build-cv-latex.mjs` handles template mer
 }
 ```
 
+**No `candidate.title` equivalent here yet.** `pdf` mode (HTML → PDF) reads an optional professional-headline field, `candidate.title`, from `config/profile.yml` and renders it under the name. This schema and `build-cv-latex.mjs` have no corresponding concept — a `title` set for `pdf` mode does nothing for `latex`/`latex-tex` output. Use `pdf` mode if the headline matters for this application.
+
 ### Field reference
 
 | Field | Type | Source |

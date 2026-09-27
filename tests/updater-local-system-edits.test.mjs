@@ -13,13 +13,32 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved } from '../update-system.mjs';
+import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved, checkoutErrorIsBenign, probeAbsentUpstream } from '../update-system.mjs';
+
+const fixtures = [];
+
+// Registered on exit rather than removed per case, the same shape as
+// template-packs.test.mjs: the cases are top-level blocks, and a hook still
+// runs when one of them throws, which is the run that would otherwise leak
+// every repo created so far. Each run used to leave one repo per case in the
+// OS temp dir, and a global core.fsmonitor=true gives each of those a daemon
+// that outlives the run.
+process.on('exit', () => {
+  for (const dir of fixtures) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A fixture that cannot be removed must not change the suite's verdict.
+    }
+  }
+});
 
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
 // merge-base a meaningful baseline.
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'co-local-edits-'));
+  fixtures.push(dir);
   const g = (...args) => gitIn(dir, ...args);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
@@ -347,8 +366,8 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   }
 }
 
-// ── 9f. pathFullyPreserved: an unreadable upstream lookup degrades to "not
-//    fully preserved" for a directory, never throws ──
+// ── 9f. pathFullyPreserved: an unreadable upstream lookup is 'unknown' for a
+//    directory (not false), and never throws (#3824) ──
 {
   const preservedPaths = ['modes/pdf.md'];
   const preservedSet = new Set(preservedPaths);
@@ -361,10 +380,97 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
   } catch {
     threw = true;
   }
-  if (!threw && result === false) {
-    pass('an unreadable directory lookup degrades to "not fully preserved" instead of throwing');
+  if (!threw && result === 'unknown') {
+    pass('an unreadable directory lookup returns "unknown" instead of throwing or claiming "not preserved"');
   } else {
-    fail(`#9f threw=${threw} result=${result}`);
+    fail(`#9f threw=${threw} result=${JSON.stringify(result)}`);
+  }
+}
+
+// ── 9g. checkoutErrorIsBenign: the cancel-out abort a fully-preserved
+//    directory with an unreadable ls-tree used to trigger is now benign (#3824) ──
+{
+  // The error git actually raises when :(exclude) pathspecs cancel a checkout
+  // out (pinned live in section 9 above); stderr is where gitQuiet surfaces it.
+  const cancelOut = Object.assign(new Error('Command failed: git checkout FETCH_HEAD -- modes/'), {
+    stderr: "error: pathspec 'modes/' did not match any file(s) known to git\n",
+  });
+  const realFailure = Object.assign(new Error('Command failed: git checkout FETCH_HEAD -- modes/'), {
+    stderr: 'fatal: unable to write new index file\n',
+  });
+
+  const ok =
+    // 'unknown' + cancel-out message → benign, so apply() skips instead of aborting
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: false, preservedState: 'unknown' }) === true &&
+    // 'unknown' + a real failure → still rethrown
+    checkoutErrorIsBenign(realFailure, { absentUpstream: false, preservedState: 'unknown' }) === false &&
+    // a genuinely absent path does NOT soften an unrelated real failure — the
+    // cancel-out message must actually be present too (CodeRabbit, #3955
+    // review): absentUpstream/preservedState explain why nothing would be
+    // left to check out, they are not a license to swallow any error that
+    // happens to arrive on an absent path.
+    checkoutErrorIsBenign(realFailure, { absentUpstream: true, preservedState: false }) === false &&
+    // the same absent path WITH the actual cancel-out message is still benign
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: true, preservedState: false }) === true &&
+    // 'false' (real content not preserved) never softens a cancel-out message
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: false, preservedState: false }) === false;
+
+  if (ok) {
+    pass('checkoutErrorIsBenign: benign only when git\'s own cancel-out message is present, real failures always abort');
+  } else {
+    fail('#9g checkoutErrorIsBenign did not gate the cancel-out message correctly');
+  }
+}
+
+// ── 9h. probeAbsentUpstream — the helper apply()'s catch calls, driven
+//    directly against a real repo AND with a throwing probe (#1998, #3824,
+//    #3955 review): a retired path lists empty → benign skip; a present path
+//    does not → real error rethrows; a probe that THROWS → false, never a skip ──
+{
+  const repo = makeRepo();
+  repo.g('fetch', '.', 'upstream'); // populate FETCH_HEAD, same ref apply() uses
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  // 'modes/pdf.md' is in the tree; 'lib/retired.mjs' never was — the shape of a
+  // SYSTEM_PATHS entry removed upstream but still present on an old install.
+  const retiredIsAbsent = probeAbsentUpstream('lib/retired.mjs', ctx);
+  const presentIsAbsent = probeAbsentUpstream('modes/pdf.md', ctx);
+
+  // The regression this guards: a probe that could not run must NOT report
+  // absence, or a real checkout failure gets masked as an expected skip.
+  const throwingProbe = probeAbsentUpstream('modes/pdf.md', {
+    git: () => { throw new Error('fatal: not a git repository'); },
+  });
+
+  // An index-write failure has nothing to do with the pathspec being
+  // cancelled out — absentUpstream/preservedState explain why a path would
+  // legitimately have nothing to check out, they do not turn an unrelated
+  // real error into that shape (CodeRabbit, #3955 review). checkoutErrorIsBenign
+  // must require git's own cancel-out message before it ever looks at those.
+  const realCheckoutFailure = Object.assign(new Error('git checkout FETCH_HEAD -- modes/'), {
+    stderr: 'fatal: unable to write new index file\n',
+  });
+  const cancelledOutFailure = Object.assign(new Error('git checkout FETCH_HEAD -- retired/'), {
+    stderr: "error: pathspec 'retired/' did not match any file(s) known to git\n",
+  });
+
+  const ok =
+    retiredIsAbsent === true &&
+    presentIsAbsent === false &&
+    throwingProbe === false &&
+    // composed the way apply()'s catch does: retired path → skip, throwing probe → rethrow
+    // An unrelated real failure (index corruption) rethrows even when the
+    // path is genuinely absent upstream — absentUpstream alone is not enough.
+    checkoutErrorIsBenign(realCheckoutFailure, { absentUpstream: retiredIsAbsent, preservedState: false }) === false &&
+    checkoutErrorIsBenign(realCheckoutFailure, { absentUpstream: throwingProbe, preservedState: false }) === false &&
+    // The actual cancel-out message, paired with the path genuinely being
+    // absent, is still the one shape that skips.
+    checkoutErrorIsBenign(cancelledOutFailure, { absentUpstream: retiredIsAbsent, preservedState: false }) === true;
+
+  if (ok) {
+    pass('probeAbsentUpstream: a retired path skips only on the real cancel-out message; an unrelated failure always rethrows');
+  } else {
+    fail(`#9h retired=${retiredIsAbsent} present=${presentIsAbsent} throwing=${throwingProbe}`);
   }
 }
 
