@@ -99,6 +99,35 @@ test("an empty profile falls through to the legacy store rather than shadowing i
   assert.equal(readProfileMemory(root), "- Wants roles in the EU only.");
 });
 
+test("an install with content in BOTH stores keeps both, all the way into the prompt", () => {
+  // Given: someone who used the web assistant before the move to
+  // modes/_profile.md, then hand-wrote profile rules after it. Returning the
+  // profile the moment it has content makes the legacy read below unreachable
+  // for exactly this person, and the notes they accumulated first disappear.
+  //
+  // Asserted on the built PROMPT, not on the return value, for the reason at the
+  // top of this file: buildPrompt() omits the notes section for an empty memory,
+  // so a half-dropped memory is invisible in the output either way.
+  const root = makeRoot({ profile: HANDWRITTEN, legacy: "- Wants roles in the EU only.\n" });
+
+  const memory = readProfileMemory(root);
+  const prompt = buildPrompt({
+    kind: "evaluate",
+    input: "https://example.com/jobs/1",
+    memory,
+    today: "2026-09-07",
+  });
+
+  assert.match(prompt, /I contributed to the billing migration, I did not lead it\./,
+    "the hand-written profile rule must reach the prompt");
+  assert.match(prompt, /Wants roles in the EU only\./,
+    "the legacy note must reach the prompt too, not be shadowed by the profile");
+  // Order is part of the contract: the canonical store leads, so a legacy note
+  // that contradicts a current rule reads as the older of the two.
+  assert.ok(memory.indexOf("Staff platform engineer") < memory.indexOf("Wants roles in the EU only"),
+    "modes/_profile.md must come first, ahead of the legacy store");
+});
+
 test("nothing on disk reads as no memory, not as an error", () => {
   assert.equal(readProfileMemory(makeRoot()), "");
 });

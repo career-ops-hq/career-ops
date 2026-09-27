@@ -36,22 +36,32 @@ export function profilePath(root) {
  * with no guardrails was byte-indistinguishable from a run that never needed
  * any (#4003).
  *
- * The legacy .career-ops-web/memory.md still answers when modes/_profile.md is
- * missing or empty, so installs predating the move keep working.
+ * BOTH stores are read, and the non-empty ones are joined. An earlier draft
+ * returned the profile as soon as it had content, which made the legacy read
+ * below unreachable in exactly the case where it matters: an install that has
+ * old notes AND a hand-written profile silently lost the old notes. That is the
+ * same failure this file was written to fix, one store further along, and it is
+ * invisible for the same reason: buildPrompt() omits the notes section rather
+ * than emitting an empty one, so guardrails going missing looks identical to
+ * guardrails never existing.
+ *
+ * Joined with a blank line and nothing else. No synthetic heading marks the
+ * boundary: the two files hold the same kind of content, durable notes about the
+ * user, and the consumer is a prompt, so a line this function invented would
+ * read there as something the user wrote.
  *
  * @param {string} root career-ops home, i.e. careerOpsRoot()
  * @returns {string}
  */
 export function readProfileMemory(root) {
-  try {
-    const md = fs.readFileSync(profilePath(root), "utf8").trim();
-    if (md) return md;
-  } catch {
-    /* no _profile.md yet */
-  }
-  try {
-    return fs.readFileSync(path.join(root, ".career-ops-web", "memory.md"), "utf8").trim();
-  } catch {
-    return "";
-  }
+  const read = (file) => {
+    try {
+      return fs.readFileSync(file, "utf8").trim();
+    } catch {
+      return "";   /* absent or unreadable reads as no memory, never as an error */
+    }
+  };
+  const profile = read(profilePath(root));
+  const legacy = read(path.join(root, ".career-ops-web", "memory.md"));
+  return [profile, legacy].filter(Boolean).join("\n\n");
 }
