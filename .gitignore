@@ -41,14 +41,17 @@ batch/*
 # pattern matches only a real directory and would miss a symlink.
 !batch/logs
 !batch/tracker-additions
+# tracker-additions never had a blanket child rule, only the **/*.tsv one below,
+# so a non-.tsv file dropped straight into it was stageable. The .gitkeep
+# negations further down still win over this on an already-updated install, not
+# only in a fresh clone: reconcileGitignore() re-emits a negation the install
+# already has after the patterns it appends, which is what #4142 added.
+batch/tracker-additions/*
 # The enumerated rules below are now redundant in a fresh clone, and are kept
-# rather than replaced on purpose. reconcileGitignore() appends only the
-# patterns an install is missing, at the end of that install's file. Deleting
-# these lines here would leave an updated install with its own
-# !batch/logs/.gitkeep sitting above a freshly appended batch/logs/*, which
-# would stop keeping that directory. For the same reason this does not add
-# batch/tracker-additions/* : appended last, it would land below that install's
-# !batch/tracker-additions/.gitkeep and ignore the keeper.
+# rather than deleted. The reconciler only ever appends, so deleting them here
+# would not remove them from an existing install; it would only drop them from
+# fresh clones, where batch/logs/* is still what re-ignores that directory's
+# contents once !batch/logs has let git descend into it.
 batch/logs/*
 !batch/logs/.gitkeep
 batch/batch-state.tsv
