@@ -10,6 +10,7 @@
 | `application-lifecycle.mjs activity` | LangGraph `validate -> commit` activity |
 | `application-outcome.mjs` outcome mapping | LangGraph `validate -> commit` outcome |
 | `followup-cadence.mjs` active states, profile/default intervals, urgency, cold cutoff and overdue filter | `application followups` over canonical lifecycle and sent-activity dates |
+| `followup-cadence.mjs` intermediary, notes, sent-history and report context | `application followups` fields from submission, activity and retained score result |
 | `followup-seed.mjs` next-date pins and `followup-cadence.mjs` cleared directives | idempotent LangGraph `application schedule`, `retire`, and `reopen` directives |
 | `store.mjs` applied/responded/interview/offer/rejected/discarded/hired states and forward-only edges | `STATUSES` and `TRANSITIONS` |
 | candidate-confirmed submission after a verified package | explicit `application submit --confirmed` after a confirmed Python apply result |

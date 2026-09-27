@@ -46,6 +46,7 @@ with tempfile.TemporaryDirectory() as temporary:
         CREATE TABLE opportunities(id INTEGER PRIMARY KEY,url TEXT,company TEXT,role TEXT,created_at TEXT);
         CREATE TABLE results(result_key TEXT PRIMARY KEY,opportunity_id TEXT,module TEXT,payload TEXT);
         INSERT INTO opportunities VALUES(42,'https://jobs.example.com/42','Realistic Employer','Engineer','2026-09-18 00:00:00');
+        INSERT INTO results VALUES('score-42','42','score','{"artifact":{"score":{"lower":61,"upper":74,"coverage":0.8},"path":"/review/score.md","report_sha256":"report-sha"}}');
         """
     )
     db.close()
@@ -54,21 +55,31 @@ with tempfile.TemporaryDirectory() as temporary:
         """
         INSERT INTO application_lifecycle(opportunity_id,status,updated_at) VALUES(42,'applied','2026-09-21 00:00:00');
         INSERT INTO application_events(operation_id,opportunity_id,to_status,source,payload,created_at)
-          VALUES('submit-42',42,'applied','candidate-confirmed','{"submitted_at":"2026-09-20"}','2026-09-21 00:00:00');
+          VALUES('submit-42',42,'applied','candidate-confirmed','{"submitted_at":"2026-09-20","via":"Agency","notes":"Receipt retained"}','2026-09-21 00:00:00');
         """
     )
     view = store.followups(today=today)
     assert view["metadata"]["overdue"] == 1
     assert view["entries"][0]["url"] == "https://jobs.example.com/42"
+    assert view["entries"][0]["via"] == "Agency"
+    assert view["entries"][0]["notes"] == "Receipt retained"
+    assert view["entries"][0]["score"] == {"lower": 61, "upper": 74, "coverage": 0.8}
+    assert view["entries"][0]["scoreResultKey"] == "score-42"
+    assert view["entries"][0]["scoreSource"] == "latest-retained-result"
+    assert view["entries"][0]["reportPath"] == "/review/score.md"
+    assert view["entries"][0]["reportSha256"] == "report-sha"
     assert view["entries"][0]["appDateSource"] == "submitted_at"
     assert view["entries"][0]["nextFollowupDate"] == "2026-09-27"
     store.db.execute(
         "INSERT INTO application_activity(operation_id,opportunity_id,type,payload,created_at) VALUES(?,?,?,?,?)",
-        ("followup-42", 42, "followup_sent", '{"sent_at":"2026-09-25"}', "2026-09-26 00:00:00"),
+        ("followup-42", 42, "followup_sent", '{"sent_at":"2026-09-25","channel":"email","notes":"Sent"}', "2026-09-26 00:00:00"),
     )
     view = store.followups(today=today)
     assert view["entries"][0]["lastFollowupAt"] == "2026-09-25"
     assert view["entries"][0]["lastFollowupDateSource"] == "sent_at"
+    assert view["entries"][0]["followups"] == [
+        {"date": "2026-09-25", "dateSource": "sent_at", "channel": "email", "notes": "Sent"}
+    ]
     assert view["entries"][0]["nextFollowupDate"] == "2026-10-02"
     assert store.followups(today=today, overdue_only=True)["entries"] == []
     store.db.execute(

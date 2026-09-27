@@ -394,26 +394,45 @@ class ApplicationStore:
                    WHERE opportunity_id=? AND type='followup_sent' ORDER BY id""",
                 (row["opportunityId"],),
             ).fetchall()
-            followup_dates = [
-                (calendar_day(json.loads(item["payload"]).get("sent_at")), calendar_day(item["created_at"][:10]))
-                for item in sent
-            ]
-            last = max((observed or recorded for observed, recorded in followup_dates if observed or recorded), default=None)
-            last_source = next(
-                ("sent_at" if observed else "recorded-at-proxy"
-                 for observed, recorded in reversed(followup_dates)
-                 if last is not None and (observed or recorded) == last),
-                None,
-            )
+            followups = []
+            for item in sent:
+                payload = json.loads(item["payload"])
+                observed = calendar_day(payload.get("sent_at"))
+                recorded = calendar_day(item["created_at"][:10])
+                day = observed or recorded
+                if day:
+                    followups.append({
+                        "date": day.isoformat(),
+                        "dateSource": "sent_at" if observed else "recorded-at-proxy",
+                        "channel": payload.get("channel") if isinstance(payload.get("channel"), str) else None,
+                        "notes": payload.get("notes") if isinstance(payload.get("notes"), str) else None,
+                    })
+            followups.sort(key=lambda item: item["date"], reverse=True)
+            last = calendar_day(followups[0]["date"]) if followups else None
+            last_source = followups[0]["dateSource"] if followups else None
+            score_result = self.db.execute(
+                """SELECT result_key,payload FROM results WHERE opportunity_id=? AND module='score'
+                   ORDER BY rowid DESC LIMIT 1""", (row["opportunityId"],)
+            ).fetchone()
+            score_artifact = json.loads(score_result["payload"]).get("artifact", {}) if score_result else {}
+            via = submission.get("via")
             entry = {
                 "opportunityId": row["opportunityId"],
                 "url": row["url"],
                 "company": row["company"],
                 "role": row["role"],
+                "via": via.strip() if isinstance(via, str) and via.strip() and via.strip() != "—" else None,
+                "notes": submission.get("notes") if isinstance(submission.get("notes"), str) else "",
+                "score": score_artifact.get("score"),
+                "reportPath": score_artifact.get("path"),
+                "reportSha256": score_artifact.get("report_sha256"),
+                "scoreResultKey": score_result["result_key"] if score_result else None,
+                "scoreSource": "latest-retained-result" if score_result else None,
                 "status": row["status"],
                 "lastTransitionAt": row["lastTransitionAt"],
                 "lastFollowupAt": last.isoformat() if last else None,
                 "lastFollowupDateSource": last_source,
+                "followups": followups,
                 "appliedDate": applied.isoformat(),
                 "appDateSource": source,
                 **cadence(row["status"], applied, last, len(sent), today=today, config=config),
