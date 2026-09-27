@@ -12,7 +12,7 @@
     "liveness": "node check-liveness.mjs",
     "workflow": "workflow/.venv/bin/python -B workflow/career_ops.py",
     "application:lifecycle": "workflow/.venv/bin/python -B workflow/career_ops.py application",
-    "interview:context": "node interview-context.mjs",
+    "interview:context": "workflow/.venv/bin/python -B -m workflow.interview_tools context",
     "cv:maintain": "workflow/.venv/bin/python -B workflow/cv_maintenance.py",
     "migrate": "node scripts/migrate/opportunities.mjs"
   },

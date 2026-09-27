@@ -90,3 +90,31 @@ record is needed; these commands never send messages.
 optionally adds one explicit user statement as a candidate source for that
 draft. Repeat the same `--statement` with `show` to retrieve its version;
 without it, the statement cannot validate a claim in another draft.
+
+Interview preparation is a separate LangGraph task over the same canonical
+opportunity and reviewed scan/score. The read-only evidence tools replace the
+former Node interview commands:
+
+```bash
+workflow/.venv/bin/python -m workflow.interview_tools context <opportunity-id> --db data/opportunities.db
+workflow/.venv/bin/python -m workflow.interview_tools match-star "<question>" --jd <jd-file>
+workflow/.venv/bin/python -m workflow.interview_tools story-provenance
+workflow/.venv/bin/python -m workflow.interview_tools preparation-plan --jd <jd-file> --company <company> --role <role>
+workflow/.venv/bin/python -m workflow.interview_tools jd-skill-gap <jd-file>
+workflow/.venv/bin/python -m workflow.interviews start prepare <opportunity-id> <session-key> --request '{"interview_at":"unknown"}'
+workflow/.venv/bin/python -m workflow.interviews show <task-id>
+workflow/.venv/bin/python -m workflow.interviews show <task-id> --format markdown
+workflow/.venv/bin/python -m workflow.interviews resume <task-id> --feedback '<review notes>'
+workflow/.venv/bin/python -m workflow.interviews confirm <task-id>
+workflow/.venv/bin/python -m workflow.interviews history <opportunity-id> <session-key>
+```
+
+`start` also accepts `practice`, `debrief`, and `learn`; debrief requires a real
+user-provided transcript. Model calls require the explicit interview-model gate
+and authorization for the configured endpoint. A model-approved draft remains
+unconfirmed until the user reviews it and runs `confirm`; this never sends an
+application or message. Use `--directory <isolated-data-dir>` for acceptance
+checks so the operational database stays unchanged.
+`show` defaults to JSON for scripts; `--format markdown` presents the same
+stored version, source quotes, and review status as a human-readable draft
+without confirming or changing it.
