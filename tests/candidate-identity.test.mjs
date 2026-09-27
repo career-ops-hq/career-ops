@@ -15,6 +15,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'url';
 
 import {
   loadCandidateIdentity,
@@ -132,4 +134,80 @@ test('the real config/profile.yml resolves a complete identity', () => {
   if (!existsSync(PROFILE_PATH)) return; // template clone — nothing to assert
   const missing = missingFields(loadCandidateIdentity(PROFILE_PATH));
   assert.deepEqual(missing, [], `config/profile.yml is missing: ${missing.join(', ')}`);
+});
+
+// --- Rendered-output guard ---------------------------------------------------
+//
+// Everything above proves the identity is READ. These prove it SURVIVES the
+// render, which is a separate failure: buildContactRow() can drop a field, or
+// linkify it without its scheme, long after the loader is perfect. A loader
+// test cannot see either. Seam copied from tests/cv-named-templates.test.mjs:133.
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const NODE = process.execPath;
+
+const RENDER_FIXTURE = profile('render.yml', [
+  'candidate:',
+  '  full_name: "Ada Lovelace"',
+  '  email: "ada@example.com"',
+  '  phone: "+44-20-7946-0000"',
+  '  linkedin: "https://linkedin.com/in/adalovelace"',
+  '',
+].join('\n'));
+
+// Headline is deliberately absent: it is not a key the HTML builder reads, so
+// including it only adds a validation warning to the output we are reading.
+function renderHtml() {
+  const payload = {
+    lang: 'en',
+    page_format: 'A4',
+    candidate: loadCandidateIdentity(RENDER_FIXTURE),
+    summary: 'A summary line, so the payload is not degenerate.',
+    experience: [{ company: 'Acme', role: 'Engineer', bullets: ['Did a thing.'] }],
+    projects: [],
+    education: [],
+    skills: [{ category: 'Core', items: ['Testing'] }],
+  };
+  const input = join(FIXTURE, 'render-payload.json');
+  const output = join(FIXTURE, 'render-payload.html');
+  writeFileSync(input, JSON.stringify(payload));
+  execFileSync(NODE, ['build-cv-html.mjs', input, output], { cwd: ROOT, encoding: 'utf-8' });
+  return readFileSync(output, 'utf-8');
+}
+
+test('the rendered CV shows the email as a real mailto: link', () => {
+  const html = renderHtml();
+  assert.match(html, /href="mailto:ada@example\.com"/, 'email is not a mailto: link');
+  assert.match(html, />ada@example\.com</, 'email is linkified but not visible to the reader');
+});
+
+test('the mailto href keeps its scheme', () => {
+  // The exact failure the LinkedIn href had: linkified, but stripped of the
+  // scheme, so generate_cv_pdf.py reads it as a relative path and the PDF
+  // silently loses the annotation. Assert the href verbatim, not just "some
+  // href exists".
+  const href = renderHtml().match(/href="(mailto:[^"]*)"/);
+  assert.ok(href, 'no mailto: link rendered at all');
+  assert.equal(href[1], 'mailto:ada@example.com');
+});
+
+test('the rendered CV shows the phone as a tel: link', () => {
+  // The second contact link, so a change to buildContactRow cannot take out
+  // one and leave the other asserted.
+  assert.match(renderHtml(), /href="tel:\+44-20-7946-0000"/);
+});
+
+test('the real profile email is the address the CV will publish', () => {
+  // Pinned, not just structural. The trap: a missing email key does NOT blank
+  // the contact row, it falls back to PLACEHOLDER_IDENTITY and renders a real,
+  // clickable mailto:you@example.com on a CV someone might send. The two tests
+  // above catch the key going missing; this one catches the wrong address
+  // reaching the page. The rest of this file runs on a fixture precisely so
+  // that pinning a real address stays a one-line, deliberate exception.
+  if (!existsSync(PROFILE_PATH)) return; // template clone — nothing to assert
+  assert.equal(
+    loadCandidateIdentity(PROFILE_PATH).email,
+    'career.shivanand@gmail.com',
+    'the contact address changed — update this expectation to match config/profile.yml',
+  );
 });
