@@ -35,8 +35,71 @@ const MASTER_DIR = join(DATA_ROOT, 'output', 'master cv');
 
 // ── Rules ────────────────────────────────────────────────────────────────────
 
-/** Summary budget. modes/_custom.md "Summary — one line, no metric stacking". */
-const SUMMARY_MAX_WORDS = 20;
+/**
+ * Summary budget. modes/_custom.md "Summary — 30–55 words, one anchor metric".
+ * The band is a floor AND a ceiling: an upper limit alone is what produced the
+ * 7–12 word label that read as a bare-bones positioning line instead of a
+ * summary, so both ends are enforced. modes/pdf.md asks the per-application
+ * path for a 3–4 line profile; this is the master-path equivalent, and the two
+ * must not drift.
+ */
+const SUMMARY_MIN_WORDS = 30;
+const SUMMARY_MAX_WORDS = 55;
+
+/**
+ * Tenure claims, per modes/_custom.md. The documented work history totals
+ * ~6.33 years of professional experience, so "6+ years" is supportable and
+ * "7+ years" is not. A summary that overstates tenure is the easiest claim on
+ * the page to catch in a reference check, and it discredits the claims
+ * underneath it.
+ */
+const TENURE_MAX_YEARS = 6.33;
+const TENURE_CLAIM_RE = /\b(\d+(?:\.\d+)?)\s*\+?\s*years?\b/gi;
+
+/**
+ * Personal-disclosure terms that must never reach a page. The Oct 2024 --
+ * Oct 2025 break was family caregiving plus a home project; it is interview
+ * material only (modes/_profile.md timeline item 2).
+ *
+ * The exclusions are load-bearing, not decoration. The candidate's own CV
+ * already contains `career.shivanand@gmail.com` and describes InstaCure as a
+ * "Health-tech startup", so a naive /care|health/ scan fires on legitimate
+ * content and would have forced a bad edit. Match personal CONTEXT only.
+ */
+const PERSONAL_DISCLOSURE = [
+  { re: /\b(?:mother|mum|mom|parents?)\b(?=[^.\n]{0,40}\b(?:health|ill|hospital|care|condition))/i, why: 'family health disclosure' },
+  { re: /\bfamily health\b/i, why: 'family health disclosure' },
+  { re: /\bbereav/i, why: 'bereavement disclosure' },
+  { re: /\billness\b/i, why: 'illness disclosure' },
+  { re: /\bmedical (?:leave|condition|reason)\b/i, why: 'medical disclosure' },
+  { re: /\bcaregiv/i, why: 'caregiving disclosure' },
+  { re: /\bgrief\b/i, why: 'grief disclosure' },
+  { re: /\bhospit(?:al|is|ised|ized)\b/i, why: 'hospitalisation disclosure' },
+  { re: /\bdiagnos(?:is|ed|tic)\b/i, why: 'diagnosis disclosure' },
+  { re: /\b(?:death|passing) of\b/i, why: 'bereavement disclosure' },
+];
+
+/**
+ * Quantified claims in a summary, split into two tiers.
+ *
+ * OUTCOME = an impact or result figure (%, currency, count of things
+ * delivered). Limit 1. This is the "25% / 18% / $500K" pile the house rule
+ * bans — a run of outcome numbers reads as keyword pressure and buries the
+ * positioning claim.
+ *
+ * SCOPE = a responsibility/scale qualifier (team size, endpoints, sites).
+ * These do something different — they establish the scale of ownership — so
+ * they are counted separately and only capped, to stop a summary decaying into
+ * a number dump.
+ *
+ * Tenure figures are stripped first and never counted as anchors: every
+ * summary legitimately carries one or two of them.
+ */
+const OUTCOME_ANCHOR_RE = /(?:\d+(?:\.\d+)?\s*%)|(?:[$₹€£]\s?\d[\d.,]*\s?[KMB]?\b)|(?:\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\b(?=[^.\n]{0,30}\b(?:product|build|ship|deliver|client|site|tool|app|platform|venture)s?\b))/gi;
+const SCOPE_FIGURE_RE = /\b\d+\+?\b(?=[^.\n]{0,24}\b(?:endpoints?|trucks?|persons?|people|teams?|staff|clients?|users?|sites?|devices?|nodes?)\b)/gi;
+const MAX_OUTCOME_ANCHORS = 1;
+const MAX_TOTAL_QUANTIFIED = 3;
+
 
 /**
  * Claims the CV must never make. Two of these are the precise failure a
@@ -169,19 +232,67 @@ function pdfUriCount(pdfPath) {
 
 // ── JSON payload checks ──────────────────────────────────────────────────────
 
+/**
+ * The four summary rules, in one place so the JSON payload path and the
+ * markdown text path cannot drift apart (they did once, when the .md path
+ * kept the old 20-word ceiling while the JSON path moved).
+ *
+ *  1. length band, both ends
+ *  2. one outcome anchor, capped total quantification (tenure excluded)
+ *  3. tenure defensible against the documented timeline
+ *  4. no personal disclosure
+ */
+function scanSummary(summary, target, out) {
+  const text = String(summary || '').trim();
+  if (!text) return out;
+
+  const wc = wordCount(text);
+  if (wc < SUMMARY_MIN_WORDS) {
+    out.push(finding('summary-too-thin', 'fail', target, `${wc} words, floor ${SUMMARY_MIN_WORDS}. Under this length the summary is a positioning label, not a profile — the reader gets no scope, evidence or through-line. modes/_custom.md "Summary — 30–55 words".`));
+  }
+  if (wc > SUMMARY_MAX_WORDS) {
+    out.push(finding('summary-too-long', 'fail', target, `${wc} words, ceiling ${SUMMARY_MAX_WORDS}. modes/_custom.md "Summary — 30–55 words".`));
+  }
+
+  const withoutTenure = text.replace(TENURE_CLAIM_RE, ' ');
+  const outcome = (withoutTenure.match(OUTCOME_ANCHOR_RE) || []).length;
+  const scope = (withoutTenure.match(SCOPE_FIGURE_RE) || []).length;
+  const total = outcome + scope;
+  if (outcome > MAX_OUTCOME_ANCHORS) {
+    out.push(finding('summary-metric-stack', 'fail', target, `${outcome} outcome metrics (limit ${MAX_OUTCOME_ANCHORS}): a run of result figures reads as keyword pressure and buries the positioning claim. Keep one; the bullets own the rest.`));
+  }
+  if (total > MAX_TOTAL_QUANTIFIED) {
+    out.push(finding('summary-number-dump', 'warn', target, `${total} quantified claims (${outcome} outcome, ${scope} scope; cap ${MAX_TOTAL_QUANTIFIED}). Passable, but the summary is drifting toward a number dump — consider pushing a scope figure down to the bullets.`));
+  }
+
+  for (const m of text.matchAll(TENURE_CLAIM_RE)) {
+    const years = parseFloat(m[1]);
+    if (Number.isFinite(years) && years > TENURE_MAX_YEARS) {
+      out.push(finding('tenure-overstated', 'fail', target, `summary claims "${m[0].trim()}" but the documented work history totals ~${TENURE_MAX_YEARS} years. "6+ years" is supportable, "7+ years" is not — an overstated tenure is the first claim a reference check will catch.`));
+    }
+  }
+
+  const lines = text.split('\n');
+  for (const { re, why } of PERSONAL_DISCLOSURE) {
+    for (let i = 0; i < lines.length; i++) {
+      if (re.test(lines[i])) {
+        out.push(finding('personal-disclosure', 'fail', target, `${why} in summary: "${lines[i].trim().slice(0, 100)}" — interview material only (modes/_custom.md "Off-Limits").`));
+      }
+    }
+  }
+
+  return out;
+}
+
 function checkJsonPayload(payload, target) {
   const out = [];
   const exp = Array.isArray(payload.experience) ? payload.experience : [];
   const projects = Array.isArray(payload.projects) ? payload.projects : [];
   const lane = (payload.__lane) || target;
 
-  // 1. Summary budget
-  if (payload.summary) {
-    const wc = wordCount(payload.summary);
-    if (wc > SUMMARY_MAX_WORDS) {
-      out.push(finding('summary-too-long', 'fail', target, `${wc} words, budget ${SUMMARY_MAX_WORDS}. A peer review flagged the previous 60-word data dump.`));
-    }
-  }
+  // 1. Summary: band, anchor count, tenure, disclosure. Shared with
+  // checkTextFile so the .json and .md paths can never enforce different bars.
+  scanSummary(payload.summary || '', target, out);
 
   scanForbidden(payload.summary || '', `${target} (summary)`, out);
   scanForbidden((payload.competencies || []).join('\n'), `${target} (competencies)`, out);
@@ -267,12 +378,7 @@ function checkJsonPayload(payload, target) {
 function checkTextFile(text, target) {
   const out = [];
   const m = text.match(/##\s*Professional Summary\s*\n+([^\n]+)/);
-  if (m) {
-    const wc = wordCount(m[1]);
-    if (wc > SUMMARY_MAX_WORDS) {
-      out.push(finding('summary-too-long', 'fail', target, `${wc} words, budget ${SUMMARY_MAX_WORDS}`));
-    }
-  }
+  if (m) scanSummary(m[1], target, out);
   scanForbidden(text, target, out);
   scanStaleDates(text, target, out);
   return out;
@@ -362,8 +468,9 @@ function printSummary(result) {
 
 function runSelfTest() {
   const cases = [
-    ['summary over budget is caught', checkJsonPayload({ summary: 'word '.repeat(30), experience: [] }, 't').some((f) => f.code === 'summary-too-long'), true],
-    ['summary at budget passes', checkJsonPayload({ summary: 'word '.repeat(20), experience: [] }, 't').some((f) => f.code === 'summary-too-long'), false],
+    ['summary over the ceiling is caught', checkJsonPayload({ summary: 'word '.repeat(60), experience: [] }, 't').some((f) => f.code === 'summary-too-long'), true],
+    ['summary under the floor is caught', checkJsonPayload({ summary: 'AI product manager with hands-on LLM agents.', experience: [] }, 't').some((f) => f.code === 'summary-too-thin'), true],
+    ['in-band summary passes the band', checkJsonPayload({ summary: 'word '.repeat(40), experience: [] }, 't').some((f) => f.code.startsWith('summary-too-')), false],
     ['GxP-compliant is caught', checkJsonPayload({ summary: 'Built a GxP-compliant system', experience: [] }, 't').some((f) => f.code === 'forbidden-claim'), true],
     ['GxP-regulated client is allowed', checkJsonPayload({ summary: 'A system a GxP-regulated client depended on', experience: [] }, 't').some((f) => f.code === 'forbidden-claim'), false],
     ['A/B testing is caught', checkJsonPayload({ summary: 'Ran A/B testing', experience: [] }, 't').some((f) => f.code === 'forbidden-claim'), true],
@@ -387,7 +494,25 @@ function runSelfTest() {
     ['headline leading with a demoted tool is caught', checkJsonPayload({ headline: 'AI Product Manager | GenAI evaluation | human-in-the-loop workflows' }, 't').some((f) => f.code === 'headline-advertises-tool'), true],
     ['headline leading with a bare credential is caught', checkJsonPayload({ headline: 'Strategy consultant | MBA (IIM Rohtak) | Deloitte USI delivery' }, 't').some((f) => f.code === 'headline-misses-moat'), true],
     ['old founder headline is caught', checkJsonPayload({ headline: 'Founder & AI-ops operator | two shipped ventures | Deloitte USI alum' }, 't').some((f) => f.code === 'headline-misses-moat'), true],
-    ['founder headline carrying the moat passes', checkJsonPayload({ headline: 'Founder, AI-ops consultancy | two shipped ventures | GxP delivery background' }, 't').some((f) => f.code.startsWith('headline-')), false],
+    ['founder headline carrying the moat passes', checkJsonPayload({ headline: 'Founder, AI-ops consultancy | two ventures | GxP delivery background' }, 't').some((f) => f.code.startsWith('headline-')), false],
+
+    // ── Summary rules added with the 30–55 word band ────────────────────────
+    // The L1 draft, verbatim. It is the reference case that must stay clean:
+    // 53 words, one outcome anchor, two tenure figures, no disclosure.
+    ['reference L1 draft produces no summary finding', checkJsonPayload({ summary: "AI product manager with 6+ years across product and solutions delivery, including 2+ years building for GxP-regulated and life-sciences clients at Deloitte USI. Runs discovery, PRDs, roadmaps and release cadence, and builds the automation directly - including an LLM-agent prototype that replaced manual spreadsheet handoffs. Cut a bilingual donor platform's release cycles by 25%.", experience: [] }, 't').some((f) => f.code.startsWith('summary-') || f.code === 'tenure-overstated' || f.code === 'personal-disclosure'), false],
+    ['two outcome metrics are caught', checkJsonPayload({ summary: 'Consultant who cut release cycles 25% and scoped a $500K savings MVP for clinical and regulatory stakeholders across many engagements over years.', experience: [] }, 't').some((f) => f.code === 'summary-metric-stack'), true],
+    ['one outcome anchor passes', checkJsonPayload({ summary: 'Consultant who cut a bilingual donor platform release cycles by 25% while building regulated-industry delivery experience across client engagements.', experience: [] }, 't').some((f) => f.code === 'summary-metric-stack'), false],
+    ['7+ years tenure is caught', checkJsonPayload({ summary: 'Consultant with 7+ years of delivery experience across regulated industries, building automation for clients and owning end-to-end engagements.', experience: [] }, 't').some((f) => f.code === 'tenure-overstated'), true],
+    ['6+ years tenure passes', checkJsonPayload({ summary: 'Consultant with 6+ years of delivery experience across regulated industries, building automation for clients and owning end-to-end engagements.', experience: [] }, 't').some((f) => f.code === 'tenure-overstated'), false],
+
+    // ── Personal disclosure: the negatives are the load-bearing half ─────────
+    // A naive /care|health/ scan fires on the candidate's OWN CV content, so
+    // these three must stay clean or the rule is worse than no rule.
+    ["a parent's failing health is caught", checkJsonPayload({ summary: "My mother's health failed and I was the one handling that, and I also took charge of designing and supervising a home project end to end.", experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), true],
+    ['caregiving language is caught', checkJsonPayload({ summary: 'Spent the period in caregiving for a family member, then returned to full-time delivery work across regulated industries.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), true],
+    ['Health-tech industry descriptor is allowed', checkJsonPayload({ summary: 'Health-tech startup regional sales operations, 30% vendor base growth; then regulated-industry delivery for life-sciences clients across many engagements.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), false],
+    ['career email address is allowed', checkJsonPayload({ summary: 'Contact career.shivanand@gmail.com; consultant with 6+ years across delivery and founding, building regulated-industry automation for clients.', experience: [] }, 't').some((f) => f.code === 'personal-disclosure'), false],
+    ['the markdown path enforces the same band', checkTextFile('## Professional Summary\n\nAI product manager with hands-on LLM agents.\n', 't').some((f) => f.code === 'summary-too-thin'), true],
   ];
   let failed = 0;
   for (const [name, got, want] of cases) {

@@ -60,7 +60,7 @@ const LANE_STYLES = {
 const LANE_HEADLINES = {
   'ai-product-manager': 'AI Product Manager | GxP-regulated delivery | hands-on LLM agents',
   'solutions-consultant': 'Solutions Consultant | GxP-regulated delivery | AI transformation',
-  'startup-ops': 'Founder, AI-ops consultancy | two shipped ventures | GxP delivery background',
+  'startup-ops': 'Founder, AI-ops consultancy | two ventures | GxP delivery background',
   'strategy-mid': 'Strategy consultant | GxP-regulated delivery | ex-Deloitte USI (IIM Rohtak)',
   general: 'Product & solutions | regulated-industry delivery | hands-on AI automation',
 };
@@ -161,15 +161,15 @@ function buildPayload(archetype, mined) {
   // "Core themes from recent target roles" advertises itself as machine-written.
   const summaries = {
     'ai-product-manager':
-      'AI product manager - GxP delivery discipline, hands-on LLM agents.',
+      'AI product manager with 6+ years across product and solutions delivery, including 2+ years building for GxP-regulated and life-sciences clients at Deloitte USI. Runs discovery, PRDs, roadmaps and release cadence, and builds the automation directly - including an LLM-agent prototype that replaced manual spreadsheet handoffs. Cut a bilingual donor platform\'s release cycles by 25%.',
     'solutions-consultant':
-      'AI solutions consultant designing and shipping automation for regulated industries.',
+      'Solutions consultant with 6+ years designing and shipping technology for clients, including 2+ years in US life-sciences and GxP-regulated delivery at Deloitte USI. Takes engagements from discovery to working automation - n8n, LLM agents, API integration - and scoped a $500K projected-savings analytics MVP for clinical and regulatory stakeholders.',
     'startup-ops':
-      'Founder of two ventures - one events business, one AI automation agency.',
+      'Founder of two ventures - an AI automation consultancy and an events business - with 6+ years operating across 50+ IoT endpoints and a 15+ person team, now shipping LLM agents. Built the model router and the automation layer those clients buy. Carries the rigour of 2+ years in GxP-regulated delivery into an operator build.',
     'strategy-mid':
-      'Structured problem-solving backed by regulated-industry delivery experience.',
+      'Strategy consultant with an MBA from IIM Rohtak, more than two years at Deloitte USI delivering for US life-sciences and GxP-regulated clients. Owned the architecture and phased cutover for a supply system a client depended on, live through day one. Pairs market scoping and offer design with the fluency to know what is buildable.',
     general:
-      'AI product manager and solutions consultant, grounded in GxP-regulated delivery.',
+      'AI product and solutions consultant with 6+ years spanning delivery, operations and founding, including 2+ years at Deloitte USI for GxP-regulated and US life-sciences clients. Builds and ships LLM agents, workflow automation and model routing hands-on, and has run both a venture and a client delivery function end to end. IBM AI Product Manager certified.',
   };
 
   // PM lanes carry the full PM spine — that is what target JDs and ATS keyword
@@ -240,13 +240,13 @@ function buildPayload(archetype, mined) {
     'ai-product-manager': [
       'Founded SigmaX Labs after an events venture exposed that ops-heavy businesses still run on spreadsheets and WhatsApp groups; now ships fixed-scope AI automation sprints for Indian SMEs',
       'Built Hermes-Router, a Node/Express model router over OpenRouter with cost/quality routing and fallback chains',
-      'Designed Basilica intake-to-reporting prototype (n8n + Google Sheets + Telegram) for an interior design firm, from brief to approved workflow spec',
+      'Spotted the manual intake-handoff bottleneck at an interior design firm, then designed the Basilica intake-to-reporting prototype (n8n + Google Sheets + Telegram) from brief to approved workflow spec',
       'Shipped kbcompress.com (client-side image compression for Indian exam portal upload limits)',
       'Scoped RRM Mobility operations-agent specification: Hindi voice agent for fleet coordination (proposal stage)',
     ],
     'solutions-consultant': [
       'Run SigmaX Labs: client discovery, solution scoping, and fixed-scope automation delivery for SMEs',
-      'Basilica engagement: workshops, requirements capture, and working prototype replacing manual spreadsheet handoffs',
+      'Basilica engagement: identified the firm manual intake-handoff bottleneck in discovery, then workshops, requirements capture, and a working prototype',
       'RRM Mobility: proposed ops-agent and LinkedIn analytics approach for EV fleet operations (proposal stage)',
       'Built sigmaxlabs.in and kbcompress.com as proof-of-delivery samples for prospects',
       'Hermes-Router: internal routing layer reused across client automations and agent tooling',
@@ -264,7 +264,7 @@ function buildPayload(archetype, mined) {
     general: [
       'Founded and run an AI-ops automation consultancy serving Indian SMEs',
       'Built Hermes-Router (model router), kbcompress.com, and sigmaxlabs.in',
-      'Basilica: n8n + Google Sheets + Telegram intake-to-reporting prototype (built, pending go-live)',
+      'Basilica: identified the firm manual intake-handoff bottleneck, then built the n8n + Google Sheets + Telegram intake-to-reporting prototype (pending go-live)',
       'RRM Mobility: LinkedIn automation and operations-agent specification (proposal stage)',
     ],
   };
