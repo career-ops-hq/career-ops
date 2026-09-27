@@ -48,14 +48,19 @@ import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
-import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
-const workspaceRoot = resolveWorkspaceRoot(trackerPath);
+// Derive the workspace root from the uncanonicalized tracker path (#3169): a
+// repo that symlinks only its data/ out (the #524 workaround) must still resolve
+// cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
+// target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
+// spelling the rest of the module compares against stays canonical as before.
+const workspaceRoot = resolveWorkspaceRootFor(getCareerOpsRoot());
 const PDF_PAGE_MARGIN = '0.6in';
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
@@ -89,7 +94,10 @@ function refreshRootCache() {
   // derived the workspace from the CODE directory, so every path under the
   // real data root read as an escape and the PDF was refused (#4389). Line 49
   // already used getCareerOpsRoot(), so the two disagreed inside one module.
-  const root = resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
+  //
+  // Same #3169 derivation as the import-time const: resolveWorkspaceRootFor works
+  // from the uncanonicalized tracker so a symlinked data/ stays in the repo.
+  const root = resolveWorkspaceRootFor(getCareerOpsRoot());
   if (__rootCache.key !== root) {
     __rootCache = { key: root, root, canonical: realpathSync(root) };
   }

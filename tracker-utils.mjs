@@ -165,6 +165,27 @@ export function resolveWorkspaceRoot(trackerPath) {
 }
 
 /**
+ * Workspace root for a script started from `rootDir`, derived from the
+ * *uncanonicalized* tracker path. Unlike `resolveWorkspaceRoot(resolveTrackerPath(rootDir))`,
+ * this does not realpath the tracker first, so a workspace that only symlinks its
+ * `data/` directory (the natural workaround for #524) still resolves to the repo
+ * rather than the symlink's target (#3169). Pointing `CAREER_OPS_TRACKER` at a
+ * genuinely external workspace keeps moving the whole set together (#2471), since
+ * the raw path is then the external tracker itself.
+ *
+ * The returned root is left in its lexical form, exactly as
+ * `resolveWorkspaceRoot(resolveTrackerPath(rootDir))` was, so it keeps the same
+ * spelling the module's containment checks compare against (they realpath both
+ * sides themselves for the symlinked-ancestor case, e.g. /tmp -> /private/tmp).
+ *
+ * @param {string} rootDir - The career-ops data root directory.
+ * @returns {string} Absolute workspace root directory.
+ */
+export function resolveWorkspaceRootFor(rootDir) {
+  return resolveWorkspaceRoot(resolve(rawTrackerPath(rootDir)));
+}
+
+/**
  * Resolve the PDF manifest (`data/pdf-index.tsv`) for the workspace that owns
  * a tracker. `CAREER_OPS_PDF_INDEX` overrides it explicitly.
  *
@@ -194,7 +215,7 @@ export function resolvePdfIndexPath(trackerPath) {
  * @param {string} path - Raw tracker path from config, env, or the default.
  * @returns {string} Absolute canonical path when the file exists, else resolved path.
  */
-import { canonicalizeTrackerPath } from './path-resolver.mjs';
+import { canonicalizeTrackerPath, rawTrackerPath } from './path-resolver.mjs';
 export { canonicalizeTrackerPath };
 
 /**
