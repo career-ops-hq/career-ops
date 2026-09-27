@@ -19,6 +19,8 @@
  * 14. data/follow-ups.md table schema (see #2971)
  * 15. portals.yml entries no provider claims (see #3251)
  * 16. No invisible control characters in tracker cells (error — see #3892)
+ * 17. Application SLA gate on Applied rows (advisory — verify-apply-gate.mjs)
+ * 18. Generated CV style + precision rules (error — see verify-cv-style.mjs)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -627,6 +629,51 @@ try {
   }
 } catch (err) {
   warn(`SLA gate could not run: ${err.message}`);
+}
+
+// --- Check 18: generated CV style + precision (verify-cv-style.mjs) ---
+// Error, not advisory, and that is the point of the check existing. Every rule
+// here was already written down in modes/_custom.md, and every one of them came
+// back anyway: the summary regrew to 60 words, a "Core themes from recent target
+// roles" keyword tail reappeared, a lane lost its GxP skills line, a startup-ops
+// CV shipped with no NMT bullet, all five PDFs came out with zero clickable
+// links, and "GxP-compliant" appeared in a bullet that should have said the
+// CLIENT was GxP-regulated. Prose that nothing enforces decays; this enforces
+// it. Read-only — it reports, it never rewrites a CV.
+//
+// Skips cleanly when no master CVs have been generated yet, so a fresh checkout
+// is not reported as broken.
+try {
+  const { verify } = await import('./verify-cv-style.mjs');
+  const { existsSync: _ex, readdirSync: _rd } = await import('fs');
+  const { join: _j } = await import('path');
+  const masterDir = _j(getCareerOpsRoot(), 'output', 'master cv');
+  if (!_ex(masterDir)) {
+    ok('No master CVs generated yet — CV style check skipped');
+  } else {
+    const targets = [];
+    const cvMd = _j(getCareerOpsRoot(), 'cv.md');
+    if (_ex(cvMd)) targets.push(cvMd);
+    for (const lane of _rd(masterDir)) {
+      for (const f of ['cv.json', 'cv.md', 'cv.pdf']) {
+        const p = _j(masterDir, lane, f);
+        if (_ex(p)) targets.push(p);
+      }
+    }
+    const result = verify(targets);
+    const fails = result.findings.filter(f => f.severity === 'fail');
+    const warns = result.findings.filter(f => f.severity === 'warn');
+    if (fails.length === 0) {
+      ok(`CV style: ${result.targets.length} generated files pass all style + precision rules`);
+      for (const w of warns) warn(`CV style ${w.code}: ${w.target} — ${w.detail}`);
+    } else {
+      const byCode = {};
+      for (const f of fails) byCode[f.code] = (byCode[f.code] || 0) + 1;
+      error(`CV style: ${fails.length} violations across ${result.targets.length} files [${Object.entries(byCode).map(([c, n]) => `${c}×${n}`).join(', ')}] — run node verify-cv-style.mjs --summary`);
+    }
+  }
+} catch (err) {
+  warn(`CV style check could not run: ${err.message}`);
 }
 
 // --- Summary ---

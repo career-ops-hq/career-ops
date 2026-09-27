@@ -290,6 +290,7 @@ const SYSTEM_PATHS = [
   'cv-jd-fit.mjs',
   'cv-pinned-experience.mjs',
   'verify-cv-facts.mjs',
+  'verify-cv-style.mjs',
   'verify-ats.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
