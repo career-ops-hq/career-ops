@@ -27,7 +27,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
    > ⚠️ **Skill-gap check inconclusive:** [Render in {language.output}: state that the automated skill-gap check returned no classified skills for this JD and so cannot be read as "no gaps"; name which of the three shapes occurred from the reason code (requirements section never found, or found but no candidates extracted, or the JD file was empty); for an empty file, say the JD may not have been saved correctly and should be checked; otherwise say that you will read the JD directly to identify required skills before drafting. Keep the CLI's own English diagnostic out of the user-facing message.]
 5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
-6. Detect company location → paper format:
+6. Detect company location → paper format. Skip this when `config/profile.yml` sets `page_format` to `letter` or `a4`, in any casing and with any surrounding spaces; that is the user's standing answer and it already reaches every renderer. Any other value there is ignored, so keep detecting.
    - US/Canada → `letter`
    - Rest of the world → `a4`
 7. Detect role archetype → adapt framing
@@ -138,6 +138,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
   "page_format": "letter",
   "candidate": {
     "name": "Jane Smith",
+    "title": "Senior Backend Engineer",
     "phone": "+1 415 555 0100",
     "email": "jane@example.com",
     "linkedin": { "url": "https://linkedin.com/in/janesmith", "display": "linkedin.com/in/janesmith" },
@@ -192,8 +193,9 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | Field | Type | Notes |
 |-------|------|-------|
 | `lang` | string | CV language code (`en`, `es`, `zh-CN`, `ja`, `ar`). Drives language-specific CSS: `zh-CN` enables Simplified Chinese fonts and strict CJK line breaking; `ja` enables a Japanese CJK font fallback; `ar` enables RTL + Arabic fonts. Defaults to `en`. |
-| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `generate-pdf.mjs --format`. |
+| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Omit it and both the body width and the sheet fall back to `config/profile.yml` `page_format`, then to `letter`. Set it and you should pass the SAME value to `generate-pdf.mjs --format`, so the body and the sheet match. |
 | `candidate.name` | string | From `profile.yml`. |
+| `candidate.title` | string | Optional professional headline shown directly under the name (e.g. "Senior Backend Engineer"). Read it from `candidate.title` in `config/profile.yml`. An ATS reads this first to place the candidate; a CV with no title forces the reader to infer the role. Omit or leave empty → no title element, byte-identical to before. Tailor it to the JD's own title wording when the candidate's real level supports it (never inflate). |
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |
 | `candidate.linkedin` | `{url, display}` | Optional — omit to drop the item and its separator. |

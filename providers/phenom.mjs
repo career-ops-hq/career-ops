@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { fetchJsonWithRetry } from './_http.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
 // Titles arrive HTML-escaped, so the tag strip below is not enough on its own:
 // an undecoded "R&amp;D Engineer" fails the user's own title_filter positive
 // "r&d" and is silently dropped, and a negative like "sales & marketing" never
@@ -168,7 +168,6 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`phenom: cannot resolve origin for ${entry.name}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     // Honor a context page cap — verify-portals' liveness probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its
@@ -190,7 +189,7 @@ export default {
     let page = 0;
     let anyPageSucceeded = false;
     for (; page < pagesToFetch; page++) {
-      if (page > 0) await wait(PAGE_DELAY_MS);
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       let json;
       try {
         // Retries transient failures (429/5xx/timeout) with backoff before
