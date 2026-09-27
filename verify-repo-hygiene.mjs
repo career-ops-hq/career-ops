@@ -80,6 +80,30 @@ function looksLikeSystemFile(rel) {
 }
 
 /**
+ * Is `rel` claimed by SYSTEM_PATHS — the same question update-system.mjs asks
+ * when it decides whether a path is its own to ship or restore.
+ *
+ * Directory entries cover everything beneath them, exactly as the updater
+ * treats them (`tests/`, `lib/`, `modes/`, … — see the `owned` contract in
+ * update-system.mjs). Plain `Set.has` membership gets that wrong in both
+ * directions, because the two shipped directories are registered as prefixes:
+ *
+ *   - false positive: a brand-new `tests/foo.test.mjs` looks registered by the
+ *     directory but fails an exact match, so it is reported as an unregistered
+ *     system file and fails the pipeline for as long as it is untracked.
+ *   - false negative, worse: a *modified* file under a shipped directory never
+ *     matches either, so it is silently never reported as a dirty system file —
+ *     the exact loss the check exists to warn about.
+ */
+function isRegisteredSystemPath(rel, systemPaths) {
+  for (const entry of systemPaths) {
+    if (entry === rel) return true;
+    if (entry.endsWith('/') && rel.startsWith(entry)) return true;
+  }
+  return false;
+}
+
+/**
  * Secret shapes. The `validate` hook on the last pattern exists because a
  * plain `key = <16 word chars>` match flags ordinary code — `password =
  * getPasswordPrompt()` and `token = response.token` are assignments, not
@@ -124,10 +148,9 @@ export function checkUserLayerTracked(tracked, userLayer = USER_LAYER) {
  */
 export function checkUnregisteredSystemFiles(untracked, systemPaths = SYSTEM_PATHS) {
   const out = [];
-  const registered = new Set(systemPaths);
   for (const p of untracked) {
     if (!looksLikeSystemFile(p)) continue;
-    if (registered.has(p)) continue;
+    if (isRegisteredSystemPath(p, systemPaths)) continue;
     out.push(finding('system-unregistered', 'fail', p,
       'A system file exists on disk and is not gitignored, but it is not in SYSTEM_PATHS. `update-system.mjs apply` will not ship it, and `validate-system-paths-coverage.mjs` cannot see it because that check enumerates tracked files only. Add it to SYSTEM_PATHS in update-system.mjs.'));
   }
@@ -211,9 +234,8 @@ export const MIN_COMPLETENESS = 0.9;
 /** Uncommitted edits to a system file: normal mid-task, worth reporting. */
 export function checkDirtySystemFiles(dirty, systemPaths = SYSTEM_PATHS) {
   const out = [];
-  const registered = new Set(systemPaths);
   for (const p of dirty) {
-    if (!registered.has(p)) continue;
+    if (!isRegisteredSystemPath(p, systemPaths)) continue;
     out.push(finding('system-dirty', 'warn', p,
       'System file has uncommitted changes. If the session ends here, `update-system.mjs apply` has no committed restore point for it.'));
   }
@@ -323,7 +345,14 @@ function runSelfTest() {
 
     // ── unregistered system files (the hole this script exists to close) ──
     ['unregistered root script is caught', has(checkUnregisteredSystemFiles(['new-thing.mjs']), 'system-unregistered'), true],
-    ['unregistered script in a system dir is caught', has(checkUnregisteredSystemFiles(['templates/new.html']), 'system-unregistered'), true],
+    ['unregistered file in a non-registered system dir is caught', has(checkUnregisteredSystemFiles(['lib/new-thing.mjs']), 'system-unregistered'), true],
+    ['unregistered batch script is caught', has(checkUnregisteredSystemFiles(['batch/new-thing.mjs']), 'system-unregistered'), true],
+    ['unregistered mode doc is caught', has(checkUnregisteredSystemFiles(['modes/new-mode.md']), 'system-unregistered'), true],
+    // A registered DIRECTORY claims everything beneath it, the way update-system
+    // reads `owned` — so a new file under templates/ or tests/ IS shipped, and
+    // reporting it as unshippable was the false positive this matcher caused.
+    ['a new file under a registered directory is not flagged', has(checkUnregisteredSystemFiles(['templates/new.html']), 'system-unregistered'), false],
+    ['a new test under the registered tests/ dir is not flagged', has(checkUnregisteredSystemFiles(['tests/new-thing.test.mjs']), 'system-unregistered'), false],
     ['a registered file is not flagged', has(checkUnregisteredSystemFiles(['verify-cv-style.mjs']), 'system-unregistered'), false],
     ['a data file is not a system file', has(checkUnregisteredSystemFiles(['reports/001-x.md']), 'system-unregistered'), false],
     ['an unregistered md that is not a mode doc is ignored', has(checkUnregisteredSystemFiles(['notes.md']), 'system-unregistered'), false],
@@ -355,6 +384,11 @@ function runSelfTest() {
     // ── dirty system files ──
     ['dirty registered system file warns', has(checkDirtySystemFiles(['a.mjs'], ['a.mjs']), 'system-dirty'), true],
     ['dirty unregistered file does not warn as system', has(checkDirtySystemFiles(['a.mjs'], ['b.mjs']), 'system-dirty'), false],
+    // The false negative an exact-match membership causes: a modified file under
+    // a registered directory matches nothing, so it was never reported dirty —
+    // silently losing the warning that exists to catch it.
+    ['dirty file under a registered directory warns', has(checkDirtySystemFiles(['tests/x.test.mjs'], ['tests/']), 'system-dirty'), true],
+    ['dirty file under the real tests/ entry warns', has(checkDirtySystemFiles(['tests/x.test.mjs']), 'system-dirty'), true],
 
     // ── secrets ──
     ['a private key in the diff is caught', has(scanDiffForSecrets('+-----BEGIN RSA PRIVATE KEY-----'), 'secret-in-diff'), true],
