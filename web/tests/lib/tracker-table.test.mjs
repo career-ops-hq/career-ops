@@ -60,6 +60,22 @@ test('parses header columns when the data root does not contain system files', (
   ]);
 });
 
+test('ignores a data-root alias table that cannot map the required columns', (t) => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'career-ops-data-'));
+  const systemRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'career-ops-system-'));
+  t.after(() => {
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+    fs.rmSync(systemRoot, { recursive: true, force: true });
+  });
+  fs.writeFileSync(path.join(dataRoot, 'tracker-aliases.json'), '{}');
+  fs.writeFileSync(path.join(systemRoot, 'tracker-aliases.json'), JSON.stringify(ALIASES));
+
+  const [row] = parseApplications(TRACKER, dataRoot, systemRoot);
+  assert.equal(row.via, 'Agency');
+  assert.equal(row.score, '4.0/5');
+  assert.equal(row.status, 'Applied');
+});
+
 for (const [market, date, company, role] of markets) {
   test(`${market}: real shared aliases parse reordered tracker with Location and Via`, () => {
     const md = `| ${company} | Status | # | ${date} | Location | Via | ${role} | Score | PDF | Report | Notes |

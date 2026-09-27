@@ -32,6 +32,9 @@ const WEB_FIELD = {
 /** @type {Map<string, {mtimeMs: number, size: number, aliases: Record<string, string>}>} */
 const aliasCache = new Map();
 
+/** Canonical fields detectColumnMap needs to recognize a header row. */
+const REQUIRED_FIELDS = ["num", "company", "role", "score", "status"];
+
 /**
  * Load the shared header-alias table (lowercased header text → canonical field).
  *
@@ -46,20 +49,29 @@ const aliasCache = new Map();
  */
 export function loadHeaderAliases(rootDir, fallbackRootDir) {
   const roots = [...new Set([rootDir, fallbackRootDir].filter(Boolean))];
-  for (const root of roots) {
+  for (const [i, root] of roots.entries()) {
     const file = path.resolve(root, "tracker-aliases.json");
     try {
       const { mtimeMs, size } = fs.statSync(file);
       const cached = aliasCache.get(file);
-      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.aliases;
-      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        aliasCache.delete(file);
-        continue;
-      }
       /** @type {Record<string, string>} */
-      const aliases = parsed;
-      aliasCache.set(file, { mtimeMs, size, aliases });
+      let aliases;
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+        aliases = cached.aliases;
+      } else {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          aliasCache.delete(file);
+          continue;
+        }
+        aliases = parsed;
+        aliasCache.set(file, { mtimeMs, size, aliases });
+      }
+      // A table that cannot map the required columns (e.g. `{}`) would push
+      // detectColumnMap onto the legacy positions and misread Via-style
+      // trackers; while another root remains, try that one instead.
+      const mapped = new Set(Object.values(aliases));
+      if (i < roots.length - 1 && !REQUIRED_FIELDS.every((f) => mapped.has(f))) continue;
       return aliases;
     } catch {
       aliasCache.delete(file);
