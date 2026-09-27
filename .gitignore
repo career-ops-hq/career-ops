@@ -25,6 +25,30 @@ reports/**/*.md
 !reports/.gitkeep
 output/*
 !output/.gitkeep
+# batch/ holds generated worker output. Ignore the directory and allowlist the
+# tracked scaffolding, so a filename a future generator picks is covered by
+# default. AGENTS.md already states the intent this way: "Batch in batch/
+# (gitignored except scripts and prompt)". Enumerating the outputs instead only
+# covers the names that existed when the list was written, which left
+# batch/cv-*.json and batch/cover-*.json stageable, and those carry the
+# candidate's CV content.
+batch/*
+!batch/README.md
+!batch/aggregate-tokens.mjs
+!batch/batch-prompt.md
+!batch/batch-runner.sh
+# No trailing slash, so git descends into the two keeper directories. A slashed
+# pattern matches only a real directory and would miss a symlink.
+!batch/logs
+!batch/tracker-additions
+# The enumerated rules below are now redundant in a fresh clone, and are kept
+# rather than replaced on purpose. reconcileGitignore() appends only the
+# patterns an install is missing, at the end of that install's file. Deleting
+# these lines here would leave an updated install with its own
+# !batch/logs/.gitkeep sitting above a freshly appended batch/logs/*, which
+# would stop keeping that directory. For the same reason this does not add
+# batch/tracker-additions/* : appended last, it would land below that install's
+# !batch/tracker-additions/.gitkeep and ignore the keeper.
 batch/logs/*
 !batch/logs/.gitkeep
 batch/batch-state.tsv
