@@ -16,28 +16,29 @@ const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 /** ~one page at tightness 0–1 on A4 (chars in renderable fields). */
 export const TARGET_CONTENT_CHARS = 3600;
 
+// Backfill pool for sparse tailored CVs: the candidate's OWN builds only.
+//
+// SPARK Analytics MVP and the Donor Engagement Portal were Deloitte client
+// deliveries and used to sit here, badged "Regulated Industry" and "Bilingual"
+// -- badges naming no client at all, so a tailored CV presented them as
+// personal work and carried a $500K savings claim into a Projects section the
+// candidate does not own. They now appear only inside the Deloitte
+// experience block, where the client is named.
+//
+// This pool is also what lets `enrichCvContent` reach its own
+// `wantProjects` floor, so it must hold at least three entries. Adding a
+// client engagement here is a silent regression; `verify-cv-style.mjs` fails
+// the build if a project duplicates a bullet under a non-venture employer.
+const CLEARSTATE_URL =
+  'https://quilt-cuckoo-1da.notion.site/ClearState-Case-Study-30921d15774880c7b862e0c8e08eefca';
+
 const CV_PROJECTS = [
-  {
-    name: 'SPARK Analytics MVP',
-    badge: 'Regulated Industry',
-    tech: 'Python, Analytics',
-    description:
-      'Delivered the SPARK analytics MVP for real-time clinical and regulatory KPIs -- $500K projected cost savings',
-    keywords: ['spark', 'analytics mvp', 'clinical and regulatory'],
-  },
-  {
-    name: 'Donor Engagement Portal',
-    badge: 'Bilingual',
-    tech: 'Agile/Scrum',
-    description:
-      'Drove Agile development of a bilingual Donor Engagement Portal; 25% faster release cycles; 18% client retention improvement via 20+ features shipped from user feedback',
-    keywords: ['donor engagement', 'donor portal', 'bilingual'],
-  },
   {
     name: 'kbcompress.com',
     badge: 'Open Source',
     tech: 'Web Application',
     description: 'Built and shipped kbcompress.com, a free image compression tool for Indian exam portals',
+    url: null,
     keywords: ['kbcompress'],
   },
   {
@@ -45,7 +46,17 @@ const CV_PROJECTS = [
     badge: 'Open Source',
     tech: 'Node/Express, OpenRouter',
     description: 'Built Hermes-Router, a model router in Node/Express sitting over OpenRouter',
+    url: null,
     keywords: ['hermes-router', 'hermes router', 'openrouter'],
+  },
+  {
+    name: 'ClearState',
+    badge: 'Case study',
+    tech: 'Cloudflare Workers, Granite 4.0',
+    description:
+      'Governance-aware executive reporting prototype: position-based isolation, governance checks before any AI access, and a constrained rewrite layer; the first shipped build under SigmaX Labs (Feb 2026)',
+    url: CLEARSTATE_URL,
+    keywords: ['clearstate', 'governance', 'cloudflare workers', 'granite'],
   },
 ];
 
@@ -74,6 +85,66 @@ function bulletsSimilar(a, b) {
 function projectListed(proj, projects) {
   const name = normText(proj.name);
   return (projects || []).some((p) => normText(p.name) === name);
+}
+
+// The candidate's own ventures, plus the regulated-industry moat that the
+// headline, the competency spine and the whole scoring depend on. Work under
+// these is legitimately both a bullet and a project, so filling them first can
+// never misattribute anything.
+const PROTECTED_EMPLOYER_RE = /sigmax|goodtime|deloitte/i;
+
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+/** Months spanned by a `"Nov 2025 -- Present"` / `"Sep 2022 -- Oct 2024"` string. */
+export function durationMonths(dates, now = new Date()) {
+  const parts = String(dates ?? '')
+    .split(/\s*(?:--|[-–—]|\bto\b)\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return 0;
+  const stamp = (s, isEnd) => {
+    const m = /([a-z]{3,})\w*\s+(\d{4})/i.exec(s);
+    if (!m) return null;
+    const mon = MONTHS[m[1].slice(0, 3).toLowerCase()];
+    if (mon === undefined) return null;
+    return { year: Number(m[2]), mon: isEnd ? mon + 1 : mon }; // inclusive of the closing month
+  };
+  const open = stamp(parts[0], false);
+  // "Present"/"Current" carries no year of its own -- it means today.
+  const end = /present|current|now|today/i.test(parts[1])
+    ? { year: now.getFullYear(), mon: now.getMonth() + 1 }
+    : stamp(parts[1], true);
+  // Bare years ("2022 - 2024") carry no month; fall back to whole-year spans.
+  if (!open || !end) {
+    const y0 = Number((/(\d{4})/.exec(parts[0]) || [])[1]);
+    const y1 = Number((/(\d{4})/.exec(parts[1]) || [])[1]);
+    if (!y0 || !y1 || y1 <= y0) return 0;
+    return (y1 - y0) * 12;
+  }
+  const months = (end.year - open.year) * 12 + (end.mon - open.mon);
+  return months > 0 ? months : 0;
+}
+
+/**
+ * Order cv.md roles for page-fill priority.
+ *
+ * Tier 1 -- the candidate's own ventures and the regulated moat, each filled
+ * to its cv.md ceiling first.
+ * Tier 2 -- everything else, longest tenure first.
+ *
+ * Sorting on duration alone would spend recovered page space on the longest
+ * *stale* role: Synergy Teletech spans 24 months against SigmaX Labs' 11, and
+ * InstaCure (12) would outrank the current founder role (11), so a decade-old
+ * field-executive bullet could displace present-tense work the candidate can
+ * discuss in detail. Duration therefore breaks ties within tier 2 only.
+ */
+export function fillPriority(roles, now = new Date()) {
+  return [...roles].sort((a, b) => {
+    const pa = PROTECTED_EMPLOYER_RE.test(a.company || '') ? 0 : 1;
+    const pb = PROTECTED_EMPLOYER_RE.test(b.company || '') ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    return durationMonths(b.dates, now) - durationMonths(a.dates, now);
+  });
 }
 
 export function parseCvSkills(cvPath = CV_PATH) {
@@ -123,7 +194,7 @@ export function enrichCvContent(payload, opts = {}) {
   }
 
   const added = [];
-  const sourceRoles = parseCvWorkExperience(cvPath);
+  const sourceRoles = fillPriority(parseCvWorkExperience(cvPath));
 
   for (const src of sourceRoles) {
     const job = out.experience.find((j) => jobMatchesPin(j, src));
@@ -147,6 +218,7 @@ export function enrichCvContent(payload, opts = {}) {
       badge: next.badge,
       tech: next.tech,
       description: next.description,
+      url: next.url || null,
     });
     added.push(`project: ${next.name}`);
   }

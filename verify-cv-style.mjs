@@ -190,6 +190,23 @@ const TOOL_IN_COMPETENCY = /\b(n8n|prompt engineering|node\/express|openrouter|v
 /** Every lane must carry a GxP/regulated skills line — it is the whole moat. */
 const REGULATED_SKILL = /gxp|regulat|validation|data integrity|risk management/i;
 
+/**
+ * The candidate's own ventures. Work under these is legitimately both a bullet
+ * and a project -- kbcompress.com is built under SigmaX Labs and shipped as a
+ * project -- so these employers are exempt from the client-work checks below.
+ * Everything else in `experience` is work delivered for someone else.
+ */
+const OWN_VENTURE_RE = /sigmax|goodtime/i;
+
+/** Strip decoration so a project name can be matched inside a bullet. */
+function bareName(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\*\*/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 // ── Finding helpers ──────────────────────────────────────────────────────────
 
 function finding(code, severity, target, detail) {
@@ -389,6 +406,52 @@ function checkJsonPayload(payload, target) {
 
   scanForbidden(projects.map((p) => p.description || '').join('\n'), `${target} (projects)`, out);
 
+  // 8. Client work must not also be presented as a project.
+  //
+  // A Projects entry reads as something the candidate conceived and owns, and
+  // it is the one section a recruiter skims for what the candidate can talk
+  // about unprompted. When the same named work is ALSO a bullet under an
+  // employer the candidate was engaged by, the CV presents one engagement as
+  // two achievements. SPARK Analytics MVP and the Donor Engagement Portal were
+  // Deloitte deliveries that sat in this list: SPARK carried its $500K figure
+  // into a Projects section with a "Deloitte" badge that read as a personal
+  // achievement, and the tailored backfill pool badged both "Regulated
+  // Industry" and "Bilingual" -- naming no client at all, which is the version
+  // that reads as the candidate's own build. Both belong in the Deloitte
+  // experience block, where the client is named.
+  //
+  // The two rules overlap on purpose. Duplicating a bullet catches the case
+  // where the badge conceals the client; a badge naming an employer catches
+  // the case where the bullet was reworded past matching but the badge still
+  // admits it.
+  const clientRoles = exp.filter((e) => !OWN_VENTURE_RE.test(e.company || ''));
+  for (const p of projects) {
+    const name = bareName(p.name);
+    if (!name) continue;
+    for (const role of clientRoles) {
+      for (const b of role.bullets || []) {
+        const bullet = bareName(b);
+        if (bullet.includes(name)) {
+          out.push(finding('project-duplicates-client-bullet', 'fail', target, `"${p.name}" also appears as a bullet under ${role.company} — that is client delivery, and it belongs in Experience, not Projects`));
+        }
+      }
+    }
+  }
+
+  // 9. A project badge may never name an employer the candidate was engaged by.
+  for (const p of projects) {
+    const badge = bareName(p.badge);
+    if (!badge) continue;
+    for (const role of clientRoles) {
+      const company = bareName(role.company);
+      // Compare on a distinctive stem: full normalised names rarely nest.
+      const stem = company.split(' ').filter((w) => w.length >= 4);
+      if (stem.some((w) => badge.includes(w))) {
+        out.push(finding('project-badge-names-employer', 'fail', target, `"${p.name}" is badged "${p.badge}", naming ${role.company} — a project cannot be an employer`));
+      }
+    }
+  }
+
   return out;
 }
 
@@ -514,6 +577,42 @@ function runSelfTest() {
     ['headline leading with a bare credential is caught', checkJsonPayload({ headline: 'Strategy consultant | MBA (IIM Rohtak) | Deloitte USI delivery' }, 't').some((f) => f.code === 'headline-misses-moat'), true],
     ['old founder headline is caught', checkJsonPayload({ headline: 'Founder & AI-ops operator | two shipped ventures | Deloitte USI alum' }, 't').some((f) => f.code === 'headline-misses-moat'), true],
     ['founder headline carrying the moat passes', checkJsonPayload({ headline: 'Founder, AI-ops consultancy | two ventures | GxP delivery background' }, 't').some((f) => f.code.startsWith('headline-')), false],
+
+    // ── Client work must not be re-listed as a project ──────────────────────
+    // A Projects entry reads as something the candidate conceived and owns.
+    // SPARK Analytics MVP and the Donor Engagement Portal were Deloitte
+    // deliveries that sat in the master lanes' project list and in the
+    // tailored backfill pool; SPARK carried its $500K figure out of the
+    // experience block, and the pool badged both "Regulated Industry" and
+    // "Bilingual" -- naming no client, so they read as personal builds.
+    ['client work duplicated as a project is caught', checkJsonPayload({
+      experience: [{ company: 'Deloitte USI', bullets: ['Delivered the SPARK analytics MVP for real-time clinical and regulatory KPIs -- $500K projected cost savings'] }],
+      projects: [{ name: 'SPARK Analytics MVP', badge: 'Regulated Industry', description: 'x' }],
+    }, 't').some((f) => f.code === 'project-duplicates-client-bullet'), true],
+    ['a project badged with a client employer is caught', checkJsonPayload({
+      experience: [{ company: 'Deloitte USI', bullets: ['unrelated work'] }],
+      projects: [{ name: 'KPI Dashboard', badge: 'Deloitte / GxP', description: 'x' }],
+    }, 't').some((f) => f.code === 'project-badge-names-employer'), true],
+    ['the two rules are complementary: badge conceals the client', checkJsonPayload({
+      experience: [{ company: 'Deloitte USI', bullets: ['Drove Agile development of a bilingual Donor Engagement Portal; 25% faster release cycles'] }],
+      projects: [{ name: 'Donor Engagement Portal', badge: 'Bilingual', description: 'x' }],
+    }, 't').some((f) => f.code === 'project-duplicates-client-bullet'), true],
+    ['the two rules are complementary: bullet reworded past matching', checkJsonPayload({
+      experience: [{ company: 'Deloitte USI', bullets: ['Delivered regulated clinical KPI reporting for a life-sciences account'] }],
+      projects: [{ name: 'SPARK Analytics MVP', badge: 'Deloitte / GxP', description: 'x' }],
+    }, 't').some((f) => f.code === 'project-badge-names-employer'), true],
+    ['own venture work is exempt: kbcompress under SigmaX passes', checkJsonPayload({
+      experience: [{ company: 'SigmaX Labs', bullets: ['Built and shipped kbcompress.com, a free image compression tool for Indian exam portals'] }],
+      projects: [{ name: 'kbcompress.com', badge: 'Open Source', description: 'x' }],
+    }, 't').some((f) => f.code.startsWith('project-')), false],
+    ['own venture badge is exempt: SigmaX passes', checkJsonPayload({
+      experience: [{ company: 'SigmaX Labs', bullets: ['unrelated'] }],
+      projects: [{ name: 'Hermes-Router', badge: 'SigmaX', description: 'x' }],
+    }, 't').some((f) => f.code === 'project-badge-names-employer'), false],
+    ['a case-study project is not mistaken for client work', checkJsonPayload({
+      experience: [{ company: 'Deloitte USI', bullets: ['Network Modelling Tool migration'] }],
+      projects: [{ name: 'ClearState', badge: 'Case study', description: 'the first shipped build under SigmaX Labs (Feb 2026)' }],
+    }, 't').some((f) => f.code.startsWith('project-')), false],
 
     // ── Summary rules added with the 30–55 word band ────────────────────────
     // The L1 draft, verbatim. It is the reference case that must stay clean:

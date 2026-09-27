@@ -275,6 +275,7 @@ function buildPayload(archetype, mined) {
     ],
     'solutions-consultant': [
       'Run SigmaX Labs: client discovery, solution scoping, and fixed-scope automation delivery for SMEs',
+      'Started SigmaX Labs after the events venture showed that ops-heavy businesses cannot be run on spreadsheets, WhatsApp groups and cold confirmations',
       'Basilica engagement: identified the firm manual intake-handoff bottleneck in discovery, then workshops, requirements capture, and a working prototype',
       'RRM Mobility: proposed ops-agent and LinkedIn analytics approach for EV fleet operations (proposal stage)',
       'Built sigmaxlabs.in and kbcompress.com as proof-of-delivery samples for prospects',
@@ -292,6 +293,7 @@ function buildPayload(archetype, mined) {
     ],
     general: [
       'Founded and run an AI-ops automation consultancy serving Indian SMEs',
+      'Started SigmaX Labs after the events venture showed that ops-heavy businesses cannot be run on spreadsheets, WhatsApp groups and cold confirmations',
       'Built Hermes-Router (model router), kbcompress.com, and sigmaxlabs.in',
       'Basilica: identified the firm manual intake-handoff bottleneck, then built the n8n + Google Sheets + Telegram intake-to-reporting prototype (pending go-live)',
       'RRM Mobility: LinkedIn automation and operations-agent specification (proposal stage)',
@@ -302,6 +304,10 @@ function buildPayload(archetype, mined) {
   // claim about profitability in either direction — see modes/_custom.md
   // "The Goodtime Co. — the guard".
   const goodtimeBullets = {
+    'solutions-consultant': [
+      'Co-founded and ran an experiential events venture May--Oct 2025 (one full-time, one part-time co-founder, all ops handled between the two); launched the first flagship event 5 Jul 2025 (now dormant)',
+      'First of two ventures founded; SigmaX Labs (Nov 2025 -- present) now sells the automation method built here',
+    ],
     'startup-ops': [
       'Co-founded and ran an experiential events venture with one full-time and one part-time co-founder, handling every operations function between the two of us; launched the first flagship event 5 Jul 2025 (venture now dormant)',
       'Ran the business on spreadsheets, WhatsApp groups and cold confirmations; built spreadsheet automation and Google Sheets scripting to cut the manual handoff work -- the capability later sold to clients',
@@ -340,6 +346,7 @@ function buildPayload(archetype, mined) {
       'Structured, evidence-driven delivery in a GxP-regulated life-sciences environment; translated stakeholder feedback into shipped features',
       'SPARK analytics MVP: KPI visibility for regulated clinical teams; $500K projected cost savings',
       'Network Modelling Tool migration for a GxP-regulated client: architecture, integration, and validation-ready phased cutover planning',
+      'Improved CI/CD pipelines, cutting deployment time 40%; redesigned reporting modules for 35% better data accuracy',
     ],
     general: [
       'Owned migration and integration of the Network Modelling Tool, a system a GxP-regulated client depended on for supply operations, with a phased cutover preserving day-one continuity',
@@ -390,6 +397,14 @@ function buildPayload(archetype, mined) {
 
   const CLEARSTATE_URL = 'https://quilt-cuckoo-1da.notion.site/ClearState-Case-Study-30921d15774880c7b862e0c8e08eefca';
 
+  // Projects are the candidate's OWN builds. A project entry reads as work
+  // the candidate conceived and owns, so client engagements never belong
+  // here -- SPARK Analytics MVP and the Donor Engagement Portal were Deloitte
+  // deliveries and previously sat in this list, one of them badged
+  // "Regulated Industry" with no client attribution at all, which read as
+  // personal work and put a $500K figure in the wrong place. They live in the
+  // Deloitte experience block instead. `verify-cv-style.mjs` fails the build
+  // if a project here duplicates a bullet under a non-venture employer.
   const projects = {
     'ai-product-manager': [
       { name: 'Hermes-Router', badge: 'Model routing', tech: 'Node/Express, OpenRouter', description: 'Task-classification layer routing prompts to the cheapest capable model; React dashboard for routing decisions' },
@@ -397,8 +412,6 @@ function buildPayload(archetype, mined) {
       { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers, Granite 4.0', description: 'Governance-aware executive reporting: position isolation, governance gating before AI access, constrained rewrite' },
     ],
     'solutions-consultant': [
-      { name: 'SPARK Analytics MVP', badge: 'Deloitte / GxP', tech: 'Analytics', description: 'Real-time clinical and regulatory KPI dashboard; $500K projected cost savings' },
-      { name: 'Donor Engagement Portal', badge: 'Agile delivery', tech: 'Bilingual product', description: '20+ features from user feedback; 25% faster releases; 18% retention lift' },
       { name: 'kbcompress.com', badge: 'Shipped', tech: 'Web app', description: 'Free image compression tool for Indian exam portal upload limits' },
       { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers, Granite 4.0', description: 'Governance-aware reporting prototype; the first shipped build under SigmaX Labs (Feb 2026)' },
     ],
@@ -408,12 +421,10 @@ function buildPayload(archetype, mined) {
       { name: 'Hermes-Router', badge: 'SigmaX tool', tech: 'Node/Express', description: 'Model router over OpenRouter for client automations' },
     ],
     'strategy-mid': [
-      { name: 'SPARK Analytics MVP', badge: 'Deloitte / GxP', tech: 'Analytics', description: 'Real-time clinical and regulatory KPI dashboard; $500K projected cost savings' },
       { name: 'ClearState', badge: 'Case study: strategy-to-ship', url: CLEARSTATE_URL, tech: 'Governance prototype', description: 'From positioning to shipped prototype in ~1 month; the first shipped build under SigmaX Labs (Feb 2026)' },
     ],
     general: [
       { name: 'Hermes-Router', badge: 'SigmaX', tech: 'Node/Express', description: 'Model router over OpenRouter for client automations' },
-      { name: 'SPARK Analytics MVP', badge: 'Deloitte', tech: 'Regulated analytics', description: '$500K projected cost savings from real-time KPI visibility' },
       { name: 'kbcompress.com', badge: 'Shipped', tech: 'Web app', description: 'Free image compression tool for exam portal upload limits' },
       { name: 'ClearState', badge: 'Case study', url: CLEARSTATE_URL, tech: 'Cloudflare Workers', description: 'Governance-aware executive reporting prototype; the first shipped build under SigmaX Labs (Feb 2026)' },
     ],
