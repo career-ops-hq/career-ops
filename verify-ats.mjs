@@ -306,11 +306,33 @@ function matchesHeading(patterns, raw, folded) {
   return patterns.some(re => re.test(raw) || (folded && re.test(folded)));
 }
 
+// Conjunctions a compound ROLE TITLE splits on, across the markets this
+// project's mode sets already target (see modes/_shared.md's language.modes_dir
+// — DACH/German is the one this list was actually caught missing for: a
+// German CV's `--role "Commercial Manager und Teamleiter"` matched neither
+// half, because only the English "and" was recognized, and the unsplit
+// German phrase then had to match the CV text verbatim — which it never will,
+// so a role check on a non-English title silently reported 0% coverage
+// instead of splitting the same way an English title does).
+//
+// A data reference, not instruction logic: extending it for another market
+// never requires touching normalizeKeywords itself, same as the jurisdiction
+// tables in modes/oferta.md. Multi-letter words only — a single-letter
+// conjunction (Italian/Portuguese "e") is one word-boundary regex away from
+// also matching a stray initial or a "Bereich E" style job-family label
+// inside a role title, which would silently mis-split something that was
+// never a conjunction at all. Add a new language's conjunction here only
+// when it is unambiguously multi-letter, or gate it with more context than
+// a bare word-boundary can provide.
+const ROLE_CONJUNCTIONS = ['and', 'und'];
+const ROLE_SPLIT_RE = new RegExp(`[,/]|\\b(?:${ROLE_CONJUNCTIONS.join('|')})\\b`, 'i');
+
 /**
  * Build the target keyword set for the advisory coverage check. `--keywords` is
- * split on commas; `--role` is split only on commas, slashes, and the word
- * "and", so a plain title like "Senior Backend Engineer" stays a single phrase
- * matched verbatim against the CV text (it is NOT tokenized into words).
+ * split on commas; `--role` is split only on commas, slashes, and a conjunction
+ * from ROLE_CONJUNCTIONS, so a plain title like "Senior Backend Engineer" stays
+ * a single phrase matched verbatim against the CV text (it is NOT tokenized
+ * into words).
  * @param {string|string[]|undefined} keywords
  * @param {string|undefined} role
  * @returns {string[]} De-duplicated, trimmed keyword phrases (length >= 2).
@@ -319,7 +341,7 @@ function normalizeKeywords(keywords, role) {
   const list = [];
   if (Array.isArray(keywords)) list.push(...keywords);
   else if (typeof keywords === 'string') list.push(...keywords.split(','));
-  if (role) list.push(...String(role).split(/[,/]|\band\b/i));
+  if (role) list.push(...String(role).split(ROLE_SPLIT_RE));
   return [...new Set(list.map(k => k.trim()).filter(k => k.length >= 2))];
 }
 

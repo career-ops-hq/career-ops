@@ -71,7 +71,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 - Distributed JD keywords: Summary (top 5), first bullet of each role, Skills section
 - No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.
 
-**Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18).
+**Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18). **When you pass `--keywords`/`--role` to it, follow `modes/ats.md`'s workflow step 5 through to the end** — a `missing` keyword the check reports and nobody acts on is a fixable ATS-matching gap shipped anyway; that mode's workflow is where the one-truthful-retry-then-report discipline for closing it lives, not repeated here.
 
 ## Recruiter Review Gates
 
