@@ -86,8 +86,10 @@ with tempfile.TemporaryDirectory() as temporary:
     assert call(directory, "retire", "42", "--confirmed", "--idempotency-key", "retire-42")["retired"]
     assert not call(directory, "reopen", "42", "--confirmed", "--idempotency-key", "reopen-42")["retired"]
 
+    assert call(directory, "activity", "42", "followup_sent", "--confirmed", "--idempotency-key", "offer-42:activity")["recorded"] == "followup_sent"
     outcome = call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")
     assert outcome["status"] == "offer"
+    assert call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")["reused"]
     cross_outcome = call(directory, "transition", "42", "offer", "--payload", '{"outcome":"offer_received"}', "--idempotency-key", "offer-42", ok=False)
     assert "Idempotency key conflicts" in cross_outcome["error"]
     assert call(directory, "activity", "42", "offer_prepared", "--confirmed", "--payload", '{"evidence":{"path":"/review/offer-notes.md","sha256":"offer-sha"}}', "--idempotency-key", "offer-prep-42")["recorded"] == "offer_prepared"
@@ -104,6 +106,9 @@ with tempfile.TemporaryDirectory() as temporary:
     assert offer_activity["payload"]["evidence"]["sha256"] == "offer-sha"
     assert offer_activity["source"] == "candidate-confirmed"
     assert [event["toStatus"] for event in view["events"]] == ["applied", "interview", "offer", "hired"]
+    database = sqlite3.connect(directory / "opportunities.db")
+    assert database.execute("SELECT operation_id FROM application_activity WHERE type='outcome_recorded' ORDER BY id").fetchall() == [("offer-42",), ("hired-42",)]
+    database.close()
     assert call(directory, "followups")["entries"] == []
     assert call(directory, "view")[0]["company"] == "Example"
     assert sqlite3.connect(directory / "opportunities.db").execute("SELECT application_state FROM opportunities WHERE id=42").fetchone()[0] == "submitted"

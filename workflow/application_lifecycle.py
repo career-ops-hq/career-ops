@@ -308,7 +308,7 @@ class ApplicationStore:
                 if state["action"] == "outcome":
                     self.db.execute(
                         "INSERT INTO application_activity(operation_id,opportunity_id,type,source,payload) VALUES(?,?,?,?,?)",
-                        (state["idempotency_key"] + ":activity", opportunity_id, "outcome_recorded", state["source"],
+                        (state["idempotency_key"], opportunity_id, "outcome_recorded", state["source"],
                          json.dumps(payload, ensure_ascii=False, sort_keys=True)),
                     )
                 result = {"status": target, "reused": False}
