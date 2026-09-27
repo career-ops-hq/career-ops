@@ -150,7 +150,31 @@ export function employerName(lines) {
   const first = lines[0] || '';
   const second = lines[1] || '';
   if ((m = first.match(/^.{3,140}?\s+@\s+(.{2,60})$/))) return plausibleEmployer(m[1], true);
-  if ((m = first.match(/^.{3,140}?\s+\|\s+([^|]{2,60})$/))) return plausibleEmployer(m[1], true);
+  // "Title | Company" assumes exactly one `|` in the title. A template that
+  // packs several pipe-delimited metadata tags into the title itself
+  // (`Title | 5 year(s) | Senior | IC`) is a different shape: the capture
+  // group's `[^|]` means the regex can only land on the LAST segment, which
+  // is whichever tag the template puts there, never the employer — and it
+  // reliably passes plausibleEmployer's own checks (a short, capitalized,
+  // single word), so every post on such a channel got a wrong-but-plausible
+  // employer instead of no match at all (#4455). Reject the shape outright
+  // rather than guess which segment (if any) is the real employer.
+  if (!/\|.*\|/.test(first) && (m = first.match(/^.{3,140}?\s+\|\s+([^|]{2,60})$/))) {
+    const pipeEmployer = plausibleEmployer(m[1], true);
+    // Defense in depth, same guard the hashtag-line shape below already
+    // applies: a bare seniority/role word ("Senior", "Middle", "Lead")
+    // passes plausibleEmployer's checks on its own (a single capitalized
+    // word), but a real employer name is very rarely a single seniority
+    // word (#4455). Anchored to the WHOLE capture, not a bare .test(): the
+    // hashtag-line shape below can reuse ROLE_WORD_RE unanchored because its
+    // capture is a full description line where a role word appearing at all
+    // is already suspicious, but here the capture is a company name and a
+    // role word can legitimately be part of one ("Senior Labs", "Acme
+    // Senior Corp") — an unanchored test rejected those as if they were the
+    // bare word alone (CodeRabbit review on #4479).
+    const isBareRoleWord = new RegExp(`^${ROLE_WORD_RE.source}$`, ROLE_WORD_RE.flags).test(pipeEmployer);
+    if (pipeEmployer && !isBareRoleWord) return pipeEmployer;
+  }
   if ((m = second.match(/^(?:в|at)\s+([^—–,(]{2,60}?)\s*(?:[—–]|$)/u))) return plausibleEmployer(m[1], true);
   // A hashtag-only first line carries no title, and this template puts the
   // bare employer name alone on the next one, with no marker at all.

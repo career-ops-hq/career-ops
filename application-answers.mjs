@@ -347,6 +347,11 @@ const DRAFT_ANSWERS_NAME_RE = /^draft application answers$/i;
 // Same grammar as report-sections.mjs' HEADING_PREFIX: a bare letter needs a
 // real delimiter, or ordinary prose loses its first word.
 const HEADING_PREFIX_RE = /^\s*(?:Block\s+([A-Z])(?:[).:]\s*|\s+(?:[—–-]+\s*)?)|([A-Z])[).:]\s*)/i;
+// The draft-answers block's own marker. Deliberately tighter than
+// HEADING_PREFIX_RE, which also accepts `H:` and `Block H`: every mode that
+// defines this block writes `## H)`, so the wider grammar would only let an
+// unrelated `H:` section be read as draft answers (#4400 review).
+const DRAFT_ANSWERS_LETTER_RE = /^H\)\s*(.*)$/i;
 
 /**
  * Locate the draft-answers heading: the first `## ` heading carrying the
@@ -357,12 +362,30 @@ const HEADING_PREFIX_RE = /^\s*(?:Block\s+([A-Z])(?:[).:]\s*|\s+(?:[—–-]+\s*
  */
 function findDraftAnswersHeading(report) {
   /** @type {RegExpMatchArray[]} */
-  const headings = [...report.matchAll(/^##\s+(.+?)\s*$/gm)];
+  // Horizontal whitespace only. `\s+` also matches the newline, so a bare `##`
+  // line consumed it and captured the NEXT line as the heading text. With the
+  // letter rule below, `##` followed by `H) Internal Notes` then read that
+  // section's bold text as draft answers (#4400 review).
+  const headings = [...report.matchAll(/^##[ \t]+(.+?)\s*$/gm)];
   const marked = headings.find(h => DRAFT_ANSWERS_MARKER_RE.test(h[1]));
   if (marked) return marked;
-  return headings.find(h => DRAFT_ANSWERS_NAME_RE.test(
+  const named = headings.find(h => DRAFT_ANSWERS_NAME_RE.test(
     h[1].replace(DRAFT_ANSWERS_MARKER_RE, '').replace(HEADING_PREFIX_RE, '').trim(),
-  )) ?? null;
+  ));
+  if (named) return named;
+  // Last resort, and the only path that reads a TRANSLATED heading (#4400).
+  // Neither rule above fires on one today: no mode emits the `(draft)` marker
+  // (`git grep '(draft)' -- 'modes/*'` is empty), and the name rule is the
+  // English words, which five shipped modes translate — modes/es, modes/ru,
+  // modes/tr, modes/zh and modes/zh-TW. For those the block silently returned
+  // null, which is indistinguishable from a report that has no Block H.
+  //
+  // The letter is the structural part every mode keeps: `modes/oferta.md`
+  // defines `H)` as the draft-answers block and each translation renders the
+  // title only. It is deliberately LAST so the marker and the English name stay
+  // authoritative where they apply, and it requires a non-empty title so a bare
+  // `## H)` does not qualify.
+  return headings.find(h => Boolean(DRAFT_ANSWERS_LETTER_RE.exec(h[1])?.[1]?.trim())) ?? null;
 }
 
 /**
@@ -388,6 +411,9 @@ function findDraftAnswersHeading(report) {
  * `normalizeApplicationAnswersSnapshot` accepts as-is.
  *
  * @param {string} reportText Full report markdown.
+ * The heading's title may be in any language; only the `## H)` marker is
+ * required. A heading with a marker and no title is not Block H.
+ *
  * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
  */
 export function parseDraftAnswersBlockH(reportText) {
@@ -396,7 +422,10 @@ export function parseDraftAnswersBlockH(reportText) {
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  // Same grammar as the opener above. That one accepts `##` plus a tab, so a
+  // terminator matching only `## ` let a later `##\tI) ...` section stay inside
+  // Block H and its bold text come back as draft answers (#4400 review).
+  const nextHeading = /^##[ \t]+.+$/m.exec(report.slice(afterHeading));
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,

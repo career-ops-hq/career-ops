@@ -140,6 +140,11 @@ try {
     [['#middle #офис', 'ПАО Сбербанк', 'Java-разработчик'], 'ПАО Сбербанк', 'a hashtag-only first line, employer name carrying a legal form'],
     [['#senior #удаленка', 'Лаборатория Касперского', 'Инженер по безопасности'], 'Лаборатория Касперского', 'a hashtag-only first line, a two-word employer name'],
     [['#middle', 'Product Hunt', 'Backend Engineer'], 'Product Hunt', 'a hashtag-only first line, an employer name that starts with a role modifier'],
+    // #4479 (CodeRabbit review on #4455's fix): the single-pipe ROLE_WORD_RE
+    // guard must reject only a BARE role word, not any employer name that
+    // happens to contain one as a substring — "Senior Labs" is a legitimate
+    // company name, not the bare word "Senior".
+    [['Engineer | Senior Labs'], 'Senior Labs', 'a single-pipe employer name that legitimately contains a role word as part of it'],
   ];
   for (const [lines, want, label] of names) {
     const got = employerName(lines);
@@ -162,6 +167,16 @@ try {
     [['#senior #удаленка', 'QA Engineer'], 'a hashtag-only first line whose next line is a role acronym'],
     [['#middle #гибрид', 'Тестировщик'], 'a hashtag-only first line whose next line is a one-word Russian role'],
     [['#lead', 'Руководитель отдела'], 'a hashtag-only first line whose next line names a head of department'],
+    // #4455: a title packing several pipe-delimited metadata tags is a
+    // different shape from "Title | Employer" — the non-greedy `[^|]`
+    // capture can only land on the LAST segment, which is whichever tag the
+    // template puts there (here, "IC"), never the employer. Both are
+    // measured live on @revacancy, 2026-09-24.
+    [['🟥 Ten Square Games - Mid/ Senior UI/UX Designer | 3 year(s) | Senior | IC', '▫️ Ten Square Games | Gaming'], 'a title with 3 pipes (multi-field template), employer named on the next line but not recovered by this heuristic'],
+    [['🟥 Senior Backend Developer | 5 year(s) | Senior | IC', '▫️ Financial technology'], 'a title with 3 pipes and no employer named anywhere in the post'],
+    // Defense in depth for the ordinary single-pipe shape: even with exactly
+    // one `|`, a bare seniority/role word after it is never a real employer.
+    [['Some Role Title | Senior'], 'a single-pipe title whose captured segment is a bare seniority word'],
   ];
   for (const [lines, label] of noNames) {
     const got = employerName(lines);
