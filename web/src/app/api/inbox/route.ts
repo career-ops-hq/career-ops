@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -92,7 +91,7 @@ export async function GET() {
   const pendingCount = items.filter((i) => !i.done).length;
   const resolvedCount = items.filter((i) => i.done).length;
 
-  return NextResponse.json({
+  return Response.json({
     exists,
     items,
     pendingCount,
@@ -121,7 +120,7 @@ export async function POST(req: Request) {
 
     if (action === "add") {
       if (!request || typeof request !== "string" || !request.trim()) {
-        return NextResponse.json({ error: "Request text is required" }, { status: 400 });
+        return Response.json({ error: "Request text is required" }, { status: 400 });
       }
 
       const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
@@ -132,12 +131,12 @@ export async function POST(req: Request) {
       content = content + separator + newLine;
 
       atomicWrite(inboxPath, content);
-      return NextResponse.json({ ok: true, items: parseInbox(content) });
+      return Response.json({ ok: true, items: parseInbox(content) });
     }
 
     if (action === "toggle" || action === "resolve") {
       if (typeof id !== "number") {
-        return NextResponse.json({ error: "id is required" }, { status: 400 });
+        return Response.json({ error: "id is required" }, { status: 400 });
       }
 
       const lines = content.split("\n");
@@ -169,17 +168,17 @@ export async function POST(req: Request) {
       }
 
       if (!found) {
-        return NextResponse.json({ error: "Item not found" }, { status: 404 });
+        return Response.json({ error: "Item not found" }, { status: 404 });
       }
 
       content = lines.join("\n");
       atomicWrite(inboxPath, content);
-      return NextResponse.json({ ok: true, items: parseInbox(content) });
+      return Response.json({ ok: true, items: parseInbox(content) });
     }
 
     if (action === "delete") {
       if (typeof id !== "number") {
-        return NextResponse.json({ error: "id is required" }, { status: 400 });
+        return Response.json({ error: "id is required" }, { status: 400 });
       }
 
       const lines = content.split("\n");
@@ -199,12 +198,12 @@ export async function POST(req: Request) {
       }
 
       if (!found) {
-        return NextResponse.json({ error: "Item not found" }, { status: 404 });
+        return Response.json({ error: "Item not found" }, { status: 404 });
       }
 
       content = lines.join("\n");
       atomicWrite(inboxPath, content);
-      return NextResponse.json({ ok: true, items: parseInbox(content) });
+      return Response.json({ ok: true, items: parseInbox(content) });
     }
 
     if (action === "clear-resolved") {
@@ -212,11 +211,11 @@ export async function POST(req: Request) {
       const filtered = lines.filter((l) => !/^- \[([xX])\]\s*/.test(l.trim()));
       content = filtered.join("\n");
       atomicWrite(inboxPath, content);
-      return NextResponse.json({ ok: true, items: parseInbox(content) });
+      return Response.json({ ok: true, items: parseInbox(content) });
     }
 
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return Response.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return Response.json({ error: String(err) }, { status: 500 });
   }
 }

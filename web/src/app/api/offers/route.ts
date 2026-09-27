@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
@@ -70,7 +69,7 @@ export async function GET() {
     } catch {}
   }
 
-  return NextResponse.json({
+  return Response.json({
     offers,
     allApps: apps,
     observations,
@@ -110,7 +109,7 @@ export async function POST(req: Request) {
       current += row;
 
       atomicWrite(obsPath, current);
-      return NextResponse.json({ success: true });
+      return Response.json({ success: true });
     }
 
     if (action === "delete" && typeof id === "number") {
@@ -121,15 +120,15 @@ export async function POST(req: Request) {
           lines.splice(id, 1);
           const newContent = lines.join("\n") + "\n";
           atomicWrite(obsPath, newContent);
-          return NextResponse.json({ success: true });
+          return Response.json({ success: true });
         }
       }
-      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+      return Response.json({ error: "Item not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return Response.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return Response.json({ error: String(err) }, { status: 500 });
   }
 }
 
