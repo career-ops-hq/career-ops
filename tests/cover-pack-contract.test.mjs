@@ -18,19 +18,28 @@
 // is deliberately a literal rather than something derived from the renderer: a
 // list read out of generate-cover-letter.mjs would agree with itself no matter
 // what the contract says, which is exactly the check that was missing.
+//
+// The last test does read the renderer, and that is a different thing. It never
+// SOURCES the list, it COMPARES against it, which is the one direction the
+// render test above cannot cover. Rendering catches a slot the contract
+// declares and core never fills. It is blind to the reverse, because a template
+// built from CONTRACT_SLOTS cannot contain a slot CONTRACT_SLOTS omits. That
+// blind spot is not hypothetical: SIGNATURE_BLOCK was missing from this list for
+// the whole of this file's first draft while core filled it and the shipped
+// template used it, and every assertion here stayed green.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildHtml } from '../generate-cover-letter.mjs';
 
-/** The 14 cover-letter slots the pack authoring contract declares. */
+/** The 15 cover-letter slots the pack authoring contract declares. */
 const CONTRACT_SLOTS = [
   'NAME', 'ROLE_TITLE', 'CONTACT_LINE', 'DATELINE', 'RECIPIENT_BLOCK',
   'GREETING_BLOCK', 'OPENING', 'PROFILE_INTRO', 'PROBLEMS_BLOCK',
   'ACHIEVEMENTS_BLOCK', 'CREDENTIALS_BLOCK', 'CLOSING_BLOCK',
-  'LANGUAGE_CLOSING_BLOCK', 'FOOTNOTES_BLOCK',
+  'LANGUAGE_CLOSING_BLOCK', 'SIGNATURE_BLOCK', 'FOOTNOTES_BLOCK',
 ];
 
 /**
@@ -86,7 +95,10 @@ const FULL = {
     problems_section: 'PROBLEMS-SENTINEL',
     closing: 'CLOSING-SENTINEL',
     language_closing: 'LANGUAGE-CLOSING-SENTINEL',
-    signature: { valediction: 'Sincerely,' },
+    // Its own sentinel, not a plausible valediction: the block also emits the
+    // candidate name, which NAME already owns, so a shared string could pass
+    // the SIGNATURE_BLOCK row on the strength of the name alone.
+    signature: { valediction: 'VALEDICTION-SENTINEL' },
     footnotes: ['FOOTNOTE-SENTINEL'],
   },
 };
@@ -114,6 +126,7 @@ const SLOT_VALUES = [
   ['PROBLEMS_BLOCK', FULL.letter.problems_section],
   ['CLOSING_BLOCK', FULL.letter.closing],
   ['LANGUAGE_CLOSING_BLOCK', FULL.letter.language_closing],
+  ['SIGNATURE_BLOCK', FULL.letter.signature.valediction],
   ['FOOTNOTES_BLOCK', FULL.letter.footnotes[0]],
 ];
 
@@ -172,4 +185,27 @@ test('the contract list and the renderer have not drifted apart', () => {
   const literal = [...html.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]);
 
   assert.deepEqual(literal, [], `unsubstituted tokens survived into the letter: ${literal.join(', ')}`);
+});
+
+test('core fills no cover slot the contract list omits', () => {
+  // The direction the render test structurally cannot see. packTemplate() is
+  // built FROM CONTRACT_SLOTS, so a slot absent from that list never reaches a
+  // template and never shows up as an unsubstituted token. Read core's own
+  // replacement keys instead and require the transcribed list to cover them.
+  //
+  // Reading the shipped template would be the wrong comparison here. It omits
+  // RECIPIENT_BLOCK on purpose, which is a legitimate choice for one template
+  // and not contract drift, so it would fail for a reason that is not a defect.
+  const core = readFileSync(new URL('../generate-cover-letter.mjs', import.meta.url), 'utf-8');
+  const filled = [...new Set([...core.matchAll(/"\{\{([A-Z_]+)\}\}"\s*:/g)].map((m) => m[1]))];
+
+  // Guard against a vacuous pass. A renamed replacements table or a changed
+  // quote style would make `filled` empty, and an empty set is covered by every
+  // list, so the assertion below would pass while measuring nothing.
+  assert.ok(filled.length >= CONTRACT_SLOTS.length,
+    `read only ${filled.length} replacement keys out of generate-cover-letter.mjs; the extraction is stale, not the contract`);
+
+  const undeclared = filled.filter((slot) => !CONTRACT_SLOTS.includes(slot));
+  assert.deepEqual(undeclared, [],
+    `core substitutes ${undeclared.join(', ')}, which CONTRACT_SLOTS does not declare: either the contract gained a slot this list has not transcribed, or core grew one the contract never agreed to`);
 });
