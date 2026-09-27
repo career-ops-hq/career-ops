@@ -1,5 +1,7 @@
 import {
   LayoutDashboard,
+  FileText,
+  UserCheck,
   Briefcase,
   Compass,
   ListChecks,
@@ -40,6 +42,8 @@ export const NAV_CATEGORIES = [
 export const NAV_ITEMS: NavItem[] = [
   // Core
   { href: "/", label: "Today", icon: LayoutDashboard, category: "core" },
+  { href: "/cv", label: "CV & Resume", icon: FileText, chip: "AI", category: "core" },
+  { href: "/profile", label: "Profile & Target", icon: UserCheck, category: "core" },
   { href: "/jobs", label: "Jobs", icon: Briefcase, category: "core" },
   { href: "/explore", label: "Discovery", icon: Compass, chip: "Live", category: "core" },
   { href: "/pipeline", label: "Pipeline", icon: ListChecks, category: "core" },

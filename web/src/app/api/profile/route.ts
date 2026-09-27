@@ -87,15 +87,29 @@ export async function POST(req: Request) {
   const file = path.join(configDir, "profile.yml");
 
   let base: Record<string, unknown> = {};
-  if (fs.existsSync(file)) {
+  if (!fs.existsSync(file)) {
+    // First create: seed from the example so we never leave an empty profile.
     try {
-      const parsed = yaml.load(fs.readFileSync(file, "utf8"));
-      if (isMapping(parsed)) {
-        base = parsed as Record<string, unknown>;
-      }
+      const seeded = yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8"));
+      base = isObj(seeded) ? (seeded as Record<string, unknown>) : {};
     } catch {
-      // fallback to empty base
+      base = {};
     }
+  } else {
+    // DATA-LOSS GUARD: a profile that EXISTS but cannot be
+    // read/parsed must never be overwritten.
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+    } catch {
+      return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
+    }
+    // A parseable list/scalar is still an invalid profile. Never replace its
+    // contents with a document containing only the patch.
+    if (!isMapping(parsed)) {
+      return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });
+    }
+    base = parsed as Record<string, unknown>;
   }
 
   // Handle both raw full profile structure or flat ProfilePatch

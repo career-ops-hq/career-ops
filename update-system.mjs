@@ -144,6 +144,8 @@ const SYSTEM_PATHS = [
   // on an existing install, silently (once text=auto is live, git status stays
   // clean and only a second update would repair it).
   '.gitattributes',
+  'career-ops-ui-antigravity-spec.md',
+  'scripts/ui-server.mjs',
   'dead-boards.mjs',
   'modes/README.md',
   'modes/_shared.md',

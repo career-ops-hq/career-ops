@@ -116,6 +116,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       });
       return;
     }
+    // Pasted text is already readable. Same path as a .md/.txt drop — no CLI.
     // Fast path: instant preview
     setSeed(null);
     setMd(trimmed);
