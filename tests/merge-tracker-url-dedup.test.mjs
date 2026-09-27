@@ -383,6 +383,26 @@ ok('aggregator vs employer board: same requisition, stays ONE row', () => {
   assertMerged(rows, 'aggregator vs employer board, same requisition');
 });
 
+// The domains list is only as good as its coverage of the boards this repo
+// actually scans. It named thirteen hosts that no provider emits, so every row
+// arriving through scan then pipeline then evaluate still hit #3652. These two
+// pin the scanner's own multi-employer boards, keyed on hosts that
+// providers/remoteok.mjs, providers/himalayas.mjs and providers/remotive.mjs
+// really produce.
+ok('scanner board vs scanner board: one requisition on two of our own boards stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://remoteok.com/remote-jobs/4001',
+    'https://himalayas.app/jobs/acme-director-of-marketing');
+  assertMerged(rows, 'one requisition re-listed on two boards this repo scans');
+});
+
+ok('scanner board vs employer board: same requisition, stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://remotive.com/remote-jobs/marketing/director-of-marketing-4001',
+    'https://boards.greenhouse.io/acme/jobs/7001');
+  assertMerged(rows, 'scanner board vs employer board, same requisition');
+});
+
 ok('REGRESSION: two employer-board URLs are still proof of two distinct openings', () => {
   const rows = mergeTwoWithUrls(
     'https://boards.greenhouse.io/acme/jobs/7001',

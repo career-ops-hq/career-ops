@@ -1,6 +1,9 @@
 # Aggregator domains: known job aggregators and scrapers that repost listings from primary sources.
 # This list is maintained by the project via updates; it is not a user-editable file — do not add personal entries here.
 # Note: Indeed (indeed.com) is deliberately excluded because companies post there directly as a primary board.
+# The test for membership is whether the URL is employer-controlled. A multi-employer board owns its own
+# posting URLs even when employers post to it directly, so a URL mismatch against one is not evidence of
+# two distinct requisitions. See #3652.
 
 recruit.net # aggregator, reposts listings from other boards
 builtin.com # aggregator (Built In), tech job aggregator
@@ -22,3 +25,16 @@ jobg8.com # aggregator, job distribution network and aggregator
 geebo.com # aggregator, job aggregator scraping third-party postings
 careerbuilder.com # aggregator, aggregates third-party syndication listings
 monster.com # aggregator, aggregates third-party syndication listings
+
+# Boards this repository's own scanner reads (#3652). Each host is emitted by the
+# provider named beside it, so a row arriving through scan, pipeline and evaluate
+# carries one of these URLs rather than an employer-controlled one.
+remoteok.com # aggregator (RemoteOK), board-wide remote feed; providers/remoteok.mjs
+jobicy.com # aggregator (Jobicy), board-wide remote feed; providers/jobicy.mjs
+remotive.com # aggregator (Remotive), board-wide remote feed; providers/remotive.mjs
+workingnomads.com # aggregator (Working Nomads), board-wide remote feed; providers/workingnomads.mjs
+himalayas.app # multi-employer remote board, board-controlled URLs; providers/himalayas.mjs
+weworkremotely.com # multi-employer remote board, board-controlled URLs; providers/weworkremotely.mjs
+nodesk.co # multi-employer remote board, board-controlled URLs; providers/nodesk.mjs
+themuse.com # multi-employer board, board-controlled URLs; providers/themuse.mjs
+echojobs.io # multi-employer board; providers/echojobs.mjs is retired (#2976), so historical rows only
