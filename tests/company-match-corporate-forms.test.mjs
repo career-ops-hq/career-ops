@@ -78,6 +78,66 @@ try {
     fail('companyMatch mishandled a bare corporate-form-only name');
   }
 
+  // A marker-only key carries no trade name, so it must not match one that
+  // does, nor another marker-only key that differs from it. 株式会社 vs
+  // 株式会社株式会社 matched before this change; it is now held by the
+  // different-form check. The punctuated pair is the bare check's own witness:
+  // the no-space key sees 株式会社 bare vs 株式会社アカネ, while the spaced key
+  // sees no form at all, so without the check containment matches 株式 会社
+  // inside 株式 会社 アカネ. The last pair, two marker-only names, matched
+  // before this change: the single strip took 株式会社 off each (suffix on one,
+  // prefix on the other), leaving an equal 合同会社.
+  if (companyMatch('株式会社', '株式会社株式会社') === false
+      && companyMatch('株式・会社', '株式・会社 アカネ') === false
+      && companyMatch('合同会社 株式会社', '株式会社 合同会社') === false) {
+    pass('companyMatch keeps a bare corporate-form name apart from a repeated marker');
+  } else {
+    fail('companyMatch merged a bare corporate-form name with a repeated marker');
+  }
+
+  // Different forms must be a verdict, not just a declined strip. Declining
+  // left the raw keys to the containment fallback, where 株式会社アカネ is a
+  // bounded substring of 合同会社 株式会社アカネ — whose leading form is 合同会社.
+  // Both edges count: a name carrying a form at each end must not be compared
+  // on whichever single form list order happens to find first, or the mirrored
+  // pairs (株式会社 shared, 合同会社 ignored) still merge. The unspaced pair
+  // was already false before; it guards the no-space key. The last pair has
+  // the same two forms swapped between the edges, and stays apart.
+  if (companyMatch('株式会社アカネ', '合同会社 株式会社アカネ') === false
+      && companyMatch('株式会社アカネ', '合同会社株式会社アカネ') === false
+      && companyMatch('アカネ株式会社', '合同会社 アカネ株式会社') === false
+      && companyMatch('株式会社アカネ', '株式会社アカネ 合同会社') === false
+      && companyMatch('株式会社アカネ有限会社', '有限会社アカネ株式会社') === false) {
+    pass('companyMatch keeps different-form names apart in the containment fallback too');
+  } else {
+    fail('companyMatch let containment merge two names carrying different corporate forms');
+  }
+
+  // Forms added after #3957. 有限责任公司 / 有限責任公司 do not end in 有限公司
+  // (责任 sits between), so the existing entry could never reach them.
+  const moreForms = [
+    ['阿里巴巴有限责任公司', '阿里巴巴'],
+    ['阿里巴巴有限責任公司', '阿里巴巴'],
+    ['合名会社アカネ', 'アカネ'],
+    ['合資会社アカネ', 'アカネ'],
+    ['一般社団法人アカネ', 'アカネ'],
+    ['유한회사카카오', '카카오'],
+  ];
+  const missed = moreForms.filter(([a, b]) => companyMatch(a, b) !== true);
+  if (missed.length === 0) {
+    pass('companyMatch strips 有限责任公司/有限責任公司, 合名会社, 合資会社, 一般社団法人 and 유한회사');
+  } else {
+    fail(`companyMatch missed corporate-form strips: ${missed.map(([a]) => a).join(', ')}`);
+  }
+
+  // The new forms obey the same different-form rule as the original ones.
+  if (companyMatch('合名会社アカネ', '合資会社アカネ') === false
+      && companyMatch('小米有限责任公司', '小米有限公司') === false) {
+    pass('companyMatch keeps same-name/different-form apart for the added forms');
+  } else {
+    fail('companyMatch merged two entities differing only by an added corporate form');
+  }
+
   // A form embedded mid-name (neither a prefix nor a suffix) must not be
   // stripped — this is deliberately narrower than substring removal.
   if (companyMatch('メルカリ株式会社ジャパン', 'メルカリ') === false) {

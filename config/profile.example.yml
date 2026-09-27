@@ -4,6 +4,11 @@
 
 candidate:
   full_name: "Jane Smith"
+  # Optional. Professional headline shown directly under the name on the CV
+  # (modes/pdf.md's candidate.title). Tailor it to the JD's own title wording
+  # when your real level supports it — never inflate. Omit or leave blank for
+  # no title element.
+  # title: "Senior Backend Engineer"
   email: "jane@example.com"
   # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
   # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.

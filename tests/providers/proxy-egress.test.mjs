@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { fetchText } from '../../providers/_http.mjs';
+import { fetchText, fetchResponse } from '../../providers/_http.mjs';
 
 async function listening(server) {
   server.listen(0, '127.0.0.1');
@@ -63,6 +63,27 @@ test('unrelated fetch is never assigned the provider proxy', async () => {
       assert.equal(await (await fetch(url)).text(), 'LOCAL');
     });
   } finally { server.close(); }
+});
+
+test('proxied manual redirects remain inspectable only through fetchResponse', async () => {
+  const proxy = http.createServer();
+  const destinations = [];
+  proxy.on('connect', (req, socket) => {
+    destinations.push(req.url);
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'));
+  });
+  const proxyUrl = await listening(proxy);
+  try {
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl }, async () => {
+      const response = await fetchResponse('http://unresolvable.invalid/job', { redirect: 'manual' });
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.get('location'), 'http://127.0.0.1/private');
+      await assert.rejects(fetchText('http://unresolvable.invalid/job', { redirect: 'manual' }),
+        (error) => error.status === 302);
+      assert.deepEqual(destinations, ['unresolvable.invalid:80', 'unresolvable.invalid:80']);
+    });
+  } finally { proxy.close(); }
 });
 
 test('proxy environment alone does not silently bypass the address guard', async () => {

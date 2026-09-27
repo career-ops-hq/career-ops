@@ -178,6 +178,9 @@ function checkTrackedBakFiles(root) {
       cwd: root,
       encoding: 'utf-8',
       timeout: 5000,
+      // The non-checkout classification below reads Git's diagnostic. Keep
+      // this subprocess deterministic without changing the user's locale.
+      env: { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' },
       // stderr PIPED, not inherited. execFileSync's default hands the child our
       // own stderr, so outside a checkout git printed
       //   fatal: not a git repository (or any of the parent directories): .git
