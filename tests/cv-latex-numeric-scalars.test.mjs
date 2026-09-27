@@ -22,6 +22,11 @@ console.log('\nbuild-cv-latex — numeric scalars');
 const PAYLOAD = {
   lang: 'en',
   page_format: 'letter',
+  // LaTeX payload vocabulary, not the HTML one — this builder reads a top-level
+  // `name` and an `email` OBJECT. The HTML contract's candidate.email (a flat
+  // string) resolved to no url, so the contact block rendered a dead \href{}.
+  name: 'Numeric Scalars',
+  email: { url: 'num@example.com', display: 'num@example.com' },
   candidate: { name: 'Numeric Scalars', email: 'num@example.com' },
   summary: 'Summary.',
   competencies: ['Competency'],

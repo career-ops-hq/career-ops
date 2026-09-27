@@ -119,6 +119,35 @@ export function validateLatexContent(content, compileOnly, engine = null) {
     if (/\\resumeProjectHeading/.test(line)) projectHeadingCount++;
   }
 
+  // The email link is identified by the envelope glyph that introduces it in
+  // both shipped templates, not by a mailto: scheme. sanitizeUrl() does prefix
+  // one, so real output always carries it — but a hand-substituted or
+  // hand-authored .tex can hold a bare address, which is still a contact
+  // channel and should not fail the build.
+  //
+  // What must never ship is an EMPTY one. EMAIL_URL substitutes to the empty
+  // string when the payload omits it, so the unresolved-placeholder check above
+  // never fires, MIN_SECTIONS passes, the file compiles, and the CV carries an
+  // envelope icon that links to nothing. The likely cause is the LaTeX payload
+  // contract — email as {url, display}, not the flat string config/profile.yml
+  // and the HTML contract use — so name it.
+  //
+  // Only fires when the envelope slot is positively present and empty. A .tex
+  // with some entirely different contact layout has no marker to match, and is
+  // left to the other checks rather than failed on a template it never claimed
+  // to follow.
+  const emailHref = content.match(/\\href\{([^}]*)\}\{\\raisebox\{-0\.2\\height\}\\faEnvelope/);
+  if (emailHref && !emailHref[1].trim()) {
+    issues.push('Empty email link in the contact block — the CV has no address a recruiter can reply to. The LaTeX payload wants the link as an object, e.g. "email": { "url": "you@example.com", "display": "you@example.com" }; a flat string (the shape config/profile.yml and the HTML payload use) resolves to no url and renders an envelope icon that links to nothing.');
+  }
+
+  // EMAIL/LINKEDIN/GITHUB are three unconditional \href{}s, so a candidate with
+  // no GitHub legitimately renders two live links and one dead one. Cosmetic,
+  // so it stays a count rather than an error — but visible, so "no contact links"
+  // is a number in the report instead of something to spot in a PDF.
+  const hrefTargets = content.match(/\\href\{([^}]*)\}/g) || [];
+  const emptyHrefCount = hrefTargets.filter((h) => !h.replace(/^\\href\{|\}$/g, '').trim()).length;
+
   if (!content.includes('\\pdfgentounicode=1')) {
     issues.push('Missing \\pdfgentounicode=1 (ATS compatibility)');
   }
@@ -129,6 +158,10 @@ export function validateLatexContent(content, compileOnly, engine = null) {
       resumeItems: resumeItemCount,
       subheadings: subheadingCount,
       projectHeadings: projectHeadingCount,
+      // Contact links, so "the CV has no way to be contacted" is a number in
+      // the report rather than something a reader has to notice in a PDF.
+      contactLinks: hrefTargets.length,
+      emptyContactLinks: emptyHrefCount,
     },
   };
 }

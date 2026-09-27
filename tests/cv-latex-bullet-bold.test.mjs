@@ -21,6 +21,14 @@ console.log('\nbuild-cv-latex — markdown bold in bullets (#3351)');
 const PAYLOAD = {
   lang: 'en',
   page_format: 'letter',
+  // LaTeX payload vocabulary, not the HTML one. This builder reads a top-level
+  // `name` and an `email` OBJECT; the HTML contract's candidate.email (a flat
+  // string) resolved to no url and rendered a contact block that linked
+  // nowhere. The keys below lang/page_format/summary/competencies are likewise
+  // HTML-only — this builder ignores them — but they are what the real
+  // master-CV payload looks like, so the fixture keeps them.
+  name: 'Bold Bullets',
+  email: { url: 'bold@example.com', display: 'bold@example.com' },
   candidate: { name: 'Bold Bullets', email: 'bold@example.com' },
   summary: 'Summary.',
   competencies: ['Competency'],
