@@ -96,10 +96,6 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Headless:** `codex exec "prompt"` for one-shot workers.
 - **Examples:** `Run career-ops scan mode`, `Run career-ops pipeline mode for data/pipeline.md`, `Run career-ops pdf mode`, `Run career-ops tracker mode`, `Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123`
 
-### Gemini evaluation
-
-`gemini-eval.mjs` is the legacy Gemini API evaluator. For deterministic diagnostics, `node gemini-eval.mjs --context-only --file <jd>` prints the resolved evaluation-mode file and context budget without making a Gemini request.
-
 ### Main Files
 
 | File | Function |
