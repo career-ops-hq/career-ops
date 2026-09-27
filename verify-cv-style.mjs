@@ -134,6 +134,25 @@ const CANONICAL_DATES = {
   sigmax: 'Nov 2025 -- Present',
   goodtime: 'May 2025 -- Oct 2025',
 };
+/**
+ * Compare date ranges by value, not by byte.
+ *
+ * STALE_DATES below already accepts `--`, `–`, `—` or `-` as the range
+ * separator, so the exact-string comparison this sits next to was
+ * inconsistent with its own file. It bit as soon as the humanize pass
+ * normalised the payload's dashes for print: every lane reported the
+ * *corrected* date as drift from the canonical string, which trains an
+ * operator to ignore the one check that catches a genuinely wrong date.
+ */
+function sameDates(a, b) {
+  const norm = (s) => String(s)
+    .replace(/[–—]/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return norm(a) === norm(b);
+}
+
 const STALE_DATES = [
   { re: /Feb 2026\s*(?:--|–|—|-)\s*Present/i, why: `SigmaX starts Nov 2025, not Feb 2026 (canonical: ${CANONICAL_DATES.sigmax})` },
   { re: /May 2025\s*(?:--|–|—|-)\s*Nov 2025/i, why: `Goodtime ends Oct 2025 (canonical: ${CANONICAL_DATES.goodtime})` },
@@ -361,10 +380,10 @@ function checkJsonPayload(payload, target) {
 
   // 7. Dates
   const sigmax = exp.find((e) => /sigmax/i.test(e.company || ''));
-  if (sigmax && sigmax.dates && sigmax.dates !== CANONICAL_DATES.sigmax) {
+  if (sigmax && sigmax.dates && !sameDates(sigmax.dates, CANONICAL_DATES.sigmax)) {
     out.push(finding('date-drift', 'fail', target, `SigmaX dates "${sigmax.dates}" ≠ canonical "${CANONICAL_DATES.sigmax}"`));
   }
-  if (goodtime && goodtime.dates && goodtime.dates !== CANONICAL_DATES.goodtime) {
+  if (goodtime && goodtime.dates && !sameDates(goodtime.dates, CANONICAL_DATES.goodtime)) {
     out.push(finding('date-drift', 'fail', target, `Goodtime dates "${goodtime.dates}" ≠ canonical "${CANONICAL_DATES.goodtime}"`));
   }
 

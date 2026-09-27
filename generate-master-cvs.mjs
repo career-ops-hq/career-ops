@@ -43,6 +43,29 @@ const ARCHETYPE_FILTERS = {
 const LANES = Object.keys(ARCHETYPE_FILTERS); // the 4 lane sets
 const ARCH_LABEL = { 'ai-product-manager': 'L1', 'solutions-consultant': 'L2', 'startup-ops': 'L3', 'strategy-mid': 'L4' };
 
+/**
+ * Surface what the humanize pass did, and what it could not fix on its own.
+ *
+ * The `changes` array was computed and thrown away here for as long as the
+ * layer existed, which is precisely why a dead banned-vocabulary list could
+ * report a clean run indefinitely: nothing was ever printed to contradict it.
+ * `findings` are the judgement calls the layer deliberately refuses to make
+ * (voice-dna §5 — sometimes a banned word is genuinely the right word), so
+ * they are printed for a human rather than silently rewritten.
+ */
+function reportHumanize(slug, changes, findings = []) {
+  if (changes.length) {
+    console.log(`   humanize[${slug}]: ${changes.length} rewrite(s) — ${[...new Set(changes)].slice(0, 4).join('; ')}`);
+  }
+  const actionable = findings.filter((f) => f.severity !== 'low');
+  const advisory = findings.length - actionable.length;
+  if (actionable.length) {
+    console.warn(`   ⚠️  humanize[${slug}]: ${actionable.length} AI-tell finding(s) needing a human call:`);
+    for (const f of actionable) console.warn(`        [${f.severity}] ${f.rule} ${f.label} — @${f.where} "${f.match}"`);
+  }
+  if (advisory) console.log(`   humanize[${slug}]: ${advisory} low-severity note(s) (advisory only)`);
+}
+
 /** Per-lane visual identity injected into each lane's cv.json `style:` block so
  *  generate_cv_pdf.py (reportlab) renders distinct accents. Color-only, so ATS
  *  keyword extraction is untouched. */
@@ -59,12 +82,16 @@ const LANE_STYLES = {
 // are TOOLS and sit in Skills -- advertising them in the headline contradicted
 // the competency spine directly beneath it. Enforced by verify-cv-style.mjs, so
 // do not reintroduce a demoted skill here. See modes/_custom.md.
+// Slot counts are deliberately uneven (2, 2, 4, 2, 2) and no two share a
+// skeleton. The previous set was five rule-of-three triples, three of them
+// carrying the identical "GxP-regulated delivery" in the same middle slot —
+// uniformity across lanes meant to be distinct is itself a machine tell.
 const LANE_HEADLINES = {
-  'ai-product-manager': 'AI Product Manager | GxP-regulated delivery | hands-on LLM agents',
-  'solutions-consultant': 'Solutions Consultant | GxP-regulated delivery | AI transformation',
-  'startup-ops': 'Founder, AI-ops consultancy | two ventures | GxP delivery background',
-  'strategy-mid': 'Strategy consultant | GxP-regulated delivery | ex-Deloitte USI (IIM Rohtak)',
-  general: 'Product & solutions | regulated-industry delivery | hands-on AI automation',
+  'ai-product-manager': 'AI product manager | GxP-regulated delivery and hands-on LLM agents',
+  'solutions-consultant': 'Solutions consultant | discovery through working automation for regulated clients',
+  'startup-ops': 'Founder | AI automation consultancy | second venture in events | GxP delivery background',
+  'strategy-mid': 'Strategy consultant, ex-Deloitte USI | IIM Rohtak MBA, focused on regulated-industry delivery',
+  general: 'Product and solutions consultant | IBM AI Product Manager certified, GxP delivery background',
 };
 
 function escapeHtml(s) {
@@ -422,7 +449,7 @@ function buildPayload(archetype, mined) {
 }
 
 function payloadToMarkdown(payload) {
-  const lines = [`# CV -- ${payload.candidate.name}`, ...(payload.headline ? [`*${payload.headline}*`] : []), '', payload.summary, '', '## Work Experience'];
+  const lines = [`# CV - ${payload.candidate.name}`, ...(payload.headline ? [`*${payload.headline}*`] : []), '', payload.summary, '', '## Work Experience'];
   for (const job of payload.experience) {
     lines.push('', `### ${job.company}`, `**${job.role}** | ${job.dates}`, ...(job.bullets || []).map((b) => `- ${b}`));
   }
@@ -454,7 +481,8 @@ async function renderSet(slug, payload, mined) {
 
   let { payload: pinned } = injectPinnedExperience(payload);
   // Pre-built master sets are already one-page dense — skip cv.md backfill to avoid duplicate bullets.
-  const { payload: final } = humanizeCvPayload(pinned);
+  const { payload: final, changes, findings } = humanizeCvPayload(pinned);
+  reportHumanize(slug, changes, findings);
 
   const jsonPath = join(dir, 'cv.json');
   const mdPath = join(dir, 'cv.md');
