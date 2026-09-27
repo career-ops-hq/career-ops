@@ -295,7 +295,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // interpretation still ran the agent, and an interpreter that never launched
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
-  if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  if (interpretFencing?.notice) issues.push({ level: "info", code: "cli-unfenced", message: `✨ ${interpretFencing.notice}` });
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
@@ -368,7 +368,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   // interpretation still ran the agent, and an interpreter that never launched
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
-  if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  if (interpretFencing?.notice) issues.push({ level: "info", code: "cli-unfenced", message: `✨ ${interpretFencing.notice}` });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
   return { title: s.title, fields: s.fields, issues };

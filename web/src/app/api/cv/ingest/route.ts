@@ -198,7 +198,7 @@ export async function POST(req: Request) {
       // It lands in the client's `trace`, which renders only its latest line — a
       // pre-existing limit of this view, not something to work around here.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.localReadOnly });
-      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}\n\n`);
+      if (fencing.notice) safeEnqueue(`✨ ${fencing.notice}\n\n`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;

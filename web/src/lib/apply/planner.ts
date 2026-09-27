@@ -76,7 +76,7 @@ export function runPlanner(opts: {
   // "Pre-fill diagnostics" drawer, which is where the other planner facts go
   // (#2507).
   const fencing = fencingReport({ cliId: spec.id, cliName: spec.name, capabilities: CAPS.localReadOnly });
-  if (fencing.notice) log(`⚠️ ${fencing.notice}`);
+  if (fencing.notice) log(`✨ ${fencing.notice}`);
   // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
   const killMs = Math.min(300_000, 150_000 + fieldCount * 6_000);
   log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);

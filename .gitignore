@@ -217,3 +217,58 @@ documents/*
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
 data/agent-inbox.md
+
+# Environment variables, Secrets & API Keys
+*.env
+*.env.*
+*.env.local
+*.env*.local
+.career-ops.env
+**/.career-ops.env
+*.secret
+*.secrets
+*apikey*
+*api_key*
+credentials.json
+client_secret*.json
+service-account*.json
+token.json
+tokens.json
+auth.json
+.auth
+
+# Private Keys, Certificates & SSH Keys
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+*.id_rsa
+*.id_ed25519
+id_rsa*
+id_ed25519*
+
+# Logs and debug traces
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js & Frontend build outputs
+.next/
+web/.next/
+web/out/
+out/
+dist/
+
+# Local cache & uploaded temp files
+uploads/
+web/uploads/
+scratch/
+config/plugins.json
+.gemini/
+.agy/
+.antigravity/
+.cursor/
+

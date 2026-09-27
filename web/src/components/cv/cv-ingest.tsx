@@ -74,7 +74,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         }
         if (parsed.trace) {
           const lines = parsed.trace.split("\n").map((l) => l.trim()).filter(Boolean);
-          const activeStep = lines.filter((l) => !l.includes("cannot be permission-restricted") && !l.includes("⚠️")).slice(-1)[0];
+          const activeStep = lines.filter((l) => !l.includes("cannot be permission-restricted") && !l.includes("⚠️") && !l.includes("✨")).slice(-1)[0];
           setTrace(activeStep || "AI is structuring your CV…");
         }
         if (parsed.markdown) setMd(parsed.markdown);
