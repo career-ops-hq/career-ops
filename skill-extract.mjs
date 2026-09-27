@@ -44,6 +44,20 @@ export const SKILL_TOKENS = [
   'Computer Vision', 'NLP',
   // Analytics / enterprise
   'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
+  // Testing / QA (added 2026-09-20). The vocabulary had NO testing term at all,
+  // so a testing-framework gap could never surface however often JDs demanded
+  // one — 16 reports name TDD, 13 JUnit, 10 Jest. Same structural blindness the
+  // certification block below was added to fix, one category over.
+  'JUnit', 'TestNG', 'NUnit', 'xUnit', 'MSTest', 'Cucumber', 'Mockito',
+  'Jest', 'pytest', 'Selenium', 'Playwright', 'Cypress', 'Karate', 'Postman',
+  'TDD', 'BDD',
+  // Observability (added 2026-09-20). Prometheus/Grafana/Datadog were already
+  // above under Cloud/infra; the log-and-trace half of the stack was not, so a
+  // posting asking for "Grafana, ELK, Splunk" scored as a partial hit. 'ELK' is
+  // case-insensitive like its neighbours: the animal and the Illinois town both
+  // exist, but extraction runs over gap descriptions only, never the whole
+  // report, so a location line can't reach it.
+  'OpenTelemetry', 'OTel', 'ELK', 'Splunk', 'CloudWatch',
   // ── Certifications, frameworks and methodologies (added 2026-08-07) ──────
   // Every token above this line is an engineering tool. That made `upskill`
   // structurally blind to the gap class that actually screens out delivery and
@@ -223,6 +237,7 @@ export const CANONICAL = {
   'c++': 'C++', 'c#': 'C#', '.net': '.NET',
   'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
   'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
+  'otel': 'OpenTelemetry',
   // Certifications / methodologies (2026-08-07). Uppercase display forms, since
   // DISPLAY lowercases its keys and these are acronyms rather than title-case
   // words — without these, "pmp" in a JD would canonicalize to "Pmp" and miss

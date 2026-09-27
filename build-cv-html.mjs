@@ -33,6 +33,7 @@ import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -40,7 +41,7 @@ const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
-const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PROFILE_PATH = resolve(DATA_ROOT, 'config', 'profile.yml');
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -644,10 +645,21 @@ function buildPhoto(candidate, name) {
   return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
+// Professional title / headline under the name (candidate.title). An ATS reads
+// this first to place the candidate ("Backend Engineer" vs "Accountant"); a CV
+// with no title forces the reader to infer the role. Empty/absent → no element,
+// so a payload without a title renders byte-identical to before.
+function buildTitle(candidate) {
+  const title = candidate && candidate.title != null ? String(candidate.title).trim() : '';
+  return title ? `<div class="header-title">${escapeHtml(title)}</div>` : '';
+}
+
 function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
-  const pageWidth = PAGE_WIDTHS[payload.page_format] || PAGE_WIDTHS.letter;
+  // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
+  // the same resolver rather than each keeping a fallback of their own.
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
@@ -688,6 +700,14 @@ function renderHtml(template, payload, templatePath) {
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+  // Captures the placeholder's own leading newline + indentation so an empty
+  // title drops the whole line — matching just the token (as every other
+  // {{PLACEHOLDER}} above does) would leave a blank line where the token sat,
+  // which is not byte-identical to a template that never had the slot
+  // (CodeRabbit, #3763). With a title, the indentation is reused verbatim so
+  // output is unchanged from the token-only replace this replaces.
+  const titleBlock = buildTitle(candidate);
+  html = html.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
