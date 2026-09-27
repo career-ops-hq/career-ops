@@ -78,14 +78,13 @@ On the first message of each session, run silently:
 node update-system.mjs check
 ```
 
-If `{"status": "update-available", "reason": ..., "local": ..., "remote": ..., "changelog": ...}` → tell the user:
+It reports an update only when a newer career-ops release is published; changes merged to `main` between releases never prompt, because an update installs the release, not `main`.
 
-- If `reason` is `system-files-changed`:
-  > "career-ops system files differ from v{local}. Re-apply v{local} to restore them? Your data (CV, profile, tracker, reports) will NOT be touched."
-- Otherwise:
-  > "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+If `{"status": "update-available", "local": ..., "remote": ..., "changelog": ...}` → tell the user:
 
-If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss`. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can force a check anytime ("check for updates" / "update career-ops"); rollback: `node update-system.mjs rollback`.
+> "career-ops update available (v{local} → v{remote}). Your data (CV, profile, tracker, reports) will NOT be touched. Want me to update?"
+
+If yes → `node update-system.mjs apply --confirm`. If no → `node update-system.mjs dismiss --version {remote}`: that quiets v{remote} only, and a newer release asks again. Every other status (`up-to-date`, `dismissed`, `offline`, `no-remote-version`) → say nothing. The user can check anytime, even after saying no ("check for updates" / "update career-ops") → `node update-system.mjs check --force`. To follow every merge on `main` instead of releases: `node update-system.mjs apply --channel main --confirm`. Rollback: `node update-system.mjs rollback`.
 
 ## What is career-ops
 
@@ -471,7 +470,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 
 **Optional Via field (#1596):** with a header, `via` is an ordinary column carrying the agency name (`Hays`). Headerless, applications through an agency/recruiter append a **tagged** extra field `via={Agency}` (e.g. `via=Hays`) after notes — never positional; the tag is mandatory. A single untagged extra keeps its legacy meaning (location). Unknown end employer → `?` as company (locale-invariant marker, never "Confidential") + a descriptor in notes. `merge-tracker.mjs` rejects ambiguous extras loudly; `--migrate-via` adds the column to an existing tracker.
 
-**Optional posting URL — the deterministic dedup key:** label it `url` in the header, or (headerless) append it as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column headerless TSVs and trackers with no `URL` header column behave exactly as before. Backfill existing rows from their reports with `node merge-tracker.mjs --backfill-urls`.
+**Optional posting URL — the deterministic dedup key:** label it `url` in the header, or (headerless) append it as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column headerless TSVs and trackers with no `URL` header column behave exactly as before. Explicitly run `node merge-tracker.mjs --backfill-urls` to append a missing trailing `URL` column and populate resolvable rows from their linked reports; ordinary merges never change the tracker schema. The migration supports `--dry-run` and is idempotent.
 
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
 
