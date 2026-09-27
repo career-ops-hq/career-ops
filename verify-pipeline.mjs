@@ -21,6 +21,7 @@
  * 16. No invisible control characters in tracker cells (error — see #3892)
  * 17. Application SLA gate on Applied rows (advisory — verify-apply-gate.mjs)
  * 18. Generated CV style + precision rules (error — see verify-cv-style.mjs)
+ * 19. Repository + commit hygiene (error — see verify-repo-hygiene.mjs)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -674,6 +675,24 @@ try {
   }
 } catch (err) {
   warn(`CV style check could not run: ${err.message}`);
+}
+
+// --- Check 19: repository + commit hygiene (verify-repo-hygiene.mjs) ---
+try {
+  const { verify: verifyHygiene } = await import('./verify-repo-hygiene.mjs');
+  const result = verifyHygiene();
+  const fails = result.findings.filter(f => f.severity === 'fail');
+  const warns = result.findings.filter(f => f.severity === 'warn');
+  if (fails.length === 0) {
+    ok(`Repo hygiene: ${result.stats.systemPaths} system paths registered, ${result.stats.userLayer} user-layer files untracked, no secrets pending`);
+    for (const w of warns) warn(`Repo hygiene ${w.code}: ${w.target} — ${w.detail}`);
+  } else {
+    const byCode = {};
+    for (const f of fails) byCode[f.code] = (byCode[f.code] || 0) + 1;
+    error(`Repo hygiene: ${fails.length} violations [${Object.entries(byCode).map(([c, n]) => `${c}×${n}`).join(', ')}] — run node verify-repo-hygiene.mjs`);
+  }
+} catch (err) {
+  warn(`Repo hygiene check could not run: ${err.message}`);
 }
 
 // --- Summary ---

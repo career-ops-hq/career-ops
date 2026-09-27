@@ -125,7 +125,9 @@ export const UPDATE_PATH_CHECKOUT_BUDGET_MS = parsePositiveInt(process.env.CAREE
 export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_REEXEC_BUFFER_TIMEOUT_MS, 60000);
 
 // System layer paths — ONLY these files get updated
-const SYSTEM_PATHS = [
+// Exported so verify-repo-hygiene.mjs can assert against the real list rather
+// than a second copy of it, which is the drift this script exists to catch.
+export const SYSTEM_PATHS = [
   // .gitattributes governs how every other path below is written to disk, and
   // `apply` checks paths out one at a time in this order: if it landed later,
   // everything before it would be written under the old core.autocrlf setting
@@ -291,6 +293,7 @@ const SYSTEM_PATHS = [
   'cv-pinned-experience.mjs',
   'verify-cv-facts.mjs',
   'verify-cv-style.mjs',
+  'verify-repo-hygiene.mjs',
   'verify-ats.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
@@ -470,6 +473,25 @@ const SYSTEM_PATHS = [
   'test-fixtures/',
   'upgrade-tests.mjs',
 ];
+
+/**
+ * SYSTEM_PATHS entries that intentionally have NO file on disk.
+ *
+ * A retired path stays in SYSTEM_PATHS so staleSystemFiles() prunes the orphan
+ * on an install that upgraded from a version where the file existed. Those
+ * entries look like typos to anything that checks the filesystem, so
+ * verify-repo-hygiene.mjs exempts exactly this set — and cross-checks that
+ * every tombstone is still present in SYSTEM_PATHS, because a tombstone
+ * dropped from that list silently stops pruning, which is the one direction of
+ * drift that actually changes behaviour.
+ *
+ * Add the retired path to SYSTEM_PATHS (keeping the comment that explains it)
+ * and to this set. Do not remove it from SYSTEM_PATHS until a release has
+ * shipped past the move.
+ */
+export const SYSTEM_TOMBSTONES = new Set([
+  'lib/context-budget.test.mjs',
+]);
 
 const BOOTSTRAP_PATHS = [
   '.agents/',
