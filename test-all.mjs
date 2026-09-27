@@ -16470,10 +16470,15 @@ try {
       // next, and this section previously covered 4 of the 6 files present.
       let webUnits = [];
       try {
-        webUnits = readdirSync(join(ROOT, 'web', 'tests', 'lib'))
+        const webLibRoot = join(ROOT, 'web', 'tests', 'lib');
+        webUnits = readdirSync(webLibRoot, { recursive: true })
           .filter((f) => f.endsWith('.test.mjs'))
+          // A checkout under web/tests/lib holds another tree's suites; the
+          // parity walk below skips those the same way (#3762), so the gate
+          // must not run them.
+          .filter((f) => !isUnderNestedCheckout(webLibRoot, f))
           .sort()
-          .map((f) => `web/tests/lib/${f}`);
+          .map((f) => join('web', 'tests', 'lib', f));
       } catch (err) {
         // Fail rather than throw to the outer catch, which would skip every value
         // assertion below while reporting only "freeze section crashed".
