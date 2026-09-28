@@ -19,7 +19,7 @@ import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 import { pass, fail, warn, ROOT } from './helpers.mjs';
 import {
-  SCRATCH_PREFIX, MIN_SCRATCH_AGE_MS, MAX_SCRATCH_AGE_MS, isScratchDir,
+  SCRATCH_PREFIX, SCRATCH_OWNER_FILE, MIN_SCRATCH_AGE_MS, MAX_SCRATCH_AGE_MS, isScratchDir,
   sweepScratchDirs, markScratchOwner, scratchOwnerAlive,
 } from '../lib/scratch-dirs.mjs';
 import { collectMjsFiles } from '../lib/mjs-files.mjs';
@@ -357,6 +357,29 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
     } else {
       fail(`ceiling wrong: removed=${JSON.stringify(removed)} kept=${JSON.stringify(kept)} `
         + `recent exists=${existsSync(recent)} forever exists=${existsSync(forever)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 12. A failed owner claim must not silently succeed ────────────────
+{
+  const dir = mkdtempSync(join(tmpdir(), 'co-scratch-owner-failure-'));
+  try {
+    // A directory at the marker path makes writing fail even when running as
+    // root, without relying on platform-specific permission bits.
+    mkdirSync(join(dir, SCRATCH_OWNER_FILE));
+    let error;
+    try {
+      markScratchOwner(dir);
+    } catch (err) {
+      error = err;
+    }
+    if (error instanceof Error && error.code && !scratchOwnerAlive(dir)) {
+      pass('an owner-marker write failure propagates to the caller');
+    } else {
+      fail('owner-marker write failure was swallowed or claimed a live owner');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -440,11 +440,10 @@ const scripts = [
 ];
 
 const scriptTmp = mkdtempSync(join(ROOT, SCRATCH_PREFIX));
-// Claim it before filling it, so a second run starting mid-copy already sees an
-// owner. Without this the sweep would be judging a live tree on its mtime, and
-// mtime stops advancing the moment this copy finishes (#3940 review).
-markScratchOwner(scriptTmp);
 try {
+  // Claim before copying or running scripts. If this fails, stop and let the
+  // finally below remove the unused directory rather than run without an owner.
+  markScratchOwner(scriptTmp);
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
   // real ROOT/node_modules, which is how the root-level exclusion already
