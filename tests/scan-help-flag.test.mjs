@@ -6,8 +6,8 @@
 // portals.yml, hitting every configured ATS, and appending to
 // pipeline.md/scan-history.tsv — the exact "unrecognized/mistyped flag
 // silently falls through to live behavior" failure class already fixed
-// (identically) in scan-ats-full.mjs (#1633/#1635), reply-watch.mjs
-// (#2743/#2745) and dedup-tracker.mjs (#2744/#2746), now shared via
+// (identically) in scan-ats-full.mjs (#1633/#1635) and
+// dedup-tracker.mjs (#2744/#2746), now shared via
 // lib/cli-flags.mjs's validateFlags() (#2775).
 //
 // HERMETIC: every run pins CAREER_OPS_PORTALS at a path that does not exist.

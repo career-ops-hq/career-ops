@@ -32,6 +32,10 @@ workflow/.venv/bin/python workflow/career_ops.py application retire <opportunity
 workflow/.venv/bin/python workflow/career_ops.py application reopen <opportunity-id> --confirmed --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application view [opportunity-id]
 workflow/.venv/bin/python workflow/career_ops.py application followups [--overdue-only] [--applied-days <days>]
+workflow/.venv/bin/python -m workflow.career_ops reply import <message.json-or-pasted-email.txt>
+workflow/.venv/bin/python -m workflow.career_ops reply paste [email.txt]
+workflow/.venv/bin/python -m workflow.career_ops reply view <message-id>
+workflow/.venv/bin/python -m workflow.career_ops reply confirm <message-id> --opportunity <id> --status responded|interview|offer|rejected --confirmed [--reason <reason>]
 ```
 
 All commands emit JSON. `discover` calls the existing Node provider scanner as
@@ -68,3 +72,7 @@ actual `package_result_key` in that payload; the CLI rejects ambiguous evidence.
 `followup_sent` activity may similarly carry `sent_at`.
 Follow-up queries compute the retained cadence from business history and
 profile overrides; schedule/retire/reopen record manual decisions, not sends.
+Reply import retains the original user-provided message, deterministic
+classification, match signals, and ranked invite candidates. It only suggests
+a status. Confirmation runs the application lifecycle graph; an unmatched or
+ambiguous application or a different status needs an explicit reason.

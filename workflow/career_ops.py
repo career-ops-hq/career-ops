@@ -26,10 +26,12 @@ try:
     from workflow.discovery import capture_jd, discover
     from workflow.application_lifecycle import ApplicationStore, mutate as mutate_application
     from workflow.resume_renderer import render_resume
+    from workflow.replies import import_reply, view_reply, confirm_reply, parse_pasted
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
     from discovery import capture_jd, discover
     from application_lifecycle import ApplicationStore, mutate as mutate_application
     from resume_renderer import render_resume
+    from replies import import_reply, view_reply, confirm_reply, parse_pasted
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
@@ -1413,6 +1415,13 @@ def parser() -> argparse.ArgumentParser:
     application.add_argument("--idempotency-key")
     application.add_argument("--overdue-only", action="store_true")
     application.add_argument("--applied-days", type=int)
+    reply = commands.add_parser("reply")
+    reply.add_argument("action", choices=("import", "paste", "view", "confirm"))
+    reply.add_argument("value", nargs="?")
+    reply.add_argument("--opportunity")
+    reply.add_argument("--status", choices=("responded", "interview", "offer", "rejected"))
+    reply.add_argument("--reason", default="")
+    reply.add_argument("--confirmed", action="store_true")
     return cli
 
 
@@ -1453,6 +1462,35 @@ def main() -> None:
                 store.close()
         elif args.command == "cancel":
             result = cancel_task(args.directory, args.task_id)
+        elif args.command == "reply":
+            if args.action == "paste":
+                if args.value:
+                    raw = Path(args.value).read_text()
+                else:
+                    print("Subject: ", end="", file=sys.stderr, flush=True)
+                    subject = sys.stdin.readline().rstrip("\n")
+                    print("From: ", end="", file=sys.stderr, flush=True)
+                    sender = sys.stdin.readline().rstrip("\n")
+                    print("Body (finish with Ctrl-D):", file=sys.stderr)
+                    raw = f"Subject: {subject}\nFrom: {sender}\n\n" + sys.stdin.read()
+                result = import_reply(args.directory, parse_pasted(raw))
+            elif args.action == "import":
+                if not args.value:
+                    raise ValueError("reply import requires a JSON object or file")
+                if args.value.lstrip().startswith(("{", "[")):
+                    message = json.loads(args.value)
+                else:
+                    raw = Path(args.value).read_text()
+                    message = json.loads(raw) if raw.lstrip().startswith(("{", "[")) else parse_pasted(raw)
+                result = [import_reply(args.directory, item) for item in message] if isinstance(message, list) else import_reply(args.directory, message)
+            elif args.action == "view":
+                if not args.value:
+                    raise ValueError("reply view requires a message ID")
+                result = view_reply(args.directory, args.value)
+            else:
+                if not args.value or not args.confirmed or not args.opportunity or not args.status:
+                    raise ValueError("reply confirm requires --confirmed, --opportunity and --status")
+                result = confirm_reply(args.directory, args.value, args.opportunity, args.status, reason=args.reason)
         elif args.command == "application":
             store = ApplicationStore(args.directory / "opportunities.db")
             try:

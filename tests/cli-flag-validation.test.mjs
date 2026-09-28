@@ -4,8 +4,8 @@
 // The failure class lib/cli-flags.mjs exists to end: an unrecognized flag is
 // ignored, the value flag it was meant to be falls back to its default, and
 // the script reports a result for inputs nobody asked for at exit 0. Already
-// fixed in scan-ats-full.mjs (#1633/#1635), reply-watch.mjs (#2743/#2745),
-// dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270), doctor.mjs (#2874),
+// fixed in scan-ats-full.mjs (#1633/#1635), dedup-tracker.mjs (#2744/#2746),
+// scan.mjs (#2270), doctor.mjs (#2874),
 // and fix-slugs.mjs (#2980).
 //
 // HERMETIC: paths use tmpdir fixtures; nothing reads or writes the real data.

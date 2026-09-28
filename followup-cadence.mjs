@@ -503,7 +503,7 @@ export function resolveNextOverride(override, lastFollowupDate) {
 //   - cleared #42 2026-08-04 — no contact on file, no warm path
 // The date records when the retirement was made. This closes the follow-up
 // loop only — it does NOT close the application. The tracker row keeps its
-// status and any inbound reply is still caught by reply-watch.
+// status; a later confirmed reply can still advance the application.
 //
 // Like a pin, a retirement is revoked by a follow-up logged after it, so
 // re-engaging a retired application resumes its normal cadence with no

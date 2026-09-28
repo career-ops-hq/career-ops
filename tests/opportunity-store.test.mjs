@@ -45,8 +45,8 @@ try {
   assert.equal(store.confirmSubmitted(first.id, 'submitted').applicationState, 'submitted');
   assert.equal(store.application(first.id).status, 'applied');
   assert.throws(() => store.transitionApplication(first.id, 'hired', { source: 'test' }), /Invalid application transition/);
-  assert.equal(store.transitionApplication(first.id, 'responded', { source: 'reply-watch', payload: { messageId: '1' } }).status, 'responded');
-  assert.equal(store.transitionApplication(first.id, 'interview', { source: 'reply-watch' }).status, 'interview');
+  assert.equal(store.transitionApplication(first.id, 'responded', { source: 'reply-confirmed', payload: { messageId: '1' } }).status, 'responded');
+  assert.equal(store.transitionApplication(first.id, 'interview', { source: 'reply-confirmed' }).status, 'interview');
   assert.equal(store.applicationViews()[0].status, 'interview');
   assert.equal(store.application(first.id).events.length, 3);
   store.recordApplicationActivity(first.id, 'reply_suggested', { toStatus: 'offer' });

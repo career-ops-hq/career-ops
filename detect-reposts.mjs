@@ -64,7 +64,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 // #2656 migrated the rest of the repo for exactly that reason.
 import * as yaml from 'js-yaml';
 
-import { normalizeCompanyName } from './invite-match.mjs';
+import { normalizeCompanyName } from './lib/company-name.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { openOpportunityStore } from './src/opportunities/store.mjs';
 

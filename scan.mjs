@@ -50,7 +50,7 @@ import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
-import { normalizeCompanyName } from './invite-match.mjs';
+import { normalizeCompanyName } from './lib/company-name.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
@@ -2291,8 +2291,8 @@ function guardStatusFor(code) {
 // ── CLI args ────────────────────────────────────────────────────────
 // #2270: `node scan.mjs --help` used to run a full live scan and write to
 // pipeline.md/scan-history.tsv instead of printing usage — the flag was
-// never checked at all. Same shape as scan-ats-full.mjs (#1633/#1635),
-// reply-watch.mjs (#2743/#2745) and dedup-tracker.mjs (#2744/#2746), shared
+// never checked at all. Same shape as scan-ats-full.mjs (#1633/#1635)
+// and dedup-tracker.mjs (#2744/#2746), shared
 // via lib/cli-flags.mjs's validateFlags() (#2775).
 const KNOWN_FLAGS = [
   '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',

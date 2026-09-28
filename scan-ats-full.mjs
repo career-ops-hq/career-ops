@@ -245,7 +245,7 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  // Shared with reply-watch.mjs/dedup-tracker.mjs/scan.mjs via
+  // Shared with dedup-tracker.mjs/scan.mjs via
   // lib/cli-flags.mjs (#2775). This also fixes a latent ordering bug this
   // script had before the pattern was consolidated: the unrecognized-flag
   // check now runs BEFORE --help, so `--help --bogus` still errors instead
