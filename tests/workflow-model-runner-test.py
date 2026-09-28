@@ -78,6 +78,14 @@ assert revision_phases == ["apply_evaluate"]
 assert revised["artifact"] == {**complete_package, "questions": "# Corrected grounded questions"}
 assert complete_package["questions"] == "Grounded questions"
 
+split_reasoning = {"dimensions": {"compensation": {
+    "score": None, "rationale": "No salary in JD", "evidence": [],
+    "fact_to_inference": "No defensible estimate",
+}}}
+assert runner.normalize_assessment(split_reasoning)["dimensions"]["compensation"] == {
+    "score": None, "rationale": "No salary in JD\nfact_to_inference: No defensible estimate", "evidence": [],
+}
+
 with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
     responses = iter((
         {"direction": {}, "compensation": {}, "team": {}, "company": {}},

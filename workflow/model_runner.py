@@ -23,6 +23,19 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
+def normalize_assessment(assessment: dict) -> dict:
+    """Keep stray textual reasoning inside rationale without discarding model content."""
+    for dimension in assessment["dimensions"].values():
+        if not isinstance(dimension, dict):
+            continue
+        extra = sorted(set(dimension) - {"score", "rationale", "evidence"})
+        if extra and isinstance(dimension.get("rationale"), str) and all(
+            isinstance(dimension[key], str) and dimension[key].strip() for key in extra
+        ):
+            dimension["rationale"] += "\n" + "\n".join(f"{key}: {dimension.pop(key)}" for key in extra)
+    return assessment
+
+
 def normalize_resume_payload(resume: dict) -> dict:
     """Unwrap common model groupings without changing resume content."""
     sections = resume.get("sections")
@@ -228,9 +241,9 @@ def evaluate(payload: dict) -> dict:
     }
     prompt = adapter.ASSESS + json.dumps(assessment_inputs, ensure_ascii=False)
     if cached_assessment:
-        assessment = cached_assessment
+        assessment = normalize_assessment(cached_assessment)
     else:
-        assessment = adapter.call_agent("assessment", prompt, [], directory)[0]
+        assessment = normalize_assessment(adapter.call_agent("assessment", prompt, [], directory)[0])
         assessment.update(research)
         tool_calls += 1
     packet = {
@@ -269,7 +282,7 @@ def evaluate(payload: dict) -> dict:
                 ensure_ascii=False,
             )
         )
-        assessment = adapter.call_agent("repair", prompt, [], directory)[0]
+        assessment = normalize_assessment(adapter.call_agent("repair", prompt, [], directory)[0])
         assessment.update(research)
         write_json(directory / "assessment.json", assessment)
         result = render_report(packet, evidence, assessment)
