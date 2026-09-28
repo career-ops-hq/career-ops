@@ -48,20 +48,8 @@ try {
     }
   }
 
-  const contentProbes = [
-    'data/generated.json',
-    'output/generated.txt',
-    'jds/generated.md',
-    'documents/private.pdf',
-  ];
-  for (const path of contentProbes) {
-    const status = ask(path);
-    if (status === 0) pass(`${path} is ignored`);
-    else fail(`${path} has unexpected ignore status ${status}`);
-  }
-
-  // .gitignore does not untrack existing files. These scaffolding files remain
-  // in the index even though a fresh copy of the same path would be ignored.
+  // .gitignore does not untrack existing files, so these system scaffolds stay
+  // in the index even though their paths are now ignored for new files.
   const trackedPlaceholders = [
     'data/.gitkeep', 'data/offers/.gitkeep', 'data/parser-output/.gitkeep',
     'output/.gitkeep', 'jds/.gitkeep', 'documents/.gitkeep', 'documents/README.md',
@@ -73,4 +61,29 @@ try {
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });
+}
+
+// Probe content paths in real directories. Git cannot resolve paths beneath a
+// symlinked directory in this check-ignore invocation (it exits 128), so keep
+// this independent from the symlink probes above.
+const contentDir = mkdtempSync(join(tmpdir(), 'gitignore-user-dir-content-'));
+try {
+  spawnSync('git', ['init', '-q', '.'], { cwd: contentDir });
+  writeFileSync(join(contentDir, '.gitignore'), readFileSync(join(ROOT, '.gitignore'), 'utf-8'));
+  const contentProbes = [
+    ['data', 'generated.json'],
+    ['output', 'generated.txt'],
+    ['jds', 'generated.md'],
+    ['documents', 'private.pdf'],
+  ];
+  for (const [name, filename] of contentProbes) {
+    mkdirSync(join(contentDir, name));
+    writeFileSync(join(contentDir, name, filename), 'generated');
+    const path = `${name}/${filename}`;
+    const result = spawnSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: contentDir });
+    if (result.status === 0) pass(`${path} is ignored`);
+    else fail(`${path} has unexpected ignore status ${result.status}`);
+  }
+} finally {
+  rmSync(contentDir, { recursive: true, force: true });
 }
