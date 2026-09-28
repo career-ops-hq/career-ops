@@ -62,7 +62,8 @@ export async function GET() {
   }
 
   const skills: SkillStat[] = Object.entries(skillCounts).map(([name, data]) => {
-    const inCv = cvContent.includes(name.toLowerCase());
+    const wordBoundary = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    const inCv = wordBoundary.test(cvContent);
     const count = data.count;
     const priority = count >= 3 && !inCv ? "High" : count >= 1 && !inCv ? "Medium" : "Low";
     return {

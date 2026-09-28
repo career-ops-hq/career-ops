@@ -389,6 +389,7 @@ function ProfileSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/profile")
@@ -402,18 +403,23 @@ function ProfileSettings() {
 
   const saveProfile = async () => {
     setSaving(true);
+    setError(null);
     try {
       const res = await fetch("/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(profile),
       });
-      if (res.ok) {
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || `Failed to save profile (${res.status})`);
+        return;
       }
-    } catch {}
-    finally {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save profile");
+    } finally {
       setSaving(false);
     }
   };
@@ -574,16 +580,19 @@ function ProfileSettings() {
         </div>
       </div>
 
-      <div className="pt-2 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={saveProfile}
-          disabled={saving}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-200"
-        >
-          {saved ? <Check className="size-3.5" /> : null}
-          {saving ? "Saving..." : saved ? "Profile Saved!" : "Save Profile & Target Roles"}
-        </button>
+      <div className="pt-2 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={saveProfile}
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-200"
+          >
+            {saved ? <Check className="size-3.5" /> : null}
+            {saving ? "Saving..." : saved ? "Profile Saved!" : "Save Profile & Target Roles"}
+          </button>
+          {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
         <span className="text-[11px] text-faint">Direct write to config/profile.yml</span>
       </div>
     </div>

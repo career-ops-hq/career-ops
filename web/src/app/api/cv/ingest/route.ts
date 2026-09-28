@@ -84,13 +84,24 @@ export async function POST(req: Request) {
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
 
-      const buffer = Buffer.from(await file.arrayBuffer());
       const fileName = file.name.toLowerCase();
 
+      if (fileName.endsWith(".docx")) {
+        return Response.json(
+          { error: "Word documents (.docx) are not supported directly. Please upload a PDF or paste text." },
+          { status: 400 }
+        );
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
       if (fileName.endsWith(".pdf")) {
-        const { parsePdfBuffer } = await import("@/lib/cv/pdf-parser");
-        const parsed = await parsePdfBuffer(buffer);
-        promptSource = TEXT_SRC(parsed.rawText);
+        // Write PDF to a temporary file in user tempdir for the CLI to read with its local file tool
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "co-cv-"));
+        tempFile = path.join(tempDir, "upload.pdf");
+        fs.writeFileSync(tempFile, buffer);
+        promptSource = FILE_SRC(tempFile);
       } else {
         const text = buffer.toString("utf8");
         promptSource = TEXT_SRC(text);
@@ -99,6 +110,7 @@ export async function POST(req: Request) {
       return Response.json({ error: "unsupported content-type" }, { status: 400 });
     }
   } catch {
+    if (tempFile) cleanupTemp(tempFile);
     return Response.json({ error: "bad request" }, { status: 400 });
   }
 

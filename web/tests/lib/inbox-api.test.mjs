@@ -28,13 +28,18 @@ const { GET: getInbox, POST: postInbox } = await import("../../src/app/api/inbox
 async function withTempRoot(fn) {
   const root = mkdtempSync(path.join(tmpdir(), "career-ops-inbox-test-"));
   mkdirSync(path.join(root, "data"), { recursive: true });
-  const prev = process.env.CAREER_OPS_ROOT;
+  const inboxPath = path.join(root, "data", "agent-inbox.md");
+  const prevRoot = process.env.CAREER_OPS_ROOT;
+  const prevInbox = process.env.CAREER_OPS_INBOX;
   process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_INBOX = inboxPath;
   try {
-    await fn({ root, inboxPath: path.join(root, "data", "agent-inbox.md") });
+    await fn({ root, inboxPath });
   } finally {
-    if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
-    else process.env.CAREER_OPS_ROOT = prev;
+    if (prevRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = prevRoot;
+    if (prevInbox === undefined) delete process.env.CAREER_OPS_INBOX;
+    else process.env.CAREER_OPS_INBOX = prevInbox;
     rmSync(root, { recursive: true, force: true });
   }
 }

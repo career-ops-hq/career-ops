@@ -12,7 +12,7 @@ To launch the local web server and open the browser dashboard:
 npm run ui
 ```
 
-The server starts locally on `http://localhost:3000` (or the next available port) and opens your default browser.
+The server starts locally on `http://localhost:3000` (or specified `--port`) and opens your default browser.
 
 ---
 

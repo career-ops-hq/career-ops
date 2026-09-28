@@ -40,19 +40,21 @@ export async function GET() {
     try {
       const files = fs.readdirSync(outputDir);
       for (const file of files) {
-        const filePath = path.join(outputDir, file);
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-          const isCover = file.includes("cover") || file.includes("letter");
-          docs.push({
-            id: `doc-out-${file}`,
-            name: file,
-            category: isCover ? "cover-letter" : "tailored-cv",
-            path: `output/${file}`,
-            sizeBytes: stat.size,
-            updatedAt: stat.mtime.toISOString(),
-          });
-        }
+        try {
+          const filePath = path.join(outputDir, file);
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const isCover = file.includes("cover") || file.includes("letter");
+            docs.push({
+              id: `doc-out-${file}`,
+              name: file,
+              category: isCover ? "cover-letter" : "tailored-cv",
+              path: `output/${file}`,
+              sizeBytes: stat.size,
+              updatedAt: stat.mtime.toISOString(),
+            });
+          }
+        } catch {}
       }
     } catch {}
   }
@@ -64,16 +66,18 @@ export async function GET() {
       const files = fs.readdirSync(prepDir);
       for (const file of files) {
         if (file.endsWith(".md")) {
-          const filePath = path.join(prepDir, file);
-          const stat = fs.statSync(filePath);
-          docs.push({
-            id: `doc-prep-${file}`,
-            name: file,
-            category: "interview-prep",
-            path: `interview-prep/${file}`,
-            sizeBytes: stat.size,
-            updatedAt: stat.mtime.toISOString(),
-          });
+          try {
+            const filePath = path.join(prepDir, file);
+            const stat = fs.statSync(filePath);
+            docs.push({
+              id: `doc-prep-${file}`,
+              name: file,
+              category: "interview-prep",
+              path: `interview-prep/${file}`,
+              sizeBytes: stat.size,
+              updatedAt: stat.mtime.toISOString(),
+            });
+          } catch {}
         }
       }
     } catch {}
@@ -86,16 +90,18 @@ export async function GET() {
       const files = fs.readdirSync(reportsDir);
       for (const file of files) {
         if (file.endsWith(".md") && !file.includes("RESERVED")) {
-          const filePath = path.join(reportsDir, file);
-          const stat = fs.statSync(filePath);
-          docs.push({
-            id: `doc-rep-${file}`,
-            name: file,
-            category: "report",
-            path: `reports/${file}`,
-            sizeBytes: stat.size,
-            updatedAt: stat.mtime.toISOString(),
-          });
+          try {
+            const filePath = path.join(reportsDir, file);
+            const stat = fs.statSync(filePath);
+            docs.push({
+              id: `doc-rep-${file}`,
+              name: file,
+              category: "report",
+              path: `reports/${file}`,
+              sizeBytes: stat.size,
+              updatedAt: stat.mtime.toISOString(),
+            });
+          } catch {}
         }
       }
     } catch {}

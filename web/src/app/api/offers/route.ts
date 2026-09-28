@@ -88,6 +88,11 @@ export async function POST(req: Request) {
     const root = careerOpsRoot();
     const obsPath = path.join(root, "data", "salary-observations.tsv");
 
+    const sanitize = (val: unknown, def = ""): string => {
+      if (typeof val !== "string") return def;
+      return val.replace(/[\t\r\n]+/g, " ").trim();
+    };
+
     if (action === "record") {
       let current = "";
       if (fs.existsSync(obsPath)) {
@@ -97,15 +102,27 @@ export async function POST(req: Request) {
       }
 
       const today = new Date().toISOString().slice(0, 10);
+      const sCompany = sanitize(company);
+      const sRole = sanitize(role);
+      const sNotes = sanitize(notes);
       const total = [
-        baseComp ? `Base: ${baseComp}` : "",
-        bonus ? `Bonus: ${bonus}` : "",
-        equity ? `Equity: ${equity}` : "",
-        signing ? `Signing: ${signing}` : "",
+        baseComp ? `Base: ${sanitize(baseComp)}` : "",
+        bonus ? `Bonus: ${sanitize(bonus)}` : "",
+        equity ? `Equity: ${sanitize(equity)}` : "",
+        signing ? `Signing: ${sanitize(signing)}` : "",
       ]
         .filter(Boolean)
         .join(", ");
-      const row = `${today}\t${company}\t${role || ""}\t${total}\t${notes || ""}\n`;
+
+      if (!sCompany) {
+        return Response.json({ error: "Company is required" }, { status: 400 });
+      }
+
+      if (current.length > 0 && !current.endsWith("\n")) {
+        current += "\n";
+      }
+
+      const row = `${today}\t${sCompany}\t${sRole}\t${total}\t${sNotes}\n`;
       current += row;
 
       atomicWrite(obsPath, current);

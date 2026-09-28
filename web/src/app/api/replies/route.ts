@@ -53,8 +53,24 @@ export async function POST(req: Request) {
     let confidence = 0.7;
 
     if (
-      lower.includes("offer") ||
+      lower.includes("unfortunately") ||
+      lower.includes("pursuing other candidates") ||
+      lower.includes("not moving forward") ||
+      lower.includes("decided not to proceed") ||
+      lower.includes("position has been filled") ||
+      lower.includes("other candidates whose") ||
+      lower.includes("not to move forward")
+    ) {
+      classification = "rejection";
+      suggestedStatus = "Rejected";
+      confidence = 0.92;
+    } else if (
       lower.includes("pleased to offer") ||
+      lower.includes("offer of employment") ||
+      lower.includes("formal offer") ||
+      lower.includes("extend an offer") ||
+      lower.includes("congratulations on your offer") ||
+      lower.includes("offer letter") ||
       lower.includes("compensation package")
     ) {
       classification = "offer";
@@ -71,16 +87,6 @@ export async function POST(req: Request) {
       classification = "interview";
       suggestedStatus = "Interview";
       confidence = 0.9;
-    } else if (
-      lower.includes("unfortunately") ||
-      lower.includes("pursuing other candidates") ||
-      lower.includes("not moving forward") ||
-      lower.includes("decided not to proceed") ||
-      lower.includes("position has been filled")
-    ) {
-      classification = "rejection";
-      suggestedStatus = "Rejected";
-      confidence = 0.92;
     } else if (
       lower.includes("assessment") ||
       lower.includes("hackerrank") ||

@@ -46,8 +46,21 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { name, description, skills, metrics, link } = body;
 
-    if (!name) {
+    if (!name || typeof name !== "string" || !name.trim()) {
       return NextResponse.json({ error: "Project name is required" }, { status: 400 });
+    }
+
+    let validatedLink = "";
+    if (link && typeof link === "string" && link.trim()) {
+      try {
+        const u = new URL(link.trim());
+        if (u.protocol !== "http:" && u.protocol !== "https:") {
+          return NextResponse.json({ error: "Link must use http: or https: protocol" }, { status: 400 });
+        }
+        validatedLink = u.href;
+      } catch {
+        return NextResponse.json({ error: "Invalid URL format for project link" }, { status: 400 });
+      }
     }
 
     const root = careerOpsRoot();
@@ -56,17 +69,24 @@ export async function POST(req: Request) {
     let current: ProjectItem[] = [];
     if (fs.existsSync(projectsPath)) {
       try {
-        current = JSON.parse(fs.readFileSync(projectsPath, "utf8"));
-      } catch {}
+        const parsed = JSON.parse(fs.readFileSync(projectsPath, "utf8"));
+        if (Array.isArray(parsed)) {
+          current = parsed;
+        } else {
+          return NextResponse.json({ error: "projects.json format is invalid (not an array)" }, { status: 500 });
+        }
+      } catch {
+        return NextResponse.json({ error: "Failed to read projects.json" }, { status: 500 });
+      }
     }
 
     const newProject: ProjectItem = {
       id: `proj-${Date.now()}`,
-      name,
+      name: name.trim(),
       description: description || "",
       skills: Array.isArray(skills) ? skills : (skills || "").split(",").map((s: string) => s.trim()).filter(Boolean),
       metrics: metrics || "",
-      link: link || "",
+      link: validatedLink,
     };
 
     current.unshift(newProject);

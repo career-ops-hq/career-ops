@@ -20,9 +20,9 @@ if (typeof window !== "undefined" && !window.__coLogBufInstalled) {
   console.error = (...args: unknown[]) => {
     try {
       const msg = args.map((a) => (a instanceof Error ? `${a.stack || a.message}` : String(a))).join(" ");
-      // Suppress extension noise, ResizeObserver noise, and extension-induced hydration mismatch overlays
+      // Suppress extension noise and ResizeObserver loop
       if (
-        /bis_skin_checked|ResizeObserver loop|chrome-extension|moz-extension|hydration-mismatch|server rendered HTML|didn't match/i.test(
+        /bis_skin_checked|ResizeObserver loop|chrome-extension:\/\/|moz-extension:\/\//i.test(
           msg
         )
       ) {

@@ -47,6 +47,8 @@ export default function InterviewCenterPage() {
   const [debriefConfidence, setDebriefConfidence] = useState(4);
   const [debriefNotes, setDebriefNotes] = useState("");
   const [debriefSaved, setDebriefSaved] = useState(false);
+  const [debriefSubmitting, setDebriefSubmitting] = useState(false);
+  const [debriefError, setDebriefError] = useState<string | null>(null);
 
   // Prep Plan state
   const [planDays, setPlanDays] = useState(5);
@@ -100,22 +102,35 @@ export default function InterviewCenterPage() {
   const handleDebriefSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!debriefCompany) return;
-    await fetch("/api/interviews", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "debrief",
-        company: debriefCompany,
-        role: debriefRole,
-        round: debriefRound,
-        question: debriefQuestion,
-        answer: debriefAnswer,
-        confidence: debriefConfidence,
-        notes: debriefNotes,
-      }),
-    });
-    setDebriefSaved(true);
-    setTimeout(() => setDebriefSaved(false), 3000);
+    setDebriefSubmitting(true);
+    setDebriefError(null);
+    try {
+      const res = await fetch("/api/interviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "debrief",
+          company: debriefCompany,
+          role: debriefRole,
+          round: debriefRound,
+          question: debriefQuestion,
+          answer: debriefAnswer,
+          confidence: debriefConfidence,
+          notes: debriefNotes,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setDebriefError(data.error || "Failed to log debrief");
+        return;
+      }
+      setDebriefSaved(true);
+      setTimeout(() => setDebriefSaved(false), 3000);
+    } catch (err: unknown) {
+      setDebriefError(err instanceof Error ? err.message : "Failed to log debrief");
+    } finally {
+      setDebriefSubmitting(false);
+    }
   };
 
   return (
@@ -422,13 +437,20 @@ export default function InterviewCenterPage() {
               />
             </div>
 
+            {debriefError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-xs text-red-400">
+                {debriefError}
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-2">
               <span className="text-xs text-emerald-400 font-medium">{debriefSaved && "✓ Debrief logged successfully!"}</span>
               <button
                 type="submit"
-                className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white hover:opacity-90"
+                disabled={debriefSubmitting}
+                className="rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
               >
-                Save Debrief
+                {debriefSubmitting ? "Saving..." : "Save Debrief"}
               </button>
             </div>
           </form>

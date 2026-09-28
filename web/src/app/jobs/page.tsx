@@ -211,7 +211,7 @@ export default function JobsPage() {
                         <td className="px-4 py-3 text-faint">{j.date || "—"}</td>
                         <td className="px-4 py-3 text-right">
                           <Link
-                            href={`/jobs/${j.n}`}
+                            href={`/pipeline/${j.n}`}
                             className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
                           >
                             <FileText className="size-3.5" /> View Report

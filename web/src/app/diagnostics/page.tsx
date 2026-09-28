@@ -16,18 +16,27 @@ export default function DiagnosticsPage() {
   const [timestamp, setTimestamp] = useState("");
   const [root, setRoot] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [copiedFix, setCopiedFix] = useState<string | null>(null);
 
   const fetchDiagnostics = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch("/api/diagnostics");
+      if (!res.ok) {
+        throw new Error(`Diagnostics request failed (${res.status})`);
+      }
       const data = await res.json();
       setChecks(data.checks || []);
       setTimestamp(data.timestamp || "");
       setRoot(data.root || "");
-    } catch {}
-    finally {
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load diagnostics");
+      setChecks([]);
+      setTimestamp("");
+      setRoot("");
+    } finally {
       setLoading(false);
     }
   };
@@ -74,6 +83,13 @@ export default function DiagnosticsPage() {
           Last checked: {timestamp ? new Date(timestamp).toLocaleTimeString() : "—"}
         </div>
       </div>
+
+      {error && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-400 flex items-center gap-2">
+          <XCircle className="size-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="p-12 text-center text-sm text-muted">Running system diagnostics...</div>

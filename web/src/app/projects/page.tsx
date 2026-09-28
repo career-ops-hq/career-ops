@@ -16,7 +16,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-
+  const [addError, setAddError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newSkills, setNewSkills] = useState("");
@@ -42,26 +42,38 @@ export default function ProjectsPage() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName) return;
+    setAddError(null);
 
-    await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: newName,
-        description: newDesc,
-        skills: newSkills,
-        metrics: newMetrics,
-        link: newLink,
-      }),
-    });
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          description: newDesc,
+          skills: newSkills,
+          metrics: newMetrics,
+          link: newLink,
+        }),
+      });
 
-    setModalOpen(false);
-    setNewName("");
-    setNewDesc("");
-    setNewSkills("");
-    setNewMetrics("");
-    setNewLink("");
-    fetchProjects();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setAddError(data.error || "Failed to save project");
+        return;
+      }
+
+      setModalOpen(false);
+      setNewName("");
+      setNewDesc("");
+      setNewSkills("");
+      setNewMetrics("");
+      setNewLink("");
+      setAddError(null);
+      fetchProjects();
+    } catch (err: unknown) {
+      setAddError(err instanceof Error ? err.message : "Failed to save project");
+    }
   };
 
   return (
@@ -143,6 +155,11 @@ export default function ProjectsPage() {
           <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl">
             <h3 className="text-base font-bold text-foreground">Add Portfolio Project</h3>
             <form onSubmit={handleAdd} className="mt-4 space-y-3">
+              {addError && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-xs text-red-400">
+                  {addError}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-muted mb-1">Project Name *</label>
                 <input

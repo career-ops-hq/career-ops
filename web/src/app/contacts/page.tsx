@@ -25,6 +25,7 @@ export default function ContactsPage() {
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newCompany, setNewCompany] = useState("");
   const [newRole, setNewRole] = useState("");
@@ -53,29 +54,41 @@ export default function ContactsPage() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName || !newCompany) return;
+    setAddError(null);
 
-    await fetch("/api/contacts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: newName,
-        company: newCompany,
-        role: newRole,
-        email: newEmail,
-        linkedin: newLinkedin,
-        notes: newNotes,
-        status: "identified",
-      }),
-    });
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newName,
+          company: newCompany,
+          role: newRole,
+          email: newEmail,
+          linkedin: newLinkedin,
+          notes: newNotes,
+          status: "identified",
+        }),
+      });
 
-    setModalOpen(false);
-    setNewName("");
-    setNewCompany("");
-    setNewRole("");
-    setNewEmail("");
-    setNewLinkedin("");
-    setNewNotes("");
-    fetchContacts();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setAddError(data.error || "Failed to save contact");
+        return;
+      }
+
+      setModalOpen(false);
+      setNewName("");
+      setNewCompany("");
+      setNewRole("");
+      setNewEmail("");
+      setNewLinkedin("");
+      setNewNotes("");
+      setAddError(null);
+      fetchContacts();
+    } catch (err: unknown) {
+      setAddError(err instanceof Error ? err.message : "Failed to save contact");
+    }
   };
 
   const copyOutreach = (contact: Contact) => {
@@ -241,6 +254,11 @@ export default function ContactsPage() {
           <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 shadow-2xl">
             <h3 className="text-base font-bold text-foreground">Add New Contact</h3>
             <form onSubmit={handleAdd} className="mt-4 space-y-3">
+              {addError && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-xs text-red-400">
+                  {addError}
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-muted mb-1">Full Name *</label>
                 <input

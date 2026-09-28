@@ -14,26 +14,32 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { cliId, action, apiKey, provider } = body;
 
+    const ALLOWED_PROVIDERS: Record<string, string> = {
+      anthropic: "ANTHROPIC_API_KEY",
+      openai: "OPENAI_API_KEY",
+      google: "GEMINI_API_KEY",
+      gemini: "GEMINI_API_KEY",
+      openrouter: "OPENROUTER_API_KEY",
+    };
+
     // 1. Handle Direct API Key saving & verification
     if (action === "save-key") {
       if (!apiKey || typeof apiKey !== "string") {
         return NextResponse.json({ error: "API Key is required" }, { status: 400 });
       }
 
-      const trimmedKey = apiKey.trim();
-      let isValid = true;
-      let errorMsg = "";
-
-      // Quick provider validation ping
-      if (provider === "anthropic" || trimmedKey.startsWith("sk-ant-")) {
-        process.env.ANTHROPIC_API_KEY = trimmedKey;
-      } else if (provider === "openai" || trimmedKey.startsWith("sk-proj-") || trimmedKey.startsWith("sk-")) {
-        process.env.OPENAI_API_KEY = trimmedKey;
-      } else if (provider === "google" || provider === "gemini") {
-        process.env.GEMINI_API_KEY = trimmedKey;
-      } else if (provider === "openrouter") {
-        process.env.OPENROUTER_API_KEY = trimmedKey;
+      if (/[\r\n]/.test(apiKey)) {
+        return NextResponse.json({ error: "API Key must not contain newlines" }, { status: 400 });
       }
+
+      const provKey = (provider || "").toLowerCase().trim();
+      const keyName = ALLOWED_PROVIDERS[provKey];
+      if (!keyName) {
+        return NextResponse.json({ error: `Unsupported provider: ${provider}` }, { status: 400 });
+      }
+
+      const trimmedKey = apiKey.trim();
+      process.env[keyName] = trimmedKey;
 
       // Persist to user local config file safely
       const root = careerOpsRoot();
@@ -42,15 +48,6 @@ export async function POST(req: Request) {
       if (fs.existsSync(envPath)) {
         envContent = fs.readFileSync(envPath, "utf8");
       }
-
-      const keyName =
-        provider === "anthropic"
-          ? "ANTHROPIC_API_KEY"
-          : provider === "openai"
-          ? "OPENAI_API_KEY"
-          : provider === "google"
-          ? "GEMINI_API_KEY"
-          : "OPENROUTER_API_KEY";
 
       const regex = new RegExp(`^${keyName}=.*$`, "m");
       if (regex.test(envContent)) {
@@ -76,23 +73,31 @@ export async function POST(req: Request) {
       }
 
       let loginUrl = "";
+      let loginArgs: string[] = [];
       if (cliId === "claude") {
         loginUrl = "https://claude.ai/login";
-        // Trigger claude login via Windows shell so browser opens
-        if (process.platform === "win32") {
-          spawn("cmd.exe", ["/c", "start", "claude", "login"], { detached: true, stdio: "ignore" });
-        } else {
-          spawn("claude", ["login"], { detached: true, stdio: "ignore" });
-        }
+        loginArgs = ["login"];
       } else if (cliId === "agy" || cliId === "antigravity") {
         loginUrl = "https://antigravity.google";
-        if (process.platform === "win32") {
-          spawn("cmd.exe", ["/c", "start", "agy", "auth", "login"], { detached: true, stdio: "ignore" });
-        } else {
-          spawn("agy", ["auth", "login"], { detached: true, stdio: "ignore" });
-        }
+        loginArgs = ["auth", "login"];
       } else if (cliId === "codex") {
         loginUrl = "https://platform.openai.com/api-keys";
+      }
+
+      if (loginArgs.length > 0) {
+        try {
+          const child = spawn(resolved.binPath, loginArgs, {
+            detached: true,
+            stdio: "ignore",
+            shell: process.platform === "win32",
+          });
+          child.on("error", (err) => {
+            console.error(`Failed to launch ${resolved.spec.name} login:`, err);
+          });
+          child.unref();
+        } catch (e) {
+          console.error("Failed to spawn login process:", e);
+        }
       }
 
       return NextResponse.json({

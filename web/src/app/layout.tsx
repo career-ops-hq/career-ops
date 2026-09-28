@@ -73,8 +73,8 @@ const THEME_SCRIPT = `(function(){
       if (
         msg.indexOf('bis_skin_checked') !== -1 ||
         msg.indexOf('chrome-extension://') !== -1 ||
-        msg.indexOf('M_ID') !== -1 ||
-        (msg.indexOf('hydration') !== -1 && msg.indexOf("didn't match") !== -1 && msg.indexOf('bis_skin_checked') !== -1)
+        msg.indexOf('moz-extension://') !== -1 ||
+        msg.indexOf('M_ID') !== -1
       ) {
         return;
       }

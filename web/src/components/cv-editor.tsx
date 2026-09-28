@@ -37,6 +37,7 @@ export function CvEditor() {
   const [profile, setProfile] = useState<any>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceErr, setEnhanceErr] = useState("");
+  const [uploadErr, setUploadErr] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -92,6 +93,7 @@ export function CvEditor() {
 
   const handleQuickUpload = async (file: File) => {
     setSaving(true);
+    setUploadErr("");
     try {
       const form = new FormData();
       form.append("file", file);
@@ -99,18 +101,22 @@ export function CvEditor() {
         method: "POST",
         body: form,
       });
-      if (res.ok) {
-        const d = await res.json();
-        setContent(d.markdown || "");
-        setDirty(false);
-        setExists(true);
-        setSaved(true);
-        fetchProfile();
-        setTab("editor");
-        setTimeout(() => setSaved(false), 2000);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setUploadErr(d.error || `Upload failed (${res.status})`);
+        return;
       }
-    } catch {}
-    finally {
+      const d = await res.json();
+      setContent(d.markdown || "");
+      setDirty(false);
+      setExists(true);
+      setSaved(true);
+      fetchProfile();
+      setTab("editor");
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: unknown) {
+      setUploadErr(err instanceof Error ? err.message : "Upload failed");
+    } finally {
       setSaving(false);
     }
   };
@@ -129,10 +135,15 @@ export function CvEditor() {
     setEnhancing(true);
     setEnhanceErr("");
     try {
+      let cli = "claude";
+      try {
+        const savedCli = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId;
+        if (savedCli) cli = savedCli;
+      } catch {}
       const res = await fetch("/api/cv/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: content, cliId: "claude" }),
+        body: JSON.stringify({ text: content, cliId: cli }),
       });
       if (!res.ok) {
         throw new Error("AI enhancement requires an active AI CLI in Settings/Config.");
@@ -313,6 +324,13 @@ export function CvEditor() {
             <div className="text-xs text-amber-400 bg-amber-950/20 border border-amber-500/20 p-3 rounded-lg flex items-center gap-2">
               <AlertTriangle className="size-4 shrink-0" />
               <span>{enhanceErr}</span>
+            </div>
+          )}
+
+          {uploadErr && (
+            <div className="text-xs text-red-400 bg-red-950/20 border border-red-500/20 p-3 rounded-lg flex items-center gap-2">
+              <AlertTriangle className="size-4 shrink-0" />
+              <span>{uploadErr}</span>
             </div>
           )}
 

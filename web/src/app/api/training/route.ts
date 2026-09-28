@@ -47,9 +47,19 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { platform, subject, score, status, notes } = body;
+    const { platform, subject, score, status, notes } = body || {};
+    const sanitize = (val: unknown, def = ""): string => {
+      if (typeof val !== "string") return def;
+      return val.replace(/[\t\r\n]+/g, " ").trim();
+    };
 
-    if (!platform || !subject) {
+    const sPlatform = sanitize(platform);
+    const sSubject = sanitize(subject);
+    const sScore = sanitize(score, "N/A");
+    const sStatus = sanitize(status, "Completed");
+    const sNotes = sanitize(notes);
+
+    if (!sPlatform || !sSubject) {
       return NextResponse.json({ error: "Platform and Subject are required" }, { status: 400 });
     }
 
@@ -63,8 +73,12 @@ export async function POST(req: Request) {
       current = "Date\tPlatform\tSubject\tScore\tStatus\tNotes\n";
     }
 
+    if (current.length > 0 && !current.endsWith("\n")) {
+      current += "\n";
+    }
+
     const today = new Date().toISOString().slice(0, 10);
-    const row = `${today}\t${platform}\t${subject}\t${score || "N/A"}\t${status || "Completed"}\t${notes || ""}\n`;
+    const row = `${today}\t${sPlatform}\t${sSubject}\t${sScore}\t${sStatus}\t${sNotes}\n`;
     current += row;
 
     atomicWrite(assessPath, current);

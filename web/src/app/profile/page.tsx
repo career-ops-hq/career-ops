@@ -108,24 +108,33 @@ export default function ProfilePage() {
     setError(null);
     setSaved(false);
 
+    const candidateObj: Record<string, any> = {
+      ...(rawProfile?.candidate || {}),
+    };
+    if (fullName.trim()) candidateObj.full_name = fullName.trim();
+    if (title.trim()) candidateObj.title = title.trim();
+    if (email.trim()) candidateObj.email = email.trim();
+    if (phone.trim()) candidateObj.phone = phone.trim();
+    if (location.trim()) candidateObj.location = location.trim();
+    if (linkedin.trim()) candidateObj.linkedin = linkedin.trim();
+    delete candidateObj.github;
+
+    const compObj: Record<string, any> = {
+      ...(rawProfile?.compensation || {}),
+    };
+    if (currency.trim()) compObj.currency = currency.trim();
+    if (targetRange.trim()) compObj.target_range = targetRange.trim();
+    if (locationFlexibility) compObj.location_flexibility = locationFlexibility;
+
     const payload = {
-      candidate: {
-        full_name: fullName.trim(),
-        title: title.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        location: location.trim(),
-        linkedin: linkedin.trim(),
-        github: github.trim(),
-      },
+      candidate: candidateObj,
       target_roles: {
+        ...(typeof rawProfile?.target_roles === "object" && !Array.isArray(rawProfile?.target_roles)
+          ? rawProfile.target_roles
+          : {}),
         primary: targetRoles,
       },
-      compensation: {
-        currency: currency.trim(),
-        target_range: targetRange.trim(),
-        location_flexibility: locationFlexibility,
-      },
+      compensation: compObj,
     };
 
     try {
@@ -384,6 +393,9 @@ export default function ProfilePage() {
                     onChange={(e) => setLocationFlexibility(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-brand focus:outline-none"
                   >
+                    {!["remote", "hybrid", "onsite", "any"].includes(locationFlexibility) && locationFlexibility && (
+                      <option value={locationFlexibility}>{locationFlexibility}</option>
+                    )}
                     <option value="remote">Remote Only</option>
                     <option value="hybrid">Hybrid (Local Office)</option>
                     <option value="onsite">On-site (Relocation Open)</option>

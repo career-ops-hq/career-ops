@@ -1,23 +1,14 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, readProfileCandidateInfo } from "@/lib/career-ops";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { type, company, role, recipient, fitPoints } = body;
 
-    const root = careerOpsRoot();
-    let candidateName = "Candidate";
-    const profilePath = path.join(root, "config", "profile.yml");
-    if (fs.existsSync(profilePath)) {
-      try {
-        const parsed = fs.readFileSync(profilePath, "utf8");
-        const matchName = parsed.match(/name:\s*["']?([^"'\n]+)/i);
-        if (matchName) candidateName = matchName[1].trim();
-      } catch {}
-    }
+    const { name: candidateName } = readProfileCandidateInfo();
 
     let subject = "";
     let emailBody = "";

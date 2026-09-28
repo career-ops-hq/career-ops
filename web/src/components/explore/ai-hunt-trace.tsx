@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { AiTraceChunk } from "@/lib/explore-ai";
 
@@ -90,8 +90,8 @@ export function AiHuntTrace({ trace }: { trace: AiTraceChunk[] }) {
         ))}
       </div>
       {fencingNotice && (
-        <div className="border-t border-emerald-500/20 px-4 py-2 text-[11px] text-emerald-400 flex items-center gap-1.5 bg-emerald-950/20 rounded-b-2xl">
-          <Sparkles className="size-3 text-emerald-400 shrink-0" />
+        <div className="border-t border-amber-500/20 px-4 py-2 text-[11px] text-amber-400 flex items-center gap-1.5 bg-amber-950/20 rounded-b-2xl">
+          <AlertTriangle className="size-3 text-amber-400 shrink-0" />
           <span className="font-medium">{fencingNotice}</span>
         </div>
       )}

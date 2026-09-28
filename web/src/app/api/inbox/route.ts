@@ -47,11 +47,13 @@ function parseInbox(content: string) {
       let request = fullText;
       let result: string | undefined = undefined;
 
-      // Extract result if present: "... → result: ..."
-      const resultSplit = fullText.split(/\s*→\s*result:\s*/i);
-      if (resultSplit.length > 1) {
-        request = resultSplit[0];
-        result = resultSplit[1];
+      // Extract result if completed: "... → result: ..."
+      if (done) {
+        const resultSplit = fullText.split(/\s*→\s*result:\s*/i);
+        if (resultSplit.length > 1) {
+          request = resultSplit[0];
+          result = resultSplit.slice(1).join(" → result: ").trim();
+        }
       }
 
       // Extract timestamp if present: "YYYY-MM-DD HH:mm — request"
@@ -80,11 +82,16 @@ export async function GET() {
   let content = "";
   let exists = false;
 
-  if (fs.existsSync(inboxPath)) {
-    try {
-      content = fs.readFileSync(inboxPath, "utf8");
-      exists = true;
-    } catch {}
+  try {
+    content = fs.readFileSync(inboxPath, "utf8");
+    exists = true;
+  } catch (err: any) {
+    if (err?.code === "ENOENT") {
+      exists = false;
+      content = "";
+    } else {
+      return Response.json({ error: "Failed to read agent inbox" }, { status: 500 });
+    }
   }
 
   const items = exists ? parseInbox(content) : [];
@@ -124,7 +131,7 @@ export async function POST(req: Request) {
       }
 
       const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-      const singleLine = request.replace(/\s*\n\s*/g, " ").trim();
+      const singleLine = request.replace(/[\r\n\t]+/g, " ").trim();
       const newLine = `- [ ] ${stamp} — ${singleLine}\n`;
 
       const separator = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
@@ -152,7 +159,8 @@ export async function POST(req: Request) {
 
             if (isDone) {
               if (result && !fullText.includes("→ result:")) {
-                fullText = `${fullText} → result: ${result.trim()}`;
+                const cleanResult = String(result).replace(/[\r\n\t]+/g, " ").trim();
+                fullText = `${fullText} → result: ${cleanResult}`;
               }
               lines[i] = `- [x] ${fullText}`;
             } else {

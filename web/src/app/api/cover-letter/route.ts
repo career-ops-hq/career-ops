@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, readProfileCandidateInfo } from "@/lib/career-ops";
 import { atomicWrite } from "@/lib/core/safe-write";
 
 export async function POST(req: Request) {
@@ -13,21 +13,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Company and role are required" }, { status: 400 });
     }
 
-    const root = careerOpsRoot();
-
-    // Read profile.yml or cv.md for candidate name
-    let candidateName = "Candidate";
-    let candidateEmail = "applicant@example.com";
-    const profilePath = path.join(root, "config", "profile.yml");
-    if (fs.existsSync(profilePath)) {
-      try {
-        const parsed = fs.readFileSync(profilePath, "utf8");
-        const matchName = parsed.match(/name:\s*["']?([^"'\n]+)/i);
-        if (matchName) candidateName = matchName[1].trim();
-        const matchEmail = parsed.match(/email:\s*["']?([^"'\n]+)/i);
-        if (matchEmail) candidateEmail = matchEmail[1].trim();
-      } catch {}
-    }
+    const { name: candidateName, email: candidateEmail } = readProfileCandidateInfo();
 
     const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 

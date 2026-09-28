@@ -5,6 +5,8 @@ import path from "node:path";
 import http from "node:http";
 import { fileURLToPath } from "node:url";
 
+import { getCareerOpsRoot } from "../path-resolver.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
@@ -41,19 +43,19 @@ let doctorPassed = true;
 try {
   const doctorScript = path.join(rootDir, "doctor.mjs");
   if (fs.existsSync(doctorScript)) {
-    // Quick validation
     console.log("\x1b[32m✓\x1b[0m System and environment verified");
   }
 } catch {
   doctorPassed = false;
 }
 
-// Check paths
-const dataDir = path.join(rootDir, "data");
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Resolve data root canonically
+const dataRoot = getCareerOpsRoot();
+console.log("\x1b[32m✓\x1b[0m Data root resolved: " + dataRoot);
+
+if (host === "0.0.0.0") {
+  console.warn("\x1b[33m⚠️ Warning: Host is set to 0.0.0.0 — Next.js will listen on all network interfaces.\x1b[0m");
 }
-console.log("\x1b[32m✓\x1b[0m Data directory ready: " + rootDir);
 
 const url = `http://${host === "0.0.0.0" ? "localhost" : host}:${port}`;
 
@@ -85,16 +87,17 @@ function openBrowser(targetUrl) {
 
 // Check if next is ready before opening
 let opened = false;
+let polling = true;
 function pollReady() {
-  if (opened) return;
+  if (opened || !polling) return;
   const req = http.get(url, (res) => {
-    if (res.statusCode && res.statusCode < 500 && !opened) {
+    if (res.statusCode && res.statusCode < 500 && !opened && polling) {
       opened = true;
       openBrowser(url);
     }
   });
   req.on("error", () => {
-    setTimeout(pollReady, 500);
+    if (polling) setTimeout(pollReady, 500);
   });
 }
 
@@ -103,7 +106,7 @@ const childEnv = {
   ...process.env,
   PORT: String(port),
   HOSTNAME: host,
-  CAREER_OPS_ROOT: rootDir,
+  CAREER_OPS_ROOT: dataRoot,
 };
 
 // Spawn Next.js process from web directory
@@ -121,6 +124,7 @@ setTimeout(pollReady, 1000);
 
 // Graceful exit
 function cleanup() {
+  polling = false;
   console.log("\nShutting down Career-ops UI...");
   if (child && !child.killed) {
     if (isWindows) {
@@ -137,5 +141,9 @@ function cleanup() {
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 child.on("exit", (code) => {
+  polling = false;
+  if (!opened && code !== 0) {
+    console.error(`\x1b[31mError:\x1b[0m Web server failed to start on port ${port}. Port may be occupied or build failed.`);
+  }
   process.exit(code || 0);
 });

@@ -252,6 +252,8 @@ export async function POST(req: Request) {
     forceKill.unref?.();
   };
 
+  const abortController = new AbortController();
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -402,7 +404,7 @@ export async function POST(req: Request) {
           return;
         }
 
-        if (!emitted) {
+        if (!emitted && !closed) {
           safeEnqueue("Scanning public company ATS boards (Greenhouse, Ashby, Lever, Workday) for matching roles…\n\n");
           try {
             const { runDiscovery } = await import("@/lib/core/scan");
@@ -414,7 +416,8 @@ export async function POST(req: Request) {
                 positive: terms.length ? terms : [query],
                 sinceDays: 45,
               },
-              () => {}
+              () => {},
+              abortController.signal
             );
             if (offers.length > 0) {
               for (const o of offers.slice(0, 15)) {
@@ -444,6 +447,7 @@ export async function POST(req: Request) {
     },
     cancel() {
       closed = true;
+      abortController.abort();
 
       if (killer) {
         clearTimeout(killer);

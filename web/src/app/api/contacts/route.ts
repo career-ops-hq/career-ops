@@ -71,9 +71,22 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { name, company, role, source, linkedin, email, notes, status } = body;
+    const { name, company, role, source, linkedin, email, notes, status } = body || {};
+    const sanitize = (val: unknown, def = ""): string => {
+      if (typeof val !== "string") return def;
+      return val.replace(/[\t\r\n]+/g, " ").trim();
+    };
 
-    if (!name || !company) {
+    const sName = sanitize(name);
+    const sCompany = sanitize(company);
+    const sRole = sanitize(role);
+    const sSource = sanitize(source, "direct");
+    const sLinkedin = sanitize(linkedin);
+    const sEmail = sanitize(email);
+    const sNotes = sanitize(notes);
+    const sStatus = sanitize(status, "identified");
+
+    if (!sName || !sCompany) {
       return NextResponse.json({ error: "Name and company are required" }, { status: 400 });
     }
 
@@ -92,7 +105,11 @@ export async function POST(req: Request) {
       content = "Name\tCompany\tRole\tSource\tLinkedIn\tEmail\tNotes\tStatus\n";
     }
 
-    const newRow = `${name}\t${company}\t${role || ""}\t${source || "direct"}\t${linkedin || ""}\t${email || ""}\t${notes || ""}\t${status || "identified"}\n`;
+    if (content.length > 0 && !content.endsWith("\n")) {
+      content += "\n";
+    }
+
+    const newRow = `${sName}\t${sCompany}\t${sRole}\t${sSource}\t${sLinkedin}\t${sEmail}\t${sNotes}\t${sStatus}\n`;
     content += newRow;
 
     atomicWrite(contactsPath, content);

@@ -146,6 +146,7 @@ const SYSTEM_PATHS = [
   '.gitattributes',
   'career-ops-ui-antigravity-spec.md',
   'scripts/ui-server.mjs',
+  'web/',
   'dead-boards.mjs',
   'modes/README.md',
   'modes/_shared.md',

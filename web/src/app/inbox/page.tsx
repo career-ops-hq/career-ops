@@ -384,6 +384,7 @@ export default function InboxPage() {
                   <button
                     type="button"
                     onClick={() => handleToggleDone(item)}
+                    aria-label={`Mark "${item.request}" as ${item.done ? "pending" : "resolved"}`}
                     className={`mt-0.5 flex items-center justify-center size-5 rounded-md border transition-all ${
                       item.done
                         ? "bg-emerald-500 border-emerald-600 text-white"
@@ -435,7 +436,14 @@ export default function InboxPage() {
                   {!item.done && (
                     <button
                       type="button"
-                      onClick={() => setResolvingId(resolvingId === item.id ? null : item.id)}
+                      onClick={() => {
+                        if (resolvingId !== item.id) {
+                          setResultNote("");
+                          setResolvingId(item.id);
+                        } else {
+                          setResolvingId(null);
+                        }
+                      }}
                       className="text-xs px-2.5 py-1 rounded-lg border border-border bg-surface text-muted hover:text-foreground transition"
                       title="Annotate Result"
                     >

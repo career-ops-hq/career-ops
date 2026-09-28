@@ -112,10 +112,32 @@ export async function POST(req: Request) {
     base = parsed as Record<string, unknown>;
   }
 
+  if (!isMapping(body)) {
+    return Response.json({ error: "Invalid profile payload: must be an object" }, { status: 400 });
+  }
+
   // Handle both raw full profile structure or flat ProfilePatch
   let proposed: Record<string, unknown> = {};
-  if (body.candidate || body.target_roles || body.compensation || body.location || body.narrative) {
-    proposed = body;
+  const KNOWN_PROFILE_KEYS = [
+    "candidate",
+    "target_roles",
+    "compensation",
+    "location",
+    "narrative",
+    "language",
+    "scan",
+    "proof_points",
+    "dealbreakers",
+  ];
+
+  const hasTopLevelProfileKey = KNOWN_PROFILE_KEYS.some((k) => k in (body as Record<string, unknown>));
+
+  if (hasTopLevelProfileKey) {
+    for (const key of KNOWN_PROFILE_KEYS) {
+      if (key in (body as Record<string, unknown>)) {
+        proposed[key] = (body as Record<string, unknown>)[key];
+      }
+    }
   } else {
     proposed = patchToProfile(body);
   }

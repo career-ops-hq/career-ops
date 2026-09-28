@@ -50,7 +50,8 @@ export async function POST(req: Request) {
     }
 
     if (action === "debrief") {
-      const slug = (company || "general").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const cleanSlug = (company || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      const slug = cleanSlug || "general";
       const debriefPath = path.join(prepDir, `${slug}-debrief.md`);
 
       const entry = `\n### Debrief: ${round || "Interview"} (${date || new Date().toISOString().slice(0, 10)})\n- **Role:** ${role || "N/A"}\n- **Confidence:** ${confidence || 3}/5\n- **Questions Asked:**\n${question ? `  - ${question}\n` : ""}- **My Response Summary:** ${answer || "N/A"}\n- **Notes & Next Steps:** ${notes || "None"}\n`;

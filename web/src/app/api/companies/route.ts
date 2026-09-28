@@ -110,8 +110,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { action, company } = body;
 
-    if (!company) {
-      return NextResponse.json({ error: "Company name is required" }, { status: 400 });
+    if (!company || typeof company !== "string" || !company.trim() || /[\r\n]/.test(company)) {
+      return NextResponse.json({ error: "Company must be a non-empty single-line string" }, { status: 400 });
+    }
+
+    if (action !== "blacklist" && action !== "unblacklist") {
+      return NextResponse.json({ error: "Action must be 'blacklist' or 'unblacklist'" }, { status: 400 });
     }
 
     const root = careerOpsRoot();

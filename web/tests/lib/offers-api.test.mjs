@@ -126,3 +126,28 @@ test("offers POST delete removes observation", async () => {
     assert.equal(data.observations[0].company, "Company B");
   });
 });
+
+test("offers POST record with newline and tab in note sanitizes input without corrupting row boundaries", async () => {
+  await withTempRoot(async () => {
+    await postOffers(
+      new Request("http://fixture.invalid/api/offers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "record",
+          company: "Acme Corp",
+          role: "Staff Engineer",
+          baseComp: "$200k",
+          notes: "Line 1\nLine 2\twith tab\r\nLine 3",
+        }),
+      })
+    );
+
+    const res = await getOffers();
+    const data = await res.json();
+    assert.equal(data.observations.length, 1);
+    assert.equal(data.observations[0].company, "Acme Corp");
+    assert.ok(!data.observations[0].notes.includes("\n"));
+    assert.ok(!data.observations[0].notes.includes("\t"));
+  });
+});

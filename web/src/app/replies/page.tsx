@@ -24,6 +24,7 @@ export default function RepliesPage() {
   const [subject, setSubject] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [appliedApp, setAppliedApp] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<{ id: string; error: string } | null>(null);
 
   const fetchReplies = async () => {
     setLoading(true);
@@ -66,8 +67,9 @@ export default function RepliesPage() {
 
   const applyStatusUpdate = async (candidate: Candidate) => {
     if (!candidate.matchedAppNumber || !candidate.suggestedStatus) return;
+    setStatusError(null);
     try {
-      await fetch("/api/status", {
+      const res = await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -76,9 +78,22 @@ export default function RepliesPage() {
           note: `Auto-classified from inbound email (${candidate.classification})`,
         }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatusError({
+          id: candidate.id,
+          error: data.error || `Failed to update status (${res.status})`,
+        });
+        return;
+      }
       setAppliedApp(candidate.id);
       setTimeout(() => setAppliedApp(null), 3000);
-    } catch {}
+    } catch (err: unknown) {
+      setStatusError({
+        id: candidate.id,
+        error: err instanceof Error ? err.message : "Failed to update status",
+      });
+    }
   };
 
   return (
@@ -192,7 +207,7 @@ export default function RepliesPage() {
                 </div>
 
                 {c.matchedAppNumber && c.suggestedStatus && (
-                  <div className="shrink-0 flex items-center gap-2">
+                  <div className="shrink-0 flex flex-col items-end gap-1.5">
                     <button
                       onClick={() => applyStatusUpdate(c)}
                       className="flex items-center gap-1.5 rounded-lg bg-surface-hover border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-brand-soft hover:text-brand-text transition-colors"
@@ -209,6 +224,9 @@ export default function RepliesPage() {
                         </>
                       )}
                     </button>
+                    {statusError?.id === c.id && (
+                      <span className="text-[11px] text-red-400">{statusError.error}</span>
+                    )}
                   </div>
                 )}
               </div>

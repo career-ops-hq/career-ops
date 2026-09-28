@@ -6,12 +6,15 @@ import { careerOpsRoot } from "@/lib/career-ops";
 export async function GET() {
   const root = careerOpsRoot();
 
+  const nodeParts = process.version.slice(1).split(".").map(Number);
+  const isNodeSupported = (nodeParts[0] || 0) > 22 || ((nodeParts[0] || 0) === 22 && (nodeParts[1] || 0) >= 6);
+
   const checks = [
     {
       category: "System",
       name: "Node.js Runtime",
-      status: parseInt(process.version.slice(1), 10) >= 18 ? "ok" : "warn",
-      details: `${process.version} (${process.platform} ${process.arch})`,
+      status: isNodeSupported ? "ok" : "warn",
+      details: `${process.version} (${process.platform} ${process.arch}) — ${isNodeSupported ? "Supported (>=22.6.0)" : "Node >=22.6.0 recommended"}`,
     },
     {
       category: "System",

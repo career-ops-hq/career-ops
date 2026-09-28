@@ -92,6 +92,12 @@ export function CommandPalette() {
             placeholder="Type a command or jump to page... (Esc to close)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && filtered.length > 0) {
+                e.preventDefault();
+                navigateTo(filtered[0].href);
+              }
+            }}
             autoFocus
             className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
           />

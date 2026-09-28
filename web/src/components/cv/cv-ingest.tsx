@@ -168,16 +168,46 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       setSaveErr("Connect an AI CLI in Config to use AI enhancement.");
       return;
     }
+    const currentMd = md;
     setAiEnhancing(true);
     setSaveErr("");
     try {
-      await runStream({
+      const r = await fetch("/api/cv/ingest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: md, cliId: id }),
+        body: JSON.stringify({ text: currentMd, cliId: id }),
       });
-    } catch {
-      setSaveErr("AI enhancement failed. Keeping current CV text.");
+      if (!r.ok || !r.body) {
+        throw new Error("AI enhancement request failed.");
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parsed = parseCvStream(buf);
+        if (parsed.error) {
+          throw new Error(parsed.error);
+        }
+        if (parsed.markdown) setMd(parsed.markdown);
+        if (parsed.seed) setSeed(parsed.seed);
+      }
+      const final = parseCvStream(buf);
+      if (final.markdown.trim()) {
+        setMd(final.markdown);
+        if (final.seed) setSeed(final.seed);
+      } else {
+        throw new Error("No enhanced markdown returned.");
+      }
+    } catch (e) {
+      setMd(currentMd);
+      setSaveErr(
+        e instanceof Error && e.message
+          ? `AI enhancement failed: ${e.message}. Keeping current CV text.`
+          : "AI enhancement failed. Keeping current CV text."
+      );
     } finally {
       setAiEnhancing(false);
     }

@@ -18,15 +18,15 @@ type Application = {
 };
 
 const STAGES = [
-  "Research",
+  "Evaluated",
   "Applied",
-  "Screen",
+  "Responded",
   "Interview",
-  "Technical",
   "Offer",
-  "Accepted",
   "Rejected",
-  "Ghosted",
+  "Discarded",
+  "SKIP",
+  "Hired",
 ];
 
 export default function TrackerPage() {
@@ -35,6 +35,7 @@ export default function TrackerPage() {
   const [view, setView] = useState<"table" | "kanban" | "timeline">("table");
   const [search, setSearch] = useState("");
   const [updatingN, setUpdatingN] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const fetchTracker = async () => {
     setLoading(true);
@@ -54,15 +55,22 @@ export default function TrackerPage() {
 
   const handleStatusChange = async (n: string, newStatus: string) => {
     setUpdatingN(n);
+    setStatusError(null);
     try {
-      await fetch("/api/status", {
+      const res = await fetch("/api/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ n, status: newStatus }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatusError(data.error || `Failed to update status (${res.status})`);
+        return;
+      }
       await fetchTracker();
-    } catch {}
-    finally {
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Failed to update status");
+    } finally {
       setUpdatingN(null);
     }
   };
@@ -128,6 +136,12 @@ export default function TrackerPage() {
         />
       </div>
 
+      {statusError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+          {statusError}
+        </div>
+      )}
+
       {loading ? (
         <div className="p-12 text-center text-sm text-muted">Loading application tracker...</div>
       ) : filtered.length === 0 ? (
@@ -182,7 +196,7 @@ export default function TrackerPage() {
                   <td className="px-4 py-3 text-faint max-w-xs truncate">{app.notes || "—"}</td>
                   <td className="px-4 py-3 text-right">
                     <Link
-                      href={`/jobs/${app.n}`}
+                      href={`/pipeline/${app.n}`}
                       className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline font-medium"
                     >
                       <FileText className="size-3.5" /> View

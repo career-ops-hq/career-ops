@@ -93,6 +93,18 @@ export default function OffersPage() {
   const [recording, setRecording] = useState(false);
   const [obsSearch, setObsSearch] = useState("");
 
+  // Verified STAR Achievements & AI Generation
+  const [verifiedAchievements, setVerifiedAchievements] = useState<any[]>([]);
+  const [loadingAchievements, setLoadingAchievements] = useState(false);
+  const [generatingAi, setGeneratingAi] = useState(false);
+  const [aiResultMetadata, setAiResultMetadata] = useState<{
+    source?: string;
+    verifiedAchievementsCount?: number;
+    cliAvailable?: boolean;
+    cliName?: string | null;
+  } | null>(null);
+  const [generatedLetterOverride, setGeneratedLetterOverride] = useState<string | null>(null);
+
   const fetchOffers = async () => {
     setLoading(true);
     try {
@@ -111,9 +123,67 @@ export default function OffersPage() {
       setLoading(false);
     }
   };
+  const fetchAchievements = async () => {
+    setLoadingAchievements(true);
+    try {
+      const res = await fetch("/api/negotiate");
+      const data = await res.json();
+      if (data.achievements && Array.isArray(data.achievements)) {
+        setVerifiedAchievements(data.achievements);
+        if (data.achievements.length > 0 && !negKeyAchievement) {
+          setNegKeyAchievement(data.achievements[0].text);
+        }
+      }
+      if (data.targeting) {
+        if (data.targeting.targetComp && !targetComp) setTargetComp(data.targeting.targetComp);
+        if (data.targeting.currency && !currency) setCurrency(data.targeting.currency);
+      }
+    } catch (e) {
+      console.error("Failed to load achievements", e);
+    } finally {
+      setLoadingAchievements(false);
+    }
+  };
+
+  const handleGenerateAiLetter = async () => {
+    setGeneratingAi(true);
+    try {
+      const res = await fetch("/api/negotiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: negCompanyName,
+          role: negRoleName,
+          recruiterName: negRecruiterName,
+          currentOffer: negCurrentOffer,
+          targetAsk: negTargetAsk,
+          competingOffer: negCompetingComp,
+          keyAchievement: negKeyAchievement,
+          strategy: negStrategy,
+          tone: negTone,
+          useAi: true,
+        }),
+      });
+      const data = await res.json();
+      if (data.letter) {
+        setGeneratedLetterOverride(data.letter);
+        setAiResultMetadata({
+          source: data.source,
+          verifiedAchievementsCount: data.verifiedAchievementsCount,
+          cliAvailable: data.cliAvailable,
+          cliName: data.cliName,
+        });
+      }
+    } catch (e) {
+      console.error("AI Generation error:", e);
+    } finally {
+      setGeneratingAi(false);
+    }
+  };
 
   useEffect(() => {
     fetchOffers();
+    fetchAchievements();
   }, []);
 
   // Demo Offers for preview when user hasn't received an offer yet
@@ -165,11 +235,19 @@ export default function OffersPage() {
   );
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency === "USD" || !currency ? "USD" : currency,
-      maximumFractionDigits: 0,
-    }).format(amount);
+    try {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: currency && currency.trim() ? currency.trim().toUpperCase() : "USD",
+        maximumFractionDigits: 0,
+      }).format(amount);
+    } catch {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 0,
+      }).format(amount);
+    }
   };
 
   const handleRecordComp = async (e: React.FormEvent) => {
@@ -850,7 +928,7 @@ Best regards,`;
                 <MessageSquare className="size-4 text-brand" /> Negotiation Strategy & Levers
               </h2>
               <p className="text-xs text-muted mt-0.5">
-                Generate battle-tested counter-offers anchored in your actual achievements.
+                Generate battle-tested counter-offers anchored in verified STAR achievements from your CV.
               </p>
             </div>
 
@@ -869,7 +947,10 @@ Best regards,`;
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => setNegStrategy(s.id as any)}
+                      onClick={() => {
+                        setNegStrategy(s.id as any);
+                        setGeneratedLetterOverride(null);
+                      }}
                       className={`text-left p-2.5 rounded-xl border transition-all ${
                         negStrategy === s.id
                           ? "border-brand bg-brand-soft/20 text-foreground font-semibold"
@@ -895,7 +976,10 @@ Best regards,`;
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setNegTone(t.id as any)}
+                      onClick={() => {
+                        setNegTone(t.id as any);
+                        setGeneratedLetterOverride(null);
+                      }}
                       className={`p-2 rounded-lg border text-center font-medium transition-all ${
                         negTone === t.id
                           ? "border-brand bg-brand text-white"
@@ -915,7 +999,10 @@ Best regards,`;
                   <input
                     type="text"
                     value={negRecruiterName}
-                    onChange={(e) => setNegRecruiterName(e.target.value)}
+                    onChange={(e) => {
+                      setNegRecruiterName(e.target.value);
+                      setGeneratedLetterOverride(null);
+                    }}
                     className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground focus:border-brand focus:outline-none"
                   />
                 </div>
@@ -924,7 +1011,10 @@ Best regards,`;
                   <input
                     type="text"
                     value={negCompanyName}
-                    onChange={(e) => setNegCompanyName(e.target.value)}
+                    onChange={(e) => {
+                      setNegCompanyName(e.target.value);
+                      setGeneratedLetterOverride(null);
+                    }}
                     className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground focus:border-brand focus:outline-none"
                   />
                 </div>
@@ -936,7 +1026,10 @@ Best regards,`;
                   <input
                     type="text"
                     value={negCurrentOffer}
-                    onChange={(e) => setNegCurrentOffer(e.target.value)}
+                    onChange={(e) => {
+                      setNegCurrentOffer(e.target.value);
+                      setGeneratedLetterOverride(null);
+                    }}
                     className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground focus:border-brand focus:outline-none"
                   />
                 </div>
@@ -945,7 +1038,10 @@ Best regards,`;
                   <input
                     type="text"
                     value={negTargetAsk}
-                    onChange={(e) => setNegTargetAsk(e.target.value)}
+                    onChange={(e) => {
+                      setNegTargetAsk(e.target.value);
+                      setGeneratedLetterOverride(null);
+                    }}
                     className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground focus:border-brand focus:outline-none font-bold text-brand"
                   />
                 </div>
@@ -957,21 +1053,67 @@ Best regards,`;
                   <input
                     type="text"
                     value={negCompetingComp}
-                    onChange={(e) => setNegCompetingComp(e.target.value)}
+                    onChange={(e) => {
+                      setNegCompetingComp(e.target.value);
+                      setGeneratedLetterOverride(null);
+                    }}
                     className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground focus:border-brand focus:outline-none"
                   />
                 </div>
               )}
 
-              <div>
-                <label className="block text-muted mb-1 font-medium">Quantified Achievement Anchor</label>
+              {/* Verified STAR Achievement Picker */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-muted font-medium">
+                    Quantified Achievement Anchor (Ground Truth)
+                  </label>
+                  {loadingAchievements && (
+                    <span className="text-[10px] text-muted flex items-center gap-1">
+                      <RefreshCw className="size-2.5 animate-spin" /> Loading CV...
+                    </span>
+                  )}
+                </div>
+                
                 <input
                   type="text"
                   value={negKeyAchievement}
-                  onChange={(e) => setNegKeyAchievement(e.target.value)}
+                  onChange={(e) => {
+                    setNegKeyAchievement(e.target.value);
+                    setGeneratedLetterOverride(null);
+                  }}
                   placeholder="e.g. built microservices handling 2M req/day with 99.99% SLA"
                   className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground focus:border-brand focus:outline-none"
                 />
+
+                {verifiedAchievements.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-muted flex items-center gap-1">
+                      <ShieldCheck className="size-3.5 text-emerald-500" />
+                      1-Click Verified STAR Anchors (cv.md):
+                    </span>
+                    <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                      {verifiedAchievements.slice(0, 5).map((ach) => (
+                        <button
+                          key={ach.id}
+                          type="button"
+                          onClick={() => {
+                            setNegKeyAchievement(ach.text);
+                            setGeneratedLetterOverride(null);
+                          }}
+                          className={`w-full text-left p-1.5 rounded-lg border text-[11px] transition-all flex items-start gap-1.5 ${
+                            negKeyAchievement === ach.text
+                              ? "border-emerald-500/50 bg-emerald-500/10 text-foreground font-medium"
+                              : "border-border/60 bg-surface/50 hover:bg-surface text-muted"
+                          }`}
+                        >
+                          <CheckCircle2 className={`size-3 mt-0.5 shrink-0 ${ach.verified ? "text-emerald-500" : "text-muted"}`} />
+                          <div className="line-clamp-2 leading-tight">{ach.text}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -979,25 +1121,53 @@ Best regards,`;
           {/* Generated Output Preview */}
           <div className="lg:col-span-7 space-y-4">
             <div className="rounded-2xl border border-border bg-surface p-6 space-y-4 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
                 <div>
                   <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                     <Sparkles className="size-4 text-brand" /> Generated Counter-Offer Email
                   </h3>
-                  <p className="text-xs text-muted">Ready to paste into email / LinkedIn message</p>
+                  <p className="text-xs text-muted">
+                    {aiResultMetadata?.source === "ai-cli"
+                      ? `Generated via ${aiResultMetadata.cliName || "CLI"} (Local Read-Only)`
+                      : "Anchored to verified CV achievements & deterministic targeting"}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(generatedScript, "main-script")}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:brightness-110 shadow-sm transition"
-                >
-                  {copiedSection === "main-script" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                  {copiedSection === "main-script" ? "Copied!" : "Copy Full Email"}
-                </button>
+                
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiLetter}
+                    disabled={generatingAi}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand/10 border border-brand/30 text-brand text-xs font-semibold hover:bg-brand/20 transition shadow-sm"
+                  >
+                    <Sparkles className={`size-3.5 ${generatingAi ? "animate-spin" : ""}`} />
+                    {generatingAi ? "Generating..." : "Generate with AI CLI"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(generatedLetterOverride || generatedScript, "main-script")}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand text-white text-xs font-semibold hover:brightness-110 shadow-sm transition"
+                  >
+                    {copiedSection === "main-script" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                    {copiedSection === "main-script" ? "Copied!" : "Copy Full Email"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Provenance and Safety Indicator */}
+              <div className="flex items-center justify-between text-[11px] bg-surface-hover/60 px-3 py-1.5 rounded-lg border border-border text-muted">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="size-3.5 text-emerald-500" />
+                  <strong className="text-foreground">Source-of-truth:</strong> {verifiedAchievements.length} verified STAR metric(s) in scope
+                </span>
+                <span className="font-mono text-[10px] text-faint">
+                  Tone: <strong className="text-foreground">{negTone}</strong> · Strategy: <strong className="text-foreground">{negStrategy}</strong>
+                </span>
               </div>
 
               <div className="rounded-xl border border-border bg-surface-hover/30 p-4 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap selection:bg-brand selection:text-white">
-                {generatedScript}
+                {generatedLetterOverride || generatedScript}
               </div>
 
               {/* Tactical Talking Points */}
