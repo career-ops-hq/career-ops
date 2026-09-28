@@ -117,6 +117,10 @@ function isLegacyReexec() {
 const CANONICAL_REPO = 'https://github.com/career-ops-hq/career-ops.git';
 const RAW_VERSION_URL = 'https://raw.githubusercontent.com/career-ops-hq/career-ops/main/VERSION';
 const RELEASES_API = 'https://api.github.com/repos/career-ops-hq/career-ops/releases/latest';
+// The authoritative answer to "what commit does this upstream ref name?".
+// check() has always read it for main; apply() now reads it for the ref it is
+// installing, so the tree is checked against the ref it claims to be (#3052).
+const UPSTREAM_REF_API = 'https://api.github.com/repos/career-ops-hq/career-ops/git/ref';
 
 // Matches a semver, with or without a leading `v` and an optional
 // Release Please component prefix (e.g. `career-ops-v1.9.0` → `1.9.0`).
@@ -961,6 +965,186 @@ function compareVersions(a, b) {
   return 0;
 }
 
+/**
+ * Whether `compareVersions` can actually compare this string.
+ *
+ * `compareVersions` is a NOTIFY-path helper and coerces like one: `Number()`
+ * with `|| 0` turns every unparseable component into zero, and the loop stops
+ * at three components. Both are harmless when the answer only decides whether
+ * to print a banner, and neither is harmless when the answer decides whether to
+ * overwrite the installation. `999.bad.0` compares as `999.0.0`, `999.0.0-rc`
+ * as `999.0.0`, and `1.32.0.1` drops its fourth component entirely — three
+ * strings the guard would read as "at least as new as installed" while having
+ * understood none of them.
+ *
+ * So the guard asks this first. A shape it cannot parse is not evidence about
+ * direction, and apply() treats absence of evidence as a refusal.
+ *
+ * @param {string} version - A VERSION string, already stripped of its marker.
+ * @returns {boolean} True only for exactly three dot-separated integers.
+ */
+export function isComparableVersion(version) {
+  return typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version);
+}
+
+/**
+ * Pin a moving ref to the immutable commit SHA it names right now.
+ *
+ * `FETCH_HEAD` is a pseudo-ref, not a snapshot: every read re-resolves whatever
+ * the last fetch wrote, and apply() read it more than a dozen times across
+ * bootstrap, checkout, prune, .gitignore reconciliation and staging. Nothing
+ * tied those reads together, so a single apply run had no guarantee that the
+ * tree it inspected was the tree it checked out. Resolving once and passing the
+ * resulting SHA down makes the whole run address one immutable commit.
+ *
+ * @param {string} [ref='FETCH_HEAD'] - Ref to resolve.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string} A 40-hex commit SHA.
+ */
+export function pinRefToCommit(ref = 'FETCH_HEAD', ctx = {}) {
+  // gitQuiet: an unresolvable ref is reported by the throw below, so git's own
+  // "fatal: Needed a single revision" on inherited stderr is duplicate noise.
+  const runGit = ctx.git || gitQuiet;
+  const sha = runGit('rev-parse', '--verify', `${ref}^{commit}`).trim();
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`Could not pin ${ref} to a commit (git rev-parse returned ${JSON.stringify(sha)}).`);
+  }
+  return sha;
+}
+
+/**
+ * The VERSION a ref ships, or '' when the ref carries none.
+ *
+ * @param {string} ref - Any commit-ish.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string} Parsed version string, or '' if unreadable.
+ */
+export function versionAtRef(ref, ctx = {}) {
+  const runGit = ctx.git || gitQuiet;
+  try {
+    return parseVersionFile(runGit('show', `${ref}:VERSION`));
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Why apply() must refuse this target, or null when it may proceed.
+ *
+ * apply() never checked what it was about to install. `compareVersions` exists
+ * and is called twice — both times inside check(), which only decides whether
+ * to NOTIFY. The install path itself checked out whatever the fetch produced,
+ * so any target that turned out to be older than the installed tree was written
+ * over the current system files with no comparison, no warning, and a "Update
+ * complete: vX -> vY" banner where Y < X.
+ *
+ * Fail closed on every input the comparison cannot actually read. An unreadable
+ * target VERSION is not evidence of a newer target, and neither is one whose
+ * shape `compareVersions` only appears to understand: `999.bad.0` coerces to
+ * `999.0.0` and would sail past a guard that compared first and asked
+ * questions never. The installed side is checked for the same reason — a
+ * direction computed from a string nobody could parse is not a direction.
+ * Same-version targets stay allowed: re-applying the current release is a
+ * legitimate repair path (#1998).
+ *
+ * @param {string} installedVersion - VERSION on disk before the update.
+ * @param {string} targetVersion - VERSION shipped by the pinned target ref.
+ * @returns {string|null} Refusal reason, or null when the target is acceptable.
+ */
+export function downgradeRefusal(installedVersion, targetVersion) {
+  if (!targetVersion) {
+    return `could not read VERSION from the update target, refusing to apply an unverifiable target`;
+  }
+  if (!isComparableVersion(targetVersion)) {
+    return `target VERSION ${JSON.stringify(targetVersion)} is not a comparable MAJOR.MINOR.PATCH version, refusing to apply an unverifiable target`;
+  }
+  if (!isComparableVersion(installedVersion)) {
+    return `installed VERSION ${JSON.stringify(installedVersion)} is not a comparable MAJOR.MINOR.PATCH version, so the update direction cannot be established`;
+  }
+  if (compareVersions(targetVersion, installedVersion) < 0) {
+    return `target VERSION ${targetVersion} is older than installed ${installedVersion}, refusing`;
+  }
+  return null;
+}
+
+/**
+ * Why the pinned target is not the upstream ref this update asked for, or
+ * null when it is (or when nothing authoritative was available to say).
+ *
+ * The version guard above verifies a DIRECTION; this one verifies an IDENTITY.
+ * They are different questions, and #3052's expected-behaviour item 1 is this
+ * one: a tree that ships a VERSION at or above the installed one still is not
+ * necessarily the ref of the canonical repo that was requested —
+ * `refs/heads/main` on `--channel main`, `refs/tags/career-ops-vX.Y.Z` on the
+ * default release channel. check() has always resolved main's authoritative
+ * SHA from the GitHub ref API and apply() never consulted it; this is the
+ * consumer, for whichever ref apply() is installing.
+ *
+ * Equality is the normal answer. Ancestry is the second accepted answer,
+ * because `main` genuinely moves: the authoritative SHA is read BEFORE the
+ * fetch, so a push landing in that window leaves the fetched tip a DESCENDANT
+ * of it, which is still the requested branch. The reverse — the authoritative
+ * commit sitting ahead of the target, as it does when the target is an older
+ * auto-followed tag — is exactly what must be refused. For a release tag the
+ * two sides should simply be the same commit; an annotated tag's object name
+ * is peeled by merge-base, so it lands on the ancestry check and passes there.
+ *
+ * Two deliberate edges:
+ *  - No authoritative SHA (offline, API rate limit, unparseable body) means no
+ *    identity claim was available, so this returns null and the explicit
+ *    refspec remains what ties the target to the ref. A rate limit is not
+ *    evidence of a rogue target.
+ *  - A git failure — including an authoritative commit missing from a shallow
+ *    clone's object store — is a refusal, not a pass. It is the rare case (the
+ *    fetch-window race above), and refusing asks for a retry rather than
+ *    installing a tree nothing could vouch for.
+ *
+ * @param {string} targetSha - The commit apply() pinned and is about to install.
+ * @param {string} authoritativeSha - The requested ref per the GitHub ref API, or ''.
+ * @param {string} refspec - The ref that was requested (see refspecForTarget()),
+ *   named in the refusal.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string|null} Refusal reason, or null when the target is acceptable.
+ */
+export function targetIdentityRefusal(targetSha, authoritativeSha, refspec, ctx = {}) {
+  if (!authoritativeSha) return null;
+  if (targetSha === authoritativeSha) return null;
+  const runGit = ctx.git || gitQuiet;
+  const name = String(refspec || '').replace(/^refs\/(heads|tags)\//, '');
+  try {
+    // Exit 0 ⇒ authoritative is an ancestor: main moved forward, target is main.
+    runGit('merge-base', '--is-ancestor', authoritativeSha, targetSha);
+    return null;
+  } catch {
+    return `target ${targetSha.slice(0, 12)} does not descend from upstream ${name} ${authoritativeSha.slice(0, 12)}, refusing to install a tree that is not the requested ref`;
+  }
+}
+
+/**
+ * The text apply() prints when it refuses a target, told from the right stage.
+ *
+ * The claim "No system files were changed" is true of the parent, which refuses
+ * before its first write, and false of the re-exec'd child: by then the parent
+ * has already checked the self-bootstrap closure out from the target. Printing
+ * the parent's sentence in the child would send someone looking for an
+ * untouched tree that is not there.
+ *
+ * @param {string} targetSha - The refused commit.
+ * @param {string} reason - Why it was refused.
+ * @param {boolean} isReexec - Whether this is the re-exec'd child.
+ * @returns {string} A message describing the actual state of the install.
+ */
+export function refusalMessage(targetSha, reason, isReexec) {
+  const state = isReexec
+    ? 'The self-bootstrap files (update-system.mjs and its import closure) were already\n' +
+      '    checked out from this target before the refusal; no other system file was changed.\n' +
+      '    `node update-system.mjs rollback` restores them along with the rest of the tree.'
+    : 'No system files were changed. To go back to an earlier state deliberately,\n' +
+      '    use `node update-system.mjs rollback`, which restores the backup branch\n' +
+      '    this installation made rather than overwriting it with an older upstream tree.';
+  return `Refusing to update from ${targetSha.slice(0, 12)}: ${reason}.\n    ${state}`;
+}
+
 function updateBackupBranchName(version, date = new Date()) {
   const stamp = date.toISOString()
     .replace(/[-:]/g, '')
@@ -1150,9 +1334,10 @@ function assertOwnGitToplevel() {
  * out when the next script crashes with ERR_MODULE_NOT_FOUND (#1998).
  *
  * @param {string[]} targetPaths - SYSTEM_PATHS read from the target updater.
- * @returns {string[]} Entries present in FETCH_HEAD but absent locally.
+ * @param {string} targetRef - The pinned target commit, not a moving pseudo-ref.
+ * @returns {string[]} Entries present in the target tree but absent locally.
  */
-function missingFromTargetManifest(targetPaths) {
+function missingFromTargetManifest(targetPaths, targetRef) {
   const missing = [];
   for (const path of targetPaths) {
     const spec = path.endsWith('/') ? path.slice(0, -1) : path;
@@ -1165,10 +1350,10 @@ function missingFromTargetManifest(targetPaths) {
     if (path.endsWith('/')) {
       let treeFiles = [];
       try {
-        treeFiles = gitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', spec)
+        treeFiles = gitQuiet('ls-tree', '-r', '--name-only', targetRef, '--', spec)
           .split('\n').map(s => s.trim()).filter(Boolean);
       } catch {
-        continue; // FETCH_HEAD unreadable for this spec — treat as stale, not missing
+        continue; // target tree unreadable for this spec — treat as stale, not missing
       }
       // Empty tree ⇒ the target ships nothing here (stale manifest entry).
       if (treeFiles.some(f => !existsSync(join(ROOT, f)))) missing.push(path);
@@ -1179,7 +1364,7 @@ function missingFromTargetManifest(targetPaths) {
     // Only count it as missing when the target actually ships it — a manifest
     // entry the target no longer carries is a stale entry, not a failed update.
     try {
-      gitQuiet('cat-file', '-e', `FETCH_HEAD:${spec}`);
+      gitQuiet('cat-file', '-e', `${targetRef}:${spec}`);
       missing.push(path);
     } catch { /* absent upstream too — nothing to materialize */ }
   }
@@ -2109,7 +2294,7 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
  *
  * One limit is deliberate, raised in review of #3781: the single-file
  * shortcut diverges from the pre-extraction inline check for a preserved file
- * ABSENT from FETCH_HEAD (that check fell through to the real checkout and
+ * ABSENT from the target tree (that check fell through to the real checkout and
  * listed the path in apply()'s "Skipped N path(s) absent upstream" summary;
  * this returns true and skips it silently). Unreachable while preserved paths
  * come from `locallyModifiedSystemFiles`, which only reports files that exist
@@ -2119,10 +2304,15 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
  * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
  * @param {string[]} preservedPaths - files this run is keeping local content for.
  * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
+ * @param {string} ref - the commit the caller is checking out from. Required and
+ *   without a default on purpose: this predicate decides whether to skip a
+ *   checkout, so it has to read the very tree that checkout would read. A
+ *   `'FETCH_HEAD'` default would let a caller silently ask a different tree than
+ *   the one it installs (#3052).
  * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
  * @returns {boolean | 'unknown'}
  */
-export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {}) {
+export function pathFullyPreserved(path, preservedPaths, preservedSet, ref, ctx = {}) {
   if (preservedSet.size === 0) return false;
   const runGitQuiet = ctx.git || gitQuiet;
   const isDirectory = path.endsWith('/');
@@ -2131,7 +2321,7 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
   if (!isDirectory) return true;
   let upstreamFiles = [];
   try {
-    upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', path)
+    upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', ref, '--', path)
       .split('\n').map((f) => f.trim()).filter(Boolean);
   } catch {
     // Can't enumerate the directory's upstream content: it might be fully
@@ -2153,7 +2343,7 @@ const PATHSPEC_CANCELLED_RE = /did not match any file/i;
  * skip rather than a real failure that must abort the update.
  *
  * Two benign shapes:
- *   - `absentUpstream` — the path is genuinely gone from FETCH_HEAD (a stale
+ *   - `absentUpstream` — the path is genuinely gone from the target tree (a stale
  *     SYSTEM_PATHS entry such as an old `.gemini/commands/` directory).
  *   - a `pathFullyPreserved` result of `'unknown'` paired with git's pathspec
  *     cancel-out message — the directory's upstream content could not be
@@ -2174,18 +2364,18 @@ export function checkoutErrorIsBenign(err, { absentUpstream, preservedState }) {
   // first (CodeRabbit, #3955) means an absent path with an unrelated real
   // failure — a corrupted index, a permissions error, a timeout — still
   // rethrows instead of being swallowed just because the path happens to be
-  // gone from FETCH_HEAD too.
+  // gone from the target tree too.
   const text = `${(err && err.stderr) || ''}\n${(err && err.message) || ''}`;
   if (!PATHSPEC_CANCELLED_RE.test(text)) return false;
   return absentUpstream || preservedState === 'unknown';
 }
 
 /**
- * Whether `spec` is absent from FETCH_HEAD's tree — the answer that makes a
+ * Whether `spec` is absent from the target tree — the answer that makes a
  * checkout failure in apply()'s per-path loop a benign skip rather than a real
  * error to rethrow (#1998, #3824).
  *
- * Only a SUCCESSFUL empty `git ls-tree --name-only FETCH_HEAD -- <spec>` counts:
+ * Only a SUCCESSFUL empty `git ls-tree --name-only <ref> -- <spec>` counts:
  * ls-tree prints the entry when the path is in the tree and nothing when it is
  * not, both at exit 0. A THROW (bad ref, unreadable repo, timeout) is the probe
  * failing to run, not an answer — return false so the checkout error rethrows
@@ -2193,13 +2383,16 @@ export function checkoutErrorIsBenign(err, { absentUpstream, preservedState }) {
  * throwing-probe path is testable without running apply() (#3955 review).
  *
  * @param {string} spec - path to probe; a `dir/` entry is passed without its trailing slash.
+ * @param {string} ref - the commit the failed checkout read from. Required and
+ *   without a default for the same reason as pathFullyPreserved()'s: the
+ *   answer is only meaningful about the tree that checkout used (#3052).
  * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
  * @returns {boolean}
  */
-export function probeAbsentUpstream(spec, ctx = {}) {
+export function probeAbsentUpstream(spec, ref, ctx = {}) {
   const runGitQuiet = ctx.git || gitQuiet;
   try {
-    return runGitQuiet('ls-tree', '--name-only', 'FETCH_HEAD', '--', spec).trim() === '';
+    return runGitQuiet('ls-tree', '--name-only', ref, '--', spec).trim() === '';
   } catch {
     return false;
   }
@@ -2656,6 +2849,85 @@ function curlGet(url, extraArgs = []) {
   });
 }
 
+/**
+ * The commit SHA carried by a GitHub ref-API body, or '' when it carries none.
+ *
+ * A body that parses is not a body that answered. `object.sha` is a string the
+ * far side chose, and a captive portal, a proxied error page or a truncated
+ * response can all put something else there. Whatever comes back is handed
+ * straight to `git merge-base --is-ancestor` by targetIdentityRefusal(), which
+ * throws on a value git cannot resolve — and the caller reports that throw as
+ * "does not descend from upstream main". That sentence is a claim about the
+ * TARGET, and it is false: nothing was ever learned about the target, because
+ * the authoritative side never produced a commit to compare it against.
+ *
+ * So the shape is checked here, at the boundary, and anything that is not a
+ * full 40-hex object name becomes '' — the same "no answer available" both
+ * callers already handle for offline and rate-limited runs. That is deliberately
+ * not a refusal: per the second edge documented on targetIdentityRefusal(), a
+ * body nobody could read is no more evidence of a rogue target than a rate limit
+ * is, and the explicit refspec still ties the target to the requested ref.
+ * apply() prints its "could not be cross-checked" note instead of asserting
+ * something about the target that was never checked.
+ *
+ * @param {string} raw - The raw response body from the GitHub ref API.
+ * @returns {string} A 40-hex object name, or '' when the body carries none.
+ */
+export function authoritativeShaFromRefBody(raw) {
+  let sha;
+  try {
+    sha = String(JSON.parse(raw)?.object?.sha || '').trim();
+  } catch {
+    return ''; // malformed API response
+  }
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : '';
+}
+
+/**
+ * The object GitHub reports for an upstream ref, or '' when it cannot be read.
+ *
+ * The single source of the authoritative SHA, so check() and apply() cannot
+ * drift into asking different questions about the same ref. '' means "no
+ * answer available" (offline, rate limited, unparseable body) and is never a
+ * claim about any commit — both callers treat it that way. For an annotated
+ * tag this is the tag object rather than the commit it points at; git peels it
+ * where targetIdentityRefusal() consults it, since the fetch brought the tag
+ * object in with the ref.
+ *
+ * @param {string} refspec - A full upstream ref, e.g. `refs/heads/main` or
+ *   `refs/tags/career-ops-v1.34.0` (see refspecForTarget()).
+ * @param {typeof curlGet} [runCurlGet] - injection seam for check()'s tests.
+ * @returns {Promise<string>} An object SHA, or '' when unavailable.
+ */
+async function upstreamRefCommit(refspec, runCurlGet = curlGet) {
+  const raw = await runCurlGet(`${UPSTREAM_REF_API}/${refspec.replace(/^refs\//, '')}`, [
+    '--header', 'Accept: application/vnd.github+json',
+    '--header', 'User-Agent: career-ops-update-checker',
+  ]);
+  if (raw === null) return '';
+  return authoritativeShaFromRefBody(raw);
+}
+
+/**
+ * The full upstream ref apply() fetches for a resolved target: `main` becomes
+ * `refs/heads/main` and a career-ops release tag becomes `refs/tags/<tag>`.
+ *
+ * A bare name is a shorthand the remote resolves, and it is what let a plain
+ * `git fetch <repo> main` leave a tag in FETCH_HEAD (#3052). Spelling the ref
+ * out also makes the answer unambiguous if a branch and a tag ever share a
+ * name. Anything else is refused rather than guessed at: resolveTargetRef()
+ * only ever produces these two shapes, so a third one reaching here (a
+ * tampered CAREER_OPS_UPDATE_TARGET_REF, say) is not something to fetch.
+ *
+ * @param {string} targetRef - what resolveTargetRef() returned.
+ * @returns {string}
+ */
+export function refspecForTarget(targetRef) {
+  if (targetRef === 'main') return 'refs/heads/main';
+  if (releaseTagVersion(targetRef)) return `refs/tags/${targetRef}`;
+  throw new Error(`Refusing to fetch '${targetRef}': not main and not a career-ops release tag.`);
+}
+
 // ── CHANNEL RESOLUTION ──────────────────────────────────────────
 
 /**
@@ -2950,13 +3222,7 @@ async function checkMainChannel(local, marker, runCurlGet, localSha) {
   // deliberately conservative: version checks still work offline/behind a
   // restricted git transport.
   try { localCommit = gitQuiet('rev-parse', 'HEAD'); } catch { /* no git checkout */ }
-  const remoteRef = await runCurlGet('https://api.github.com/repos/career-ops-hq/career-ops/git/ref/heads/main', [
-    '--header', 'Accept: application/vnd.github+json',
-    '--header', 'User-Agent: career-ops-update-checker',
-  ]);
-  if (remoteRef !== null) {
-    try { remoteCommit = String(JSON.parse(remoteRef)?.object?.sha || '').trim(); } catch { /* malformed API response */ }
-  }
+  remoteCommit = await upstreamRefCommit('refs/heads/main', runCurlGet);
 
   if (rawVersion !== null) {
     try {
@@ -3011,7 +3277,10 @@ async function checkMainChannel(local, marker, runCurlGet, localSha) {
   let systemTreeDrift = false;
   if (localCommit && remoteCommit && localCommit !== remoteCommit) {
     try {
-      gitQuiet('fetch', '--quiet', CANONICAL_REPO, 'main');
+      // Same explicit refspec as apply() on this channel: `main` alone lets git
+      // auto-follow a tag into FETCH_HEAD, and the diff below reads FETCH_HEAD
+      // — the drift answer would then be about the wrong tree (#3052).
+      gitQuiet('fetch', '--quiet', '--no-tags', CANONICAL_REPO, 'refs/heads/main');
       // Lazy import: keep update-system.mjs self-loading (see apply()'s note
       // on the same import). Exclude the materialized CLI skill entrypoints
       // from the drift diff — see driftPathspecExcludingSkillEntrypoints()
@@ -3359,9 +3628,86 @@ async function apply() {
       console.log(`Backup branch created: ${backupBranch}`);
     }
 
-    // 2. Fetch from canonical repo
+    // 2. Fetch from canonical repo.
+    //
+    // targetRef names WHAT to install (a release tag, or main on
+    // `--channel main`); targetCommit below pins WHICH commit that is. The
+    // re-exec'd child re-fetches, so without the parent's SHA it would pin its
+    // own target and then install a tree different from the one the parent
+    // verified and bootstrapped from. The env value is a hint, not an
+    // authorization (#2866): it is read under the same trustsEnvTargetRef()
+    // gate as CAREER_OPS_UPDATE_TARGET_REF, never on isReexec's bare
+    // CAREER_OPS_UPDATE_REEXEC=1 disjunct, since an inherited SHA also skips
+    // the identity check below; rev-parse validates it against the local
+    // object store.
+    const inheritedTarget = trustsEnvTargetRef(authenticatedReexec, legacyReexec)
+      ? (process.env.CAREER_OPS_UPDATE_TARGET_SHA || '')
+      : '';
+    const targetRefspec = refspecForTarget(targetRef);
+
+    // Read the authoritative SHA BEFORE fetching, not after. The two reads race
+    // whenever someone pushes to main in between, and the order decides which
+    // way the race resolves: read first and the fetched tip is a DESCENDANT of
+    // the authoritative commit, which targetIdentityRefusal accepts; read after
+    // and it would be an ancestor, which is indistinguishable from the stale
+    // target this whole guard exists to catch. '' is "no claim available",
+    // never "no such ref" — including the child's case, which inherits a SHA
+    // the parent already cleared and so has nothing left to ask.
+    const authoritativeCommit = inheritedTarget ? '' : await upstreamRefCommit(targetRefspec);
+
     console.log(`Fetching ${targetRef} from upstream...`);
-    git('fetch', CANONICAL_REPO, targetRef);
+    // A bare `main` or tag name is a shorthand the remote resolves, and plain
+    // `git fetch` then auto-follows tags that point into the fetched history —
+    // writing them into FETCH_HEAD alongside the requested ref. That is the
+    // mechanism #3052 reports: FETCH_HEAD named `career-ops-v1.25.0` rather
+    // than main's tip. Name the ref outright (refs/heads/main or
+    // refs/tags/<release>) and turn tag-following off, so the only thing this
+    // fetch can leave in FETCH_HEAD is the ref this run asked for.
+    git('fetch', '--no-tags', CANONICAL_REPO, targetRefspec);
+
+    // 2a. Resolve the target ONCE, then address it by SHA for the rest of the
+    // run. `FETCH_HEAD` is re-resolved on every read, so the dozen reads this
+    // function used to make were a dozen independent questions about a ref that
+    // is free to move between them — the bootstrap checkout, the manifest read,
+    // the per-path checkout loop, the stale-file prune, the .gitignore
+    // reconciliation and the staging expansion could each have seen a different
+    // tree. Pinning makes one apply run mean one commit.
+    //
+    // Neither branch has a fallback, and the inherited one especially must not:
+    // a child that cannot resolve its parent's SHA is already running bootstrap
+    // files the parent checked out from that SHA, so quietly re-pinning its own
+    // FETCH_HEAD would assemble an install from two different trees — the mixed
+    // state #3052 describes. An unresolvable target ends the run instead.
+    const targetCommit = inheritedTarget
+      ? pinRefToCommit(inheritedTarget)
+      : pinRefToCommit('FETCH_HEAD');
+
+    // 2b. Verify the target before touching a single file, on both axes.
+    //
+    // IDENTITY: is this commit the ref we asked for? Only the parent asks.
+    // The child inherits a SHA the parent already cleared, and main may well
+    // have advanced in the seconds since — re-asking there would abort a
+    // half-finished update over a push that has nothing to do with it.
+    //
+    // DIRECTION: is this commit's VERSION at least the installed one?
+    // newerThanTarget() above answers that from the release tag's NAME before
+    // anything is fetched; this answers it from the pinned tree itself, on
+    // both channels. compareVersions() is otherwise called only from check(),
+    // which decides whether to NOTIFY. An unreadable or unparseable target
+    // VERSION is refused too: an unverifiable target is not a verified one.
+    if (!inheritedTarget) {
+      const identity = targetIdentityRefusal(targetCommit, authoritativeCommit, targetRefspec);
+      if (identity) throw new Error(refusalMessage(targetCommit, identity, isReexec));
+      if (!authoritativeCommit) {
+        console.error(`Note: could not reach the GitHub ref API, so the target could not be cross-checked against upstream ${targetRefspec}.`);
+        console.error(`It is still the commit this run fetched from ${CANONICAL_REPO} ${targetRefspec}.`);
+      }
+    }
+    const targetVersion = versionAtRef(targetCommit);
+    const refusal = downgradeRefusal(local, targetVersion);
+    if (refusal) {
+      throw new Error(refusalMessage(targetCommit, refusal, isReexec));
+    }
 
     if (!isReexec) {
       const timeout = reexecTimeoutMs();
@@ -3370,8 +3716,8 @@ async function apply() {
         // at load time must exist first. Resolve the fetched update-system.mjs's
         // relative-import closure and check out exactly those files, so a future
         // new top-level import can't reintroduce the self-reexec crash (#1245).
-        const reexecFiles = resolveReexecCheckout('FETCH_HEAD', 'update-system.mjs');
-        const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, 'FETCH_HEAD');
+        const reexecFiles = resolveReexecCheckout(targetCommit, 'update-system.mjs');
+        const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, targetCommit);
         if (bootstrapAtRisk.length > 0) {
           console.log('');
           console.log(`${bootstrapAtRisk.length} self-bootstrap file(s) differ from upstream because THIS install changed them:`);
@@ -3385,7 +3731,7 @@ async function apply() {
           console.log('Self-bootstrap must load the upstream versions; the local versions remain in the backups above.');
           console.log('');
         }
-        git('checkout', 'FETCH_HEAD', '--', ...reexecFiles);
+        git('checkout', targetCommit, '--', ...reexecFiles);
         const marker = createReexecMarker();
         execFileSync(process.execPath, [
           'update-system.mjs',
@@ -3405,6 +3751,9 @@ async function apply() {
             CAREER_OPS_UPDATE_REEXEC: '1',
             CAREER_OPS_UPDATE_BACKUP_BRANCH: backupBranch,
             CAREER_OPS_UPDATE_TARGET_REF: targetRef,
+            // The child must install the tree this parent pinned and verified,
+            // not whatever its own fetch of targetRef happens to resolve.
+            CAREER_OPS_UPDATE_TARGET_SHA: targetCommit,
             ...(updateForce ? { CAREER_OPS_UPDATE_FORCE: '1' } : {}),
             // Keep the legacy confirmation channel for older target updaters;
             // this process still requires the authenticated marker above.
@@ -3427,7 +3776,7 @@ async function apply() {
     const updated = [];
     let remoteSystemPaths = [];
     try {
-      const remoteUpdaterSource = git('show', 'FETCH_HEAD:update-system.mjs');
+      const remoteUpdaterSource = git('show', `${targetCommit}:update-system.mjs`);
       remoteSystemPaths = extractArrayFromSource(remoteUpdaterSource, 'SYSTEM_PATHS');
     } catch {
       // Older targets may not have update-system.mjs. Fall back to the
@@ -3456,7 +3805,7 @@ async function apply() {
       effectiveUserPaths(),
       manifestProbes({
         trackedOutput: git('ls-files', '-z'),
-        upstreamOutput: git('ls-tree', '-r', '--name-only', '-z', 'FETCH_HEAD'),
+        upstreamOutput: git('ls-tree', '-r', '--name-only', '-z', targetCommit),
       }),
     );
     const refusedSet = new Set(refused);
@@ -3474,7 +3823,7 @@ async function apply() {
     // so; `--force` overwrites. Either way a .bak of the local content is
     // written first, so the fix is recoverable even from the forced path.
     const preservedPaths = [];
-    const atRisk = locallyModifiedSystemFiles(updatePaths, 'FETCH_HEAD');
+    const atRisk = locallyModifiedSystemFiles(updatePaths, targetCommit);
     if (atRisk.length > 0) {
       console.log('');
       console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
@@ -3511,7 +3860,7 @@ async function apply() {
     }
     let configuredVariantRemoteFiles = [];
     try {
-      configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', 'FETCH_HEAD', '--', 'templates')
+      configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', targetCommit, '--', 'templates')
         .split('\n').map((file) => file.trim()).filter(Boolean);
     } catch {
       // If the upstream tree cannot be read, the checkout below reports the
@@ -3520,7 +3869,7 @@ async function apply() {
     const configuredSnapshot = await snapshotConfiguredTemplateVariants({
       dataRoot,
       remoteFiles: configuredVariantRemoteFiles,
-      readRemoteContent: (file) => gitShowRaw(`FETCH_HEAD:${file}`),
+      readRemoteContent: (file) => gitShowRaw(`${targetCommit}:${file}`),
     });
     const { configuredVariants } = configuredSnapshot;
     const configuredReferencePaths = configuredSnapshot.localFiles;
@@ -3545,8 +3894,9 @@ async function apply() {
       // below, so it would abort the entire update. Skip the entry outright
       // when nothing would be left to check out; when the directory's upstream
       // content could not be enumerated ('unknown'), still check it out but let
-      // the catch treat a cancel-out error as benign (#3824).
-      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet);
+      // the catch treat a cancel-out error as benign (#3824). It reads the same
+      // pinned target this loop checks out from, not FETCH_HEAD.
+      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit);
       if (preservedState === true) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
@@ -3555,20 +3905,20 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('checkout', 'FETCH_HEAD', '--', path, ...preserveSpecs);
+        gitQuiet('checkout', targetCommit, '--', path, ...preserveSpecs);
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
         // also caught timeouts, permission errors, and repo corruption and
         // reported them as skips too — letting a partial update reach the
         // success banner (#1998). Confirm the path is actually absent from
-        // FETCH_HEAD before treating the failure as benign; otherwise rethrow.
+        // the target tree before treating the failure as benign; else rethrow.
         // A fully-preserved directory whose upstream content we could not
         // enumerate up front ('unknown') is the second benign shape: the
         // exclusions cancelled the checkout out and git said "did not match
         // any file(s)" (#3824).
         const spec = path.endsWith('/') ? path.slice(0, -1) : path;
-        const absentUpstream = probeAbsentUpstream(spec);
+        const absentUpstream = probeAbsentUpstream(spec, targetCommit);
         if (!checkoutErrorIsBenign(err, { absentUpstream, preservedState })) throw err;
         skippedPaths.push(path);
       }
@@ -3586,7 +3936,7 @@ async function apply() {
       let remoteFiles = new Set();
       try {
         remoteFiles = new Set(
-          git('ls-tree', '-r', '--name-only', 'FETCH_HEAD')
+          git('ls-tree', '-r', '--name-only', targetCommit)
             .split('\n').filter(Boolean).map((p) => p.replace(/\\/g, '/'))
         );
       } catch {
@@ -3611,7 +3961,7 @@ async function apply() {
             console.log(`Kept stale asset still referenced by a preserved file: ${f}`);
             continue;
           }
-          if (!wasEverShippedUpstream(f, 'FETCH_HEAD')) {
+          if (!wasEverShippedUpstream(f, targetCommit)) {
             console.log(`Kept local file upstream has never shipped: ${f}`);
             continue;
           }
@@ -3639,7 +3989,7 @@ async function apply() {
     // and what it could only prevent inside this repository.
     try {
       const gitignorePath = join(ROOT, '.gitignore');
-      const upstreamGitignore = gitShowRaw('FETCH_HEAD:.gitignore');
+      const upstreamGitignore = gitShowRaw(`${targetCommit}:.gitignore`);
       // Uncommitted local edits to .gitignore are the user's, and that is a
       // routine state rather than an exotic one: agent-inbox.mjs's own
       // ensureGitignored() appends a rule without committing it. Such a file
@@ -3682,7 +4032,7 @@ async function apply() {
       // Never abort an update over this, but never swallow it either: a silent
       // skip here is precisely how the original bug stayed invisible.
       console.error(`Could not reconcile .gitignore: ${err.message}`);
-      console.error('Your own rules were left untouched. Compare manually with: git diff FETCH_HEAD -- .gitignore');
+      console.error(`Your own rules were left untouched. Compare manually with: git diff ${targetCommit} -- .gitignore`);
     }
 
     // Lazy import: keep update-system.mjs self-loading (see the top-of-file
@@ -3780,7 +4130,13 @@ async function apply() {
     rebuildDashboardBinaryIfNeeded();
 
     // 7. Commit the update
-    const remote = localVersion(); // Re-read after checkout updated VERSION
+    // The version this run VERIFIED and installed, not whatever VERSION happens
+    // to say now. Re-reading disk reports the target only when the checkout
+    // reached VERSION at all: a VERSION this install had edited locally is a
+    // preserved path (#2337) and stays at the old value, so the banner printed
+    // `v1.26.0 → v1.26.0` — the very line #3052 reports as the symptom, from
+    // the succeeding path rather than the failing one.
+    const remote = targetVersion;
     // Files deliberately left untouched are excluded from the staging pathspec
     // too: this update did not change them, so an "auto-update system files"
     // commit must not sweep the user's local edit in under its message (#2337).
@@ -3819,8 +4175,9 @@ async function apply() {
     // expands the positive specs and subtracts the preserved files, so no
     // `:(exclude)` spec reaches addPaths (where --literal-pathspecs would read
     // it as a literal filename and abort the commit) and no preserved file is
-    // staged. preservedSet is the same Set built at the top of apply().
-    const expandedPathsToStage = stagingFileList(pathsToStage, preservedSet);
+    // staged. preservedSet is the same Set built at the top of apply(), and the
+    // expansion reads the pinned target rather than re-resolving FETCH_HEAD.
+    const expandedPathsToStage = stagingFileList(pathsToStage, preservedSet, targetCommit);
 
     try {
       prepareMaterializedSkillEntrypointsForStage(materializedSkillEntrypoints);
@@ -3836,7 +4193,7 @@ async function apply() {
       // …but the pathspec form builds the commit from the WORKING TREE for those
       // paths rather than from the index. Where `core.fileMode` is false — the
       // default on Windows — the working tree cannot express the executable bit,
-      // so a mode change that `git checkout FETCH_HEAD -- <path>` just staged is
+      // so a mode change that `git checkout <target> -- <path>` just staged is
       // dropped from the commit and left sitting in the index. The install is
       // dirty the instant a "clean" update finishes, and stays dirty, because
       // every later update re-stages the same mode and drops it again.
@@ -3912,6 +4269,7 @@ async function apply() {
     // refuse-loudly-do-not-abort contract at 3a.
     const unmaterialized = missingFromTargetManifest(
       remoteSystemPaths.filter((path) => !refusedSet.has(path)),
+      targetCommit,
     );
     if (unmaterialized.length > 0) {
       console.error(`\nUpdate incomplete: v${local} → v${remote}`);
