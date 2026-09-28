@@ -306,8 +306,9 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
 // ── 10. An unreadable marker means "unknown", not "alive" ─────────────
 {
   // Every leftover written before this marker existed has none, so treating an
-  // absent or unparseable marker as a live run would mean never sweeping again —
-  // the bug, restored through the mechanism meant to be careful about it.
+  // absent or unparseable marker as a live run would prevent their automatic
+  // cleanup. This pins the age fallback, not proof that an owner has exited;
+  // the walker exclusion prevents the original layout failures either way.
   const dir = mkdtempSync(join(tmpdir(), 'co-scratch-nomarker-'));
   try {
     const bare = join(dir, `${SCRATCH_PREFIX}bare00`);
@@ -334,8 +335,10 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
 {
   // `kill(pid, 0)` answers "is that pid running", not "is that pid the run that
   // wrote this marker". A pid freed by a crash gets reused, and the marker then
-  // reads as alive for as long as the recycled process lives — so the claim
-  // needs a ceiling, or "never sweep a live run" becomes "never sweep".
+  // reads as alive for as long as the recycled process lives. The ceiling
+  // bounds that protection. Both markers below deliberately name this live
+  // process: the test also pins the accepted risk that the sweep removes a
+  // genuinely active scratch once its mtime passes the ceiling.
   const dir = mkdtempSync(join(tmpdir(), 'co-scratch-ceiling-'));
   try {
     const recent = join(dir, `${SCRATCH_PREFIX}recent`);
