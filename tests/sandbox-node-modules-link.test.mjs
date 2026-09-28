@@ -139,6 +139,41 @@ try {
       }
     }
 
+    // A regular file standing where the tree belongs. statSync succeeds on it, so
+    // before the isDirectory check an executable one linked cleanly and handed the
+    // sandbox a symlink to a file. Both modes, because 0755 was the one that got
+    // through and 0644 was reported as unreadable rather than as what it is.
+    {
+      for (const mode of [0o644, 0o755]) {
+        const root = join(tmp, `file-clone-${mode.toString(8)}`);
+        const sandbox = join(tmp, `sandbox-file-${mode.toString(8)}`);
+        mkdirSync(root, { recursive: true });
+        mkdirSync(sandbox, { recursive: true });
+        const nm = join(root, 'node_modules');
+        writeFileSync(nm, 'not a directory');
+        chmodSync(nm, mode);
+
+        const reason = linkNodeModules(sandbox, root);
+        if (typeof reason === 'string' && /is not a directory/.test(reason)) {
+          pass(`a file where node_modules belongs is refused (mode ${mode.toString(8)})`);
+        } else {
+          fail(`a file at node_modules (mode ${mode.toString(8)}) produced ${JSON.stringify(reason)}`);
+        }
+
+        let entry = 'present';
+        try {
+          lstatSync(join(sandbox, 'node_modules'));
+        } catch (err) {
+          entry = err.code;
+        }
+        if (entry === 'ENOENT') {
+          pass(`no link entry is left behind for a file at node_modules (mode ${mode.toString(8)})`);
+        } else {
+          fail(`linkNodeModules linked against a file (mode ${mode.toString(8)}, lstat: ${entry})`);
+        }
+      }
+    }
+
     // Directory permission, both ways. What module resolution needs from
     // node_modules is TRAVERSE, not read: Node stats paths underneath it rather
     // than listing it. So the two failing modes fall on opposite sides of the
@@ -329,7 +364,11 @@ try {
     // the source itself alone, which both halves of this need: the predicate is
     // the `'node_modules'` path LITERAL, so a masker that blanks strings blanks
     // the evidence, and untouched offsets let a failure name a real line.
-    const ALIAS = /\bsymlinkSync\s+as\s+[A-Za-z_$][\w$]*/g;
+    // The binding name is deliberately unmatched. Pinning it to [A-Za-z_$][\w$]*
+    // missed `as \u03c3\u03cd\u03bd\u03b4\u03b5\u03c3\u03bc\u03bf\u03c2`, and the name is not the finding: the rename is.
+    // KNOWN LIMIT: a comment between the tokens (`symlinkSync /* c */ as x`) and
+    // the string-literal export form (`{ 'symlinkSync' as x }`) still slip past.
+    const ALIAS = /\bsymlinkSync\s+as\s+/g;
     const scan = (src) => {
       const isCode = codeMask(src);
       return {
@@ -368,6 +407,12 @@ try {
       // keyword is missing from startsRegex.
       ['a call below `throw` of a quote-bearing regex', `const f = () => { throw /it's bad/; };\n${RAW}`, 1],
       ['a call below `export default` of one', `export default /it's bad/;\n${RAW}`, 1],
+      // ...and the same words reached through a dot, where `/` is division. Every
+      // operand-position keyword is also a legal property name.
+      // SAME line on purpose. A regex scan stops at the newline, so a call on the
+      // line below is never masked and the probe passes either way.
+      ['a call after division on .return', `const r = obj.return / 7; ${RAW}`, 1],
+      ['a call after division on .default', `const r = obj.default / 7; ${RAW}`, 1],
     ];
     // The alias gate gets its own controls, including the shape that made the
     // first version of it wrong: reading only the FIRST match let a
@@ -378,6 +423,7 @@ try {
       ['a real aliased import below a commented one', `// ${ALIASED}\n${ALIASED}`, true],
       ['an aliased import in a comment', `// ${ALIASED}`, false],
       ['an aliased import inside a string', `const s = ${JSON.stringify(ALIASED)};`, false],
+      ['an aliased import bound to a non-ASCII name', `import { symlink${'Sync'} as \u03c3\u03cd\u03bd\u03b4\u03b5\u03c3\u03bc\u03bf\u03c2 } from 'fs';`, true],
     ];
     const misread = [
       ...probes.map(([what, src, want]) => [what, scan(src).lines.length, want]),

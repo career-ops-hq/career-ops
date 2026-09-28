@@ -509,6 +509,11 @@ export function startsRegex(src, i) {
     let k = j;
     while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k])) k--;
     const word = src.slice(k + 1, j + 1);
+    // Every name below is also a legal PROPERTY name, and `obj.return / 7` is
+    // division. Read as a regex, it runs to the next `/` and masks whatever
+    // follows -- and this scan's failure direction is a silent pass, so masked
+    // code reads as a clean repo. A preceding `.` (or `?.`) settles it.
+    if (k >= 0 && src[k] === '.') return false;
     // `throw` and `default` were absent until this function became shared. Both
     // take an operand, so `throw /x/` and `export default /x/` are regexes; read
     // as division, a quote inside one opens a phantom string that masks the
@@ -653,7 +658,13 @@ export const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Bo
 export function linkNodeModules(destDir, root = ROOT) {
   const target = join(root, 'node_modules');
   try {
-    statSync(target);
+    // isDirectory, because statSync succeeds on a regular FILE standing where the
+    // tree belongs. Without this an executable one links cleanly and the sandbox
+    // gets a symlink to a file, which is the broken sandbox this function exists
+    // to refuse. The message says what it is rather than calling it unreadable.
+    if (!statSync(target).isDirectory()) {
+      return `node_modules at ${target} is not a directory`;
+    }
     // Traverse permission, not read permission, is what resolution needs, and
     // statSync alone proves neither: it succeeds on a directory the caller
     // cannot enter. Measured here on 4 modes of a node_modules holding one
