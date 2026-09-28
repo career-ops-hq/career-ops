@@ -90,8 +90,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
-      <body suppressHydrationWarning className="font-sans antialiased">
+      <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body suppressHydrationWarning className="font-sans antialiased">
         <AppShell>{children}</AppShell>
       </body>
     </html>
