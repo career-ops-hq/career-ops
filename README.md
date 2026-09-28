@@ -497,7 +497,8 @@ Once resolved, all user files are resolved and written relative to that folder, 
 - **Tracker Override:** You can also set `CAREER_OPS_TRACKER` to override the applications tracker file path directly.
 - **Writes:** All write operations (such as merges) canonically target `{DATA_ROOT}/data/applications.md`.
 - **Scanner config:** `portals.yml` is read and validated at `{DATA_ROOT}/portals.yml`, so `node validate-portals.mjs` checks the same file `scan.mjs` reads.
-- **Generated documents:** tailored CVs and cover letters are written under `{DATA_ROOT}/output/`, and the PDF manifest that links them to a report lives at `{DATA_ROOT}/data/pdf-index.tsv`. The tracker workspace that bounds those writes is the data root, not the checkout.
+- **Generated documents:** tailored CVs and cover letters are written under `{DATA_ROOT}/output/`, and the PDF manifest that links them to a report lives at `{DATA_ROOT}/data/pdf-index.tsv`. While `CAREER_OPS_TRACKER` is unset, the tracker workspace that bounds those writes is the data root, not the checkout.
+- **PDFs under a tracker override:** `generate-pdf.mjs` resolves `CAREER_OPS_TRACKER` before it derives the workspace, so with the override set the workspace is the folder that holds that tracker (or the folder above it, when the tracker sits in a `data/` folder). The CV's HTML and every PDF must then sit inside that workspace, and the manifest moves to its `data/pdf-index.tsv`. Cover letters still target `{DATA_ROOT}/output/`, so they are refused when that folder falls outside the tracker's workspace.
 - **Code layer stays put:** `node_modules/`, `providers/`, `modes/` and the scripts themselves always resolve against the repository, never the data root.
 
 The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically respect this resolution hierarchy.
