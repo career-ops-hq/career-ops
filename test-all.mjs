@@ -1373,6 +1373,19 @@ try {
     fail(`BambooHR retry-still-empty should be uncertain, not expired: ${JSON.stringify(bambooStillEmpty)}`);
   }
 
+  // A reload that lands on the generic job-list route (not the specific
+  // posting) is the same "didn't find the posting" category as an empty
+  // body — never trusted as expired either.
+  const bambooReloadToListing = await checkUrlLiveness(
+    bambooRetryPage({ reloadBodyText: '12 jobs found', reloadApplyControls: [] }),
+    BAMBOO_URL
+  );
+  if (bambooReloadToListing.result === 'uncertain' && bambooReloadToListing.code === 'bamboohr_render_retry_failed') {
+    pass('a BambooHR reload landing on the job-list page is uncertain, never expired');
+  } else {
+    fail(`BambooHR retry-to-listing-page should be uncertain, not expired: ${JSON.stringify(bambooReloadToListing)}`);
+  }
+
   let nonBambooReloadCalled = false;
   const nonBambooPage = fakePage({ status: 200, finalUrl: URL, bodyText: '', applyControls: [] });
   nonBambooPage.reload = async () => { nonBambooReloadCalled = true; return { status: () => 200 }; };

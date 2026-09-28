@@ -473,7 +473,8 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
             bodyText: reloadBodyText,
             applyControls: reloadApplyControls,
           });
-          verdict = reloadVerdict.code !== 'insufficient_content'
+          const stillNotFound = reloadVerdict.code === 'insufficient_content' || reloadVerdict.code === 'listing_page';
+          verdict = !stillNotFound
             ? { ...reloadVerdict, reason: `${reloadVerdict.reason} (after BambooHR reload retry)` }
             : {
                 result: 'uncertain',
