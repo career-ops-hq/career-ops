@@ -1,6 +1,6 @@
 // tests/apply-mode-tailored-cv.test.mjs — the apply mode's two load-bearing
 // contracts: which document supplies an experience field, and what has to be
-// true before Save.
+// true before the action that commits a step.
 //
 // Both failures these cover are silent. A form filled from cv.md contradicts the
 // resume stapled to it, and nothing errors. A required control left unset is
@@ -15,7 +15,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 
-console.log('\napply mode: tailored-CV source and the pre-Save sweep');
+console.log('\napply mode: tailored-CV source and the pre-action sweep');
 
 const flat = readFileSync(join(ROOT, 'modes/apply.md'), 'utf-8').replace(/\s+/g, ' ');
 const has = (probe) => flat.includes(probe.replace(/\s+/g, ' '));
@@ -77,8 +77,8 @@ ok('the whole-section fallback is still the rule it defers to',
   has('`cv.md` — the fallback, never the default'),
   'the table row the other 2 sites point at');
 
-// ── Step 7b: the pre-Save required-field sweep ──────────────────────────────
-ok('Step 7b exists', has('## Step 7b — Pre-Save required-field sweep'),
+// ── Step 7b: the pre-action required-field sweep ────────────────────────────
+ok('Step 7b exists', has('## Step 7b — Pre-action required-field sweep'),
   'the sweep that catches a required control the run never surveyed is gone');
 
 // The heading alone is not the contract. Pinning only it leaves every
@@ -95,6 +95,10 @@ for (const [name, probe, why] of [
     'without it the sweep treats a deliberate No on a boolean question as an unfilled field'],
   ['the repeat-until-stable pass', 'Repeat 1-4 until the list stops changing',
     'one pass surveys the form as it was, and a fill can create required controls'],
-  ['the Save gate', 'Click Save only once a full pass adds no new required control',
-    'the inventory is advisory unless something blocks Save on it'],
+  ['the action gate', 'Click Save, Next, Continue, or Submit only once a full pass adds no new required control',
+    'the inventory is advisory unless something blocks the action on it'],
+  ['the multi-step final Submit', 'Before every Save, Next, Continue, or Submit on a multi-step form',
+    'a multi-step form ends in Submit, so a Save/Next/Continue-only clause leaves the one action that cannot be undone unswept'],
+  ['the stop-and-ask covering every action', 'stop and ask before Save, Next, Continue, or Submit',
+    'a gate that only blocks Save lets an unanswerable required field through on the final Submit'],
 ]) ok(`Step 7b pins ${name}`, has(probe), why);
