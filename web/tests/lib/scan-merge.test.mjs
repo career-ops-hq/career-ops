@@ -36,8 +36,9 @@ test("mergeScanResults falls back to the surfaced offer count, and omits fields 
 
 test("timedOutMessage names the source, the deadline and the fix", () => {
   const one = timedOutMessage(["Workday"], 230);
-  assert.match(one, /^Workday didn't finish within 230s, so its results are missing\./);
+  assert.match(one, /^Workday didn't finish within 230s, so its results are incomplete\./);
   assert.match(one, /without Workday/);
+  assert.match(one, /raise scan\.timeout_seconds in config\/profile\.yml/);
   assert.doesNotMatch(one, /no readable output/);
   assert.match(timedOutMessage(["Lever", "Workday"], 230), /^Lever and Workday .* their results/);
   assert.match(timedOutMessage(["Greenhouse", "Lever", "Workday"], 230), /^Greenhouse, Lever and Workday /);

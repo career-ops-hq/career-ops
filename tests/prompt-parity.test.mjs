@@ -18,6 +18,22 @@ function section(text, startMarker, endMarker) {
 try {
   const oferta = readFileSync(join(ROOT, 'modes', 'oferta.md'), 'utf8');
   const batch = readFileSync(join(ROOT, 'batch', 'batch-prompt.md'), 'utf8');
+  const shared = readFileSync(join(ROOT, 'modes', '_shared.md'), 'utf8');
+
+  const trackerInstruction = section(oferta, '- Score: copy the already-decided', '\n- Status:');
+  const batchScoreInstruction = section(batch, '#### Global Score', '#### Machine Summary');
+  assert(
+    shared.includes('A–H are report sections, not numeric inputs to average')
+      && trackerInstruction.includes('A–H are report sections, not scores to average')
+      && batchScoreInstruction.includes('Do not average report blocks A–H'),
+    'all evaluation paths keep report blocks separate from scoring dimensions',
+  );
+  assert(
+    shared.includes('report header, Machine Summary `score`, and application tracker must record that same value')
+      && trackerInstruction.includes('copy the already-decided 1–5 Global Score')
+      && batchScoreInstruction.includes('Copy the same value into the report header, Machine Summary `score`, and tracker addition'),
+    'interactive and batch paths copy one Global Score into every output',
+  );
 
   const ofertaBlockA = section(oferta, '## Block A — Role Summary', '## Block B — Match with CV');
   const batchBlockA = section(batch, '#### Block A — Role Summary', '#### Block B — CV Match');

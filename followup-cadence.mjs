@@ -186,6 +186,32 @@ export function parseDate(dateStr) {
 // silently fell back to the evaluation date — the exact wrong-age failure this
 // lookup exists to prevent. The leading \b still refuses "reapplied".
 //
+// A bounded gap between "applied" and the date covers the channel phrasing
+// career-ops' own apply modes write -- "Applied via Ashby 2026-08-31",
+// "Applied on 2026-08-25 via Ashby" -- which the original adjacent-only match
+// missed entirely, silently degrading to the evaluation-date fallback on the
+// exact notes this project generates (#4084). Bounded to 40 chars total and
+// unable to cross a sentence boundary (`.`/`;`/`?`/`!`) or a line break so it
+// cannot reach into a neighbouring sentence or a different requisition's
+// date; isCrossReferencedMention below reuses the same source so its "does
+// the citation already have a date" check stays in sync with what this one
+// actually matches.
+//
+// The {0,39} quantifier, not {0,40}: the mandatory separator right after it
+// is part of the gap too, so the true maximum distance between "applied" and
+// the date is quantifier-plus-one. Two CodeRabbit rounds on #4143:
+//   - `?`/`!` join `.`/`;` as sentence boundaries the gap cannot cross --
+//     "Applied? 2026-08-31" no longer reaches a foreign date.
+//   - The mandatory separator is [^\S\r\n\u2028\u2029] (whitespace that is
+//     not itself a line terminator), not \s: \s matches \r/\n/U+2028/U+2029
+//     the same as a space, so "Applied via Ashby\n2026-08-31" would have
+//     matched even with the gap itself excluding line terminators -- the
+//     separator character is the one place a line break could still sneak
+//     through.
+const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
+const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
+const APPLIED_DATE_HAS_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'i');
+
 // The trailing (?![\w-]) is the mirror of that leading \b: without it a
 // malformed value ("2026-06-091", "2026-06-09-2026-06-10") is truncated to a
 // plausible-looking date and then reported as a *measured* apply date. That is
@@ -216,7 +242,7 @@ export function parseAppliedDate(notes, options = {}) {
   const text = String(notes);
 
   const matches = [];
-  for (const m of text.matchAll(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/gi)) {
+  for (const m of text.matchAll(APPLIED_DATE_RE)) {
     if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
   }
   if (matches.length === 0) return null;
@@ -257,9 +283,9 @@ const CROSS_REF_LOOKBACK = 120;
 // identifier for THIS row, not a pointer at another tracker row. Anchored at the
 // end so it only matches a label sitting directly before the `#`, and the
 // separator excludes `.!?` so a sentence boundary cannot be swallowed into it.
-// Same vocabulary as merge-tracker.mjs's REQ_NUMBER_RE, which reads the same
+// Same vocabulary as tracker-parse.mjs's REQ_NUMBER_RE (used by merge-tracker.mjs), which reads the same
 // Notes column.
-const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?)[\s:_-]*$/i;
+const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:_-]*$/i;
 
 /**
  * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
@@ -302,14 +328,22 @@ const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|
  * @returns {boolean}
  */
 function isCrossReferencedMention(text, index) {
-  const window = text.slice(Math.max(0, index - CROSS_REF_LOOKBACK), index);
+  const windowStart = Math.max(0, index - CROSS_REF_LOOKBACK);
+  const window = text.slice(windowStart, index);
   let refEnd = -1;
-  for (const m of window.matchAll(/#\d+\b/g)) {
+  // A `#NNN` glued to a preceding word character or hyphen is an external tag
+  // ("job-search#7", "gh#12"), not a pointer at a tracker row. Reading it as a
+  // row reference discarded the row's own date: "job-search#7; Applied
+  // 2026-09-21" attributed the date to row #7.
+  for (const m of window.matchAll(/(?<![\w-])#\d+\b/g)) {
+    // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
+    // on the window's first character is checked against the original text.
+    if (m.index === 0 && /[\w-]/.test(text[windowStart - 1] ?? '')) continue;
     // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
     // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
     // this row's own date, and reading it as a cross-reference would discard a
     // genuine date. The label vocabulary is the one merge-tracker.mjs already
-    // recognises in this same Notes column (REQ_NUMBER_RE), kept in sync by
+    // recognises in this same Notes column (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by
     // being written the same way rather than imported — merge-tracker's regex
     // also captures the id itself, which is not wanted here.
     if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
@@ -350,7 +384,7 @@ function isCrossReferencedMention(text, index) {
   const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
   if (lastSeparator) {
     const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
-    if (/\bapplied\s+~?\d{4}-\d{2}-\d{2}/i.test(beforeSeparator)) return false;
+    if (APPLIED_DATE_HAS_DATE_RE.test(beforeSeparator)) return false;
   }
   return true;
 }

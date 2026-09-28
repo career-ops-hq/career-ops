@@ -41,9 +41,10 @@ function joinLabels(labels) {
 }
 
 /**
- * User-facing copy for sources whose results are missing because they ran out of
- * time. Names the sources and the lever that fixes it, instead of the generic
- * "no readable output" that read as a broken install.
+ * User-facing copy for sources whose results are incomplete because they ran out
+ * of time (a stopped source keeps only what it found before the deadline). Names
+ * the sources and the levers that fix it, instead of the generic "no readable
+ * output" that read as a broken install.
  *
  * @param {string[]} labels Display names of the timed-out sources (e.g. ["Workday"]).
  * @param {number} deadlineSec The deadline they missed, in seconds.
@@ -52,7 +53,8 @@ export function timedOutMessage(labels, deadlineSec) {
   const names = joinLabels(labels);
   const plural = labels.length > 1;
   return (
-    `${names} didn't finish within ${deadlineSec}s, so ${plural ? "their" : "its"} results are missing. ` +
-    `Try again without ${names}, or with a shorter date range or a lower per-source limit.`
+    `${names} didn't finish within ${deadlineSec}s, so ${plural ? "their" : "its"} results are incomplete. ` +
+    `Try again without ${names}, with a shorter date range or a lower per-source limit, ` +
+    `or raise scan.timeout_seconds in config/profile.yml.`
   );
 }

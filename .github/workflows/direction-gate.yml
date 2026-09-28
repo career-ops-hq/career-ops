@@ -29,9 +29,9 @@ permissions:
   contents: read
   checks: write   # solo para workflow_dispatch: crear el check en el head de la PR
 
-concurrency:
-  group: direction-gate-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.event.inputs.pr || github.ref }}
-  cancel-in-progress: true
+# Sin concurrency a propósito: con cancel-in-progress, dos eventos de label casi a la vez (labeler + pr-triage al abrir una PR)
+# dejaban un run CANCELADO en el head, y GitHub cuenta todos los checks direction-gate: la PR quedaba BLOCKED aunque otro estuviera
+# en verde (#3974 y 10 más, 24-sep). Cada run lee los labels actuales y tarda segundos: correr en paralelo es inofensivo.
 
 jobs:
   direction-gate:

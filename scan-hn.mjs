@@ -41,8 +41,12 @@ function loadKeywords() {
 // ── AI Extraction Layer ─────────────────────────────────────────
 export async function extractWithAI(rawText, model) {
   const prompt = `--- BEGIN UNTRUSTED DATA ---\n${rawText.substring(0, 2000)}\n--- END UNTRUSTED DATA ---`;
+  // A failed API call is not a non-match, so it is not caught here: an invalid
+  // key, an exhausted quota or a retired model must reach the caller, which
+  // counts it. Returning null for it made every job look like a non-match and
+  // the run end with "New offers: 0" and exit 0.
+  const result = await model.generateContent(prompt);
   try {
-    const result = await model.generateContent(prompt);
     const response = result.response.text();
     const clean = response.replace(/```yaml|```/g, '').trim();
 
@@ -77,11 +81,16 @@ async function main() {
   const rawJobs = await hnProvider.fetch({ name: 'HN' }, ctx);
 
   const newOffers = [];
+  let aiCalls = 0;
+  let aiFailures = 0;
+  let firstAiError = '';
 
   // STEP 2: The Architecture Branch
   if (apiKey) {
     console.log(`✨ AI Key detected. Processing with Gemini...`);
-    const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    // Same default as gemini-eval.mjs. gemini-1.5-flash is shut down and every
+    // request to it returns 404.
+    const modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: modelName,
@@ -91,7 +100,16 @@ async function main() {
     for (const job of rawJobs) {
       if (seen.has(job.url)) continue;
       
-      const extracted = await extractWithAI(job.title + " " + (job.text || ""), model);
+      aiCalls++;
+      let extracted;
+      try {
+        extracted = await extractWithAI(job.title + " " + (job.text || ""), model);
+      } catch (err) {
+        aiFailures++;
+        if (!firstAiError) firstAiError = `${modelName}: ${err?.message || err}`;
+        seen.add(job.url);
+        continue;
+      }
       if (extracted && extracted.company && extracted.title) {
         newOffers.push({ ...job, ...extracted, source: 'hn-hiring', postedAt: Date.now() });
         console.log(`  ✅ AI Match: ${extracted.company}`);
@@ -124,6 +142,13 @@ async function main() {
   printScanSummaryHeader('HN Scan', localToday());
   console.log(`Postings fetched:   ${rawJobs.length}`);
   console.log(`New offers:         ${newOffers.length}`);
+  if (aiFailures > 0) {
+    console.log(`AI errors:          ${aiFailures} of ${aiCalls}`);
+    console.warn(`\n⚠️  ${aiFailures} of ${aiCalls} Gemini extractions failed, so those postings were not checked. First error: ${firstAiError}`);
+    // Every call failed: the AI pass did not run at all, so a zero here is
+    // not a result. Exit non-zero so a scheduled run does not report success.
+    if (aiFailures === aiCalls) process.exitCode = 1;
+  }
   if (newOffers.length > 0) console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
 }
 
