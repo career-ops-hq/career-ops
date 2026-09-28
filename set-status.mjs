@@ -60,25 +60,60 @@
  *
  * Every real status change also appends one line to the transition ledger
  * (status-log.tsv, sibling of the tracker file):
- *   {tracker#}\t{date}\t{from}\t{to}\tset-status\t
+ *   {tracker#}\t{date}\t{from}\t{to}\t{source}\t
+ * Source is `set-status` unless --source names the caller delegating here.
  * Date defaults to today; pass --on YYYY-MM-DD when the transition actually
  * happened earlier ("they replied Tuesday"). The append is observation-only:
  * if it fails, a warning goes to stderr and the exit code is unchanged — the
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
+ *
+ * Two rules the reader enforces that this writer never has to think about,
+ * because it always has a real prior status and always writes its own source.
+ * Any other producer does have to, so they are stated here:
+ *   - An unknown from- or to-state is the sentinel "-", never an empty cell.
+ *     funnel-velocity.mjs reads the two columns differently: a from of "-"
+ *     parses to null, meaning no prior state, while a to of "-" is preserved
+ *     as the literal "-", meaning an unknown target. Any other value goes
+ *     through resolveCanonicalState, so an empty cell is rejected as
+ *     `unknown from-state ""` or `unknown to-state ""` for its own column,
+ *     and the row is dropped.
+ *   - The source column is a closed set, and VALID_SOURCES in
+ *     funnel-velocity.mjs is the authority on its members. Deliberately not
+ *     enumerated here: a copy of that list in prose is wrong the first time a
+ *     writer is added, and it would be wrong in three files at once.
+ *     A value outside the set parses but is excluded from day-math. The row
+ *     is not lost and the exclusion is not silent: it is kept as an
+ *     observation, recorded in unknownSources, and printed with its line
+ *     number under dataQuality. Namespacing a source (say "backfill:notes")
+ *     therefore keeps the row out of the day-math figures; put that detail in
+ *     the note column.
  */
 
 import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+// Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
+// DATA_ROOT is the user's, and getCareerOpsRoot() is the only thing that honours
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the .career-ops-data marker.
+//
+// One constant named CAREER_OPS did both, so resolveTrackerPath() looked inside
+// the checkout. AGENTS.md calls this script "the canonical (locked, validated,
+// atomic) write path" and #2901 converged the web layer's /api/status onto it —
+// so on any configured data root the one supported way to change a status
+// answered "No tracker found at <CHECKOUT>/applications.md", naming a file the
+// user never configured. Same defect #3715 fixed in the analysis scripts.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
@@ -96,6 +131,8 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
+  --source NAME      Attribution for the transition ledger: set-status (default)
+                     or web (a caller delegating to this script)
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
                      report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
@@ -103,14 +140,89 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
   once any row exists without a report. Prefer --row/--report (or the company
-  name) over a bare number, and prefer any of them over --force.`;
+  name) over a bare number, and prefer any of them over --force.
+
+Examples:
+  node set-status.mjs --report 12 Applied
+  node set-status.mjs --report 12 Interview --note "recruiter screen booked"
+  node set-status.mjs "Acme Corp" Rejected --on 2026-08-01
+  node set-status.mjs "Acme Corp" Applied --role "Platform Engineer"
+  node set-status.mjs --row 7 Discarded --dry-run`;
+
+/**
+ * Render the canonical states from states.yml for `--help`.
+ *
+ * A broken states.yml degrades to a pointer rather than throwing: that failure
+ * belongs to the run that tries to WRITE a state, not to `--help`.
+ *
+ * @returns {string} The states section, or a pointer line when unreadable.
+ */
+function renderStatesSection() {
+  let states;
+  try {
+    states = loadCanonicalStates(STATES_FILE);
+  } catch {
+    return `\nCanonical states: see ${STATES_FILE}`;
+  }
+  if (!states.length) return `\nCanonical states: see ${STATES_FILE}`;
+  const width = Math.max(...states.map(st => st.label.length));
+  const lines = states.map((st) => {
+    const terminal = st.terminal ? '  (terminal)' : '';
+    const desc = st.description ? `  ${st.description}` : '';
+    return `  ${st.label.padEnd(width)}${desc}${terminal}`;
+  });
+  return [
+    '',
+    'Canonical states (aliases also accepted — see templates/states.yml):',
+    ...lines,
+    '',
+    '  A terminal state ends the application. Discarded is YOUR decision or a',
+    '  closed req; Rejected is theirs; SKIP means never applied for.',
+  ].join('\n');
+}
 
 // ── argument parsing ─────────────────────────────────────────────
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report' };
+const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+
+/**
+ * Is the caller asking for help, rather than passing "--help" as a VALUE?
+ *
+ * Runs before the main loop so help answers a line that still carries the bad
+ * arguments from a failed run. Value positions are skipped but never validated
+ * — validation stays in the loop, which owns the error messages and exit codes.
+ *
+ * @param {string[]} args - argv slice.
+ * @returns {boolean}
+ */
+function wantsHelp(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (Object.hasOwn(VALUE_FLAGS, a)) { i++; continue; } // skip this flag's value
+    if (a === '--help' || a === '-h') return true;
+  }
+  return false;
+}
+
+// Exits 0 so `cmd --help` works in CI smoke checks and `|| true` idioms.
+if (wantsHelp(rawArgs)) {
+  console.log(`${USAGE}\n${renderStatesSection()}`);
+  process.exit(EXIT_OK);
+}
+
+// Who is driving this write. A caller that delegates here instead of touching
+// the tracker itself — the web status route — needs its ledger rows to stay
+// distinguishable from a CLI run's.
+//
+// The allow-list is narrow on purpose. The value is written to a file
+// funnel-velocity.mjs parses positionally and gates on its own source
+// allow-list, so an unrecognized label would be persisted here and then
+// silently dropped there. Rejecting it at the boundary keeps the two ends from
+// disagreeing about what a valid source is.
+const WRITER_SOURCES = new Set(['set-status', 'web', 'reply-watch']);
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
@@ -126,13 +238,16 @@ for (let i = 0; i < rawArgs.length; i++) {
     if ((a === '--row' || a === '--report') && !/^\d+$/.test(value)) {
       failUsage(`${a} expects a positive integer, got "${value}"`);
     }
+    if (a === '--source' && !WRITER_SOURCES.has(value)) {
+      failUsage(`--source expects one of ${[...WRITER_SOURCES].join(', ')}, got "${value}"`);
+    }
     flags[VALUE_FLAGS[a]] = value;
     i++;
   }
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
-  else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
+  else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
 }
 
@@ -161,7 +276,13 @@ if (flags.on !== null) {
   const d = m ? new Date(`${flags.on}T00:00:00Z`) : null;
   const roundTrips = d && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === flags.on;
   if (!roundTrips) failUsage(`--on expects a real date as YYYY-MM-DD, got "${flags.on}"`);
-  if (flags.on > new Date().toISOString().slice(0, 10)) failUsage(`--on date is in the future: "${flags.on}"`);
+  // LOCAL today, not the UTC day. At a positive UTC offset the UTC day is
+  // still yesterday for the first hours of the local day, so comparing against
+  // it rejected the user's own today: `TZ=Pacific/Auckland --on 2026-08-16`
+  // failed with "date is in the future" on 2026-08-16 (#2932). The round-trip
+  // check above deliberately stays on UTC — that is date PARSING, not "what
+  // day is it here".
+  if (flags.on > localToday()) failUsage(`--on date is in the future: "${flags.on}"`);
 }
 
 const selector = explicitSelector ? null : positional[0];
@@ -190,6 +311,7 @@ const failWith = makeCliFailWith(flags.json);
 function failUsage(message) {
   const msg = message ?? 'Expected 2 arguments: <report#|company> <state>';
   if (rawArgs.includes('--json')) {
+    // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
     console.log(JSON.stringify({ error: msg, code: 'usage' }));
     console.error(`❌ ${msg}`);
   } else {
@@ -215,7 +337,7 @@ if (!newStatus) {
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }
@@ -275,7 +397,7 @@ function resolveRow(rows) {
   if (flags.report !== null) {
     const num = parseInt(flags.report, 10);
     return resolveCandidates(
-      rows.filter(r => extractTrackerReportNumbers(r.report).includes(num)),
+      rows.filter(r => extractTrackerReportNumbers(r.report, r.notes).includes(num)),
       {
         notFound: `No tracker row links report #${num}. (Report IDs and tracker row IDs differ — ` +
           'use --row N to select by tracker #.)',
@@ -354,7 +476,7 @@ const target = resolveRow(rows);
 // teaches callers to pass --force, which disables it everywhere including the
 // cases it was written for.
 if (isBareNumericSelector && !flags.force) {
-  const reportNums = extractTrackerReportNumbers(target.report);
+  const reportNums = extractTrackerReportNumbers(target.report, target.notes);
   const mismatched = reportNums.filter(num => num !== target.num);
   if (mismatched.length > 0) {
     failWith(
@@ -380,7 +502,7 @@ if (isBareNumericSelector && !flags.force) {
   // not see. Bare "#N" then names two applications at once and must not write.
   if (reportNums.length === 0) {
     const num = parseInt(selector, 10);
-    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report).includes(num));
+    const linkers = rows.filter(r => r !== target && extractTrackerReportNumbers(r.report, r.notes).includes(num));
     if (linkers.length > 0) {
       const listing = linkers.map(r => `#${r.num}\t${r.company}\t${r.role}`).join('\n');
       failWith(
@@ -408,15 +530,29 @@ if (isBareNumericSelector && !flags.force) {
 // entirely baseline vocabulary (["platform","engineer"]) so that same-titled
 // sibling reqs never auto-merge. That makes it unusable on its own here — it
 // would reject --role "Platform Engineer" against a row that IS exactly that.
-const normalizeRoleText = s => String(s ?? '')
-  .toLowerCase()
-  // Preserve symbols that distinguish real titles before collapsing generic
-  // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
-  // "c engineer" and the exact-equality path treats them as the same row.
-  .replace(/\+\+/g, ' plusplus ')
-  .replace(/#/g, ' sharp ')
-  .replace(/[^a-z0-9]+/g, ' ')
-  .trim();
+// The collapse must drop PUNCTUATION, never letters. `[^a-z0-9]` dropped every
+// letter outside the Latin range, so any title written entirely in Japanese,
+// Arabic or Cyrillic keyed to '' — two different titles then compared equal
+// ('' === '') and the guard wrote the status to a row it had never actually
+// matched (#2670). normalizeTextKey is the Unicode-aware normalizer company
+// matching already used; it also folds NFKC, so a decomposed title still
+// matches its composed row.
+const normalizeRoleText = s => normalizeTextKey(
+  String(s ?? '')
+    // NFKC first: normalizeTextKey folds it too, but only AFTER this pre-map, so
+    // a fullwidth ＃/＋＋ would reach the collapse unrecognized and be stripped as
+    // punctuation — "C＃ Engineer" and "C＋＋ Engineer" both keying to
+    // "c engineer". Fullwidth forms are ordinary Japanese typography, so this is
+    // the same shipped-market surface as the rest of #2670. Folding here also
+    // makes the ASCII and fullwidth spellings of one title match each other.
+    .normalize('NFKC')
+    // Preserve symbols that distinguish real titles before collapsing generic
+    // punctuation — otherwise "C# Engineer" and "C++ Engineer" both fold to
+    // "c engineer" and the exact-equality path treats them as the same row.
+    .replace(/\+\+/g, ' plusplus ')
+    .replace(/#/g, ' sharp '),
+  ' ',
+);
 const roleMatchesTarget = normalizeRoleText(target.role) === normalizeRoleText(flags.role)
   || roleFuzzyMatch(target.role, flags.role);
 
@@ -485,15 +621,86 @@ if (changed && !flags.dryRun) {
 let statusLogged = false;
 if (statusChanged && !flags.dryRun) {
   const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
-  const eventDate = flags.on ?? new Date().toISOString().slice(0, 10);
+  // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
+  // so this appended a status-log row dated a day that had not happened yet
+  // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
+  // time-between-stages, so a future-dated transition skews the interval it
+  // measures rather than just looking odd in the file.
+  const eventDate = flags.on ?? localToday();
   try {
-    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\tset-status\t\n`);
+    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\t${flags.source ?? 'set-status'}\t\n`);
     statusLogged = true;
   } catch (err) {
     console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
   }
 }
 lock?.release();
+
+// ── follow-up seeding (#1430) ────────────────────────────────────
+//
+// The transition into Applied is where the first follow-up gets scheduled.
+// set-status.mjs used to only ANNOUNCE that — `followupSeedCandidate: true` —
+// and nothing consumed the flag: the only callers of followup-seed.mjs were
+// modes/apply.md and modes/followup.md, both agent instructions. So recording
+// an application from the web UI, or from this CLI directly, wrote the tracker
+// and the ledger correctly and scheduled nothing, silently (#3459).
+//
+// Seeding HERE rather than in each caller is what makes that one fix instead of
+// three: #2901 converged /api/status onto this script, so the web path inherits
+// it, and so does every future caller that delegates here rather than editing
+// the table.
+//
+// AFTER the tracker lock is released, deliberately. seedFollowup() re-reads the
+// tracker to resolve the applied date, and it must read the row this run just
+// wrote. It takes its own followups lock, never the tracker lock, so there is
+// no lock ordering to get wrong.
+//
+// A seeding failure NEVER fails the status change. The write has already
+// committed and the caller's exit code is about that write — same policy, and
+// the same wording, as the status-log append above. It is also idempotent
+// (`already-seeded` → seeded:false), so a re-run cannot stack duplicate pins.
+let followupSeeded = null;
+if (statusChanged && newStatus === 'Applied') {
+  try {
+    const { seedFollowup } = await import('./followup-seed.mjs');
+    // followupsPath is derived from the tracker's own directory, not left to
+    // followup-seed's default. Its default is the REPO's data/follow-ups.md,
+    // so with CAREER_OPS_TRACKER pointing elsewhere — tests, and any install
+    // whose data lives outside the checkout — the status would be written to
+    // one tracker and the follow-up seeded next to a different one. The
+    // status-log append above derives its path the same way.
+    const seed = await seedFollowup(target.num, {
+      trackerPath: APPS_FILE,
+      followupsPath: join(dirname(APPS_FILE), 'follow-ups.md'),
+      // --on is the day the transition REALLY happened, and for a transition
+      // into Applied that day is the day the application was sent. Nothing
+      // else carries it here: the tracker's date column is the evaluation
+      // date and this script never rewrites it, so without passing it on,
+      // seedFollowup falls back to that column or to today. Backdating a
+      // week-old application would then schedule its first follow-up a week
+      // late — from the wrong anchor, silently.
+      date: flags.on,
+      dryRun: flags.dryRun,
+      // assumeApplied on a DRY RUN only, and deliberately not `force`.
+      // seedFollowup refuses a row that is not Applied, and on a dry run the
+      // tracker was not written — so the row it re-reads still holds the old
+      // status and the preview would report a failure for the one thing the
+      // real run is about to do. `force` would fix that by ALSO suppressing
+      // the already-seeded check, which is the opposite of a preview: a row
+      // that already has a pin would be promised a new one here and refused
+      // on the real run. assumeApplied relaxes the status guard only. In a
+      // real run the row IS Applied by this point and neither is needed.
+      ...(flags.dryRun ? { assumeApplied: true } : {}),
+    });
+    followupSeeded = { seeded: seed.seeded, nextDate: seed.nextDate ?? null, ...(seed.reason ? { reason: seed.reason } : {}) };
+    if (!flags.json && seed.seeded) {
+      console.log(`📅 Follow-up ${flags.dryRun ? 'would be seeded' : 'seeded'} for #${target.num}: next ${seed.nextDate}`);
+    }
+  } catch (err) {
+    followupSeeded = { seeded: false, reason: 'error', error: err.message };
+    console.error(`⚠ follow-up seeding failed (status change itself succeeded): ${err.message}`);
+  }
+}
 
 // ── report ───────────────────────────────────────────────────────
 
@@ -509,17 +716,25 @@ const result = {
   // Fire the #1430 hook only on an actual transition INTO Applied — an
   // idempotent re-run of an already-Applied row must not invite a consumer
   // to seed a duplicate follow-up.
+  // followupSeedCandidate is kept for any consumer already reading it; the
+  // seeding it used to merely advertise now actually happens, and its outcome
+  // travels beside it.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(followupSeeded ? { followupSeeded } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
 
 if (flags.json) {
+  // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
   console.log(JSON.stringify(result, null, 2));
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
-  if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
+  // Only when seeding did NOT happen. The advisory predates the seeding above
+  // and asked the user to do by hand what now runs for them; leaving it
+  // unconditional would read as a contradiction right under "Follow-up seeded".
+  if (statusChanged && !flags.dryRun && newStatus === 'Applied' && !followupSeeded?.seeded) {
     console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
   }
 }

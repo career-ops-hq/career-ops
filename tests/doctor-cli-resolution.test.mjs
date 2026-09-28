@@ -15,10 +15,16 @@ console.log('\ndoctor.mjs — CLI resolution');
 const DOCTOR = join(ROOT, 'doctor.mjs');
 
 function runDoctor(cwd, args, env) {
+  const baseEnv = { ...process.env };
+  // Hermetic env: in-process imports earlier in the suite load the repo .env
+  // (scan.mjs, …), which sets CAREER_OPS_CLI and would silently override the
+  // precedence scenarios below. Delete it so each scenario controls the CLI
+  // explicitly (default → claude, or the --cli/env/.env value it supplies).
+  delete baseEnv.CAREER_OPS_CLI;
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      env: { ...baseEnv, ...env },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();

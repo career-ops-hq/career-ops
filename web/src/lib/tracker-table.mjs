@@ -32,46 +32,68 @@ const WEB_FIELD = {
 /** @type {Map<string, {mtimeMs: number, size: number, aliases: Record<string, string>}>} */
 const aliasCache = new Map();
 
+/** Canonical fields detectColumnMap needs to recognize a header row. */
+const REQUIRED_FIELDS = ["num", "company", "role", "score", "status"];
+
 /**
- * Load the shared header-alias table (lowercased header text → canonical field)
- * from `{rootDir}/tracker-aliases.json`. Cached per resolved file path so the
- * request-time read path (readApplications runs on every API route / page
- * render) doesn't re-read and re-parse the JSON each call — but the cache is
- * keyed on the file's mtime+size (one statSync per call, no full read), so a
- * system update that rewrites the alias table is picked up on the next request
- * instead of after a server restart. Failures are NEVER cached: a
- * missing/corrupt file (core checkout predating the JSON) yields an empty
- * table — no header row is then detected and parseApplications falls back to
- * the legacy fixed column order — and the cache entry is cleared so a later
- * recovered file is loaded immediately.
- * @param {string} rootDir - career-ops root (careerOpsRoot() on the web side).
+ * Load the shared header-alias table (lowercased header text → canonical field).
+ *
+ * `rootDir` is normally the data root so a complete external checkout keeps
+ * using its own matching system files. A data-only root has no alias table;
+ * `fallbackRootDir` then points at the checkout that runs the web app. Cache
+ * entries remain keyed by the resolved file's mtime+size, and failures are
+ * never cached so a recovered primary file is picked up immediately.
+ * @param {string} rootDir - primary career-ops root.
+ * @param {string} [fallbackRootDir] - running system checkout.
  * @returns {Record<string, string>}
  */
-export function loadHeaderAliases(rootDir) {
-  const file = path.resolve(rootDir, "tracker-aliases.json");
-  try {
-    const { mtimeMs, size } = fs.statSync(file);
-    const cached = aliasCache.get(file);
-    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.aliases;
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    // Guard non-object JSON (null, arrays, scalars) — treat like corrupt.
-    /** @type {Record<string, string>} */
-    const aliases = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    aliasCache.set(file, { mtimeMs, size, aliases });
-    return aliases;
-  } catch {
-    aliasCache.delete(file); // never cache failure — recovery must not need a restart
-    return {};
+export function loadHeaderAliases(rootDir, fallbackRootDir) {
+  const roots = [...new Set([rootDir, fallbackRootDir].filter(Boolean))];
+  for (const [i, root] of roots.entries()) {
+    const file = path.resolve(root, "tracker-aliases.json");
+    try {
+      const { mtimeMs, size } = fs.statSync(file);
+      const cached = aliasCache.get(file);
+      /** @type {Record<string, string>} */
+      let aliases;
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+        aliases = cached.aliases;
+      } else {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          aliasCache.delete(file);
+          continue;
+        }
+        aliases = parsed;
+        aliasCache.set(file, { mtimeMs, size, aliases });
+      }
+      // A table that cannot map the required columns (e.g. `{}`) would push
+      // detectColumnMap onto the legacy positions and misread Via-style
+      // trackers; while another root remains, try that one instead.
+      const mapped = new Set(Object.values(aliases));
+      if (i < roots.length - 1 && !REQUIRED_FIELDS.every((f) => mapped.has(f))) continue;
+      return aliases;
+    } catch {
+      aliasCache.delete(file);
+    }
   }
+  return {};
 }
 
 /**
  * Split a tracker line into trimmed cells (outer pipes removed).
+ *
+ * The trailing empty part is dropped only when the row actually ENDS with a
+ * pipe. Hand-edited rows without it are one part narrower but still complete —
+ * tracker-utils rebuildRow supports them and parseTrackerRow reads their last
+ * cell — so an unconditional `slice(1, -1)` silently ate real data (Notes read
+ * as empty). Same rule as parseTrackerRow's width computation (#2369).
  * @param {string} line
  * @returns {string[]}
  */
 function trackerCells(line) {
-  return line.split("|").slice(1, -1).map((c) => c.trim());
+  const parts = line.split("|").map((c) => c.trim());
+  return parts.slice(1, line.trimEnd().endsWith("|") ? -1 : undefined);
 }
 
 /**
@@ -101,19 +123,21 @@ export function detectColumnMap(lines, aliases) {
 
 /**
  * Parse the tracker markdown (source of truth) into application rows.
- * Columns are mapped by header name via the shared alias table in
- * `{rootDir}/tracker-aliases.json`; the legacy fixed order
+ * Columns are mapped by header name via the shared alias table. A data-only
+ * `rootDir` falls back to `systemRootDir`; the legacy fixed order
  * (# | Date | Company | Role | Score | Status | PDF | Report | Notes)
- * is the fallback when no recognizable header row is present.
+ * remains the last resort for old trackers without recognizable headers.
  * Rows without a numeric # cell (header, separator, stray pipes) are skipped,
  * mirroring parseTrackerRow in tracker-parse.mjs.
  * @param {string} md - content of data/applications.md.
- * @param {string} rootDir - career-ops root holding tracker-aliases.json.
+ * @param {string} rootDir - data root, which may also be a full checkout.
+ * @param {string} [systemRootDir] - checkout holding system files.
  * @returns {{n: string, date: string, company: string, via: string, role: string, score: string, status: string, pdf: string, report: string, notes: string}[]}
  */
-export function parseApplications(md, rootDir) {
+export function parseApplications(md, rootDir, systemRootDir) {
   const lines = md.split("\n");
-  const map = detectColumnMap(lines, loadHeaderAliases(rootDir));
+  const map = detectColumnMap(lines, loadHeaderAliases(rootDir, systemRootDir));
+  const mappedWidth = map ? Math.max(...Object.values(map)) + 1 : 0;
   const rows = [];
   for (const raw of lines) {
     const line = raw.trim();
@@ -121,6 +145,12 @@ export function parseApplications(md, rootDir) {
     const cells = trackerCells(line);
     if (cells.length < 8) continue;
     if (map) {
+      // Width guard, mirroring parseTrackerRow: a row missing an INTERIOR cell
+      // shifts every later column one left, so requiring merely that the
+      // highest mapped index EXISTS is not enough — the row must carry a cell
+      // for every mapped column. Without this the reader rendered a
+      // pre-`--migrate-via` row with Score in Role and Status in Score (#2369).
+      if (cells.length < mappedWidth) continue;
       const at = (/** @type {string} */ k) => cells[map[k]] ?? "";
       if (!/^\d+$/.test(at("n"))) continue; // header / separator / malformed
       rows.push({

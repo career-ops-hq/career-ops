@@ -1,6 +1,14 @@
-import { spawn } from "node:child_process";
-import { prepareCliLaunch, resolveCli } from "@/lib/clis";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
+import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState } from "@/lib/career-ops";
+import { CAPS } from "@/lib/worker-capabilities.mjs";
+import { scopeFrom } from "@/lib/claude-invocation.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read,WebFetch,Glob,Grep");
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
@@ -102,15 +110,35 @@ export async function POST(req: Request) {
         "--include-partial-messages",
         "--permission-mode",
         "acceptEdits",
+        // --strict-mcp-config with no --mcp-config loads ZERO MCP servers, so the
+        // tool lists here describe everything this agent can reach. Required for a
+        // non-writing worker: without it a user MCP server could supply a write tool
+        // the capability record forbids, and cli-fencing refuses to certify that (#2507).
+        "--strict-mcp-config",
         "--allowedTools",
-        "Read,WebFetch,Glob,Grep",
+        ADVISOR_SCOPE.allowed,
         "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task",
+        ADVISOR_SCOPE.disallowed,
       ]
     : spec.args(prompt);
 
-  const launch = prepareCliLaunch(binPath, args);
-  const child = spawn(launch.command, launch.args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  // The advisor reads and fetches but must never write — the same intent the
+  // Claude branch spells as Read,WebFetch,Glob,Grep with Bash/Write/Edit denied.
+  // networkReadOnly, not localReadOnly, because WebFetch is in that allow list.
+  let child;
+  try {
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId, capabilities: CAPS.networkReadOnly },
+    );
+  } catch (e) {
+    // Fencing refuses an argv that contradicts the capability record. Report it
+    // in this route's own error shape rather than letting the throw escape POST
+    // as an unhandled rejection and an unstructured 500.
+    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+  }
 
   const encoder = new TextEncoder();
   // `closed` + kill timer in the OUTER scope so cancel() can flip `closed` before
@@ -121,7 +149,6 @@ export async function POST(req: Request) {
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
-      let stderrBuf = "";
       let emitted = false;
       killer = setTimeout(() => {
         try {
@@ -154,6 +181,14 @@ export async function POST(req: Request) {
       const emit = (s: string) => {
         if (safeEnqueue(s)) emitted = true;
       };
+      // Same honesty as /api/run: a runtime with no verified fencing mechanism
+      // runs with its default access, and that must be visible rather than
+      // inferred from which CLI happens to be selected (#2507). This stream is
+      // plain text, so the notice is a leading line rather than an event.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.networkReadOnly });
+      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}
+
+`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;
@@ -181,9 +216,8 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        stderrBuf += s;
         if (/error|not found|denied|fatal/i.test(s)) {
-          emit(`\n[${spec.name}] ${s.trim()}\n`);
+          safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
       });
       child.on("error", (e) => {
@@ -192,8 +226,7 @@ export async function POST(req: Request) {
       });
       child.on("close", () => {
         if (!emitted) {
-          const detail = stderrBuf.trim();
-          safeEnqueue(detail ? `[${spec.name}] ${detail}` : "_(no output — is the CLI authenticated?)_");
+          safeEnqueue("_(no output — is the CLI authenticated?)_");
         }
         safeClose();
       });

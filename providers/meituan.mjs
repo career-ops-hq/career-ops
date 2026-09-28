@@ -1,6 +1,9 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 // Meituan careers provider — posts to the public zhaopin.meituan.com JSON API
 // (no auth, no browser, no special headers). Verified 2026-07 by capturing the
 // site's own XHR:
@@ -74,9 +77,13 @@ export function parseMeituanResponse(json, companyName) {
     const title = p.name || '';
     const id = p.jobUnionId;
     if (!title || !id) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     jobs.push({
       title,
-      url: DETAIL + encodeURIComponent(id),
+      url: DETAIL + encodedId,
       company: companyName,
       location: names(p.cityList),
       // Meituan posts carry full-text JDs (duty + requirements), much longer
@@ -118,7 +125,6 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
@@ -131,7 +137,7 @@ export default {
 
         for (let attempt = 0; attempt <= EMPTY_RETRIES; attempt++) {
           if (firstRequest) firstRequest = false;
-          else await sleep(attempt > 0 ? RETRY_BACKOFF_MS * attempt : INTER_PAGE_DELAY_MS);
+          else await sleep(attempt > 0 ? RETRY_BACKOFF_MS * attempt : INTER_PAGE_DELAY_MS, ctx);
 
           let json;
           try {

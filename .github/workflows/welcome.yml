@@ -6,28 +6,48 @@ on:
   issues:
     types: [opened]
 
+permissions:
+  issues: write
+  pull-requests: write
+
 jobs:
   welcome:
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
-      pull-requests: write
     steps:
-      - uses: actions/first-interaction@v3
+      # Counting is done with the search API instead of actions/first-interaction:
+      # on a repo this size that action mistook a contributor with two dozen merged
+      # PRs for a newcomer and greeted him with "thanks for your first PR", which
+      # reads as a bot that does not know who it is talking to and quietly takes
+      # credit away from a veteran. Search counts the whole history in one call, so
+      # the greeting is only ever sent when it is actually true.
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          pr_message: |
-            Welcome to career-ops, @${{ github.actor }}! Thanks for your first PR.
+          script: |
+            const { owner, repo } = context.repo;
+            const isPr = !!context.payload.pull_request;
+            const item = context.payload.pull_request || context.payload.issue;
+            const user = item.user.login;
+            if (item.user.type === 'Bot' || user.endsWith('[bot]')) return;
 
-            A few things to know:
-            - Tests will run automatically — check the status below
-            - Make sure you've linked a related issue (required for features)
-            - Read [CONTRIBUTING.md](https://github.com/santifer/career-ops/blob/main/CONTRIBUTING.md) if you haven't
+            // "First" is judged per surface: someone's first issue still deserves a
+            // welcome even after they have landed PRs, and vice versa.
+            const kind = isPr ? 'pr' : 'issue';
+            const { data: prior } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:${kind} author:${user}`, per_page: 2 });
+            // The item that triggered this run is itself in the count.
+            if (prior.total_count > 1) return;
 
-            We'll review your PR soon. Join our [Discord](https://discord.gg/8pRpHETxa4) if you have questions.
-          issue_message: |
-            Thanks for opening your first issue, @${{ github.actor }}! We'll take a look soon.
+            const body = isPr
+              ? `Welcome to career-ops, @${user}! Thanks for your first PR.\n\n`
+                + `A few things to know:\n`
+                + `- Tests run automatically, but on a first contribution they wait for a maintainer to approve the run: if it looks stuck, that queue is on us, not on you\n`
+                + `- Link a related issue if this is a feature (bug fixes, providers, docs and translations need no issue)\n`
+                + `- [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md) has the specifics\n\n`
+                + `We review every PR by hand. Join our [Discord](https://discord.gg/8pRpHETxa4) if anything blocks you.`
+              : `Thanks for opening your first issue, @${user}! We'll take a look soon.\n\n`
+                + `In the meantime:\n`
+                + `- [SUPPORT.md](https://github.com/${owner}/${repo}/blob/main/SUPPORT.md) covers setup help\n`
+                + `- Our [Discord](https://discord.gg/8pRpHETxa4) is the fastest place for quick answers`;
 
-            In the meantime:
-            - Check [SUPPORT.md](https://github.com/santifer/career-ops/blob/main/SUPPORT.md) for setup help
-            - Join our [Discord](https://discord.gg/8pRpHETxa4) for quick answers
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: item.number, body });

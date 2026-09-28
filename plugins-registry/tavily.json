@@ -15,6 +15,6 @@
   "allowedHosts": [
     "api.tavily.com"
   ],
-  "registrationIssue": "https://github.com/santifer/career-ops/issues/1344",
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/1344",
   "addedAt": "2026-06-29"
 }

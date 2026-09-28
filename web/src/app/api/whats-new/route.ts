@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
+import { getNormalizeTextKey } from "@/lib/core/text-key";
+import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
+import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,10 +14,18 @@ export const dynamic = "force-dynamic";
 // evaluated yet. No scan runs here — it reads the history a past scan already
 // wrote, so the home stays instant + free (directly answers the #1 token-cost
 // complaint). cols: url, first_seen, portal, title, company, status, location.
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// Company matching keys come from the CORE (see lib/core/text-key.ts), never a
+// local reimplementation. The previous ASCII-only key deleted every non-Latin
+// letter, so "Škoda" collided with "Koda" — suppressing a real offer as
+// "already evaluated" — and "日本電産" keyed to the empty string (#2666).
 
 export async function GET(req: Request) {
-  const days = Math.min(30, Math.max(1, Number(new URL(req.url).searchParams.get("days")) || 7));
+  const searchParams = new URL(req.url).searchParams;
+  const days = Math.min(30, Math.max(1, Number(searchParams.get("days")) || 7));
+  // Home only needs enough offers for its cards; Explore's “See all” hand-off
+  // asks for more. Both stay finite — `count` is always complete, so the true
+  // total is free while the rendered list keeps a ceiling (see MAX_OFFER_LIMIT).
+  const offerLimit = resolveOfferLimit(searchParams.get("limit"));
   const cutoff = Date.now() - days * 86_400_000;
   let rows: string[];
   try {
@@ -23,14 +34,17 @@ export async function GET(req: Request) {
     return Response.json({ offers: [], count: 0 });
   }
 
-  // Companies already evaluated → don't resurface as "new".
-  const evaluated = new Set(readApplications().map((a) => norm(a.company)).filter(Boolean));
+  // Roles already evaluated → don't resurface as "new". Keyed on company AND
+  // role, not company alone: suppressing by employer removed that employer's
+  // entire board after one evaluation (#3131). See lib/whats-new-suppression.
+  const normalizeTextKey = await getNormalizeTextKey();
+  const evaluated = evaluatedKeys(readApplications(), normalizeTextKey);
 
   const toOffer = (c: string[]): DiscoveredOffer | null => {
     const [url, firstSeen, portal, title, company, status, location] = c;
     if (!url || !/^https?:\/\//i.test(url)) return null;
     if (status && /skipped|expired/i.test(status)) return null;
-    if (company && evaluated.has(norm(company))) return null;
+    if (isEvaluated(evaluated, normalizeTextKey, company, title)) return null;
     return {
       url,
       company: (company || "").trim(),
@@ -42,30 +56,6 @@ export async function GET(req: Request) {
     };
   };
 
-  const seen = new Set<string>();
-  const offers: DiscoveredOffer[] = [];
-  let anyDated = false;
-  // Pass 1: recent-by-date (the supply loop).
-  for (let i = rows.length - 1; i >= 1 && offers.length < 24; i--) {
-    const c = rows[i].split("\t");
-    const t = Date.parse(c[1] || "");
-    if (Number.isFinite(t)) anyDated = true;
-    if (!Number.isFinite(t) || t < cutoff) continue;
-    const o = toOffer(c);
-    if (!o || seen.has(o.url)) continue;
-    seen.add(o.url);
-    offers.push(o);
-  }
-  // Fallback for LEGACY scan.mjs histories with no parseable first_seen (every row
-  // would be dropped → a false "all caught up"). Show the most-recent-by-append-order
-  // un-evaluated rows instead, so the supply loop still surfaces something.
-  if (offers.length === 0 && !anyDated) {
-    for (let i = rows.length - 1; i >= 1 && offers.length < 12; i--) {
-      const o = toOffer(rows[i].split("\t"));
-      if (!o || seen.has(o.url)) continue;
-      seen.add(o.url);
-      offers.push(o);
-    }
-  }
-  return Response.json({ offers, count: offers.length });
+  const { offers, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit });
+  return Response.json({ offers, count });
 }

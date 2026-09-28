@@ -10,9 +10,10 @@
 // Driven end-to-end in a child process rather than against an exported helper:
 // the bug is not in any single function but in the interaction between the
 // breaker, the checkpoint writer, and the exit path, and only a whole run
-// exercises all three. The child runs in a sandbox cwd (every path
-// scan-ats-full.mjs touches is relative) with a stubbed `dns.lookup`, so no
-// network is involved and the resolver's behaviour is exact:
+// exercises all three. The child runs against a sandbox data root — pointed at
+// by CAREER_OPS_ROOT, since scan-ats-full.mjs's paths follow the data root
+// rather than the cwd (#3510) — with a stubbed `dns.lookup`, so no network is
+// involved and the resolver's behaviour is exact:
 //
 //   EAI_AGAIN  — a resolver-level failure; trips the breaker  → checkpoint kept
 //   ENOTFOUND  — NXDOMAIN, an ordinary dead board; no outage  → checkpoint deleted
@@ -42,6 +43,8 @@ const CHECKPOINT_REL = join('data', 'cache', 'ats-full-checkpoint.json');
  * @returns {string} Sandbox directory.
  */
 function makeSandbox() {
+  // Laid out exactly like a real data root — portals.yml at the top,
+  // data/cache/ beneath it — because that is what it is handed to the child as.
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-outage-'));
   // Minimal portals.yml: main() exits early without one. The filters never
   // matter here — no board is reachable, so no posting reaches them.
@@ -92,7 +95,17 @@ function sweep(dir, dnsCode, extraArgs = []) {
   return run(NODE, [join(dir, 'launch.mjs'), '--ats', 'greenhouse', '--json', ...extraArgs], {
     cwd: dir,
     // Pacing would only add wall-clock time to a run whose every lookup fails.
-    env: { ...process.env, STUB_DNS_CODE: dnsCode, CAREER_OPS_DNS_LOOKUPS_PER_MIN: '0' },
+    // CAREER_OPS_ROOT is what actually isolates this sweep: cwd stays pinned too,
+    // so a path that quietly went back to following the shell would still be
+    // caught by tests/scan-data-paths-under-data-root.test.mjs rather than
+    // silently reading this fixture through the other route.
+    env: {
+      ...process.env,
+      CAREER_OPS_ROOT: dir,
+      CAREER_OPS_DATA_DIR: '',
+      STUB_DNS_CODE: dnsCode,
+      CAREER_OPS_DNS_LOOKUPS_PER_MIN: '0',
+    },
     timeout: 120_000,
   });
 }
@@ -188,6 +201,55 @@ function sweep(dir, dnsCode, extraArgs = []) {
       fail(`a completed sweep reported stoppedByOutage=${JSON.parse(out).stoppedByOutage}`);
     } else {
       pass('a completed sweep still deletes its checkpoint and reports no outage stop');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- retired boards are reported separately, not as scanned companies ---
+{
+  const dir = makeSandbox();
+  try {
+    writeFileSync(
+      join(dir, 'data', 'dead-boards.tsv'),
+      `ats\tboard\tmisses\tlast_checked\ngreenhouse\thttps://job-boards.greenhouse.io/sandbox-co-0\t3\t${new Date().toISOString()}\n`,
+      'utf-8',
+    );
+    const out = sweep(dir, 'ENOTFOUND');
+    if (out === null) {
+      fail(`retired-board count sweep did not complete${formatRunFailure()}`);
+    } else {
+      const result = JSON.parse(out);
+      if (result.companiesScanned === COMPANIES - 1 && result.retiredBoardsSkipped === 1) {
+        pass(`retired boards are excluded from companiesScanned (${result.companiesScanned}) and reported separately`);
+      } else {
+        fail(`retired-board counts are wrong: companiesScanned=${result.companiesScanned}, retiredBoardsSkipped=${result.retiredBoardsSkipped}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- dead-board cache failures do not discard the sweep ---
+{
+  const dir = makeSandbox();
+  try {
+    // Force saveDeadBoards() to fail at its temporary-file write. The scanner
+    // should keep its matches and summary even when this optional cache cannot
+    // be persisted.
+    mkdirSync(join(dir, 'data', 'dead-boards.tsv.tmp'));
+    const out = sweep(dir, 'ENOTFOUND');
+    if (out === null) {
+      fail(`dead-board cache failure aborted the sweep${formatRunFailure()}`);
+    } else if (
+      JSON.parse(out).companiesScanned === COMPANIES
+      && !existsSync(join(dir, 'data', 'dead-boards.tsv'))
+    ) {
+      pass('dead-board cache failure is best-effort and does not abort the sweep');
+    } else {
+      fail(`dead-board cache failure changed the scan count: ${JSON.parse(out).companiesScanned}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

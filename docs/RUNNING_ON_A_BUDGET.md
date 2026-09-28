@@ -59,6 +59,26 @@ Inside Claude Code, `/status` reports the active login and shows an API-key row 
 
 `ANTHROPIC_AUTH_TOKEN` and the cloud-provider switches (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`) take precedence too, so check those if a stray key is not the culprit.
 
+### A settings.json helper can bring the key back
+
+Even with the environment clean, `~/.claude/settings.json` can set `apiKeyHelper` — a script Claude Code runs to produce an API key on every request. When it is set, that key wins over your subscription login, so the steps above alone will not fix billing.
+
+Check for it:
+
+```bash
+grep -n "apiKeyHelper" ~/.claude/settings.json 2>/dev/null   # any match means a helper is configured
+```
+
+Remove it then restart Claude Code:
+
+```jsonc
+{
+  "apiKeyHelper": "/path/to/script.sh" // remove this line
+}
+```
+
+Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can set the same key — check those too if it keeps coming back.
+
 ### The batch mode is the exception worth knowing
 
 `batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
@@ -84,26 +104,77 @@ Different CLIs offer different levels of flexibility for model routing. The two 
 OpenCode is an open-source coding agent that easily routes to custom API providers (like DeepSeek, OpenRouter, Together AI) or local endpoints (Ollama).
 
 To configure OpenCode with a custom provider:
-1. Initialize/open OpenCode in the project directory:
+
+1. Create `opencode.json` in the project root. OpenCode looks for it in the
+   current directory and then walks up to the nearest git root, so the
+   career-ops checkout is the right place for it. A custom endpoint goes in
+   `provider.<name>.options.baseURL`, and credentials come in through `{env:VAR}`
+   substitution rather than being pasted in:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+     "provider": {
+       "openrouter": {
+         "options": {
+           "apiKey": "{env:OPENROUTER_API_KEY}"
+         }
+       }
+     }
+   }
+   ```
+
+   `openrouter` is one of OpenCode's built-in providers, so it already knows the
+   base URL — you only supply the key. For a provider OpenCode does not ship,
+   add `"baseURL": "https://your-endpoint/v1"` alongside `apiKey` and set
+   `"npm": "@ai-sdk/openai-compatible"`, as in the verified Kimi recipe below.
+
+2. Export only the key named in the config, then open OpenCode in the project
+   directory:
+
+   ```bash
+   # Git Bash / Linux / macOS:
+   export OPENROUTER_API_KEY="your_openrouter_api_key_here"
+
+   # Windows CMD:
+   set OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+   # Windows PowerShell:
+   $env:OPENROUTER_API_KEY="your_openrouter_api_key_here"
+   ```
+
    ```bash
    opencode
    ```
-2. Open its configuration settings (usually located in `.opencode/config.json` or configured via CLI prompts/settings).
-3. Set the `provider` to your chosen endpoint (e.g., OpenRouter or a custom OpenAI-compatible endpoint).
-4. Configure the environment variables for custom endpoints if needed:
-   ```bash
-   # For Git Bash / Linux / macOS:
-   export OPENAI_API_BASE="https://openrouter.ai/api/v1"
-   export OPENAI_API_KEY="your_openrouter_api_key_here"
 
-   # For Windows CMD:
-   set OPENAI_API_BASE=https://openrouter.ai/api/v1
-   set OPENAI_API_KEY=your_openrouter_api_key_here
+> **`OPENAI_API_BASE` does nothing here.** OpenCode reads neither
+> `OPENAI_API_BASE` nor `OPENAI_BASE_URL`; a base URL is only ever config, as
+> above. Exporting it and nothing else leaves OpenCode with no provider
+> configured — which fails in a confusing way, especially in headless
+> `opencode run` usage where there is no `/models` picker to fall back on.
+> (`OPENAI_BASE_URL` *is* read by career-ops' own direct-API scripts —
+> `openai-eval.mjs`, `openai-tailor.mjs` — see `.env.example`. That is a
+> separate path from running a CLI as your engine.)
 
-   # For Windows PowerShell:
-   $env:OPENAI_API_BASE="https://openrouter.ai/api/v1"
-   $env:OPENAI_API_KEY="your_openrouter_api_key_here"
-   ```
+> **Headless runs need a model in config.** `opencode run` resolves its model
+> from the top-level `model` key (format `provider/model`, so an OpenRouter id
+> that itself contains a slash reads `openrouter/vendor/model:free`). Scripts
+> that shell out to `opencode run` — `rank-pipeline.mjs`, for one — do not pass
+> `--model`, so without that key there is nothing to select one.
+
+Free model ids on OpenRouter rotate, and the one above will eventually stop
+resolving. List what is currently free with:
+
+```bash
+curl -s https://openrouter.ai/api/v1/models \
+  | jq -r '.data[] | select(.id|endswith(":free")) | "\(.context_length)\t\(.id)"' \
+  | sort -rn
+```
+
+Prefer a large context window for career-ops: the batch paths send many rows in
+a single prompt and parse strict JSON back, so a small context or a chatty small
+model both fail the parse.
 ### Kimi K2.5 via OpenCode (Verified)
 
 > **Kimi the model, not Kimi the CLI.** This recipe runs the Kimi K2.5 *model* through the **OpenCode** CLI. That is a different thing from using the standalone **Kimi CLI** as your host (see [Supported CLIs](SUPPORTED_CLIS.md)). The names collide; the setups don't. Follow the steps below inside OpenCode.
@@ -211,13 +282,21 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
 
 
-> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
+> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
 > OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
 > OPENAI_MODEL=deepseek/deepseek-chat \
 > OPENAI_API_KEY=your_key \
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
+> Requesty (`https://router.requesty.ai/v1`) is another OpenAI-compatible router that works the same way — one key across OpenAI, Anthropic, Google, DeepSeek and others. Prompt caching depends on the model: Anthropic models honor the `cache_control` breakpoints the script already sends, while OpenAI models such as `gpt-4o-mini` cache automatically on the provider side without any request changes:
+> ```bash
+> OPENAI_BASE_URL=https://router.requesty.ai/v1 \
+> OPENAI_MODEL=openai/gpt-4o-mini \
+> OPENAI_API_KEY=your_requesty_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+>
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
 > NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
@@ -237,6 +316,37 @@ Running 32B or 70B models locally requires substantial system resources:
 
 > 💡 **Budget Tip**: For most users, running **DeepSeek V3** or **Qwen 2.5 Coder 72B** via a cheap hosted API (like DeepSeek directly or OpenRouter) is far more efficient and cost-effective than investing in local hardware, costing only a few cents for dozens of evaluations.
 
+### Ollama + OpenCode Quick-Start (Verified)
+For users who want a completely local setup on Apple Silicon, Ollama can be used with OpenCode without an API key.
+
+The following setup was verified on an Apple Silicon Mac with 16 GB unified memory.
+
+1. Install Ollama and make sure it is running.
+2. Pull the model:
+
+   ```bash
+   ollama pull command-r7b
+   ```
+3. Verify that the model is available:
+   ```bash
+   ollama list
+   ```
+4. Launch OpenCode with the local model:
+
+    ```bash
+    ollama launch opencode --model command-r7b
+    ```
+5. From OpenCode, point the agent at your Career-Ops checkout and run a simple repository task to confirm that the model can interact with the repository.
+
+- **Verified hardware:** Apple M4, 16 GB unified memory
+- **Model:** `command-r7b` (7B parameters)
+- **Inference:** Local through Ollama
+- **API key:** Not required
+- **API cost:** $0
+
+Observed result: OpenCode launched successfully with `command-r7b`. A simple prompt completed in approximately 57 seconds. The model produced a reasonable high-level README summary, but it did not reliably read repository files through OpenCode during testing. For complex repository tasks, larger models may provide better accuracy.
+
+> **Performance and quality note:** Smaller local models can be useful on memory-constrained hardware, but they may be less reliable than larger hosted models for complex Career-Ops evaluations, repository analysis, and resume tailoring. Use this setup when local execution and zero API cost are more important than maximum output quality.
 ---
 
 ## 6. Token-Saving Best Practices
@@ -263,6 +373,15 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    ```bash
    npm run scan -- --verify
    ```
+
+
+### Cap interactive sessions (~10 roles)
+
+Evaluating many roles in one interactive session degrades the output well before the quota runs out. At 40+ evaluations in a single session, reports started mixing job titles and dates, and CV PDFs came out wrong. Cap an interactive session at about ten role evaluations, then `/clear` or start a fresh session.
+
+The real limit is tokens of accumulated job text, not a hard role count. When descriptions are long, cut the batch roughly in half.
+
+To evaluate more than that in one go, use `batch/batch-runner.sh`. It reuses one worker instead of letting context pile up across interactive turns. Source: [discussion #1089](https://github.com/career-ops-hq/career-ops/discussions/1089).
 
 ---
 

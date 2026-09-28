@@ -139,7 +139,7 @@ export default {
       processedIds.add(m.id);
     }
 
-    saveProcessedIds(processedIds);
+    if (!ctx?.dryRun) saveProcessedIds(processedIds);
     return jobs;
   },
 };

@@ -46,7 +46,11 @@ imported), an `index.mjs` (default-exports your hooks), and optionally a
 — there is no auto-submit hook. Producers **return** `Job[]`; the engine writes
 them. Reach the network **only** through `ctx.fetch` (your manifest
 `allowedHosts` is enforced, with SSRF protection). Keys arrive via `ctx.env`,
-non-secret settings via `ctx.settings`.
+non-secret settings via `ctx.settings`. To deduplicate the postings you return —
+or to compare a posting against one you have already seen — use
+`ctx.normalizePostingUrl(url)`, which is the same key the tracker and scanner
+build. It returns `''` when there is nothing to key on, and `''` means *no key*:
+never match one `''` against another.
 
 See `plugins/README.md` for the full contract + the honest trust model (plain
 ESM has no hard sandbox — bundled plugins are code-reviewed; your own are your
@@ -122,6 +126,6 @@ To add your own plugin to the registry, follow the [Publishing + getting approve
 
 - **Centralized infrastructure** the project would run (hosted aggregation,
   shared services, proxies) → a separate, opt-in service, see
-  [Discussion #904](https://github.com/santifer/career-ops/discussions/904).
+  [Discussion #904](https://github.com/career-ops-hq/career-ops/discussions/904).
 - **Auto-submitting / blind-applying** → out of the core everywhere. career-ops
   drafts for you to review and submit; it is a decision-support tool, not a bot.

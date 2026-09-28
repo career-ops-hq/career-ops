@@ -9,24 +9,66 @@
  * Fills templates/cover-letter-template.html with the payload, then renders
  * it to PDF via the same Playwright pipeline used for CVs (generate-pdf.mjs).
  *
- * `buildHtml` is exported as a pure function so the template can be tested
- * without loading Playwright (renderHtmlToPdf is imported lazily inside main).
+ * `buildHtml` and `safeOutputPath` are exported as pure functions so the
+ * template and --out path guard can be tested without loading Playwright
+ * (renderHtmlToPdf is imported lazily inside main).
  */
 
 import { readFileSync, existsSync, mkdirSync } from "fs";
-import { dirname, resolve, basename, join } from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { dirname, resolve, join, relative, isAbsolute } from "path";
+import { fileURLToPath } from "url";
 import { parseArgs } from "util";
 import { assertFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
+import { isMainModule } from "./lib/is-main-module.mjs";
 
-const OUTPUT_ROOT = resolve("output");
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const OUTPUT_ROOT = resolve(__dirname, "output");
 
-/** Sanitize a requested output filename and keep it under the output directory. */
-function safeOutputPath(raw) {
-  // Derive a sanitized filename from raw string (strip path separators and dots)
-  const filename = basename(raw).replace(/[^a-zA-Z0-9._-]/g, "-").replace(/\.{2,}/g, "-");
-  return join(OUTPUT_ROOT, filename);
+/**
+ * Resolve a requested cover-letter output path.
+ *
+ * Paths that stay inside `output/` keep their relative subdirectory (the
+ * application-bundle layout `generate-pdf.mjs` already supports). Paths that
+ * would escape `output/` — `..` traversal or an absolute path outside it —
+ * are rejected instead of being silently flattened to `output/<basename>`.
+ *
+ * @param {string} raw - Caller-supplied --out / payload.output_path value.
+ * @returns {string} Absolute path inside OUTPUT_ROOT.
+ */
+export function safeOutputPath(raw) {
+  if (raw == null || String(raw).trim() === "") {
+    throw new Error("Refusing to write the cover letter outside output/: (empty path)");
+  }
+  const trimmed = String(raw).trim();
+
+  const asWritten = resolve(trimmed);
+  if (containedInOutput(asWritten)) return asWritten;
+
+  // Absolute paths and any `..` segment already chose a location; if that
+  // location is not inside output/, refuse instead of rewriting to a basename.
+  if (isAbsolute(trimmed) || /(^|[\\/])\.\.([\\/]|$)/.test(trimmed)) {
+    throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+  }
+
+  // Bare filename or a relative path that is not already under output/
+  // (e.g. --out cover.pdf, or --out output/foo/bar.pdf from another cwd).
+  const posix = trimmed.replace(/\\/g, "/").replace(/^\.\//, "");
+  const relativeToRoot = posix === "output" || posix === "output/"
+    ? ""
+    : posix.startsWith("output/")
+      ? posix.slice("output/".length)
+      : posix;
+  const candidate = resolve(OUTPUT_ROOT, relativeToRoot);
+  if (containedInOutput(candidate)) return candidate;
+
+  throw new Error(`Refusing to write the cover letter outside output/: ${raw}`);
+}
+
+/** True when absPath is a file (not output/ itself) still inside OUTPUT_ROOT. */
+function containedInOutput(absPath) {
+  const rel = relative(OUTPUT_ROOT, absPath);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /** Assert that a payload object contains the required keys. */
@@ -85,6 +127,41 @@ function buildCredentialsBlock(candidate) {
 function buildDateline(letter) {
   const parts = [letter.company, letter.city, letter.date].filter(Boolean).map(escapeHtml);
   return parts.join(" &nbsp;&nbsp; ");
+}
+
+/**
+ * Build the optional recipient address block for a business letter.
+ *
+ * The pack authoring contract places {{RECIPIENT_BLOCK}} bare and expects the
+ * filler to emit its own wrapper, so this returns a complete
+ * `<div class="recipient">` or an empty string, never a bare fragment. Each
+ * line is its own `<div>` rather than a `<br>` join, which is what the packs'
+ * own CSS targets.
+ *
+ * A partial recipient is normal and renders as far as it goes: a company with
+ * no named individual, or a name with no street address, are both ordinary
+ * states for a cover letter. Only a recipient with nothing usable in it (blank or whitespace-only fields included), or no
+ * recipient at all, yields the empty string, so a letter without an addressee
+ * still renders instead of failing.
+ *
+ * Accepts `address_lines` (array, the contract's shape) or `address` (string).
+ */
+function buildRecipientBlock(letter) {
+  const r = letter.recipient;
+  if (!r || typeof r !== "object") return "";
+  const addressLines = Array.isArray(r.address_lines)
+    ? r.address_lines
+    : r.address
+      ? [r.address]
+      : [];
+  // Trim before filtering: `filter(Boolean)` alone keeps "   ", which renders as
+  // a blank line inside the wrapper rather than as the absent field it is.
+  const lines = [r.name, r.title, r.company, ...addressLines]
+    .map((v) => (typeof v === "string" ? v.trim() : v))
+    .filter(Boolean)
+    .map(escapeHtml);
+  if (!lines.length) return "";
+  return `<div class="recipient">\n${lines.map((l) => `    <div>${l}</div>`).join("\n")}\n  </div>`;
 }
 
 /** Build the optional achievements list for the letter body. */
@@ -184,6 +261,7 @@ export function buildHtml(payload, templatePath) {
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),
     "{{DATELINE}}": buildDateline(letter),
+    "{{RECIPIENT_BLOCK}}": buildRecipientBlock(letter),
     "{{GREETING_BLOCK}}": greetingBlock,
     "{{OPENING}}": escapeHtml(letter.opening),
     "{{PROFILE_INTRO}}": escapeHtml(letter.profile_intro),
@@ -244,7 +322,8 @@ Usage:
 
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4, default: a4)
+  --format    Override output PDF page format (letter|a4). Defaults to
+              config/profile.yml page_format, then letter.
   --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
@@ -267,7 +346,12 @@ Usage:
     const role    = (payload.letter?.role_title || "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
     payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
   } else {
-    payload.output_path = safeOutputPath(payload.output_path);
+    try {
+      payload.output_path = safeOutputPath(payload.output_path);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
   }
 
   if (!existsSync(OUTPUT_ROOT)) mkdirSync(OUTPUT_ROOT, { recursive: true });
@@ -278,6 +362,11 @@ Usage:
     // validator before importing Playwright or writing a PDF so a failed gate
     // cannot leave behind a misleading artifact.
     const factCheck = assertFacts(html, { label: "cover letter" });
+    // Ahead of the verdict, because it qualifies it: with no config the phrase
+    // lists are empty, so a silent gate here covers metrics and facts only.
+    if (factCheck.configMissing) {
+      console.error("No config/cv-facts.json — forbidden/advisory phrase checks did not run.");
+    }
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
       for (const phrase of factCheck.warnings) {
@@ -289,7 +378,10 @@ Usage:
     const { renderHtmlToPdf } = await import("./generate-pdf.mjs");
     const outputPath = resolve(payload.output_path);
     await renderHtmlToPdf(html, outputPath, {
-      format: args.format || "a4",
+      // Passed through unresolved. renderHtmlToPdf ranks it against the user's
+      // config/profile.yml, so a cover letter and its CV cannot end up on
+      // different paper because only one of them carried a flag.
+      format: args.format,
       reportNum: args.report,
       inputPath: payloadPath,
     });
@@ -301,5 +393,5 @@ Usage:
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule(import.meta.url);
 if (isMain) main();

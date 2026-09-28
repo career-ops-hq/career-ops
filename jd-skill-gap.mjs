@@ -27,12 +27,24 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const CV_PATH = 'cv.md';
+// From the data root, not the cwd. cv.md is a Source-of-Truth Boundary primary
+// file and lives wherever CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
+// .career-ops-data marker points; a bare relative path resolves against
+// whatever directory the process was started in.
+//
+// Everything this script reports is a comparison against that file, so without
+// it there is nothing to say at all. The error below therefore has to serve two
+// different users at once: one who never wrote a cv.md, and one who has one
+// sitting outside the data root this resolver just looked in. Naming only one
+// of them sends the other to the wrong fix.
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //
@@ -41,24 +53,71 @@ const CV_PATH = 'cv.md';
 // (missing a skill) is recoverable by the user reading the JD themselves;
 // over-extracting noise into "required skills" is not — it would misreport
 // gaps that aren't real.
-
+//
 // Real postings rarely use the word "Requirements". The literal-only list
 // missed the phrasings most modern ATS boards actually ship ("What we're
-// looking for", "Who you are", "You may be a good fit if"), so a JD could
-// yield zero skills - which reads identically to "no gaps found" and is the
-// more dangerous of the two failure modes this file warns about.
+// looking for", "Who you are", "You may be a good fit if", "You have"), so a
+// JD could yield zero skills - which reads identically to "no gaps found" and
+// is the more dangerous of the two failure modes this file warns about.
+//
+// CJK characters are \W (non-word), so the s?\b suffix that works for ASCII
+// terms would always fail after a Chinese heading: \b asserts between \w and
+// \W, and after a CJK char the following whitespace / colon / newline is also
+// \W, so no boundary fires. The fix is a separate alternation arm for CJK
+// terms that drops s?\b; both arms share the same ^#{0,6}\s* prefix.
+//
+// The prefix itself stays #{0,6} — it is NOT widened to also swallow `*`/`_`.
+// A bolded heading with no markdown hash ("**What We're Looking For**") is
+// handled instead by stripping `**`/`__` pairs from the line before testing
+// it against this pattern (see stripBoldMarkers() and its call site in
+// scanJd(), #4273). Widening the prefix character class was the first thing
+// tried here and it regressed a real, common shape: an asterisk-BULLET whose
+// text happens to start with a keyword — "* Required: Python and
+// Kubernetes" — would have its leading `*` consumed as a heading marker,
+// misclassifying the bullet itself as a new heading (and dropping the
+// skills on that exact line, since a heading match short-circuits before
+// bullet extraction runs). Stripping only doubled `**`/`__` markers — never
+// a single `*`/`_` — leaves a literal bullet character untouched, since a
+// real bullet is one asterisk, not two.
 const REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,4}\\s*(?:' + [
+  '^#{0,6}\\s*(?:(?:' + [
     'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
-    "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
+    // (?:'|’)?\s*re|\s+are (not just (?:'|’)?\s*re): the contracted-only form
+    // matched "we're"/"we re" but not the equally common uncontracted "we are"
+    // (#4273 — the Netflix posting that surfaced this used the uncontracted,
+    // bolded form of this exact heading).
+    "what\\s+we(?:(?:'|’)?\\s*re|\\s+are)\\s+looking\\s+for",
     "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
     'who\\s+you\\s+are',
     'about\\s+you',
     'your\\s+(?:background|experience|profile)',
-    'you\\s+may\\s+be\\s+a\\s+good\\s+fit',
+    'you\\s+(?:may|might|could)\\s+be\\s+a\\s+good\\s+fit',
+    // Ashby's default template ships a bare "YOU HAVE:" heading (no markdown
+    // hashes - already allowed by the ^#{0,6} prefix). Without this the whole
+    // requirements block is invisible even though the bullets under it are
+    // perfectly well formed.
+    "you(?:(?:'|’)ll|\\s+will)?\\s+have",
+    // Postings that phrase must-have/nice-to-have as full sentences rather
+    // than noun headings.
+    "it(?:'|’)?s\\s+important\\s+to\\s+us\\s+that\\s+you\\s+have",
+    'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
-  ].join('|') + ')s?\\b.*$',
+  ].join('|') + ')s?\\b|(?:' + [
+    // zh-TW / zh-CN requirement headers.
+    // 104 / 1111 / CakeResume / Yourator all use variants of these headings.
+    '\u61C9\u5FB5\u689D\u4EF6',   // 應徵條件
+    '\u8CC7\u683C\u689D\u4EF6',   // 資格條件
+    '\u8077\u52D9\u9700\u6C42',   // 職務需求
+    '\u689D\u4EF6\u8981\u6C42',   // 條件要求 (zh-CN)
+    '\u4EFB\u8077\u8CC7\u683C',   // 任職資格 (zh-CN)
+    '\u5FC5\u8981\u689D\u4EF6',   // 必要條件
+    '\u57FA\u672C\u8981\u6C42',   // 基本要求 (zh-CN)
+    '\u8077\u4F4D\u8981\u6C42',   // 職位要求 (zh-CN)
+    // preferred / nice-to-have
+    '\u52A0\u5206\u9805\u76EE',   // 加分項目
+    '\u52A0\u5206\u689D\u4EF6',   // 加分條件
+  ].join('|') + ')).*$',
   'im'
 );
 
@@ -66,8 +125,21 @@ const REQUIREMENT_HEADER_RE = new RegExp(
 // heading levels. Without this the block stayed open to end-of-file and swept
 // the benefits list into "required skills" - turning perks like "401k",
 // "Equity" and "Carrot" into reported skill gaps.
+//
+// Same #{0,6} prefix, same reason for leaving it unwidened, as
+// REQUIREMENT_HEADER_RE above: a bolded "**Benefits**" with no markdown hash
+// is handled by stripBoldMarkers() before this pattern ever sees the line,
+// not by letting the prefix itself swallow `*`/`_` (#4273).
 const NON_REQUIREMENT_HEADER_RE = new RegExp(
-  '^#{0,4}\\s*(?:' + [
+  '^#{0,6}\\s*(?:(?:' + [
+    // Responsibilities. The negative lookahead keeps "You will have" on the
+    // requirements side — this list is tested BEFORE REQUIREMENT_HEADER_RE in
+    // scanJd(), so without it a "You will have:" heading would close a block
+    // instead of opening one. Bare "YOU WILL" must close: the fallback that
+    // ends a block on a new heading only fires for markdown headings (#{1,6}),
+    // so an unhashed responsibilities heading left the block open and scored
+    // its duties as required skills.
+    'you\\s+will(?!\\s+have)',
     'benefits?', 'perks?', 'benefits\\s+and\\s+perks', 'compensation', 'salary', 'pay\\s+range',
     'what\\s+we\\s+offer', 'why\\s+(?:join|work|this\\s+role)',
     'about\\s+(?:us|the\\s+company|the\\s+team|the\\s+role)',
@@ -75,13 +147,41 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
     'equal\\s+opportunity', 'eeo', 'diversity',
     'interview\\s+process', 'how\\s+to\\s+apply', 'to\\s+apply',
     'our\\s+(?:stack|process|values|mission)',
-  ].join('|') + ')\\b.*$',
+  ].join('|') + ')\\b|(?:' + [
+    // zh-TW / zh-CN closing headers — drops \b for the same CJK reason.
+    '\u5DE5\u4F5C\u5167\u5BB9',   // 工作內容
+    '\u5DE5\u4F5C\u8077\u8CAC',   // 工作職責
+    '\u8077\u8CAC\u7BC4\u758A',   // 職責範疇
+    '\u798F\u5229',               // 福利
+    '\u85AA\u8CC7',               // 薪資
+    '\u85AA\u916C',               // 薪酬 (zh-CN)
+    '\u516C\u53F8\u4ECB\u7D39',   // 公司介紹
+    '\u95DC\u65BC\u6211\u5011',   // 關於我們
+    '\u61C9\u5FB5\u65B9\u5F0F',   // 應徵方式
+    '\u5982\u4F55\u61C9\u5FB5',   // 如何應徵
+  ].join('|') + ')).*$',
   'im'
 );
 
 // `\r?$` is required, not cosmetic: JS treats \r as a line terminator, so `.`
 // cannot consume it and a bare `$` never matches on a CRLF-split line.
 const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)\r?$/;
+
+// Strip markdown STRONG-emphasis markers (`**text**` / `__text__`) so a
+// bolded heading with no `#` at all — "**What We're Looking For**" — still
+// reaches REQUIREMENT_HEADER_RE / NON_REQUIREMENT_HEADER_RE's own `#{0,6}`
+// prefix as if the bold wrapper were never there (#4273).
+//
+// Only doubled markers: a single `*`/`_` is left completely alone, on
+// purpose. `*` is also how a plain markdown bullet starts (BULLET_LINE_RE),
+// and a bullet whose text happens to start with a keyword — "* Required:
+// Python and Kubernetes" — must stay a bullet, not become a misdetected
+// heading that swallows its own line's skills before bullet extraction ever
+// runs. `**` (two characters) can never be a single-asterisk bullet marker,
+// so this global-replace has no bullet-collision case to worry about.
+function stripBoldMarkers(line) {
+  return line.replace(/\*\*|__/g, '');
+}
 
 // A conservative skill-token extractor: pulls comma/slash/and-separated
 // technical-looking tokens out of a requirement bullet, rather than treating
@@ -143,19 +243,27 @@ function scanJd(jdText) {
   let sawRequirementSection = false;
 
   for (const line of lines) {
+    // Header-classification only, never bullet extraction below: a bolded
+    // heading ("**Benefits**") must match these two regexes as if the bold
+    // wrapper weren't there, but a bolded SKILL inside a bullet
+    // ("- **Docker** and **Kubernetes**") already extracts fine as-is via
+    // SKILL_TOKEN_RE, which skips right over `*` since it isn't in the
+    // token's character class — stripping there would be a no-op at best
+    // (#4273).
+    const headerLine = stripBoldMarkers(line);
     // Checked before the requirement test so a heading that satisfies both
     // (e.g. "Why this role") closes the block rather than reopening it.
-    if (NON_REQUIREMENT_HEADER_RE.test(line)) {
+    if (NON_REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(line)) {
+    if (REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,4}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(line)) {
+    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
     }
 
@@ -261,8 +369,8 @@ function skillMentionedInText(skill, text) {
 // section at all or matches a literal "Z" character later in the text.
 // Scanning line-by-line for the next heading avoids the anchor entirely.
 
-const SKILLS_HEADING_RE = /^#{1,4}\s*Skills\s*$/i;
-const ANY_HEADING_RE = /^#{1,4}\s/;
+const SKILLS_HEADING_RE = /^#{1,6}\s*Skills\s*$/i;
+const ANY_HEADING_RE = /^#{1,6}\s/;
 
 /**
  * Split cv.md into its named "Skills" section (if any) and the remaining
@@ -416,6 +524,91 @@ Python, Docker, Zookeeper
     true
   );
 
+  // The cv.md side of the six-level widening: SKILLS_HEADING_RE and
+  // ANY_HEADING_RE also stopped at four. An h5 "Skills" heading meant no
+  // named section was found at all (everything downgraded to
+  // supportedByResume), and once it IS found, the h6 heading after it must
+  // still close the section - otherwise Experience prose leaks into the
+  // named skills and upgrades to existing. One assert per regex: reverting
+  // SKILLS_HEADING_RE to #{1,4} turns the first red, reverting
+  // ANY_HEADING_RE alone turns the second red.
+  const deepHeadingCv = [
+    '# Resume', '',
+    '##### Skills', 'Python, Docker, PostgreSQL', '',
+    '###### Experience', 'Deployed Kubernetes clusters for internal tools.',
+  ].join('\n');
+  const deepCvResult = classifySkillGaps(['Python', 'Docker', 'PostgreSQL', 'Kubernetes'], deepHeadingCv);
+  eq('an h5 Skills heading is recognized as the named section', deepCvResult.existing.includes('Python'), true);
+  eq('the named section stops at the h6 heading (Kubernetes stays prose)', deepCvResult.existing.includes('Kubernetes'), false);
+  eq('prose under the h6 still classifies as supportedByResume', deepCvResult.supportedByResume.includes('Kubernetes'), true);
+
+  // Regression: requirement headings that are full sentences or bare
+  // uppercase rather than the noun forms ("Requirements", "Qualifications").
+  // Each of these silently yielded ZERO skills, which is indistinguishable
+  // from "no gaps found" — the failure mode this file's header warns about.
+  const headerVariants = [
+    ['bare uppercase "YOU HAVE:" (Ashby default template)', 'YOU HAVE:'],
+    ['"You\'ll have"', "You'll have:"],
+    ['"You will have"', 'You Will Have:'],
+    ['"You might be a good fit if you:"', 'You Might Be a Good Fit If You:'],
+    ['"You could be a good fit if you:"', 'You Could Be a Good Fit If You:'],
+    ['"It\'s Important To Us That You Have"', "## It's Important To Us That You Have"],
+    ['"It Would Be Great if You Had"', '## It Would Be Great if You Had'],
+  ];
+  for (const [label, heading] of headerVariants) {
+    const jd = `# Role\n\n${heading}\n- Hands-on experience with React, TypeScript and AWS\n`;
+    const skills = extractJdSkills(jd);
+    eq(`${label} opens a requirements block`, skills.includes('React'), true);
+  }
+
+  // Guard the other direction: the responsibilities heading "You will" must NOT
+  // open a requirements block. It reads as a near-miss for "you will have", and
+  // treating duties as requirements is exactly the over-extraction this file
+  // calls unrecoverable.
+  const responsibilitiesJd = `# Role\n\nYOU WILL\n- Ship Kubernetes manifests for the platform team\n`;
+  eq(
+    '"YOU WILL" (responsibilities) does not open a requirements block',
+    extractJdSkills(responsibilitiesJd).includes('Kubernetes'),
+    false
+  );
+
+  // The assertion above only proves YOU WILL cannot OPEN a block. Closing is
+  // the case that actually bites: postings routinely list requirements first
+  // and duties second, and the block-ending fallback in scanJd() fires only on
+  // markdown headings (#{1,6}) — so a bare responsibilities heading left the
+  // block open and reported every duty as a missing skill.
+  const dutiesAfterRequirementsJd = [
+    '# Role', '', 'YOU HAVE:', '- Experience with Python', '',
+    'YOU WILL', '- Ship Kubernetes manifests', '- Operate Terraform modules', '',
+  ].join('\n');
+  const dutiesSkills = extractJdSkills(dutiesAfterRequirementsJd);
+  eq('requirements before a bare YOU WILL are still extracted', dutiesSkills.includes('Python'), true);
+  eq('bare "YOU WILL" closes an open requirements block (Kubernetes)', dutiesSkills.includes('Kubernetes'), false);
+  eq('bare "YOU WILL" closes an open requirements block (Terraform)', dutiesSkills.includes('Terraform'), false);
+
+  // Guard the lookahead: "You will have" must still reach REQUIREMENT_HEADER_RE
+  // even though NON_REQUIREMENT_HEADER_RE is tested first in scanJd().
+  eq(
+    '"You will have" opens a block despite the YOU WILL exclusion',
+    extractJdSkills('# Role\n\nYou Will Have:\n- Experience with Kubernetes\n').includes('Kubernetes'),
+    true
+  );
+
+  // Markdown defines six heading levels, and the block-ending fallback only
+  // recognized four (CodeRabbit, reviewing #2176). A posting pasted out of a
+  // deeply nested doc - or converted from HTML, where an ATS wraps sections in
+  // h5/h6 - kept the requirements block open across its own next heading, so
+  // everything below it scored as a required skill.
+  const deepHeadingJd = [
+    '##### Requirements', '- Experience with Python', '',
+    '##### Benefits', '- Equity and a Carrot subscription', '',
+    '###### About Us', '- We use Kubernetes internally for our own platform',
+  ].join('\n');
+  const deepSkills = extractJdSkills(deepHeadingJd);
+  eq('an h5 requirements heading is recognized', deepSkills.includes('Python'), true);
+  eq('an h5 heading closes the block (Equity)', deepSkills.includes('Equity'), false);
+  eq('an h6 heading stays closed (Kubernetes)', deepSkills.includes('Kubernetes'), false);
+
   // Regression: generic JD boilerplate must not be misreported as a skill gap.
   const boilerplateJd = `
 # Role
@@ -524,6 +717,13 @@ Benefits and Perks (US Only)
   const crlfSkills = extractJdSkills(lineEndingJd.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'));
   eq('CRLF JD extracts the same skills as the LF JD', crlfSkills, lfSkills);
   eq('CRLF JD extracts a non-zero number of skills', crlfSkills.length > 0, true);
+  const lfClassification = classifySkillGaps(lfSkills, fakeCv);
+  const crlfClassification = classifySkillGaps(crlfSkills, fakeCv);
+  eq(
+    'CRLF JD produces the same classification as the LF JD',
+    JSON.stringify(crlfClassification),
+    JSON.stringify(lfClassification)
+  );
 
   // Regression (#1896): the reported bug. A CV alias and a JD's canonical name
   // must not read as a gap. Before the shared skill-extract canonicalization,
@@ -644,13 +844,28 @@ Maintained the internal Fabrikam-SDK build.
     'empty-jd'
   );
 
-  // The warning must carry a caller-facing message, not just a code — the agent
-  // following modes/pdf.md Step 4 surfaces this text to the user.
-  eq(
-    'the diagnosis carries a non-empty message',
-    diagnoseExtraction(unreadableJd, []).message.length > 0,
-    true
-  );
+  // Regression (#3601): Chinese headers (zh-TW / zh-CN) like 應徵條件 or 職務需求
+  // must be recognized as requirement section openers, and headers like 工作內容
+  // or 福利 must close the section.
+  const zhJd = `
+# PHP 後端工程師
+
+## 應徵條件
+- 熟悉 PHP、MySQL、Git
+- 具 Linux 基本指令能力
+
+## 工作內容
+- 開發 RESTful API
+- 維護既有 專案
+`;
+  const zhSkills = extractJdSkills(zhJd);
+  eq('Chinese requirement header (應徵條件) extracts skills', zhSkills.includes('PHP'), true);
+  eq('Chinese requirement header extracts MySQL', zhSkills.includes('MySQL'), true);
+  eq('Chinese requirement header extracts Git', zhSkills.includes('Git'), true);
+  eq('Chinese requirement header extracts Linux', zhSkills.includes('Linux'), true);
+  eq('Chinese non-requirement header (工作內容) closes requirement section', zhSkills.includes('RESTful'), false);
+
+  eq('Chinese header diagnosis is conclusive', diagnoseExtraction(zhJd, zhSkills), null);
 
   console.log(`\njd-skill-gap self-test: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
@@ -658,7 +873,7 @@ Maintained the internal Fabrikam-SDK build.
 
 // ── Main ─────────────────────────────────────────────────────────────
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
 if (selfTestMode) {
   runSelfTest();
 } else {
@@ -668,7 +883,8 @@ if (selfTestMode) {
     process.exit(1);
   }
   if (!existsSync(CV_PATH)) {
-    console.error(`Error: ${CV_PATH} not found — this is a user-layer file, create it first.`);
+    console.error(`Error: cv.md not found at ${CV_PATH}`);
+    console.error('Create it there, or point CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR (or a .career-ops-data marker) at the directory that already has it.');
     process.exit(1);
   }
 
@@ -676,6 +892,11 @@ if (selfTestMode) {
   const cvText = readFileSync(CV_PATH, 'utf-8');
   const jdSkills = extractJdSkills(jdText);
   const result = classifySkillGaps(jdSkills, cvText);
+  // Computed for BOTH output modes. The JSON branch is the one other tools
+  // consume (modes/pdf.md Step 4 gates on it), so it is the branch that most
+  // needs to say "nothing was classified" out loud - an empty three-bucket
+  // object is otherwise indistinguishable from a clean bill of health.
+  const diagnosis = diagnoseExtraction(jdText, jdSkills);
 
   if (summaryMode) {
     console.log(`\nJD Skill-Gap Check`);
@@ -689,7 +910,6 @@ if (selfTestMode) {
     // health, and modes/pdf.md Step 4 treats this output as a gate. Say out loud
     // that nothing was classified. Still exit 0: this is a warning, not a
     // failure, and the user decides how to proceed.
-    const diagnosis = diagnoseExtraction(jdText, jdSkills);
     if (diagnosis) {
       console.log('');
       console.log('  🚨 LOW CONFIDENCE: this is not a clean result.');
@@ -697,7 +917,9 @@ if (selfTestMode) {
       console.log(`     (reason: ${diagnosis.reason})`);
     }
   } else {
-    console.log(JSON.stringify(result, null, 2));
+    // Additive key: existing consumers reading the three buckets are unaffected.
+    // null when the run was conclusive, {reason, message} when it was not.
+    console.log(JSON.stringify({ ...result, lowConfidence: diagnosis }, null, 2));
   }
 }
 } // end CLI guard

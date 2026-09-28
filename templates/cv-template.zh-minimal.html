@@ -9,6 +9,11 @@ version: 1.0.0
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{NAME}} — CV</title>
 <style>
+  /* Profile style overrides are injected later by the PDF pipeline (#1837).
+     Keep each surface's existing font and color as its fallback: this template
+     has different defaults from the standard CV, including within its own
+     typography and palette. With no profile override those defaults stay put. */
+
   /* ATS-safe typography (#font-extraction fix):
      The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
      glyph advances that make PDF text extractors inject spurious spaces inside
@@ -39,8 +44,8 @@ version: 1.0.0
   }
 
   body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
-    font-size: 11px;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: var(--font-size, 11px);
     line-height: 1.5;
     color: #1a1a2e;
     background: #ffffff;
@@ -64,7 +69,7 @@ version: 1.0.0
   }
 
   .header h1 {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 28px;
     font-weight: 700;
     color: #1a1a2e;
@@ -73,9 +78,24 @@ version: 1.0.0
     line-height: 1.1;
   }
 
+  .header-title {
+    /* No own font-family: inherits from .header/body, so every locale
+       override below (ar, ja, AND zh/zh-CN/zh-TW, which only override body
+       and never declare an explicit .header h1 rule) reaches it for free.
+       Default value is identical to the stack this replaced, so unlocalized
+       output is unchanged (CodeRabbit, #3763). */
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-color, #1a1a2e);
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
   .header-gradient {
     height: 2px;
-    background: linear-gradient(to right, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color, hsl(270, 70%, 45%)));
     border-radius: 1px;
     margin-bottom: 10px;
   }
@@ -84,8 +104,8 @@ version: 1.0.0
     display: flex;
     flex-wrap: wrap;
     gap: 8px 14px;
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
-    font-size: 10.5px;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-size: var(--font-size, 10.5px);
     line-height: 1.4;
     color: #555;
   }
@@ -121,7 +141,7 @@ version: 1.0.0
   }
 
   .section-title {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -135,7 +155,7 @@ version: 1.0.0
 
   /* === PROFESSIONAL SUMMARY === */
   .summary-text {
-    font-size: 11px;
+    font-size: var(--font-size, 11px);
     line-height: 1.7;
     color: #2f2f2f;
   }
@@ -159,7 +179,7 @@ version: 1.0.0
   }
 
   .competency-tag {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 10px;
     font-weight: 500;
     color: hsl(187, 74%, 28%);
@@ -183,20 +203,20 @@ version: 1.0.0
   }
 
   .job-company {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color, hsl(270, 70%, 45%));
   }
 
   .job-period {
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     color: #777;
     white-space: nowrap;
   }
 
   .job-role {
-    font-size: 11px;
+    font-size: var(--font-size, 11px);
     font-weight: 600;
     color: #333;
     margin-bottom: 6px;
@@ -213,7 +233,7 @@ version: 1.0.0
   }
 
   .job li {
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     line-height: 1.6;
     color: #333;
     margin-bottom: 4px;
@@ -229,10 +249,10 @@ version: 1.0.0
   }
 
   .project-title {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color, hsl(270, 70%, 45%));
   }
 
   .project-badge {
@@ -246,7 +266,7 @@ version: 1.0.0
   }
 
   .project-desc {
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     color: #444;
     margin-top: 3px;
     line-height: 1.55;
@@ -272,12 +292,12 @@ version: 1.0.0
 
   .edu-title {
     font-weight: 600;
-    font-size: 11px;
+    font-size: var(--font-size, 11px);
     color: #333;
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color, hsl(270, 70%, 45%));
     font-weight: 500;
   }
 
@@ -285,6 +305,11 @@ version: 1.0.0
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+  }
+
+  .edu-location {
+    font-size: 10px;
+    color: #888;
   }
 
   .edu-desc {
@@ -311,13 +336,13 @@ version: 1.0.0
   }
 
   .cert-title {
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     font-weight: 500;
     color: #333;
   }
 
   .cert-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color, hsl(270, 70%, 45%));
     white-space: nowrap;
   }
 
@@ -346,13 +371,13 @@ version: 1.0.0
   }
 
   .award-title {
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     font-weight: 500;
     color: #333;
   }
 
   .award-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color, hsl(270, 70%, 45%));
     white-space: nowrap;
   }
 
@@ -372,14 +397,14 @@ version: 1.0.0
   }
 
   .skill-item {
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     color: #444;
   }
 
   .skill-category {
     font-weight: 600;
     color: #333;
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
   }
 
   /* === PRINT === */
@@ -421,16 +446,26 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
+  }
+
+  /* Keep a project's tech line attached to the description above it.  A project
+     may still split across pages, but not at the one opportunity that strands a
+     bare "Python | github.com/..." line at the top of the next page with no
+     title or description to identify it. */
+  .project-tech {
+    break-before: avoid;
+    page-break-before: avoid;
   }
 
   /* === RTL (Arabic) Support === */
   html[lang="ar"] body {
     direction: rtl;
     text-align: right;
-    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    font-family: var(--font-family, 'Segoe UI'), Tahoma, Arial, sans-serif;
   }
 
   html[lang="ar"] .header h1,
@@ -439,11 +474,11 @@ version: 1.0.0
   html[lang="ar"] .project-title,
   html[lang="ar"] .competency-tag,
   html[lang="ar"] .skill-category {
-    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    font-family: var(--font-family, 'Segoe UI'), Tahoma, Arial, sans-serif;
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, hsl(187, 74%, 32%), hsl(270, 70%, 45%));
+    background: linear-gradient(to left, hsl(187, 74%, 32%), var(--secondary-color, hsl(270, 70%, 45%)));
   }
 
   html[lang="ar"] .job ul {
@@ -477,7 +512,7 @@ version: 1.0.0
      browser's per-glyph fallback picks the first installed CJK face for kana
      and kanji. Mirrors the lang="ar" precedent above. */
   html[lang="ja"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
   }
@@ -488,7 +523,7 @@ version: 1.0.0
   html[lang="ja"] .project-title,
   html[lang="ja"] .competency-tag,
   html[lang="ja"] .skill-category {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
   }
@@ -497,23 +532,35 @@ version: 1.0.0
      An opt-in, restrained visual system for Chinese and mixed-language
      technical CVs. The document stays single-column and ATS-readable. */
   :root {
-    --zhm-ink: #172033;
+    --zhm-ink: var(--secondary-color, #172033);
     --zhm-text: #2f3747;
     --zhm-muted: #667085;
     --zhm-rule: #d9dee8;
-    --zhm-accent: #174a7e;
+    --zhm-accent: var(--accent-color, #174a7e);
   }
 
   body,
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: 'Liberation Sans', 'Helvetica Neue', Arial, 'PingFang SC',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'PingFang SC',
       'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
       'Noto Sans SC', 'Source Han Sans SC', sans-serif;
     color: var(--zhm-text);
     line-break: strict;
     word-break: normal;
     overflow-wrap: break-word;
+  }
+
+  /* Traditional Chinese. `html[lang="zh"]` does not match `zh-TW`, and this
+     template's default stack is Simplified — which substitutes the wrong glyph
+     forms for TC text — so zh-TW needs TC faces explicitly. modes/zh-TW/ ships
+     as a supported locale. (No `ko` rule here on purpose: this is the Chinese
+     minimal template, not a general one.) */
+  html[lang="zh-TW"] body,
+  html[lang="zh-TW"] .contact-row {
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'PingFang TC',
+      'Microsoft JhengHei', 'Noto Sans CJK TC',
+      'Noto Sans TC', 'Source Han Sans TC', sans-serif;
   }
 
   .header {
@@ -547,7 +594,7 @@ version: 1.0.0
   .section-title {
     font-family: inherit;
     font-size: 12px;
-    color: var(--zhm-ink);
+    color: var(--accent-color, var(--zhm-ink));
     text-transform: none;
     letter-spacing: 0.08em;
     border-bottom: 1px solid var(--zhm-rule);
@@ -568,7 +615,7 @@ version: 1.0.0
   .competency-tag {
     display: inline;
     font-family: inherit;
-    font-size: 10.5px;
+    font-size: var(--font-size, 10.5px);
     font-weight: 500;
     color: var(--zhm-text);
     background: none;
@@ -598,7 +645,8 @@ version: 1.0.0
   }
 
   .job-period,
-  .job-location {
+  .job-location,
+  .edu-location {
     color: var(--zhm-muted);
   }
 
@@ -642,7 +690,7 @@ version: 1.0.0
 
   .edu-org,
   .cert-org {
-    color: var(--zhm-accent);
+    color: var(--secondary-color, var(--zhm-accent));
   }
 
   .skills-grid {
@@ -668,6 +716,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
@@ -731,6 +780,8 @@ version: 1.0.0
     <div class="section-title">{{SECTION_SKILLS}}</div>
     {{SKILLS}}
   </div>
+
+  <!-- END -->
 
 </div>
 </body>

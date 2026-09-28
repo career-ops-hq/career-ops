@@ -17,16 +17,12 @@ export const PROFILE_CADENCE_KEYS = [
 ] as const;
 export type ProfileCadenceKey = (typeof PROFILE_CADENCE_KEYS)[number];
 
-/** Kept IDENTICAL to DEFAULT_CADENCE in followup-cadence.mjs (the source of
- *  truth) — only used to show the settings form's baseline values. */
-export const CADENCE_DEFAULTS: Record<ProfileCadenceKey, number> = {
-  applied_first_days: 7,
-  applied_subsequent_days: 7,
-  applied_max_followups: 2,
-  responded_initial_days: 1,
-  responded_subsequent_days: 3,
-  interview_thankyou_days: 1,
-};
+/* CADENCE_DEFAULTS used to live here as a hand-copy of DEFAULT_CADENCE in
+   followup-cadence.mjs, kept in sync by a comment. It is gone (#2369): the
+   pure defaults now come from the core itself via `followup-cadence.mjs
+   --json` -> `cadenceDefaults`, read server-side in /api/followups/cadence.
+   Do not reintroduce a local table here, not even as a fallback — a fallback
+   copy drifts exactly like the original did (states.ts FALLBACK, #2282). */
 
 /** One logged follow-up (a row of data/follow-ups.md; legacy bullets have num null). */
 export type FollowupLogEntry = {

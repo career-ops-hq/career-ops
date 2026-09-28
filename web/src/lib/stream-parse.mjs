@@ -1,9 +1,10 @@
 // Pure JS helper for the AI-search <<offer:>> stream parser — no TypeScript
 // types so it can be imported directly by both explore-ai.ts (which uses it)
-// and test-stream-parse.mjs (which can't import .ts without a runner). This is
-// the single source of truth for the "how much of a possibly-split opener do we
-// hold back?" logic — the load-bearing part of never dropping an offer whose
-// `<<offer:` marker straddles a stream chunk boundary (#2290).
+// and tests/lib/stream-parse.test.mjs (which can't import .ts without a
+// runner). This is the single source of truth for the "how much of a
+// possibly-split opener do we hold back?" logic — the load-bearing part of
+// never dropping an offer whose `<<offer:` marker straddles a stream chunk
+// boundary (#2290).
 
 /**
  * Length of the trailing run of `buf` that is a proper prefix of `opener` —
