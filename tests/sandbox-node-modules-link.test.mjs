@@ -369,9 +369,26 @@ try {
     // KNOWN LIMIT: a comment between the tokens (`symlinkSync /* c */ as x`) and
     // the string-literal export form (`{ 'symlinkSync' as x }`) still slip past.
     const ALIAS = /\bsymlinkSync\s+as\s+/g;
+    // A statement STARTS where the previous significant character closes one, so
+    // a linkNodeModules() call reached that way is an expression statement and
+    // its reason went nowhere. Non-code positions are stepped over with the rest
+    // of the whitespace, or a comment on the line above would answer for it.
+    const isBareStatement = (src, isCode, at) => {
+      let i = at - 1;
+      while (i >= 0 && (/\s/.test(src[i]) || !isCode[i])) i--;
+      return i < 0 || src[i] === ';' || src[i] === '{' || src[i] === '}';
+    };
     const scan = (src) => {
       const isCode = codeMask(src);
       return {
+        // The reason is the whole point of the helper. Dropping it puts the call
+        // site back where the raw symlinkSync sites were: a sandbox with no
+        // dependency tree, and assertions that report on a run that never
+        // happened. Checked at EVERY call site rather than at the one in
+        // test-all.mjs, which is the enumeration this section exists to replace.
+        bareCalls: [...src.matchAll(/\blinkNodeModules\s*\(/g)]
+          .filter((m) => isCode[m.index] && isBareStatement(src, isCode, m.index))
+          .map((m) => src.slice(0, m.index).split('\n').length),
         // An alias defeats the scan outright: `import { symlinkSync as linkIt }`
         // then linkIt(join(ROOT, 'node_modules'), ...) matches nothing below.
         // There is no reason to rename this import, so the rename is the finding.
@@ -425,9 +442,21 @@ try {
       ['an aliased import inside a string', `const s = ${JSON.stringify(ALIASED)};`, false],
       ['an aliased import bound to a non-ASCII name', `import { symlink${'Sync'} as \u03c3\u03cd\u03bd\u03b4\u03b5\u03c3\u03bc\u03bf\u03c2 } from 'fs';`, true],
     ];
+    const LNM = `link${'NodeModules'}(codeRoot, ROOT)`;
+    const bareProbes = [
+      ['a discarded result', `${LNM};`, 1],
+      ['a discarded result below a comment', `// note\n${LNM};`, 1],
+      ['a discarded result after a block', `if (x) { y(); }\n${LNM};`, 1],
+      ['a bound result', `const reason = ${LNM};`, 0],
+      ['a returned result', `const f = () => { return ${LNM}; };`, 0],
+      ['a tested result', `if (${LNM}) { skip(); }`, 0],
+      ['a call in a comment', `// ${LNM};`, 0],
+      ['a call inside a string', `const s = ${JSON.stringify(LNM + ';')};`, 0],
+    ];
     const misread = [
       ...probes.map(([what, src, want]) => [what, scan(src).lines.length, want]),
       ...aliasProbes.map(([what, src, want]) => [what, scan(src).aliased, want]),
+      ...bareProbes.map(([what, src, want]) => [what, scan(src).bareCalls.length, want]),
     ]
       .filter(([, got, want]) => got !== want)
       .map(([what, got, want]) => `${what}: ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
@@ -440,13 +469,17 @@ try {
     } else {
       const offenders = [];
       const aliased = [];
+      const discarded = [];
       for (const rel of tracked) {
         if (rel === 'tests/helpers.mjs') continue; // linkNodeModules lives here; it IS the sanctioned site
-        const { aliased: renamed, lines } = scan(readFileSync(join(ROOT, rel), 'utf-8'));
+        const { aliased: renamed, lines, bareCalls } = scan(readFileSync(join(ROOT, rel), 'utf-8'));
         if (renamed) aliased.push(rel);
         for (const line of lines) offenders.push(`${rel}:${line}`);
+        for (const line of bareCalls) discarded.push(`${rel}:${line}`);
       }
-      if (aliased.length) {
+      if (discarded.length) {
+        fail(`${discarded.join(', ')} throws away the reason linkNodeModules() returns, so an absent tree cannot make it skip`);
+      } else if (aliased.length) {
         fail(`${aliased.join(', ')} imports symlinkSync under another name, which the scan above cannot follow; call it directly or route through linkNodeModules()`);
       } else if (offenders.length) {
         fail(`${offenders.join(', ')} links node_modules with a raw symlinkSync; route it through linkNodeModules() so it gets the Windows junction and the absent-tree reason`);

@@ -16,7 +16,7 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { pass, fail, linkNodeModules, stripJsComments, NODE } from './helpers.mjs';
+import { pass, fail, warn, linkNodeModules, stripJsComments, NODE } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -40,12 +40,17 @@ function prepareFixtureCodeRoot(tmp) {
   }
   // Through the shared helper, so this site and the one in test-all.mjs cannot
   // drift again: each had half of the pair (a guard here, the Windows junction
-  // type there) and the halves are now one function. The reason is dropped on
-  // purpose. Without an installed tree this fixture already fails two of its
-  // own assertions, and reporting that truthfully means changing this suite,
-  // which this PR leaves alone.
-  linkNodeModules(codeRoot, ROOT);
-  return codeRoot;
+  // type there) and the halves are now one function.
+  //
+  // The reason used to be dropped, on the stated grounds that an absent tree
+  // already failed two of this fixture's assertions. Two of four, measured: the
+  // spawned verifier dies ERR_MODULE_NOT_FOUND, and the FIRST check reads that
+  // crash output, finds no "unknown provider: apify" in it, and passes. It then
+  // reports that verify-pipeline.mjs resolves the plugin, about a run that never
+  // reached the resolution code. A false green is the failure this whole file
+  // exists to remove, so the reason is carried out and the caller skips on it.
+  const depsReason = linkNodeModules(codeRoot, ROOT);
+  return { codeRoot, depsReason };
 }
 
 const MINIMAL_TRACKER =
@@ -73,10 +78,16 @@ const MINIMAL_TRACKER =
 //    "missing env APIFY_TOKEN" stub. A minimal tracker is seeded so
 //    verify-pipeline gets past its "no applications.md" early exit and actually
 //    reaches the provider-resolution check. ──
-{
+providerFixture: {
   const tmp = mkdtempSync(join(tmpdir(), 'co-4026-'));
   try {
-    const codeRoot = prepareFixtureCodeRoot(tmp);
+    const { codeRoot, depsReason } = prepareFixtureCodeRoot(tmp);
+    if (depsReason) {
+      // break, not return: this is a labeled block, and the finally below still
+      // runs so the temp tree is removed.
+      warn(`skipping the provider-resolution checks: ${depsReason}`);
+      break providerFixture;
+    }
     mkdirSync(join(codeRoot, 'config'), { recursive: true });
     writeFileSync(join(codeRoot, 'config', 'plugins.yml'), 'plugins:\n  apify: { enabled: true }\n');
 
