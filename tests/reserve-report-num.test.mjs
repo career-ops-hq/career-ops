@@ -97,3 +97,54 @@ for (const flag of ['--help', '-h']) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// `--status` must be read-only and printable JSON: no sentinel created, exit 0.
+{
+  const reportsDir = join(ROOT, 'reports');
+  const before = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter((f) => /-RESERVED\.md$/.test(f)).sort()
+    : [];
+  const result = spawnSync(NODE, [join(ROOT, 'reserve-report-num.mjs'), '--status'], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    timeout: 15000,
+  });
+  const after = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter((f) => /-RESERVED\.md$/.test(f)).sort()
+    : [];
+  let jsonOk = false;
+  try {
+    const parsed = JSON.parse(result.stdout);
+    jsonOk = Number.isSafeInteger(parsed.next) && Array.isArray(parsed.occupied) && Array.isArray(parsed.sentinels);
+  } catch { /* not JSON */ }
+  if (result.status === 0 && jsonOk && JSON.stringify(before) === JSON.stringify(after)) {
+    pass('--status prints occupancy JSON and writes nothing');
+  } else {
+    fail(`--status: exit=${result.status}, jsonOk=${jsonOk}, unchanged=${JSON.stringify(before) === JSON.stringify(after)}, stderr=${JSON.stringify(result.stderr.slice(0, 120))}`);
+  }
+}
+
+// Regression: any unrecognized command used to fall through to the default
+// reserve path — a read-only-looking `--status` typed before it existed wrote
+// reports/165-RESERVED.md (2026-09-28). An unknown command must exit non-zero
+// and write nothing anywhere.
+for (const bogus of ['--bogus', '--releas']) {
+  const reportsDir = join(ROOT, 'reports');
+  const before = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter((f) => /-RESERVED\.md$/.test(f)).sort()
+    : [];
+  const result = spawnSync(NODE, [join(ROOT, 'reserve-report-num.mjs'), bogus], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    timeout: 15000,
+  });
+  const after = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter((f) => /-RESERVED\.md$/.test(f)).sort()
+    : [];
+  const unchanged = JSON.stringify(before) === JSON.stringify(after);
+  if (result.status !== 0 && /unknown command/.test(result.stderr) && unchanged) {
+    pass(`${bogus} rejected (exit ${result.status}) and writes nothing`);
+  } else {
+    fail(`${bogus}: exit=${result.status}, unchanged=${unchanged}, stderr=${JSON.stringify(result.stderr.slice(0, 120))}`);
+  }
+}

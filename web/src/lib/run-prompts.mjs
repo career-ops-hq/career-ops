@@ -78,6 +78,7 @@ num\tdate\tcompany\trole\tscore\tstatus\tpdf\treport\tnotes
       then ONE data row under it (values aligned to those labels; status may sit before or after score — merge-tracker resolves by header name):
 {num}\t${todayStr}\t{Company}\t{Role}\t{score}/5\t{CanonicalStatus e.g. Evaluated}\t❌\t[{num}](reports/{num}-{company-slug}-${todayStr}.md)\t{one-line note}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+   e. Release the reservation sentinel: run \`node reserve-report-num.mjs --release <num>\` with the number from (a). Skipping this leaks \`reports/{num}-RESERVED.md\` — an abandoned run's sentinel counts as an occupied report number forever, so every later evaluation is pushed one higher for a report that will never exist. modes/pipeline.md step (d) and every market mode's pipeline.md/oferta.md already require this release; this prompt did not, which is how the Airtel APM run (2026-09-28) orphaned 158 and 159.
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 

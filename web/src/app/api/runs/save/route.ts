@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { markInboxDone } from "@/lib/core/eval-dedupe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,9 +13,12 @@ type Body = {
   subtitle?: string;
   page?: string;
   input?: string;
+  kind?: string;
   result?: { score: number | null; summary: string };
   steps?: { kind: string; label: string }[];
   output?: string;
+  status?: string;
+  lastLabel?: string;
 };
 
 // Persist a finished worker's log as markdown under a web-managed dir so the CLI
@@ -37,12 +41,15 @@ export async function POST(req: Request) {
   const safeId = String(b.id).replace(/[^a-z0-9_-]/gi, "");
   const steps = (b.steps ?? []).map((s) => `- ${s.kind === "tool" ? `🔧 ${s.label}` : s.label}`).join("\n");
   const verdict = b.result?.score != null ? `${b.result.score}/5 — ${b.result.summary || ""}` : "—";
-  const md = `# Web run · ${b.title || b.id}
+  // A failed run is saved too, so name the failure in the header. Without this the
+  // log of a killed worker is indistinguishable from one that never started.
+  const failed = b.status === "error";
+  const md = `# Web run · ${b.title || b.id}${failed ? " — FAILED" : ""}
 
 - id: ${b.id}
 - page: ${b.page || "-"}
 - input: ${b.input || "-"}
-- verdict: ${verdict}
+- verdict: ${verdict}${failed ? `\n- outcome: FAILED — ${(b.lastLabel || "no reason recorded").replace(/\s+/g, " ")}` : ""}
 
 ## Steps
 ${steps}
@@ -52,8 +59,21 @@ ${b.output || ""}
 `;
   try {
     fs.writeFileSync(path.join(dir, `${safeId}.md`), md);
-    return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
   }
+
+  // A DONE evaluation means a report landed (the run route only emits `done`
+  // for an evaluate that wrote one) — flip the posting's pipeline row to [x] so
+  // it stops showing as pending and can't re-fire a worker. Idempotent; a row
+  // that doesn't exist (pasted JD with no pipeline entry) is a no-op.
+  if (b.status === "done" && b.kind === "evaluate" && b.input) {
+    try {
+      markInboxDone(careerOpsRoot(), b.input);
+    } catch {
+      /* non-fatal: the run log is the point of this endpoint */
+    }
+  }
+
+  return NextResponse.json({ ok: true });
 }

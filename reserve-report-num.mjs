@@ -303,12 +303,13 @@ async function runCli() {
 
   if (cmd === '--help' || cmd === '-h') {
     process.stdout.write([
-      'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
+      'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc] [--status]',
       '',
       '  (no flags)                Reserve 1 report number (default)',
       `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
       '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
       '  --gc                      Garbage-collect stale reservation sentinels',
+      '  --status                  Report occupied numbers, next free number, and live sentinels (read-only, never writes)',
       '',
     ].join('\n'));
     return 0;
@@ -338,6 +339,50 @@ async function runCli() {
   if (cmd === '--gc') {
     await gcStaleReportReservations(options);
     return 0;
+  }
+
+  // Read-only diagnostics. Never acquires the tracker lock, never writes:
+  // report occupancy plus every live reservation sentinel, so callers can see
+  // leaks (like 164/165 from 2026-09-28) without an accidental --count fallthrough.
+  if (cmd === '--status') {
+    const reportsDir = reportsDirFor(options);
+    const occupied = collectOccupied(reportsDir, trackerPathFor(options));
+    const sentinels = [];
+    if (existsSync(reportsDir)) {
+      for (const name of readdirSync(reportsDir)) {
+        if (!/^\d+-RESERVED\.md$/.test(name)) continue;
+        const fullPath = join(reportsDir, name);
+        try {
+          const owner = readSentinelOwner(fullPath);
+          sentinels.push({
+            num: parseInt(name, 10),
+            stale: !owner?.pid || !processIsAlive(owner.pid),
+            ageSec: Math.round((Date.now() - statSync(fullPath).mtimeMs) / 1000),
+            pid: owner?.pid ?? null,
+            created: owner?.created_at ?? null,
+          });
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err;
+        }
+      }
+    }
+    sentinels.sort((a, b) => a.num - b.num);
+    process.stdout.write(JSON.stringify({
+      occupied: [...occupied].sort((a, b) => a - b),
+      maxOccupied: highestNumber(occupied),
+      next: highestNumber(occupied) + 1,
+      sentinels,
+    }, null, 2) + '\n');
+    return 0;
+  }
+
+  // A misspelled/unsupported command must NOT silently fall through to the
+  // default reserve — that is how a read-only-looking `--status` typed before
+  // it existed reserved 165. Reject anything we don't know.
+  const KNOWN_COMMANDS = new Set(['--help', '-h', '--release', '--gc', '--count', '--status']);
+  if (cmd && !KNOWN_COMMANDS.has(cmd)) {
+    process.stderr.write(`reserve-report-num: unknown command '${cmd}' (see --help)\n`);
+    return 2;
   }
 
   let count = 1;

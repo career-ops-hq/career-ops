@@ -4,6 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildPrompt } from "../../src/lib/run-prompts.mjs";
 import { CV_ENVELOPE_INSTRUCTION } from "../../src/lib/cv-envelope.mjs";
 
@@ -65,4 +66,39 @@ test("memory block is appended only when non-empty", () => {
   const without = buildPrompt({ kind: "evaluate", input: "u", memory: "  ", today: "2026-02-02" });
   assert.ok(withMem.includes("prefers remote"));
   assert.ok(!without.includes("Durable notes"));
+});
+
+test("evaluate prompt releases the reservation sentinel it claims", () => {
+  // A leaked sentinel counts as an occupied report number forever, so every
+  // later evaluation is pushed one higher for a report that will never exist.
+  // The Airtel APM run (2026-09-28) orphaned 158 and 159 this way when its
+  // SIGTERM budget expired mid-report. modes/pipeline.md step (d) and every
+  // market mode's pipeline.md/oferta.md already require the release.
+  const prompt = buildPrompt({ kind: "evaluate", input: "u", today: "2026-02-02" });
+  assert.match(prompt, /reserve-report-num\.mjs --release/);
+  // It must come after the claim, or the release targets a number never reserved.
+  assert.ok(
+    prompt.indexOf("--release") > prompt.indexOf("node reserve-report-num.mjs`"),
+    "release step must follow the reservation claim",
+  );
+});
+
+test("every kind's SIGTERM budget clears the report write, not just pdf", () => {
+  // The inversion that caused the Airtel failure: evaluate — which emits a
+  // ~40 KB report in one write call — had 285 s while the heavier pdf kind had
+  // 720 s. Assert the budgets by reading the route source, and assert they stay
+  // under maxDuration so the two can never drift into a platform timeout.
+  const src = readFileSync(new URL("../../src/app/api/run/route.ts", import.meta.url), "utf-8");
+  const budgets = { evaluate: null, pdf: null };
+  for (const kind of Object.keys(budgets)) {
+    const m = src.match(new RegExp(`${kind}:\\s*([\\d_]+)`));
+    assert.ok(m, `route.ts has no ${kind} entry in KILL_MS_BY_KIND`);
+    budgets[kind] = Number(m[1].replace(/_/g, ""));
+  }
+  const maxDuration = Number((src.match(/maxDuration\s*=\s*(\d+)/) || [])[1]);
+  assert.ok(maxDuration, "route.ts must declare maxDuration");
+  for (const [kind, ms] of Object.entries(budgets)) {
+    assert.ok(ms >= 720_000, `${kind} budget ${ms}ms is too small to finish a report write`);
+    assert.ok(ms < maxDuration * 1000, `${kind} budget ${ms}ms must stay under maxDuration`);
+  }
 });

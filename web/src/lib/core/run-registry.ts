@@ -38,3 +38,28 @@ export function isTrackerWriting(): boolean {
   pruneStaleWrites();
   return writing.size > 0;
 }
+
+// Serialization gate for tracker-writing runs. reports/ and applications.md are
+// single-writer resources, and two CONCURRENT evaluations each snapshotting
+// reports/ made "did THIS run write a report?" ambiguous — run A's close handler
+// claimed run B's just-written report as its own (PolicyBazaar job-12,
+// 2026-09-28, where A had no report at all yet read a green "report saved").
+// Rather than trusting an agent-typed marker — more prompt formatting for a
+// correctness boundary — serialize the writers: callers of acquireWriteGate()
+// hold the gate for the WHOLE run and release via the returned fn. The gate
+// still feeds the `writing` map, so a row delete is guarded exactly as before.
+let writeQueueTail: Promise<void> = Promise.resolve();
+export function acquireWriteGate(): Promise<() => void> {
+  return new Promise((resolve) => {
+    // The chain link stays pending until the holder RELEASES, not until the
+    // token is acquired — otherwise every queued run would pile on after the
+    // first acquisition instead of waiting for the first run to finish.
+    writeQueueTail = writeQueueTail.then(() => new Promise<void>((release) => {
+      const token = acquireTrackerWrite();
+      resolve(() => {
+        releaseTrackerWrite(token);
+        release();
+      });
+    }));
+  });
+}

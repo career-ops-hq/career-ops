@@ -1,16 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { spawnCli } from "@/lib/cli-spawn";
+import { killCliTree, spawnCli } from "@/lib/cli-spawn";
+import { findExistingEvaluation, markInboxDone } from "@/lib/core/eval-dedupe";
 import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot, findApplication, primaryReportNum, readMemory } from "@/lib/career-ops";
-import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { acquireWriteGate, isTrackerWriting } from "@/lib/core/run-registry";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs, toolScopeFor } from "@/lib/claude-invocation.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
+
+const STREAM_HEADERS: Record<string, string> = {
+  "Content-Type": "text/plain; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  "X-Accel-Buffering": "no",
+};
 
 // The web ORCHESTRATES the real career-ops engine — it does NOT reimplement it.
 // kind "evaluate" runs the REAL modes/oferta.md and persists the canonical
@@ -19,16 +26,21 @@ export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailor
 // claudeCliArgs (route may not spell tool flags — #2185). Streams NDJSON.
 
 export async function POST(req: Request) {
-  let body: { kind?: string; input?: string; cliId?: string };
+  let body: { kind?: string; input?: string; cliId?: string; force?: boolean | string };
   try {
     body = await req.json();
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
-  const { kind = "evaluate", input, cliId } = body;
+  const { kind = "evaluate", input, cliId, force } = body;
   if (!input || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
+  const forceRun =
+    force === true ||
+    force === "1" ||
+    force === "true" ||
+    new URL(req.url).searchParams.get("force") === "1";
   const resolved = resolveCli(cliId);
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
@@ -65,6 +77,32 @@ export async function POST(req: Request) {
     );
   }
 
+  // Duplicate-evaluate guard: if this input already produced a report, resolving
+  // the card to that report costs ZERO tokens and stops the "posting never
+  // leaves the pipeline" loop — the same URL/jds file re-fired a second worker
+  // for Airtel (report 164 next to 160) and Nians (2026-09-28). The report is
+  // the binding evidence (not scanner history — seen ≠ evaluated). force=1 is
+  // the deliberate re-run escape hatch.
+  if (kind === "evaluate" && !forceRun) {
+    const existing = findExistingEvaluation(careerOpsRoot(), input);
+    if (existing != null) {
+      try {
+        markInboxDone(careerOpsRoot(), input);
+      } catch {
+        /* a row flip failing must not fail the response */
+      }
+      const encDup = new TextEncoder();
+      const dupStream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(encDup.encode(JSON.stringify({ type: "status", label: `Already evaluated — report #${existing}; no new run. (re-run: force=1)` }) + "\n"));
+          c.enqueue(encDup.encode(JSON.stringify({ type: "done", tokens: 0 }) + "\n"));
+          c.close();
+        },
+      });
+      return new Response(dupStream, { headers: STREAM_HEADERS });
+    }
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   // Web job inputs are tracker ROW ids; report filenames / pdf-index keys are
   // REPORT numbers, which diverge after a re-eval renumbers the Report cell
@@ -88,9 +126,10 @@ export async function POST(req: Request) {
           needsShell: scope.needsShell,
         });
 
-  // For write-needing kinds, snapshot report FILENAMES so we can verify THIS
-  // run persisted (a global count races a concurrent eval of the same URL).
-  // Ignore reservation sentinels (*-RESERVED.md) — they are not reports.
+  // For evaluations, snapshot report FILENAMES so we can verify THIS run
+  // persisted. Runs are serialized (the write gate in start), so no concurrent
+  // eval can satisfy the check for us. Ignore reservation sentinels
+  // (*-RESERVED.md) — they are not reports.
   const reportsDir = path.join(careerOpsRoot(), "reports");
   const listReportFiles = (): Set<string> => {
     try {
@@ -142,26 +181,14 @@ export async function POST(req: Request) {
     return false;
   };
 
-  // Tracker-mutating runs hold a write token so a row delete can't race their merge
-  // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
-  let writeToken: number | null = null;
-
-  let child;
-  try {
-    // opencode's headless scope rides in OPENCODE_CONFIG_CONTENT (no per-tool
-    // argv); everything else gets an empty env and stays CLI-agnostic. The env
-    // only DELETES or re-scopes tool permissions — the no-auto-submit guarantee
-    // is prompt-level and untouched by this.
-    const cliEnv = buildCliEnv(cliId, { allowedTools: scope.allowed, disallowedTools: scope.disallowed });
-    child = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv } });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "failed to start CLI" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+  // Tracker-mutating kinds (evaluate/pdf) hold a serialization gate for the
+  // WHOLE run: reports/ and applications.md are single-writer resources. The
+  // gate (run-registry.acquireWriteGate) also feeds `writing`, so a row delete
+  // stays guarded exactly as before; other kinds keep full parallelism. The
+  // child is spawned inside the stream so a queued run can report "waiting"
+  // and an abort while queued can skip the slot cleanly.
+  let child: ReturnType<typeof spawnCli> | undefined;
+  let releaseWrite: (() => void) | null = null;
   const enc = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
@@ -170,18 +197,14 @@ export async function POST(req: Request) {
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
+    async start(controller) {
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false; // heuristic noise (stderr / non-zero exit) — not a verdict by itself
       let warnedStderr = false; // at most one ⚠ step for the whole run
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
-      // pdf-mode tailors a full CV + renders it — give it more headroom.
-      const killMs = kind === "pdf" ? 720_000 : 285_000;
-      killer = setTimeout(() => {
-        try { child.kill("SIGTERM"); } catch { /* ignore */ }
-      }, killMs);
+
       const send = (obj: unknown) => {
         if (closed) return;
         try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
@@ -190,12 +213,75 @@ export async function POST(req: Request) {
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
-          if (writeToken !== null) releaseTrackerWrite(writeToken);
+          if (releaseWrite) { releaseWrite(); releaseWrite = null; }
           try { controller.close(); } catch { /* */ }
         }
       };
 
-      child.stdout.on("data", (d: Buffer) => {
+      // Serialization gate: only ONE tracker-writing worker at a time, so the
+      // "any new report" check below becomes exact by construction. Other runs
+      // queue here; the frontend card wears the "Waiting…" status step.
+      if (kind === "evaluate" || kind === "pdf") {
+        if (isTrackerWriting()) {
+          send({ type: "status", label: "Waiting for the running evaluation to finish…" });
+        }
+        releaseWrite = await acquireWriteGate();
+        // The client aborted while queued — cede the slot to the next run.
+        if (closed) {
+          releaseWrite(); releaseWrite = null;
+          close();
+          return;
+        }
+      }
+
+      // opencode's headless scope rides in OPENCODE_CONFIG_CONTENT (no per-tool
+      // argv); everything else gets an empty env and stays CLI-agnostic. The env
+      // only DELETES or re-scopes tool permissions — the no-auto-submit guarantee
+      // is prompt-level and untouched by this.
+      const cliEnv = buildCliEnv(cliId, { allowedTools: scope.allowed, disallowedTools: scope.disallowed });
+      let childProc: ReturnType<typeof spawnCli>;
+      try {
+        // detached: true makes the CLI the leader of its own process group, so a
+        // budget/cancel kill can SIGTERM the WHOLE tree (killCliTree) — otherwise
+        // a `npm exec @playwright/mcp` grandchild survives the parent and orphans.
+        childProc = spawnCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, ...cliEnv }, detached: true });
+        child = childProc; // exposed to cancel() so an abort can kill it too
+      } catch (e) {
+        send({ type: "error", msg: e instanceof Error ? e.message : "failed to start CLI" });
+        if (releaseWrite) { releaseWrite(); releaseWrite = null; }
+        close();
+        return;
+      }
+
+      // SIGTERM budget per kind. `evaluate` is NOT the cheap kind: a full A–F
+      // oferta reads the ~1k-line mode, researches the company, then emits a
+      // ~40 KB report in a SINGLE write call, then a TSV and a merge. 285 s
+      // SIGTERM'd three Airtel runs mid-report (2026-09-28, sentinels 158/159
+      // leaked) and 600 s still killed a research-heavy PolicyBazaar run the
+      // same day (job-12, sentinel 164) — 720 s is the working budget, the same
+      // as pdf. Every value must stay under `maxDuration` (800 s).
+      // The timer arms on the child's FIRST output so boot/idle before any
+      // stream-json event is not billed against the budget; a baseline timer
+      // backstops a CLI that never produces output at all.
+      const KILL_MS_BY_KIND: Record<string, number> = {
+        evaluate: 720_000,
+        pdf: 720_000,
+      };
+      const killMs = KILL_MS_BY_KIND[kind] ?? 600_000;
+      let killArmed = false;
+      const killTree = () => {
+        if (child) killCliTree(child, true);
+      };
+      const armKill = () => {
+        if (killArmed) return;
+        killArmed = true;
+        if (killer) clearTimeout(killer);
+        killer = setTimeout(killTree, killMs);
+      };
+      killer = setTimeout(killTree, killMs + 120_000);
+
+      childProc.stdout.on("data", (d: Buffer) => {
+        armKill();
         if (closed) return;
         if (!streamJson) {
           emittedText = true;
@@ -217,7 +303,7 @@ export async function POST(req: Request) {
           if (meta.costUsd != null) lastCostUsd = meta.costUsd;
         });
       });
-      child.stderr.on("data", (d: Buffer) => {
+      childProc.stderr.on("data", (d: Buffer) => {
         const raw = d.toString();
         // Heuristic ONLY — never finish the job mid-run on stderr text. OpenCode
         // (and other CLIs) echo `$ cmd` / UI noise to stderr; a chunk can start
@@ -244,8 +330,8 @@ export async function POST(req: Request) {
         warnedStderr = true;
         send({ type: "warning", msg: msgLine.replace(/\s+/g, " ").slice(0, 200) });
       });
-      child.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
-      child.on("close", (code) => {
+      childProc.on("error", (e) => { send({ type: "error", msg: e.message }); close(); });
+      childProc.on("close", (code) => {
         // Spawn-level / proxy plaintext failures are terminal.
         const tailErr = detectCliPlaintextError(buf);
         if (tailErr) {
@@ -318,16 +404,10 @@ export async function POST(req: Request) {
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
-      if (writeToken !== null) releaseTrackerWrite(writeToken);
-      try { child.kill("SIGTERM"); } catch { /* ignore */ }
+      if (releaseWrite) { releaseWrite(); releaseWrite = null; }
+      if (child) killCliTree(child, true);
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return new Response(stream, { headers: STREAM_HEADERS });
 }

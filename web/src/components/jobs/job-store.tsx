@@ -97,6 +97,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       // evals of the same URL; the second stole wroteReport and raced git locks).
       const clash = jobs.find((j) => j.status === "running" && j.kind === opts.kind && j.input === opts.input);
       if (clash) return null;
+      // Also refuse a re-evaluate of an input we ALREADY scored (belt for the
+      // /api/run guard): the posting's lifecycle ended when the first run saved
+      // its report. An errored run — no score — is retryable.
+      const finished = jobs.find(
+        (j) => j.status === "done" && j.kind === opts.kind && j.input === opts.input && j.result?.score != null,
+      );
+      if (finished) return null;
 
       let cliId: string | null = null;
       try {
@@ -143,18 +150,21 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
-          // persist a readable log file so the CLI/assistant can read past runs
-          if (status === "done") {
-            fetch("/api/runs/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, output: text }),
-            }).catch(() => {});
-            // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
-            // worker just wrote a real tracker row / report they don't yet see.
-            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
-              window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
-            }
+          // Persist a readable log file so the CLI/assistant can read past runs —
+          // on FAILURE too. A run killed mid-write (the evaluate SIGTERM budget,
+          // a dropped connection) leaves the report unwritten and the card red,
+          // and with no log on disk there is nothing left to diagnose it from:
+          // that is exactly how the Airtel APM evaluation of 2026-09-28 left two
+          // orphaned report reservations and no trace of why.
+          fetch("/api/runs/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, kind: opts.kind, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, status, lastLabel, output: text }),
+          }).catch(() => {});
+          // Only a run that actually landed its artifacts should invalidate the
+          // server-snapshot surfaces (Today, pipeline) — a failed one wrote nothing.
+          if (status === "done" && typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+            window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
           }
         };
 
