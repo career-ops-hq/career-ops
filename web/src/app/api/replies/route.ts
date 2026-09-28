@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readApplications } from "@/lib/career-ops";
@@ -28,7 +27,7 @@ export async function GET() {
     } catch {}
   }
 
-  return NextResponse.json({
+  return Response.json({
     candidates,
   });
 }
@@ -39,7 +38,7 @@ export async function POST(req: Request) {
     const { message, sender, subject } = body;
 
     if (!message || message.trim().length === 0) {
-      return NextResponse.json({ error: "Message content is required" }, { status: 400 });
+      return Response.json({ error: "Message content is required" }, { status: 400 });
     }
 
     const root = careerOpsRoot();
@@ -53,13 +52,28 @@ export async function POST(req: Request) {
     let confidence = 0.7;
 
     if (
-      lower.includes("unfortunately") ||
       lower.includes("pursuing other candidates") ||
       lower.includes("not moving forward") ||
       lower.includes("decided not to proceed") ||
       lower.includes("position has been filled") ||
       lower.includes("other candidates whose") ||
-      lower.includes("not to move forward")
+      lower.includes("not to move forward") ||
+      lower.includes("will not be moving forward") ||
+      lower.includes("unable to offer you") ||
+      lower.includes("decided to move forward with other") ||
+      lower.includes("decided to pursue other") ||
+      lower.includes("unfortunately, we will not") ||
+      lower.includes("unfortunately we will not") ||
+      lower.includes("unfortunately, we are not") ||
+      lower.includes("unfortunately we are not") ||
+      lower.includes("unfortunately, we have decided") ||
+      lower.includes("unfortunately we have decided") ||
+      lower.includes("unfortunately, at this time") ||
+      lower.includes("unfortunately at this time") ||
+      lower.includes("unfortunately, after careful") ||
+      lower.includes("unfortunately after careful") ||
+      lower.includes("wish you the best in your job search") ||
+      lower.includes("best of luck with your job search")
     ) {
       classification = "rejection";
       suggestedStatus = "Rejected";
@@ -135,8 +149,8 @@ export async function POST(req: Request) {
     current.unshift(newCandidate);
     atomicWrite(repliesPath, JSON.stringify(current, null, 2));
 
-    return NextResponse.json({ success: true, candidate: newCandidate });
+    return Response.json({ success: true, candidate: newCandidate });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return Response.json({ error: String(err) }, { status: 500 });
   }
 }

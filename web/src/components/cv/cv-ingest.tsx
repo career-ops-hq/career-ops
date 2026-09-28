@@ -191,18 +191,20 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         if (parsed.error) {
           throw new Error(parsed.error);
         }
-        if (parsed.markdown) setMd(parsed.markdown);
-        if (parsed.seed) setSeed(parsed.seed);
       }
       const final = parseCvStream(buf);
       if (final.markdown.trim()) {
-        setMd(final.markdown);
-        if (final.seed) setSeed(final.seed);
+        setMd((prev) => {
+          if (prev === currentMd) {
+            if (final.seed) setSeed(final.seed);
+            return final.markdown;
+          }
+          return prev;
+        });
       } else {
         throw new Error("No enhanced markdown returned.");
       }
     } catch (e) {
-      setMd(currentMd);
       setSaveErr(
         e instanceof Error && e.message
           ? `AI enhancement failed: ${e.message}. Keeping current CV text.`

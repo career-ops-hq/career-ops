@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -61,7 +60,7 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({
+  return Response.json({
     contacts,
     connectionsCount,
     hasConnectionsFile: fs.existsSync(connectionsPath),
@@ -84,10 +83,22 @@ export async function POST(req: Request) {
     const sLinkedin = sanitize(linkedin);
     const sEmail = sanitize(email);
     const sNotes = sanitize(notes);
-    const sStatus = sanitize(status, "identified");
+
+    const VALID_STATUSES = new Set(["identified", "contacted", "replied", "referral"]);
+    let sStatus: ContactItem["status"] = "identified";
+    if (status !== undefined && status !== null && status !== "") {
+      const sanitizedStatus = sanitize(status);
+      if (!VALID_STATUSES.has(sanitizedStatus)) {
+        return Response.json(
+          { error: "Invalid status. Must be one of: identified, contacted, replied, referral" },
+          { status: 400 }
+        );
+      }
+      sStatus = sanitizedStatus as ContactItem["status"];
+    }
 
     if (!sName || !sCompany) {
-      return NextResponse.json({ error: "Name and company are required" }, { status: 400 });
+      return Response.json({ error: "Name and company are required" }, { status: 400 });
     }
 
     const root = careerOpsRoot();
@@ -114,8 +125,8 @@ export async function POST(req: Request) {
 
     atomicWrite(contactsPath, content);
 
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return Response.json({ error: String(err) }, { status: 500 });
   }
 }

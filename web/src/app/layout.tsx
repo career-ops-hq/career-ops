@@ -15,9 +15,6 @@ export const viewport: Viewport = {
   // viewport-fit=cover → env(safe-area-inset-*) become non-zero so the header can
   // sit flush under the notch / Dynamic Island.
   viewportFit: "cover",
-  // Default (corrected to the real theme before paint by THEME_SCRIPT, then kept
-  // in sync by the theme toggle). Dark flows seamlessly into the black island.
-  themeColor: "#0a0a0a",
 };
 
 // Before paint: set the theme class AND tint the browser chrome (theme-color) to

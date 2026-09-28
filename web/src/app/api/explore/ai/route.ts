@@ -395,14 +395,10 @@ export async function POST(req: Request) {
                 diagnosticsCaptured ? "; diagnostic output captured" : ""
               }]\n`
             );
-          } else if (!emitted) {
-            safeEnqueue("_(no final output from Codex)_");
           }
-
-          cleanupChildCwd();
-          safeClose();
-          return;
         }
+
+        cleanupChildCwd();
 
         if (!emitted && !closed) {
           safeEnqueue("Scanning public company ATS boards (Greenhouse, Ashby, Lever, Workday) for matching roles…\n\n");
@@ -410,13 +406,18 @@ export async function POST(req: Request) {
             const { runDiscovery } = await import("@/lib/core/scan");
             const { DEFAULT_FILTERS } = await import("@/lib/explore");
             const terms = query.split(/\s+/).filter((t) => t.length > 2);
+            let scanError: string | null = null;
             const offers = await runDiscovery(
               {
                 ...DEFAULT_FILTERS,
                 positive: terms.length ? terms : [query],
                 sinceDays: 45,
               },
-              () => {},
+              (e) => {
+                if (e.kind === "error") {
+                  scanError = e.message;
+                }
+              },
               abortController.signal
             );
             if (offers.length > 0) {
@@ -435,6 +436,8 @@ export async function POST(req: Request) {
                   })}>>\n`
                 );
               }
+            } else if (scanError) {
+              safeEnqueue(`_(Public boards scan failed: ${scanError})_`);
             } else {
               safeEnqueue("_(No matching openings found on public boards for this search query)_");
             }

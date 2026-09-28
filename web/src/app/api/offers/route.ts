@@ -129,17 +129,37 @@ export async function POST(req: Request) {
       return Response.json({ success: true });
     }
 
-    if (action === "delete" && typeof id === "number") {
-      if (fs.existsSync(obsPath)) {
-        const content = fs.readFileSync(obsPath, "utf8");
-        const lines = content.split("\n").filter((l) => l.trim().length > 0);
-        if (id >= 1 && id < lines.length) {
-          lines.splice(id, 1);
-          const newContent = lines.join("\n") + "\n";
-          atomicWrite(obsPath, newContent);
-          return Response.json({ success: true });
-        }
+    if (action === "delete") {
+      if (!fs.existsSync(obsPath)) {
+        return Response.json({ error: "Item not found" }, { status: 404 });
       }
+
+      const content = fs.readFileSync(obsPath, "utf8");
+      const lines = content.split("\n").filter((l) => l.trim().length > 0);
+
+      let targetIdx = -1;
+
+      if (body.content && typeof body.content === "string") {
+        const target = body.content.trim();
+        targetIdx = lines.findIndex((l, idx) => idx > 0 && l.trim() === target);
+      } else if (typeof id === "number" && id >= 1 && id < lines.length) {
+        if (body.expected && typeof body.expected === "string") {
+          const expected = sanitize(body.expected);
+          const actual = sanitize(lines[id]);
+          if (!actual.includes(expected)) {
+            return Response.json({ error: "Item has changed or does not match expected value" }, { status: 409 });
+          }
+        }
+        targetIdx = id;
+      }
+
+      if (targetIdx >= 1 && targetIdx < lines.length) {
+        lines.splice(targetIdx, 1);
+        const newContent = lines.join("\n") + "\n";
+        atomicWrite(obsPath, newContent);
+        return Response.json({ success: true });
+      }
+
       return Response.json({ error: "Item not found" }, { status: 404 });
     }
 

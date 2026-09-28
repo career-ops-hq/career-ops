@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { parseCvTextToMarkdown } from "@/lib/cv/pdf-parser";
 
 export const runtime = "nodejs";
@@ -12,19 +11,26 @@ export async function POST(req: Request) {
     const file = formData.get("file");
 
     if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+      return Response.json({ error: "No file uploaded" }, { status: 400 });
     }
 
     if (file.size > MAX_CV_BYTES) {
-      return NextResponse.json({ error: "Uploaded CV file is too large (max 500KB)" }, { status: 413 });
+      return Response.json({ error: "Uploaded CV file is too large (max 500KB)" }, { status: 413 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileName = file.name.toLowerCase();
 
     if (fileName.endsWith(".docx")) {
-      return NextResponse.json(
-        { error: "Word documents (.docx) are not supported. Please upload a PDF or plain text CV." },
+      return Response.json(
+        { error: "Word documents (.docx) are not supported. Please upload a plain text or markdown CV." },
+        { status: 400 }
+      );
+    }
+
+    if (fileName.endsWith(".pdf")) {
+      return Response.json(
+        { error: "Direct PDF parsing in quick upload is not supported. Please use AI Ingestion or upload a plain text/markdown file." },
         { status: 400 }
       );
     }
@@ -32,7 +38,7 @@ export async function POST(req: Request) {
     const text = buffer.toString("utf8");
     const parsed = parseCvTextToMarkdown(text);
 
-    return NextResponse.json({
+    return Response.json({
       ok: true,
       markdown: parsed.markdown,
       candidate: parsed.candidate,
@@ -44,7 +50,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (err) {
-    return NextResponse.json(
+    return Response.json(
       { error: err instanceof Error ? err.message : "Failed to process CV upload" },
       { status: 500 }
     );

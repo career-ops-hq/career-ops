@@ -301,6 +301,15 @@ export async function executeNegotiationAiAction({
       let stderr = "";
 
       const output = await new Promise((resolve) => {
+        let timer = null;
+
+        const cleanup = () => {
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        };
+
         child.stdout?.on("data", (d) => {
           stdout += d.toString();
         });
@@ -308,16 +317,21 @@ export async function executeNegotiationAiAction({
           stderr += d.toString();
         });
         child.on("close", (code) => {
+          cleanup();
           if (code === 0 && stdout.trim().length > 50) {
             resolve(stdout.trim());
           } else {
             resolve(null);
           }
         });
-        child.on("error", () => resolve(null));
+        child.on("error", () => {
+          cleanup();
+          resolve(null);
+        });
 
         // Timeout after 15s to prevent hanging
-        setTimeout(() => {
+        timer = setTimeout(() => {
+          cleanup();
           try {
             child.kill();
           } catch {}

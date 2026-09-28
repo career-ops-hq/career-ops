@@ -148,6 +148,11 @@ export default function OffersPage() {
   const handleGenerateAiLetter = async () => {
     setGeneratingAi(true);
     try {
+      let activeCliId: string | null = null;
+      try {
+        activeCliId = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
+      } catch {}
+
       const res = await fetch("/api/negotiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -158,9 +163,11 @@ export default function OffersPage() {
           currentOffer: negCurrentOffer,
           targetAsk: negTargetAsk,
           competingOffer: negCompetingComp,
+          achievement: negKeyAchievement,
           keyAchievement: negKeyAchievement,
           strategy: negStrategy,
           tone: negTone,
+          cliId: activeCliId,
           useAi: true,
         }),
       });
@@ -168,10 +175,10 @@ export default function OffersPage() {
       if (data.letter) {
         setGeneratedLetterOverride(data.letter);
         setAiResultMetadata({
-          source: data.source,
-          verifiedAchievementsCount: data.verifiedAchievementsCount,
-          cliAvailable: data.cliAvailable,
-          cliName: data.cliName,
+          source: data.aiGenerated ? "ai-cli" : "template",
+          verifiedAchievementsCount: verifiedAchievements.length,
+          cliAvailable: Boolean(data.aiGenerated),
+          cliName: activeCliId,
         });
       }
     } catch (e) {

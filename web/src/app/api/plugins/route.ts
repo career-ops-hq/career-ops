@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -22,7 +21,7 @@ export const KNOWN_PLUGINS: PluginInfo[] = [
     enabled: false,
     hooks: ["ingest", "reply-watch"],
     requiredEnv: ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"],
-    configured: Boolean(process.env.GMAIL_REFRESH_TOKEN),
+    configured: false,
   },
   {
     id: "notion",
@@ -31,7 +30,7 @@ export const KNOWN_PLUGINS: PluginInfo[] = [
     enabled: false,
     hooks: ["export", "search"],
     requiredEnv: ["NOTION_ACCESS_TOKEN", "NOTION_PARENT_PAGE_ID"],
-    configured: Boolean(process.env.NOTION_ACCESS_TOKEN),
+    configured: false,
   },
   {
     id: "apify",
@@ -40,7 +39,7 @@ export const KNOWN_PLUGINS: PluginInfo[] = [
     enabled: false,
     hooks: ["provider", "scan"],
     requiredEnv: ["APIFY_TOKEN"],
-    configured: Boolean(process.env.APIFY_TOKEN),
+    configured: false,
   },
   {
     id: "h1b-sponsor",
@@ -55,7 +54,10 @@ export const KNOWN_PLUGINS: PluginInfo[] = [
 
 export async function GET() {
   const root = careerOpsRoot();
-  const plugins = KNOWN_PLUGINS.map((p) => ({ ...p }));
+  const plugins: PluginInfo[] = KNOWN_PLUGINS.map((p) => ({
+    ...p,
+    configured: p.requiredEnv.length === 0 || p.requiredEnv.every((k) => Boolean(process.env[k]?.trim())),
+  }));
 
   // Check which are enabled in plugins/ or config
   const enabledConfigPath = path.join(root, "config", "plugins.json");
@@ -63,15 +65,21 @@ export async function GET() {
   if (fs.existsSync(enabledConfigPath)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(enabledConfigPath, "utf8"));
-      if (Array.isArray(parsed)) enabledList = parsed;
-    } catch {}
+      if (Array.isArray(parsed)) {
+        enabledList = parsed;
+      } else {
+        return Response.json({ error: "plugins.json is not an array" }, { status: 500 });
+      }
+    } catch {
+      return Response.json({ error: "Failed to parse plugins.json" }, { status: 500 });
+    }
   }
 
   for (const plugin of plugins) {
     plugin.enabled = enabledList.includes(plugin.id);
   }
 
-  return NextResponse.json({ plugins });
+  return Response.json({ plugins });
 }
 
 export async function POST(req: Request) {
@@ -80,11 +88,11 @@ export async function POST(req: Request) {
     const { pluginId, enabled } = body;
 
     if (!pluginId || typeof pluginId !== "string") {
-      return NextResponse.json({ error: "Plugin ID is required" }, { status: 400 });
+      return Response.json({ error: "Plugin ID is required" }, { status: 400 });
     }
 
     if (!KNOWN_PLUGINS.some((p) => p.id === pluginId)) {
-      return NextResponse.json({ error: `Unknown plugin ID: ${pluginId}` }, { status: 400 });
+      return Response.json({ error: `Unknown plugin ID: ${pluginId}` }, { status: 400 });
     }
 
     const root = careerOpsRoot();
@@ -101,10 +109,10 @@ export async function POST(req: Request) {
         if (Array.isArray(parsed)) {
           enabledList = parsed;
         } else {
-          return NextResponse.json({ error: "plugins.json is not an array" }, { status: 500 });
+          return Response.json({ error: "plugins.json is not an array" }, { status: 500 });
         }
       } catch {
-        return NextResponse.json({ error: "Failed to parse plugins.json" }, { status: 500 });
+        return Response.json({ error: "Failed to parse plugins.json" }, { status: 500 });
       }
     }
 
@@ -116,8 +124,8 @@ export async function POST(req: Request) {
 
     atomicWrite(enabledConfigPath, JSON.stringify(enabledList, null, 2));
 
-    return NextResponse.json({ success: true, enabledList });
+    return Response.json({ success: true, enabledList });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    return Response.json({ error: String(err) }, { status: 500 });
   }
 }

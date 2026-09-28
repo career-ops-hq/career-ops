@@ -118,11 +118,10 @@ export async function POST(req: Request) {
 
   // Handle both raw full profile structure or flat ProfilePatch
   let proposed: Record<string, unknown> = {};
-  const KNOWN_PROFILE_KEYS = [
+  const KNOWN_STRUCTURED_PROFILE_KEYS = [
     "candidate",
     "target_roles",
     "compensation",
-    "location",
     "narrative",
     "language",
     "scan",
@@ -130,13 +129,18 @@ export async function POST(req: Request) {
     "dealbreakers",
   ];
 
-  const hasTopLevelProfileKey = KNOWN_PROFILE_KEYS.some((k) => k in (body as Record<string, unknown>));
+  const hasStructuredProfileKey =
+    KNOWN_STRUCTURED_PROFILE_KEYS.some((k) => k in (body as Record<string, unknown>)) ||
+    isMapping((body as Record<string, unknown>).location);
 
-  if (hasTopLevelProfileKey) {
-    for (const key of KNOWN_PROFILE_KEYS) {
+  if (hasStructuredProfileKey) {
+    for (const key of KNOWN_STRUCTURED_PROFILE_KEYS) {
       if (key in (body as Record<string, unknown>)) {
         proposed[key] = (body as Record<string, unknown>)[key];
       }
+    }
+    if (isMapping((body as Record<string, unknown>).location)) {
+      proposed.location = (body as Record<string, unknown>).location;
     }
   } else {
     proposed = patchToProfile(body);

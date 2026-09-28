@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, readProfileCandidateInfo } from "@/lib/career-ops";
 import { resolveCli } from "@/lib/clis";
 import { extractVerifiedAchievements, executeNegotiationAiAction } from "@/lib/negotiation.mjs";
 
@@ -9,20 +9,20 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function getCandidateInfo(root: string) {
-  let name = "Candidate";
-  let email = "applicant@example.com";
+  const { name: parsedName, email } = readProfileCandidateInfo(root);
+  let name = parsedName;
   let targetComp = "$175,000 - $200,000";
 
-  // 1. Check profile.yml
+  // 1. Check profile.yml for compensation
   const profilePath = path.join(root, "config", "profile.yml");
   if (fs.existsSync(profilePath)) {
     try {
       const parsed = yaml.load(fs.readFileSync(profilePath, "utf8")) as any;
-      if (parsed?.candidate?.full_name) name = parsed.candidate.full_name;
-      else if (parsed?.candidate?.name) name = parsed.candidate.name;
-      if (parsed?.candidate?.email) email = parsed.candidate.email;
-      if (parsed?.compensation?.target_range) targetComp = parsed.compensation.target_range;
-      else if (parsed?.compensation?.target) targetComp = parsed.compensation.target;
+      if (typeof parsed?.compensation?.target_range === "string" && parsed.compensation.target_range.trim()) {
+        targetComp = parsed.compensation.target_range.trim();
+      } else if (typeof parsed?.compensation?.target === "string" && parsed.compensation.target.trim()) {
+        targetComp = parsed.compensation.target.trim();
+      }
     } catch {}
   }
 

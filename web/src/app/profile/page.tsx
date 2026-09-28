@@ -110,21 +110,21 @@ export default function ProfilePage() {
 
     const candidateObj: Record<string, any> = {
       ...(rawProfile?.candidate || {}),
+      full_name: fullName.trim(),
+      title: title.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      location: location.trim(),
+      linkedin: linkedin.trim(),
     };
-    if (fullName.trim()) candidateObj.full_name = fullName.trim();
-    if (title.trim()) candidateObj.title = title.trim();
-    if (email.trim()) candidateObj.email = email.trim();
-    if (phone.trim()) candidateObj.phone = phone.trim();
-    if (location.trim()) candidateObj.location = location.trim();
-    if (linkedin.trim()) candidateObj.linkedin = linkedin.trim();
     delete candidateObj.github;
 
     const compObj: Record<string, any> = {
       ...(rawProfile?.compensation || {}),
+      currency: currency.trim(),
+      target_range: targetRange.trim(),
+      location_flexibility: locationFlexibility,
     };
-    if (currency.trim()) compObj.currency = currency.trim();
-    if (targetRange.trim()) compObj.target_range = targetRange.trim();
-    if (locationFlexibility) compObj.location_flexibility = locationFlexibility;
 
     const payload = {
       candidate: candidateObj,

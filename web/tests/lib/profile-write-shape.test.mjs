@@ -114,3 +114,21 @@ for (const route of routes) {
     });
   });
 }
+
+test("profile flat patch with string location maps to candidate.location", async () => {
+  const source = "candidate:\n  full_name: Jane Doe\n  location: London\ncompensation:\n  currency: GBP\n";
+  await withFixture(source, async ({ file }) => {
+    const req = new Request("http://fixture.invalid/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: "Bristol, UK" }),
+    });
+    const res = await updateProfile(req);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.ok, true);
+    assert.equal(data.profile.candidate.location, "Bristol, UK");
+    assert.equal(data.profile.candidate.full_name, "Jane Doe");
+    assert.equal(data.profile.location, undefined);
+  });
+});

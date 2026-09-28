@@ -92,6 +92,10 @@ export function CvEditor() {
   }
 
   const handleQuickUpload = async (file: File) => {
+    if (dirty && typeof window !== "undefined" && !window.confirm("You have unsaved changes. Overwrite draft with uploaded file?")) {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     setSaving(true);
     setUploadErr("");
     try {
@@ -108,16 +112,13 @@ export function CvEditor() {
       }
       const d = await res.json();
       setContent(d.markdown || "");
-      setDirty(false);
-      setExists(true);
-      setSaved(true);
-      fetchProfile();
+      setDirty(true);
       setTab("editor");
-      setTimeout(() => setSaved(false), 2000);
     } catch (err: unknown) {
       setUploadErr(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setSaving(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
