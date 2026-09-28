@@ -25,20 +25,23 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, rea
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DRY_RUN = process.argv.includes('--dry-run');
+const CAREER_OPS = getCareerOpsRoot();
 
-if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log('Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]');
-  console.log('  Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".');
-  process.exit(0);
-}
+const KNOWN_FLAGS = ['--dry-run', '--pipeline', '--state', '--help', '-h'];
+const VALUE_FLAGS = ['--pipeline', '--state'];
+const USAGE = `Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]
+  Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".`;
 
-function argValue(flag) {
-  const i = process.argv.indexOf(flag);
-  return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null;
-}
+// An unrecognized flag (typo'd --dry-run, say) used to be silently ignored
+// and fall through to a LIVE run that writes pipeline.md — the caller
+// believed they were in dry-run mode and were not. Fail fast instead.
+const args = process.argv.slice(2);
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+const DRY_RUN = args.includes('--dry-run');
 
 // Constrain user-supplied --state/--pipeline paths to the repository tree, so a
 // crafted path cannot read from or overwrite files outside the project.
@@ -73,8 +76,8 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
 const defaultPipeline = existsSync(join(CAREER_OPS, 'data/pipeline.md'))
   ? join(CAREER_OPS, 'data/pipeline.md')
   : join(CAREER_OPS, 'pipeline.md');
-const PIPELINE_FILE = resolveInsideRepo(argValue('--pipeline'), defaultPipeline, '--pipeline');
-const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CAREER_OPS, 'batch/batch-state.tsv'), '--state');
+const PIPELINE_FILE = resolveInsideRepo(flagValue(args, '--pipeline'), defaultPipeline, '--pipeline');
+const STATE_FILE = resolveInsideRepo(flagValue(args, '--state'), join(CAREER_OPS, 'batch/batch-state.tsv'), '--state');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
 // ---- guards ----
@@ -124,19 +127,35 @@ function readReportField(reportFile, field) {
   if (!reportFile) return null;
   try {
     const txt = readFileSync(join(REPORTS_DIR, reportFile), 'utf-8');
-    const m = txt.match(new RegExp(`^\\*\\*${field}:\\*\\*\\s*(.+)$`, 'm'));
+    // An empty header is unknown; never borrow the following URL/PDF line.
+    const m = txt.match(new RegExp(`^\\*\\*${field}:\\*\\*([^\\r\\n]*)$`, 'm'));
     return m ? m[1].trim() : null;
   } catch { return null; }
 }
 
-// State score is authoritative when numeric; otherwise fall back to the report.
+function formatScore(value) {
+  return /^\d+(?:\.\d+)?$/.test(value) && Number(value) <= 5 ? `${value}/5` : null;
+}
+
+// A valid numeric state score is authoritative; otherwise fall back to the report.
 function resolveScore(stateScore, reportFile) {
-  if (/^\d+(?:\.\d+)?$/.test(stateScore)) return `${stateScore}/5`;
+  const state = formatScore(stateScore);
+  if (state) return state;
   const rep = readReportField(reportFile, 'Score');
   if (rep) {
-    const num = rep.match(/(\d+(?:\.\d+)?)/);
-    if (num) return `${num[1]}/5`;
-    if (/n\/?a/i.test(rep)) return 'N/A';
+    // Scores may have Markdown decoration or trailing prose. The first
+    // denominator is authoritative even when an annotation precedes it,
+    // matching evaluator score cells: "4.2 (strong fit)/10" is not 4.2/5.
+    const score = rep.match(/^[*_`]*(\d+(?:\.\d+)?)(?=$|[\s*_`/,(—–-])/);
+    if (!score) return 'N/A';
+    const denominator = rep.match(/\/[ \t]*(\d+(?:\.\d+)?)/);
+    if (denominator) {
+      const tail = rep.slice(denominator.index + denominator[0].length);
+      if (Number(denominator[1]) !== 5 || (tail && !/^[\s*_`,;:.()\]—–-]/.test(tail))) return 'N/A';
+    } else if (/^[*_`]*[ \t]*\//.test(rep.slice(score[0].length))) {
+      return 'N/A'; // An explicit but unreadable scale is not a bare score.
+    }
+    return formatScore(score[1]) || 'N/A';
   }
   return 'N/A';
 }

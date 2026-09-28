@@ -17,7 +17,7 @@ When interview sessions are available, it also reads *what the candidate actuall
 
 ## Minimum Threshold
 
-Before running analysis, check: does `data/applications.md` have at least 5 entries with status beyond "Evaluated" (i.e., Applied, Responded, Interview, Offer, Rejected, Discarded, SKIP)?
+Before running analysis, check: does `data/applications.md` have at least 5 entries that were actually sent (Applied, Responded, Interview, Offer, Hired, Rejected)? SKIP and Discarded rows are not submissions and do not count toward the floor.
 
 If not, tell the user:
 > "Not enough data yet -- {N}/5 applications have progressed beyond evaluation. Keep applying and come back when you have more outcomes to analyze."
@@ -36,17 +36,20 @@ Parse the JSON output. It contains:
 
 | Key | Contents |
 |-----|----------|
-| `metadata` | Total entries, date range, analysis date, counts by outcome |
+| `metadata` | Total entries, date range, analysis date, counts by outcome, and `outcomeRates` — the whole tracker through the same `submitted` / `decided` denominators as every breakdown row |
 | `funnel` | Count per status stage (evaluated, applied, interview, offer, etc.) |
-| `scoreComparison` | Avg/min/max score per outcome group (positive, negative, self_filtered, pending) |
-| `archetypeBreakdown` | Per-archetype: total, positive, negative, self_filtered, conversion rate |
-| `blockerAnalysis` | Most frequent hard blockers: geo-restriction, stack-mismatch, seniority, onsite |
-| `remotePolicy` | Per-policy bucket: total, positive, negative, conversion rate |
+| `scoreComparison` | Avg/min/max score per outcome group (positive, awaiting, negative, discarded, self_filtered, pending) |
+| `archetypeBreakdown` | Per-archetype: total, submitted, decided, positive, awaiting, negative, discarded, self_filtered, conversionRate, decidedRate |
+| `blockerAnalysis` | Most frequent hard blockers: geo-restriction, stack-mismatch, seniority, onsite; each `percentage` is a share of `blockerBase` |
+| `blockerBase` | Entries carrying a non-empty gaps array — the denominator for `blockerAnalysis[].percentage` |
+| `remotePolicy` | Per-policy bucket: same columns as `archetypeBreakdown` |
 | `companySizeBreakdown` | Per-size bucket: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS channel analysis: per-vendor advance rate + coverage (see below) |
 | `viaChannelAnalysis` | Via channel analysis (#1596): per-agency advance rate + agency-vs-direct aggregate (see below) |
-| `scoreThreshold` | Recommended minimum score + reasoning |
-| `techStackGaps` | Most frequent tech gaps in negative outcomes |
+| `scoreThreshold` | `recommended` (null until `sufficientSample`), `observedMinimum`, `sampleSize`, `sufficientSample`, reasoning |
+| `techStackGaps` | Most frequent tech gaps in negative / discarded outcomes |
+| `discardReasonStats` | User-committed skip/discard reasons; each `percentage` is a share of `discardReasonBase` |
+| `discardReasonBase` | Self-filtered, discarded or negative entries — the denominator for `discardReasonStats[].percentage` and its recommendation threshold |
 | `recommendations` | Top 5 actionable items with reasoning and impact level |
 
 If the script returns `error`, display the error message and exit.
@@ -100,6 +103,26 @@ via X — it converts"*, a weak one is an observation, not an accusation.
 
 If compensation observations exist (report `advertised_comp` keys or `data/salary-observations.tsv` lines), run `node salary-gap.mjs --summary` as an additional lens: advertised→actual haircut per (company, role) and per currency, plus desired-attainment. Zero tokens — never recompute these numbers manually. Respect its data-quality section the same way as `sufficientSample`: low sample sizes are observations, not recommendations.
 
+### Company History lens (optional)
+
+Run `node company-history.mjs --summary` as an additional lens. Zero tokens.
+
+**Hygiene first, always.** The summary leads with any aged-Applied rows that look silent — present that list before any card. Tell the user to confirm real or update via `node set-status.mjs --row <num> <state> --on <response-date>` before drawing any conclusion from the cards below it — a stale tracker row produces the same signal as genuine silence.
+
+Then present the cards, sorted silent-first (the script already orders them this way).
+
+**Causal humility (mandatory, same posture as `vendorAnalysis`):** these cards are facts about *your own files* — a company reflecting `silent-on-you` means "no response recorded in your tracker/follow-ups," not "the company never responded." Innocent explanations are common: high-volume inboxes, evergreen requisitions, re-opened searches, or a response the candidate received but never logged. Present the facts (silent Nd since date, M follow-ups sent) and let the user judge — never phrase a card as a verdict about the company.
+
+### Funnel Calibration lens (optional)
+
+If the tracker has Applied-or-beyond rows, run `node funnel-velocity.mjs --summary` as an additional lens: the candidate's funnel rates vs candidate-side market benchmark ranges, in-flight applications past the typical first-response window, and (once `data/status-log.tsv` has accrued transitions) median days per stage hop. Zero tokens — never recompute these numbers manually. Presentation rules (these are hard MUSTs, not style suggestions):
+
+- **Above-range rates**: encouragement is wanted — this lens exists to counter silence-anxiety — but MUST keep the script's selection-bias note (targeted applications are expected to beat mass-platform averages). Confirmed filter quality, not market ease.
+- **Below-range rates**: calibration plus exactly one concrete action (follow-up compliance via followup mode, or score-threshold review via patterns Step 2). Never verdicts about the candidate.
+- **Every benchmark mention** carries its year and "directional" — the shipped baselines are recruiter-industry aggregates, not peer-reviewed statistics.
+- **No comparative multiplier claims below n=20 applied.** The script already suppresses them; do not reconstruct them manually from the raw numbers.
+- **Velocity medians**: always repeat the censored count the script prints ("n still waiting, excluded") — a median over answered applications only is survivorship-biased without it.
+
 ## Step 1b — Session-Content Targeting Signal (optional)
 
 Outcome data (Step 1) tells you *whether* you're winning. Interview sessions tell you *what role you're actually selling* in the room — a higher-resolution, lower-noise signal of role-fit than win/loss, which is confounded by comp, timing, headcount, and a dozen reasons unrelated to fit.
@@ -134,7 +157,7 @@ Write the report to `reports/pattern-analysis-{YYYY-MM-DD}.md`.
 
 **Applications analyzed:** {total}
 **Date range:** {from} to {to}
-**Outcomes:** {positive} positive, {negative} negative, {self_filtered} self-filtered, {pending} pending
+**Outcomes:** {positive} positive, {awaiting} awaiting a reply, {negative} negative, {self_filtered} self-filtered, {pending} not sent
 
 ---
 
@@ -154,30 +177,35 @@ Show each status with count and percentage of total. Use a simple table:
 |---------|-----------|-----|-----|-------|
 | Positive | X.X/5 | X.X | X.X | X |
 | Negative | ... | | | |
+| Awaiting | ... | | | |
 | Self-filtered | ... | | | |
 | Pending | ... | | | |
 
 ## Archetype Performance
 
-Table with each archetype, total applications, positive outcomes, conversion rate.
-Highlight the best-performing archetype and the worst.
+Table with each archetype: `submitted`, `decided`, positive, `decidedRate` (lead with it) and `conversionRate`. Highlight the best-performing archetype and the worst.
+
+`conversionRate` = positives over everything sent, so a mostly-unanswered segment reads low by construction. `decidedRate` = positives over the applications with a recorded outcome, and is `null` while nothing is decided — report that as "no data yet", never 0%. Never divide by `metadata.total`: it counts evaluated rows that were never sent; the whole-tracker rates live in `metadata.outcomeRates`.
 
 ## Top Blockers
 
 Frequency table of recurring hard blockers (geo-restriction, stack-mismatch, etc.).
-Note the percentage of all applications affected by each.
+Show each frequency against `blockerBase`; its percentage is the share of
+gap-bearing entries, not the share of all applications.
 
 ## Remote Policy Patterns
 
 Table showing conversion rate by remote policy bucket (global, regional, geo-restricted, hybrid/onsite).
 
+**Never call a segment bad on `conversionRate` alone** — an all-awaiting bucket shows a low rate and a `null` `decidedRate`, which is silence, not rejection. Call `0%` negative only when `positive` is 0 and `decided` >= 2, and name the decided count.
+
 ## Tech Stack Gaps
 
-List of most common missing skills in negative/self-filtered outcomes with frequency.
+List of most common missing skills in negative / discarded / self-filtered outcomes with frequency.
 
 ## Recommended Score Threshold
 
-State the data-driven minimum score and reasoning.
+State the data-driven minimum score and reasoning. When `sufficientSample` is false, `recommended` is `null`: report `observedMinimum` as an observation over `sampleSize` outcome(s) and do not offer to persist it.
 
 ## Targeting Signal (interview sessions)
 
@@ -196,7 +224,7 @@ Number the top recommendations (from the script output). For each:
 ## Step 3 — Present Summary
 
 Show the user a condensed version with:
-1. One-line stat summary (X applications, Y% applied, Z% positive outcome)
+1. One-line stat summary from `metadata.outcomeRates` (X sent, Y decided, Z% of decided advanced) — never a share of `metadata.total`
 2. Top 3 findings (most impactful patterns)
 3. Link to full report
 
@@ -204,7 +232,7 @@ Example:
 > **Pattern Analysis Complete** (24 applications, Apr 7-8)
 >
 > Key findings:
-> - Geo-restricted roles are 0% conversion (7 of 24) -- stop evaluating US/Canada-only postings
+> - Geo-restricted roles: 0 of 7 **decided** applications advanced -- stop evaluating US/Canada-only postings
 > - Regional/global remote roles convert at 57-67% -- these are your sweet spot
 > - No positive outcomes below 4.2/5 -- consider this your score floor
 >
@@ -216,7 +244,7 @@ Ask the user if they want to act on any recommendations:
 
 > "Want me to apply any of these recommendations? I can:
 > - Update `portals.yml` to filter out geo-restricted roles
-> - Set a score threshold in `_profile.md` for PDF generation
+> - Set a score threshold in `_profile.md` for PDF generation (only when `scoreThreshold.sufficientSample` is true)
 > - Adjust archetype targeting based on what's converting
 > - Realign targeting from the session signal — add the under-targeted archetype X to `modes/_profile.md` and reweight `portals.yml` `title_filter.positive` (if Step 1b ran)
 >
@@ -233,7 +261,9 @@ For reference, outcomes are classified as:
 
 | Status | Outcome |
 |--------|---------|
-| Interview, Offer, Responded, Applied | **Positive** (invested effort or got traction) |
-| Rejected, Discarded | **Negative** (company said no or offer closed) |
+| Interview, Offer, Responded, Hired | **Positive** (the employer moved it forward) |
+| Applied | **Awaiting** (sent, no answer yet — counts in the conversion denominator, never as a success) |
+| Rejected | **Negative** (the employer said no) |
+| Discarded | **Discarded** (you withdrew, or the posting closed — not an employer decision, not a proven submission; counts in neither `submitted` nor `decided`) |
 | SKIP, NO APLICAR | **Self-filtered** (user decided not to apply) |
-| Evaluated | **Pending** (no action taken yet) |
+| Evaluated | **Pending** (never sent) |

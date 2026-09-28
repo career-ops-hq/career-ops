@@ -14,20 +14,34 @@
 // The script does NOT parse cv.md / YAML: the authoritative read of the source
 // files stays in the agent (same contract as build-cv-latex.mjs / modes/latex.md).
 // generate-pdf.mjs remains the single PDF renderer and is unchanged.
+//
+// Section HTML partials (#2183):
+//   A template pack can ship a sections/ directory alongside the main template
+//   file (e.g. templates/sections/ for the built-in templates). When a partial
+//   file exists for a section (e.g. sections/experience.html), the builder uses
+//   that file's markup instead of the hard-coded tag structure. Partials follow
+//   the same {{PLACEHOLDER}} convention used by the main template but carry
+//   entry-level field names (COMPANY, PERIOD, ROLE, etc.). When no partial file
+//   is found the built-in fallback builder is used, preserving full backward
+//   compatibility.
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
-const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PROFILE_PATH = resolve(DATA_ROOT, 'config', 'profile.yml');
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -45,6 +59,8 @@ const DEFAULT_SECTION_TITLES = {
   projects: 'Projects',
   education: 'Education',
   certifications: 'Certifications',
+  awards: 'Awards & Honors',
+  interests: 'Interests',
   skills: 'Skills',
 };
 
@@ -53,8 +69,12 @@ const DEFAULT_SECTION_TITLES = {
 // (e.g. "R&D", "scaled 10x < budget", 'the "north star" metric') render as
 // literal text instead of breaking the document or injecting tags.
 function escapeHtml(text) {
-  if (typeof text !== 'string') return '';
-  return text
+  // Blank out only truly absent/structural values. A number or boolean scalar
+  // (e.g. a payload with `year: 2024` instead of `"2024"`) must render its value,
+  // not vanish: the old `typeof text !== 'string' → ''` guard silently dropped
+  // numeric years/dates from the CV while `present` stayed true.
+  if (text === null || text === undefined || typeof text === 'object') return '';
+  return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -149,26 +169,195 @@ function joinItems(items) {
   return typeof items === 'string' ? items : '';
 }
 
-// --- Section builders: each returns the inner HTML for one {{PLACEHOLDER}}. ---
+// ── Section partials (#2183) ────────────────────────────────────────────────
+//
+// Resolve the sections/ directory co-located with a given template file.
+// For "templates/cv-template.html" this is "templates/sections/".
+// For a custom pack at "templates/cv-template.compact.html" we look for
+// "templates/sections/" first (shared by all templates in that directory),
+// then fall back to the built-in builders.
+//
+// Partial file format (v2 — ENTRY zone):
+//   The file is split into two zones:
+//
+//   1. Documentation zone (before <!--ENTRY--> and after <!--/ENTRY-->):
+//      Free-form HTML comments or text. Completely ignored by the parser.
+//
+//   2. Entry zone (inside <!--ENTRY-->...<!--/ENTRY-->):
+//      Contains the per-entry HTML template. {{PLACEHOLDER}} references are
+//      filled by fillEntry(). Optional conditional-block *definitions* are
+//      placed here too, encoded as HTML comments:
+//
+//        <!--BLOCK_NAME--><tag>{{PLACEHOLDER}}</tag><!--/BLOCK_NAME-->
+//
+//      The builder extracts block definitions first, then the remaining markup
+//      becomes the entry template. When a field is absent the entire block is
+//      replaced with '' (or with the <!--BLOCK_NAME_EMPTY--> fallback if one
+//      is defined, which the certifications partial uses for alignment).
+//
+// By keeping documentation outside the ENTRY zone we never need to strip
+// arbitrary HTML comments from the entry template, which avoids the
+// CodeQL js/incomplete-multi-character-sanitization rule entirely.
 
-function buildCompetencies(entries) {
+// Parse a partial file and return:
+//   { entryTemplate: string, blocks: Map<name, {present: string, absent: string}> }
+//
+// The entry template is extracted from inside <!--ENTRY-->...<!--/ENTRY-->.
+// Named conditional-block definitions are extracted from the same zone and
+// removed to leave the clean entry template. No HTML comment stripping is
+// performed on arbitrary content (no CodeQL sanitization concern).
+function parsePartial(source) {
+  // Step 1: locate the ENTRY zone.
+  const entryZoneMatch = /<!--ENTRY-->([\s\S]*?)<!--\/ENTRY-->/.exec(source);
+  if (!entryZoneMatch) {
+    throw new Error('Malformed partial: missing <!--ENTRY-->...<!--/ENTRY--> tags');
+  }
+  const entryZone = entryZoneMatch[1];
+
+  // Step 2: extract named conditional-block definitions from the entry zone.
+  const blockRe = /<!--([A-Z][A-Z0-9_]+)-->([\s\S]*?)<!--\/\1-->/g;
+  const blocks = new Map();
+  // Collect the exact definition strings (open-tag + content + close-tag) so we
+  // can remove them verbatim from the entry zone in step 3, without needing any
+  // broad HTML-comment regex (which would trigger CodeQL).
+  const definitionStrings = [];
+  // Collect every definition first. The _EMPTY fallbacks are resolved in a
+  // second pass because a fallback may be defined before the block it belongs
+  // to, and pairing needs to know which block names exist.
+  const definitions = new Map();
+  let m;
+  while ((m = blockRe.exec(entryZone)) !== null) {
+    const name = m[1];
+    const content = m[2];
+    if (name === 'ENTRY') continue; // skip the sentinel itself
+    definitionStrings.push(m[0]); // full match, e.g. <!--FOO-->bar<!--/FOO-->
+    definitions.set(name, content);
+  }
+
+  const EMPTY_SUFFIX = '_EMPTY';
+  for (const [name, content] of definitions) {
+    if (name.endsWith(EMPTY_SUFFIX)) continue;
+    const existing = blocks.get(name) || { present: '', absent: '' };
+    blocks.set(name, { ...existing, present: content });
+  }
+  // An EMPTY variant is the absent-field fallback for a sibling block, and the
+  // renderer looks it up under the block's own name. Both spellings pair to the
+  // same block: <!--ORG_EMPTY--> and <!--ORG_BLOCK_EMPTY--> attach to ORG_BLOCK.
+  // Falling back to the bare stem keeps a FOO_EMPTY/FOO pair working.
+  for (const [name, content] of definitions) {
+    if (!name.endsWith(EMPTY_SUFFIX)) continue;
+    const stem = name.slice(0, -EMPTY_SUFFIX.length);
+    const base = definitions.has(`${stem}_BLOCK`) ? `${stem}_BLOCK` : stem;
+    const existing = blocks.get(base) || { present: '', absent: '' };
+    blocks.set(base, { ...existing, absent: content });
+  }
+
+  // Step 3: build the entry template by removing the captured block *definitions*
+  // verbatim. Block *references* ({{BLOCKNAME}}) remain and are resolved by
+  // fillEntry() at render time.
+  // We use split/join on the exact captured strings — no broad HTML-comment regex,
+  // so CodeQL js/incomplete-multi-character-sanitization cannot fire.
+  let entryTemplate = entryZone;
+  for (const def of definitionStrings) {
+    entryTemplate = entryTemplate.split(def).join('');
+  }
+  entryTemplate = entryTemplate.trim();
+
+  return { entryTemplate, blocks };
+}
+
+// Fill an entry template with a map of { PLACEHOLDER: value } substitutions,
+// resolving conditional blocks before the normal field fill.
+// blockValues: Map<name, { value: string, present: boolean }> drives which
+// conditional markup variant to use.
+function fillEntry(entryTemplate, blocks, fields, blockValues) {
+  let out = entryTemplate;
+
+  // Every replacement below passes a FUNCTION rather than the value directly.
+  // A string replacement argument is scanned by JS for $-patterns, so candidate
+  // text containing $&, $', $` or $$ (escaping leaves those sequences intact)
+  // would splice part of the template into the CV instead of being inserted
+  // literally. A replacer function's return value is never interpreted.
+
+  // Resolve conditional blocks: replace {{BLOCK_NAME}} with the
+  // present/absent markup depending on whether the field has a value.
+  if (blockValues) {
+    for (const [name, { value, present }] of blockValues) {
+      const block = blocks.get(name);
+      if (!block) continue;
+      const scalarKey = name.endsWith('_BLOCK') ? name.slice(0, -6) : name;
+      const markup = present 
+        ? block.present.replace(new RegExp(`\\{\\{(${name}|${scalarKey})\\}\\}`, 'g'), () => value) 
+        : block.absent;
+      out = out.replace(new RegExp(`\\{\\{${name}\\}\\}`, 'g'), () => markup);
+    }
+  }
+
+  // Fill remaining scalar placeholders.
+  for (const [key, value] of Object.entries(fields)) {
+    out = out.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => value);
+  }
+
+  return out;
+}
+
+// Load section partials from the sections/ directory co-located with the
+// template. Returns a Map<sectionName, { entryTemplate, blocks }> for each
+// partial file found. Sections with no partial file are absent from the map
+// and fall back to the built-in builders.
+function loadSectionPartials(templatePath) {
+  const sectionsDir = join(dirname(templatePath), 'sections');
+  const partials = new Map();
+  if (!existsSync(sectionsDir)) return partials;
+
+  const sectionNames = [
+    'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills',
+  ];
+  for (const name of sectionNames) {
+    const partialPath = join(sectionsDir, `${name}.html`);
+    if (!existsSync(partialPath)) continue;
+    try {
+      const source = readFileSync(partialPath, 'utf-8');
+      partials.set(name, parsePartial(source));
+    } catch {
+      // Silently skip malformed partial files — fall back to built-in builder.
+    }
+  }
+  return partials;
+}
+
+// ── Section builders ────────────────────────────────────────────────────────
+// Each builder accepts an optional `partial` argument ({ entryTemplate, blocks }).
+// When a partial is provided the builder fills the partial's template instead
+// of its built-in tag structure. When partial is undefined/null the original
+// hard-coded output is produced (full backward compatibility).
+
+function buildCompetencies(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
+  if (!partial) {
+    return entries
+      .filter(Boolean)
+      .map(tag => `<span class="competency-tag">${escapeHtml(String(tag))}</span>`)
+      .join('\n      ');
+  }
+  const { entryTemplate, blocks } = partial;
   return entries
     .filter(Boolean)
-    .map(tag => `<span class="competency-tag">${escapeHtml(String(tag))}</span>`)
+    .map(tag => fillEntry(entryTemplate, blocks, { TAG: escapeHtml(String(tag)) }, null))
     .join('\n      ');
 }
 
-function buildExperience(entries) {
+function buildExperience(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
-  return entries.filter(Boolean).map(e => {
-    const bullets = Array.isArray(e.bullets)
-      ? e.bullets.filter(Boolean).map(b => `        <li>${escapeHtml(b)}</li>`).join('\n')
-      : '';
-    const location = e.location
-      ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
-      : '';
-    return `<div class="job">
+  if (!partial) {
+    return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
+      const bullets = Array.isArray(e.bullets)
+        ? e.bullets.filter(Boolean).map(b => `        <li>${escapeHtml(b)}</li>`).join('\n')
+        : '';
+      const location = e.location
+        ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
+        : '';
+      return `<div class="job">
     <div class="job-header">
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
@@ -178,73 +367,240 @@ function buildExperience(entries) {
 ${bullets}
     </ul>
   </div>`;
+    }).join('\n  ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(e => hasRequiredFields(e, 'experience', 'html')).map(e => {
+    const bullets = Array.isArray(e.bullets)
+      ? e.bullets.filter(Boolean).map(b => `<li>${escapeHtml(b)}</li>`).join('\n    ')
+      : '';
+    const blockValues = new Map([
+      ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''), present: Boolean(e.location) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      COMPANY: escapeHtml(e.company || ''),
+      PERIOD: escapeHtml(e.dates || e.period || ''),
+      ROLE: escapeHtml(e.role || ''),
+      LOCATION: escapeHtml(e.location || ''),
+      BULLETS: bullets,
+    }, blockValues);
   }).join('\n  ');
 }
 
-function buildProjects(entries) {
+function buildProjects(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
-  return entries.filter(Boolean).map(e => {
-    const badge = e.badge
-      ? `<span class="project-badge">${escapeHtml(e.badge)}</span>`
-      : '';
-    // Prefer a single description; fall back to joining bullets into one line so
-    // a bullets-shaped payload still renders inside the .project-desc block.
+  if (!partial) {
+    return entries.filter(e => hasRequiredFields(e, 'projects', 'html')).map(e => {
+      const badge = e.badge
+        ? `<span class="project-badge">${escapeHtml(e.badge)}</span>`
+        : '';
+      const nameText = escapeHtml(e.name || '');
+      const url = sanitizeUrl(e.url);
+      const nameHtml = url
+        ? `<a href="${url}">${nameText}</a>`
+        : nameText;
+      // Prefer a single description; fall back to joining bullets into one line so
+      // a bullets-shaped payload still renders inside the .project-desc block.
+      const descText = e.description
+        || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
+      const desc = descText
+        ? `\n    <div class="project-desc">${escapeHtml(descText)}</div>`
+        : '';
+      const tech = e.tech
+        ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
+        : '';
+      return `<div class="project">
+    <div class="project-title">${nameHtml}${badge}</div>${desc}${tech}
+  </div>`;
+    }).join('\n  ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(e => hasRequiredFields(e, 'projects', 'html')).map(e => {
     const descText = e.description
       || (Array.isArray(e.bullets) ? e.bullets.filter(Boolean).join(' ') : '');
-    const desc = descText
-      ? `\n    <div class="project-desc">${escapeHtml(descText)}</div>`
-      : '';
-    const tech = e.tech
-      ? `\n    <div class="project-tech">${escapeHtml(e.tech)}</div>`
-      : '';
-    return `<div class="project">
-    <div class="project-title">${escapeHtml(e.name)}${badge}</div>${desc}${tech}
-  </div>`;
+    const blockValues = new Map([
+      ['BADGE_BLOCK', { value: escapeHtml(e.badge || ''), present: Boolean(e.badge) }],
+      ['DESC_BLOCK',  { value: escapeHtml(descText),      present: Boolean(descText) }],
+      ['TECH_BLOCK',  { value: escapeHtml(e.tech || ''),  present: Boolean(e.tech) }],
+    ]);
+    const nameText = escapeHtml(e.name || '');
+    const url = sanitizeUrl(e.url);
+    const nameHtml = url
+      ? `<a href="${url}">${nameText}</a>`
+      : nameText;
+    // A bullets array with 2+ items and no description renders one DESC_BLOCK
+    // per bullet, matching how experience renders one <li> per bullet, instead
+    // of joining them into a single block.
+    let entryBlocks = blocks;
+    const multi = !e.description && Array.isArray(e.bullets)
+      ? e.bullets.filter(Boolean) : [];
+    const descBlock = blocks.get('DESC_BLOCK');
+    if (multi.length > 1 && descBlock) {
+      // The expanded block is scanned again by fillEntry, so encode braces in
+      // the bullet text: a literal {{DESC}} must render as text, not be treated
+      // as a template reference.
+      const literalBraces = (t) => escapeHtml(t).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+      const present = multi
+        .map(b => descBlock.present.replace(/\{\{(DESC_BLOCK|DESC)\}\}/g, () => literalBraces(b)))
+        .join('\n  ');
+      entryBlocks = new Map(blocks);
+      entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
+    }
+    return fillEntry(entryTemplate, entryBlocks, {
+      NAME:  nameHtml,
+      BADGE: escapeHtml(e.badge || ''),
+      DESC:  escapeHtml(descText),
+      TECH:  escapeHtml(e.tech || ''),
+    }, blockValues);
   }).join('\n  ');
 }
 
-function buildEducation(entries) {
+function buildEducation(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
-  return entries.filter(Boolean).map(e => {
-    const org = e.org
-      ? ` <span class="edu-org">${escapeHtml(e.org)}</span>`
-      : '';
-    const desc = e.description
-      ? `\n    <div class="edu-desc">${escapeHtml(e.description)}</div>`
-      : '';
-    return `<div class="edu-item">
+  if (!partial) {
+    return entries.filter(e => hasRequiredFields(e, 'education', 'html')).map(e => {
+      const org = e.org
+        ? ` <span class="edu-org">${escapeHtml(e.org)}</span>`
+        : '';
+      const location = e.location
+        ? `\n    <div class="edu-location">${escapeHtml(e.location)}</div>`
+        : '';
+      const desc = e.description
+        ? `\n    <div class="edu-desc">${escapeHtml(e.description)}</div>`
+        : '';
+      return `<div class="edu-item">
     <div class="edu-header">
       <div class="edu-title">${escapeHtml(e.title)}${org}</div>
       <div class="edu-year">${escapeHtml(e.year || '')}</div>
-    </div>${desc}
+    </div>${location}${desc}
   </div>`;
+    }).join('\n  ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(e => hasRequiredFields(e, 'education', 'html')).map(e => {
+    const blockValues = new Map([
+      ['ORG_BLOCK',      { value: escapeHtml(e.org || ''),         present: Boolean(e.org) }],
+      ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''),    present: Boolean(e.location) }],
+      ['DESC_BLOCK',     { value: escapeHtml(e.description || ''), present: Boolean(e.description) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      TITLE:    escapeHtml(e.title || ''),
+      ORG:      escapeHtml(e.org || ''),
+      LOCATION: escapeHtml(e.location || ''),
+      YEAR:     escapeHtml(e.year || ''),
+      DESC:     escapeHtml(e.description || ''),
+    }, blockValues);
   }).join('\n  ');
 }
 
-function buildCertifications(entries) {
+function buildCertifications(entries, partial) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
-  return entries.filter(Boolean).map(e => {
-    const org = e.org ? `<span class="cert-org">${escapeHtml(e.org)}</span>` : '<span class="cert-org"></span>';
-    const year = e.year ? `<span class="cert-year">${escapeHtml(e.year)}</span>` : '<span class="cert-year"></span>';
-    return `<div class="cert-item">
+  if (!partial) {
+    return entries.filter(e => hasRequiredFields(e, 'certifications', 'html')).map(e => {
+      const org = e.org ? `<span class="cert-org">${escapeHtml(e.org)}</span>` : '<span class="cert-org"></span>';
+      const year = e.year ? `<span class="cert-year">${escapeHtml(e.year)}</span>` : '<span class="cert-year"></span>';
+      return `<div class="cert-item">
       <span class="cert-title">${escapeHtml(e.title)}</span>
       ${org}
       ${year}
     </div>`;
+    }).join('\n    ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(e => hasRequiredFields(e, 'certifications', 'html')).map(e => {
+    const blockValues = new Map([
+      // An absent field resolves to the partial's _EMPTY fallback, emitting an
+      // empty <span> for table-cell alignment rather than being removed.
+      ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
+      ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      TITLE: escapeHtml(e.title || ''),
+      ORG:   escapeHtml(e.org || ''),
+      YEAR:  escapeHtml(e.year || ''),
+    }, blockValues);
   }).join('\n    ');
 }
 
-function buildSkills(categories) {
+// Awards mirror certifications: a title with an optional issuing body and year,
+// laid out on one baseline. Kept as its own builder rather than an alias so the
+// two can diverge (and so awards.html can be authored independently of
+// certifications.html) without one section's markup leaking into the other.
+function buildAwards(entries, partial) {
+  if (!Array.isArray(entries) || entries.length === 0) return '';
+  if (!partial) {
+    return entries.filter(e => hasRequiredFields(e, 'awards', 'html')).map(e => {
+      const org = e.org ? `<span class="award-org">${escapeHtml(e.org)}</span>` : '<span class="award-org"></span>';
+      const year = e.year ? `<span class="award-year">${escapeHtml(e.year)}</span>` : '<span class="award-year"></span>';
+      return `<div class="award-item">
+      <span class="award-title">${escapeHtml(e.title)}</span>
+      ${org}
+      ${year}
+    </div>`;
+    }).join('\n    ');
+  }
+
+  const { entryTemplate, blocks } = partial;
+  return entries.filter(e => hasRequiredFields(e, 'awards', 'html')).map(e => {
+    const blockValues = new Map([
+      // As with certifications, an absent field resolves to the partial's
+      // _EMPTY fallback so the table cells stay aligned across rows.
+      ['ORG_BLOCK',  { value: escapeHtml(e.org || ''),  present: Boolean(e.org) }],
+      ['YEAR_BLOCK', { value: escapeHtml(e.year || ''), present: Boolean(e.year) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      TITLE: escapeHtml(e.title || ''),
+      ORG:   escapeHtml(e.org || ''),
+      YEAR:  escapeHtml(e.year || ''),
+    }, blockValues);
+  }).join('\n    ');
+}
+
+// Interests renders as one comma-joined, sentence-cased line rather than a
+// repeating table like certifications/awards, so a partial's entryTemplate
+// (built for one row per entry) doesn't fit — html-only, no partial support,
+// same tradeoff certifications/competencies make for having no LaTeX marker.
+function buildInterests(items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  return items
+    .filter(Boolean)
+    .map(String)
+    .map((item, idx) => (idx === 0 ? item : item.charAt(0).toLowerCase() + item.slice(1)))
+    .map(item => escapeHtml(item))
+    .join(', ');
+}
+
+function buildSkills(categories, partial) {
   if (!Array.isArray(categories) || categories.length === 0) return '';
-  const items = categories.filter(Boolean).map(c => {
-    const cat = c.category
-      ? `<span class="skill-category">${escapeHtml(c.category)}:</span> `
-      : '';
-    return `    <div class="skill-item">${cat}${escapeHtml(joinItems(c.items))}</div>`;
+  if (!partial) {
+    const kept = categories.filter(c => hasRequiredFields(c, 'skills', 'html'));
+    if (kept.length === 0) return '';
+    const items = kept.map(c => {
+      const cat = c.category
+        ? `<span class="skill-category">${escapeHtml(c.category)}:</span> `
+        : '';
+      return `    <div class="skill-item">${cat}${escapeHtml(joinItems(c.items))}</div>`;
+    }).join('\n');
+    return `<div class="skills-grid">\n${items}\n  </div>`;
+  }
+
+  const { entryTemplate, blocks } = partial;
+  const kept = categories.filter(c => hasRequiredFields(c, 'skills', 'html'));
+  if (kept.length === 0) return '';
+  const items = kept.map(c => {
+    const blockValues = new Map([
+      ['CATEGORY_BLOCK', { value: escapeHtml(c.category || ''), present: Boolean(c.category) }],
+    ]);
+    return fillEntry(entryTemplate, blocks, {
+      CATEGORY:    escapeHtml(c.category || ''),
+      ITEMS_TEXT:  escapeHtml(joinItems(c.items)),
+    }, blockValues);
   }).join('\n');
-  return `<div class="skills-grid">
-${items}
-  </div>`;
+  return `<div class="skills-grid">\n${items}\n  </div>`;
 }
 
 // Rebuild the whole .contact-row block. Its markup uses fixed "|" separators
@@ -289,10 +645,21 @@ function buildPhoto(candidate, name) {
   return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
-function renderReport(payload) {
+// Professional title / headline under the name (candidate.title). An ATS reads
+// this first to place the candidate ("Backend Engineer" vs "Accountant"); a CV
+// with no title forces the reader to infer the role. Empty/absent → no element,
+// so a payload without a title renders byte-identical to before.
+function buildTitle(candidate) {
+  const title = candidate && candidate.title != null ? String(candidate.title).trim() : '';
+  return title ? `<div class="header-title">${escapeHtml(title)}</div>` : '';
+}
+
+function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
-  const pageWidth = PAGE_WIDTHS[payload.page_format] || PAGE_WIDTHS.letter;
+  // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
+  // the same resolver rather than each keeping a fallback of their own.
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
@@ -301,30 +668,46 @@ function renderReport(payload) {
     SECTION_SUMMARY: escapeHtml(sectionTitles.summary),
     SUMMARY_TEXT: escapeHtml(payload.summary || ''),
     SECTION_COMPETENCIES: escapeHtml(sectionTitles.competencies),
-    COMPETENCIES: buildCompetencies(payload.competencies),
+    COMPETENCIES: buildCompetencies(payload.competencies, partials.get('competencies')),
     SECTION_EXPERIENCE: escapeHtml(sectionTitles.experience),
-    EXPERIENCE: buildExperience(payload.experience),
+    EXPERIENCE: buildExperience(payload.experience, partials.get('experience')),
     SECTION_PROJECTS: escapeHtml(sectionTitles.projects),
-    PROJECTS: buildProjects(payload.projects),
+    PROJECTS: buildProjects(payload.projects, partials.get('projects')),
     SECTION_EDUCATION: escapeHtml(sectionTitles.education),
-    EDUCATION: buildEducation(payload.education),
+    EDUCATION: buildEducation(payload.education, partials.get('education')),
     SECTION_CERTIFICATIONS: escapeHtml(sectionTitles.certifications),
-    CERTIFICATIONS: buildCertifications(payload.certifications),
+    CERTIFICATIONS: buildCertifications(payload.certifications, partials.get('certifications')),
+    SECTION_AWARDS: escapeHtml(sectionTitles.awards),
+    AWARDS: buildAwards(payload.awards, partials.get('awards')),
+    SECTION_INTERESTS: escapeHtml(sectionTitles.interests),
+    INTERESTS: buildInterests(payload.interests),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
-    SKILLS: buildSkills(payload.skills),
+    SKILLS: buildSkills(payload.skills, partials.get('skills')),
   };
   return { substitutions, candidate };
 }
 
 // Merge a payload into the template and return the final HTML (throws on any
 // unresolved {{PLACEHOLDER}} so a malformed payload fails loudly, not silently).
-function renderHtml(template, payload) {
-  const { substitutions, candidate } = renderReport(payload);
+function renderHtml(template, payload, templatePath) {
+  // Load section partials from the sections/ directory co-located with the
+  // template. Falls back to built-in builders when no partials directory exists.
+  const partials = templatePath ? loadSectionPartials(templatePath) : new Map();
+
+  const { substitutions, candidate } = renderReport(payload, partials);
 
   // The contact row and photo carry conditional markup (dropped separators /
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+  // Captures the placeholder's own leading newline + indentation so an empty
+  // title drops the whole line — matching just the token (as every other
+  // {{PLACEHOLDER}} above does) would leave a blank line where the token sat,
+  // which is not byte-identical to a template that never had the slot
+  // (CodeRabbit, #3763). With a title, the indentation is reused verbatim so
+  // output is unchanged from the token-only replace this replaces.
+  const titleBlock = buildTitle(candidate);
+  html = html.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
@@ -341,6 +724,12 @@ function renderHtml(template, payload) {
   return html;
 }
 
+// Payload validation lives in lib/cv-payload-schema.mjs, shared with
+// build-cv-latex.mjs: the two formats have different key contracts (this one's
+// education entry is {title, org, year, description}; the LaTeX one is
+// {institution, degree, dates, coursework}), and keeping both tables in one
+// place is what lets each reject the other's vocabulary by name (#3523).
+
 function countBullets(payload) {
   const ex = Array.isArray(payload.experience)
     ? payload.experience.flatMap(e => (Array.isArray(e?.bullets) ? e.bullets : []))
@@ -349,13 +738,14 @@ function countBullets(payload) {
 }
 
 async function writeAndReport(html, absOutput, payload, extra = {}) {
+  const { warnings = [], ...rest } = extra;
   const outDir = dirname(absOutput);
   if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
   await writeFile(absOutput, html, 'utf-8');
 
   const fileInfo = await stat(absOutput);
   const report = {
-    ...extra,
+    ...rest,
     file: basename(absOutput),
     path: absOutput,
     sizeKB: parseFloat((fileInfo.size / 1024).toFixed(1)),
@@ -365,9 +755,11 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
       projectEntries: (payload.projects || []).length,
       educationEntries: (payload.education || []).length,
       certificationEntries: (payload.certifications || []).length,
+      awardEntries: (payload.awards || []).length,
       skillCategories: (payload.skills || []).length,
       totalBullets: countBullets(payload),
     },
+    warnings,
     valid: true,
   };
   console.log(JSON.stringify(report, null, 2));
@@ -384,6 +776,13 @@ async function main() {
     console.error('');
     console.error('  [template.html] defaults to templates/cv-template.html. Pass the path');
     console.error('  printed by `node cv-templates.mjs resolve cv` to use a selected template.');
+    console.error('');
+    console.error('  Section partials (#2183):');
+    console.error('  If a sections/ directory exists alongside the template file,');
+    console.error('  the builder loads per-section HTML partial files from it');
+    console.error('  (e.g. sections/experience.html). Partials control the DOM');
+    console.error('  structure, tag names, and class names for each section.');
+    console.error('  When no partial file is found the built-in builder is used.');
     process.exit(args.includes('--help') ? 0 : 1);
   }
 
@@ -394,7 +793,7 @@ async function main() {
 
   const preview = args[0] === '--preview';
   const [inputPath, outputPath, templateArg] = preview
-    ? [args[1], resolve(__dirname, 'output', 'cv-preview.html'), args[2]]
+    ? [args[1], resolve(DATA_ROOT, 'output', 'cv-preview.html'), args[2]]
     : args;
   if (!inputPath || !outputPath) {
     console.error('Usage: node build-cv-html.mjs <input.json> <output.html> [template.html]');
@@ -423,17 +822,26 @@ async function main() {
     process.exit(1);
   }
 
+  const { errors, warnings } = validatePayload(payload, 'html');
+  if (errors.length) {
+    console.error('Invalid CV payload:');
+    for (const message of errors) console.error(`  - ${message}`);
+    console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
+    process.exit(1);
+  }
+  for (const message of warnings) console.error(`Warning: ${message}`);
+
   const template = await readFile(templatePath, 'utf-8');
 
   let html;
   try {
-    html = renderHtml(template, payload);
+    html = renderHtml(template, payload, templatePath);
   } catch (err) {
     console.error(err.message);
     process.exit(1);
   }
 
-  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready' } : {});
+  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready', warnings } : { warnings });
   process.exit(0);
 }
 
@@ -471,14 +879,17 @@ async function runSelfTest() {
     education: [{
       title: 'Bachelor of Science in Computer Science',
       org: 'Test University',
+      location: 'City, State',
       year: '2024',
       description: 'Coursework: Data Structures, Algorithms, Machine Learning.',
     }],
     certifications: [{ title: 'Certified Kubernetes Administrator', org: 'CNCF', year: '2025' }],
+    awards: [{ title: 'Gold Medal, International Olympiad in Informatics', org: 'IOI', year: '2023' }],
     skills: [
       { category: 'Languages', items: 'Python, JavaScript, TypeScript' },
       { category: 'Frameworks', items: ['FastAPI', 'React', 'PyTorch'] },
     ],
+    interests: ['Reading sci-fi & fantasy', 'Hiking', 'Chess'],
   };
 
   if (!existsSync(TEMPLATE_PATH)) {
@@ -490,7 +901,7 @@ async function runSelfTest() {
 
   let html;
   try {
-    html = renderHtml(template, sample);
+    html = renderHtml(template, sample, TEMPLATE_PATH);
   } catch (err) {
     console.error(`Self-test failed: ${err.message}`);
     process.exit(1);
@@ -504,6 +915,13 @@ async function runSelfTest() {
   }
   if (/Kubernetes & Docker/.test(html)) {
     console.error('Self-test failed: found an unescaped ampersand in output');
+    process.exit(1);
+  }
+
+  // Guard buildInterests(): comma-joined, sentence-cased (only the first item
+  // keeps its capital), and escaped like every other free-text field.
+  if (!html.includes('Reading sci-fi &amp; fantasy, hiking, chess')) {
+    console.error('Self-test failed: Interests did not render as an escaped, comma-joined, sentence-cased line');
     process.exit(1);
   }
 
@@ -542,6 +960,301 @@ async function runSelfTest() {
   if (countSeparators(htmlWithRejectedGithub) !== countSeparators(html) - 1) {
     console.error('Self-test failed: rejected github URL left a dangling separator in the contact row');
     process.exit(1);
+  }
+
+  // Guard that section partial rendering produces expected class names (so a
+  // broken partial file doesn't silently remove structural markup).
+  if (!html.includes('class="job"')) {
+    console.error('Self-test failed: experience section is missing .job class — partial may be broken');
+    process.exit(1);
+  }
+  if (!html.includes('class="competency-tag"')) {
+    console.error('Self-test failed: competencies section is missing .competency-tag class');
+    process.exit(1);
+  }
+  if (!html.includes('class="project"')) {
+    console.error('Self-test failed: projects section is missing .project class');
+    process.exit(1);
+  }
+  if (!html.includes('class="edu-item"')) {
+    console.error('Self-test failed: education section is missing .edu-item class');
+    process.exit(1);
+  }
+  if (!html.includes('class="cert-item"')) {
+    console.error('Self-test failed: certifications section is missing .cert-item class');
+    process.exit(1);
+  }
+  if (!html.includes('class="award-item"')) {
+    console.error('Self-test failed: awards section is missing .award-item class');
+    process.exit(1);
+  }
+  if (!html.includes('class="skills-grid"')) {
+    console.error('Self-test failed: skills section is missing .skills-grid wrapper');
+    process.exit(1);
+  }
+
+  // Guard that partials-based rendering produces the correct field values.
+  if (!html.includes('Test Corp') || !html.includes('Test Engineer')) {
+    console.error('Self-test failed: experience entry fields not found in output');
+    process.exit(1);
+  }
+
+  // Guard that conditional blocks work: location present → rendered; absent → not.
+  if (!html.includes('class="job-location"')) {
+    console.error('Self-test failed: job-location block not rendered when location is present');
+    process.exit(1);
+  }
+  if (!html.includes('class="edu-location"')) {
+    console.error('Self-test failed: edu-location block not rendered when education location is present');
+    process.exit(1);
+  }
+
+  // Guard that a project's bullets array renders one DESC_BLOCK per bullet
+  // (2+ bullets, no description), while a plain description stays a single block.
+  const multiBulletHtml = renderHtml(template, {
+    ...sample,
+    projects: [{ name: 'Multi', bullets: ['First bullet', 'Second bullet', 'Third bullet'] }],
+  }, TEMPLATE_PATH);
+  // Literal placeholder text inside a bullet must render as text, not be
+  // re-read as a template reference (which would fail as an unresolved marker).
+  let literalHtml;
+  try {
+    literalHtml = renderHtml(template, {
+      ...sample,
+      projects: [{ name: 'Literal', bullets: ['Uses {{DESC}} syntax', 'Also {{DESC_BLOCK}} here'] }],
+    }, TEMPLATE_PATH);
+  } catch (err) {
+    console.error(`Self-test failed: literal placeholder text in a project bullet: ${err.message}`);
+    process.exit(1);
+  }
+  if (!literalHtml.includes('&#123;&#123;DESC&#125;&#125;') || !literalHtml.includes('&#123;&#123;DESC_BLOCK&#125;&#125;')) {
+    console.error('Self-test failed: literal placeholders in project bullets were not preserved');
+    process.exit(1);
+  }
+  if ((multiBulletHtml.match(/class="project-desc"/g) || []).length !== 3) {
+    console.error('Self-test failed: project bullets did not render one block per bullet');
+    process.exit(1);
+  }
+  if ((html.match(/class="project-desc"/g) || []).length !== 1) {
+    console.error('Self-test failed: project description should render as a single block');
+    process.exit(1);
+  }
+
+  // Test with experience and education entries that have no location to verify
+  // the LOCATION_BLOCK conditional removal path.
+  const noLocSample = {
+    ...sample,
+    experience: [{ company: 'Acme', role: 'Engineer', dates: '2023', bullets: [] }],
+    education: [{ title: 'BSc', org: 'Test University', year: '2024' }],
+    projects: [],
+  };
+  let noLocHtml;
+  try {
+    noLocHtml = renderHtml(template, noLocSample, TEMPLATE_PATH);
+  } catch (err) {
+    console.error(`Self-test failed (no-location variant): ${err.message}`);
+    process.exit(1);
+  }
+  if (noLocHtml.includes('class="job-location"')) {
+    console.error('Self-test failed: job-location block rendered when location is absent');
+    process.exit(1);
+  }
+  if (noLocHtml.includes('class="edu-location"')) {
+    console.error('Self-test failed: edu-location block rendered when education location is absent');
+    process.exit(1);
+  }
+
+  // Test with certifications that are missing optional org/year fields to verify
+  // the EMPTY block fallback (empty <span> for table-cell alignment).
+  const noOrgCert = {
+    ...sample,
+    certifications: [{ title: 'No Org Cert' }, { title: 'With Org', org: 'CNCF', year: '2025' }],
+    projects: [],
+  };
+  let certHtml;
+  try {
+    certHtml = renderHtml(template, noOrgCert, TEMPLATE_PATH);
+  } catch (err) {
+    console.error(`Self-test failed (cert variant): ${err.message}`);
+    process.exit(1);
+  }
+  // The partial should emit an empty <span class="cert-org"> for alignment.
+  const orgCount = (certHtml.match(/class="cert-org"/g) || []).length;
+  if (orgCount !== 2) {
+    console.error('Self-test failed: cert-org empty-block not emitted for table alignment');
+    process.exit(1);
+  }
+
+  // Guard the payload key contract (#3523): an education section written with
+  // another tool's key names (institution/degree/dates) renders no education at
+  // all. It must be rejected, not silently dropped, and the empty entry must
+  // never reach the output as a bare .edu-item block.
+  const wrongKeyEducation = [{
+    institution: 'Test University',
+    degree: 'Bachelor of Science in Computer Science',
+    dates: '2024',
+    detail: 'Coursework: Data Structures.',
+  }];
+  const wrongKeys = validatePayload({ ...sample, education: wrongKeyEducation }, 'html');
+  if (wrongKeys.errors.length === 0) {
+    console.error('Self-test failed: education entry with wrong key names was accepted');
+    process.exit(1);
+  }
+  if (!wrongKeys.errors[0].includes('education[0]')
+      || !wrongKeys.errors[0].includes('title')
+      || !wrongKeys.errors[0].includes('institution')) {
+    console.error(`Self-test failed: unhelpful error for wrong education keys: ${wrongKeys.errors[0]}`);
+    process.exit(1);
+  }
+  if (buildEducation(wrongKeyEducation) !== '') {
+    console.error('Self-test failed: buildEducation emitted a block for an entry with no title');
+    process.exit(1);
+  }
+
+  // A valid payload must stay clean: no errors, no warnings.
+  const clean = validatePayload(sample, 'html');
+  if (clean.errors.length || clean.warnings.length) {
+    console.error(`Self-test failed: valid sample payload reported ${JSON.stringify(clean)}`);
+    process.exit(1);
+  }
+
+  // An extra key on an otherwise valid entry warns (it is ignored at render
+  // time) but does not block the build.
+  const extraKey = validatePayload({
+    ...sample,
+    certifications: [{ title: 'CKA', org: 'CNCF', year: '2025', credential_id: 'X-1' }],
+  }, 'html');
+  if (extraKey.errors.length !== 0 || extraKey.warnings.length !== 1
+      || !extraKey.warnings[0].includes('credential_id')) {
+    console.error(`Self-test failed: unrecognised optional key not warned about: ${JSON.stringify(extraKey)}`);
+    process.exit(1);
+  }
+
+  // A payload root that is not an object must be rejected: every named section
+  // reads undefined on an array or null root, so it would otherwise validate clean.
+  for (const badRoot of [[], null, 'x', 42]) {
+    if (validatePayload(badRoot, 'html').errors.length === 0) {
+      console.error(`Self-test failed: payload root ${JSON.stringify(badRoot)} was accepted`);
+      process.exit(1);
+    }
+  }
+
+  // skills[].items is the one required field that is not plain text: a string
+  // or a non-empty array of strings renders; anything else does not.
+  for (const items of ['Python, JavaScript', ['FastAPI', 'React']]) {
+    const ok = validatePayload({ ...sample, skills: [{ category: 'L', items }] }, 'html');
+    if (ok.errors.length || ok.warnings.length) {
+      console.error(`Self-test failed: valid skills items ${JSON.stringify(items)} rejected: ${JSON.stringify(ok)}`);
+      process.exit(1);
+    }
+  }
+  for (const items of [[], ['  '], '', {}, null, undefined]) {
+    if (validatePayload({ ...sample, skills: [{ category: 'L', items }] }, 'html').errors.length === 0) {
+      console.error(`Self-test failed: unrenderable skills items ${JSON.stringify(items)} accepted`);
+      process.exit(1);
+    }
+  }
+  // A skills entry using another vocabulary must fail, not render an empty row.
+  if (validatePayload({ ...sample, skills: [{ label: 'Languages', values: ['JS'] }] }, 'html').errors.length === 0) {
+    console.error('Self-test failed: skills entry with wrong key names was accepted');
+    process.exit(1);
+  }
+  if (buildSkills([{ label: 'Languages', values: ['JS'] }]) !== '') {
+    console.error('Self-test failed: buildSkills emitted markup for an unrenderable entry');
+    process.exit(1);
+  }
+
+  // A mistyped SECTION name is as invisible as a mistyped field name was: the
+  // validator iterates its spec table, so an unknown root key is never visited.
+  const typoSection = validatePayload({ ...sample, educations: sample.education }, 'html');
+  if (!typoSection.warnings.some(w => w.includes('educations') && w.includes('education'))) {
+    console.error(`Self-test failed: mistyped section name not reported: ${JSON.stringify(typoSection.warnings)}`);
+    process.exit(1);
+  }
+  if (typoSection.errors.length !== 0) {
+    console.error('Self-test failed: an unknown root key must warn, not block the build');
+    process.exit(1);
+  }
+  // An unknown key with nothing in it is not worth reporting.
+  for (const empty of [{ educations: [] }, { educations: '' }]) {
+    if (validatePayload({ ...sample, ...empty }, 'html').warnings.some(w => w.includes('educations'))) {
+      console.error(`Self-test failed: empty unknown key ${JSON.stringify(empty)} warned`);
+      process.exit(1);
+    }
+  }
+  // Known root keys the builders read but that carry no section must stay quiet.
+  const cleanRoots = validatePayload(sample, 'html');
+  if (cleanRoots.warnings.length !== 0) {
+    console.error(`Self-test failed: valid sample warned about its own root keys: ${JSON.stringify(cleanRoots.warnings)}`);
+    process.exit(1);
+  }
+
+  // Every element of a skills items array must render — both builders join the
+  // whole array, so one bad element reaches the CV as "[object Object]".
+  if (validatePayload({ ...sample, skills: [{ category: 'L', items: ['JS', {}] }] }, 'html').errors.length === 0) {
+    console.error('Self-test failed: skills items array with a non-text element was accepted');
+    process.exit(1);
+  }
+
+  // A mistyped section arrives in more shapes than an array: an object value
+  // satisfies neither Array.isArray nor hasText, so it slipped through the
+  // first version of this guard.
+  const objectSection = validatePayload({ ...sample, educations: { title: 'BSc' } }, 'html');
+  if (!objectSection.warnings.some(w => w.includes('educations'))) {
+    console.error('Self-test failed: object-valued unknown root key was not reported');
+    process.exit(1);
+  }
+  if (validatePayload({ ...sample, educations: {} }, 'html').warnings.some(w => w.includes('educations'))) {
+    console.error('Self-test failed: an empty object unknown key warned');
+    process.exit(1);
+  }
+
+  // A scalar is the fourth shape a mistyped section arrives in, after array,
+  // object and string. hasText() is string-only by design, so reusing it here
+  // let a number or a boolean pass as "empty".
+  for (const scalar of [2026, 0, true, false]) {
+    if (!validatePayload({ ...sample, educations: scalar }, 'html').warnings.some(w => w.includes('educations'))) {
+      console.error(`Self-test failed: scalar unknown root key ${JSON.stringify(scalar)} was not reported`);
+      process.exit(1);
+    }
+  }
+  // ...but a genuinely empty value still stays quiet.
+  for (const empty of [null, undefined, '', '   ', [], {}]) {
+    if (validatePayload({ ...sample, educations: empty }, 'html').warnings.some(w => w.includes('educations'))) {
+      console.error(`Self-test failed: empty unknown root key ${JSON.stringify(empty)} warned`);
+      process.exit(1);
+    }
+  }
+
+  // Every list section carries the same guard, not just education.
+  for (const [section, bad] of [
+    ['experience', [{ employer: 'Acme', title: 'Engineer' }]],
+    ['projects', [{ project_name: 'Thing' }]],
+    ['education', [{ org: 'Test University', year: '2024' }]],
+    ['certifications', [{ name: 'CKA' }]],
+    ['awards', [{ award: 'Gold Medal' }]],
+  ]) {
+    const result = validatePayload({ ...sample, [section]: bad }, 'html');
+    if (result.errors.length === 0) {
+      console.error(`Self-test failed: ${section} entry with wrong key names was accepted`);
+      process.exit(1);
+    }
+  }
+
+  // A blank required field is as broken as an absent one.
+  if (validatePayload({ ...sample, education: [{ title: '   ', org: 'X' }] }, 'html').errors.length === 0) {
+    console.error('Self-test failed: education entry with a blank title was accepted');
+    process.exit(1);
+  }
+
+  // ...and so is a non-string one: escapeHtml() renders '' for an object or
+  // array, so {"title": {}} would otherwise write the empty block this guard
+  // exists to prevent.
+  for (const badTitle of [{}, [], 0, true, null]) {
+    if (validatePayload({ ...sample, education: [{ title: badTitle, org: 'X' }] }, 'html').errors.length === 0) {
+      console.error(`Self-test failed: education title ${JSON.stringify(badTitle)} was accepted as text`);
+      process.exit(1);
+    }
   }
 
   const absOutput = resolve(join(tmpdir(), 'build-cv-html-test.html'));

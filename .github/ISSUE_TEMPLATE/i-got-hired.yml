@@ -1,6 +1,7 @@
 name: "I Got Hired!"
 description: Share your success story — you landed a job using career-ops
 labels: ["hired"]
+title: "I got hired 🎉"
 body:
   - type: markdown
     attributes:
@@ -56,10 +57,26 @@ body:
     attributes:
       label: One tip for others
       description: What would you tell someone just starting their job search with career-ops?
+  - type: input
+    id: location
+    attributes:
+      label: Where (optional)
+      placeholder: "e.g., Spain, Berlin, remote EU, remote US"
+  - type: dropdown
+    id: anonymity
+    attributes:
+      label: How should we show you on the wall?
+      description: Your choice, never defaulted to the most exposed. See HIRED.md for what each looks like.
+      options:
+        - Role and location only, no handle
+        - With my GitHub handle (full credit)
+        - Just count me, no card
+    validations:
+      required: true
   - type: checkboxes
     id: permission
     attributes:
       label: Permission
       options:
-        - label: I'm okay with my story being featured in the README and release notes
+        - label: I'm happy for this story to appear publicly on the Hired Wall (HIRED.md), the README and release notes. I can ask to withdraw it at any time and my number stays counted.
           required: false

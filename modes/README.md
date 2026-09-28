@@ -23,6 +23,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `apply.md` | `apply` | Live application assistant (form filling; never submits) |
 | `pdf.md` | `pdf` | ATS-optimized PDF generation |
 | `latex.md` | `latex` | LaTeX/Overleaf CV export |
+| `text.md` | `text` | Tailored markdown CV (no PDF) |
 | `cover.md` | `cover` | Cover letter generator |
 | `email.md` | `email` | Application email drafts (draft-only) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
@@ -33,8 +34,10 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `offer-prep.md` | `offer-prep` | Contract reading companion (offer stage) |
 | `followup.md` | `followup` | Follow-up cadence tracker |
 | `reply-watch.md` | `reply-watch` | Classify employer replies, reconcile tracker |
+| `outcome.md` | `outcome` | Record application outcome & archive artifacts |
 | `tracker.md` | `tracker` | Applications tracker overview |
 | `patterns.md` | `patterns` | Rejection pattern detector |
+| `calibrate.md` | `calibrate` | Advisory report: do your evaluation scores predict your real outcomes? Reads `/outcome` data; never changes scoring |
 | `titles.md` | `titles` | Adjacent job-title suggestions |
 | `training.md` | `training` | Training & course evaluation |
 | `project.md` | `project` | Portfolio project evaluation |
@@ -60,6 +63,7 @@ and never touched by `update-system.mjs` (see
 |---|---|
 | `interview/` | Reusable interview skills: prep planner, practice interviewer, post-interview debrief (see [interview/README.md](interview/README.md)) |
 | `heuristics/` | Shared candidate-facing writing heuristics loaded by other modes — `recruiter-side.md` governs PDF summaries, bullets, cover letters, form answers, and outreach |
+| `pdf/` | Opt-in passes inside the `pdf` flow, not routable modes — `hm-audit.md` is the hiring-manager read of a tailored CV, run between the fact gate and PDF render when `--hm-audit` is passed |
 | `regional/` | Market calibration modes — `eu-swe.md` calibrates applications for European SWE roles (advisory only) |
 | `ar/ da/ de/ es/ fr/ hi/ id/ it/ ja/ ko/ pl/ pt/ ru/ tr/ ua/ zh/` | Language modes: native translations of the core modes with market-specific vocabulary; each has its own README |
 

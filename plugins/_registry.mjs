@@ -14,6 +14,10 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
+import { fileURLToPath } from 'url';
+
+const CODEBASE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
 export function registryDirPath(root) {
   return path.join(root, 'plugins-registry');
 }
@@ -43,15 +47,16 @@ export function loadRegistryFiles(root) {
 
 /** Load the curated registry. Fail-open to an empty registry. */
 export function loadRegistry(root) {
+  const base = existsSync(registryDirPath(root)) || existsSync(registryPath(root)) ? root : CODEBASE_ROOT;
   // Per-plugin files are the primary format; sorted by filename for determinism.
-  if (existsSync(registryDirPath(root))) {
-    const plugins = loadRegistryFiles(root)
+  if (existsSync(registryDirPath(base))) {
+    const plugins = loadRegistryFiles(base)
       .map(({ entry }) => entry)
       .filter(e => e && typeof e === 'object');
     return { registryVersion: 1, plugins };
   }
   // Legacy fallback: the old single-array file.
-  const f = registryPath(root);
+  const f = registryPath(base);
   if (!existsSync(f)) return { registryVersion: 1, plugins: [] };
   try {
     const p = JSON.parse(readFileSync(f, 'utf8'));
@@ -64,7 +69,13 @@ export function loadRegistry(root) {
 /** Find a registry entry by bare id, full name, or `career-ops-plugin-<id>`. */
 export function findInRegistry(root, nameOrId) {
   const reg = loadRegistry(root);
-  return reg.plugins.find(p =>
+  const found = reg.plugins.find(p =>
+    p.id === nameOrId || p.name === nameOrId || p.name === `career-ops-plugin-${nameOrId}`) || null;
+  if (found) return found;
+
+  // Fallback to codebase root registry if not found
+  const baseReg = loadRegistry(CODEBASE_ROOT);
+  return baseReg.plugins.find(p =>
     p.id === nameOrId || p.name === nameOrId || p.name === `career-ops-plugin-${nameOrId}`) || null;
 }
 
@@ -79,7 +90,8 @@ export function findInRegistry(root, nameOrId) {
  * @returns {'bundled'|'approved'|'off-registry'|'unverified'}
  */
 export function classifySource(manifest, root, lockEntry) {
-  if (manifest.dir.startsWith(path.join(root, 'plugins') + path.sep)) return 'bundled';
+  if (manifest.dir.startsWith(path.join(root, 'plugins') + path.sep) ||
+      manifest.dir.startsWith(path.join(CODEBASE_ROOT, 'plugins') + path.sep)) return 'bundled';
   const reg = findInRegistry(root, manifest.id);
   if (!reg) return 'unverified';
   if (lockEntry && lockEntry.sha && reg.sha && lockEntry.sha !== reg.sha) return 'off-registry';

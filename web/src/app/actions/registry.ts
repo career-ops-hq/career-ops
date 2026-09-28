@@ -10,15 +10,16 @@
 
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { Job } from "@/components/jobs/job-store";
+import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 
 export const AUTO_FIRE_MAX = 3; // fire ≤3 evaluations silently; confirm above that
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 
 // Canonical states (templates/states.yml) — the web validates against the same set.
-const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded", "SKIP"];
+const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Interview", "Offer", "Hired", "Rejected", "Discarded", "SKIP"];
 
 const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "REJECTED", "DISCARDED", "SKIP",
+  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED", "DISCARDED", "SKIP",
 ] as const;
 const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
 
@@ -84,7 +85,8 @@ export type DispatchResult =
 
 // ── helpers ──────────────────────────────────────────────────────────────
 const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
-const normCompany = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+// Same shape as core normalizeTextKey(s, " ") — keeps accents/CJK, strips punct (#2666).
+const normCompany = (s: string) => normalizeTextKey(s, " ");
 
 // Allow only in-app routes (with optional :segment and ?query). Blocks anything
 // that isn't one of the app's own sections — the model can't navigate offsite.

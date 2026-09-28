@@ -25,6 +25,10 @@ try {
   }
   if (resolveConfig({ api: 'https://career-x.csod.com/other/path' }) === null) pass('csod.resolveConfig() rejects non-careersite paths');
   else fail('csod.resolveConfig() should reject non-careersite paths');
+  // HTTPS-only: the bootstrap session cookies are replayed on the search
+  // request, so an http: tenant would put them on the wire in clear.
+  if (resolveConfig({ api: 'http://career-ohb.csod.com/ux/ats/careersite/4/home?c=career-ohb' }) === null) pass('csod.resolveConfig() rejects http:// (cookies must never go out in clear)');
+  else fail('csod.resolveConfig() should reject http:// careersite URLs');
 
   // detect — host-anchored, path-shape required; spoofs return null.
   if (csod.detect({ careers_url: 'https://career-ohb.csod.com/ux/ats/careersite/4/home?c=career-ohb' })) pass('csod.detect() matches *.csod.com careersite URLs');
@@ -108,6 +112,73 @@ try {
   await csod.fetch({ name: 'X', api: 'https://x.csod.com/ux/ats/careersite/1/home?c=x' }, { ...mockCtx, fetchText: async () => '<html/>' }).catch((e) => { tokenErr = e.message; });
   if (/no anonymous token/.test(tokenErr)) pass('csod.fetch() throws when the home page carries no token');
   else fail(`csod.fetch() should throw on missing token, got: ${JSON.stringify(tokenErr)}`);
+
+  // ── Session cookie priming ────────────────────────────────────────────────
+  // Some tenants (verified live on careers-kln.csod.com) reject the search API
+  // with "HTTP 401 CSOD Unauthorized" unless the request carries the session
+  // cookies the bootstrap home page set — the anonymous bearer token alone is
+  // not enough. The provider must therefore read Set-Cookie off the bootstrap
+  // RESPONSE and replay it on every search call.
+  const mkCookieCtx = (setCookies) => {
+    const calls = { search: 0, cookieHeaders: [], homeUrls: [], bootstrapOpts: [] };
+    return {
+      calls,
+      sleep: async () => {},
+      fetchText: async () => { throw new Error('fetchText must not be used when fetchResponse exists'); },
+      fetchResponse: async (url, opts) => {
+        calls.homeUrls.push(url);
+        calls.bootstrapOpts.push(opts);
+        const headers = new Headers();
+        for (const c of setCookies) headers.append('set-cookie', c);
+        return new Response('{"token":"tok.abc"}', { status: 200, headers });
+      },
+      fetchJson: async (_url, opts) => {
+        // Record the raw value — an absent header must stay `undefined` here,
+        // so don't normalise it to null or the omission assertion can't tell
+        // "no header" from "header set to null".
+        calls.cookieHeaders.push(opts?.headers?.cookie);
+        calls.search++;
+        return { data: { totalCount: 1, requisitions: [mkReq(1, 'Job 1')] } };
+      },
+    };
+  };
+
+  const cookieCtx = mkCookieCtx(['ASP.NET_SessionId=abc123; path=/; HttpOnly', 'csod_tenant=kln; Secure; SameSite=None']);
+  const cookieJobs = await csod.fetch({ name: 'KLN', api: 'https://careers-kln.csod.com/ux/ats/careersite/14/home?c=careers-kln' }, cookieCtx);
+  if (cookieJobs.length === 1) pass('csod.fetch() still returns jobs when priming cookies');
+  else fail(`csod.fetch() cookie path returned ${cookieJobs.length} jobs`);
+  const sentCookie = cookieCtx.calls.cookieHeaders[0];
+  if (sentCookie === 'ASP.NET_SessionId=abc123; csod_tenant=kln') pass('csod.fetch() replays bootstrap Set-Cookie as a cookie header (attributes stripped)');
+  else fail(`csod.fetch() cookie header wrong: ${JSON.stringify(sentCookie)}`);
+
+  // Origin validation only covers the URL we ask for. Without redirect:'error'
+  // the bootstrap would follow a 3xx off the validated csod.com host — and the
+  // cookies it collected there would then be replayed by the search call.
+  if (cookieCtx.calls.bootstrapOpts[0]?.redirect === 'error') pass('csod.fetch() refuses redirects on the bootstrap request');
+  else fail(`csod.fetch() bootstrap must pass redirect:'error', got ${JSON.stringify(cookieCtx.calls.bootstrapOpts[0]?.redirect)}`);
+
+  // No Set-Cookie → no cookie header at all (never send an empty one).
+  const bareCtx = mkCookieCtx([]);
+  await csod.fetch({ name: 'X', api: 'https://x.csod.com/ux/ats/careersite/1/home?c=x' }, bareCtx);
+  if (bareCtx.calls.cookieHeaders[0] === undefined) pass('csod.fetch() omits the cookie header when the tenant sets none');
+  else fail(`csod.fetch() should omit cookie header, got ${JSON.stringify(bareCtx.calls.cookieHeaders[0])}`);
+
+  // Backward compatibility: a ctx without fetchResponse (older callers, test
+  // mocks) must keep working via fetchText rather than crashing.
+  const legacyCtx = {
+    sleep: async () => {},
+    fetchText: async (_url, opts) => {
+      if (opts?.redirect !== 'error') throw new Error(`legacy bootstrap must pass redirect:'error', got ${JSON.stringify(opts?.redirect)}`);
+      return '{"token":"tok.legacy"}';
+    },
+    fetchJson: async (_url, opts) => {
+      if (opts?.headers?.cookie !== undefined) throw new Error('legacy path must not send a cookie header');
+      return { data: { totalCount: 1, requisitions: [mkReq(1, 'Job 1')] } };
+    },
+  };
+  const legacyJobs = await csod.fetch({ name: 'L', api: 'https://l.csod.com/ux/ats/careersite/2/home?c=l' }, legacyCtx);
+  if (legacyJobs.length === 1) pass('csod.fetch() falls back to fetchText when ctx has no fetchResponse');
+  else fail(`csod.fetch() legacy path returned ${legacyJobs.length} jobs`);
 } catch (e) {
   fail(`csod provider tests crashed: ${e.message}`);
 }

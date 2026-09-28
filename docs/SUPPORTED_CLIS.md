@@ -5,6 +5,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | CLI | Entry File | How to Invoke |
 | --- | --- | --- |
 | Claude Code | `CLAUDE.md` | Interactive: `claude` (then `/career-ops`). Headless/Batch: `claude -p "prompt"` |
+| Cursor | `AGENTS.md` | Interactive: open the project in Cursor and ask for `career-ops` (skill entrypoint at `.cursor/skills/career-ops/SKILL.md`) |
 | Codex | `CODEX.md` (see [`docs/CODEX.md`](CODEX.md)) | Interactive: `codex` (then use plain text). Headless/Batch: `codex exec "prompt"` |
 | OpenCode | `OPENCODE.md` | Interactive: `opencode` (then `/career-ops`). Headless/Batch: `opencode run "prompt"` |
 | Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless/Batch: `agy -p "prompt"` |
@@ -13,3 +14,8 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Kimi | `KIMI.md` | Interactive: `kimi` |
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
+| Hermes Agent | `AGENTS.md` | Interactive: open the checkout in a Hermes session (see [`docs/HERMES.md`](HERMES.md)) |
+
+## Hermes Agent
+
+Hermes runs the same pipeline as every other CLI here. Two things differ: the repository's own skill loads only once you trust the checkout (`hermes skills trust`), and Hermes scans project context files before loading them, so a rule that quotes attack phrasing literally can be dropped. Hermes is interactive-only here, since nothing in this repository drives a `hermes` binary headlessly. The full walkthrough, from clone to first evaluation, is in [`docs/HERMES.md`](HERMES.md).

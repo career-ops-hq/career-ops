@@ -1,7 +1,9 @@
 // tests/stats.test.mjs — moved verbatim from test-all.mjs (#1604).
-import { pass, fail, run, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 
 console.log('\nstats.mjs — lifetime pipeline stats aggregator (#1604)');
 try {
@@ -65,6 +67,29 @@ try {
     fail('computeFunnel should flag everApplied < 10 as smallSample');
   }
 
+  // Ledger-aware funnel (#1428): a declined offer (now Discarded) and a
+  // rejected-after-interview must count for the stages they passed through,
+  // which the status snapshot alone cannot see. Row 3 has no ledger history and
+  // must fall back to its current status (Rejected proves everApplied only).
+  const statusByNum = new Map([[1, 'Discarded'], [2, 'Rejected'], [3, 'Rejected'], [4, 'Interview']]);
+  const ledgerTsv = [
+    '1\t2026-08-19\tInterview\tOffer\tset-status\t',   // row 1 reached Offer, then declined
+    '1\t2026-08-25\tOffer\tDiscarded\tset-status\t',
+    '2\t2026-08-25\tInterview\tRejected\tset-status\t', // row 2 reached Interview, then rejected
+    '2junk\t2026-08-25\tOffer\tHired\tset-status\t',       // partial numeric id must not inflate row 2
+    '4\t2026-08-25\tOffer\t\tset-status\t',                // missing destination is malformed
+    '5\t\tInterview\tOffer\tset-status\t',                 // missing date is malformed
+    'torn-line-no-num',
+  ].join('\n');
+  const ledgerParsed = stats.parseStatusLogStages(ledgerTsv);
+  const fl = stats.computeFunnelWithHistory(statusByNum, ledgerParsed);
+  if (ledgerParsed.length === 3 && fl.everApplied === 4 && fl.everInterview === 3 && fl.everOffer === 1
+      && !ledgerParsed.some(row => row.num === 5 || row.to === '') && fl.basis === 'ledger') {
+    pass('computeFunnelWithHistory folds ledger history (declined offer counts into everOffer)');
+  } else {
+    fail(`computeFunnelWithHistory wrong output: parsed=${ledgerParsed.length} ${JSON.stringify(fl)}`);
+  }
+
   // Lifetime scan totals — CRLF input, torn row skipped, fingerprint column tolerated.
   const scanTsv = [
     'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
@@ -112,6 +137,82 @@ try {
     fail(`computePortalStats wrong output: ${JSON.stringify(p)}`);
   }
 
+  // Cold-classification wiring (#2123): activeApps stays purely status-based
+  // (backward compatible for existing consumers); activeAppsLive subtracts
+  // rows followup-cadence.mjs's own cadence math independently flags 'cold'
+  // (Applied, zero response after applied_max_followups follow-ups).
+  const coldTrackerMd = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-05-01 | Acme | Eng | 4.5/5 | Applied | ✅ | ❌ | note |',
+    '| 2 | 2026-05-01 | Beta | Eng | 4.0/5 | Applied | ✅ | ❌ | note |',
+    '| 3 | 2026-05-01 | Gama | Eng | 3.9/5 | Interview | ✅ | ❌ | note |',
+  ].join('\n');
+  const coldFollowupsMd = [
+    '| # | App | Date | Company | Role | Channel | Contact | Notes |',
+    '|---|-----|------|---------|------|---------|---------|-------|',
+    '| 1 | 1 | 2026-05-10 | Acme | Eng | email | jane | f1 |',
+    '| 2 | 1 | 2026-05-20 | Acme | Eng | email | jane | f2 |',
+  ].join('\n');
+  const coldNums = stats.computeColdAppNums(coldTrackerMd, coldFollowupsMd);
+  if (coldNums.size === 1 && coldNums.has(1)) {
+    pass('computeColdAppNums reuses followup-cadence.mjs cadence math to flag app #1 cold');
+  } else {
+    fail(`computeColdAppNums wrong output: ${JSON.stringify([...coldNums])}`);
+  }
+
+  const allStatsWithCold = stats.computeAllStats({
+    appsFile: '__missing_apps__.md',
+    scanHistoryFile: '__missing_scan__.tsv',
+    followupsFile: '__missing_fups__.md',
+    scanRunsFile: '__missing_runs__.tsv',
+    portalsFile: '__missing_portals__.yml',
+    portalHealthFile: '__missing_health__.tsv',
+  });
+  if (allStatsWithCold.tracker === null) {
+    pass('computeAllStats tolerates a fully missing data set (tracker null, no crash)');
+  } else {
+    fail(`computeAllStats should return tracker null on missing files: ${JSON.stringify(allStatsWithCold.tracker)}`);
+  }
+
+  // computeAllStats reading from real content via tmp files: a tracker with
+  // one independently cold-classified row must lower activeAppsLive below
+  // activeApps while leaving activeApps itself untouched.
+  const coldTmp = mkdtempSync(join(tmpdir(), 'stats-cold-'));
+  const coldAppsFile = join(coldTmp, 'applications.md');
+  const coldFupsFile = join(coldTmp, 'follow-ups.md');
+  writeFileSync(coldAppsFile, coldTrackerMd);
+  writeFileSync(coldFupsFile, coldFollowupsMd);
+  const allCold = stats.computeAllStats({
+    appsFile: coldAppsFile,
+    scanHistoryFile: '__missing_scan__.tsv',
+    followupsFile: coldFupsFile,
+    scanRunsFile: '__missing_runs__.tsv',
+    portalsFile: '__missing_portals__.yml',
+    portalHealthFile: '__missing_health__.tsv',
+  });
+  if (allCold.tracker.activeApps === 3 && allCold.tracker.activeAppsLive === 2 && allCold.tracker.activeAppsCold === 1) {
+    pass('computeAllStats: activeApps unchanged (3), activeAppsLive correctly excludes the 1 cold row (2)');
+  } else {
+    fail(`computeAllStats cold wiring wrong: ${JSON.stringify(allCold.tracker)}`);
+  }
+
+  // Graceful degradation: no follow-ups.md at all → activeAppsLive === activeApps exactly.
+  const allNoFups = stats.computeAllStats({
+    appsFile: coldAppsFile,
+    scanHistoryFile: '__missing_scan__.tsv',
+    followupsFile: '__missing_fups__.md',
+    scanRunsFile: '__missing_runs__.tsv',
+    portalsFile: '__missing_portals__.yml',
+    portalHealthFile: '__missing_health__.tsv',
+  });
+  if (allNoFups.tracker.activeApps === 3 && allNoFups.tracker.activeAppsLive === 3 && allNoFups.tracker.activeAppsCold === 0) {
+    pass('computeAllStats: missing follow-ups.md degrades gracefully, activeAppsLive === activeApps');
+  } else {
+    fail(`computeAllStats missing-followups degradation wrong: ${JSON.stringify(allNoFups.tracker)}`);
+  }
+  rmSync(coldTmp, { recursive: true, force: true });
+
   // Follow-up compliance.
   const followupsMd = [
     '# Follow-ups',
@@ -145,6 +246,58 @@ try {
     pass('stats.mjs --summary renders the human table');
   } else {
     fail('stats.mjs --summary missing header');
+  }
+
+  // --help smoke: must print usage, exit 0, and not read any data file.
+  const helpOut = run(NODE, [join(ROOT, 'stats.mjs'), '--help']);
+  if (helpOut && helpOut.includes('Usage:') && helpOut.includes('--summary') && helpOut.includes('--help|-h')) {
+    pass('stats.mjs --help prints the usage block and exits 0');
+  } else {
+    fail(`stats.mjs --help missing usage output: ${helpOut}`);
+  }
+
+  // -h alias smoke: same behavior as --help.
+  const hOut = run(NODE, [join(ROOT, 'stats.mjs'), '-h']);
+  if (hOut && hOut.includes('Usage:') && hOut.includes('--help|-h')) {
+    pass('stats.mjs -h prints the usage block and exits 0');
+  } else {
+    fail(`stats.mjs -h missing usage output: ${hOut}`);
+  }
+
+  // Unknown flag smoke: must fail cleanly and report the invalid-flag message.
+  const bogusOut = run(NODE, [join(ROOT, 'stats.mjs'), '--bogus']);
+  const bogusFailure = lastRunFailure();
+  const bogusOutput = `${bogusFailure?.stdout ?? ''}\n${bogusFailure?.stderr ?? ''}`;
+  if (bogusOut === null && bogusFailure?.status !== 0 && /invalid|unrecognized|unknown/i.test(bogusOutput)) {
+    pass('stats.mjs --bogus rejects unknown flags with a non-zero exit status');
+  } else {
+    fail(`stats.mjs --bogus did not fail as expected: exit=${bogusFailure?.status ?? 'null'} output=${bogusOutput.trim()}`);
+  }
+
+  // --summary cold-classification integration (#2123): the CLI reads its
+  // fixed data/ paths, so exercise it against real (temporary) tracker +
+  // follow-ups files at those exact paths, then restore whatever was there.
+  const liveAppsFile = join(ROOT, 'data', 'applications.md');
+  const liveFupsFile = join(ROOT, 'data', 'follow-ups.md');
+  const { existsSync, readFileSync: readFileSyncNode, mkdirSync } = await import('fs');
+  const dataDirExisted = existsSync(join(ROOT, 'data'));
+  const appsExisted = existsSync(liveAppsFile);
+  const fupsExisted = existsSync(liveFupsFile);
+  const appsBackup = appsExisted ? readFileSyncNode(liveAppsFile, 'utf-8') : null;
+  const fupsBackup = fupsExisted ? readFileSyncNode(liveFupsFile, 'utf-8') : null;
+  try {
+    if (!dataDirExisted) mkdirSync(join(ROOT, 'data'), { recursive: true });
+    writeFileSync(liveAppsFile, coldTrackerMd);
+    writeFileSync(liveFupsFile, coldFollowupsMd);
+    const coldSummaryOut = run(NODE, [join(ROOT, 'stats.mjs'), '--summary']);
+    if (coldSummaryOut && coldSummaryOut.includes('3 active (2 live, 1 cold)')) {
+      pass('stats.mjs --summary integrates live/cold counts into the existing Tracker line');
+    } else {
+      fail(`stats.mjs --summary missing live/cold breakdown: ${coldSummaryOut}`);
+    }
+  } finally {
+    if (appsBackup !== null) writeFileSync(liveAppsFile, appsBackup); else if (!appsExisted) rmSync(liveAppsFile, { force: true });
+    if (fupsBackup !== null) writeFileSync(liveFupsFile, fupsBackup); else if (!fupsExisted) rmSync(liveFupsFile, { force: true });
   }
 } catch (e) {
   fail(`stats.mjs tests crashed: ${e.message}`);

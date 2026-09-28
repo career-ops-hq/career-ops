@@ -1,0 +1,95 @@
+# Career-Ops — Agency/Recruiter Licensing Regimes (jurisdiction table) (#2037)
+#
+# Consumed prompt-level by modes/oferta.md Block G ("Agency Licensing
+# Check"). This file is a DATA REFERENCE, not instruction logic: extending
+# it to a new jurisdiction never requires touching the rule text in
+# modes/oferta.md. No script reads it — the agent does. Nothing in this
+# system ever fetches or scrapes a registry URL: the candidate clicks the
+# official link themselves (zero-fetch by design).
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a regulator-grade citable source (statute, regulation, official
+#      government page, or a reputable law-firm bulletin summarizing it), AND
+#   2. an explicit effective date for the licensing obligation, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. a `registry.url` pointing at the OFFICIAL government lookup —
+#      never a third-party mirror, aggregator, or law-firm copy of the list.
+# Unverified or "I heard that..." rows will be rejected in review. Seed
+# narrow and verified; extend via community PRs — same discipline as the
+# jurisdiction tables introduced for #2013/#2018/#2019/#2025.
+#
+# NEVER-ASSERT RULE (mandatory — mirrored in modes/oferta.md): these rows
+# describe licensing regimes and where the official registry lives. They
+# are NEVER a basis for asserting that any specific agency is unlicensed
+# or operating illegally — transitional rules alone (e.g. Ontario
+# applicants who filed before the deadline may lawfully operate while
+# their application pends) make that assertion impossible from outside
+# the registry. The agent states the regime facts and hands the candidate
+# the official link. Not legal advice.
+#
+# Schema per entry (key = jurisdiction code, e.g. CA-ON, US-IL, UK):
+#   jurisdiction_name: string — human-readable name for report output
+#   licensing_required_for: temporary_help_agency | recruiter | both
+#   effective: YYYY-MM-DD     — date the licensing obligation became mandatory
+#   registry:
+#     url: string             — OFFICIAL government licence-status lookup
+#     what_it_shows: string   — what a candidate sees when they check
+#   legal_basis: string       — statute/regulation citation
+#   client_side_prohibition: string — whether clients/employers are barred
+#                               from knowingly using unlicensed operators
+#   penalties: string         — published administrative/monetary penalties
+#   transitional_notes: string — carve-outs that make "unlicensed" unknowable
+#                               from outside (pending applications, etc.)
+#   sources: list             — citable pages/bulletins backing the row
+#   as_of: YYYY-MM-DD         — date this row was last verified against sources
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (suggestions only — do NOT add without the
+# source + effective-date + as_of + official-registry discipline above):
+#   - CA-QC : Quebec — CNESST placement-agency / recruitment-agency permits
+#   - CA-MB : Manitoba — Worker Recruitment and Protection Act licensing
+#   - US-IL : Illinois — Day and Temporary Labor Services Act registration
+#   - US-NJ : New Jersey — temporary-worker certification regime
+#   - US-MA : Massachusetts — staffing-agency registration
+#   - UK    : Employment Agency Standards (EAS) inspectorate; GLAA licensing
+#             for regulated sectors (agriculture, food processing, shellfish)
+#   - EU    : national regimes (e.g. temporary-agency-work authorizations
+#             under member-state transpositions of Directive 2008/104/EC)
+
+jurisdictions:
+  CA-ON:
+    jurisdiction_name: "Ontario, Canada"
+    licensing_required_for: both   # temporary help agencies AND recruiters
+    effective: "2024-07-01"        # commencement DELAYED from 2024-01-01 by O. Reg. 339/23 —
+                                   # the old 2024-01-01 date appears in early bulletins; do not regress it
+    registry:
+      url: "https://www.ontario.ca/page/licensing-temporary-help-agencies-and-recruiters"
+      what_it_shows: "The Ontario Ministry of Labour's public 'Check licensing status' lookup — lists every temporary help agency and recruiter application and licence with its current status (issued, applied, revoked, refused)."
+    legal_basis: "Working for Workers Act, 2021 amendments to the Employment Standards Act, 2000 + O. Reg. 99/23 (licensing of THAs and recruiters); commencement date set by O. Reg. 339/23"
+    client_side_prohibition: "Employers/clients are prohibited from knowingly engaging or using the services of an unlicensed temporary help agency or recruiter."
+    penalties: "Administrative penalties of C$15,000 for a first violation, up to C$50,000 for subsequent violations (Blakes bulletin)."
+    transitional_notes: "Operators who applied for a licence before 2024-07-01 may lawfully continue operating while their application is pending — which is exactly why an outside observer can never assert an agency is unlicensed; only the official registry's current status answers that."
+    sources:
+      - "ontario.ca — Licensing for temporary help agencies and recruiters (primary; includes the public status-checker link)"
+      - "Littler — Ontario THA/recruiter licensing bulletin"
+      - "Blakes — Ontario licensing regime and administrative penalties bulletin"
+      - "HGR Graham Partners — Working for Workers Act licensing bulletin"
+    as_of: "2026-07-18"
+
+  UK:
+    jurisdiction_name: "United Kingdom (Great Britain)"
+    licensing_required_for: both   # employment agencies (permanent introduction) AND employment businesses (temporary placement)
+    effective: "2004-04-06"        # commencement date of the Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319); Act passed 1973-07-18 (c. 35)
+    registry:
+      url: "https://www.gov.uk/employment-agencies-and-businesses"
+      what_it_shows: "GOV.UK official guidance and compliance resources for employment agencies and employment businesses — details statutory conduct rules, worker rights, enforcement under the Employment Agency Standards (EAS) Inspectorate (Department for Business and Trade), and official list of prohibited persons."
+    legal_basis: "Employment Agencies Act 1973 (c. 35) + Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319)"
+    client_side_prohibition: "Hirers/clients in general recruitment are not broadly prohibited from using agencies as general licensing was replaced by statutory conduct rules under EAS, though hirers are barred from using unlicensed labor providers in GLAA-regulated sectors (Gangmasters (Licensing) Act 2004)."
+    penalties: "Prosecution in Magistrates' Court (unlimited fines), tribunal awards, and formal prohibition orders banning individuals from operating or managing an employment agency/business for up to 10 years."
+    transitional_notes: "General recruitment in Great Britain is governed by statutory conduct regulations enforced by the EAS Inspectorate rather than universal pre-licensing — compliance is enforced via inspections and complaints, making outside assertions of non-compliance impossible without official enforcement actions."
+    sources:
+      - "https://www.legislation.gov.uk/ukpga/1973/35 — Employment Agencies Act 1973 (c. 35)"
+      - "https://www.legislation.gov.uk/uksi/2003/3319 — Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319)"
+      - "https://www.gov.uk/employment-agencies-and-businesses — GOV.UK guidance: Employment agencies and businesses"
+      - "https://www.gov.uk/government/organisations/employment-agency-standards-inspectorate — Employment Agency Standards (EAS) Inspectorate (DBT)"
+    as_of: "2026-09-03"
+

@@ -4,7 +4,16 @@
 
 candidate:
   full_name: "Jane Smith"
+  # Optional. Professional headline shown directly under the name on the CV
+  # (modes/pdf.md's candidate.title). Tailor it to the JD's own title wording
+  # when your real level supports it — never inflate. Omit or leave blank for
+  # no title element.
+  # title: "Senior Backend Engineer"
   email: "jane@example.com"
+  # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
+  # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
+  # alternate_emails:
+  #   - "jane@previous-employer.example"
   phone: "+1-555-0123"
   # Optional. Used by `/career-ops email` contact blocks in markets where WeChat
   # is an expected recruiting channel. Omit or leave blank if not applicable.
@@ -74,6 +83,15 @@ location:
   city: "San Francisco"
   timezone: "PST"
   visa_status: "No sponsorship needed"
+  # Countries/regions where you ALREADY hold work authorization (no sponsorship
+  # needed there). Drives the Work-Authorization signal in job evaluation
+  # (modes/oferta.md → Block A "Work-authorization check"). Optional — omit or
+  # leave [] if not applicable; the free-text visa_status above still applies.
+  authorized_in: ["United States"]
+  # true if you need visa sponsorship for roles OUTSIDE authorized_in. When a JD
+  # explicitly states it will not sponsor, that is a hard blocker (see
+  # modes/_profile.md "Your Location Policy"). Omit → treated as false.
+  needs_sponsorship: false
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
@@ -103,8 +121,25 @@ language:
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
+# (Optional) Paper size for every generated PDF: "letter" or "a4".
+# One setting for the CV, the cover letter and the HTML body width, so they
+# cannot disagree. Absent means letter. An explicit --format flag or a payload
+# page_format still wins for a single render.
+# page_format: letter
+
+# (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
+# Each token is injected as a CSS custom property that overrides the template
+# default — omit the block (or any key) to keep the built-in look unchanged.
+# Only these five keys are recognized; anything else is ignored.
+# style:
+#   accent_color:    "#2563eb"           # section headings, competency tags, project badges
+#   secondary_color: "#111827"           # company/institution names, header gradient's 2nd stop
+#   font_family:     "Outfit, Inter, sans-serif"
+#   font_size:       "10pt"              # base body text size
+#   margin:          "0.5in"             # page margin (@page)
+
 cv:
-  output_format: "html" # "html" (default) or "latex"
+  output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)
   # (Optional) Canva resume design ID for visual CV generation via /career-ops pdf.
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
@@ -116,6 +151,31 @@ cv:
   # (e.g. "use the modern template").
   # template: modern
   # For a restrained Chinese technical CV, use: template: zh-minimal
+  #
+  # (Optional) Section order for the generated CV (#2533). The sections you name
+  # are placed into the slots they already occupy, in the order you list them;
+  # every section you leave out stays exactly where the template puts it — so a
+  # section added by a later release lands where upstream put it instead of
+  # breaking this list.
+  #
+  # Moving a section past its neighbours is a rotation, so name the sections it
+  # displaces too. To render Skills before Education with the built-in template
+  # (which ends Education → Certifications → Awards → Skills):
+  #
+  #   sections: [skills, education, certifications, awards]
+  #
+  # Recognized names: summary, competencies, experience, projects, education,
+  # certifications, awards, skills. An unrecognized name is reported and ignored.
+  #
+  # Applies to the HTML output only. With output_format: latex the order comes
+  # from templates/cv-template.tex, and with output_format: text it comes from
+  # cv.md; this setting does nothing in either case.
+  #
+  # This exists so the order can live in your profile instead of in
+  # templates/cv-template.html, which update-system.mjs restores on every update.
+  # cv.md stays the source of truth: the section-order guard still compares the
+  # rendered CV against it, and still fails if they disagree.
+  # sections: [skills, education, certifications, awards]
 
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #
@@ -218,6 +278,10 @@ cover_letter:
 #                   silently, so nothing breaks. `doctor` reports the active mode.
 # scan:
 #   extractor: mcp   # mcp (default) | cli
+#   timeout_seconds: 230   # web Explore scan budget (seconds) before the run is
+#                          # stopped; default 230. A broad ATS sweep probes every
+#                          # company in a source — raise this to let a large scan
+#                          # finish (bounded by the API route's 300s cap if deployed).
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #
@@ -239,6 +303,26 @@ cover_letter:
 # half-point scores like 3.5/5 occur in evaluations). Set it to 0 to
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
+
+# ── Two-pass triage gate ────────────────────────────────────────────────────
+#
+# Used by `/career-ops pipeline`. Before running the full A-G evaluation on
+# every URL in a batch, a lightweight first pass (`modes/triage.md`) scores each
+# role from a compact profile brief (`modes/_brief.md`) and filters out the ones
+# that would clearly disqualify — so the expensive full evaluation only runs on
+# roles that pass. On a mixed batch this cuts total tokens by roughly half.
+#
+#   triage_threshold  — minimum triage score (out of 5) to proceed to full
+#                       evaluation. Roles at 3.0–(threshold) are MARGINAL and
+#                       shown to you; below 3.0 they are filtered silently.
+#                       Default (key absent): 3.5.
+#   triage_min_urls   — batches with fewer surviving URLs than this skip triage
+#                       and go straight to full evaluation (triage overhead
+#                       isn't worth it on a handful of roles). Default: 5.
+#
+# pipeline:
+#   triage_threshold: 3.5
+#   triage_min_urls: 5
 
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #

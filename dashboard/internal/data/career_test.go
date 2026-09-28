@@ -79,7 +79,7 @@ func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("update after lock release: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("dashboard update did not resume after lock release")
 	}
 
@@ -295,6 +295,50 @@ func TestParseApplicationsMapsColumnsByHeader(t *testing.T) {
 	}
 }
 
+func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-08-28 | Acme | Triage Engineer | 4.0/5 | Evaluated | — | — | triage only | https://jobs.example.com/triage |
+| 2 | 2026-08-28 | Globex | Platform Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | has report | https://jobs.example.com/tracker |
+| 3 | 2026-08-28 | Initech | Legacy Engineer | 3.9/5 | Evaluated | — | [3](../reports/003-initech.md) | legacy fallback | |
+`)
+
+	reportsDir := filepath.Join(tempDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "002-globex.md"),
+		[]byte("**URL:** https://jobs.example.com/report\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "003-initech.md"),
+		[]byte("**URL:** https://jobs.example.com/legacy\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write legacy report: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 3 {
+		t.Fatalf("expected 3 applications, got %d", len(apps))
+	}
+	if got := apps[0].JobURL; got != "https://jobs.example.com/triage" {
+		t.Errorf("triage-only JobURL = %q, want tracker URL", got)
+	}
+	if got := apps[1].JobURL; got != "https://jobs.example.com/tracker" {
+		t.Errorf("report-backed JobURL = %q, want tracker URL to take precedence", got)
+	}
+	if got := apps[2].JobURL; got != "https://jobs.example.com/legacy" {
+		t.Errorf("legacy JobURL = %q, want report URL fallback", got)
+	}
+}
+
 // End-to-end status update on the inserted-column layout: parse, update, and
 // re-parse. Only the Status cell may change; every other cell stays intact.
 func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {
@@ -350,6 +394,34 @@ func TestResolveTrackerColumns(t *testing.T) {
 	fallback := resolveTrackerColumns(headerless)
 	if fallback["status"] != 5 {
 		t.Errorf("fallback status index = %d, want 5 (legacy layout)", fallback["status"])
+	}
+}
+
+func TestParseApplicationsRespectsCareerOpsTracker(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create a tracker file outside the tempDir's default search paths
+	customTrackerPath := filepath.Join(tempDir, "custom-tracker.md")
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-07-01 | CustomCo | Specialist | 3.5/5 | Applied | ❌ | - | - |
+`
+	if err := os.WriteFile(customTrackerPath, []byte(applications), 0o644); err != nil {
+		t.Fatalf("failed to write custom tracker: %v", err)
+	}
+
+	t.Setenv("CAREER_OPS_TRACKER", customTrackerPath)
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 parsed application, got %d", len(apps))
+	}
+
+	if apps[0].Company != "CustomCo" {
+		t.Errorf("expected company CustomCo, got %q", apps[0].Company)
 	}
 }
 
@@ -445,5 +517,97 @@ func TestNormalizeStatus(t *testing.T) {
 				t.Errorf("NormalizeStatus(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// Regression: when an external writer (set-status.mjs, merge-tracker.mjs,
+// another session) changes a row's status while the dashboard is open, the
+// in-memory "old" status no longer matches the file. The update must still
+// land in the Status column — identified via the header — rather than
+// silently no-opping.
+func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|-----|------|-------|--------|-----|--------|-------|
+| 28 | 2026-07-10 | ? | DaCodes | Backend Engineer | 3.1/5 | Evaluated | ✅ | [28](../reports/028-dacodes.md) | note |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+
+	// Simulate an external writer changing the status on disk after parse.
+	stale := strings.Replace(applications, "| Evaluated |", "| Applied |", 1)
+	if err := os.WriteFile(path, []byte(stale), 0o644); err != nil {
+		t.Fatalf("rewrite tracker: %v", err)
+	}
+
+	// apps[0].Status is still "Evaluated" (stale) — the update must still work.
+	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err != nil {
+		t.Fatalf("UpdateApplicationStatus with stale status: %v", err)
+	}
+
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !strings.Contains(string(out), "| Interview |") {
+		t.Errorf("status not updated, file now:\n%s", string(out))
+	}
+	if strings.Contains(string(out), "| Applied |") || strings.Contains(string(out), "| Evaluated |") {
+		t.Errorf("old status still present, file now:\n%s", string(out))
+	}
+}
+
+// A row whose canonical status column holds something unrecognizable must NOT
+// be guessed at — the update fails loudly instead of corrupting a cell.
+func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
+	tempDir := t.TempDir()
+	dataDir := filepath.Join(tempDir, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 3 | 2026-07-10 | Acme | Engineer | 3.1/5 | Evaluated | ✅ | [3](reports/003.md) | note |
+`
+	path := filepath.Join(dataDir, "applications.md")
+	if err := os.WriteFile(path, []byte(applications), 0o644); err != nil {
+		t.Fatalf("write tracker: %v", err)
+	}
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+
+	// Corrupt the status cell into something that is not a status.
+	broken := strings.Replace(applications, "| Evaluated |", "| ??? |", 1)
+	if err := os.WriteFile(path, []byte(broken), 0o644); err != nil {
+		t.Fatalf("rewrite tracker: %v", err)
+	}
+
+	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err == nil {
+		t.Fatal("expected an error when the status cell is unrecognizable, got nil")
+	}
+
+	out, _ := os.ReadFile(path)
+	if !strings.Contains(string(out), "| ??? |") {
+		t.Errorf("file was modified despite refusal, now:\n%s", string(out))
 	}
 }

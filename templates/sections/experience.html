@@ -1,0 +1,26 @@
+<!--
+  experience.html — section partial for Work Experience (#2183).
+
+  Field placeholders filled per entry:
+    COMPANY          — employer name
+    PERIOD           — date range
+    ROLE             — job title
+    BULLETS          — rendered <li> tags
+    LOCATION_BLOCK   — conditional: .job-location div when location present; omitted when absent
+
+  Template packs: edit tag names, class names, and field order freely inside the ENTRY zone.
+-->
+<!--ENTRY-->
+<div class="job">
+  <div class="job-header">
+    <span class="job-company">{{COMPANY}}</span>
+    <span class="job-period">{{PERIOD}}</span>
+  </div>
+  <div class="job-role">{{ROLE}}</div>
+  {{LOCATION_BLOCK}}
+  <ul>
+    {{BULLETS}}
+  </ul>
+</div>
+<!--LOCATION_BLOCK--><div class="job-location">{{LOCATION}}</div><!--/LOCATION_BLOCK-->
+<!--/ENTRY-->

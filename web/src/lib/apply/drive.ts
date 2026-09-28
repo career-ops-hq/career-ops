@@ -1,9 +1,11 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import type { DriveStep } from "./issue";
+import { CAPS } from "../worker-capabilities.mjs";
+import { scopeFrom } from "../claude-invocation.mjs";
 
 export type { DriveStep };
 
@@ -54,12 +56,33 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
   });
 }
 
+// The narrowest scope in the app. scopeFrom("") grants nothing, so every
+// write-capable and network tool is denied BY DERIVATION; Read, Glob and Grep are
+// denied on top so the planner reasons over the snapshot it was handed and
+// nothing else. Derived rather than hand-listed for the reason agent-interpret.ts
+// gives (#2185): a tool added to WRITE_CAPABLE_TOOLS or NETWORK_TOOLS must not
+// leave this argv silently permissive — and verifyClaudeArgs would refuse the
+// spawn the moment the hand-written copy fell behind.
+const PLANNER_DENIED = [scopeFrom("").disallowed, "Read", "Glob", "Grep"].join(",");
+
 /** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
 function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
   const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", PLANNER_DENIED];
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    // Claude-only by construction — driveSession returns before the loop unless
+    // cliId is "claude", and this argv is Claude's own (--resume, --output-format
+    // json). That is why there is deliberately no unfenced notice here, unlike the
+    // other CLI-spawning paths: claude is always fenceable, so the check could
+    // never fire and the branch would be dead code (#2507). The narrowest scope in
+    // the app: the disallowedTools above denies every tool including Read, so the
+    // planner reasons over the snapshot it was handed and nothing else.
+    const child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId: "claude", capabilities: CAPS.localReadOnly },
+    );
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});

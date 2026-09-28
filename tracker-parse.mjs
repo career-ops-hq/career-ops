@@ -64,11 +64,86 @@ export function looksLikeScoreCell(v) {
 }
 
 /**
+ * A markdown table separator row: `|---|------|...|`, optionally with alignment
+ * colons.
+ *
+ * Readers used to recognize this row with `line.includes('---')`, which also
+ * matched any DATA row whose free text happened to contain three hyphens — a
+ * URL slug such as `Senior-Engineer---Platform-Team`, or an em dash typed
+ * as `---`. Matching the row's structure instead cannot false-positive that way.
+ */
+export const SEPARATOR_ROW_RE = /^\|(?:\s*:?-+:?\s*\|)+\s*$/;
+
+/** @param {string} line @returns {boolean} whether the line is the `|---|` separator row. */
+export function isSeparatorRow(line) {
+  return typeof line === 'string' && SEPARATOR_ROW_RE.test(line);
+}
+
+/** The columns a row must label before it counts as the tracker header. */
+const REQUIRED_HEADER_FIELDS = ['num', 'company', 'role', 'score', 'status'];
+
+/**
+ * The ONE definition of "this row is the tracker header", shared by
+ * `isHeaderRow` and `detectColumns`.
+ *
+ * A row qualifies only by labelling the whole schema — every field in
+ * REQUIRED_HEADER_FIELDS. One telltale cell is not enough: a company genuinely
+ * named "Company", or a note consisting of that single word, would otherwise be
+ * read as table furniture and skip row-format validation, which is the same
+ * class of false positive this module exists to stop.
+ *
+ * Extracted rather than duplicated (PR #2267 review): the two callers had
+ * drifted, and a header they disagree about is one that validation skips as
+ * furniture while column detection cannot parse — silently falling back to the
+ * fixed legacy layout.
+ *
+ * @param {string[]} cells - Lowercased, trimmed cells from `line.split('|')`.
+ * @returns {Object<string,number>|null} Field → column index, or null.
+ */
+function headerSchemaMap(cells) {
+  // The alias table is the whole contract — no literal `company`/`role`
+  // pre-filter. There used to be one, which meant a FULLY localized header
+  // (`| # | Fecha | Empresa | Puesto | … |`) never reached the aliases that
+  // exist for exactly that case, and the tracker silently fell back to
+  // LEGACY_COLMAP. On a plain 9-column table the fallback lines up and nothing
+  // looks wrong; insert the Location column from #946's own use case and the
+  // Score cell is read from Location instead (#2274).
+  //
+  // Requiring the full schema is what makes the pre-filter unnecessary: a data
+  // row would have to carry five different header labels in five different
+  // cells to qualify, which no real row does.
+  const map = {};
+  cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
+  return REQUIRED_HEADER_FIELDS.every(k => map[k] != null) ? map : null;
+}
+
+/**
+ * Whether a table row is the tracker's header row.
+ *
+ * @param {string} line - One line from applications.md.
+ * @returns {boolean}
+ */
+export function isHeaderRow(line) {
+  if (typeof line !== 'string' || !line.startsWith('|')) return false;
+  return headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase())) !== null;
+}
+
+/**
  * Given the two adjacent cells that carry score and status in EITHER order,
- * identify which is which by content — the score cell is recognizable by
- * pattern (`looksLikeScoreCell`), statuses never are. This lets TSV ingestion
- * tolerate the two known column orders (batch TSV writes status-then-score;
- * `applications.md` is score-then-status) instead of trusting position.
+ * identify which is which by content. This lets HEADERLESS TSV ingestion
+ * tolerate the two known column orders (legacy batch TSV writes
+ * status-then-score; `applications.md` is score-then-status) instead of
+ * trusting position.
+ *
+ * This discriminator is INCOMPLETE, and that is why headed additions exist
+ * (#3517). The comment here used to claim "statuses never are" recognizable as
+ * a score. That is false: `looksLikeScoreCell` accepts `—` and `-` as score
+ * sentinels (#1799), and `normalize-statuses.mjs` accepts the same two glyphs
+ * (plus empty) as a status meaning Discarded. So a discarded, never-scored row
+ * carries `—` in BOTH cells and no content rule can order them. That row is
+ * refused rather than guessed at — but refusing is still a failure to ingest,
+ * so writers should emit a header row and let ingestion resolve by NAME
+ * (`resolveTsvColumns`), which has no undecidable case at all.
  *
  * Returns null when the order is undecidable — neither cell, or BOTH cells, look
  * like a score — so callers can fail loudly rather than merge a silent swap.
@@ -85,6 +160,87 @@ export function resolveScoreStatus(a, b) {
 }
 
 /**
+ * The canonical fields a HEADED tracker addition must label before its header
+ * is usable. Deliberately wider than REQUIRED_HEADER_FIELDS (which describes
+ * `applications.md`, a file whose optional columns are the user's business):
+ * an addition is machine-generated in one shot, every one of these has a
+ * documented value, and a header that omits one is a broken emitter — better
+ * caught at the header than silently merged as an empty cell.
+ *
+ * `notes`, `via`, `location` and `url` stay optional, matching the TSV contract
+ * in AGENTS.md.
+ */
+export const TSV_REQUIRED_FIELDS = ['num', 'date', 'company', 'role', 'score', 'status', 'pdf', 'report'];
+
+/**
+ * The header line an in-repo TSV writer emits above its data row. Order is
+ * arbitrary by construction — ingestion resolves by name — so this exists only
+ * so the several writers cannot drift into slightly different LABEL spellings,
+ * which is the one thing name resolution cannot absorb.
+ */
+export const TSV_ADDITION_HEADER = ['num', 'date', 'company', 'role', 'status', 'score', 'pdf', 'report', 'notes'].join('\t');
+
+/** Recognized labels a first row needs before it is READ as a header at all. */
+const TSV_HEADER_MIN_LABELS = 3;
+
+/**
+ * Whether the first row of an addition file is meant to be a header row.
+ *
+ * Separate from "is this header VALID": a row that looks like a header but does
+ * not resolve must be reported, not silently reinterpreted as data and merged
+ * through the positional path — that would turn a typo'd label into exactly the
+ * silent column swap headers exist to prevent.
+ *
+ * Two signals, both required: the first cell is not a tracker number (a data
+ * row always leads with one), and at least three cells carry recognized column
+ * labels. A data row would have to put three different header words in three
+ * different cells to false-positive.
+ *
+ * @param {string[]} cells - Raw cells of the first row.
+ * @returns {boolean}
+ */
+export function looksLikeTsvHeaderRow(cells) {
+  if (!Array.isArray(cells) || cells.length < TSV_HEADER_MIN_LABELS) return false;
+  if (/^\d+$/.test(String(cells[0] ?? '').trim())) return false;
+  const recognized = new Set();
+  for (const c of cells) {
+    const key = HEADER_ALIASES[String(c ?? '').trim().toLowerCase()];
+    if (key != null) recognized.add(key);
+  }
+  return recognized.size >= TSV_HEADER_MIN_LABELS;
+}
+
+/**
+ * Resolve a tracker addition's header row to field name → column index, using
+ * the same shared alias table as the markdown tracker (tracker-aliases.json),
+ * so the two name-resolution surfaces cannot drift.
+ *
+ * Reports rather than throws: the caller owns the warning text and the
+ * skip-this-file decision.
+ *
+ * @param {string[]} cells - Raw cells of the header row.
+ * @returns {{map: Object<string,number>, missing: string[], duplicates: string[], unknown: string[]}}
+ */
+export function resolveTsvColumns(cells) {
+  const map = {};
+  const duplicates = [];
+  const unknown = [];
+  (cells || []).forEach((c, i) => {
+    const label = String(c ?? '').trim();
+    if (!label) return;
+    const key = HEADER_ALIASES[label.toLowerCase()];
+    if (key == null) { unknown.push(label); return; }
+    // First occurrence wins for the map, but a repeat is still reported: two
+    // columns claiming the same field is an emitter bug, and picking one of
+    // them is the guess this whole path exists to avoid.
+    if (map[key] != null) { duplicates.push(key); return; }
+    map[key] = i;
+  });
+  const missing = TSV_REQUIRED_FIELDS.filter(k => map[k] == null);
+  return { map, missing, duplicates, unknown };
+}
+
+/**
  * Scan the table for a header row and build a field-name → column-index map.
  * Indexing matches `line.split('|')`. Returns null — caller should fall back to
  * LEGACY_COLMAP — unless the essential columns are all present, so a stray pipe
@@ -96,11 +252,8 @@ export function resolveScoreStatus(a, b) {
 export function detectColumns(lines) {
   for (const line of lines) {
     if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map(s => s.trim().toLowerCase());
-    if (!cells.includes('company') || !cells.includes('role')) continue;
-    const map = {};
-    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
-    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
+    const map = headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase()));
+    if (map) return map;
   }
   return null;
 }
@@ -153,7 +306,37 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   };
   if (colmap.location != null) row.location = at('location');
   if (colmap.via != null) row.via = at('via');
+  if (colmap.url != null) row.url = at('url');
   return row;
+}
+
+// Matches the req/job-number labels actually seen in this tracker's free-text
+// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
+// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
+// `Ref R2857957`. The label is required so we don't grab an unrelated number
+// (a salary figure, a date fragment) — only text explicitly tagged as a
+// req/job/posting/reference id counts.
+export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+
+/**
+ * Extract a req/job/posting number from a tracker Notes cell, if present.
+ *
+ * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
+ * req numbers on its own, which lets two distinct postings at the same company
+ * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
+ * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
+ * pulls out that number so the caller can treat a confirmed mismatch as proof
+ * the rows are NOT duplicates, without touching cases where no number is
+ * present on either side. Shared by merge-tracker.mjs (tracker merge) and
+ * scan.mjs (company+role scan dedupe).
+ *
+ * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
+ * @returns {string|null} Uppercased req/job number, or null when none is found.
+ */
+export function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(REQ_NUMBER_RE);
+  return m ? m[1].toUpperCase() : null;
 }
 
 /**
@@ -242,9 +425,9 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
-export function extractTrackerReportNumbers(reportCell) {
+export function extractTrackerReportNumbers(reportCell, notesCell = '') {
   const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return [];
+  if (!value || value === '-' || value === '—') return scanNotesForReportNumbers(notesCell);
 
   const numbers = new Set();
   const numberFromTarget = (rawTarget) => {
@@ -274,6 +457,48 @@ export function extractTrackerReportNumbers(reportCell) {
     const pathNum = numberFromTarget(value);
     if (pathNum != null) numbers.add(pathNum);
   }
+  // A layout with a Report column that simply has no link yet still falls back
+  // to Notes, so a customized tracker behaves the same whether its Report cell
+  // is absent or empty.
+  return numbers.size > 0 ? [...numbers] : scanNotesForReportNumbers(notesCell);
+}
+
+/**
+ * Report numbers named by a report link inside a free-form Notes cell.
+ *
+ * Customized trackers with no dedicated Report column embed the link in Notes
+ * prose instead — the layout merge-tracker.mjs learned to read in 8668ac1, via
+ * its own `extractReportNum(reportStr, notesStr)`. set-status.mjs read only the
+ * Report cell, so `--report N` could not find a row merge-tracker had linked
+ * happily (#3075).
+ *
+ * DELIBERATELY STRICTER than the Report-cell scan above, which is the same
+ * scoping merge-tracker applies. The Report cell holds a report link by
+ * contract, so a loose match there is safe; Notes is prose, and a link like
+ * `[9](../notes/9-thing.md)` satisfies the generic `N-*.md` shape without being
+ * a report at all. Requiring a `reports/` path segment is what keeps an
+ * unrelated markdown link — or a job-posting URL in the same sentence — from
+ * claiming to be a report number.
+ *
+ * @param {string} [notesCell] - Free-form Notes cell.
+ * @returns {number[]} Report numbers, or [] when the cell names none.
+ */
+function scanNotesForReportNumbers(notesCell) {
+  const notes = String(notesCell ?? '').trim();
+  if (!notes) return [];
+  const numbers = new Set();
+  for (const link of parseMarkdownLinks(notes)) {
+    const target = String(link.target).trim().replace(/^<|>$/g, '');
+    // Absolute URLs are never a local report path, and a posting URL is the
+    // most likely thing to sit next to a report link in the same note.
+    if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) continue;
+    const pathname = target.split(/[?#]/, 1)[0];
+    if (!/(?:^|[\\/])reports[\\/]/i.test(pathname)) continue;
+    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i);
+    if (!match) continue;
+    const num = parseInt(match[1], 10);
+    if (Number.isInteger(num) && num > 0) numbers.add(num);
+  }
   return [...numbers];
 }
 
@@ -294,5 +519,61 @@ export function extractTrackerReportNumbers(reportCell) {
  * @returns {string} Case-folded, punctuation-free, script-preserving key.
  */
 export function normalizeVia(name) {
-  return String(name).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return normalizeTextKey(name);
+}
+
+/**
+ * Unicode-aware grouping key for any free-text tracker/report field.
+ *
+ * Same rule as normalizeVia(), generalized because Via is not the only field
+ * keyed this way: verify-pipeline groups tracker rows and report files by
+ * company+role with the same [a-z0-9] strip, so for a non-Latin pipeline every
+ * company keys to '' and every role keys to '' — three unrelated 株式会社X all
+ * land in one "possible duplicates" cluster (#2393). Keep letters and digits of
+ * any script; NFKC first so full-width/half-width variants compare equal.
+ *
+ * Combining marks are kept too (\p{M}): NFKC composes Latin diacritics into
+ * single code points, but Indic matras have no precomposed form, so stripping
+ * marks would make Devanagari कंपनी and कपनी — or क and का — the same key and
+ * re-introduce the exact collision this function exists to prevent.
+ *
+ * This is the one key every grouping consumer should share, so company/role
+ * identity cannot drift between scripts the way Via identity did.
+ *
+ * `separator` exists because not every consumer wants a solid key: scan.mjs
+ * keys role titles as space-separated words so "engineer (senior)" and
+ * "engineer, senior" collapse without "data engineer" and "dataengineer"
+ * merging. Passing ' ' keeps that shape while sharing this exact rule, so a
+ * second private [a-z0-9] strip never has to exist to get it.
+ *
+ * @param {string} value - Raw cell value (company, role, agency, slug, …).
+ * @param {string} [separator=''] - Replacement for each run of stripped chars.
+ *   Passed straight to String.replace, so `$` is special ('$&' would re-insert
+ *   the stripped run). Callers should pass a literal such as '' or ' '.
+ * @returns {string} Case-folded, punctuation-free, script-preserving key.
+ */
+export function normalizeTextKey(value, separator = '') {
+  // `value ?? ''` rather than String(value): a null/undefined cell must key to
+  // '' like any other empty field, not to the literal strings "null"/"undefined"
+  // — which would compare equal to each other and form a bogus group.
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    // Drop the combining dot that lowercasing a Turkish dotted capital leaves
+    // behind. `'İ'.toLowerCase()` yields `i` + U+0307, not a plain `i`, so
+    // `İstanbul Tekstil` and `Istanbul Tekstil` keyed differently while reading
+    // identically on screen: the tracker treated one employer as two, and the
+    // user had no way to see why (#2705, #2736, and verify-pipeline's duplicate
+    // check, which returned a false green because of it).
+    //
+    // NO `NFD` here, and that is the whole safety property. NFKC leaves ż, ė
+    // and ġ as SINGLE precomposed code points, so this strip cannot reach
+    // their dots — while `i` + U+0307 has no precomposed form and stays
+    // exposed. Decomposing first (NFD → strip → NFC) looks equivalent and is
+    // not: it collapsed Żubr/Zubr, Ėmė/Eme and Ġenerali/Generali, which is
+    // Polish, Lithuanian and Maltese losing the distinction (caught in main
+    // by career-ops-ui, 12-ago). The protection is structural, not a list.
+    .replace(/̇/gu, '')
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, separator)
+    .trim();
 }

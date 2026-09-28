@@ -2,8 +2,14 @@
   "allow_metrics": [
     "10 users"
   ],
+  "allow_facts": [
+    "verified title or employer phrase"
+  ],
   "forbidden_phrases": [
     "Fortune 500",
     "patented"
+  ],
+  "warn_phrases": [
+    "maybe"
   ]
 }

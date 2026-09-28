@@ -1,0 +1,60 @@
+% Fictional example CV for latex-tex tests (resumeSubheading family,
+% \resumeItemWithoutTitle{}{...} bullet variant + \resumeSubItem skills).
+% The preamble macro definitions below intentionally contain \resumeItem{#1}{#2}
+% and \textbf{#1}{: #2} — regression guards: extraction must skip the preamble.
+\documentclass[letterpaper,10pt]{article}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\pdfgentounicode=1
+
+\newcommand{\resumeItem}[2]{
+  \item\small{
+    \textbf{#1}{: #2 \vspace{-2pt}}
+  }
+}
+\newcommand{\resumeItemWithoutTitle}[1]{
+  \item\small{
+    {#1 \vspace{-1pt}}
+  }
+}
+\newcommand{\resumeSubItem}[2]{\resumeItem{#1}{#2}\vspace{-4pt}}
+\newcommand{\resumeSubheading}[4]{%
+  \item
+  \textbf{#1} \hfill #2 \\
+  \textit{#3} \hfill \textit{#4}%
+}
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[label={}, leftmargin=*]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries Alex Example}\\[2pt]
+  \small alex@example.dev $|$ Example City, EX
+\end{center}
+
+\section{Skills}
+\resumeSubHeadingListStart
+  \resumeSubItem{Languages}{Python, Go, SQL}
+  \resumeSubItem{Tools}{Docker, PostgreSQL, Redis}
+\resumeSubHeadingListEnd
+
+\section{Experience}
+\resumeSubHeadingListStart
+  \resumeSubheading{Example Corp}{2022 -- Present}{Backend Engineer}{Remote}
+  \resumeItemListStart
+    \resumeItemWithoutTitle{}{Built REST APIs in Python serving 20k daily active users.}
+    % Old bullet kept for reference — commented calls must NOT become slots:
+    %\resumeItemWithoutTitle{}{Stale commented bullet that must never be extracted.}
+    \resumeItemWithoutTitle{}{Reduced batch job runtime by 35 percent with parallel workers.}
+  \resumeItemListEnd
+\resumeSubHeadingListEnd
+
+\section{Leadership}
+\resumeSubHeadingListStart
+  \resumeSubItem{President, Example Club}{Led a 10-person officer team and shipped two internal tools.}
+\resumeSubHeadingListEnd
+
+\end{document}

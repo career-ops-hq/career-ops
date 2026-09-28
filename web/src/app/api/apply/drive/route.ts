@@ -47,7 +47,6 @@ export async function POST(req: Request) {
           // to review + submit themselves. We never submit.
           if (result.reached) await handoffSession(s.id).catch(() => {});
           emit({ t: "done", filled: result.reached, turns: result.turns, reason: result.reason });
-          controller.close();
           return;
         }
 
@@ -55,7 +54,6 @@ export async function POST(req: Request) {
           const fin = await finalizeDrivenSession(s.id, cliId);
           if (fin) {
             emit({ t: "done", reached: true, turns: result.turns, title: fin.title, fields: fin.fields, issues: fin.issues });
-            controller.close();
             return;
           }
         }

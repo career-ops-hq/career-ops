@@ -5,8 +5,15 @@
 # tests silently) + the catastrophic updater + governance docs. Code that
 # test-all.mjs / Renovate / dependency-review already guard (scan.mjs,
 # generate-pdf.mjs, test-all.mjs, package.json) is intentionally NOT gated,
-# so routine contributor PRs aren't bottlenecked on a single owner. Broaden
-# this list once there is more than one code owner.
+# so routine contributor PRs aren't bottlenecked on a single owner.
+#
+# 2026-08-13: that condition is met — there is now more than one code owner,
+# so the list broadens for the first time. The split is deliberate: the blocks
+# below stay single-owner because they are the ones CI cannot catch and where
+# a quiet mistake is expensive; the areas at the bottom move to the person who
+# has been their de facto expert for months. Area ownership routes review, it
+# does not bypass it: branch protection still requires an approval on every
+# PR, for every owner, including this file's.
 
 # Repo docs & governance
 /README*.md            @santifer
@@ -14,6 +21,12 @@
 /MAINTAINERS.md        @santifer
 /ARCHITECTURE.md       @santifer
 /.github/CODEOWNERS    @santifer
+
+# Coding-agent configuration (instructions, agent profiles, setup job):
+# a change here rewrites what an autonomous session is allowed to do.
+/.github/copilot-instructions.md  @santifer
+/.github/agents/                  @santifer
+/.github/instructions/            @santifer
 
 # Agent behavior & the multi-CLI contract (prompt layer — CI-blind)
 /CLAUDE.md             @santifer
@@ -46,3 +59,19 @@
 # The experimental web UI — owned by the web track (dual-track review with the
 # core maintainer on any PR that also touches root files).
 /web/ @santifer
+
+# ── Area owners ────────────────────────────────────────────────────────────
+# Not red lines: these are the day-to-day areas, routed to whoever has been
+# carrying them. Test-suite infrastructure and the Go dashboard both fall to
+# @Scott-Emberson, who built most of what is in them (the test-all split into
+# six suites, the provider-contract suites, and the dashboard's tracker work).
+# `test-all.mjs` itself stays out on purpose: it is the harness every other
+# check runs through, so it keeps the wider review.
+/tests/     @Scott-Emberson
+/dashboard/ @Scott-Emberson
+# Scanner providers and their contract suites are one reviewable unit: the
+# module and its test land together, and the review that matters on a fetch
+# surface (host allowlisting, redirects, SSRF, parsing pinned with concrete
+# assertions) is the one he has been doing on every provider PR (2-sep).
+/providers/       @Scott-Emberson
+/tests/providers/ @Scott-Emberson
