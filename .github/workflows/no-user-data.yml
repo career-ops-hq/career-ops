@@ -51,19 +51,33 @@ jobs:
               /^batch\//,
             ];
             // Tracked scaffolding that legitimately lives under those dirs.
-            // batch/ is blanket-blocked because the workers write user-layer
-            // output into it (tailored CV and cover-letter JSON, prefetched JD
-            // text, per-run state), so its tracked sources are named here one
-            // by one rather than matched by shape. An extension heuristic would
-            // pass the next .md or .json a worker learns to write; a name has
+            //
+            // batch/ gets an exact allowlist instead of the filename rule. The
+            // workers write user-layer output into it (tailored CV and
+            // cover-letter JSON, prefetched JD text, per-run state), and a
+            // filename-shaped exemption is exactly what that output can be
+            // named: a worker scratch dir may hold a README.md, and nothing
+            // stops private content being committed as batch/tmp/README.md or
+            // batch/anything/.gitkeep. So under batch/ a path is exempt only by
+            // being on this list, which also means a new tracked file there has
             // to be added on purpose.
+            //
+            // Everywhere else the filename rule stands: data/, reports/, jds/,
+            // output/, interview-prep/ and writing-samples/ track real .gitkeep
+            // keepers and dir READMEs, and narrowing this globally would fail
+            // every PR that touches one.
             const BATCH_SOURCES = new Set([
+              'batch/README.md',
               'batch/aggregate-tokens.mjs',
               'batch/batch-prompt.md',
               'batch/batch-runner.sh',
+              'batch/logs/.gitkeep',
+              'batch/tracker-additions/.gitkeep',
             ]);
             const isScaffold = (f) =>
-              /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f) || BATCH_SOURCES.has(f);
+              f.startsWith('batch/')
+                ? BATCH_SOURCES.has(f)
+                : /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f);
 
             const bad = files
               .filter((f) => f.status !== 'removed')

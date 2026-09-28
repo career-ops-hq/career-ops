@@ -83,12 +83,39 @@ test('the guard blocks generated batch/ worker output', () => {
     'batch/logs/worker-1.log',
     'batch/tracker-additions/001-example.tsv',
     'batch/batch-state-recovery.d/001.tsv',
+    // The generic scaffold exemptions must not reach into batch/. A worker
+    // scratch dir is free to contain a README.md, and a filename-shaped
+    // exemption would wave it through carrying whatever the worker wrote.
+    'batch/tmp/README.md',
+    'batch/tmp/.gitkeep',
   ];
   const passed = generated.filter((f) => !isBlocked(f));
   assert.deepEqual(
     passed,
     [],
     `the no-user-data guard would merge generated batch/ output: ${passed.join(', ')}`,
+  );
+});
+
+test('the generic scaffold exemptions still apply outside batch/', () => {
+  const isBlocked = loadGuard();
+
+  // batch/ narrows isScaffold to an exact allowlist. The other guarded
+  // directories keep the filename exemption they have always had, and several
+  // of them track a real .gitkeep or README.md, so narrowing it globally would
+  // fail every PR that touches those files.
+  const scaffoldElsewhere = [
+    'data/.gitkeep',
+    'reports/.gitkeep',
+    'interview-prep/sessions/README.md',
+    'writing-samples/README.md',
+  ];
+  const overblocked = scaffoldElsewhere.filter(isBlocked);
+  assert.deepEqual(
+    overblocked,
+    [],
+    `the batch/ narrowing leaked into other directories and would block tracked ` +
+      `scaffolding there: ${overblocked.join(', ')}`,
   );
 });
 
