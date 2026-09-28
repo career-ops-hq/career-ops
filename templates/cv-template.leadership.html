@@ -189,7 +189,12 @@ version: 1.0.0
     text-align: right;
   }
 
+  /* Cleared onto its own line under the floated role; floated full-width so
+     the location after it in the DOM still sits beside the role. */
   .job-context {
+    clear: both;
+    float: left;
+    width: 100%;
     font-style: italic;
     font-size: 10px;
     line-height: 1.5;

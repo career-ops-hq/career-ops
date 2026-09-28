@@ -364,7 +364,7 @@ function buildExperience(entries, partial) {
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
     </div>
-    <div class="job-role">${escapeHtml(e.role)}</div>${location}${context}
+    <div class="job-role">${escapeHtml(e.role)}</div>${context}${location}
     <ul>
 ${bullets}
     </ul>
@@ -976,6 +976,16 @@ async function runSelfTest() {
     console.error('Self-test failed: job-context block not rendered when context is present');
     process.exit(1);
   }
+  // context sits directly under the role, ahead of the location, on both paths:
+  // the section partial and the built-in builder (templates with no sections/).
+  const contextDiv = '<div class="job-context">Seed-stage startup; joined as employee #7.</div>';
+  for (const [path, out] of [['partial', html], ['built-in', buildExperience(sample.experience)]]) {
+    const [role, context, location] = ['class="job-role"', contextDiv, 'class="job-location"'].map(s => out.indexOf(s));
+    if (role === -1 || !(role < context && context < location)) {
+      console.error(`Self-test failed: ${path} builder did not render job-context between the role and the location`);
+      process.exit(1);
+    }
+  }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
     process.exit(1);
@@ -1000,7 +1010,7 @@ async function runSelfTest() {
     console.error('Self-test failed: job-location block rendered when location is absent');
     process.exit(1);
   }
-  if (noLocHtml.includes('class="job-context"')) {
+  if (noLocHtml.includes('class="job-context"') || buildExperience(noLocSample.experience).includes('class="job-context"')) {
     console.error('Self-test failed: job-context block rendered when context is absent');
     process.exit(1);
   }

@@ -164,7 +164,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
       "company": "Company Name",
       "role": "Job Title",
       "location": "Remote",
-      "context": "Early-stage startup; joined at growth stage. Product reached 500k MAU and was acquired by BigCo.",
+      "context": "Early-stage startup, ~40 people; acquired by BigCo in 2023.",
       "dates": "June 2022 - Present",
       "bullets": ["Achievement bullet with JD keywords injected", "Another quantified-impact bullet"]
     }
@@ -206,7 +206,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. |
 | `summary` | string | Personalized summary with keywords. Supports `**…**` emphasis (see **Markdown bold** below). |
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
-| `experience[]` | object | `company`, `role`, `location` (optional), `context` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). `context` is an un-bulleted italic line rendered directly under the role — for a one-line company/scope note (company size/stage, an acquisition, headcount owned, team the role sat in) that is background, not an achievement. Keep it short; keep achievements in `bullets`. Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
+| `experience[]` | object | `company`, `role`, `location` (optional), `context` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). `context` is an un-bulleted italic line rendered directly under the role, for one line of background about the company (stage, size, an acquisition), not an achievement. Use only facts already in `cv.md`: when it states none for that role, omit `context` rather than write one. Keep it short; keep achievements in `bullets`. Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
 | `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
 | `education[]` | object | `title` (degree), `org` (institution), `location` (optional, city/state), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |
