@@ -149,8 +149,9 @@ export async function POST(req: Request) {
         }
         current = parsed;
       } catch (e) {
+        console.error("Failed to parse data/reply-candidates.json", e);
         return Response.json(
-          { error: `Failed to parse data/reply-candidates.json: ${e instanceof Error ? e.message : String(e)}` },
+          { error: "Failed to parse data/reply-candidates.json" },
           { status: 500 }
         );
       }
