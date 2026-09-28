@@ -95,6 +95,15 @@ version: 1.0.0
     margin-bottom: 2px;
   }
 
+  .header-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent-color, #333);
+    margin-bottom: 4px;
+    line-height: 1.2;
+  }
+
   .contact-row {
     font-size: 10px;
     line-height: 1.5;
@@ -315,6 +324,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
       <span class="separator">|</span>

@@ -432,7 +432,9 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
   const classification = classifyReportsByTrackerState(trackerPath, statesPath);
   const trackerCaptures = mapTrackerCaptureLinks(trackerPath, jdsDir);
 
-  const files = readdirSync(reportsDir).filter((f) => f.endsWith('.md')).sort();
+  const files = readdirSync(reportsDir)
+    .filter((f) => f.endsWith('.md') && !/^\d+-RESERVED\.md$/.test(f))
+    .sort();
 
   for (const file of files) {
     reportsScanned += 1;

@@ -38,6 +38,7 @@ const SCRIPTS = [
   ['linkedin-join.mjs', '--sinse'],
   ['application-artifacts.mjs', '--reprot'],
   ['clean-markers.mjs', '--dryrun'],
+  ['cv-sync-check.mjs', '--hlep'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -163,7 +164,6 @@ test('fix-slugs honours both --file <path> and --file=<path> syntax', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-fixslugs-flag-'));
   try {
     const customPortals = join(dir, 'custom.yml');
-    // Non-existent custom path should be reported when flags are valid
     const r1 = runScript('fix-slugs.mjs', '--file', customPortals);
     assert.match(r1.all, new RegExp(`no portals file at ${customPortals.replace(/\\/g, '\\\\')}`));
 
@@ -206,6 +206,48 @@ test('fix-slugs rejects missing --file values (bare, empty, or next-is-flag)', (
   assert.doesNotMatch(rShortFlagEq.all, /no portals file at/i);
 });
 
+// --- analyze-patterns specific: numeric value flags must be strict ----------
+for (const [form, args] of [
+  ['space-separated', ['--min-threshold', 'abc']],
+  ['negative', ['--min-threshold', '-5']],
+  ['decimal', ['--min-threshold', '1.5']],
+  ['extra characters', ['--min-threshold', '10abc']],
+  ['unsafe integer', ['--min-threshold=9007199254740992']],
+]) {
+  test(`analyze-patterns rejects ${form} threshold values`, () => {
+    const r = runScript('analyze-patterns.mjs', ...args);
+    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.match(r.all, /--min-threshold requires a non-negative integer, got/);
+  });
+}
+
+for (const [form, args] of [
+  ['space-separated', ['--min-vendor-n', 'abc']],
+  ['zero', ['--min-vendor-n', '0']],
+  ['negative', ['--min-vendor-n=-1']],
+  ['decimal', ['--min-vendor-n=1.5']],
+  ['unsafe integer', ['--min-vendor-n', '9007199254740992']],
+]) {
+  test(`analyze-patterns rejects ${form} vendor sample values`, () => {
+    const r = runScript('analyze-patterns.mjs', ...args);
+    assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+    assert.match(r.all, /--min-vendor-n requires a positive integer, got/);
+  });
+}
+
+test('analyze-patterns rejects a trailing --min-threshold without an operand', () => {
+  const r = runScript('analyze-patterns.mjs', '--min-threshold');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--min-threshold requires a value/);
+});
+
+test('analyze-patterns rejects a trailing --min-vendor-n without an operand', () => {
+  const r = runScript('analyze-patterns.mjs', '--min-vendor-n');
+  assert.equal(r.status, 1, `exited ${r.status}, want 1`);
+  assert.match(r.all, /--min-vendor-n requires a value/);
+});
+
+
 // --- missing operand for a RECOGNIZED value-taking flag (#3087) ------------
 //
 // A different defect than an unrecognized flag: the flag is spelled right,
@@ -245,6 +287,48 @@ test('weekly-digest: --dir --summary does not scan a directory named "--summary"
   const r = runScript('weekly-digest.mjs', '--dir', '--summary');
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--dir requires a value/);
+});
+
+test('upskill: --min-reports --summary does not silently fall back to 5 reports', () => {
+  const r = runScript('upskill.mjs', '--min-reports', '--summary');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--min-reports requires a value/);
+});
+
+test('upskill: --url-text --help reports the missing operand instead of printing usage at exit 0', () => {
+  const r = runScript('upskill.mjs', '--url-text', '--help');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--url-text requires a value/);
+});
+
+test('audit-portals: --help --bogus still reports the unrecognized flag', () => {
+  const r = runScript('audit-portals.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /unrecognized flag\(s\): --bogus/);
+});
+
+test('audit-portals: --file --help reports the missing operand, not usage at exit 0', () => {
+  const r = runScript('audit-portals.mjs', '--file', '--help');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--file requires a value/);
+});
+
+test('audit-portals: --company --strict does not audit every board instead of one', () => {
+  const r = runScript('audit-portals.mjs', '--company', '--strict');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--company requires a value/);
+});
+
+test('audit-portals: a trailing --baseline does not silently skip the comparison', () => {
+  const r = runScript('audit-portals.mjs', '--baseline');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--baseline requires a value/);
+});
+
+test('audit-portals: --help alone still prints usage and exits 0', () => {
+  const r = runScript('audit-portals.mjs', '--help');
+  assert.equal(r.status, 0, `want exit 0, got ${r.status}`);
+  assert.match(r.all, /Usage:/i);
 });
 
 // archive-posting.mjs hand-rolls its own argv loop rather than going through
@@ -312,5 +396,29 @@ test('linkedin-join.mjs --help exits 0 and prints usage', () => {
 test('linkedin-join.mjs --help --bogus still errors', () => {
   const r = runScript('linkedin-join.mjs', '--help', '--bogus');
   assert.equal(r.status, 1, `--help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// cv-sync-check.mjs parsed no arguments before #3565, so a mistyped flag ran
+// the whole check suite and the caller had no way to discover the right
+// spelling. Its exit code is data-dependent (1 when cv.md is missing, which is
+// the normal state of a checkout), so the flag paths are asserted on their own
+// rather than through the bare-invocation expectation in test-all.mjs.
+test('cv-sync-check.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('cv-sync-check.mjs', '--help');
+  assert.equal(r.status, 0, `cv-sync-check.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'cv-sync-check.mjs --help printed no usage block');
+  assert.doesNotMatch(r.all, /sync check/i, '--help still ran the checks');
+});
+
+test('cv-sync-check.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('cv-sync-check.mjs', '-h');
+  assert.equal(r.status, 0, `cv-sync-check.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'cv-sync-check.mjs -h printed no usage block');
+});
+
+test('cv-sync-check.mjs --help --bogus still errors', () => {
+  const r = runScript('cv-sync-check.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
 });

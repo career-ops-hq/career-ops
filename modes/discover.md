@@ -43,6 +43,26 @@ reusable tool that feeds the scanner.
 - `portals.yml` — dedupe target and write destination (user layer). Honors the
   `CAREER_OPS_PORTALS` env override for scratch/testing.
 
+### Generating the input list from scan history
+
+You don't have to hand-write `companies.yml`. The scanners already log every
+company they touch in `data/scan-history.tsv`, including employers not yet in
+`portals.yml`. `discover-new-companies.mjs` reads that log, subtracts everything
+already tracked, and emits the remainder in exactly the `companies: [{name}]`
+shape this mode consumes:
+
+```bash
+node discover-new-companies.mjs --out /tmp/new.yml   # candidate list, writes nothing else
+node discover-ats.mjs --in /tmp/new.yml --summary     # preview boards, writes nothing
+node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
+```
+
+It writes only the candidate list; `portals.yml` stays touched exclusively by
+`discover-ats.mjs --write`. Companies are deduped on their canonical name (via
+`buildCompanyCanonicalizer`), so alias drift doesn't resurface a configured
+board. Useful flags: `--since <days>`, `--min-rows <n>`, `--added-only`,
+`--limit <n>`, `--summary`, `--json`.
+
 ## Step 1 — Run the script
 
 Preview (the default — writes nothing, prints the entries it would add):

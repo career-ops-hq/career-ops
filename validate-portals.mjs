@@ -19,11 +19,12 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
-// portals.yml is a USER-layer file. Resolved against the data root so an
-// external data directory validates the portals file the scanner actually
-// reads, instead of failing with "file not found" against the checkout.
-const DEFAULT_PORTALS_PATH =
-  process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
+// providers/ ships with the checkout, but portals.yml is user data: it lives in
+// the data root, where scan.mjs reads it. A bare 'portals.yml' resolved against
+// the cwd instead, so `npm run validate:portals` (npm always runs it from the
+// checkout) could not find an external data root's file, and a run from any
+// other directory validated whatever copy sat there.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
 
 function add(list, path, message) {
   list.push({ path, message });
@@ -175,6 +176,9 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
       validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
+      if (config.location_filter.strict !== undefined && typeof config.location_filter.strict !== 'boolean') {
+        add(errors, 'location_filter.strict', 'must be a boolean when set');
+      }
     }
   }
 

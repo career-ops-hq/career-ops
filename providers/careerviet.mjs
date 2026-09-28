@@ -43,7 +43,7 @@
 // exactly like itviec.mjs — a broken parser must look like a broken board,
 // never a market with no jobs.
 
-import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
 const TRUSTED_HOST = 'careerviet.vn';
@@ -90,12 +90,6 @@ const LOCATION_RE = /<div class=["']location["'][^>]*>(?:(?!<\/div>)[\s\S])*?<li
  * apart; both wrap their <time> the same way.
  */
 const UPDATED_DATE_RE = /Cập nhật(?:<!--[\s\S]*?-->)?\s*:?\s*(?:<\/span>)?\s*<time>([\d/-]+)<\/time>/i;
-
-/** @param {any} ctx @param {number} ms */
-function sleep(ctx, ms) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /** @param {string} url */
 function assertCareerVietUrl(url) {
@@ -310,7 +304,7 @@ export default {
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await sleep(ctx, INTER_PAGE_DELAY_MS);
+      if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const url = assertCareerVietUrl(buildListUrl(entry, page));
       const html = await fetchTextWithRetry(ctx, url, {
