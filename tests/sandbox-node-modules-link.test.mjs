@@ -13,8 +13,8 @@
 // The suite is designed to run on a fresh clone with only Node (see the
 // tests/helpers.mjs header), where an absent node_modules is the expected state
 // and has to be reported as itself.
-import { pass, fail, run, stripJsComments, ROOT } from './helpers.mjs';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, symlinkSync, readlinkSync } from 'fs';
+import { pass, fail, warn, run, stripJsComments, codeMask, isCodeRange, ROOT } from './helpers.mjs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, symlinkSync, readlinkSync, chmodSync, accessSync, constants } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -139,6 +139,70 @@ try {
       }
     }
 
+    // Directory permission, both ways. What module resolution needs from
+    // node_modules is TRAVERSE, not read: Node stats paths underneath it rather
+    // than listing it. So the two failing modes fall on opposite sides of the
+    // obvious check, and a tree that only LISTS is the one that breaks --
+    //
+    //   0111  no read, traverses -> import works, so linking is correct
+    //   0444  reads, no traverse -> import dies EACCES, so a reason is correct
+    //
+    // -- which is why both are here. A readability probe inverts both rows: it
+    // would skip the tree that works and link against the one that does not,
+    // handing the call site the EACCES misattribution this guard exists to
+    // remove. Skipped where the mode does not bite: root ignores it, and
+    // Windows has no bit to set.
+    {
+      const modes = [
+        { mode: 0o111, name: 'traversable but unreadable', linksOk: true },
+        { mode: 0o444, name: 'readable but not traversable', linksOk: false },
+      ];
+      for (const { mode, name, linksOk } of modes) {
+        const root = join(tmp, `perm-clone-${mode.toString(8)}`);
+        const nm = join(root, 'node_modules');
+        const sandbox = join(tmp, `sandbox-perm-${mode.toString(8)}`);
+        mkdirSync(nm, { recursive: true });
+        mkdirSync(sandbox, { recursive: true });
+
+        // Only run the row where the mode had the effect the row describes.
+        // Traversable has to equal linksOk by construction; where it does not,
+        // the bit was ignored -- root, or a filesystem that does not carry it.
+        chmodSync(nm, mode);
+        let traversable = true;
+        try { accessSync(nm, constants.X_OK); } catch { traversable = false; }
+        if (traversable !== linksOk) {
+          // Say so. A bare `continue` leaves the reader to notice that 2 of 15
+          // lines are absent, which is how an unexercised guard reads as a
+          // working one.
+          warn(`skipped the ${name} row: mode ${mode.toString(8)} did not take effect here`);
+          chmodSync(nm, 0o755);
+          continue;
+        }
+
+        const reason = linkNodeModules(sandbox, root);
+        if (linksOk && reason === null) {
+          pass(`a ${name} tree is linked, not skipped`);
+        } else if (!linksOk && typeof reason === 'string' && /unreadable \(EACCES\)/.test(reason)) {
+          pass(`a ${name} tree reports EACCES instead of linking`);
+        } else {
+          fail(`a ${name} node_modules produced ${JSON.stringify(reason)}`);
+        }
+
+        let entry = 'present';
+        try {
+          lstatSync(join(sandbox, 'node_modules'));
+        } catch (err) {
+          entry = err.code;
+        }
+        if ((entry === 'ENOENT') === !linksOk) {
+          pass(`the link entry matches the verdict for a ${name} tree`);
+        } else {
+          fail(`a ${name} tree returned ${JSON.stringify(reason)} but left lstat: ${entry}`);
+        }
+        chmodSync(nm, 0o755);
+      }
+    }
+
     // The repo's own root is the default, so call sites do not repeat it. Held
     // against an explicit ROOT call, because this machine's own state decides
     // almost nothing here: where dependencies are installed, "returned null" is
@@ -259,43 +323,84 @@ try {
       return out;
     };
 
-    // Comments are not code, and this suite documents the exact shapes it forbids,
-    // so a naive scan flags its own prose. stripJsComments() collapses a block
-    // comment to nothing and shifts every line after it, which would make the line
-    // numbers in a failure point at the wrong place. This blanks comment characters
-    // to spaces and keeps the newlines, so offsets and line numbers both survive.
-    const blankComments = (src) => src
-      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-      .replace(/(^|[^:])(\/\/[^\n]*)/g, (_m, before, cmt) => before + cmt.replace(/./g, ' '));
+    // A call inside a comment or a string is prose, not a link, and this suite
+    // documents the exact shapes it forbids -- so a scan that cannot tell them
+    // apart flags its own text. codeMask() answers that per character and leaves
+    // the source itself alone, which both halves of this need: the predicate is
+    // the `'node_modules'` path LITERAL, so a masker that blanks strings blanks
+    // the evidence, and untouched offsets let a failure name a real line.
+    const ALIAS = /\bsymlinkSync\s+as\s+[A-Za-z_$][\w$]*/g;
+    const scan = (src) => {
+      const isCode = codeMask(src);
+      return {
+        // An alias defeats the scan outright: `import { symlinkSync as linkIt }`
+        // then linkIt(join(ROOT, 'node_modules'), ...) matches nothing below.
+        // There is no reason to rename this import, so the rename is the finding.
+        // EVERY match, not the first: a commented-out alias above a real one
+        // would otherwise answer for it and report the file clean.
+        aliased: [...src.matchAll(ALIAS)].some((m) => isCodeRange(isCode, m.index, m.index + m[0].length)),
+        lines: firstArgOf(src)
+          .filter(({ index, arg }) => isCode[index] && arg.includes('node_modules'))
+          .map(({ index }) => src.slice(0, index).split('\n').length),
+      };
+    };
+
+    // Prove the scan can find before trusting it clean -- over the shapes that
+    // can defeat it, not one plain call. Each of these is measured against the
+    // line-based blanker this replaced, and 3 of the 6 catch it: a `//` in a
+    // string hides the rest of its line, a `/*` in a string hides everything to
+    // the next `*/`, and a call written inside a string is read as real. The
+    // `/*` probe carries a later comment for that reason. Without one the source
+    // has no closing `*/`, the old blanker matches nothing, and the probe passes
+    // under the very implementation it exists to condemn. The call is built by
+    // concatenation, so this suite's own source never carries the pattern its
+    // scan forbids.
+    const RAW = `symlink${'Sync'}(join(ROOT, 'node_modules'), join(x, 'node_modules'), 'dir');`;
+    const probes = [
+      ['a bare call', RAW, 1],
+      ['a call after a string holding //', `const sep = "//"; ${RAW}`, 1],
+      ['a call below a string holding /*', `const open = "/*";\n${RAW}\n/* a later comment */`, 1],
+      ['a call in a line comment', `// ${RAW}`, 0],
+      ['a call in a block comment', `/* ${RAW} */`, 0],
+      ['a call inside a string', `const s = ${JSON.stringify(RAW)};`, 0],
+      // Operand-position keywords. A regex is legal straight after these, and a
+      // quote inside one opens a phantom string across the lines below when the
+      // keyword is missing from startsRegex.
+      ['a call below `throw` of a quote-bearing regex', `const f = () => { throw /it's bad/; };\n${RAW}`, 1],
+      ['a call below `export default` of one', `export default /it's bad/;\n${RAW}`, 1],
+    ];
+    // The alias gate gets its own controls, including the shape that made the
+    // first version of it wrong: reading only the FIRST match let a
+    // commented-out alias answer for a real one below it.
+    const ALIASED = `import { symlink${'Sync'} as linkIt } from 'fs';`;
+    const aliasProbes = [
+      ['a real aliased import', ALIASED, true],
+      ['a real aliased import below a commented one', `// ${ALIASED}\n${ALIASED}`, true],
+      ['an aliased import in a comment', `// ${ALIASED}`, false],
+      ['an aliased import inside a string', `const s = ${JSON.stringify(ALIASED)};`, false],
+    ];
+    const misread = [
+      ...probes.map(([what, src, want]) => [what, scan(src).lines.length, want]),
+      ...aliasProbes.map(([what, src, want]) => [what, scan(src).aliased, want]),
+    ]
+      .filter(([, got, want]) => got !== want)
+      .map(([what, got, want]) => `${what}: ${JSON.stringify(got)}, expected ${JSON.stringify(want)}`);
 
     const tracked = run('git', ['ls-files', 'tests/*.mjs', 'test-all.mjs']).split('\n').filter(Boolean);
     if (tracked.length < 50) {
       fail(`the raw-link scan enumerated only ${tracked.length} tracked files, so a clean result would mean nothing`);
+    } else if (misread.length) {
+      fail(`the raw-link scan misreads its own controls (${misread.join('; ')}), so it cannot be trusted on the repo`);
     } else {
       const offenders = [];
-      // An alias defeats the scan outright: `import { symlinkSync as linkIt }` then
-      // linkIt(join(ROOT, 'node_modules'), ...) matches nothing above. There is no
-      // reason to rename this import, so the rename itself is the finding.
       const aliased = [];
-      const ALIAS = /\bsymlinkSync\s+as\s+[A-Za-z_$][\w$]*/;
       for (const rel of tracked) {
         if (rel === 'tests/helpers.mjs') continue; // linkNodeModules lives here; it IS the sanctioned site
-        const src = blankComments(readFileSync(join(ROOT, rel), 'utf-8'));
-        if (ALIAS.test(src)) aliased.push(rel);
-        for (const { index, arg } of firstArgOf(src)) {
-          if (!arg.includes('node_modules')) continue;
-          offenders.push(`${rel}:${src.slice(0, index).split('\n').length}`);
-        }
+        const { aliased: renamed, lines } = scan(readFileSync(join(ROOT, rel), 'utf-8'));
+        if (renamed) aliased.push(rel);
+        for (const line of lines) offenders.push(`${rel}:${line}`);
       }
-      // Prove the scan can find before trusting it clean: the same walk over the
-      // shape it is meant to catch must return exactly one hit.
-      // Built by concatenation on purpose. Written as one literal, this suite's own
-      // source would carry the pattern and the scan above would flag this line.
-      const canFind = firstArgOf(`symlink${'Sync'}(join(ROOT, 'node_modules'), join(x, 'node_modules'), 'dir');`)
-        .filter(({ arg }) => arg.includes('node_modules')).length;
-      if (canFind !== 1) {
-        fail(`the raw-link scan found ${canFind} hits in a string built to contain exactly 1, so it cannot be trusted on the repo`);
-      } else if (aliased.length) {
+      if (aliased.length) {
         fail(`${aliased.join(', ')} imports symlinkSync under another name, which the scan above cannot follow; call it directly or route through linkNodeModules()`);
       } else if (offenders.length) {
         fail(`${offenders.join(', ')} links node_modules with a raw symlinkSync; route it through linkNodeModules() so it gets the Windows junction and the absent-tree reason`);
