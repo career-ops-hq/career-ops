@@ -312,9 +312,15 @@ def import_reply(directory: Path, message: dict) -> dict:
                 JOIN opportunities o ON o.id=l.opportunity_id
                 JOIN application_events e ON e.id=(SELECT id FROM application_events WHERE opportunity_id=o.id AND to_status='applied' ORDER BY id LIMIT 1)"""):
             payload = json.loads(row["payload"])
+            followups = [json.loads(item["payload"]) for item in db.execute(
+                "SELECT payload FROM application_activity WHERE opportunity_id=? AND type='followup_sent'",
+                (str(row["id"]),)
+            )]
+            notes = [payload.get("notes")]
+            notes.extend(item.get("notes") for item in followups)
             applications.append({"id": str(row["id"]), "company": row["company"], "role": row["role"],
                                  "status": db.execute("SELECT status FROM application_lifecycle WHERE opportunity_id=?", (str(row["id"]),)).fetchone()[0],
-                                 "notes": str(payload.get("notes") or "")})
+                                 "notes": "\n".join(item for item in notes if isinstance(item, str))})
         with SqliteSaver.from_conn_string(str(directory / "workflow-checkpoints.db")) as saver:
             state = _graph(saver).invoke({"message": message, "applications": applications, "classification": {}, "invite": {}, "match": {}, "invite_candidates": []},
                                          {"configurable": {"thread_id": "reply:" + hashlib.sha256(message["message_id"].encode()).hexdigest()}})

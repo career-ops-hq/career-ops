@@ -81,11 +81,15 @@ with tempfile.TemporaryDirectory() as temp:
     assert replay["reused"], replay
     db = sqlite3.connect(directory / "opportunities.db")
     db.execute("UPDATE inbound_replies SET confirmed_at=NULL WHERE message_id='mail-1'")
+    db.execute("INSERT INTO application_activity(operation_id,opportunity_id,type,source,payload) VALUES(?,?,?,?,?)",
+               ("followup-note-1", "1", "followup_sent", "user", '{"notes":"Wrote to sam@example.org"}'))
     db.commit()
     assert not call(directory, "confirm", "mail-1", "--opportunity", "1", "--status", "interview", "--confirmed")["reused"]
+    domain_reply = import_reply(directory, {"message_id": "domain-1", "from": "recruiter@alumni.example.org", "subject": "We would like to chat", "body_snippet": "Next steps"})
+    assert domain_reply["match"]["opportunity_id"] == "1" and "sender-domain" in domain_reply["match"]["signals"]
     assert db.execute("SELECT status FROM application_lifecycle WHERE opportunity_id='1'").fetchone()[0] == "interview"
     assert db.execute("SELECT COUNT(*) FROM application_events WHERE opportunity_id='1'").fetchone()[0] == 2
-    assert db.execute("SELECT COUNT(*) FROM application_activity WHERE type='reply_suggested'").fetchone()[0] == 2
+    assert db.execute("SELECT COUNT(*) FROM application_activity WHERE type='reply_suggested'").fetchone()[0] == 3
     db.executescript("""
         INSERT INTO opportunities(id,url,company,role,source,state,application_state) VALUES(2,'https://example.org/2','Acme','Data Analyst','provider','discovered','submitted');
         INSERT INTO application_lifecycle(opportunity_id,status) VALUES('2','applied');
