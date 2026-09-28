@@ -292,10 +292,13 @@ export default function OffersPage() {
     }
   };
 
+  const [obsError, setObsError] = useState<string | null>(null);
+
   const handleDeleteObservation = async (obs: Observation) => {
     if (!confirm("Remove this salary observation?")) return;
+    setObsError(null);
     try {
-      await fetch("/api/offers", {
+      const res = await fetch("/api/offers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -305,9 +308,14 @@ export default function OffersPage() {
           expected: obs.content,
         }),
       });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setObsError(d.error || "Failed to remove observation");
+        return;
+      }
       await fetchOffers();
     } catch (e) {
-      console.error(e);
+      setObsError(e instanceof Error ? e.message : "Failed to remove observation");
     }
   };
 
@@ -1228,6 +1236,13 @@ Best regards,`;
               />
             </div>
           </div>
+
+          {obsError && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
+              <AlertTriangle className="size-4 shrink-0" />
+              <span>{obsError}</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Record Form */}

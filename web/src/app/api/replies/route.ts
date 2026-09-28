@@ -149,8 +149,9 @@ export async function POST(req: Request) {
         }
         current = parsed;
       } catch (e) {
+        console.error("Failed to parse data/reply-candidates.json:", e);
         return Response.json(
-          { error: `Failed to parse data/reply-candidates.json: ${e instanceof Error ? e.message : String(e)}` },
+          { error: "Failed to read reply candidates" },
           { status: 500 }
         );
       }
@@ -161,6 +162,7 @@ export async function POST(req: Request) {
 
     return Response.json({ success: true, candidate: newCandidate });
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 500 });
+    console.error("Failed to process reply candidate:", err);
+    return Response.json({ error: "Internal server error" }, { status: 500 });
   }
 }

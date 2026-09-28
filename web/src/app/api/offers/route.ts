@@ -140,21 +140,21 @@ export async function POST(req: Request) {
 
       let targetIdx = -1;
 
-      if (body.content && typeof body.content === "string") {
+      if (body.content && typeof body.content === "string" && body.content.trim()) {
         const target = body.content.trim();
         targetIdx = lines.findIndex((l, idx) => idx > 0 && l.trim() === target);
-      } else if (typeof id === "number" && id >= 1 && id < lines.length) {
-        if (!body.expected || typeof body.expected !== "string") {
+      } else if (typeof id === "number" && Number.isInteger(id) && id >= 1 && id < lines.length) {
+        if (!body.expected || typeof body.expected !== "string" || !body.expected.trim()) {
           return Response.json({ error: "Expected value is required for ID-based deletion" }, { status: 400 });
         }
-        const expected = sanitize(body.expected).trim();
-        const actual = sanitize(lines[id]).trim();
+        const expected = body.expected.replace(/[\r\n]+/g, "").trim();
+        const actual = lines[id].replace(/[\r\n]+/g, "").trim();
         if (actual !== expected) {
           return Response.json({ error: "Item has changed or does not match expected value" }, { status: 409 });
         }
         targetIdx = id;
       } else {
-        return Response.json({ error: "Invalid delete request: missing content or valid id with expected value" }, { status: 400 });
+        return Response.json({ error: "Invalid delete request: missing content or valid integer id with expected value" }, { status: 400 });
       }
 
       if (targetIdx >= 1 && targetIdx < lines.length) {

@@ -48,7 +48,10 @@ export async function POST(req: Request) {
       if (fs.existsSync(envPath)) {
         try {
           fs.chmodSync(envPath, 0o600);
-        } catch {}
+        } catch (err) {
+          console.error("Failed to set permissions on .career-ops.env:", err);
+          return NextResponse.json({ error: "Failed to secure permissions on .career-ops.env" }, { status: 500 });
+        }
         envContent = fs.readFileSync(envPath, "utf8");
       }
 
