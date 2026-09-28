@@ -434,7 +434,7 @@ function checkPlaywrightMcp(root, activeCli) {
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
       entry.plugins
-        ? `No project-level MCP config, no server in ~/.claude.json, and no enabled plugin providing one, was detected for ${activeCli}.`
+        ? `No project-level MCP config, no server in .claude.json (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json when set), and no enabled plugin providing one, was detected for ${activeCli}.`
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
