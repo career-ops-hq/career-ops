@@ -31,7 +31,8 @@ const LOADER = pathToFileURL(path.join(HERE, "..", "helpers", "web-ts-alias-load
 /** Run one ESM snippet in a fresh Node process. Never throws; reports the failure. */
 function run(src, flags = [], cwd = WEB) {
   try {
-    return { ok: true, out: execFileSync(process.execPath, [...flags, "--input-type=module", "-e", src], {
+    const parentFlags = (process.execArgv || []).filter((a) => a.includes("strip-types") || a.includes("typescript"));
+    return { ok: true, out: execFileSync(process.execPath, [...parentFlags, ...flags, "--input-type=module", "-e", src], {
       cwd, encoding: "utf-8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"],
     }).trim() };
   } catch (e) {

@@ -114,3 +114,68 @@ for (const route of routes) {
     });
   });
 }
+
+test("profile flat patch with string location maps to candidate.location", async () => {
+  const source = "candidate:\n  full_name: Jane Doe\n  location: London\ncompensation:\n  currency: GBP\n";
+  await withFixture(source, async ({ file }) => {
+    const req = new Request("http://fixture.invalid/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: "Bristol, UK" }),
+    });
+    const res = await updateProfile(req);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.ok, true);
+    assert.equal(data.profile.candidate.location, "Bristol, UK");
+    assert.equal(data.profile.candidate.full_name, "Jane Doe");
+    assert.equal(data.profile.location, undefined);
+  });
+});
+
+test("profile rejects malformed structured fields with 400 without writing to disk", async () => {
+  const source = "candidate:\n  full_name: Jane Doe\ncompensation:\n  currency: USD\n";
+  await withFixture(source, async ({ file }) => {
+    // Malformed candidate (string instead of object)
+    const badCandidateRes = await updateProfile(
+      new Request("http://fixture.invalid/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate: "invalid string" }),
+      })
+    );
+    assert.equal(badCandidateRes.status, 400);
+
+    // Malformed compensation (number instead of object)
+    const badCompRes = await updateProfile(
+      new Request("http://fixture.invalid/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ compensation: 12345 }),
+      })
+    );
+    assert.equal(badCompRes.status, 400);
+
+    // Verify file content was not modified
+    assert.equal(readFileSync(file, "utf8"), source);
+  });
+});
+
+test("profile accepts valid structured partial updates and preserves unmentioned fields", async () => {
+  const source = "candidate:\n  full_name: Jane Doe\n  location: London\ncompensation:\n  currency: USD\n  target_range: 150-180\n";
+  await withFixture(source, async ({ file }) => {
+    const res = await updateProfile(
+      new Request("http://fixture.invalid/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate: { full_name: "Jane Smith" } }),
+      })
+    );
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.ok, true);
+    assert.equal(data.profile.candidate.full_name, "Jane Smith");
+    assert.equal(data.profile.candidate.location, "London");
+    assert.equal(data.profile.compensation.currency, "USD");
+  });
+});

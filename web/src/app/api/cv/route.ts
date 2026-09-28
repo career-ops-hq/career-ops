@@ -8,7 +8,7 @@ function cvPath() {
   return path.join(careerOpsRoot(), "cv.md");
 }
 
-const MAX_CV_BYTES = 200_000;
+const MAX_CV_BYTES = 500_000;
 
 export async function GET() {
   try {

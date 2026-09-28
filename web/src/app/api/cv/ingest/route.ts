@@ -83,20 +83,34 @@ export async function POST(req: Request) {
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
-      // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
-      // is granted here. Tell non-Claude users plainly instead of failing opaquely.
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
+
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith(".docx")) {
+        return Response.json(
+          { error: "Word documents (.docx) are not supported directly. Please upload a PDF or paste text." },
+          { status: 400 }
+        );
       }
-      const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
-      tempFile = path.join(dir, `cv${ext}`); // outside the repo, basename-only
-      fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
-      promptSource = FILE_SRC(tempFile);
+
+      const arrayBuffer = await file.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      if (fileName.endsWith(".pdf")) {
+        // Write PDF to a temporary file in user tempdir for the CLI to read with its local file tool
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "co-cv-"));
+        tempFile = path.join(tempDir, "upload.pdf");
+        fs.writeFileSync(tempFile, buffer);
+        promptSource = FILE_SRC(tempFile);
+      } else {
+        const text = buffer.toString("utf8");
+        promptSource = TEXT_SRC(text);
+      }
     } else {
       return Response.json({ error: "unsupported content-type" }, { status: 400 });
     }
   } catch {
+    if (tempFile) cleanupTemp(tempFile);
     return Response.json({ error: "bad request" }, { status: 400 });
   }
 
@@ -196,7 +210,7 @@ export async function POST(req: Request) {
       // It lands in the client's `trace`, which renders only its latest line — a
       // pre-existing limit of this view, not something to work around here.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.localReadOnly });
-      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}\n\n`);
+      if (fencing.notice) safeEnqueue(`✨ ${fencing.notice}\n\n`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;

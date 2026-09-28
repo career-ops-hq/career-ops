@@ -19,13 +19,26 @@ if (typeof window !== "undefined" && !window.__coLogBufInstalled) {
   const orig = console.error.bind(console);
   console.error = (...args: unknown[]) => {
     try {
-      push("[error] " + args.map((a) => (a instanceof Error ? `${a.message}` : String(a))).join(" "));
+      const msg = args.map((a) => (a instanceof Error ? `${a.stack || a.message}` : String(a))).join(" ");
+      // Suppress extension noise and ResizeObserver loop
+      if (
+        /bis_skin_checked|ResizeObserver loop|chrome-extension:\/\/|moz-extension:\/\//i.test(
+          msg
+        )
+      ) {
+        return;
+      }
+      push("[error] " + msg);
     } catch {
       /* never break logging */
     }
     orig(...args);
   };
-  window.addEventListener("error", (e) => push(`[onerror] ${e.message || ""} @ ${e.filename || ""}:${e.lineno || ""}`));
+  window.addEventListener("error", (e) => {
+    if (e.message && !/bis_skin_checked|ResizeObserver/i.test(e.message)) {
+      push(`[onerror] ${e.message || ""} @ ${e.filename || ""}:${e.lineno || ""}`);
+    }
+  });
   // Server-side failures are invisible to console.error — wrap fetch so a
   // degraded API (500, or a route that answered but couldn't do its job) lands
   // in the ring too. Pathname only: query strings can carry company names.
@@ -40,7 +53,12 @@ if (typeof window !== "undefined" && !window.__coLogBufInstalled) {
     }
     return res;
   };
-  window.addEventListener("unhandledrejection", (e) => push(`[rejection] ${String((e as PromiseRejectionEvent).reason)}`));
+  window.addEventListener("unhandledrejection", (e) => {
+    const reason = String((e as PromiseRejectionEvent).reason);
+    if (!/bis_skin_checked|ResizeObserver/i.test(reason)) {
+      push(`[rejection] ${reason}`);
+    }
+  });
 }
 
 export function recentLogs(): string[] {

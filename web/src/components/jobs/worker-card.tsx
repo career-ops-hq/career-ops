@@ -140,8 +140,9 @@ export function WorkerCard({
         </div>
       )}
       {fencing && (
-        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          {fencing}
+        <div className={cn("mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-amber-600 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          <AlertTriangle className="size-3 shrink-0 text-amber-500" />
+          <span className="truncate">{fencing.replace(/^[⚠️✨]\s*/, "")}</span>
         </div>
       )}
       {tokens > 0 && (

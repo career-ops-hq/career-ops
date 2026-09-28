@@ -1,0 +1,132 @@
+import fs from "node:fs";
+import path from "node:path";
+import { careerOpsRoot } from "@/lib/career-ops";
+import { atomicWrite } from "@/lib/core/safe-write";
+
+export type ContactItem = {
+  id: string;
+  name: string;
+  company: string;
+  role: string;
+  source: string;
+  linkedin?: string;
+  email?: string;
+  notes?: string;
+  relatedJob?: string;
+  status: "identified" | "contacted" | "replied" | "referral";
+};
+
+export async function GET() {
+  const root = careerOpsRoot();
+  const contactsPath = path.join(root, "data", "contacts.tsv");
+  const connectionsPath = path.join(root, "data", "Connections.csv");
+
+  const contacts: ContactItem[] = [];
+  let connectionsCount = 0;
+
+  // Read contacts.tsv
+  if (fs.existsSync(contactsPath)) {
+    try {
+      const content = fs.readFileSync(contactsPath, "utf8");
+      const lines = content.split("\n").filter((l) => l.trim().length > 0);
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split("\t");
+        if (parts.length >= 3) {
+          contacts.push({
+            id: `c-${i}`,
+            name: parts[0]?.trim() || "",
+            company: parts[1]?.trim() || "",
+            role: parts[2]?.trim() || "",
+            source: parts[3]?.trim() || "direct",
+            linkedin: parts[4]?.trim() || "",
+            email: parts[5]?.trim() || "",
+            notes: parts[6]?.trim() || "",
+            status: (parts[7]?.trim() as ContactItem["status"]) || "identified",
+          });
+        }
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
+  // Check LinkedIn Connections export
+  if (fs.existsSync(connectionsPath)) {
+    try {
+      const content = fs.readFileSync(connectionsPath, "utf8");
+      connectionsCount = Math.max(0, content.split("\n").filter((l) => l.trim().length > 0).length - 1);
+    } catch {
+      // Ignored
+    }
+  }
+
+  return Response.json({
+    contacts,
+    connectionsCount,
+    hasConnectionsFile: fs.existsSync(connectionsPath),
+  });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { name, company, role, source, linkedin, email, notes, status } = body || {};
+    const sanitize = (val: unknown, def = ""): string => {
+      if (typeof val !== "string") return def;
+      return val.replace(/[\t\r\n]+/g, " ").trim();
+    };
+
+    const sName = sanitize(name);
+    const sCompany = sanitize(company);
+    const sRole = sanitize(role);
+    const sSource = sanitize(source, "direct");
+    const sLinkedin = sanitize(linkedin);
+    const sEmail = sanitize(email);
+    const sNotes = sanitize(notes);
+
+    const VALID_STATUSES = new Set(["identified", "contacted", "replied", "referral"]);
+    let sStatus: ContactItem["status"] = "identified";
+    if (status !== undefined && status !== null && status !== "") {
+      const sanitizedStatus = sanitize(status);
+      if (!VALID_STATUSES.has(sanitizedStatus)) {
+        return Response.json(
+          { error: "Invalid status. Must be one of: identified, contacted, replied, referral" },
+          { status: 400 }
+        );
+      }
+      sStatus = sanitizedStatus as ContactItem["status"];
+    }
+
+    if (!sName || !sCompany) {
+      return Response.json({ error: "Name and company are required" }, { status: 400 });
+    }
+
+    const root = careerOpsRoot();
+    const dataDir = path.join(root, "data");
+    const contactsPath = path.join(dataDir, "contacts.tsv");
+
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    let content = "";
+    if (fs.existsSync(contactsPath)) {
+      content = fs.readFileSync(contactsPath, "utf8");
+    } else {
+      content = "Name\tCompany\tRole\tSource\tLinkedIn\tEmail\tNotes\tStatus\n";
+    }
+
+    if (content.length > 0 && !content.endsWith("\n")) {
+      content += "\n";
+    }
+
+    const newRow = `${sName}\t${sCompany}\t${sRole}\t${sSource}\t${sLinkedin}\t${sEmail}\t${sNotes}\t${sStatus}\n`;
+    content += newRow;
+
+    atomicWrite(contactsPath, content);
+
+    return Response.json({ success: true });
+  } catch (err) {
+    return Response.json({ error: String(err) }, { status: 500 });
+  }
+}

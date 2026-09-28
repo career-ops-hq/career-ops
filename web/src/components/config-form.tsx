@@ -124,16 +124,14 @@ export function ConfigForm() {
           onClick={() => setMode("key")}
           icon={KeyRound}
           title="Paste an AI key"
-          hint="Coming soon"
-          disabled
+          hint="Direct API Key"
         />
         <ModeCard
           active={mode === "manual"}
           onClick={() => setMode("manual")}
           icon={TerminalSquare}
           title="No setup needed"
-          hint="Coming soon"
-          disabled
+          hint="Fast local mode"
         />
       </div>
 
@@ -170,24 +168,50 @@ export function ConfigForm() {
 
                   if (c.installed) {
                     return (
-                      <button
+                      <div
                         key={c.id}
-                        type="button"
-                        onClick={() => setCliId(c.id)}
-                        aria-pressed={selected}
-                        className={cn(rowClassName, "w-full cursor-pointer text-left")}
+                        className={cn(rowClassName, "flex items-center justify-between gap-3")}
                       >
-                        <Check className="size-4 shrink-0 text-emerald-400" />
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
-                          <span className={cn("font-medium", selected ? "text-foreground" : "")}>
-                            {c.name}
+                        <button
+                          type="button"
+                          onClick={() => setCliId(c.id)}
+                          aria-pressed={selected}
+                          className="flex min-w-0 flex-1 items-center gap-3 cursor-pointer text-left"
+                        >
+                          <Check className="size-4 shrink-0 text-emerald-400" />
+                          <span className="flex min-w-0 flex-1 items-center gap-2">
+                            <span className={cn("font-medium", selected ? "text-foreground" : "")}>
+                              {c.name}
+                            </span>
+                            <span className="font-mono text-xs text-faint">{c.run}</span>
                           </span>
-                          <span className="font-mono text-xs text-faint">{c.run}</span>
-                        </span>
-                        <span className="hidden max-w-[40%] shrink-0 truncate text-xs text-faint sm:block">
-                          {c.path}
-                        </span>
-                      </button>
+                          <span className="hidden max-w-[30%] shrink-0 truncate text-xs text-faint sm:block">
+                            {c.path}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              const res = await fetch("/api/clis/auth", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ cliId: c.id }),
+                              });
+                              const d = await res.json();
+                              if (d.loginUrl) {
+                                window.open(d.loginUrl, "_blank");
+                              }
+                            } catch {}
+                          }}
+                          className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-surface-hover hover:text-brand"
+                        >
+                          <KeyRound className="size-3 text-brand" />
+                          <span>Log in</span>
+                        </button>
+                      </div>
                     );
                   }
 
@@ -260,25 +284,51 @@ export function ConfigForm() {
               <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
                 Paste an AI key
               </label>
-              <p className="mb-2 text-xs text-faint">Bring a key from OpenAI, Anthropic, and others.</p>
+              <p className="mb-2 text-xs text-faint">Bring an API key from Anthropic, OpenAI, Google, or OpenRouter.</p>
               <input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="sk-…"
                 autoComplete="off"
-                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50"
+                className="w-full rounded-xl border border-border bg-surface/60 px-4 py-2.5 font-mono text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 text-foreground"
               />
-              <p className="mt-2 text-xs text-faint">
-                Stored only in this browser — never sent anywhere but your chosen provider.
-              </p>
+              <div className="mt-3 flex items-center justify-between">
+                <button
+                  type="button"
+                  disabled={!apiKey.trim()}
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/api/clis/auth", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "save-key", apiKey, provider }),
+                      });
+                      if (res.ok) {
+                        setSaved(true);
+                        setTimeout(() => setSaved(false), 2000);
+                      }
+                    } catch {}
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white hover:bg-brand-200 disabled:opacity-50"
+                >
+                  <Check className="size-3.5" />
+                  Connect &amp; Save Key
+                </button>
+                <span className="text-xs text-faint">
+                  Stored safely in local environment — never sent elsewhere.
+                </span>
+              </div>
             </div>
           </div>
         )}
 
         {mode === "manual" && (
-          <div className="rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-            The easiest way in — no keys, nothing to set up. On the roadmap.
+          <div className="rounded-xl border border-border bg-surface/50 p-6 space-y-3">
+            <h3 className="text-sm font-semibold text-foreground">Fast Local Mode (0 Tokens)</h3>
+            <p className="text-xs text-muted leading-relaxed">
+              Run Career-ops completely offline with local PDF parsing, rule-based job scoring, and deterministic ATS checks.
+            </p>
           </div>
         )}
       </div>
@@ -316,16 +366,234 @@ export function ConfigForm() {
 
       <CadenceSettings />
 
+      {/* Target Roles & Compensation Profile (config/profile.yml) */}
+      <ProfileSettings />
+
       <div className="mt-8 flex items-center gap-3">
         <button
           type="button"
           onClick={save}
-          className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
         >
           {saved ? <Check className="size-4" /> : null}
-          {saved ? "Saved" : "Save config"}
+          {saved ? "Saved" : "Save general config"}
         </button>
         <span className="text-xs text-faint">Local-first · on our roadmap</span>
+      </div>
+    </div>
+  );
+}
+
+function ProfileSettings() {
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/profile")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.profile) setProfile(d.profile);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const saveProfile = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || `Failed to save profile (${res.status})`);
+        return;
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="mt-8 rounded-xl border border-border bg-surface/50 p-6 text-sm text-muted">
+        Loading target roles & compensation profile...
+      </div>
+    );
+  }
+
+  const candidate = profile?.candidate || {};
+  const targetRoles = profile?.target_roles?.primary || [];
+  const comp = profile?.compensation || {};
+  const loc = profile?.location || {};
+
+  return (
+    <div className="mt-8 rounded-xl border border-border bg-surface/50 p-6 space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-muted">
+          Target Roles & Compensation Profile
+        </h2>
+        <p className="mt-1 text-xs text-faint">
+          Canonical source of truth in <code className="font-mono text-foreground font-semibold">config/profile.yml</code>. Used by evaluations and job scoring.
+        </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Full Name</label>
+          <input
+            type="text"
+            value={candidate.full_name || ""}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                candidate: { ...candidate, full_name: e.target.value },
+              })
+            }
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Headline / Target Title</label>
+          <input
+            type="text"
+            value={candidate.title || ""}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                candidate: { ...candidate, title: e.target.value },
+              })
+            }
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs font-medium text-muted mb-1">
+          Primary Target Roles (comma separated)
+        </label>
+        <input
+          type="text"
+          value={targetRoles.join(", ")}
+          onChange={(e) =>
+            setProfile({
+              ...profile,
+              target_roles: {
+                ...profile?.target_roles,
+                primary: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+              },
+            })
+          }
+          placeholder="Senior AI Engineer, Staff ML Engineer, Solutions Architect"
+          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Target Comp Range</label>
+          <input
+            type="text"
+            value={comp.target_range || ""}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                compensation: { ...comp, target_range: e.target.value },
+              })
+            }
+            placeholder="$160K-$200K"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Minimum Walk-away Comp</label>
+          <input
+            type="text"
+            value={comp.minimum || ""}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                compensation: { ...comp, minimum: e.target.value },
+              })
+            }
+            placeholder="$140K"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Currency</label>
+          <input
+            type="text"
+            value={comp.currency || "USD"}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                compensation: { ...comp, currency: e.target.value },
+              })
+            }
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Location Flexibility</label>
+          <input
+            type="text"
+            value={comp.location_flexibility || ""}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                compensation: { ...comp, location_flexibility: e.target.value },
+              })
+            }
+            placeholder="Remote preferred / Hybrid Austin"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-muted mb-1">Visa / Authorization</label>
+          <input
+            type="text"
+            value={loc.visa_status || ""}
+            onChange={(e) =>
+              setProfile({
+                ...profile,
+                location: { ...loc, visa_status: e.target.value },
+              })
+            }
+            placeholder="No sponsorship needed"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground outline-none focus:border-brand/50"
+          />
+        </div>
+      </div>
+
+      <div className="pt-2 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={saveProfile}
+            disabled={saving}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-200"
+          >
+            {saved ? <Check className="size-3.5" /> : null}
+            {saving ? "Saving..." : saved ? "Profile Saved!" : "Save Profile & Target Roles"}
+          </button>
+          {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
+        <span className="text-[11px] text-faint">Direct write to config/profile.yml</span>
       </div>
     </div>
   );

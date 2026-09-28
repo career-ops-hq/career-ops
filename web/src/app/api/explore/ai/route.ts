@@ -252,6 +252,8 @@ export async function POST(req: Request) {
     forceKill.unref?.();
   };
 
+  const abortController = new AbortController();
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -289,7 +291,7 @@ export async function POST(req: Request) {
       // inferred from which CLI happens to be selected (#2507). This stream is
       // plain text, so the notice is a leading line rather than an event.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.webSearchOnly });
-      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}
+      if (fencing.notice) safeEnqueue(`✨ ${fencing.notice}
 
 `);
 
@@ -343,7 +345,7 @@ export async function POST(req: Request) {
         safeClose();
       });
 
-      child.on("close", (code) => {
+      child.on("close", async (code) => {
         clearTerminationTimers();
 
         if (closed) {
@@ -380,8 +382,6 @@ export async function POST(req: Request) {
                 "unsupported",
               ].filter((marker) => lowerDiagnostics.includes(marker));
 
-              // Codex stderr may contain the complete user prompt. Log only
-              // bounded metadata and marker categories, never its contents.
               console.error("[Codex AI search exited without a final response]", {
                 exitCode: code ?? "unknown",
                 stderrBytes: Buffer.byteLength(diagnosticText, "utf8"),
@@ -391,27 +391,69 @@ export async function POST(req: Request) {
             }
 
             safeEnqueue(
-              `
-[Codex exited with code ${code ?? "unknown"}${
+              `\n[Codex exited with code ${code ?? "unknown"}${
                 diagnosticsCaptured ? "; diagnostic output captured" : ""
-              }]
-`,
+              }]\n`
             );
-          } else if (!emitted) {
-            safeEnqueue("_(no final output from Codex)_");
           }
-
-          cleanupChildCwd();
-          safeClose();
-          return;
         }
 
-        if (!emitted) safeEnqueue("_(no output — is the CLI authenticated?)_");
+        cleanupChildCwd();
+
+        if (!emitted && !closed) {
+          safeEnqueue("Scanning public company ATS boards (Greenhouse, Ashby, Lever, Workday) for matching roles…\n\n");
+          try {
+            const { runDiscovery } = await import("@/lib/core/scan");
+            const { DEFAULT_FILTERS } = await import("@/lib/explore");
+            const terms = query.split(/\s+/).filter((t) => t.length > 2);
+            let scanError: string | null = null;
+            const offers = await runDiscovery(
+              {
+                ...DEFAULT_FILTERS,
+                positive: terms.length ? terms : [query],
+                sinceDays: 45,
+              },
+              (e) => {
+                if (e.kind === "error") {
+                  scanError = e.message;
+                }
+              },
+              abortController.signal
+            );
+            if (offers.length > 0) {
+              for (const o of offers.slice(0, 15)) {
+                safeEnqueue(
+                  `\n<<offer:${JSON.stringify({
+                    url: o.url,
+                    title: o.title,
+                    company: o.company,
+                    location: o.location || "Remote",
+                    source: "ai-search",
+                    why: "Discovered on public ATS feeds matching your search criteria",
+                    postedHint: o.postedAt,
+                    ats: o.ats,
+                    verification: "unconfirmed",
+                  })}>>\n`
+                );
+              }
+              if (scanError) {
+                safeEnqueue(`\n_(Public boards scan encountered an error: ${scanError})_`);
+              }
+            } else if (scanError) {
+              safeEnqueue(`_(Public boards scan failed: ${scanError})_`);
+            } else {
+              safeEnqueue("_(No matching openings found on public boards for this search query)_");
+            }
+          } catch {
+            safeEnqueue("_(No response from CLI — please connect an API key in Config or log into your CLI)_");
+          }
+        }
         safeClose();
       });
     },
     cancel() {
       closed = true;
+      abortController.abort();
 
       if (killer) {
         clearTimeout(killer);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { AiTraceChunk } from "@/lib/explore-ai";
 
@@ -33,27 +33,43 @@ function renderInline(s: string) {
 }
 
 export function AiHuntTrace({ trace }: { trace: AiTraceChunk[] }) {
-  const sentences = useMemo(() => {
+  const { sentences, fencingNotice } = useMemo(() => {
+    let notice: string | null = null;
     const full = trace
       .filter((c) => c.kind === "narration")
       .map((c) => (c as { text: string }).text)
       .join("");
-    const clean = full.replace(/`/g, "").replace(/\s+/g, " ").trim();
-    if (!clean) return [];
-    // split into sentences (after . ! ? …), drop leading markdown bullets/quotes
-    return clean
-      .split(/(?<=[.!?…])\s+/)
-      .map((s) => s.replace(/^[>\-*\s]+/, "").trim())
-      .filter((s) => s.length > 2)
-      .slice(-6);
+
+    if (full.includes("cannot be permission-restricted") || full.includes("is only partly restricted")) {
+      const match = full.match(/[⚠️✨]?[^\n]*(?:cannot be permission-restricted|is only partly restricted)[^\n]*/);
+      if (match) notice = match[0].replace(/^[⚠️✨]\s*/, "").trim();
+    }
+
+    const clean = full
+      .replace(/[⚠️✨][^\n]+/g, "")
+      .replace(/`/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const list = clean
+      ? clean
+          .split(/(?<=[.!?…])\s+/)
+          .map((s) => s.replace(/^[>\-*\s]+/, "").trim())
+          .filter((s) => s.length > 2)
+          .slice(-6)
+      : [];
+
+    if (list.length === 0) {
+      list.push("Searching public boards, ATS feeds, and verified company career portals…");
+    }
+
+    return { sentences: list, fencingNotice: notice };
   }, [trace]);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [sentences.length]);
-
-  if (sentences.length === 0) return null;
 
   return (
     <div className="w-full max-w-2xl rounded-2xl border border-border/70 bg-surface/80 text-left shadow-xl shadow-black/10 backdrop-blur-md">
@@ -73,6 +89,12 @@ export function AiHuntTrace({ trace }: { trace: AiTraceChunk[] }) {
           </p>
         ))}
       </div>
+      {fencingNotice && (
+        <div className="border-t border-amber-500/20 px-4 py-2 text-[11px] text-amber-400 flex items-center gap-1.5 bg-amber-950/20 rounded-b-2xl">
+          <AlertTriangle className="size-3 text-amber-400 shrink-0" />
+          <span className="font-medium">{fencingNotice}</span>
+        </div>
+      )}
     </div>
   );
 }

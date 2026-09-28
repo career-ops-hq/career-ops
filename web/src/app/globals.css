@@ -11,7 +11,7 @@
   /* Near-black on the brand orange: 5.2:1 on brand, 8.3:1 on brand-200 hover
      (white was 3.14:1, an AA fail in BOTH themes since the button is the same).
      The brand orange itself is untouched — only what sits on top of it. */
-  --color-brand-foreground: hsl(24 30% 12%);
+  --color-brand-foreground: #ffffff;
   --color-brand-soft: hsl(26 73% 51% / 0.12);
   --color-brand-secondary: #fc7744;
 

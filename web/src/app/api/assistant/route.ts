@@ -186,7 +186,7 @@ export async function POST(req: Request) {
       // inferred from which CLI happens to be selected (#2507). This stream is
       // plain text, so the notice is a leading line rather than an event.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.networkReadOnly });
-      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}
+      if (fencing.notice) safeEnqueue(`✨ ${fencing.notice}
 
 `);
 
