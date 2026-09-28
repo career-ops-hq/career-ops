@@ -28,14 +28,21 @@ export async function GET() {
     return Response.json({ available: true, configured: false, companies: [] });
   }
 
-  const stdout = await new Promise<string>((resolve) => {
+  // Same class of fix as doctor/followups: use process.execPath (not bare
+  // "node"), windowsHide (not inherit a stale console on Windows), and surface
+  // a spawn failure as available:false instead of an empty result
+  const stdout = await new Promise<string | null>((resolve) => {
     execFile(
-      "node",
+      process.execPath,
       [verifyPortals],
-      { cwd: root, timeout: 110_000, maxBuffer: 4 * 1024 * 1024 },
-      (_e, out, err) => resolve((out || "") + (err || "")),
+      { cwd: root, timeout: 110_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+      (e, out) => resolve(e || !out ? null : out),
     );
   });
+
+  if (!stdout) {
+    return Response.json({ available: false, configured: false, companies: [] });
+  }
 
   const companies: { name: string; status: string; detail: string }[] = [];
   for (const line of stdout.split("\n")) {
