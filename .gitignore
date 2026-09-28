@@ -6,6 +6,9 @@ local/
 # placeholders are tracked (verify with `git ls-files data/`). A blanket rule
 # means a new generated file (e.g. a future log/cache addition) is covered
 # for every user automatically, with no per-filename .gitignore update needed.
+# Match the root entry itself as well as its contents: the user data root may
+# be a symlink to storage outside the checkout, which child globs cannot reach.
+/data
 data/*
 !data/.gitkeep
 !data/offers/
@@ -23,6 +26,7 @@ reports/*.md
 # re-append the original pattern as "missing".
 reports/**/*.md
 !reports/.gitkeep
+/output
 output/*
 !output/.gitkeep
 batch/logs/*
@@ -32,6 +36,10 @@ batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+# Worker scratch: prefetched JD text plus whatever compile cache the worker CLI
+# drops here. Fetched postings are user data — never stage them.
+batch/tmp/
+/jds
 jds/*
 !jds/.gitkeep
 
@@ -90,7 +98,7 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
-node_modules/
+node_modules
 bun.lock
 # Working copy the test suite makes under the repo root (test-all.mjs
 # `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a
@@ -107,6 +115,15 @@ reports/*-RESERVED.md
 # form, which for cv.md or portals.yml leaves a file holding the same PII as the
 # original sitting untracked in the repo root. Trailing `*` covers both.
 *.bak*
+
+# Atomic-write temp files, the sibling of the backups above and from the same
+# two writers: `.{name}.{pid}.{ts}.{uuid}.tmp` (tracker-utils.mjs
+# writeFileAtomic, web/src/lib/core/safe-write.ts atomicWrite). They exist only
+# between the write and the rename — but a rename that throws (Windows
+# destination-handle contention, ENOSPC, a read-only mount) leaves one behind
+# holding a byte-for-byte copy of cv.md / profile.yml / portals.yml, under a
+# name the `*.bak*` rule does not match. Same PII, same reflexive `git add .`.
+*.tmp*
 
 # The tracker and its follow-ups file in the LEGACY ROOT LAYOUT. resolveTrackerPath()
 # documents its own fallback chain — CAREER_OPS_TRACKER > <root>/data/applications.md
@@ -198,9 +215,11 @@ plan/
 
 # Profile intake sources (master CV / LinkedIn export / diplomas / references
 # — user PII, never commit). Ship only the system-owned scaffold. #1723
+/documents
 documents/*
 !documents/.gitkeep
 !documents/README.md
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+data/agent-inbox.md

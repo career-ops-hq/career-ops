@@ -75,9 +75,21 @@ try {
   const paths = parseUserLayerPaths(contract);
   pass(`parsed ${paths.length} user-layer paths from DATA_CONTRACT.md`);
 
-  const violations = trackedIgnoredUserLayerFiles(ROOT, paths);
+  // These are system-owned directory scaffolds, not user data. A root-level
+  // ignore rule must cover a same-named symlink as well as the real directory,
+  // which means Git also reports the already-tracked scaffolds as ignored.
+  // Keep this allowlist exact so real user files in the same paths still fail.
+  const trackedScaffolds = new Set([
+    'data/offers/.gitkeep',
+    'documents/.gitkeep',
+    'documents/README.md',
+    'jds/.gitkeep',
+    'output/.gitkeep',
+  ]);
+  const violations = trackedIgnoredUserLayerFiles(ROOT, paths)
+    .filter((path) => !trackedScaffolds.has(path));
   if (violations.length === 0) {
-    pass('no ignored User Layer file remains tracked');
+    pass('no ignored User Layer data file remains tracked (known scaffolds are exempt)');
   } else {
     for (const path of violations) {
       fail(`${path} is User Layer, git-ignored, and still tracked — remove it from the index`);
@@ -149,4 +161,53 @@ try {
   fail(`tracked User Layer regression fixture failed: ${error.message}`);
 } finally {
   rmSync(fixture, { recursive: true, force: true });
+}
+
+// Regression fixture: the supported route for a fork that runs the suite in CI
+// (#4128). The coverage guard needs `config/local-paths.txt` visible to CI, and
+// this guard forbids a User Layer file that is ignored AND tracked. Un-ignoring
+// it satisfies both — it is then tracked and NOT ignored — and that has to keep
+// being true, or the documented escape stops working without anything saying so.
+const forkFixture = mkdtempSync(join(tmpdir(), 'career-ops-fork-local-paths-'));
+try {
+  mkdirSync(join(forkFixture, 'config'));
+  writeFileSync(join(forkFixture, 'DATA_CONTRACT.md'), `# Data Contract
+
+## User Layer (NEVER auto-updated)
+
+| File | Purpose |
+|------|---------|
+| \`config/local-paths.txt\` | Fork-local declarations |
+
+## System Layer
+`);
+  writeFileSync(join(forkFixture, 'config', 'local-paths.txt'), 'nightly.mjs\n');
+  // The upstream rule, then the fork's negation — order matters to Git.
+  writeFileSync(join(forkFixture, '.gitignore'), 'config/local-paths.txt\n!config/local-paths.txt\n');
+
+  for (const args of [['init', '-q'], ['add', '.gitignore', 'DATA_CONTRACT.md', 'config/local-paths.txt']]) {
+    const result = spawnSync('git', args, { cwd: forkFixture, encoding: 'utf-8' });
+    if (result.status !== 0) throw new Error((result.stderr || `git ${args[0]} failed`).trim());
+  }
+
+  const forkPaths = parseUserLayerPaths(readFileSync(join(forkFixture, 'DATA_CONTRACT.md'), 'utf-8'));
+  const forkViolations = trackedIgnoredUserLayerFiles(forkFixture, forkPaths);
+  if (forkViolations.length === 0) {
+    pass('a fork that un-ignores config/local-paths.txt may commit it (#4128)');
+  } else {
+    fail(`negated local-paths fixture expected no violation, got: ${forkViolations.join(', ')}`);
+  }
+
+  // The control: without the negation the same commit IS the leak this guard is for.
+  writeFileSync(join(forkFixture, '.gitignore'), 'config/local-paths.txt\n');
+  const stillTracked = trackedIgnoredUserLayerFiles(forkFixture, forkPaths);
+  if (stillTracked.length === 1 && stillTracked[0] === 'config/local-paths.txt') {
+    pass('committing it while it stays ignored is still flagged (#4128 control)');
+  } else {
+    fail(`ignored-and-tracked control expected config/local-paths.txt, got: ${stillTracked.join(', ') || '(none)'}`);
+  }
+} catch (error) {
+  fail(`fork local-paths fixture failed: ${error.message}`);
+} finally {
+  rmSync(forkFixture, { recursive: true, force: true });
 }

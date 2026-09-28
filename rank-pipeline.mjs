@@ -62,6 +62,7 @@ export const CLI_CANDIDATES = [
   { bin: 'qwen', args: p => ['-p', p] },
   { bin: 'agy', args: p => ['-p', p] },
   { bin: 'grok', args: p => ['-p', p] },
+  { bin: 'pi', args: p => ['-p', p] },
 ];
 
 const USAGE = `

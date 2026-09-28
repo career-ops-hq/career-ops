@@ -20,3 +20,14 @@ export function pickSoleInstalled(clis) {
 export function pickDefaultInstalled(clis) {
   return (clis || []).find((c) => c && c.installed)?.id || null;
 }
+
+/**
+ * `id` when it is still an installed CLI, otherwise null.
+ *
+ * A saved id outlives the CLI it names: swap one install for another and the
+ * old id stays in localStorage, and every run against it 404s (#4012).
+ */
+export function keepIfInstalled(id, clis) {
+  if (!id) return null;
+  return (clis || []).some((c) => c && c.id === id && c.installed) ? id : null;
+}

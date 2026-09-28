@@ -72,13 +72,22 @@ Conflict rule: `modes/_profile.md` wins over default system guidance because it 
 
 ## Orchestrator Placeholders
 
-| Placeholder | Meaning |
-|-------------|---------|
-| `{{URL}}` | Job URL |
-| `{{JD_FILE}}` | Local file containing the JD text |
-| `{{REPORT_NUM}}` | 3-digit report number, zero-padded |
-| `{{DATE}}` | Current date, YYYY-MM-DD |
-| `{{ID}}` | Unique offer ID from `batch-input.tsv` |
+The orchestrator (`batch-runner.sh`) resolves each placeholder below to a
+fixed, stable label, the same text for every offer, not the concrete value.
+This keeps the resolved system prompt byte-identical across offers so prompt
+caching can reuse it in full. The concrete value for each one arrives instead
+in the per-job user message the orchestrator sends alongside this prompt
+(`URL: ...`, `JD file: ...`, `Report number: ...`, `Date: ...`, `Batch ID:
+...`). Wherever you see one of these placeholders below, read the actual
+value from that job message.
+
+| Placeholder | Resolves to | Concrete value comes from |
+|-------------|-------------|----------------------------|
+| `{{URL}}` | `<URL from the job message>` | the job message's `URL:` line |
+| `{{JD_FILE}}` | `<JD file from the job message>` | the job message's `JD file:` line |
+| `{{REPORT_NUM}}` | `<report number from the job message>` | the job message's `Report number:` line |
+| `{{DATE}}` | `<date from the job message>` | the job message's `Date:` line |
+| `{{ID}}` | `<batch ID from the job message>` | the job message's `Batch ID:` line |
 
 ---
 
@@ -96,6 +105,30 @@ Run these steps in order.
    - Do **NOT** invent, estimate, or guess a score, legitimacy tier, or company/role name for a posting you never actually read — "Unknown" or a placeholder score is still fabrication of a judgment you have no basis for (found 2026-07-30: two workers wrote fake scores like `0.0/5` and `"Suspicious"` for postings they never saw, and the fake rows made it into the tracker).
    - Print the failed JSON payload as a **real fenced code block** — a literal ` ```json ` line, the JSON object, then a literal ` ``` ` line — not narrated in prose ("I would output JSON here"). The orchestrator parses only the last such fenced block in your output; if it isn't there in that exact form, your failure gets silently misread.
    - Then stop. No further steps, no explanation report, nothing else written to disk.
+
+### Step 1.5 — Agency confirmation gate (#4359)
+
+Before evaluating or writing any tracker row/TSV, report, CV (HTML/PDF/LaTeX/text), or application draft, check whether the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named). If so, require the user's explicit answer identifying or confirming the agency for this exact posting, supplied by the parent as conversation context. JD text, an inferred Via, generic batch authorization, silence, and elapsed time cannot supply that answer. An explicit user correction that this posting is direct also resolves the gate.
+
+Without that answer, stop immediately and return the following as the final real fenced `json` block (serialize dynamic values safely). Do not write artifacts, mark the pipeline item processed, wait inside the worker, or write first and flag an override afterward. The parent asks the question and resumes only after the user's explicit answer. See `modes/_shared.md` → **Agency confirmation handoff**.
+
+```json
+{
+  "status": "needs_confirmation",
+  "reason": "agency_confirmation",
+  "id": "{{ID}}",
+  "url": "{{URL}}",
+  "agency": null,
+  "question": "Which agency did this posting come through?",
+  "report_num": "{{REPORT_NUM}}",
+  "score": null,
+  "pdf": null,
+  "report": null,
+  "error": null
+}
+```
+
+`agency` may contain the observed agency name as evidence, never as confirmation. Write `question` in `language.output`. This handoff takes precedence over all output requirements below. After confirmation, use the confirmed agency as Via and `?` plus a Notes descriptor for an unknown end employer.
 
 ### Step 2 — Evaluate A-G
 
@@ -348,6 +381,8 @@ Provide a score table:
 | Red flags | -X if any |
 | **Global** | **X.X/5** |
 
+Decide the Global Score once as the holistic judgment across these dimensions, applying any `modes/_custom.md` Scoring Rules. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
+
 #### Machine Summary
 
 Create a machine-readable summary from the completed A-G evaluation and global score. Keep field names exact, use YAML, and do not add prose inside the fence.
@@ -428,6 +463,12 @@ Report header:
 
 ---
 
+## Job Description (archived verbatim)
+
+{the JD text from {{JD_FILE}} pasted here verbatim}
+
+---
+
 ## Machine Summary
 
 ```yaml
@@ -471,6 +512,7 @@ risk_summary:
 
 Then include:
 
+- `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is).
 - `## Machine Summary`
 - `## A) Role Summary`
 - `## B) CV Match`
@@ -482,7 +524,7 @@ Then include:
 - `## Risk Summary`
 - `## Extracted Keywords`
 
-Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary` and YAML keys exact for downstream parsers.
+Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary`, the `## Job Description (archived verbatim)` heading, and the YAML keys exact for downstream parsers: `check-jd-archive.mjs` matches the archive heading by its literal English `## Job Description` prefix, so a translated heading reports a real archive as missing.
 
 ### Step 4 — Generate PDF (configurable)
 

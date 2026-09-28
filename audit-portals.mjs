@@ -46,6 +46,7 @@
  *   node audit-portals.mjs --baseline prev.json  # flag boards that lost postings
  *   node audit-portals.mjs --small-threshold 10  # what counts as a small board
  *   node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
+ *   node audit-portals.mjs --queries             # offline search-query drift advice
  *   node audit-portals.mjs --help
  *
  * Network: only main() and auditCompanies() hit the network, and every call
@@ -233,7 +234,7 @@ export async function auditCompanies(companies, {
       let result = { provider: providerId, scanMethod: entry.scan_method || null };
       if (providerId) {
         try {
-          const ctx = httpCtx || makeHttpCtx({ maxPages: AUDIT_MAX_PAGES });
+          const ctx = httpCtx || { ...makeHttpCtx(), maxPages: AUDIT_MAX_PAGES };
           result.jobs = (await resolved.provider.fetch(entry, ctx)) || [];
         } catch (err) {
           result.error = err?.message || String(err);
@@ -318,10 +319,45 @@ export function loadCompanies(filePath = DEFAULT_PORTALS_PATH) {
   return Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : [];
 }
 
+// This is lexical advice, not semantic validation: synonyms and another
+// language can legitimately share no words. Never rewrite a user's query.
+function queryWords(text) {
+  return String(text).normalize('NFKC').toLowerCase()
+    .match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}+#]*/gu) || [];
+}
+
+export function findStaleScanQueries(companies, positiveKeywords) {
+  const keywords = Array.isArray(positiveKeywords)
+    ? positiveKeywords.filter((v) => typeof v === 'string' && v.trim()) : [];
+  const targets = new Set(keywords.flatMap(queryWords));
+  if (!targets.size) return [];
+  const findings = [];
+  for (const company of Array.isArray(companies) ? companies : []) {
+    if (!company || company.enabled === false || company.scan_method !== 'websearch') continue;
+    // Follow scan.mjs's handoff precedence, but a careers URL alone isn't a query.
+    const query = company.scan_query || company.search_query;
+    if (typeof query !== 'string' || !query.trim()) continue;
+    const terms = query
+      .replace(/\bNOT\s+(?:"[^"]*"|\([^)]*\)|\S+)/g, ' ')
+      .replace(/(?:^|[\s(])-(?:"[^"]*"|\([^)]*\)|[^\s)]+)/g, ' ')
+      .replace(/\b(?:site|inurl|filetype):(?:"[^"]*"|\S+)/gi, ' ')
+      .replace(/https?:\/\/\S+/gi, ' ')
+      .replace(/\b(?:OR|AND|NOT)\b/g, ' ');
+    const words = queryWords(terms);
+    if (!words.length || words.some((word) => targets.has(word))) continue;
+    findings.push({
+      name: typeof company.name === 'string' ? company.name : '(unnamed)',
+      query,
+      detail: 'possibly stale — no positive-keyword overlap with current targeting',
+    });
+  }
+  return findings;
+}
+
 const ICON = { ok: '✅', small: '🟡', empty: '⚪', 'no-provider': '🚨', error: '❌' };
 
 const KNOWN_FLAGS = [
-  '--summary', '--json', '--strict', '--company', '--file',
+  '--summary', '--json', '--strict', '--queries', '--company', '--file',
   '--baseline', '--small-threshold', '--help', '-h',
 ];
 const VALUE_FLAGS = ['--company', '--file', '--baseline', '--small-threshold'];
@@ -335,15 +371,24 @@ const USAGE = `Usage:
   node audit-portals.mjs --baseline prev.json  # flag boards that lost postings
   node audit-portals.mjs --small-threshold 10  # what counts as a small board
   node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
+  node audit-portals.mjs --queries             # offline advisory; never rewrites queries
   node audit-portals.mjs --help                # print this usage block and exit`;
 
 async function main() {
   const args = process.argv.slice(2);
-  if (hasFlag(args, '--help') || hasFlag(args, '-h')) {
-    console.log(USAGE);
-    return;
-  }
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // validateFlags handles --help itself, and handles it LAST — after the
+  // unrecognized-flag and missing-operand checks. The manual pre-check that used
+  // to sit here inverted that order, which is the bug CodeRabbit caught on
+  // #2745/#2746: `--help --bogus` exited 0 having never looked at `--bogus`,
+  // and `--file --help` printed usage instead of reporting the missing operand.
+  //
+  // requireOperand: nothing here rejects a missing operand. A trailing `--file`
+  // fell back to the default portals.yml, a trailing `--company` audited every
+  // board instead of one, and a trailing `--baseline` skipped the comparison
+  // entirely — each of them silently, at exit 0, reporting on inputs nobody
+  // asked for. `--small-threshold` keeps its own SHAPE check below (a
+  // non-negative number); this only adds the presence check it lacked.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   const filePath = flagValue(args, '--file') || DEFAULT_PORTALS_PATH;
   const only = flagValue(args, '--company');
@@ -366,6 +411,20 @@ async function main() {
       console.error(`Error: no tracked company matches "${only}" in ${filePath}`);
       process.exit(1);
     }
+  }
+
+  if (hasFlag(args, '--queries')) {
+    const cfg = yaml.load(readFileSync(filePath, 'utf-8')) || {};
+    const warnings = findStaleScanQueries(companies, cfg.title_filter?.positive);
+    if (asJson) console.log(JSON.stringify({ warnings }, null, 2));
+    else {
+      console.log('Search-query drift advice (lexical overlap only; synonyms may differ):');
+      for (const warning of warnings) {
+        console.log(`  ${warning.name}: ${warning.detail}\n    ${warning.query}`);
+      }
+      console.log(`${warnings.length} query warning(s). Review manually; no files changed.`);
+    }
+    return; // advisory even with --strict; no providers loaded or network calls
   }
 
   const providers = await loadProviders(PROVIDERS_DIR);
