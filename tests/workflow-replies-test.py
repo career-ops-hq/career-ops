@@ -46,6 +46,13 @@ assert match({"from": "recruiter@example.com", "subject": "Your interview"}, [
 assert match({"subject": "PHP interview"}, [{"id": "1", "company": "HP", "role": "Engineer", "notes": ""}])["opportunity_id"] is None
 
 with tempfile.TemporaryDirectory() as temp:
+    unmatched = import_reply(Path(temp), {"message_id": "unmatched", "subject": "Unknown employer", "body_snippet": "Can we talk?"})
+    assert unmatched["match"]["signals"] == ["no-match"]
+    assert unmatched["suggested_status"] is None
+    assert view_reply(Path(temp), "unmatched")["message_id"] == "unmatched"
+    assert "requires an existing submitted application" in call(Path(temp), "confirm", "unmatched", "--opportunity", "404", "--status", "responded", "--reason", "Manual match", "--confirmed", ok=False)
+
+with tempfile.TemporaryDirectory() as temp:
     directory = Path(temp)
     assert call(directory, "view", "none") is None
     db = sqlite3.connect(directory / "opportunities.db")

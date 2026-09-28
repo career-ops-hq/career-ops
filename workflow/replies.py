@@ -290,6 +290,7 @@ def import_reply(directory: Path, message: dict) -> dict:
     if not (message.get("subject") or message.get("body_snippet")):
         raise ValueError("Reply subject or body is required")
     directory.mkdir(parents=True, exist_ok=True)
+    ApplicationStore(directory / "opportunities.db").close()
     db = sqlite3.connect(directory / "opportunities.db", timeout=5, isolation_level=None)
     db.row_factory = sqlite3.Row
     try:
@@ -308,9 +309,10 @@ def import_reply(directory: Path, message: dict) -> dict:
             _record_suggestion(directory, result)
             return result
         applications = []
+        has_opportunities = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opportunities'").fetchone()
         for row in db.execute("""SELECT o.id,o.company,o.role,e.payload FROM application_lifecycle l
                 JOIN opportunities o ON o.id=l.opportunity_id
-                JOIN application_events e ON e.id=(SELECT id FROM application_events WHERE opportunity_id=o.id AND to_status='applied' ORDER BY id LIMIT 1)"""):
+                JOIN application_events e ON e.id=(SELECT id FROM application_events WHERE opportunity_id=o.id AND to_status='applied' ORDER BY id LIMIT 1)""") if has_opportunities else []:
             payload = json.loads(row["payload"])
             followups = [json.loads(item["payload"]) for item in db.execute(
                 "SELECT payload FROM application_activity WHERE opportunity_id=? AND type='followup_sent'",
