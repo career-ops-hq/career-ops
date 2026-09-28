@@ -170,7 +170,15 @@ const _CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const _STATES_FILE = existsSync(join(_CODE_ROOT, 'templates/states.yml'))
   ? join(_CODE_ROOT, 'templates/states.yml')
   : join(_CODE_ROOT, 'states.yml');
-const _canonicalStates = loadCanonicalStates(_STATES_FILE);
+// A missing or unreadable states file is a broken install, not a reason to abort
+// the merge on a raw ENOENT. Say so once, then merge each status as written:
+// validateStatus() only rewrites to "Evaluated" when it has states to check.
+let _canonicalStates = [];
+try {
+  _canonicalStates = loadCanonicalStates(_STATES_FILE);
+} catch (err) {
+  console.warn(`⚠️  Cannot read canonical states (${err.message}): statuses are merged as written. Restore templates/states.yml, then run node normalize-statuses.mjs`);
+}
 const _aliasMap = Object.fromEntries(
   _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.label]))
 );
@@ -200,6 +208,10 @@ function validateStatus(status) {
 
   // DUPLICADO/Repost → Discarded
   if (/^(duplicado|dup|repost)/i.test(lower)) return 'Discarded';
+
+  // No states loaded (see above): keep the row's own status rather than record
+  // an "Evaluated" it never claimed.
+  if (!_canonicalStates.length && clean) return clean;
 
   console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
   return 'Evaluated';

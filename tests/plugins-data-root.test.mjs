@@ -17,6 +17,8 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\nplugins — data-root path resolution and buildSnapshot pipeline parser');
 
 const dir = mkdtempSync(join(tmpdir(), 'career-ops-plugins-'));
+// test-all runs this file in a shared process: restore, don't just delete.
+const prevRoot = process.env.CAREER_OPS_ROOT;
 try {
   // Set CAREER_OPS_ROOT BEFORE importing plugins.mjs. The module-level
   // constants DATA_ROOT / APPLICATIONS_PATH / PIPELINE_PATH are evaluated
@@ -78,6 +80,7 @@ try {
   }
 
 } finally {
-  delete process.env.CAREER_OPS_ROOT;
+  if (prevRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+  else process.env.CAREER_OPS_ROOT = prevRoot;
   rmSync(dir, { recursive: true, force: true });
 }
