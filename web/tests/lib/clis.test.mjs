@@ -80,3 +80,19 @@ test("prepareCliLaunch preserves the original command when no PowerShell shim ex
     args: ["-p", "hello"],
   });
 });
+
+test("prepareCliLaunch refuses a .cmd/.bat wrapper it cannot resolve instead of spawning it without a shell", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cli-"));
+  try {
+    // No adjacent .ps1 at all.
+    assert.throws(() => prepareCliLaunch(path.join(dir, "claude.cmd"), ["-p", "hello"], "win32"), /without a shell/);
+    // A .ps1 that cannot be read (here: a directory).
+    fs.mkdirSync(path.join(dir, "qwen.ps1"));
+    assert.throws(() => prepareCliLaunch(path.join(dir, "qwen.cmd"), ["-p", "hello"], "win32"), /without a shell/);
+    // A .ps1 whose target does not exist.
+    fs.writeFileSync(path.join(dir, "gemini.ps1"), '& "node$exe" "$basedir/node_modules/missing/cli.js" $args\n', "utf8");
+    assert.throws(() => prepareCliLaunch(path.join(dir, "gemini.bat"), ["-p", "hello"], "win32"), /without a shell/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

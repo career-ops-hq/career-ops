@@ -16,6 +16,7 @@ import path from "node:path";
  * @param {string[]} args
  * @param {string} [platform]
  * @returns {{ command: string, args: string[] }}
+ * @throws {Error} On Windows, for a .cmd/.bat/.ps1 wrapper it cannot resolve.
  */
 export function prepareCliLaunch(binPath, args, platform = process.platform) {
   if (platform !== "win32") return { command: binPath, args };
@@ -25,13 +26,24 @@ export function prepareCliLaunch(binPath, args, platform = process.platform) {
 
   const shimBase = ext ? binPath.slice(0, -ext.length) : binPath;
   const ps1Shim = `${shimBase}.ps1`;
-  if (!fs.existsSync(ps1Shim)) return { command: binPath, args };
+  // Nothing resolved. An extensionless path is handed back unchanged (spawn()
+  // may still find a .exe beside it), but a .cmd/.bat/.ps1 needs a shell, which
+  // is what this avoids: spawned as-is it only fails (EINVAL for .cmd/.bat), so
+  // refuse it with the reason instead.
+  const unresolved = () => {
+    if (!ext) return { command: binPath, args };
+    throw new Error(
+      `Cannot launch ${binPath} without a shell: no npm PowerShell shim beside it names the CLI's real .js or .exe. ` +
+        "Reinstall the CLI with npm, or put its native .exe on PATH.",
+    );
+  };
+  if (!fs.existsSync(ps1Shim)) return unresolved();
 
   let wrapper = "";
   try {
     wrapper = fs.readFileSync(ps1Shim, "utf8");
   } catch {
-    return { command: binPath, args };
+    return unresolved();
   }
 
   const targetMatches = wrapper.matchAll(/["']\$basedir[\\/]([^"']+)["']\s+\$args/g);
@@ -47,5 +59,5 @@ export function prepareCliLaunch(binPath, args, platform = process.platform) {
     }
   }
 
-  return { command: binPath, args };
+  return unresolved();
 }
