@@ -1326,6 +1326,63 @@ try {
     fail(`frame aggregation broke a frameless page object: ${JSON.stringify(legacyDouble)}`);
   }
 
+  // --- BambooHR reload retry -----------------------------------------------
+  // BambooHR's client bundle can crash mid-render and leave the page stuck on
+  // a bare loading spinner — the posting is untouched, but the page reads as
+  // insufficient_content (see BAMBOOHR_HOSTS in liveness-browser.mjs).
+  // This must never surface as `expired`, whether or not the retry succeeds.
+  // Synthetic — checkUrlLiveness never makes a real request in this test
+  // (goto/reload are faked below), so this only needs to be *shaped* like a
+  // bamboohr.com posting URL, not point at a real, permanently-live one.
+  const BAMBOO_URL = 'https://example-co.bamboohr.com/careers/1';
+  const bambooRetryPage = ({ reloadBodyText, reloadApplyControls = [] }) => {
+    let evalCall = 0;
+    return {
+      async goto() { return { status: () => 200 }; },
+      async waitForTimeout() {},
+      url() { return BAMBOO_URL; },
+      async evaluate() {
+        evalCall += 1;
+        // 1st/2nd calls: initial (empty) render. 3rd/4th: post-reload render.
+        if (evalCall === 1) return '';
+        if (evalCall === 2) return [];
+        if (evalCall === 3) return reloadBodyText;
+        return reloadApplyControls;
+      },
+      async reload() { return { status: () => 200 }; },
+    };
+  };
+
+  const bambooRecovered = await checkUrlLiveness(
+    bambooRetryPage({ reloadBodyText: 'Senior QA Automation Engineer. '.repeat(20), reloadApplyControls: ['Apply for This Job'] }),
+    BAMBOO_URL
+  );
+  if (bambooRecovered.result === 'active' && bambooRecovered.reason.includes('after BambooHR reload retry')) {
+    pass('a BambooHR render-race is cleared by a reload retry');
+  } else {
+    fail(`BambooHR reload retry did not recover a live posting: ${JSON.stringify(bambooRecovered)}`);
+  }
+
+  const bambooStillEmpty = await checkUrlLiveness(
+    bambooRetryPage({ reloadBodyText: '', reloadApplyControls: [] }),
+    BAMBOO_URL
+  );
+  if (bambooStillEmpty.result === 'uncertain' && bambooStillEmpty.code === 'bamboohr_render_retry_failed') {
+    pass('a BambooHR page still empty after reload is uncertain, never expired');
+  } else {
+    fail(`BambooHR retry-still-empty should be uncertain, not expired: ${JSON.stringify(bambooStillEmpty)}`);
+  }
+
+  let nonBambooReloadCalled = false;
+  const nonBambooPage = fakePage({ status: 200, finalUrl: URL, bodyText: '', applyControls: [] });
+  nonBambooPage.reload = async () => { nonBambooReloadCalled = true; return { status: () => 200 }; };
+  const nonBambooInsufficient = await checkUrlLiveness(nonBambooPage, URL);
+  if (nonBambooInsufficient.result === 'expired' && nonBambooInsufficient.code === 'insufficient_content' && !nonBambooReloadCalled) {
+    pass('the reload retry is scoped to BambooHR hosts only');
+  } else {
+    fail(`reload retry leaked to a non-BambooHR host: ${JSON.stringify(nonBambooInsufficient)}, reloadCalled=${nonBambooReloadCalled}`);
+  }
+
   if (isChallengeResult({ result: 'uncertain', code: 'bot_challenge' }) &&
       isChallengeResult({ result: 'uncertain', code: 'access_blocked' }) &&
       !isChallengeResult({ result: 'expired', code: 'http_gone' }) &&
