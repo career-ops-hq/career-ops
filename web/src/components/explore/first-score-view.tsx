@@ -173,7 +173,7 @@ export function FirstScoreView() {
                 close();
                 router.push("/pipeline?tab=EVALUATED");
               }}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:brightness-110"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110"
             >
               <FileText className="size-4" /> See the full report
             </button>

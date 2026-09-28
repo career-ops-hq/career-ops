@@ -6,6 +6,7 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
+import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
@@ -15,7 +16,8 @@ import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
+const norm = (s: string) => normalizeTextKey(s, " ");
 const CLI_NAMES: Record<string, string> = {
   claude: "Claude Code",
   codex: "Codex",
@@ -37,7 +39,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
   const scanNote =
     companiesScanned > 0
       ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
@@ -66,6 +68,15 @@ export function ExplorerView({
     if (ai !== null) {
       setMode("ai");
       setAiIntent(ai);
+    } else if (sp.get("view") === "fresh") {
+      // Today's "See all N" (#84) hands off here instead of a bare config form —
+      // load the SAME /api/whats-new offers it already showed, through the normal
+      // results-phase UI. The config form (Refine search / Re-cast) stays reachable.
+      // Force scan mode: a session restored in "ai" mode (sessionStorage rehydrate)
+      // must not show the AI-search UI for this scan-only hand-off.
+      setMode("scan");
+      initFilters(seed.filters);
+      void loadFresh();
     } else {
       initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
       // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
@@ -75,7 +86,7 @@ export function ExplorerView({
         void discover();
       }
     }
-  }, [seed.filters, initFilters, setMode, setAiIntent, discover]);
+  }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
   const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
   const enriched: EnrichedOffer[] = useMemo(
@@ -95,19 +106,26 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
-
-  const canDiscover = filters.ats.length > 0;
   const isResults = phase === "results";
+  const canDiscover = filters.ats.length > 0;
+  const scanRunning = running && !isAi;
+  // Keep one ResultsList mounted across scanning → revealing → results so
+  // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
+  const showScanList = !isAi && offers.length > 0 && (scanRunning || isResults);
+
+  if (running && isAi) return <AiHuntView cliName={cli.name} />;
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8">
+    <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
+      {scanRunning && <DiscoveringState />}
+      {!scanRunning && (
+        <>
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
             <Compass className="size-6 text-brand" />
             <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Explore</h1>
-            <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand">New</span>
+            <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-text">New</span>
           </div>
           <div className="w-full sm:ml-auto sm:w-auto">
             <ExploreModeToggle mode={mode} onChange={setMode} cliConfigured={!!cli.id} />
@@ -151,7 +169,7 @@ export function ExplorerView({
                 rerunLabel="Run the free Scan"
               />
             )}
-            {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discoverAI()} />}
+            {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discoverAI()} />}
           </div>
         )
       ) : (
@@ -190,8 +208,19 @@ export function ExplorerView({
           {isResults && capHit && (
             <CappedBanner companiesScanned={companiesScanned} companiesAvailable={companiesAvailable} onRefine={() => setRefineOpen(true)} />
           )}
-          {isResults && <ResultsList offers={enriched} />}
+        </>
+      )}
+      </>
+      )}
 
+      {showScanList && (
+        <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
+          <ResultsList offers={enriched} />
+        </div>
+      )}
+
+      {!scanRunning && !isAi && (
+        <>
           {phase === "empty-current" && (
             <EmptyState
               tone="good"
@@ -228,7 +257,7 @@ export function ExplorerView({
               partial={partial}
             />
           )}
-          {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discover()} />}
+          {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discover()} />}
         </>
       )}
     </div>
@@ -242,7 +271,7 @@ function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean;
         type="button"
         disabled={!canDiscover}
         onClick={onDiscover}
-        className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-brand-foreground shadow-sm transition-all hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
       >
         <Compass className="size-4" /> {label}
       </button>
@@ -329,10 +358,14 @@ function CappedBanner({ companiesScanned, companiesAvailable, onRefine }: { comp
   );
 }
 
-function FailedCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
-  // The scanner-missing 400 (data-only / pre-scan-ats-full checkout) must NOT
+function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMissing: boolean; onRetry: () => void }) {
+  // The scanner-missing case (data-only / pre-scan-ats-full checkout) must NOT
   // offer a "Try again" that re-fails forever — give a real next step instead.
-  const scannerMissing = /isn'?t available|data only|complete career-ops checkout|scanner/i.test(msg);
+  // The caller decides this from the response body's SCANNER_MISSING code, never
+  // from the error text and never from the bare 400: a runtime scan error ("The
+  // scanner returned no readable output.") mentions the scanner too, and 400 is
+  // a shared channel that also carries malformed-request and MODE_MISSING
+  // failures. Neither may be misreported as a broken checkout.
   if (scannerMissing) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
@@ -345,7 +378,7 @@ function FailedCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
           update career-ops, or paste a job URL on the pipeline to evaluate it directly.
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110">
+          <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
             Open pipeline
           </Link>
           <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand">
@@ -377,7 +410,7 @@ function BlockedCard() {
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
         Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.
       </p>
-      <Link href="/config" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110">
+      <Link href="/config" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
         <Settings className="size-4" /> Open Config
       </Link>
     </div>

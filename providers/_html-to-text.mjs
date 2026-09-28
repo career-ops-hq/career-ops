@@ -41,8 +41,15 @@ export function htmlToText(content) {
   if (typeof content !== 'string' || !content) return '';
   // Strip literal markup before decoding: quote entities inside a quoted
   // attribute are data, and decoding them first would turn them into false
-  // delimiters. The second strip handles entity-escaped tags revealed by the
-  // first decode; the final decode retains the existing double-decode behavior.
+  // delimiters. Each decode is followed by a strip so double-encoded active
+  // markup cannot become the final plain-text output. A final incomplete tag
+  // opener has no closing `>` for stripMarkup() to consume, so drop only its
+  // leading angle bracket; this keeps the text visible while making it inert.
   const decoded = decodeEntities(stripMarkup(content));
-  return decodeEntities(stripMarkup(decoded)).replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_CAP);
+  const decodedTwice = decodeEntities(stripMarkup(decoded));
+  return stripMarkup(decodedTwice)
+    .replace(/<(?=\/?[a-z!?])/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, DESCRIPTION_CAP);
 }

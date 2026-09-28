@@ -7,6 +7,7 @@ import { CoMark } from "@/components/co-mark";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BackToTop } from "@/components/back-to-top";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
 import { ApplyProvider } from "@/components/apply/apply-provider";
@@ -44,14 +45,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className={cn(
                     "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
                     active
-                      ? "bg-brand-soft text-brand"
+                      ? "bg-brand-soft text-brand-text"
                       : "text-muted hover:bg-surface-hover hover:text-foreground",
                   )}
                 >
                   <Icon className="size-4" />
                   {label}
                   {chip && (
-                    <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand">
+                    <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
                       {chip}
                     </span>
                   )}
@@ -62,16 +63,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <WorkerPills />
 
-          <div className="mt-auto space-y-3 pt-4">
+          <div className="mt-auto space-y-3 pb-16 pt-4">
             <UsageMeter />
-            <div className="flex items-center justify-between px-1">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              <ThemeToggle />
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
+                <span className="font-mono text-[10px] text-faint">THEME</span>
+              </div>
+              <ThemeToggle showLabel />
+              <div className="px-1">
+                <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              </div>
             </div>
           </div>
         </aside>
         <main className="flex-1 overflow-x-hidden">{children}</main>
         <AssistantConsole />
+        <BackToTop />
         <FirstScoreView />
         <BetaBanner />
       </div>

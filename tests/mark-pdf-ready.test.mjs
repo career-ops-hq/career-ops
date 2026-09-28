@@ -9,7 +9,7 @@
 // Auto-discovered by test-all.mjs (tests/**/*.test.mjs, #1440) — imported
 // in-process alongside every other discovered suite, so this file must NEVER
 // exit the process itself; only pass()/fail() from ./helpers.mjs.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, directoryDenyBinds } from './helpers.mjs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'fs';
@@ -405,6 +405,10 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
 {
   if (process.platform !== 'win32' && process.getuid?.() === 0) {
     pass('write-failure: skipped (running as root — directory permissions are not enforced)');
+  } else if (process.platform === 'win32' && !directoryDenyBinds()) {
+    // Same escape hatch as root above. This suite mirrors set-status-tests.mjs's
+    // write-failure test, and mirrored its Windows blind spot with it (#3423).
+    pass('write-failure: skipped (an icacls write-deny does not bind this token - elevated shell)');
   } else {
     // Given the tracker's directory is readable but not writable
     const dir = mkdtempSync(join(tmpdir(), 'co-markpdf-wf-'));

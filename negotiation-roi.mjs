@@ -54,7 +54,7 @@
  *      node negotiation-roi.mjs --wage 45 --occurrences 52       (direct annual count)
  *      node negotiation-roi.mjs --self-test
  *
- * Issue #2949 — github.com/santifer/career-ops
+ * Issue #2949 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';

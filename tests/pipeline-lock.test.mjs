@@ -22,12 +22,17 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
   lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
+  createLockWaitPolicy,
 } from '../pipeline-lock.mjs';
+import { collectMjsFiles } from '../lib/mjs-files.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SELF = fileURLToPath(import.meta.url);
+const REPO_ROOT = dirname(dirname(SELF));
 
 // Occupies `lockDir` continuously while handing it to a fresh owner every
 // `everyMs`, the way a queue of short writers does. The swap runs inside one
@@ -593,6 +598,306 @@ test('release(): a holder whose lock was reclaimed by another process must not d
     const owner = JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
     assert.equal(owner.token, 'a-different-owners-token');
     rmSync(lockDir, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The wait ceiling belongs to the policy, not to each caller (#3895)
+// ---------------------------------------------------------------------------
+//
+// createLockWaitPolicy clamps the jittered retry against a ceiling, but the
+// ceiling itself used to arrive from outside: three lock modules each wrote
+// `hardDeadline: Date.now() + timeoutMs * 10` at their own call site. Copies of
+// an invariant stay correct only until one is edited, and NOTHING FAILED when
+// they diverged — a wrong ceiling changes retry timing, which no test asserted
+// and no user reports. These are the assertions that make that divergence
+// detectable, so moving the clamp inside the policy is a fix rather than a
+// relocation of a silent invariant.
+
+test('createLockWaitPolicy: the wait ceiling is the policy\'s own, so a caller need not supply one (#3895)', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    // retryMs far above the ceiling, so the jittered retry never wins the
+    // Math.min and backoffMs() reports the remaining ceiling itself. The
+    // per-holder deadline is pushed out past the ceiling for the same reason:
+    // backoffMs() is clamped by both, and this test reads the ceiling through
+    // it, so the other clamp has to stay out of the way.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 200, retryMs: 1_000_000, deadline: Date.now() + 60_000,
+    });
+
+    const remaining = policy.backoffMs();
+    assert.ok(
+      Number.isFinite(remaining),
+      `backoffMs() returned ${remaining}: with no ceiling the clamp is Math.min(x, NaN) === NaN, `
+      + 'and setTimeout(NaN) fires immediately — the retry loop spins hot instead of waiting',
+    );
+    // 2000ms is the 10x multiple of timeoutMs each of the three lock modules
+    // used to write out for itself. A literal on purpose: a test that reads the
+    // constant back out of the module cannot notice that constant moving.
+    assert.ok(
+      Math.abs(remaining - 2_000) <= 100,
+      `default ceiling is ~${remaining}ms away, expected ~2000ms (10 x timeoutMs)`,
+    );
+    assert.equal(policy.ceilingReached(), false, 'the ceiling cannot already be reached at t=0');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createLockWaitPolicy: the policy-supplied ceiling actually expires, so waiting stays bounded (#3895)', async () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 5, retryMs: 1, deadline: Date.now() + 5,
+    });
+
+    await sleep(120); // well past 10 x 5ms, so this is not a race against the clock
+
+    assert.equal(
+      policy.ceilingReached(), true,
+      'ceilingReached() never fires without a ceiling (Date.now() > undefined is always false), '
+      + 'so a caller waits unboundedly on a lock that never frees',
+    );
+    assert.equal(policy.backoffMs(), 0, 'past the ceiling there is nothing left to sleep');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not silently turned into NaN (#3895)', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const timing = { timeoutMs: 100, retryMs: 10, deadline: Date.now() + 100 };
+
+    for (const bad of ['in a bit', NaN, {}]) {
+      assert.throws(
+        () => createLockWaitPolicy(lockDir, { ...timing, hardDeadline: bad }),
+        /hardDeadline/,
+        `hardDeadline: ${String(bad)} must be refused — as a ceiling it silently becomes NaN, `
+        + 'and a NaN backoff is a hot spin rather than an error anyone can see',
+      );
+    }
+
+    // null is "nothing supplied", the same as omitting the key, so it takes the
+    // policy default rather than throwing. Pinned because `??` is what draws
+    // that line, and a later switch to `||` or a truthiness test would move it.
+    const viaNull = createLockWaitPolicy(lockDir, { ...timing, hardDeadline: null });
+    assert.ok(Number.isFinite(viaNull.backoffMs()), 'a null ceiling means "use the default", not NaN');
+
+    // Infinity is a legitimate, explicit "no ceiling": acquirePipelineLock
+    // passes it for maxWaitMs: Infinity. The check must not swallow it.
+    const unbounded = createLockWaitPolicy(lockDir, { ...timing, hardDeadline: Infinity });
+    assert.ok(unbounded.backoffMs() > 0, 'an unbounded ceiling still yields a real jittered retry');
+    assert.equal(unbounded.ceilingReached(), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
+  const policyModule = join(REPO_ROOT, 'pipeline-lock.mjs');
+  const sources = collectMjsFiles(REPO_ROOT).filter((f) => f !== SELF && f !== policyModule);
+
+  // A guard that cannot look must never pass: an empty or tiny scan means the
+  // walk failed, not that the repository is clean.
+  assert.ok(
+    sources.length > 100,
+    `only ${sources.length} .mjs files scanned — this guard could not inspect the tree`,
+  );
+
+  // Comments are stripped first: naming the parameter while explaining why it
+  // is NOT passed is exactly what the three call sites now do, and a guard that
+  // fires on prose gets silenced rather than obeyed.
+  const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+  const offenders = sources
+    .filter((f) => withoutComments(readFileSync(f, 'utf-8')).includes('hardDeadline'))
+    .map((f) => f.slice(REPO_ROOT.length + 1).replace(/\\/g, '/'));
+
+  assert.deepEqual(
+    offenders, [],
+    'these modules name hardDeadline themselves, which means they are bounding the wait '
+    + 'instead of letting createLockWaitPolicy do it — the duplicated invariant #3895 removed. '
+    + 'A ceiling belongs to the policy; a copy of it stays correct only until someone edits one side',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The backoff is clamped to the per-holder window too, not only to the ceiling
+// ---------------------------------------------------------------------------
+//
+// backoffMs() clamped the jittered retry against the ceiling alone, so a sleep
+// could run straight past the per-holder deadline. That deadline is the only
+// thing holderStillWedged() can fire on, and it is only ever checked at the top
+// of the loop, so a caller's timeoutMs was observed at whatever instant the
+// sleep happened to end. With retryMs above timeoutMs the overshoot is the
+// whole retry: a 150ms timeout waited five seconds.
+
+test('createLockWaitPolicy: the backoff never sleeps past the per-holder deadline', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const now = Date.now();
+    // retryMs far above timeoutMs, and a ceiling far above both, so the only
+    // bound that can produce a correct answer here is the per-holder window.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 100, retryMs: 5_000, deadline: now + 100, hardDeadline: now + 30_000,
+    });
+
+    const slept = policy.backoffMs();
+    assert.ok(
+      slept <= 150,
+      `backoffMs() returned ${Math.round(slept)}ms against a 100ms per-holder window: the caller `
+      + 'wakes long after the deadline its timeout is measured against, so timeoutMs is enforced '
+      + 'at whatever moment the sleep ends',
+    );
+
+    // The same read taken LATE in the window, which is where every retry after
+    // the first takes it. The bound is the time actually remaining, so the
+    // clamp has to keep tightening as the window drains. A clamp that floors
+    // at some fraction of timeoutMs satisfies the t=0 read above and still
+    // sleeps the caller past the deadline on every later pass.
+    const lateNow = Date.now();
+    const late = createLockWaitPolicy(lockDir, {
+      timeoutMs: 1_000, retryMs: 5_000, deadline: lateNow + 40, hardDeadline: lateNow + 60_000,
+    });
+
+    // Bound it by the time the window ACTUALLY has left, read immediately
+    // before the call. A fixed midpoint of 250ms separates a remaining-window
+    // clamp from a half-of-timeoutMs floor (500ms), but it still passes a
+    // clamp that returns 200ms with 40ms left — the same overshoot one order
+    // down, and invisible to the assertion meant to catch it.
+    //
+    // The tight bound is derivable rather than empirical. backoffMs() returns
+    // min(jitter, ceiling - now, perHolderDeadline - now) read at call time,
+    // and that read happens no earlier than `beforeCall`, so the result can
+    // never exceed windowLeft. The 5ms slack covers Date.now() granularity
+    // only; a 200ms answer misses it by 40x.
+    const lateDeadline = lateNow + 40;
+    const beforeCall = Date.now();
+    const lateSleep = late.backoffMs();
+    const windowLeft = Math.max(0, lateDeadline - beforeCall);
+    assert.ok(
+      lateSleep <= windowLeft + 5,
+      `backoffMs() returned ${Math.round(lateSleep)}ms with ${windowLeft}ms left of a 1000ms `
+      + 'per-holder window: the clamp stopped tracking the time left, so the caller overshoots '
+      + 'its own deadline on every retry but the first',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('acquirePipelineLock: a caller gives up near its timeoutMs even when retryMs is larger', async () => {
+  const root = fixtureRoot();
+  try {
+    const p = join(root, 'data', 'pipeline.md');
+    // maxWaitMs is set high on purpose. The ceiling would otherwise cap the
+    // overshoot at 10 x timeoutMs and hide how far past its own deadline the
+    // waiter sleeps.
+    const timing = { timeoutMs: 150, retryMs: 5_000, maxWaitMs: 30_000 };
+    const held = await acquirePipelineLock(p, timing);
+    try {
+      // What the policy ASKS the timer for, recorded rather than timed. A
+      // stopwatch around this call measures the runner as much as the clamp,
+      // and this suite already has a slow-runner flake (#4017). The real
+      // acquirePipelineLock() path is untouched: the wrapper hands every call
+      // straight to the timer it replaced.
+      const requestedDelays = [];
+      const realSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        requestedDelays.push(delay);
+        return realSetTimeout(callback, delay, ...args);
+      };
+      try {
+        await assert.rejects(() => acquirePipelineLock(p, timing), (err) => err instanceof LockTimeoutError);
+      } finally {
+        globalThis.setTimeout = realSetTimeout;
+      }
+
+      // A clamped waiter sleeps the time its window has left, which is at most
+      // timeoutMs. An unclamped one asks for the whole jittered retry, 2500ms
+      // at its floor here, so one overshooting delay is the bug itself.
+      const sleeps = requestedDelays.filter((ms) => typeof ms === 'number' && ms > 0);
+      assert.ok(
+        sleeps.length > 0,
+        'no retry delay was recorded, so this assertion proves nothing about the clamp',
+      );
+      assert.deepEqual(
+        sleeps.filter((ms) => ms > timing.timeoutMs).map((ms) => Math.round(ms)), [],
+        `retry delays ${JSON.stringify(sleeps.map((ms) => Math.round(ms)))} against a `
+        + `${timing.timeoutMs}ms per-holder window: a backoff carries the caller past its own `
+        + 'deadline, and the loop only decides after the sleep returns',
+      );
+    } finally {
+      held.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// The clamp is the RE-ARMED window, so it cannot collapse into a busy-wait
+// ---------------------------------------------------------------------------
+//
+// holderStillWedged() re-arms perHolderDeadline whenever the lock changes
+// hands. It runs immediately before every backoffMs() on both sleep paths.
+// Clamping to the `deadline` parameter looks identical at t=0. It diverges on
+// the first handoff: that bound has already passed, so every later sleep
+// floors at 0. The loop still runs to the ceiling, now spinning at the
+// setTimeout floor and re-racing every waiter at once. That's the thundering
+// herd the jitter above exists to prevent. So the two clamps have to be told
+// apart, and only the re-armed one keeps the jitter alive.
+//
+// No timers here, and no elapsed-time reads. The sequence is computed
+// synchronously, and a frozen clamp yields exactly 0 every round.
+
+test('createLockWaitPolicy: a re-armed per-holder window still sleeps a full jittered retry', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    mkdirSync(lockDir, { recursive: true });
+    // One handoff, stamped the way churnLock() stamps them. A fresh token is
+    // all lockFingerprint() needs to read the lock as having moved.
+    const handOff = (n) => writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: `handoff-${n}`, started_at: new Date().toISOString(),
+    }), 'utf-8');
+    handOff(0);
+
+    const now = Date.now();
+    // The window opens already spent, so the handoff is what the first
+    // holderStillWedged() decides on. timeoutMs dwarfs retryMs and the ceiling
+    // sits far out, leaving the jitter alone to set every sleep.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 60_000, retryMs: 80, deadline: now - 1, hardDeadline: now + 600_000,
+    });
+    policy.noteWaiting();
+
+    const sleeps = [];
+    for (let round = 1; round <= 5; round += 1) {
+      handOff(round);
+      assert.equal(
+        policy.holderStillWedged(), false,
+        `round ${round}: the lock changed hands, so this is progress and the window re-arms`,
+      );
+      sleeps.push(policy.backoffMs());
+    }
+
+    // 40ms is the jitter floor itself, retryMs * 0.5, so the bound is exact.
+    // A clamp to the frozen `deadline` reports 0.
+    assert.ok(
+      sleeps.every((ms) => ms >= 40),
+      `backoff sequence [${sleeps.map((ms) => Math.round(ms)).join(', ')}] across five handoffs. `
+      + 'A re-armed window still owes the caller a real jittered retry. A sleep of 0 is the '
+      + 'busy-wait a clamp against the frozen deadline would produce.',
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

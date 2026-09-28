@@ -115,6 +115,24 @@ func TestPDFKeyOpensNewestForMultipleMatches(t *testing.T) {
 	}
 }
 
+func TestPDFKeyDoesNotOpenCompanyPrefixMatch(t *testing.T) {
+	root := t.TempDir()
+	writePDFFixture(t, root, "output/cv-jane-doe-metabase-2026-06-05.pdf")
+	apps := []model.CareerApplication{
+		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+	}
+
+	pm := newPDFTestModel(t, root, apps)
+	updated, cmd := pm.Update(keyMsg("d"))
+
+	if cmd != nil {
+		t.Fatalf("expected no open command for Metabase's PDF, got %#v", cmd())
+	}
+	if updated.flash == "" {
+		t.Fatal("expected a no-PDF flash for the Meta application")
+	}
+}
+
 func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
 	root := t.TempDir()
 	apps := []model.CareerApplication{
@@ -129,6 +147,32 @@ func TestRegenerateKeyFlashesWithoutManifestEntry(t *testing.T) {
 	}
 	if updated.flash == "" {
 		t.Fatal("expected a flash notice without a manifest entry")
+	}
+}
+
+func TestRegenerateKeyDoesNotUseCompanyPrefixMatch(t *testing.T) {
+	root := t.TempDir()
+	pdfPath := "output/cv-jane-doe-metabase-2026-06-05.pdf"
+	htmlPath := "output/cv-jane-doe-metabase-2026-06-05.html"
+	writePDFFixture(t, root, pdfPath)
+	writePDFFixture(t, root, htmlPath)
+	writePDFFixture(t, root, "data/pdf-index.tsv")
+	manifest := "\t" + pdfPath + "\t" + htmlPath + "\tletter\t2026-06-05\n"
+	if err := os.WriteFile(filepath.Join(root, "data", "pdf-index.tsv"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	apps := []model.CareerApplication{
+		{Company: "Meta", Role: "Engineer", Status: "Evaluated", Score: 4.0},
+	}
+
+	pm := newPDFTestModel(t, root, apps)
+	updated, cmd := pm.Update(keyMsg("D"))
+
+	if cmd != nil {
+		t.Fatalf("expected no regeneration command for Metabase's artifacts, got %#v", cmd())
+	}
+	if updated.flash == "" {
+		t.Fatal("expected a no-source flash for the Meta application")
 	}
 }
 

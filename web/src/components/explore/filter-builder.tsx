@@ -22,17 +22,20 @@ html.dark .co-fb__chip.inc{color:hsl(26 86% 70%);background:hsl(26 80% 55% / .14
 .co-fb__field{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-height:2.6rem;padding:.45rem .55rem;border-radius:.7rem}
 .co-fb__field input{flex:1;min-width:7rem;background:transparent;border:none;outline:none;font-size:13.5px;color:inherit}
 .co-fb__field input::placeholder{color:var(--co-faint,hsl(0 0% 60%))}
+@media (max-width:639px){.co-fb__chip button{min-width:44px;min-height:44px;justify-content:center}.co-fb__chip{min-height:44px}.co-fb__field{min-height:44px}.co-fb__field input{min-height:32px}}
 `;
 
 function KeywordField({
   values,
   tone,
   placeholder,
+  ariaLabel,
   onChange,
 }: {
   values: string[];
   tone: "inc" | "exc";
   placeholder: string;
+  ariaLabel?: string;
   onChange: (v: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -57,6 +60,7 @@ function KeywordField({
         </span>
       ))}
       <input
+        aria-label={ariaLabel}
         value={draft}
         onChange={(e) => {
           const val = e.target.value;
@@ -90,9 +94,9 @@ function KeywordField({
 
 function Label({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
-    <div className="mb-1.5 flex items-baseline justify-between">
+    <div className="mb-1.5 flex items-baseline justify-between gap-4">
       <span className="text-[13px] font-medium text-foreground">{children}</span>
-      {hint && <span className="text-[11px] text-faint">{hint}</span>}
+      {hint && <span className="ml-4 text-right text-[11px] text-faint">{hint}</span>}
     </div>
   );
 }
@@ -131,8 +135,23 @@ export function FilterBuilder({
         <KeywordField values={filters.negative} tone="exc" placeholder="manager, sales, contract…" onChange={(v) => set({ negative: v })} />
       </div>
 
+      <div>
+        <Label hint="matches any city, region, country, or Remote">
+          <span className="inline-flex items-center gap-1.5">
+            <MapPin className="size-3.5 text-muted" /> City or location
+          </span>
+        </Label>
+        <KeywordField
+          values={filters.allow}
+          tone="inc"
+          placeholder="Toronto, New York, Remote…"
+          ariaLabel="City or location"
+          onChange={(v) => set({ allow: v })}
+        />
+      </div>
+
       <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
-        <div>
+        <div className="min-w-[18rem]">
           <Label hint="postings published in this window">
             <span className="inline-flex items-center gap-1.5">
               <Clock className="size-3.5 text-muted" /> Posted within
@@ -145,7 +164,7 @@ export function FilterBuilder({
                 type="button"
                 onClick={() => set({ sinceDays: r.days })}
                 className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                   filters.sinceDays === r.days ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
                 )}
               >
@@ -166,7 +185,7 @@ export function FilterBuilder({
                   type="button"
                   onClick={() => toggleAts(a)}
                   className={cn(
-                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                     on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
                   )}
                 >
@@ -181,31 +200,28 @@ export function FilterBuilder({
       <button
         type="button"
         onClick={() => setAdvanced((v) => !v)}
-        className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors"
+        className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors max-sm:min-h-[44px]"
       >
         <SlidersHorizontal className="size-3.5" />
-        Location &amp; scope
+        More location controls &amp; scan depth
         <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
       </button>
 
       {advanced && (
         <div className="space-y-3 rounded-xl border border-border bg-surface/30 p-3">
-          <div className="flex items-center gap-1.5 text-[12px] text-muted">
-            <MapPin className="size-3.5" /> Location
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label hint="rescues multi-loc posts">Always include</Label>
-              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="London…" onChange={(v) => set({ alwaysAllow: v })} />
+              <Label hint="rescues a multi-location posting">Always include</Label>
+              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="Toronto…" onChange={(v) => set({ alwaysAllow: v })} />
             </div>
             <div>
-              <Label>Only in</Label>
-              <KeywordField values={filters.allow} tone="inc" placeholder="Remote, EMEA…" onChange={(v) => set({ allow: v })} />
-            </div>
-            <div>
-              <Label>Never in</Label>
+              <Label hint="unless Always include also matches">Exclude locations</Label>
               <KeywordField values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
             </div>
+          </div>
+          <div>
+            <Label hint="hard reject — overrides Always include">Never include</Label>
+            <KeywordField values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
           </div>
           <div>
             <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>

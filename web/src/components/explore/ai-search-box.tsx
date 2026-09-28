@@ -84,7 +84,7 @@ export function AiSearchBox({
             type="button"
             disabled={!intent.trim()}
             onClick={onSubmit}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-110 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50"
           >
             Search the open web
             <CostBadge kind="spend" size="xs" />

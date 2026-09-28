@@ -76,7 +76,7 @@ export function TriageRow({
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
           {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
-          {!evaluated && <span className="italic text-faint/80">not scored</span>}
+          {!evaluated && <span className="italic text-muted">not scored</span>}
         </p>
       </div>
 

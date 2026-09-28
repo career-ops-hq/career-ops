@@ -39,8 +39,21 @@ function resolveApiUrl(entry) {
   }
   const url = entry.careers_url || '';
   const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
-  if (match) return `https://boards-api.greenhouse.io/v1/boards/${match[1]}/jobs`;
-  return null;
+  let slug = match ? match[1] : null;
+  // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
+  // The path segment is literally "embed", which resolves to a nonexistent
+  // board and 404s — the token is the only usable slug.
+  if (!slug || slug === 'embed') {
+    try {
+      // Only a Greenhouse URL names a board in ?for=: on any other site the param
+      // is unrelated (example.com/jobs?for=stripe) and must not select a board.
+      slug = new URL(assertGreenhouseUrl(url)).searchParams.get('for');
+    } catch {
+      // unparseable, non-HTTPS or non-Greenhouse URL: no board to read
+    }
+  }
+  if (!slug || slug === 'embed') return null;
+  return `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`;
 }
 
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
@@ -196,7 +209,14 @@ export default {
       let location = j.location?.name || '';
       if (officeMap && isWorkModelOnly(location)) {
         const offices = officeMap.get(j.id);
-        if (offices && offices.size > 0) location = [location, ...offices].join(' · ');
+        // Sorted, not in /offices traversal order. The set is built by walking
+        // the office tree, so the order is Greenhouse's, and it is not promised
+        // to be stable between responses. Unsorted, a board that re-orders its
+        // offices rewrites this string, which changes the posting's location
+        // dedupe key (scan.mjs `normalizeLocationForDedup`) and the row already
+        // written to scan-history.tsv — so a posting nothing changed about
+        // reads as new. Sorting costs nothing and removes the dependency.
+        if (offices && offices.size > 0) location = [location, ...[...offices].sort()].join(' · ');
       }
       const description = contentToText(j.content);
       return {

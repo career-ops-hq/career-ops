@@ -105,7 +105,7 @@ export function MobileNav() {
       <style>{STYLE}</style>
 
       <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
-        <Link href="/" className="flex items-center gap-2" aria-label="career-ops home">
+        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="career-ops home">
           <CoMark size={26} />
           <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
         </Link>
@@ -160,13 +160,13 @@ export function MobileNav() {
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-3 text-[15px] transition-colors",
-                  active ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-hover hover:text-foreground",
+                  active ? "bg-brand-soft text-brand-text" : "text-muted hover:bg-surface-hover hover:text-foreground",
                 )}
               >
                 <Icon className="size-5" />
                 {label}
                 {chip && (
-                  <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand">
+                  <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
                     {chip}
                   </span>
                 )}
@@ -181,9 +181,12 @@ export function MobileNav() {
 
         <div className="co-msafe mt-auto space-y-3 border-t border-border px-4 pt-4">
           <UsageMeter />
-          <div className="flex items-center justify-between">
-            <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-            <ThemeToggle />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className="font-mono text-[10px] text-faint">THEME</span>
+            </div>
+            <ThemeToggle showLabel className="bg-surface-hover/40" />
           </div>
         </div>
       </aside>

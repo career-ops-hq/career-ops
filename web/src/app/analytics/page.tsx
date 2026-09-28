@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { pipelineSummary } from "@/lib/career-ops";
 import { canonStatus, scoreNum } from "@/lib/format";
+import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +11,7 @@ const STAGES: { key: string; label: string }[] = [
   { key: "RESPONDED", label: "Responded" },
   { key: "INTERVIEW", label: "Interview" },
   { key: "OFFER", label: "Offer" },
+  { key: "HIRED", label: "Hired" },
   { key: "REJECTED", label: "Rejected" },
   { key: "DISCARDED", label: "Discarded" },
 ];
@@ -38,25 +41,44 @@ export default function Analytics() {
   const topCompanies = [...companyCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
   const maxCompany = Math.max(1, ...topCompanies.map((c) => c[1]));
 
-  const offers = stageCounts.find((s) => s.key === "OFFER")?.n ?? 0;
-  const interviews = stageCounts.find((s) => s.key === "INTERVIEW")?.n ?? 0;
+  // CUMULATIVE, unlike the stage bars above: these two tiles are achievement
+  // counters whose zero-state shows a coaching nudge, so a candidate who has
+  // already advanced past a stage must not read 0 for it (an offer-holder was
+  // told "Interviews follow replies — keep follow-ups warm"). Mirrors
+  // everInterview/everOffer in stats.mjs's computeFunnel().
+  const { interviews, offers } = cumulativeTiles(applications.map((a) => canonStatus(a.status)));
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
-      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluations.</p>
+      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluation{total === 1 ? "" : "s"}.</p>
 
       {/* headline stats */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Stat value={total} label="evaluated" />
         <Stat value={avg ? avg.toFixed(2) : "—"} label="avg score" />
-        <Stat value={interviews} label="interviews" />
-        <Stat value={offers} label="offers" />
+        <Stat
+          value={interviews}
+          label="interviews"
+          hint={interviews === 0 ? "Interviews follow replies — keep follow-ups warm →" : undefined}
+        />
+        <Stat
+          value={offers}
+          label="offers"
+          hint={offers === 0 ? "Offers follow interviews — keep the conversations going →" : undefined}
+        />
       </div>
 
       <Section title="Pipeline by stage">
         {stageCounts.map((s) => (
-          <Bar key={s.key} label={s.label} value={s.n} pct={(s.n / maxStage) * 100} total={total} />
+          <Bar
+            key={s.key}
+            label={s.label}
+            value={s.n}
+            pct={(s.n / maxStage) * 100}
+            total={total}
+            tone={s.key === "OFFER" ? "positive" : "neutral"}
+          />
         ))}
       </Section>
 
@@ -75,11 +97,16 @@ export default function Analytics() {
   );
 }
 
-function Stat({ value, label }: { value: number | string; label: string }) {
+function Stat({ value, label, hint }: { value: number | string; label: string; hint?: string }) {
   return (
     <div className="rounded-2xl border border-border bg-surface/50 p-4">
       <div className="text-3xl font-semibold tabular-nums">{value}</div>
       <div className="mt-1 text-xs text-faint">{label}</div>
+      {hint && (
+        <Link href="/" className="mt-2 block text-xs text-muted transition-colors hover:text-brand">
+          {hint}
+        </Link>
+      )}
     </div>
   );
 }
@@ -93,14 +120,30 @@ function Section({ title, children, id }: { title: string; children: React.React
   );
 }
 
-function Bar({ label, value, pct, total }: { label: string; value: number; pct: number; total?: number }) {
+function Bar({
+  label,
+  value,
+  pct,
+  total,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  pct: number;
+  total?: number;
+  tone?: "neutral" | "positive";
+}) {
   const share = total && total > 0 ? Math.round((value / total) * 100) : null;
+  const fill =
+    tone === "positive"
+      ? "bg-gradient-to-r from-emerald-500/60 to-emerald-500/30"
+      : "bg-gradient-to-r from-foreground/25 to-foreground/10";
   return (
     <div className="flex items-center gap-3">
       <div className="w-32 shrink-0 truncate text-sm text-muted">{label}</div>
       <div className="relative h-7 flex-1 overflow-hidden rounded-md bg-surface">
         <div
-          className="h-full rounded-md bg-gradient-to-r from-brand/70 to-brand/40"
+          className={`h-full rounded-md ${fill}`}
           style={{ width: `${Math.max(pct, value > 0 ? 4 : 0)}%` }}
         />
       </div>

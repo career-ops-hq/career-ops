@@ -8,16 +8,33 @@
 // hardcoded. The key is referer-locked, so every Algolia request sends a
 // welcometothejungle.com Referer header.
 //
-// The board is global and enormous, so a `wttj:` config block with explicit
-// search queries is REQUIRED — without one the provider throws rather than
-// silently scanning an arbitrary slice:
+// The board is global and enormous, so a `wttj:` config block that narrows it is
+// REQUIRED — without one the provider throws rather than silently scanning an
+// arbitrary slice. Narrow it with `filters`, with `queries`, or with both:
 //
 //   - name: Welcome to the Jungle
 //     provider: wttj
 //     wttj:
+//       # Algolia filter expression, applied server-side (recommended).
+//       filters: 'offices.country_code:FR AND contract_type:full_time'
 //       queries: ["finops", "data platform engineer", "snowflake"]
-//       max_hits: 100        # optional, per query, capped at 200
+//       max_hits: 100        # optional, per query; capped at 200, or 1000 with filters
 //     enabled: true
+//
+// Prefer `filters` over broad keyword queries. A keyword alone cannot narrow a
+// global board: it is Algolia's relevance ranking that decides which `max_hits`
+// results come back, so anything past the cap is invisible no matter how well it
+// matches the scanner's own title/location filters (those run afterwards, on what
+// already came back). Filtering server-side shrinks the result set instead of
+// re-ranking it, which is what makes a scan exhaustive rather than a sample.
+//
+// Useful faceted attributes on this index: offices.country_code, offices.state,
+// offices.city, contract_type, remote, experience_level_minimum,
+// salary_yearly_minimum, organization.name, and WTTJ's own job taxonomy
+// new_profession.sub_category_reference (e.g. "product-management-wNjYw").
+//
+// When `filters` is set, `queries` becomes optional — the empty query means
+// "everything that passes the filter", which is usually what you want.
 //
 // Each hit maps to the normalized Job shape; salary_yearly_minimum (when
 // present) is attached as `salary: {min, max, currency}` so scan.mjs's
@@ -28,6 +45,14 @@ const SITE_ORIGIN = 'https://www.welcometothejungle.com';
 const INDEX = 'wttj_jobs_production_en';
 const DEFAULT_MAX_HITS = 100;
 const MAX_HITS_CAP = 200;
+// An unfiltered keyword query matches a large slice of a global board — "product
+// manager" alone returns ~14k hits — so Algolia's own relevance ranking, not the
+// scanner's filters, decides which 200 are seen. A server-side `filters`
+// expression cuts the result set to something a single request can actually
+// exhaust (e.g. product-management + France + full_time is ~450), so the cap is
+// raised to Algolia's per-request ceiling for this index when one is configured.
+const FILTERED_MAX_HITS_CAP = 1000;
+const FILTERS_MAX_LEN = 1000;
 
 /** Pin a URL to an expected https host. */
 function assertHost(url, host, label) {
@@ -134,20 +159,29 @@ export function normalizeWttjHit(h) {
   return job;
 }
 
-/** Resolve config: required queries list + optional per-query hit cap. */
+/** Resolve config: queries and/or an Algolia filter expression, + per-query hit cap. */
 function resolveConfig(entry) {
   const cfg = entry?.wttj && typeof entry.wttj === 'object' ? entry.wttj : {};
   const queries = Array.isArray(cfg.queries)
     ? cfg.queries.filter((q) => typeof q === 'string' && q.trim()).map((q) => q.trim())
     : [];
-  if (queries.length === 0) {
+  const filters = typeof cfg.filters === 'string' && cfg.filters.trim() ? cfg.filters.trim() : '';
+  if (filters.length > FILTERS_MAX_LEN) {
+    throw new Error(`wttj: \`filters\` is too long (${filters.length} > ${FILTERS_MAX_LEN} chars)`);
+  }
+  if (queries.length === 0 && !filters) {
     throw new Error(
-      'wttj: the WTTJ board is global — configure explicit searches via `wttj: { queries: ["…"] }`',
+      'wttj: the WTTJ board is global — narrow it with `wttj: { filters: "…" }` and/or `wttj: { queries: ["…"] }`',
     );
   }
+  // A filter expression already narrows the board server-side, so the empty query
+  // ("match everything that passes the filter") is the useful default. Without a
+  // filter there is nothing to narrow the board, so a query list stays mandatory.
+  const effectiveQueries = queries.length > 0 ? queries : [''];
+  const cap = filters ? FILTERED_MAX_HITS_CAP : MAX_HITS_CAP;
   const maxHits =
-    Number.isInteger(cfg.max_hits) && cfg.max_hits > 0 ? Math.min(cfg.max_hits, MAX_HITS_CAP) : DEFAULT_MAX_HITS;
-  return { queries, maxHits };
+    Number.isInteger(cfg.max_hits) && cfg.max_hits > 0 ? Math.min(cfg.max_hits, cap) : DEFAULT_MAX_HITS;
+  return { queries: effectiveQueries, filters, maxHits };
 }
 
 /** @type {Provider} */
@@ -159,7 +193,7 @@ export default {
   },
 
   async fetch(entry, ctx) {
-    const { queries, maxHits } = resolveConfig(entry);
+    const { queries, filters, maxHits } = resolveConfig(entry);
 
     // 1. Fresh Algolia credentials from the site's public env endpoint.
     const envText = await ctx.fetchText(assertHost(ENV_URL, 'www.welcometothejungle.com', 'env'), {
@@ -182,6 +216,10 @@ export default {
         attributesToRetrieve:
           'name,slug,organization,offices,remote,published_at_timestamp,salary_yearly_minimum,salary_maximum,salary_period,salary_currency',
       });
+      // Algolia parses `filters` as a filter expression against the index's
+      // faceted attributes; it never reaches a URL or host, so the assertHost
+      // guard above still covers every request target.
+      if (filters) params.set('filters', filters);
       const json = /** @type {any} */ (
         await ctx.fetchJson(url, {
           method: 'POST',

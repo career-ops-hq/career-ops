@@ -1,6 +1,6 @@
 {
   "projectName": "career-ops",
-  "projectOwner": "santifer",
+  "projectOwner": "career-ops-hq",
   "repoType": "github",
   "repoHost": "https://github.com",
   "files": [
@@ -1991,6 +1991,47 @@
       "contributions": [
         "code",
         "test"
+      ]
+    },
+    {
+      "login": "artemtrofymenko",
+      "name": "Artem Trofymenko",
+      "avatar_url": "https://avatars.githubusercontent.com/u/99894081?v=4",
+      "profile": "https://skusum.com/",
+      "contributions": [
+        "code",
+        "test",
+        "doc"
+      ]
+    },
+    {
+      "login": "thibmonier",
+      "name": "thibmonier",
+      "avatar_url": "https://avatars.githubusercontent.com/u/413136?v=4",
+      "profile": "https://github.com/thibmonier",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "WJiangH",
+      "name": "WJHuang",
+      "avatar_url": "https://avatars.githubusercontent.com/u/45132014?v=4",
+      "profile": "https://github.com/WJiangH",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "IaroslavMazur",
+      "name": "Iaroslav Mazur",
+      "avatar_url": "https://avatars.githubusercontent.com/u/22785348?v=4",
+      "profile": "https://github.com/IaroslavMazur",
+      "contributions": [
+        "code",
+        "test",
+        "doc"
       ]
     }
   ]

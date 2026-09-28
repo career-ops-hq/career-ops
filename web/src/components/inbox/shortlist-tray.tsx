@@ -76,7 +76,7 @@ export function ShortlistTray({
               className="inline-flex items-center gap-1.5 text-sm font-medium max-sm:min-h-[44px]"
             >
               <ChevronDown className={cn("size-4 text-muted transition-transform", open && "rotate-180")} />
-              Shortlist <span className="tabular-nums text-brand">({n})</span>
+              Shortlist <span className="tabular-nums text-brand-text">({n})</span>
             </button>
 
             {open && (

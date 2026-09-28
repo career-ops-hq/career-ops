@@ -24,7 +24,7 @@ export function ExploreModeToggle({
         onClick={() => onChange("scan")}
         aria-pressed={mode === "scan"}
         className={cn(
-          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3",
+          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3 max-sm:min-h-[44px]",
           mode === "scan" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
         )}
       >
@@ -39,7 +39,7 @@ export function ExploreModeToggle({
         onClick={() => onChange("ai")}
         aria-pressed={mode === "ai"}
         className={cn(
-          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3",
+          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3 max-sm:min-h-[44px]",
           mode === "ai" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
         )}
       >

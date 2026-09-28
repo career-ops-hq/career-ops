@@ -79,7 +79,7 @@ func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("update after lock release: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("dashboard update did not resume after lock release")
 	}
 

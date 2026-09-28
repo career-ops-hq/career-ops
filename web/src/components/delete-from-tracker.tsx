@@ -64,7 +64,7 @@ export function DeleteFromTracker({ n }: { n: string }) {
     return (
       <button
         onClick={openConfirm}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-red-400/50 hover:text-red-500"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-muted max-sm:min-h-[44px] transition-colors hover:border-red-400/50 hover:text-red-500"
       >
         <Trash2 className="size-3.5" /> Remove from tracker
       </button>
@@ -82,14 +82,14 @@ export function DeleteFromTracker({ n }: { n: string }) {
         <button
           disabled={busy}
           onClick={confirmDelete}
-          className="inline-flex items-center gap-1.5 rounded-md bg-red-500 px-2.5 py-1 font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md bg-red-500 px-2.5 py-1 font-medium max-sm:min-h-[44px] text-white transition-colors hover:bg-red-600 disabled:opacity-50"
         >
           {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />} Delete
         </button>
         <button
           disabled={busy}
           onClick={() => setOpen(false)}
-          className="rounded-md border border-border px-2.5 py-1 text-muted transition-colors hover:text-foreground disabled:opacity-50"
+          className="rounded-md border border-border px-2.5 py-1 text-muted max-sm:min-h-[44px] transition-colors hover:text-foreground disabled:opacity-50"
         >
           Cancel
         </button>

@@ -34,7 +34,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
-const REPO_URL = 'https://github.com/santifer/career-ops';
+const REPO_URL = 'https://github.com/career-ops-hq/career-ops';
 const TEMPLATE = 'i-got-hired.yml';
 const LEVELS = ['handle', 'role', 'count'];
 

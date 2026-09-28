@@ -85,6 +85,8 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 | Red flags | Blockers, warnings (negative adjustments) |
 | **Global** | Holistic judgment integrating the five dimensions above (no arithmetic formula) |
 
+Decide the Global Score once from these dimensions, applying any user-specific Scoring Rules in `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
+
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
 - 4.0-4.4 → Good match, worth applying
@@ -99,10 +101,13 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 5. **If evidence contradicts the `require` criteria** → **cap this dimension at 2/5**, and add an explicit line to Block A's Culture Screen field (see `oferta.md`) naming what's missing or contradicted. Do not let a strong CV-match score silently compensate for this — surface it, don't bury it.
 6. **If no evidence exists for any `require` criterion** → score 3 by default, unless `culture_screen.deprioritize_if_absent: true` is set, in which case **cap this dimension at 2/5**.
 7. A role scoring 4.5+ overall but 2 or below on Cultural signals must carry an explicit warning in the report: "High technical fit, unconfirmed/poor culture fit — verify before applying."
+8. If `modes/oferta.md`'s Block A "PcD-quota check" fired a match (🟢 PcD-Quota flag line present), treat it as a positive contributor to this dimension, worth at most +1 — a legally mandated quota opening is a genuine hiring-process advantage. It never overrides a `culture_screen` contradiction (rule 5 above still caps the dimension at 2/5 if evidence contradicts required criteria); it only adds weight when the dimension isn't otherwise capped.
 
 ## Posting Legitimacy (Block G)
 
 Block G assesses whether a posting is likely a real, active opening. It does NOT affect the 1-5 global score -- it is a separate qualitative assessment.
+
+The same holds for Block B's **requirement Importance column**: it does NOT affect the 1-5 global score either -- it is a prioritization and interview-preparation surface. The CV-match dimension stays a holistic judgment, so reports written before and after that column remain comparable, and the 4.0 apply / don't-apply line keeps its meaning across the whole history folded by `analyze-patterns.mjs`, `stats.mjs`, `funnel-velocity.mjs` and `rank-pipeline.mjs`.
 
 **Three tiers:**
 - **High Confidence** -- Real, active opening (most signals positive)
@@ -202,7 +207,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 7. Be direct and actionable -- no fluff
 8. Native tech English for generated text. Short sentences, action verbs, no passive voice.
 8b. Case study URLs in PDF Professional Summary (recruiter may only read this).
-9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `batch/tracker-additions/`.
+9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `batch/tracker-additions/`: a header row of column labels, then one data row (see AGENTS.md, "TSV Format for Tracker Additions"). The header is what lets `merge-tracker.mjs` resolve fields by name instead of guessing which column is score and which is status.
 10. **Include `**URL:**` in every report header.**
 
 ### Tools
@@ -211,7 +216,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 |------|-----|
 | WebSearch | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs |
 | WebFetch | Fallback for extracting JDs from static pages |
-| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel.** |
+| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER let 2+ agents drive the same Playwright/MCP browser session concurrently.** This is a per-session rule, not a per-agent-count one: agents each holding their own isolated browser session are fine in parallel; agents sharing one interactive MCP browser session are not — they race for control and can silently read or act on each other's page state. |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
 | Write | Temporary HTML for PDF, applications.md, reports .md |
 | Edit | Update tracker |
@@ -223,8 +228,19 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 A mode may tell you to run work in a background subagent (e.g. `scan`, or parallel `pipeline` URLs) to spare the main agent's context. Any subagent you spawn for career-ops is a **single-pass worker**:
 
 - It MUST NOT spawn further subagents, and MUST NOT invoke other skills — especially open-ended or recursive research skills (e.g. a `deep-research` skill). Those fan out into nested agents and can burn tens of millions of tokens on one run.
+- If the work involves Playwright (e.g. parallel `pipeline` workers each verifying a posting), the Playwright rule above still applies in full: parallel subagents must never share one interactive Playwright/MCP browser session. Each worker needs its own isolated session, or the Playwright-touching step must run sequentially.
 - Company, role, and compensation research is ALWAYS done **inline**, with the small explicit set of WebSearch/WebFetch queries the mode names (e.g. `oferta` Blocks C/D) — never delegated to a recursive research harness.
 - One `/career-ops <JD>` evaluates one role; it must never explode into a self-replicating swarm of agents. If you are about to delegate research or nest agents, stop and do it inline, bounded.
+
+<!-- guardrail:agency-confirmation -->
+**RULE: Agency confirmation must happen before any tracker, report, or CV write.** If the JD suggests an agency/recruiter intermediary ("our client", agency domain, undisclosed end employer), and the user has not explicitly identified or confirmed the agency for this posting, stop before evaluating or writing artifacts. A guessed agency, a Via value from the JD, blanket batch authorization, silence, and elapsed time are not confirmation.
+
+### Agency confirmation handoff (#4359)
+
+- **Interactive session:** ask which agency this posting came through. Wait for an explicit answer for this URL (or local JD reference). If the user cannot identify it or declines, leave it pending; do not invent a Via value. A direct-employer correction resolves the gate only when the user explicitly says this posting is direct.
+- **Delegated/headless worker:** return `status: needs_confirmation`, `reason: agency_confirmation`, the posting `url`, observed `agency` (string or null, evidence only), and the `question` for the parent. Stop immediately: no tracker row or TSV, no report, no CV in any format, no application drafts, and no pipeline completion. Return through the worker hand-back/stdout, never a placeholder report. Do not wait for a human inside the worker, spawn another agent, or write first and flag an override afterward.
+- **Parent/orchestrator:** surface the question with the URL and evidence; keep this item pending and show it separately from completed/failed evaluations. Other URLs may continue. Release any unused report-number reservation. Resume only after the user's explicit answer, passing that answer and its exact posting identity to a fresh single-pass worker or handling the posting interactively. Re-check liveness and other gates; reserve a fresh report number if the old reservation was released. A new URL needs its own answer. Only actual completed artifacts may enter the tracker merge and completion summary.
+- After confirmation, use the confirmed agency as Via; use `?` for an undisclosed end employer plus a distinguishing Notes descriptor. Never substitute the agency for the end employer. This gate also applies to localized modes and overrides unconditional "always write/register" instructions. It is not a new tracker lifecycle status.
 
 ### Time-to-offer priority
 - Working demo + metrics > perfection
