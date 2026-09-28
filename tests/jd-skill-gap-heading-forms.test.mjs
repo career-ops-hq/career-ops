@@ -79,3 +79,12 @@ test('an asterisk bullet whose text starts with a keyword is still a bullet, not
 test('a bolded skill inside a bullet still extracts correctly', () => {
   assertExtracts('## Requirements\n- **Python** and **Kubernetes**\n- **Terraform**\n', 'bold-skill-in-bullet');
 });
+
+test('bolded preferred headings remain optional after classifying requirements', async () => {
+  const { extractJdSkillsByClass } = await import(pathToFileURL(join(ROOT, 'jd-skill-gap.mjs')).href);
+  for (const heading of ['**Preferred**', '__Nice to have__', '**加分條件**']) {
+    const result = extractJdSkillsByClass(`**What We Are Looking For**\n- Python\n${heading}\n- Kubernetes\n**Benefits**\n- Terraform\n`);
+    assert.deepEqual(result.required, ['Python'], heading);
+    assert.deepEqual(result.preferred, ['Kubernetes'], heading);
+  }
+});

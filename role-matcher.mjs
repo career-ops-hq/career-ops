@@ -127,19 +127,20 @@ export const BASELINE_TOKENS = new Set([
  * @param {unknown} value - Raw title, possibly not a string.
  * @returns {string} Lowercased, accent-folded text.
  */
-function normalizeTitle(value) {
+export function normalizeTitle(value) {
   const text = typeof value === 'string' ? value : String(value ?? '');
   return text
     .toLowerCase()
     .normalize('NFD')
-    // Only marks sitting on an ASCII Latin base. Stripping EVERY \p{Mn} also
+    // Only marks sitting on an ASCII Latin base, the whole run of them ("ế"
+    // decomposes to e + two marks). Stripping EVERY \p{Mn} also
     // reached marks that carry meaning in other scripts: Devanagari matras
     // (कंपनी and कपनी became one token), Cyrillic breve (Йогурт -> иогурт) and
     // Japanese dakuten (バックエンド -> ハックエント, voiced kana folded onto
     // unvoiced). Latin accent-folding — the reason this function exists, per
     // the Sênior case — is unchanged, because those marks always follow an
     // ASCII base once the title is lowercased.
-    .replace(/(?<=[a-z])\p{Mn}/gu, '')
+    .replace(/(?<=[a-z])\p{Mn}+/gu, '')
     .normalize('NFC');
 }
 
