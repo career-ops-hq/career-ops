@@ -341,8 +341,9 @@ Job aggregators keep stale, filled, and ghost listings live long after the emplo
 
 1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as above.
 2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
-3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Mark it in `data/scan-history.tsv` or on the tracker row — never silently delete the record, since that is what stops it being re-added as new on the next scan.
-4. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
+3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Mark it in `data/scan-history.tsv`; if it is already in the tracker, run `node set-status.mjs <report#|company> Discarded --note "not found at employer"` — never silently delete the record, since that is what stops it being re-added as new on the next scan.
+4. **Employer has no careers page / ATS you can find → leave it UNCONFIRMED, not stale.** Keep the aggregator URL and tell the user the role could not be confirmed at the employer.
+5. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
 
 This is a confirmation step, not a replacement for `check-liveness.mjs` — run the liveness checker against the **employer** URL once you have it. The headless-batch exception above still applies.
 
