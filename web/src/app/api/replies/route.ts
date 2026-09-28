@@ -151,7 +151,7 @@ export async function POST(req: Request) {
       } catch (e) {
         console.error("Failed to parse data/reply-candidates.json:", e);
         return Response.json(
-          { error: "Failed to read reply candidates" },
+          { error: "Failed to parse data/reply-candidates.json" },
           { status: 500 }
         );
       }
