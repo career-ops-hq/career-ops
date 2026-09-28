@@ -58,14 +58,16 @@ export function readProfileMemory(root) {
     try {
       return fs.readFileSync(file, "utf8").trim();
     } catch (err) {
-      /* ENOENT and ENOTDIR are the two shapes of "nobody ever wrote one": the
-         file is missing, or a directory above it is. Anything else (EISDIR,
-         EACCES, EIO) means the file IS there and could not be read, which is
-         this file's own bug one layer down — buildPrompt() omits the notes
-         section for an empty memory, so guardrails that exist and failed to
-         read would look exactly like guardrails nobody ever wrote. Those
-         surface. analyze-patterns.mjs and upskill.mjs draw the same line. */
-      if (err?.code === "ENOENT" || err?.code === "ENOTDIR") return "";
+      /* ENOENT alone is "nobody ever wrote one", and it is a real state: with a
+         separate CAREER_OPS_ROOT the data dir has no modes/ until doctor.mjs
+         copies the template in. Every other code means the path is broken or the
+         file is unreadable, and returning "" for those is this file's own bug one
+         layer down — buildPrompt() omits the notes section for an empty memory,
+         so guardrails that exist and failed to read look exactly like guardrails
+         nobody ever wrote. ENOTDIR is deliberately NOT folded in here: modes/
+         ships with the repo, so a file standing where that directory belongs is a
+         broken path rather than a fresh install. */
+      if (err?.code === "ENOENT") return "";
       throw err;
     }
   };

@@ -132,15 +132,18 @@ test("nothing on disk reads as no memory, not as an error", () => {
   assert.equal(readProfileMemory(makeRoot()), "");
 });
 
-test("a missing modes/ directory reads as no memory too", () => {
-  // The other shape of absent: `modes` is a FILE, so the read throws ENOTDIR
-  // rather than ENOENT. Nobody ever wrote a profile here either, so it is the
-  // same answer.
+test("a file where modes/ belongs is an error, not silence", () => {
+  // `modes` as a FILE throws ENOTDIR. An earlier version of this file folded that
+  // into absent, reasoning that nobody had written a profile either way. That was
+  // wrong: `modes/` SHIPS with the repo (175 tracked files), so in a default
+  // install the directory always exists, and with a separate CAREER_OPS_ROOT an
+  // absent one reports ENOENT. A file standing where the directory belongs is a
+  // broken path, never a fresh install, and silence there costs the guardrails.
   const root = mkdtempSync(join(tmpdir(), "co-profile-mem-"));
   ROOTS.push(root);
   writeFileSync(join(root, "modes"), "not a directory");
 
-  assert.equal(readProfileMemory(root), "");
+  assert.throws(() => readProfileMemory(root), (err) => err.code === "ENOTDIR");
 });
 
 test("a profile that exists and cannot be read is an error, not silence", () => {
