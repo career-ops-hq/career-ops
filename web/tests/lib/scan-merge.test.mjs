@@ -62,3 +62,12 @@ test("the Explore provider treats incomplete sources as a partial result", () =>
   assert.match(summary, /ev\.incomplete\?\.length/);
   assert.match(summary, /if \(ev\.unreachable > 0 \|\| datasetIssue\) setPartial\(true\)/);
 });
+
+test("a scan that ends in an error keeps its results as partial and shows the reason", () => {
+  const src = readFileSync(join(SRC, "components/explore/explore-provider.tsx"), "utf8");
+  const start = src.indexOf("if (acc.length > 0) {");
+  const withResults = src.slice(start, src.indexOf("} else if (sawError) {", start));
+  assert.match(withResults, /if \(sawError\) \{\s*setPartial\(true\);\s*setError\(sawError\);/);
+  const list = readFileSync(join(SRC, "components/explore/results-list.tsx"), "utf8");
+  assert.match(list, /!isAi && error && </);
+});
