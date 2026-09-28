@@ -1509,7 +1509,7 @@ def parser() -> argparse.ArgumentParser:
     application.add_argument("action", choices=("submit", "transition", "activity", "outcome", "schedule", "retire", "reopen", "view", "followups"))
     application.add_argument("opportunity", nargs="?")
     application.add_argument("value", nargs="?")
-    application.add_argument("--source", default="candidate-confirmed")
+    application.add_argument("--source")
     application.add_argument("--confirmed", action="store_true")
     application.add_argument("--payload", default="{}")
     application.add_argument("--idempotency-key")
@@ -1567,13 +1567,16 @@ def main() -> None:
                         raise ValueError("application mutation requires opportunity and value")
                     if not args.idempotency_key:
                         raise ValueError("application mutation requires --idempotency-key")
-                    if args.action in {"submit", "activity", "schedule", "retire", "reopen"} and not args.confirmed:
+                    if args.action in {"submit", "transition", "activity", "outcome", "schedule", "retire", "reopen"} and not args.confirmed:
                         raise ValueError(f"application {args.action} requires --confirmed")
+                    if args.action in {"transition", "outcome"} and not (args.source or "").strip():
+                        raise ValueError(f"application {args.action} requires --source")
                     store.close()
                     store = None
                     result = mutate_application(
                         args.directory, args.opportunity, args.action, args.value or "",
-                        source=args.source, payload=json.loads(args.payload), idempotency_key=args.idempotency_key,
+                        source=args.source if args.source is not None else "candidate-confirmed",
+                        payload=json.loads(args.payload), idempotency_key=args.idempotency_key,
                     )
             finally:
                 if store:

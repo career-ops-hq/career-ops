@@ -584,7 +584,7 @@ if (flags.json) {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
   if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
-    console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
+    console.error('ℹ️  Status is Applied in the legacy tracker. After recording the confirmed submission in the Python application CLI, use application followups.');
   }
 }
 process.exit(EXIT_OK);

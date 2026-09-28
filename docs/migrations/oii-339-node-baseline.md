@@ -19,5 +19,6 @@ Python additionally binds every write to an idempotency key. Replaying a
 completed operation returns the retained result without adding an event or
 activity. Package confirmation remains distinct from the user's report that an
 application was actually submitted.
-The legacy Markdown follow-up CLIs remain callable until the real submitted
-record acceptance gate passes; they are not a second canonical business store.
+Application lifecycle acceptance uses isolated business samples; it does not
+require the candidate to submit a real application. Legacy Markdown follow-up
+CLIs remain separate from the canonical Python application records.

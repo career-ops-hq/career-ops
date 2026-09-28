@@ -51,9 +51,13 @@ with tempfile.TemporaryDirectory() as temporary:
     checkpoint.commit()
     checkpoint.close()
     assert call(directory, "submit", "42", "--confirmed", "--idempotency-key", "submit-42")["reused"]
-    cross_action = call(directory, "transition", "42", "applied", "--source", "candidate-confirmed", "--idempotency-key", "submit-42", ok=False)
+    cross_action = call(directory, "transition", "42", "applied", "--confirmed", "--source", "candidate-confirmed", "--idempotency-key", "submit-42", ok=False)
     assert "Idempotency key conflicts" in cross_action["error"]
-    reused_after_progress = call(directory, "transition", "42", "interview", "--source", "candidate-confirmed", "--idempotency-key", "interview-42")
+    unconfirmed_transition = call(directory, "transition", "42", "interview", "--source", "candidate-confirmed", "--idempotency-key", "unconfirmed-interview", ok=False)
+    assert "requires --confirmed" in unconfirmed_transition["error"]
+    missing_source = call(directory, "transition", "42", "interview", "--confirmed", "--idempotency-key", "missing-source", ok=False)
+    assert "requires --source" in missing_source["error"]
+    reused_after_progress = call(directory, "transition", "42", "interview", "--confirmed", "--source", "candidate-confirmed", "--idempotency-key", "interview-42")
     assert reused_after_progress["status"] == "interview"
     assert call(directory, "submit", "42", "--confirmed", "--idempotency-key", "submit-42")["reused"]
     collision = call(directory, "activity", "42", "followup_sent", "--confirmed", "--idempotency-key", "submit-42", ok=False)
@@ -66,9 +70,9 @@ with tempfile.TemporaryDirectory() as temporary:
     assert "payload must be an object" in invalid_payload["error"]
     future_send = call(directory, "activity", "42", "followup_sent", "--confirmed", "--payload", '{"sent_at":"2099-01-01"}', "--idempotency-key", "future-send", ok=False)
     assert "cannot be in the future" in future_send["error"]
-    repeated_transition = call(directory, "transition", "42", "interview", "--idempotency-key", "interview-again", ok=False)
+    repeated_transition = call(directory, "transition", "42", "interview", "--confirmed", "--source", "candidate-confirmed", "--idempotency-key", "interview-again", ok=False)
     assert "Invalid application transition" in repeated_transition["error"]
-    invalid = call(directory, "transition", "42", "responded", "--source", "candidate-confirmed", "--idempotency-key", "invalid-42", ok=False)
+    invalid = call(directory, "transition", "42", "responded", "--confirmed", "--source", "candidate-confirmed", "--idempotency-key", "invalid-42", ok=False)
     assert "Invalid application transition" in invalid["error"]
 
     activity = call(directory, "activity", "42", "followup_sent", "--confirmed", "--payload", '{"channel":"email"}', "--idempotency-key", "followup-42")
@@ -87,16 +91,18 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not call(directory, "reopen", "42", "--confirmed", "--idempotency-key", "reopen-42")["retired"]
 
     assert call(directory, "activity", "42", "followup_sent", "--confirmed", "--idempotency-key", "offer-42:activity")["recorded"] == "followup_sent"
-    outcome = call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")
+    unconfirmed_outcome = call(directory, "outcome", "42", "offer_received", "--source", "employer-message", "--idempotency-key", "unconfirmed-offer", ok=False)
+    assert "requires --confirmed" in unconfirmed_outcome["error"]
+    outcome = call(directory, "outcome", "42", "offer_received", "--confirmed", "--source", "employer-message", "--idempotency-key", "offer-42")
     assert outcome["status"] == "offer"
     assert outcome["outcome"] == "offer_received"
     assert outcome["preserved_artifacts"] == [{"kind": "verified-application-pdf", "path": "/review/resume.pdf", "sha256": "sha-42"}]
-    replayed_outcome = call(directory, "outcome", "42", "offer_received", "--idempotency-key", "offer-42")
+    replayed_outcome = call(directory, "outcome", "42", "offer_received", "--confirmed", "--source", "employer-message", "--idempotency-key", "offer-42")
     assert replayed_outcome["reused"] and replayed_outcome["preserved_artifacts"] == outcome["preserved_artifacts"]
-    cross_outcome = call(directory, "transition", "42", "offer", "--payload", '{"outcome":"offer_received"}', "--idempotency-key", "offer-42", ok=False)
+    cross_outcome = call(directory, "transition", "42", "offer", "--confirmed", "--source", "employer-message", "--payload", '{"outcome":"offer_received"}', "--idempotency-key", "offer-42", ok=False)
     assert "Idempotency key conflicts" in cross_outcome["error"]
     assert call(directory, "activity", "42", "offer_prepared", "--confirmed", "--payload", '{"evidence":{"path":"/review/offer-notes.md","sha256":"offer-sha"}}', "--idempotency-key", "offer-prep-42")["recorded"] == "offer_prepared"
-    assert call(directory, "outcome", "42", "hired", "--idempotency-key", "hired-42")["status"] == "hired"
+    assert call(directory, "outcome", "42", "hired", "--confirmed", "--source", "employer-message", "--idempotency-key", "hired-42")["status"] == "hired"
 
     view = call(directory, "view", "42")
     assert view["status"] == "hired"
@@ -158,7 +164,7 @@ with tempfile.TemporaryDirectory() as temporary:
     database.close()
     assert call(directory, "view", "7")["events"][0]["toStatus"] == "applied"
     assert call(directory, "submit", "7", "--confirmed", "--idempotency-key", "legacy-event-1")["reused"]
-    legacy_collision = call(directory, "transition", "7", "applied", "--idempotency-key", "legacy-event-1", ok=False)
+    legacy_collision = call(directory, "transition", "7", "applied", "--confirmed", "--source", "candidate-confirmed", "--idempotency-key", "legacy-event-1", ok=False)
     assert "Idempotency key conflicts" in legacy_collision["error"]
 
 print("workflow application lifecycle: transitions, activities, outcomes and idempotency passed")

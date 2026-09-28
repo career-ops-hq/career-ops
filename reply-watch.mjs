@@ -23,6 +23,6 @@ if (values.help || !values.db || !positionals[0]) {
       store.recordApplicationActivity(id, 'reply_suggested', { messageId: candidate.message_id, toStatus: status, evidence: reply.evidence || [] });
       suggestions.push({ opportunityId: id, current: store.application(id).status, suggested: status, messageId: candidate.message_id });
     }
-    console.log(JSON.stringify({ suggestions, note: 'Suggestions only. Confirm and run application-lifecycle.mjs transition yourself.' }, null, 2));
+    console.log(JSON.stringify({ suggestions, note: 'Suggestions only. Confirm and run workflow/career_ops.py application transition with --confirmed and --source.' }, null, 2));
   } finally { store.close(); }
 }

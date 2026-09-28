@@ -24,9 +24,9 @@ workflow/.venv/bin/python workflow/career_ops.py scores
 workflow/.venv/bin/python workflow/career_ops.py resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
 workflow/.venv/bin/python workflow/career_ops.py cancel <task-id>
 workflow/.venv/bin/python workflow/career_ops.py application submit <opportunity-id> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application transition <opportunity-id> <status> --source <source> --idempotency-key <operation-id>
+workflow/.venv/bin/python workflow/career_ops.py application transition <opportunity-id> <status> --confirmed --source <source> --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application activity <opportunity-id> <type> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application outcome <opportunity-id> <outcome> --idempotency-key <operation-id>
+workflow/.venv/bin/python workflow/career_ops.py application outcome <opportunity-id> <outcome> --confirmed --source <source> --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application schedule <opportunity-id> <YYYY-MM-DD> --confirmed --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application retire <opportunity-id> --confirmed --idempotency-key <operation-id>
 workflow/.venv/bin/python workflow/career_ops.py application reopen <opportunity-id> --confirmed --idempotency-key <operation-id>
