@@ -68,7 +68,7 @@ Read the entire page/form to scan for knock-out questions BEFORE generating full
    - **Degree requirements** (e.g., "Do you have a Bachelor's degree in Computer Science or a related field?")
    - **Work authorization/Visa sponsorship** (e.g., "Will you now or in the future require visa sponsorship to work in the United States?")
    - **Salary floors/expectations** (e.g., "What is your target salary / expectation?")
-2. Check these questions against the candidate's parameters, using the Step 4b sources: `config/profile.yml` for work authorization, sponsorship, location, and comp expectations, and the tailored CV for degree, credentials, and years of experience (`cv.md` only when no tailored CV exists).
+2. Check these questions against the candidate's parameters, using the Step 4b sources: `config/profile.yml` for work authorization, sponsorship, location, and comp expectations, and the tailored CV for degree, credentials, and years of experience, at the Step 4b precedence: `cv.md` supplies a whole section the tailored CV omits, and nothing inside one it covers. A tailored CV that drops an education block is not evidence the candidate lacks the degree, so reading it that way manufactures a knock-out.
 3. If a knock-out question is detected where the candidate's profile represents a potential mismatch (e.g., candidate needs sponsorship and the form automatically filters out sponsorship-needy applicants, or candidate's salary expectations mismatch the visible JD/form floors):
    - Highlight the specific knock-out question to the candidate immediately.
    - Present a clear warning block:
@@ -236,7 +236,7 @@ Identify ALL visible questions:
 
 Classify each question:
 - **Already answered in Section H or `## Application Answers`** → adapt the existing response
-- **New question** → generate response from the report + the tailored CV resolved in Step 4b (`cv.md` only when there is none)
+- **New question** → generate response from the report plus the Step 4b sources, at the Step 4b precedence: the tailored CV for anything it covers, `cv.md` only for a whole section it omits
 
 For each field, preserve the application form contract:
 - `field_type`: `text`, `textarea`, `select`, `radio`, `checkbox`, `number`, `file`, or `unknown`
@@ -306,7 +306,14 @@ below).
    instances: six experience entries carry six of every per-block required field,
    and each one must appear in the list on its own.
 3. Read back the current value of each. Empty, whitespace-only, or a dropdown still
-   showing its placeholder all count as empty.
+   showing its placeholder all count as empty. A non-empty `value` is not by itself
+   evidence of a selection. An unchecked checkbox still reports `value="on"`. Every
+   radio in a group carries a value whether or not any member is selected. Read
+   state rather than value wherever a control has one: a consent checkbox must be
+   `checked`, a required radio group must have one checked member, and a required
+   select must hold a real option rather than its placeholder. Where unchecked is
+   itself a valid answer to a boolean question, unchecked is the answer and the
+   field is not missing.
 4. Fill what is missing: profile and CV fields from the Step 4b sources, and
    question-style fields (motivation, "why this role", free-text prompts) through
    the Step 7 generation path. Re-read each one to confirm the value registered.
