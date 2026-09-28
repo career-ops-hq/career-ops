@@ -9,6 +9,7 @@ local/
 # Match the root entry itself as well as its contents: the user data root may
 # be a symlink to storage outside the checkout, which child globs cannot reach.
 /data
+!data/
 data/*
 !data/.gitkeep
 !data/offers/
@@ -27,6 +28,7 @@ reports/*.md
 reports/**/*.md
 !reports/.gitkeep
 /output
+!output/
 output/*
 !output/.gitkeep
 batch/logs/*
@@ -40,6 +42,7 @@ batch/tracker-additions/**/*.tsv
 # drops here. Fetched postings are user data — never stage them.
 batch/tmp/
 /jds
+!jds/
 jds/*
 !jds/.gitkeep
 
@@ -216,6 +219,7 @@ plan/
 # Profile intake sources (master CV / LinkedIn export / diplomas / references
 # — user PII, never commit). Ship only the system-owned scaffold. #1723
 /documents
+!documents/
 documents/*
 !documents/.gitkeep
 !documents/README.md
