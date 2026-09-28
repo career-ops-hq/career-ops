@@ -132,6 +132,30 @@ test("nothing on disk reads as no memory, not as an error", () => {
   assert.equal(readProfileMemory(makeRoot()), "");
 });
 
+test("a missing modes/ directory reads as no memory too", () => {
+  // The other shape of absent: `modes` is a FILE, so the read throws ENOTDIR
+  // rather than ENOENT. Nobody ever wrote a profile here either, so it is the
+  // same answer.
+  const root = mkdtempSync(join(tmpdir(), "co-profile-mem-"));
+  ROOTS.push(root);
+  writeFileSync(join(root, "modes"), "not a directory");
+
+  assert.equal(readProfileMemory(root), "");
+});
+
+test("a profile that exists and cannot be read is an error, not silence", () => {
+  // Given: modes/_profile.md is a DIRECTORY, so the read throws EISDIR. The file
+  // IS there; it just cannot be read.
+  const root = mkdtempSync(join(tmpdir(), "co-profile-mem-"));
+  ROOTS.push(root);
+  mkdirSync(join(root, "modes", "_profile.md"), { recursive: true });
+
+  // Returning "" here would be the #4003 failure one layer down. buildPrompt()
+  // omits the notes section for an empty memory, so guardrails that exist and
+  // could not be read would look exactly like guardrails nobody ever wrote.
+  assert.throws(() => readProfileMemory(root), (err) => err.code === "EISDIR");
+});
+
 test("the profile lands in the prompt buildPrompt() actually sends", () => {
   // The whole point. buildPrompt() omits the notes section entirely for an empty
   // memory, so asserting on readProfileMemory()'s return value alone would not

@@ -57,8 +57,16 @@ export function readProfileMemory(root) {
   const read = (file) => {
     try {
       return fs.readFileSync(file, "utf8").trim();
-    } catch {
-      return "";   /* absent or unreadable reads as no memory, never as an error */
+    } catch (err) {
+      /* ENOENT and ENOTDIR are the two shapes of "nobody ever wrote one": the
+         file is missing, or a directory above it is. Anything else (EISDIR,
+         EACCES, EIO) means the file IS there and could not be read, which is
+         this file's own bug one layer down — buildPrompt() omits the notes
+         section for an empty memory, so guardrails that exist and failed to
+         read would look exactly like guardrails nobody ever wrote. Those
+         surface. analyze-patterns.mjs and upskill.mjs draw the same line. */
+      if (err?.code === "ENOENT" || err?.code === "ENOTDIR") return "";
+      throw err;
     }
   };
   const profile = read(profilePath(root));
