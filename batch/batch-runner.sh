@@ -980,6 +980,14 @@ process_offer() {
         echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
       fi
   fi
+  # A JS-rendered board (Workday, Ashby, Greenhouse embeds) leaves the static
+  # prefetch empty, and the worker's WebFetch hits the same empty shell. Ask the
+  # ATS public API through fetch-jd.mjs before falling back to WebFetch.
+  if [[ ! -s "$jd_file" ]] && node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_file" 2>/dev/null && [[ -s "$jd_file" ]]; then
+    echo "    ℹ️  JD prefetch: ATS API text written to JD file (fetch-jd.mjs)"
+  else
+    [[ -s "$jd_file" ]] || : > "$jd_file"
+  fi
 
   echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
 
