@@ -10,10 +10,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join, delimiter } from "node:path";
 import { ensureSkillEntrypoints } from "./skill-entrypoints.mjs";
+import { npmCommand } from "./npm-command.mjs";
 
 const REPO = "https://github.com/career-ops-hq/career-ops.git";
 const LATEST_RELEASE = "https://api.github.com/repos/career-ops-hq/career-ops/releases/latest";
-const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 
 // career-ops is AI-agnostic: every one of these CLIs reads AGENTS.md and works
 // out of the box. We only detect them to tailor the final message — we never
@@ -119,7 +119,8 @@ async function main() {
   console.log("\n→ Installing dependencies (npm install) ...");
   let installed = true;
   try {
-    execFileSync(NPM, ["install"], { cwd: target, stdio: "inherit" });
+    const npm = npmCommand(["install"]);
+    execFileSync(npm.file, npm.args, { cwd: target, stdio: "inherit" });
   } catch {
     installed = false;
     console.warn('\n! npm install failed — you can re-run it manually later with "npm install".');

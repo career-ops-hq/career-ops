@@ -8,6 +8,7 @@
   "type": "module",
   "files": [
     "bin/cli.mjs",
+    "bin/npm-command.mjs",
     "bin/skill-entrypoints.mjs",
     "README.md"
   ],
