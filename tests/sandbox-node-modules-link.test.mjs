@@ -235,7 +235,9 @@ try {
   // KNOWN LIMIT: the scan reads the FIRST argument of each symlinkSync call and
   // flags one naming node_modules, which is the repo's own tree being linked
   // somewhere else. A site that hoists that path into a variable first is not
-  // caught, and neither is one that only puts node_modules in the DESTINATION:
+  // caught. An ALIASED import is, separately, because renaming this import defeats
+  // the scan entirely and no caller has a reason to. Not caught either: a site that
+  // only puts node_modules in the DESTINATION:
   // tests/gitignore-symlink-escape.test.mjs does that deliberately to build a
   // path-escape fixture, and it is not this defect.
   {
@@ -257,14 +259,29 @@ try {
       return out;
     };
 
+    // Comments are not code, and this suite documents the exact shapes it forbids,
+    // so a naive scan flags its own prose. stripJsComments() collapses a block
+    // comment to nothing and shifts every line after it, which would make the line
+    // numbers in a failure point at the wrong place. This blanks comment characters
+    // to spaces and keeps the newlines, so offsets and line numbers both survive.
+    const blankComments = (src) => src
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:])(\/\/[^\n]*)/g, (_m, before, cmt) => before + cmt.replace(/./g, ' '));
+
     const tracked = run('git', ['ls-files', 'tests/*.mjs', 'test-all.mjs']).split('\n').filter(Boolean);
     if (tracked.length < 50) {
       fail(`the raw-link scan enumerated only ${tracked.length} tracked files, so a clean result would mean nothing`);
     } else {
       const offenders = [];
+      // An alias defeats the scan outright: `import { symlinkSync as linkIt }` then
+      // linkIt(join(ROOT, 'node_modules'), ...) matches nothing above. There is no
+      // reason to rename this import, so the rename itself is the finding.
+      const aliased = [];
+      const ALIAS = /\bsymlinkSync\s+as\s+[A-Za-z_$][\w$]*/;
       for (const rel of tracked) {
         if (rel === 'tests/helpers.mjs') continue; // linkNodeModules lives here; it IS the sanctioned site
-        const src = readFileSync(join(ROOT, rel), 'utf-8');
+        const src = blankComments(readFileSync(join(ROOT, rel), 'utf-8'));
+        if (ALIAS.test(src)) aliased.push(rel);
         for (const { index, arg } of firstArgOf(src)) {
           if (!arg.includes('node_modules')) continue;
           offenders.push(`${rel}:${src.slice(0, index).split('\n').length}`);
@@ -278,6 +295,8 @@ try {
         .filter(({ arg }) => arg.includes('node_modules')).length;
       if (canFind !== 1) {
         fail(`the raw-link scan found ${canFind} hits in a string built to contain exactly 1, so it cannot be trusted on the repo`);
+      } else if (aliased.length) {
+        fail(`${aliased.join(', ')} imports symlinkSync under another name, which the scan above cannot follow; call it directly or route through linkNodeModules()`);
       } else if (offenders.length) {
         fail(`${offenders.join(', ')} links node_modules with a raw symlinkSync; route it through linkNodeModules() so it gets the Windows junction and the absent-tree reason`);
       } else {
