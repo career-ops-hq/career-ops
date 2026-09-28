@@ -19,6 +19,7 @@ console.log('\napply mode: tailored-CV source and the pre-action sweep');
 
 const flat = readFileSync(join(ROOT, 'modes/apply.md'), 'utf-8').replace(/\s+/g, ' ');
 const has = (probe) => flat.includes(probe.replace(/\s+/g, ' '));
+const count = (probe) => flat.split(probe.replace(/\s+/g, ' ')).length - 1;
 
 const ok = (name, condition, why) => (condition ? pass(name) : fail(`${name} — ${why}`));
 
@@ -72,6 +73,25 @@ ok('the cv.md fallback is never narrowed to "no tailored CV at all"',
 ok('every consumer of the Step 4b sources names its precedence',
   (flat.match(/at the Step 4b precedence/g) || []).length === 2,
   'the knock-out pre-scan and the new-question path must each say which source wins');
+
+// Two table rows can match one field: a dropped education entry is both an
+// omitted credential and an omitted whole section. Left untied, the pre-scan and
+// the new-question path can answer the same gap from different documents.
+//
+// KNOWN LIMIT, so nobody reads this as more than it is. These two cases catch the
+// order being DELETED and the order being stated TWICE, the second being the drift
+// shape this file has already produced twice: a rule copied to a second consumer
+// and then edited in one copy only. They do NOT catch a contradiction. Appending
+// "A dropped education entry uses `cv.md` over `config/profile.yml` and the
+// tailored CV." elsewhere in modes/apply.md leaves both green. Detecting that with
+// substring probes is not achievable, and a count tuned to today's prose would pin
+// an artifact of the sentence split rather than an invariant.
+const ORDER = 'The order there is `config/profile.yml` first, then the tailored CV, then `cv.md`';
+ok('the two rows that can both claim a field carry a tiebreak', has(ORDER),
+  'a dropped education entry matches both the education row and the whole-section fallback, and nothing says which wins');
+
+ok('the tiebreak is stated once, not copied', count(ORDER) === 1,
+  `the order appears ${count(ORDER)} times; two copies drift apart and the file then contradicts itself`);
 
 ok('the whole-section fallback is still the rule it defers to',
   has('`cv.md` — the fallback, never the default'),
