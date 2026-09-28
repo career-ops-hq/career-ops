@@ -544,9 +544,11 @@ version: 1.0.0
   html[lang="zh"] body {
     /* Keep Chinese and Latin text in one font run where possible. Splitting
        mixed-language lines across Liberation Sans plus a CJK fallback makes
-       Chromium PDFs look correct while text extractors reorder Latin tokens. */
-    font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
-      'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC',
+       Chromium PDFs look correct while text extractors reorder Latin tokens.
+       A profile font replaces only the var() default: PingFang SC is repeated
+       so the Simplified Chinese fallback chain stays intact behind it. */
+    font-family: var(--font-family, 'PingFang SC'), 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC',
       'Arial Unicode MS', sans-serif;
     color: var(--zhm-text);
     line-break: strict;

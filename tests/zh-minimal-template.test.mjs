@@ -11,6 +11,10 @@ import { chromium } from 'playwright';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = join(ROOT, 'templates', 'cv-template.zh-minimal.html');
 const HAS_PDFTOTEXT = spawnSync('pdftotext', ['-v'], { stdio: 'ignore' }).status === 0;
+// Probe the launch the extraction test makes: chromium.executablePath() names the
+// headed binary, while a headless launch may use chrome-headless-shell instead.
+const CAN_EXTRACT_PDF = HAS_PDFTOTEXT && await chromium.launch({ headless: true })
+  .then((browser) => browser.close().then(() => true), () => false);
 
 test('Chinese Minimal template is discoverable and valid', () => {
   const listed = listTemplates('cv');
@@ -62,8 +66,7 @@ test('Chinese Minimal renders a complete mixed-language payload', () => {
 });
 
 test('Chinese Minimal preserves mixed-language and job order in PDF text extraction', {
-  skip: (!existsSync(chromium.executablePath()) || !HAS_PDFTOTEXT)
-    && 'Chromium or pdftotext is not installed',
+  skip: !CAN_EXTRACT_PDF && 'Chromium cannot launch or pdftotext is not installed',
 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-extraction-'));
   const input = join(dir, 'cv.json');
