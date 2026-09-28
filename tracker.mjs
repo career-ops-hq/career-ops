@@ -40,6 +40,7 @@ import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import * as yaml from 'js-yaml';
 import {
   resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP,
@@ -549,7 +550,11 @@ function reportDiagnostics(diag) {
 
 function syncIndex(db, states) {
   const { apps, diag, layout } = parseTracker(states);
-  const today = new Date().toISOString().slice(0, 10);
+  // LOCAL calendar day (#3070). This dates a row in the status_events table,
+  // and that table is the one part of the index a resync does NOT rebuild
+  // identically — the comment below says events "persist across rebuilds, keyed
+  // by id", so a wrong day is written once and then sticks.
+  const today = localToday();
 
   db.exec('BEGIN');
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit

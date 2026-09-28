@@ -24,6 +24,7 @@ const SUPPORTED_CLIS = [
   { name: "Codex", cmd: "codex" },
   { name: "Qwen Code", cmd: "qwen" },
   { name: "OpenCode", cmd: "opencode" },
+  { name: "Pi", cmd: "pi" },
   { name: "GitHub Copilot CLI", cmd: "copilot" },
   { name: "Antigravity CLI", cmd: "agy" },
   { name: "Grok Build CLI", cmd: "grok" },

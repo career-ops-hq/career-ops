@@ -186,6 +186,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -248,6 +252,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops deep      → Deep research prompt about company
 /career-ops interview-prep → Generate company-specific interview prep doc
 /career-ops interview    → Interactive profile/CV onboarding interview
+/career-ops master-profile → Import, review, and validate your Master Career Profile
 /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
 /career-ops eu-fintech → Scan 21 EU fintech portals for Product Manager roles (zero-token)
 /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
@@ -382,6 +387,35 @@ grok
 
 For headless batch workers, use `grok -p "prompt"` (add `--yolo` to auto-approve tool executions).
 
+## Pi Integration
+
+career-ops supports [Pi](https://github.com/earendil-works/pi) natively, with no wrapper file to maintain: Pi reads `AGENTS.md` from the repo root as project context and discovers the shared skill at `.agents/skills/career-ops/SKILL.md` on its own. The router is then available as `/skill:career-ops`.
+
+### Native Pi
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+pi
+
+# 2. Use the shared skill with subcommands:
+/skill:career-ops "Senior AI Engineer at Anthropic..."
+/skill:career-ops pipeline
+/skill:career-ops scan
+/skill:career-ops pdf
+/skill:career-ops tracker
+```
+
+### One-shot Pi (`pi -p`)
+
+```bash
+pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p "Run career-ops scan mode and summarize new matches."
+pi -p "Run career-ops tracker mode and summarize the current statuses."
+```
+
+If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
+
 ### Standalone Gemini API Script (No CLI install needed)
 
 ```bash
@@ -492,6 +526,10 @@ Once resolved, all user files are resolved and written relative to that folder, 
 
 - **Tracker Override:** You can also set `CAREER_OPS_TRACKER` to override the applications tracker file path directly.
 - **Writes:** All write operations (such as merges) canonically target `{DATA_ROOT}/data/applications.md`.
+- **Scanner config:** `portals.yml` is read and validated at `{DATA_ROOT}/portals.yml`, so `node validate-portals.mjs` checks the same file `scan.mjs` reads.
+- **Generated documents:** tailored CVs and cover letters are written under `{DATA_ROOT}/output/`, and the PDF manifest that links them to a report lives at `{DATA_ROOT}/data/pdf-index.tsv`. While `CAREER_OPS_TRACKER` is unset, the tracker workspace that bounds those writes is the data root, not the checkout.
+- **PDFs under a tracker override:** `generate-pdf.mjs` resolves `CAREER_OPS_TRACKER` before it derives the workspace, so with the override set the workspace is the folder that holds that tracker (or the folder above it, when the tracker sits in a `data/` folder). The CV's HTML and every PDF must then sit inside that workspace, and the manifest moves to its `data/pdf-index.tsv`. Cover letters still target `{DATA_ROOT}/output/`, so they are refused when that folder falls outside the tracker's workspace.
+- **Code layer stays put:** `node_modules/`, `providers/`, `modes/` and the scripts themselves always resolve against the repository, never the data root.
 
 The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically respect this resolution hierarchy.
 
@@ -529,6 +567,7 @@ The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically resp
   <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
   <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
   <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
   <br>
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
