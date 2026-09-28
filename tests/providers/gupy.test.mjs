@@ -1,5 +1,7 @@
 // tests/providers/gupy.test.mjs
 import { pass, fail, ROOT } from '../helpers.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -62,8 +64,8 @@ try {
   }
 
   // postedAt omitted when absent/unparseable; description key absent when empty.
-  const noDate = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/1' });
-  const badDate = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/2', publishedDate: 'not-a-date' });
+  const noDate = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/1', careerPageName: 'Co' });
+  const badDate = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/2', careerPageName: 'Co', publishedDate: 'not-a-date' });
   if (noDate && !('postedAt' in noDate) && badDate && !('postedAt' in badDate)) {
     pass('normalizeGupyApiJob omits postedAt when publishedDate is absent or unparseable');
   } else {
@@ -72,19 +74,24 @@ try {
   if (noDate && !('description' in noDate)) pass('normalizeGupyApiJob omits the description key when the payload carries none');
   else fail(`normalizeGupyApiJob description key = ${JSON.stringify(noDate)}`);
 
-  // Missing company survives as '' — scan.mjs fills it downstream rather than
-  // dropping the posting.
-  const noCompany = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/3' });
-  if (noCompany && noCompany.company === '') pass('normalizeGupyApiJob keeps the posting when careerPageName is absent (company = "")');
+  // No employer, no posting (Source Indexing Policy rule 1). scan.mjs copies
+  // company into the pipeline as-is, so '' would land there unattributed.
+  const noCompany = [
+    normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/3' }),
+    normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/4', careerPageName: '   ' }),
+    normalizeGupyApiJob({ name: 'T', jobUrl: 'https://a.gupy.io/job/5', careerPageName: 42 }),
+  ];
+  if (noCompany.every((r) => r === null)) pass('normalizeGupyApiJob drops a posting whose careerPageName is absent, blank or not a string');
   else fail(`normalizeGupyApiJob no-company = ${JSON.stringify(noCompany)}`);
 
-  // Host-lock + drops.
+  // Host-lock + drops. Every row names an employer, so only the field under
+  // test can be the reason it is dropped.
   const drops = [
-    normalizeGupyApiJob({ name: 'Off host', jobUrl: 'https://evil.example/job/x' }),
-    normalizeGupyApiJob({ name: 'Lookalike', jobUrl: 'https://notgupy.io/job/x' }),
-    normalizeGupyApiJob({ name: 'Insecure', jobUrl: 'http://a.gupy.io/job/x' }),
-    normalizeGupyApiJob({ name: 'No URL' }),
-    normalizeGupyApiJob({ name: '', jobUrl: 'https://a.gupy.io/job/x' }),
+    normalizeGupyApiJob({ name: 'Off host', jobUrl: 'https://evil.example/job/x', careerPageName: 'Co' }),
+    normalizeGupyApiJob({ name: 'Lookalike', jobUrl: 'https://notgupy.io/job/x', careerPageName: 'Co' }),
+    normalizeGupyApiJob({ name: 'Insecure', jobUrl: 'http://a.gupy.io/job/x', careerPageName: 'Co' }),
+    normalizeGupyApiJob({ name: 'No URL', careerPageName: 'Co' }),
+    normalizeGupyApiJob({ name: '', jobUrl: 'https://a.gupy.io/job/x', careerPageName: 'Co' }),
     normalizeGupyApiJob(null),
     normalizeGupyApiJob('string'),
   ];
@@ -94,7 +101,7 @@ try {
     fail(`normalizeGupyApiJob drops = ${JSON.stringify(drops)}`);
   }
 
-  const apex = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://gupy.io/job/apex' });
+  const apex = normalizeGupyApiJob({ name: 'T', jobUrl: 'https://gupy.io/job/apex', careerPageName: 'Co' });
   if (apex && apex.url === 'https://gupy.io/job/apex') pass('normalizeGupyApiJob accepts the apex gupy.io host, not only subdomains');
   else fail(`normalizeGupyApiJob apex = ${JSON.stringify(apex)}`);
 
@@ -521,67 +528,83 @@ try {
     fail(`overlap sweep = ${JSON.stringify({ calls: overlapCalls, jobs: overlap.length })}`);
   }
 
-  // Keywords fall back to config/profile.yml target_roles (the vdab.mjs
-  // pattern), never to a hardcoded term baked into this system-layer file.
-  const profileKeywords = (await import(pathToFileURL(join(ROOT, 'providers/_profile-keywords.mjs')).href))
-    .resolveProfileKeywords(join(ROOT, 'config/profile.yml'));
-  const defCalls = [];
-  const defCtx = { sleep: noSleep, fetchJson: async (url) => { defCalls.push(url); return { data: [], pagination: { total: 0 } }; } };
-  let defThrew = null;
-  try {
-    await provider.fetch({ name: 'Gupy', max_pages: 1 }, defCtx);
-  } catch (err) {
-    defThrew = err.message;
-  }
-  const defNames = defCalls.map((u) => new URL(u).searchParams.get('jobName'));
-  if (profileKeywords.length > 0) {
-    // This repo has a profile — the fallback must use it verbatim.
-    if (defThrew === null && defNames.length === profileKeywords.length
-        && defNames.every((n, i) => n === profileKeywords[i])) {
+  // Keyword resolution against config/profile.yml. Every case runs in an
+  // isolated tmp cwd (never this checkout's own config/profile.yml, so both
+  // the fallback and the throw are checked on every machine, onboarded or
+  // not). Same pattern as tests/providers/vdab.test.mjs.
+  {
+    const withTmpCwd = async (setup, run) => {
+      const tmp = mkdtempSync(join(tmpdir(), 'career-ops-gupy-fallback-'));
+      const cwdBefore = process.cwd();
+      try {
+        setup(tmp);
+        process.chdir(tmp);
+        return await run();
+      } finally {
+        process.chdir(cwdBefore);
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    };
+    const withProfile = (tmp) => {
+      mkdirSync(join(tmp, 'config'));
+      writeFileSync(join(tmp, 'config', 'profile.yml'), 'target_roles:\n  primary:\n    - Engenheiro de Dados\n    - Analista de BI\n');
+    };
+    const noProfile = () => {}; // no config/ dir: profile.yml absent
+    // Runs one fetch() and returns the jobName of every request it issued,
+    // plus the error message if it threw.
+    const sweep = async (entry, setup) => {
+      const calls = [];
+      let threw = null;
+      try {
+        await withTmpCwd(setup, () => provider.fetch(entry, {
+          sleep: noSleep,
+          fetchJson: async (url) => { calls.push(new URL(url).searchParams.get('jobName')); return { data: [], pagination: { total: 0 } }; },
+        }));
+      } catch (err) {
+        threw = err.message;
+      }
+      return { calls, threw };
+    };
+
+    // Keywords fall back to target_roles (the vdab.mjs pattern), never to a
+    // hardcoded term baked into this system-layer file.
+    const fallback = await sweep({ name: 'Gupy', max_pages: 1 }, withProfile);
+    if (fallback.threw === null && JSON.stringify(fallback.calls) === JSON.stringify(['Engenheiro de Dados', 'Analista de BI'])) {
       pass('fetch() falls back to config/profile.yml target_roles when neither gupy.keywords[] nor gupy.q is set');
     } else {
-      fail(`profile fallback = ${JSON.stringify({ defThrew, defNames, profileKeywords })}`);
+      fail(`profile fallback = ${JSON.stringify(fallback)}`);
     }
-  } else if (defThrew && defThrew.includes('no gupy.keywords[]/gupy.q')) {
-    // No profile on this machine — must fail loudly, never sweep a guessed term.
-    pass('fetch() throws when there are no gupy.keywords[]/gupy.q and no profile target_roles to fall back to');
-  } else {
-    fail(`profile fallback (no profile) = ${JSON.stringify({ defThrew, defNames })}`);
-  }
 
-  // Explicit keywords[] always beat the profile fallback.
-  const overrideCalls = [];
-  await provider.fetch({ gupy: { keywords: ['Só Esta'] }, max_pages: 1 }, {
-    sleep: noSleep, fetchJson: async (url) => { overrideCalls.push(url); return { data: [], pagination: { total: 0 } }; },
-  });
-  if (overrideCalls.length === 1 && new URL(overrideCalls[0]).searchParams.get('jobName') === 'Só Esta') {
-    pass('fetch() prefers the entry keywords[] over the profile fallback');
-  } else {
-    fail(`keyword override = ${JSON.stringify(overrideCalls.map((u) => new URL(u).searchParams.get('jobName')))}`);
-  }
+    // No keywords and no profile: fail loudly, never sweep a guessed term.
+    const empty = await sweep({ name: 'Gupy', max_pages: 1 }, noProfile);
+    if (empty.calls.length === 0 && empty.threw && empty.threw.includes('no gupy.keywords[]/gupy.q')) {
+      pass('fetch() throws when there are no gupy.keywords[]/gupy.q and no profile target_roles to fall back to');
+    } else {
+      fail(`profile fallback (no profile) = ${JSON.stringify(empty)}`);
+    }
 
-  // Search keys are read from the gupy: block only (the vdab/arbeitsagentur
-  // shape). A top-level keywords: is not a search key: it neither beats the
-  // block nor replaces the profile fallback.
-  const blockCalls = [];
-  await provider.fetch({ keywords: ['Top'], gupy: { keywords: ['Nested'] }, max_pages: 1 }, {
-    sleep: noSleep, fetchJson: async (url) => { blockCalls.push(url); return { data: [], pagination: { total: 0 } }; },
-  });
-  const topCalls = [];
-  let topThrew = null;
-  try {
-    await provider.fetch({ name: 'Gupy', keywords: ['Top'], max_pages: 1 }, {
-      sleep: noSleep, fetchJson: async (url) => { topCalls.push(url); return { data: [], pagination: { total: 0 } }; },
-    });
-  } catch (err) {
-    topThrew = err.message;
-  }
-  const topNames = topCalls.map((u) => new URL(u).searchParams.get('jobName'));
-  if (blockCalls.length === 1 && new URL(blockCalls[0]).searchParams.get('jobName') === 'Nested'
-      && topThrew === defThrew && JSON.stringify(topNames) === JSON.stringify(defNames)) {
-    pass('fetch() reads search keys from the gupy: block and ignores top-level keywords:');
-  } else {
-    fail(`gupy: block = ${JSON.stringify({ block: blockCalls.map((u) => new URL(u).searchParams.get('jobName')), topThrew, topNames, defNames })}`);
+    // Explicit keywords[] always beat the profile fallback.
+    const override = await sweep({ gupy: { keywords: ['Só Esta'] }, max_pages: 1 }, withProfile);
+    if (override.threw === null && JSON.stringify(override.calls) === JSON.stringify(['Só Esta'])) {
+      pass('fetch() prefers the entry keywords[] over the profile fallback');
+    } else {
+      fail(`keyword override = ${JSON.stringify(override)}`);
+    }
+
+    // Search keys are read from the gupy: block only (the vdab/arbeitsagentur
+    // shape). A top-level keywords: is not a search key: it neither beats the
+    // block nor replaces the profile fallback, and without a profile it does
+    // not rescue the entry from the throw.
+    const block = await sweep({ keywords: ['Top'], gupy: { keywords: ['Nested'] }, max_pages: 1 }, withProfile);
+    const topWithProfile = await sweep({ name: 'Gupy', keywords: ['Top'], max_pages: 1 }, withProfile);
+    const topNoProfile = await sweep({ name: 'Gupy', keywords: ['Top'], max_pages: 1 }, noProfile);
+    if (JSON.stringify(block.calls) === JSON.stringify(['Nested'])
+        && JSON.stringify(topWithProfile.calls) === JSON.stringify(fallback.calls)
+        && topNoProfile.calls.length === 0 && topNoProfile.threw === empty.threw) {
+      pass('fetch() reads search keys from the gupy: block and ignores top-level keywords:');
+    } else {
+      fail(`gupy: block = ${JSON.stringify({ block, topWithProfile, topNoProfile })}`);
+    }
   }
 
   // ── recency window ───────────────────────────────────────────────────────

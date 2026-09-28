@@ -266,8 +266,10 @@ export function buildGupyLocation(j) {
  *                  the cross-listing fingerprint work without a second request.
  *   - postedAt:    `publishedDate` ISO → epoch ms (omitted when unparseable).
  *
- * A posting flagged `isConfidentialCareerPage` names no employer and is
- * dropped (Source Indexing Policy rule 1).
+ * A posting flagged `isConfidentialCareerPage`, or with a blank
+ * `careerPageName`, names no employer and is dropped (Source Indexing Policy
+ * rule 1). scan.mjs copies `company` into the pipeline as-is, so an empty one
+ * would reach it unattributed.
  *
  * @param {any} j
  * @returns {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number } | null}
@@ -282,11 +284,14 @@ export function normalizeGupyApiJob(j) {
   const rawUrl = typeof j.jobUrl === 'string' ? j.jobUrl.trim() : '';
   if (!isSafeGupyUrl(rawUrl)) return null;
 
+  const company = typeof j.careerPageName === 'string' ? j.careerPageName.trim() : '';
+  if (!company) return null;
+
   /** @type {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number }} */
   const job = {
     title,
     url: rawUrl,
-    company: typeof j.careerPageName === 'string' ? j.careerPageName.trim() : '',
+    company,
     location: buildGupyLocation(j),
   };
   if (typeof j.description === 'string' && j.description) job.description = j.description;
