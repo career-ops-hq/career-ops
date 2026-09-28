@@ -25,7 +25,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, copyFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, copyFileSync } from 'node:fs';
+import { linkNodeModules } from './helpers.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -173,9 +174,15 @@ function markerFixture(script) {
   mkdirSync(join(dataRoot, 'output'), { recursive: true });
 
   for (const file of CLOSURE[script]) copyFileSync(join(ROOT, file), join(codeRoot, file));
-  // generate-pdf.mjs imports playwright at module scope, so without this the
-  // child dies before it can print anything and the assertions say nothing.
-  try { symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'dir'); } catch { /* already there */ }
+  // generate-pdf.mjs imports playwright at module scope and tracker-utils.mjs
+  // imports js-yaml, so without this the child dies before it can print anything
+  // and the assertions say nothing. linkNodeModules() rather than a raw
+  // symlinkSync: it uses a junction on Windows, where a 'dir' link needs a
+  // privilege a normal shell lacks, and it returns a reason instead of leaving a
+  // dangling link when the tree is absent. A swallowed EPERM here surfaced as
+  // ERR_MODULE_NOT_FOUND, which reads as a missing dependency rather than a
+  // failed link.
+  const depsReason = linkNodeModules(codeRoot, ROOT);
 
   // The marker: rule 3. No CAREER_OPS_* variable is set when this is used.
   writeFileSync(join(codeRoot, '.career-ops-data'), `${dataRoot}\n`);
@@ -195,7 +202,7 @@ function markerFixture(script) {
     + 'in high volume semiconductor manufacturing over more than a decade of practice.</p>'
     + '<h2>Education</h2><p>BS Chemical Engineering, 2014.</p>'
     + '<h2>Skills</h2><p>Python, MATLAB, SPC.</p></body></html>');
-  return { dir, codeRoot, dataRoot };
+  return { dir, codeRoot, dataRoot, depsReason };
 }
 
 function runFromCodeRoot(f, script, args) {
@@ -212,8 +219,11 @@ function runFromCodeRoot(f, script, args) {
 
 const markerCleanup = (f) => rmSync(f.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 
-test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', () => {
+test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', (t) => {
   const f = markerFixture('set-status.mjs');
+  // set-status reaches js-yaml through tracker-utils.mjs, so with no linked tree
+  // the child dies at module load and every assertion below passes vacuously.
+  if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
   try {
     const r = runFromCodeRoot(f, 'set-status.mjs', ['1', 'Interview', '--note', 'marker check']);
     // Positive first. Every assertion below is an ABSENCE, and a child that
@@ -227,8 +237,10 @@ test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', (
   } finally { markerCleanup(f); }
 });
 
-test('generate-pdf honours a .career-ops-data marker for its workspace boundary', () => {
+test('generate-pdf honours a .career-ops-data marker for its workspace boundary', (t) => {
   const f = markerFixture('generate-pdf.mjs');
+  // generate-pdf imports playwright at module scope, same vacuity.
+  if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
   try {
     const r = runFromCodeRoot(f, 'generate-pdf.mjs',
       [join(f.dataRoot, 'output', 'cv.html'), join(f.dataRoot, 'output', 'cv.pdf')]);

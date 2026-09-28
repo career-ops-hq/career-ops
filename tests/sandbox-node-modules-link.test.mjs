@@ -13,7 +13,7 @@
 // The suite is designed to run on a fresh clone with only Node (see the
 // tests/helpers.mjs header), where an absent node_modules is the expected state
 // and has to be reported as itself.
-import { pass, fail, stripJsComments, ROOT } from './helpers.mjs';
+import { pass, fail, run, stripJsComments, ROOT } from './helpers.mjs';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync, symlinkSync, readlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -218,6 +218,74 @@ try {
       }
     }
   }
+
+  // ── The class, not the 2 instances this PR started from ────────────────────
+  //
+  // Routing the 2 known call sites through linkNodeModules() does not stop a
+  // third from being written, and one already was: #4486 added
+  // tests/writer-scripts-data-root.test.mjs with a raw symlinkSync and a catch
+  // whose comment says "already there" while swallowing EPERM on a Windows box
+  // with no Developer Mode. Two of its cases then failed as ERR_MODULE_NOT_FOUND,
+  // which is exactly the misattribution this helper exists to prevent, and CI's
+  // Windows runner can create the 'dir' link so nothing there ever showed it.
+  //
+  // So the rule is checked across every tracked test instead of at the sites that
+  // happened to exist when it was written.
+  //
+  // KNOWN LIMIT: the scan reads the FIRST argument of each symlinkSync call and
+  // flags one naming node_modules, which is the repo's own tree being linked
+  // somewhere else. A site that hoists that path into a variable first is not
+  // caught, and neither is one that only puts node_modules in the DESTINATION:
+  // tests/gitignore-symlink-escape.test.mjs does that deliberately to build a
+  // path-escape fixture, and it is not this defect.
+  {
+    const firstArgOf = (src) => {
+      const out = [];
+      const re = /\bsymlinkSync\s*\(/g;
+      let m;
+      while ((m = re.exec(src))) {
+        let depth = 0, arg = '';
+        for (let i = m.index + m[0].length; i < src.length; i++) {
+          const ch = src[i];
+          if (ch === '(' || ch === '[') depth++;
+          else if (ch === ')' || ch === ']') { if (depth === 0) break; depth--; }
+          else if (ch === ',' && depth === 0) break;
+          arg += ch;
+        }
+        out.push({ index: m.index, arg: arg.trim() });
+      }
+      return out;
+    };
+
+    const tracked = run('git', ['ls-files', 'tests/*.mjs', 'test-all.mjs']).split('\n').filter(Boolean);
+    if (tracked.length < 50) {
+      fail(`the raw-link scan enumerated only ${tracked.length} tracked files, so a clean result would mean nothing`);
+    } else {
+      const offenders = [];
+      for (const rel of tracked) {
+        if (rel === 'tests/helpers.mjs') continue; // linkNodeModules lives here; it IS the sanctioned site
+        const src = readFileSync(join(ROOT, rel), 'utf-8');
+        for (const { index, arg } of firstArgOf(src)) {
+          if (!arg.includes('node_modules')) continue;
+          offenders.push(`${rel}:${src.slice(0, index).split('\n').length}`);
+        }
+      }
+      // Prove the scan can find before trusting it clean: the same walk over the
+      // shape it is meant to catch must return exactly one hit.
+      // Built by concatenation on purpose. Written as one literal, this suite's own
+      // source would carry the pattern and the scan above would flag this line.
+      const canFind = firstArgOf(`symlink${'Sync'}(join(ROOT, 'node_modules'), join(x, 'node_modules'), 'dir');`)
+        .filter(({ arg }) => arg.includes('node_modules')).length;
+      if (canFind !== 1) {
+        fail(`the raw-link scan found ${canFind} hits in a string built to contain exactly 1, so it cannot be trusted on the repo`);
+      } else if (offenders.length) {
+        fail(`${offenders.join(', ')} links node_modules with a raw symlinkSync; route it through linkNodeModules() so it gets the Windows junction and the absent-tree reason`);
+      } else {
+        pass('no tracked test links node_modules outside linkNodeModules()');
+      }
+    }
+  }
+
 } catch (err) {
   fail(`sandbox node_modules link suite crashed: ${err.message}`);
 } finally {
