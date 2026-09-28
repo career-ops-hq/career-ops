@@ -531,16 +531,22 @@ try {
   // Keyword resolution against config/profile.yml. Every case runs in an
   // isolated tmp cwd (never this checkout's own config/profile.yml, so both
   // the fallback and the throw are checked on every machine, onboarded or
-  // not). Same pattern as tests/providers/vdab.test.mjs.
+  // not). Same pattern as tests/providers/vdab.test.mjs, plus
+  // CAREER_OPS_PROFILE cleared for the duration: when set, it overrides the
+  // relative path and the fixture would never be read.
   {
     const withTmpCwd = async (setup, run) => {
       const tmp = mkdtempSync(join(tmpdir(), 'career-ops-gupy-fallback-'));
       const cwdBefore = process.cwd();
+      const profileEnvBefore = process.env.CAREER_OPS_PROFILE;
       try {
         setup(tmp);
         process.chdir(tmp);
+        delete process.env.CAREER_OPS_PROFILE;
         return await run();
       } finally {
+        if (profileEnvBefore === undefined) delete process.env.CAREER_OPS_PROFILE;
+        else process.env.CAREER_OPS_PROFILE = profileEnvBefore;
         process.chdir(cwdBefore);
         rmSync(tmp, { recursive: true, force: true });
       }
