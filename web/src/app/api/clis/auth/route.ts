@@ -46,6 +46,9 @@ export async function POST(req: Request) {
       const envPath = path.join(root, ".career-ops.env");
       let envContent = "";
       if (fs.existsSync(envPath)) {
+        try {
+          fs.chmodSync(envPath, 0o600);
+        } catch {}
         envContent = fs.readFileSync(envPath, "utf8");
       }
 

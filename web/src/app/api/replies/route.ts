@@ -142,8 +142,18 @@ export async function POST(req: Request) {
     let current: ReplyCandidate[] = [];
     if (fs.existsSync(repliesPath)) {
       try {
-        current = JSON.parse(fs.readFileSync(repliesPath, "utf8"));
-      } catch {}
+        const raw = fs.readFileSync(repliesPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          return Response.json({ error: "data/reply-candidates.json is corrupt (expected JSON array)" }, { status: 500 });
+        }
+        current = parsed;
+      } catch (e) {
+        return Response.json(
+          { error: `Failed to parse data/reply-candidates.json: ${e instanceof Error ? e.message : String(e)}` },
+          { status: 500 }
+        );
+      }
     }
 
     current.unshift(newCandidate);

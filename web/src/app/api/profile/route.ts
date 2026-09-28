@@ -56,6 +56,45 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
   return out;
 }
 
+function validateStructuredField(key: string, value: unknown): { valid: boolean; error?: string } {
+  if (value === undefined || value === null) return { valid: true };
+
+  switch (key) {
+    case "candidate":
+    case "compensation":
+    case "narrative":
+    case "scan":
+    case "followup_cadence":
+      if (!isObj(value)) {
+        return { valid: false, error: `Invalid '${key}': expected a mapping/object` };
+      }
+      return { valid: true };
+    case "target_roles":
+      if (!isObj(value) && !Array.isArray(value)) {
+        return { valid: false, error: "Invalid 'target_roles': expected a mapping or list" };
+      }
+      return { valid: true };
+    case "proof_points":
+    case "dealbreakers":
+      if (!Array.isArray(value) && !isObj(value)) {
+        return { valid: false, error: `Invalid '${key}': expected a list or mapping` };
+      }
+      return { valid: true };
+    case "language":
+      if (typeof value !== "string" && !isObj(value)) {
+        return { valid: false, error: "Invalid 'language': expected a string or mapping" };
+      }
+      return { valid: true };
+    case "location":
+      if (!isObj(value) && typeof value !== "string") {
+        return { valid: false, error: "Invalid 'location': expected a string or mapping" };
+      }
+      return { valid: true };
+    default:
+      return { valid: true };
+  }
+}
+
 export async function GET() {
   const root = careerOpsRoot();
   const file = path.join(root, "config", "profile.yml");
@@ -136,7 +175,12 @@ export async function POST(req: Request) {
   if (hasStructuredProfileKey) {
     for (const key of KNOWN_STRUCTURED_PROFILE_KEYS) {
       if (key in (body as Record<string, unknown>)) {
-        proposed[key] = (body as Record<string, unknown>)[key];
+        const val = (body as Record<string, unknown>)[key];
+        const check = validateStructuredField(key, val);
+        if (!check.valid) {
+          return Response.json({ error: check.error }, { status: 400 });
+        }
+        proposed[key] = val;
       }
     }
     if (isMapping((body as Record<string, unknown>).location)) {

@@ -109,12 +109,12 @@ test("offers POST delete removes observation", async () => {
     let data = await res.json();
     assert.equal(data.observations.length, 2);
 
-    // Delete item 1
+    // Delete item 1 with content
     const delRes = await postOffers(
       new Request("http://fixture.invalid/api/offers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", id: 1 }),
+        body: JSON.stringify({ action: "delete", content: data.observations[0].content }),
       })
     );
     assert.equal((await delRes.json()).success, true);
@@ -152,7 +152,7 @@ test("offers POST record with newline and tab in note sanitizes input without co
   });
 });
 
-test("offers POST delete protects against expected content mismatch", async () => {
+test("offers POST delete protects against expected content mismatch and requires expected for id-based delete", async () => {
   await withTempRoot(async () => {
     await postOffers(
       new Request("http://fixture.invalid/api/offers", {
@@ -167,6 +167,38 @@ test("offers POST delete protects against expected content mismatch", async () =
       })
     );
 
+    let res = await getOffers();
+    let data = await res.json();
+    assert.equal(data.observations.length, 1);
+    const rowContent = data.observations[0].content;
+
+    // ID delete without expected value should return 400
+    const noExpectedRes = await postOffers(
+      new Request("http://fixture.invalid/api/offers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          id: 1,
+        }),
+      })
+    );
+    assert.equal(noExpectedRes.status, 400);
+
+    // Partial/substring expected value should return 409 (must match entire row)
+    const partialRes = await postOffers(
+      new Request("http://fixture.invalid/api/offers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete",
+          id: 1,
+          expected: "Target Corp",
+        }),
+      })
+    );
+    assert.equal(partialRes.status, 409);
+
     // Mismatched expected value should return 409 and not delete
     const mismatchRes = await postOffers(
       new Request("http://fixture.invalid/api/offers", {
@@ -175,17 +207,17 @@ test("offers POST delete protects against expected content mismatch", async () =
         body: JSON.stringify({
           action: "delete",
           id: 1,
-          expected: "Different Corp",
+          expected: "Different Corp\tEngineer\tBase: $150k",
         }),
       })
     );
     assert.equal(mismatchRes.status, 409);
 
-    let res = await getOffers();
-    let data = await res.json();
+    res = await getOffers();
+    data = await res.json();
     assert.equal(data.observations.length, 1);
 
-    // Matching expected value should succeed
+    // Exact matching expected value should succeed
     const matchRes = await postOffers(
       new Request("http://fixture.invalid/api/offers", {
         method: "POST",
@@ -193,7 +225,7 @@ test("offers POST delete protects against expected content mismatch", async () =
         body: JSON.stringify({
           action: "delete",
           id: 1,
-          expected: "Target Corp",
+          expected: rowContent,
         }),
       })
     );

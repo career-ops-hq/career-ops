@@ -70,3 +70,30 @@ test("replies POST classifies genuine rejections vs scheduling messages containi
     assert.equal(rejData.candidate.classification, "rejection");
   });
 });
+
+test("replies POST rejects writing when reply-candidates.json is corrupt or not an array", async () => {
+  const { writeFileSync } = await import("node:fs");
+  await withTempRoot(async ({ root }) => {
+    const candidatesPath = path.join(root, "data", "reply-candidates.json");
+    
+    // Corrupt JSON
+    writeFileSync(candidatesPath, "{ broken json");
+    const req1 = new Request("http://fixture.invalid/api/replies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Hello", subject: "Test" }),
+    });
+    const res1 = await postReplies(req1);
+    assert.equal(res1.status, 500);
+
+    // Non-array JSON
+    writeFileSync(candidatesPath, JSON.stringify({ foo: "bar" }));
+    const req2 = new Request("http://fixture.invalid/api/replies", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Hello", subject: "Test" }),
+    });
+    const res2 = await postReplies(req2);
+    assert.equal(res2.status, 500);
+  });
+});

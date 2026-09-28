@@ -15,7 +15,7 @@ export async function GET() {
 
   // Read salary observations
   const obsPath = path.join(root, "data", "salary-observations.tsv");
-  const observations: Array<{ id: number; company: string; role: string; comp: string; date: string; notes: string }> = [];
+  const observations: Array<{ id: number; company: string; role: string; comp: string; date: string; notes: string; content?: string }> = [];
   if (fs.existsSync(obsPath)) {
     try {
       const content = fs.readFileSync(obsPath, "utf8");
@@ -30,6 +30,7 @@ export async function GET() {
             role: parts[2]?.trim() || "",
             comp: parts[3]?.trim() || "",
             notes: parts[4]?.trim() || "",
+            content: lines[i].trim(),
           });
         }
       }
@@ -143,14 +144,17 @@ export async function POST(req: Request) {
         const target = body.content.trim();
         targetIdx = lines.findIndex((l, idx) => idx > 0 && l.trim() === target);
       } else if (typeof id === "number" && id >= 1 && id < lines.length) {
-        if (body.expected && typeof body.expected === "string") {
-          const expected = sanitize(body.expected);
-          const actual = sanitize(lines[id]);
-          if (!actual.includes(expected)) {
-            return Response.json({ error: "Item has changed or does not match expected value" }, { status: 409 });
-          }
+        if (!body.expected || typeof body.expected !== "string") {
+          return Response.json({ error: "Expected value is required for ID-based deletion" }, { status: 400 });
+        }
+        const expected = sanitize(body.expected).trim();
+        const actual = sanitize(lines[id]).trim();
+        if (actual !== expected) {
+          return Response.json({ error: "Item has changed or does not match expected value" }, { status: 409 });
         }
         targetIdx = id;
+      } else {
+        return Response.json({ error: "Invalid delete request: missing content or valid id with expected value" }, { status: 400 });
       }
 
       if (targetIdx >= 1 && targetIdx < lines.length) {

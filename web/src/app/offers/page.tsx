@@ -47,6 +47,7 @@ type Observation = {
   role: string;
   comp: string;
   notes?: string;
+  content?: string;
 };
 
 export default function OffersPage() {
@@ -291,13 +292,18 @@ export default function OffersPage() {
     }
   };
 
-  const handleDeleteObservation = async (id: number) => {
+  const handleDeleteObservation = async (obs: Observation) => {
     if (!confirm("Remove this salary observation?")) return;
     try {
       await fetch("/api/offers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", id }),
+        body: JSON.stringify({
+          action: "delete",
+          id: obs.id,
+          content: obs.content,
+          expected: obs.content,
+        }),
       });
       await fetchOffers();
     } catch (e) {
@@ -1349,7 +1355,7 @@ Best regards,`;
 
                       <button
                         type="button"
-                        onClick={() => handleDeleteObservation(obs.id)}
+                        onClick={() => handleDeleteObservation(obs)}
                         className="text-muted hover:text-red-500 p-1 rounded transition"
                         title="Delete observation"
                       >

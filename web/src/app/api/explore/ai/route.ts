@@ -436,6 +436,9 @@ export async function POST(req: Request) {
                   })}>>\n`
                 );
               }
+              if (scanError) {
+                safeEnqueue(`\n_(Public boards scan encountered an error: ${scanError})_`);
+              }
             } else if (scanError) {
               safeEnqueue(`_(Public boards scan failed: ${scanError})_`);
             } else {
