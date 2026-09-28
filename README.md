@@ -322,7 +322,7 @@ pi -p "Run career-ops scan mode and summarize new matches."
 pi -p "Run career-ops tracker mode and summarize the current statuses."
 ```
 
-If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo (or start with `-a`) so the project skill loads.
+If a Pi build gates project resources behind a trust decision, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
 
 ### Standalone Gemini API Script (No CLI install needed)
 
