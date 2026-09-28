@@ -13,7 +13,7 @@ import path from "node:path";
  * runtime lives outside the engine checkout (isolated build/deploy dirs). The
  * fallback assumes the process cwd is `<checkout>/web`, the same base
  * `careerOpsRoot()` uses for its own parent walk, so standard installs keep
- * working unchanged.
+ * working unchanged. A relative override resolves against `cwd` too.
  *
  * Pure and dependency-injected (cwd + env passed in) so `node --test` can
  * exercise it, matching the data-root.mjs precedent.
@@ -24,7 +24,7 @@ import path from "node:path";
  */
 export function resolveCodeRoot(cwd, env = process.env) {
   const explicit = (env.CAREER_OPS_CODE_ROOT || "").trim();
-  if (explicit) return path.resolve(explicit);
+  if (explicit) return path.resolve(cwd, explicit);
   return path.resolve(cwd, "..");
 }
 
@@ -37,5 +37,8 @@ export function resolveCodeRoot(cwd, env = process.env) {
  * @param {string} nameNoExt e.g. "doctor", "scan-ats-full"
  */
 export function resolveRootScript(codeRoot, nameNoExt) {
-  return path.join(codeRoot, `${nameNoExt}.mjs`);
+  // The checkout is chosen at runtime, so this is the dynamic path Turbopack
+  // must not trace: without the ignore, `next build` warns that it traces the
+  // whole project into every server bundle that reaches rootScript().
+  return path.join(/* turbopackIgnore: true */ codeRoot, `${nameNoExt}.mjs`);
 }

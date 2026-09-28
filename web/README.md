@@ -63,6 +63,8 @@ npm run build        # production build
 
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
+Root scripts such as `doctor.mjs` run from the checkout that holds `web/`, not
+from `CAREER_OPS_ROOT`; set `CAREER_OPS_CODE_ROOT` when the app runs outside it.
 
 `/api` is gated by the same-origin + loopback guard in `src/lib/origin-guard.mjs`.
 Two opt-ins widen it, both unset by default and both in `web/.env.local`:

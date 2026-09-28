@@ -58,10 +58,10 @@ export function careerOpsRoot(): string {
  * checkout as missing. CAREER_OPS_CODE_ROOT selects the checkout explicitly.
  */
 export function rootScript(nameNoExt: string): string {
-  // The core checkout is selected at runtime and must not be bundled into the
-  // web server output when Turbopack sees this dynamic script path.
-  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
-  return path.join(/* turbopackIgnore: true */ codeRoot, resolveRootScript(codeRoot, nameNoExt));
+  // resolveRootScript() already returns the absolute `<checkout>/<name>.mjs`, and
+  // its path.join carries the Turbopack ignore: the core checkout is selected at
+  // runtime and must not be bundled into the web server output.
+  return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), nameNoExt);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
