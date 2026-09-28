@@ -1,5 +1,5 @@
 ---
-description: career-ops command center — evaluate offers, scan portals, track applications
+description: career-ops AI job search agent: evaluate offers, scan portals, track applications
 ---
 
 # career-ops

@@ -168,7 +168,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx`는 [Node.js](https://nodejs.org)에 포함되어 있습니다: 전역으로 아무것도 설치하지 않고
 > 설치 프로그램을 한 번 실행합니다. Node가 아직 없나요? 먼저 설치하세요.
-> (이미 Claude Code / Gemini / Codex CLI를 쓰고 있나요? 그러면 이미 있습니다.)
+> (이미 Claude Code / Codex CLI를 쓰고 있나요? 그러면 이미 있습니다.)
 
 이 명령은 최신 릴리스를 `./career-ops`에 클론하고 의존성을 설치합니다. 그다음:
 
