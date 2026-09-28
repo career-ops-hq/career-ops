@@ -39,7 +39,6 @@ export async function POST(req: Request) {
       }
 
       const trimmedKey = apiKey.trim();
-      process.env[keyName] = trimmedKey;
 
       // Persist to user local config file safely
       const root = careerOpsRoot();
@@ -61,7 +60,14 @@ export async function POST(req: Request) {
       } else {
         envContent += `\n${keyName}=${trimmedKey}`;
       }
-      fs.writeFileSync(envPath, envContent.trim() + "\n", { mode: 0o600 });
+      try {
+        fs.writeFileSync(envPath, envContent.trim() + "\n", { mode: 0o600 });
+      } catch (err) {
+        console.error("Failed to write .career-ops.env:", err);
+        return NextResponse.json({ error: "Failed to persist API key to file" }, { status: 500 });
+      }
+
+      process.env[keyName] = trimmedKey;
 
       return NextResponse.json({
         ok: true,
