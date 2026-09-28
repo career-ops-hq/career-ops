@@ -45,18 +45,18 @@ module or changed input cannot silently reuse an active task. The scheduled
 score entry retries waiting source-Unknown scan tasks after pending jobs and
 rotates failed probes so one blocked posting does not starve another.
 `scan-discovered` can resume the same waiting task when refreshed evidence
-arrives. Scan produces the reviewed
+arrives. Scan produces the validated
 `jd_report_v1`; score and
-apply consume reviewed upstream results by opportunity ID. The module fingerprint
+apply consume completed upstream results by opportunity ID. The module fingerprint
 binds those results to the current CV, profile, targeting, and rules. Existing
 valid results are reused; changed inputs require `--re-evaluate`.
 
 Tasks use `running`, `waiting`, `completed`, and `cancelled`. Business tables in
 `opportunities.db` are authoritative; `workflow-checkpoints.db` records execution
-progress only. After independent apply review, the graph calls the retained
+progress only. After package generation, the graph calls the retained
 Reactive Resume tool to update a task-owned copy and export a PDF. Readable
 PDF pages, candidate identity, and every package file hash are recorded with
-the draft. Confirmation checks the current inputs, review, PDF, and actual file
+the draft. Confirmation checks the current inputs, PDF, and actual file
 bytes before committing the whole package; failed exports can resume on the
 same task. Apply pauses for user review/confirmation. No path submits an
 application or sends a message.

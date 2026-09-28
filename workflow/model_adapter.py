@@ -84,58 +84,6 @@ Never state all hard gates pass when employment, compensation or eligibility rem
 Do not repeat the research object, write YAML, calculate scores, hashes or source paths.
 '''
 
-REVIEW = '''Independently review the final report against frozen evidence and rules. Do not trust the evaluator's conclusions.
-Check complete JD, each literal citation's substantive support, employer identity, the jd_report's structured location_evidence and employment_evidence, dates/location/level/team applicability,
-contradictions, full capability coverage, production-vs-prototype claims, no double-counting, and all hard gates/readiness.
-Return these TOP-LEVEL fields: verdict,jd_complete,source_grounding,dimension_support,capability_coverage,
-no_double_count,gate_evidence,location,employment,size,compensation,eligibility,liveness,ready.
-verdict is approve|revise. The six checks (jd_complete through gate_evidence) each contain {status:"pass|fail",finding}.
-The six gate fields (location through liveness) each contain "Pass|Fail|Unknown". ready is boolean.
-The program assembles the canonical checks/gates record; do not nest these fields inside checks or gates.
-Each finding must explain the actual evidence or defect, not merely assert a check passed.
-For passing checks, use at most 120 Chinese characters per finding; for failing checks list every concrete defect.
-Approve only if all checks pass. Liveness must be supported by the supplied browser evidence, and readiness requires verified work conditions.
-Do not generate a hash or rewrite the report. Missing information may remain Unknown; fabrication is a revision.
-'''
-
-REVIEW_CHECKS = ('jd_complete', 'source_grounding', 'dimension_support', 'capability_coverage', 'no_double_count', 'gate_evidence')
-REVIEW_GATES = ('location', 'employment', 'size', 'compensation', 'eligibility', 'liveness')
-
-
-def normalize_review(value):
-    """Unnest a complete model review without inventing or dropping judgments."""
-    required = {'verdict', 'ready', *REVIEW_CHECKS, *REVIEW_GATES}
-    fields = {}
-
-    def collect(node):
-        if not isinstance(node, dict):
-            return
-        for key, item in node.items():
-            if key in required:
-                if key in fields:
-                    raise ValueError(f'Duplicate review field: {key}')
-                fields[key] = item
-            if isinstance(item, dict):
-                collect(item)
-
-    collect(value)
-    missing = required - fields.keys()
-    if missing:
-        raise ValueError(f'Incomplete review: {", ".join(sorted(missing))}')
-    if fields['verdict'] not in ('approve', 'revise') or not isinstance(fields['ready'], bool):
-        raise ValueError('Invalid review verdict or readiness')
-    checks = {}
-    for key in REVIEW_CHECKS:
-        item = fields[key]
-        if not isinstance(item, dict) or item.get('status') not in ('pass', 'fail') or not item.get('finding'):
-            raise ValueError(f'Invalid review check: {key}')
-        checks[key] = {'status': item['status'], 'finding': item['finding']}
-    gates = {key: fields[key] for key in REVIEW_GATES}
-    if any(value not in ('Pass', 'Fail', 'Unknown') for value in gates.values()):
-        raise ValueError('Invalid review gate')
-    return {'verdict': fields['verdict'], 'ready': fields['ready'], 'checks': checks, 'gates': gates}
-
-
 def parse_object(text):
     text = text.strip()
     blocks = re.findall(r'```(?:json)?\s*\n(.*?)```', text, re.DOTALL)
@@ -262,8 +210,6 @@ def call_agent(phase, prompt, tools, directory):
         raise RuntimeError(value['blocked'])
     if phase == 'research':
         value = freeze_research(value, result.get('messages', []))
-    elif phase == 'review':
-        value = normalize_review(value)
     elif phase in ('assessment', 'repair'):
         value = {'dimensions': {k: value[k] for k in ('direction', 'compensation', 'team', 'company')},
                  'sections': value['sections']}

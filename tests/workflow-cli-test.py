@@ -55,10 +55,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     assert run(directory, "show", "job-1") == completed
     assert run(directory, "list") == [completed]
 
-    waiting = run(directory, "start", "score", "job-2", str(report("job-2")), env={**model_env, "WORKFLOW_TEST_FAILED_CHECK": "1"})
-    assert waiting["status"] == "waiting"
-    assert waiting["reason"] == "review_budget_exhausted"
-    assert waiting["allowed_actions"] == ["resume", "cancel"]
+    second = run(directory, "start", "score", "job-2", str(report("job-2")), env=model_env)
+    assert second["status"] == "completed"
     duplicate = run(directory, "start", "score", "job-1", str(job1), env=model_env)
     assert duplicate == completed
     rejected = subprocess.run(
@@ -90,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     assert real["artifact"]["outcome"] == "score"
     assert real["artifact"]["artifact"]["report"] == "# Verified score report"
     assert Path(real["artifact"]["artifact"]["path"]).read_text() == "# Verified score report"
-    assert Path(real["artifact"]["artifact"]["review_path"]).is_file()
+    assert "review_path" not in real["artifact"]["artifact"]
 
     incomplete_report = directory / "incomplete-jd.json"
     incomplete_report.write_text(json.dumps({
@@ -125,18 +123,18 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     assert arbitrary.returncode == 1 and "jd_report_v1" in arbitrary.stderr
 
     scores = run(directory, "scores", env=model_env)
-    assert [item["opportunity_id"] for item in scores if item["valid"]][:2] == ["job-1", "job-real"]
+    assert {item["opportunity_id"] for item in scores if item["valid"]} == {"job-1", "job-2", "job-real", "job-uncertain"}
     assert all(set(item) == {"opportunity_id", "lower", "upper", "coverage", "valid", "stale_reason"} for item in scores)
-    reevaluated_waiting = run(
+    reevaluated = run(
         directory, "start", "score", "job-2", str(report("job-2")), "--re-evaluate", env=model_env
     )
-    assert reevaluated_waiting["status"] == "completed"
-    assert reevaluated_waiting["task_id"] != waiting["task_id"]
-    cancelled = run(directory, "cancel", waiting["task_id"])
-    assert cancelled["status"] == "cancelled"
+    assert reevaluated["status"] == "completed"
+    assert reevaluated["task_id"] == second["task_id"]
+    cancelled = run(directory, "cancel", second["task_id"])
+    assert cancelled["status"] == "completed"
     assert cancelled["allowed_actions"] == []
     terminal_resume = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "resume", waiting["task_id"], "--input", str(report("job-2"))],
+        [str(PYTHON), str(CLI), "--directory", str(directory), "resume", second["task_id"], "--input", str(report("job-2"))],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert terminal_resume.returncode == 1 and "Terminal task cannot resume" in terminal_resume.stderr

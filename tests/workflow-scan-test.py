@@ -1,4 +1,4 @@
-"""Verify scan evidence retention, deduplication, review and score handoff."""
+"""Verify scan evidence retention, deduplication, and score handoff."""
 
 import json
 import hashlib
@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     scanned = run(directory, "start", "scan", "job-1", str(source))
     assert scanned["status"] == "completed"
     assert scanned["artifact"]["artifact"]["schema_version"] == "jd_report_v1"
-    assert scanned["artifact"]["review"]["verdict"] == "approve"
+    assert "review" not in scanned["artifact"]
     assert run(directory, "start", "scan", "job-1", str(source)) == scanned
 
     inline = run(directory, "start", "scan", "inline", json.dumps({
@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "missing", "scan:missing"],
         text=True, capture_output=True,
     )
-    assert missing.returncode == 1 and "Missing reviewed scan result" in missing.stderr
+    assert missing.returncode == 1 and "Missing completed scan result" in missing.stderr
 
     blocked = directory / "blocked.json"
     blocked.write_text(json.dumps({
@@ -114,12 +114,12 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "url": "https://example.com/jobs/3",
     }))
     crashed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "scan", "job-3", str(crash_source), "--crash-at", "review"],
+        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "scan", "job-3", str(crash_source), "--crash-at", "publish"],
         text=True, capture_output=True, env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
     assert crashed.returncode == 86
     crashed_task = next(task for task in run(directory, "list") if task["opportunity_id"] == "job-3")
-    recovered_crash = run(directory, "run", crashed_task["task_id"], "--crash-at", "review")
+    recovered_crash = run(directory, "run", crashed_task["task_id"], "--crash-at", "publish")
     assert recovered_crash["status"] == "completed"
 
     excluded_source = directory / "excluded.json"
@@ -231,4 +231,4 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-fair-") as temporary:
     with patch("workflow.career_ops.capture_jd", return_value=refreshed), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
         assert scan_discovered(directory, "2")["task_id"] == waiting["task_id"]
 
-print("workflow scan: evidence, deduplication, review and score handoff passed")
+print("workflow scan: evidence, deduplication, and score handoff passed")

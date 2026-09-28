@@ -24,6 +24,21 @@ except ValueError as error:
 else:
     raise AssertionError("Non-boolean layout instruction was accepted")
 
+with tempfile.TemporaryDirectory(prefix="career-ops-draft-migration-") as temporary:
+    database = Path(temporary) / "opportunities.db"
+    store = BusinessStore(database)
+    task = store.start("legacy-draft", "apply", "{}")
+    store.db.execute("ALTER TABLE drafts ADD COLUMN review TEXT NOT NULL DEFAULT '{}'")
+    store.db.execute("ALTER TABLE drafts ADD COLUMN approved INTEGER NOT NULL DEFAULT 0")
+    store.db.execute(
+        "INSERT INTO drafts(task_id,version,input_hash,package_hash,payload) VALUES(?,?,?,?,?)",
+        (task["task_id"], 1, store.task(task["task_id"])["input_hash"], "hash", '{"package":{}}'),
+    )
+    store.close()
+    store = BusinessStore(database)
+    assert set(store.draft(task["task_id"])) == {"package", "version", "package_hash", "input_hash"}
+    store.close()
+
 
 def call(directory: Path, input_root: Path, *args: str, expected: int = 0) -> dict:
     result = subprocess.run(
@@ -80,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     assert set(stored_input["market_rules"]) == {"cn", "hk", "remote"}
     assert draft["status"] == "waiting" and draft["reason"] == "user_review"
     assert draft["allowed_actions"] == ["feedback", "confirm", "defer", "cancel"]
-    assert draft["artifact"]["review"]["verdict"] == "approve"
+    assert "review" not in draft["artifact"]
     assert Path(draft["artifact"]["files"]["resume_payload"]).is_file()
     assert Path(draft["artifact"]["files"]["resume_pdf"]).is_file()
     assert Path(draft["artifact"]["files"]["resume_metadata"]).is_file()
@@ -89,7 +104,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     assert "application_answers" not in draft["artifact"]["files"]
     cover_letter = Path(draft["artifact"]["files"]["cover_letter"])
     original_letter = cover_letter.read_text()
-    cover_letter.write_text("changed after review")
+    cover_letter.write_text("changed after staging")
     call(directory, inputs, "resume", draft["task_id"], "--decision", "confirm", expected=1)
     assert call(directory, inputs, "show", draft["task_id"])["status"] == "waiting"
     cover_letter.write_text(original_letter)
@@ -105,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     with sqlite3.connect(directory / "opportunities.db") as connection:
         connection.execute("UPDATE drafts SET payload=? WHERE task_id=?", (original_manifest, draft["task_id"]))
         altered_package = json.loads(original_manifest)
-        altered_package["package"]["cover_letter"] = "Unreviewed replacement letter"
+        altered_package["package"]["cover_letter"] = "Unconfirmed replacement letter"
         connection.execute("UPDATE drafts SET payload=? WHERE task_id=?", (json.dumps(altered_package), draft["task_id"]))
     call(directory, inputs, "resume", draft["task_id"], "--decision", "confirm", expected=1)
     with sqlite3.connect(directory / "opportunities.db") as connection:
@@ -179,7 +194,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     count = store.db.execute("SELECT COUNT(*) FROM drafts WHERE task_id=?", (second_draft["task_id"],)).fetchone()[0]
     try:
         store.stage_draft({"task_id": second_draft["task_id"], "input_hash": store.task(second_draft["task_id"])["input_hash"]},
-                          {"files": {}}, {"verdict": "approve"}, True)
+                          {"files": {}})
     except ValueError as error:
         assert "no longer running" in str(error)
     else:
@@ -191,21 +206,17 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     call(directory, inputs, "start", "scan", "job-3", str(third))
     call(directory, inputs, "start", "score", "job-3", "scan:job-3")
     crashed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "apply", "job-3", "score:job-3", "--crash-at", "review"],
+        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "apply", "job-3", "score:job-3", "--crash-at", "publish"],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER, "CAREER_OPS_RESUME_RENDERER": RESUME_RENDERER,
              "CAREER_OPS_INPUT_ROOT": str(inputs)},
     )
-    assert crashed.returncode == 86
+    assert crashed.returncode == 0
     crashed_task = next(task for task in call(directory, inputs, "list") if task["opportunity_id"] == "job-3" and task["module"] == "apply")
-    recovered = call(directory, inputs, "run", crashed_task["task_id"], "--crash-at", "review")
+    recovered = call(directory, inputs, "run", crashed_task["task_id"])
     assert recovered["status"] == "waiting" and recovered["reason"] == "user_review"
-    review_failed = call(directory, inputs, "resume", crashed_task["task_id"], "--feedback", "force-review-failure")
-    assert review_failed["reason"] == "review_budget_exhausted"
-    assert review_failed["artifact"]["approved"] is False
     budgeted = call(directory, inputs, "resume", crashed_task["task_id"], "--feedback", "force-budget")
     assert budgeted["reason"] == "tool_budget_exhausted"
-    assert budgeted["artifact"]["approved"] is False
 
     fourth = source(root / "fourth.json", "job-4", "Build verifiable AI agents.")
     call(directory, inputs, "start", "scan", "job-4", str(fourth))

@@ -79,32 +79,6 @@ assert revision_phases == ["apply_evaluate"]
 assert revised["artifact"] == {**complete_package, "questions": "# Corrected grounded questions"}
 assert complete_package["questions"] == "Grounded questions"
 
-review_checks = [
-    {"id": item, "status": "pass", "finding": "Grounded"}
-    for item in (
-        "source-grounding", "role-alignment", "cv-materiality",
-        "employer-questions", "sensitive-fields", "artifact-consistency",
-    )
-]
-complete_review = {
-    "schema": "career-ops/application-review", "schema_version": 1,
-    "verdict": "approve", "checks": review_checks,
-    "unsupported_claims": [], "required_changes": [],
-}
-review_phases = []
-def review_call(phase, *_args):
-    review_phases.append(phase)
-    return ({**complete_review, "unsupported_claims": None}
-            if phase == "apply_review" else complete_review), f"{phase}-session"
-model_adapter.call_agent = review_call
-try:
-    reviewed = runner.apply_review({"inputs": {}, "artifact": complete_package})
-finally:
-    model_adapter.call_agent = original_call_agent
-assert review_phases == ["apply_review", "apply_review_repair"]
-assert reviewed["verdict"] == "approve"
-assert reviewed["tool_calls"] == 2
-
 inputs = {
     "jd_report": {"prescreen": {"status": "uncertain"}},
     "cv": "cv", "profile": "attractiveness:\n  weights:\n    direction: 0.25\n    compensation: 0.25\n    team: 0.25\n    company: 0.25\n",
@@ -209,7 +183,6 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     finally:
         model_adapter.call_agent = original_call_agent
     assert phases == ["research", "assessment", "repair"]
-    assert rendered["revision"] == 1
     assert rendered["artifact"]["type"] == "score"
     report_path = Path(rendered["artifact"]["draft_directory"]) / "report.md"
     report_path.unlink()
@@ -223,6 +196,5 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     finally:
         model_adapter.call_agent = original_call_agent
     assert phases == ["repair"]
-    assert recovered["revision"] == 1
 
 print("workflow model runner: rendered draft recovery avoids repeated research")

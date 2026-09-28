@@ -50,9 +50,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         }))
         return path
 
-    call(directory, "start", "score", "review-crash", str(report("review-crash")), "--crash-at", "review", expected=86, env=model_env)
+    call(directory, "start", "score", "precommit-crash", str(report("precommit-crash")), "--crash-at", "before_publish", expected=86, env=model_env)
     crashed = call(directory, "list")[0]
-    recovered = call(directory, "run", crashed["task_id"], "--crash-at", "review", env=model_env)
+    recovered = call(directory, "run", crashed["task_id"], "--crash-at", "before_publish", env=model_env)
     assert recovered["status"] == "completed"
 
     call(directory, "start", "score", "publish-crash", str(report("publish-crash")), "--crash-at", "publish", expected=86, env=model_env)
@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     isolated = call(directory, "start", "score", "isolated", str(report("isolated")), env=model_env)
     assert isolated["status"] == "completed"
 
-    call(directory, "start", "score", "input-change", str(report("input-change")), "--crash-at", "review", expected=86, env=model_env)
+    call(directory, "start", "score", "input-change", str(report("input-change")), "--crash-at", "before_publish", expected=86, env=model_env)
     changed_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "input-change")
     (inputs / "cv.md").write_text("Candidate facts v2")
     changed = subprocess.run(
@@ -86,6 +86,22 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     )
     assert changed.returncode == 1 and "changed before business commit" in changed.stderr
     assert call(directory, "show", changed_task["task_id"])["reason"] == "input_changed"
+    (inputs / "cv.md").write_text("Candidate facts v1")
+    scan_source = directory / "scan-input.json"
+    scan_source.write_text(json.dumps({
+        "schema_version": "scan_input_v1", "opportunity_id": "scan-input-change",
+        "url": "https://example.com/scan-input-change", "company": "Example", "role": "AI Engineer",
+        "jd": "Build agent workflows.", "captured_at": "2026-09-21T00:00:00Z", "liveness": "active",
+    }))
+    call(directory, "start", "scan", "scan-input-change", str(scan_source), "--crash-at", "before_publish", expected=86, env=model_env)
+    scan_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "scan-input-change")
+    (inputs / "cv.md").write_text("Candidate facts v2")
+    stale_scan = subprocess.run(
+        [str(PYTHON), str(CLI), "--directory", str(directory), "run", scan_task["task_id"]],
+        text=True, capture_output=True, env={**os.environ, **model_env},
+    )
+    assert stale_scan.returncode == 1 and "Scan inputs changed before business commit" in stale_scan.stderr
+    assert call(directory, "show", scan_task["task_id"])["reason"] == "input_changed"
 
     lock_report = report("locked")
     running = subprocess.Popen(
@@ -115,10 +131,10 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     store = BusinessStore(directory / "opportunities.db")
     pending = store.start("cancel-race", "scan", "{}")
     store.cancel(pending["task_id"])
-    artifact = {"reason": "Closed", "evidence": "Verified source"}
+    artifact = {"type": "exclusion", "reason": "Closed", "evidence": "Verified source"}
     state = {"task_id": pending["task_id"], "input_hash": digest("{}"), "outcome": "exclude",
              "draft": json.dumps(artifact), "material_hash": digest(json.dumps(artifact)),
-             "review": {"verdict": "approve", "checks": {"grounded": "pass"}}}
+             }
     try:
         store.publish(state)
     except ValueError as error:

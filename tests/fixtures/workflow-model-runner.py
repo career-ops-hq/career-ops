@@ -37,8 +37,6 @@ if phase == "scan_evaluate":
         },
         "tool_calls": 1,
     }))
-elif phase == "scan_review":
-    print(json.dumps({"verdict": "approve", "checks": {"grounded": "pass"}, "tool_calls": 1}))
 elif phase == "apply_evaluate":
     feedback = payload["inputs"].get("feedback", [])
     if "Emphasize verified testing work" in feedback and "Regenerate for current facts" not in feedback:
@@ -58,15 +56,6 @@ elif phase == "apply_evaluate":
             "questions": "# Questions",
         },
         "tool_calls": 20 if "force-budget" in feedback else 1,
-    }))
-elif phase == "apply_review":
-    checks = ["source-grounding", "role-alignment", "cv-materiality", "employer-questions", "sensitive-fields", "artifact-consistency"]
-    forced = "force-review-failure" in payload["inputs"].get("feedback", [])
-    print(json.dumps({
-        "verdict": "revise" if forced else "approve", "schema": "career-ops/application-review", "schema_version": 1,
-        "checks": [{"id": item, "status": "fail" if forced and item == "source-grounding" else "pass", "finding": "Verified"} for item in checks],
-        "unsupported_claims": ["Unsupported"] if forced else [],
-        "required_changes": ["Remove claim"] if forced else [], "tool_calls": 1,
     }))
 elif phase == "evaluate":
     if os.environ.get("WORKFLOW_TEST_SLEEP"):
@@ -96,23 +85,5 @@ elif phase == "evaluate":
         "artifact": artifact,
         "tool_calls": 3,
     }))
-elif phase == "review":
-    if payload["artifact"]["type"] == "score":
-        assert payload["artifact"]["report"] == "# Verified score report"
-    names = ("jd_complete", "source_grounding", "dimension_support", "capability_coverage", "no_double_count", "gate_evidence")
-    failed = os.environ.get("WORKFLOW_TEST_FAILED_CHECK") == "1"
-    decision = {
-        "verdict": "approve",
-        "checks": {name: {"status": "fail" if failed and name == "source_grounding" else "pass", "finding": "Verified"} for name in names},
-        "gates": {name: "Pass" if name == "liveness" else "Unknown" for name in ("location", "employment", "size", "compensation", "eligibility", "liveness")},
-        "ready": False,
-        "report_sha256": payload["artifact"].get("report_sha256"),
-        "tool_calls": 1,
-    }
-    if os.environ.get("WORKFLOW_TEST_DRAFT_DIRECTORY"):
-        path = Path(os.environ["WORKFLOW_TEST_DRAFT_DIRECTORY"]) / "report.md.review.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(decision))
-    print(json.dumps(decision))
 else:
     raise SystemExit(f"unknown phase: {phase}")

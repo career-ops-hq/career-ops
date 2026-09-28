@@ -36,19 +36,9 @@ os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 ROOT = Path(__file__).resolve().parents[1]
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
-MAX_CORRECTIONS = 2
 ATTEMPT_SECONDS = 900
 ATTEMPT_CALLS = 20
 MODEL_RUNNER = "workflow.model_runner"
-SCORE_REVIEW_CHECKS = {
-    "jd_complete", "source_grounding", "dimension_support",
-    "capability_coverage", "no_double_count", "gate_evidence",
-}
-SCORE_REVIEW_GATES = {"location", "employment", "size", "compensation", "eligibility", "liveness"}
-APPLY_REVIEW_CHECKS = {
-    "source-grounding", "role-alignment", "cv-materiality",
-    "employer-questions", "sensitive-fields", "artifact-consistency",
-}
 
 
 def digest(value: str) -> str:
@@ -183,7 +173,7 @@ def verify_package_files(draft: dict, *, require_pdf: bool) -> None:
         raise ValueError("Current package file manifest is incomplete")
     artifact = {name: draft.get(name) for name in ("files", "file_hashes", "package", "pdf_receipt")}
     if digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True)) != draft.get("package_hash"):
-        raise ValueError("Current package changed since review")
+        raise ValueError("Current package manifest changed")
     for name, path in files.items():
         try:
             current_hash = hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -193,47 +183,12 @@ def verify_package_files(draft: dict, *, require_pdf: bool) -> None:
             raise ValueError(f"Current package file changed: {name}")
 
 
-def review_approved(module: str, review: dict) -> bool:
-    """Accept only structurally complete reviews whose own checks do not contradict approval."""
-    if review.get("verdict") != "approve":
-        return False
-    if module == "scan":
-        checks = review.get("checks")
-        return isinstance(checks, dict) and checks.get("grounded") == "pass"
-    if module == "score":
-        checks = review.get("checks", {})
-        gates = review.get("gates", {})
-        return (
-            isinstance(checks, dict)
-            and isinstance(gates, dict)
-            and set(checks) == SCORE_REVIEW_CHECKS
-            and all(isinstance(item, dict) and item.get("status") == "pass" and item.get("finding") for item in checks.values())
-            and set(gates) == SCORE_REVIEW_GATES
-            and all(value in {"Pass", "Unknown"} for value in gates.values())
-            and gates["liveness"] == "Pass"
-        )
-    checks = review.get("checks", [])
-    return (
-        review.get("schema") == "career-ops/application-review"
-        and review.get("schema_version") == 1
-        and isinstance(checks, list)
-        and all(isinstance(item, dict) for item in checks)
-        and {item.get("id") for item in checks} == APPLY_REVIEW_CHECKS
-        and all(item.get("status") == "pass" and item.get("finding") for item in checks)
-        and not review.get("unsupported_claims")
-        and not review.get("required_changes")
-    )
-
-
 class WorkflowState(TypedDict):
     task_id: str
     module: Literal["scan", "score", "apply"]
     input_hash: str
-    revision: int
     outcome: Literal["jd_report", "score", "exclude", "package"]
     draft: str
-    review_approved: bool
-    review: dict
     waiting_reason: str | None
     material_hash: str
     tool_calls: int
@@ -321,8 +276,6 @@ class BusinessStore:
               input_hash TEXT NOT NULL,
               package_hash TEXT NOT NULL,
               payload TEXT NOT NULL,
-              review TEXT NOT NULL,
-              approved INTEGER NOT NULL,
               PRIMARY KEY(task_id,version)
             );
             CREATE TABLE IF NOT EXISTS feedback (
@@ -344,6 +297,10 @@ class BusinessStore:
             );
             """
         )
+        draft_columns = {row[1] for row in self.db.execute("PRAGMA table_info(drafts)")}
+        for obsolete in ("review", "approved"):
+            if obsolete in draft_columns:
+                self.db.execute(f"ALTER TABLE drafts DROP COLUMN {obsolete}")
         task_columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
         if "elapsed_seconds" not in task_columns:
             self.db.execute("ALTER TABLE tasks ADD COLUMN elapsed_seconds REAL NOT NULL DEFAULT 0")
@@ -473,26 +430,23 @@ class BusinessStore:
             "version": row["version"],
             "package_hash": row["package_hash"],
             "input_hash": row["input_hash"],
-            "review": json.loads(row["review"]),
-            "approved": bool(row["approved"]),
         }
 
-    def stage_draft(self, state: WorkflowState, artifact: dict, review: dict, approved: bool) -> dict:
+    def stage_draft(self, state: WorkflowState, artifact: dict) -> dict:
         self.db.execute("BEGIN IMMEDIATE")
         try:
             task = self.task(state["task_id"])
             if task["status"] != "running" or task["input_hash"] != state["input_hash"]:
-                raise ValueError("Apply task is no longer running with the reviewed input")
+                raise ValueError("Apply task is no longer running with the current input")
             version = self.db.execute(
                 "SELECT COALESCE(MAX(version),0)+1 FROM drafts WHERE task_id=?", (state["task_id"],)
             ).fetchone()[0]
             package_hash = digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
             self.db.execute(
-                "INSERT INTO drafts(task_id,version,input_hash,package_hash,payload,review,approved) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO drafts(task_id,version,input_hash,package_hash,payload) VALUES(?,?,?,?,?)",
                 (
                     state["task_id"], version, state["input_hash"], package_hash,
                     json.dumps(artifact, ensure_ascii=False, sort_keys=True),
-                    json.dumps(review, ensure_ascii=False, sort_keys=True), int(approved),
                 ),
             )
             self.db.execute("COMMIT")
@@ -505,13 +459,11 @@ class BusinessStore:
         task = self.task(task_id)
         draft = self.draft(task_id)
         if task["module"] != "apply" or task["status"] not in ("waiting", "completed") or not draft:
-            raise ValueError("apply task has no reviewable package")
+            raise ValueError("apply task has no package awaiting confirmation")
         if task["input_hash"] != digest(current_input) or draft["input_hash"] != task["input_hash"]:
             if task["status"] == "waiting":
                 self.wait(task_id, "input_changed")
             raise ValueError("apply inputs changed; regenerate before confirmation")
-        if not draft["approved"] or draft["review"].get("verdict") != "approve":
-            raise ValueError("current package has not passed independent review")
         verify_package_files(draft, require_pdf=True)
         if task["status"] == "completed":
             return self.result(task_id)
@@ -627,6 +579,8 @@ class BusinessStore:
 
     def publish(self, state: WorkflowState) -> dict:
         task = self.task(state["task_id"])
+        if task["status"] != "running":
+            raise ValueError("Task is no longer running with the current input")
         if task["input_hash"] != state["input_hash"]:
             self.wait(state["task_id"], "input_changed")
             raise ValueError("Input changed before business commit")
@@ -635,10 +589,17 @@ class BusinessStore:
             if digest(current) != task["input_hash"]:
                 self.wait(state["task_id"], "input_changed")
                 raise ValueError("Score inputs changed before business commit")
-        review = state.get("review") or {}
-        if not review_approved(task["module"], review):
-            raise ValueError("Independent review is not publishable")
+        if task["module"] == "scan":
+            current = canonical_scan_input(json.dumps(json.loads(task["input_payload"])["source"]))
+            if digest(current) != task["input_hash"]:
+                self.wait(state["task_id"], "input_changed")
+                raise ValueError("Scan inputs changed before business commit")
         artifact = json.loads(state["draft"]) if state["draft"].startswith("{") else {"report": state["draft"]}
+        if task["module"] == "scan" and state["outcome"] == "jd_report":
+            source = json.loads(task["input_payload"])["source"]
+            score_inputs(artifact)
+            if any(artifact[key] != source[key] for key in ("opportunity_id", "url", "jd", "captured_at")):
+                raise ValueError("Scan report differs from retained source")
         if task["module"] == "score" and state["outcome"] == "score":
             score = artifact.get("score", {})
             if (
@@ -650,10 +611,9 @@ class BusinessStore:
                 or any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in score.values())
                 or not (1 <= score["lower"] <= score["upper"] <= 5)
                 or not (0 <= score["coverage"] <= 1)
-                or review.get("report_sha256") != artifact["report_sha256"]
             ):
-                raise ValueError("Score artifact or review hash is invalid")
-        if task["module"] == "score" and state["outcome"] == "exclude" and (
+                raise ValueError("Score artifact or report hash is invalid")
+        if state["outcome"] == "exclude" and (
             artifact.get("type") != "exclusion" or not artifact.get("reason") or not artifact.get("evidence")
         ):
             raise ValueError("Exclusion requires a reason and evidence")
@@ -661,7 +621,6 @@ class BusinessStore:
             "module": task["module"],
             "outcome": state["outcome"],
             "artifact": artifact,
-            "review": state.get("review"),
             "input_hash": state["input_hash"],
             "material_hash": state["material_hash"],
         }
@@ -669,7 +628,7 @@ class BusinessStore:
         try:
             current = self.task(state["task_id"])
             if current["status"] != "running" or current["input_hash"] != state["input_hash"]:
-                raise ValueError("Task is no longer running with the reviewed input")
+                raise ValueError("Task is no longer running with the current input")
             self.db.execute(
                 "INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING",
                 (
@@ -861,9 +820,8 @@ class Runtime:
                 result = self.run_model(
                     "apply_evaluate",
                     {
-                        "inputs": inputs, "revision": state["revision"],
-                        "previous_review": state.get("review"),
-                        "previous_artifact": json.loads(state["draft"]) if state["revision"] or state.get("has_prior_package") else None,
+                        "inputs": inputs,
+                        "previous_artifact": json.loads(state["draft"]) if state.get("has_prior_package") else None,
                     },
                     state,
                 )
@@ -876,7 +834,7 @@ class Runtime:
             if task["module"] == "scan":
                 if inputs["source"]["liveness"] == "uncertain":
                     return {"waiting_reason": "source_access_unknown"}
-                result = self.run_model("scan_evaluate", {"inputs": inputs, "revision": state["revision"]}, state)
+                result = self.run_model("scan_evaluate", {"inputs": inputs}, state)
                 if result.get("waiting_reason"):
                     return {"waiting_reason": result["waiting_reason"], "tool_calls": result["tool_calls"]}
                 artifact = result["artifact"]
@@ -892,11 +850,7 @@ class Runtime:
                 return {"waiting_reason": "core_evidence_missing"}
             result = self.run_model(
                 "evaluate",
-                {
-                    "inputs": inputs, "revision": state["revision"],
-                    "previous_review": state.get("review"),
-                    "previous_artifact": json.loads(state["draft"]) if state["revision"] else None,
-                },
+                {"inputs": inputs},
                 state,
             )
             artifact = result["artifact"]
@@ -905,55 +859,23 @@ class Runtime:
                 "draft": json.dumps(artifact, ensure_ascii=False, sort_keys=True),
                 "material_hash": digest(json.dumps(artifact, ensure_ascii=False, sort_keys=True)),
                 "tool_calls": result["tool_calls"],
-                "revision": result.get("revision", state["revision"]),
-            }
-        raise ValueError("Workflow input must be canonical JSON")
-
-    def review(self, state: WorkflowState) -> dict:
-        self.crash_once(state, "review")
-        task = self.store.task(state["task_id"])
-        if task["module"] == "apply" and (task["attempt_tool_calls"] >= ATTEMPT_CALLS or task["attempt_elapsed_seconds"] >= ATTEMPT_SECONDS):
-            return {
-                "review_approved": False,
-                "revision": MAX_CORRECTIONS + 1,
-                "review": {"verdict": "blocked", "required_changes": ["Execution budget exhausted before review"]},
-            }
-        if task["input_payload"].startswith("{"):
-            decision = self.run_model(
-                {"scan": "scan_review", "score": "review", "apply": "apply_review"}[task["module"]],
-                {"inputs": json.loads(task["input_payload"]), "artifact": json.loads(state["draft"])},
-                state,
-            )
-            approved = review_approved(task["module"], decision)
-            return {
-                "review_approved": approved,
-                "revision": state["revision"] + (0 if approved else 1),
-                "tool_calls": decision["tool_calls"],
-                "review": decision,
             }
         raise ValueError("Workflow input must be canonical JSON")
 
     @staticmethod
     def route_evaluate(state: WorkflowState) -> str:
-        return "wait" if state.get("waiting_reason") else "review"
+        return "wait" if state.get("waiting_reason") else "stage" if state["module"] == "apply" else "publish"
 
     @staticmethod
-    def route_review(state: WorkflowState) -> str:
-        if state["review_approved"]:
-            return "stage" if state["module"] == "apply" else "publish"
-        if state["revision"] > MAX_CORRECTIONS:
-            return "stage_unapproved" if state["module"] == "apply" else "wait_review"
-        return "evaluate"
-
-    @staticmethod
-    def wait_review(state: WorkflowState) -> dict:
-        return {"waiting_reason": state.get("waiting_reason") or "review_budget_exhausted"}
+    def wait(state: WorkflowState) -> dict:
+        return {"waiting_reason": state["waiting_reason"]}
 
     def publish(self, state: WorkflowState) -> dict:
         existing = self.store.result(state["task_id"])
         if existing:
             payload = existing
         else:
+            self.crash_once(state, "before_publish")
             artifact = json.loads(state["draft"]) if state["draft"].startswith("{") else None
             if artifact and artifact.get("report"):
                 path = self.fault_dir / "artifacts" / state["task_id"] / state["input_hash"] / "report.md"
@@ -962,18 +884,12 @@ class Runtime:
                 temporary.write_text(artifact["report"])
                 temporary.replace(path)
                 artifact["path"] = str(path)
-                draft_directory = artifact.get("draft_directory")
-                review = Path(draft_directory) / "report.md.review.json" if draft_directory else None
-                if review and review.is_file():
-                    review_path = Path(str(path) + ".review.json")
-                    review_path.write_text(review.read_text())
-                    artifact["review_path"] = str(review_path)
                 state = {**state, "draft": json.dumps(artifact, ensure_ascii=False, sort_keys=True)}
             payload = self.store.publish(state)
         self.crash_once(state, "publish")
         return {"waiting_reason": None}
 
-    def stage(self, state: WorkflowState, *, approved: bool = True) -> dict:
+    def stage(self, state: WorkflowState) -> dict:
         package = json.loads(state["draft"])
         required = {
             "resume_payload", "changes", "cover_letter", "upskill",
@@ -987,13 +903,13 @@ class Runtime:
                 raise ValueError(f"Invalid application package: {key} must be a nonempty Markdown string")
         validate_resume_payload(package["resume_payload"])
         current = self.store.draft(state["task_id"])
-        if current and current["input_hash"] == state["input_hash"] and current["package"] == package and current["review"] == state["review"] and current["approved"] == approved:
+        if current and current["input_hash"] == state["input_hash"] and current["package"] == package:
             try:
-                verify_package_files(current, require_pdf=approved)
+                verify_package_files(current, require_pdf=True)
             except ValueError:
                 pass
             else:
-                return {"waiting_reason": "user_review" if approved else "review_budget_exhausted"}
+                return {"waiting_reason": "user_review"}
         version = (current["version"] if current else 0) + 1
         root = self.fault_dir / "artifacts" / state["task_id"] / state["input_hash"] / f"package-v{version:03d}"
         root.mkdir(parents=True, exist_ok=True)
@@ -1010,64 +926,49 @@ class Runtime:
             )
             files[key] = str(path)
         pdf_receipt = None
-        if approved:
-            remaining = ATTEMPT_SECONDS - self.store.task(state["task_id"])["attempt_elapsed_seconds"] - (time.monotonic() - self.started_at)
-            if remaining <= 0:
-                raise TimeoutError("time_budget_exhausted")
-            pdf_path = root / "resume.pdf"
-            metadata_path = root / "reactive-resume.json"
-            previous_metadata = current.get("files", {}).get("resume_metadata") if current else None
-            previous_metadata = previous_metadata or str(root.parents[1] / "reactive-resume.json")
-            if not metadata_path.exists() and Path(previous_metadata).is_file():
-                shutil.copyfile(previous_metadata, metadata_path)
-            started = time.monotonic()
-            try:
-                inputs = json.loads(self.store.task(state["task_id"])["input_payload"])
-                pdf_receipt = render_resume(
-                    state["task_id"], version, root.parents[1], Path(files["resume_payload"]),
-                    pdf_path, INPUT_ROOT / "config" / "profile.yml",
-                    package["resume_payload"]["candidate"]["name"],
-                    inputs["jd_report"]["company"], inputs["jd_report"]["role"],
-                    timeout_seconds=min(120, max(1, int(remaining))),
-                )
-            finally:
-                self.store.add_usage(state["task_id"], time.monotonic() - started, 1)
-            files["resume_pdf"] = str(pdf_path)
-            files["resume_metadata"] = pdf_receipt["metadata_path"]
+        remaining = ATTEMPT_SECONDS - self.store.task(state["task_id"])["attempt_elapsed_seconds"] - (time.monotonic() - self.started_at)
+        if remaining <= 0:
+            raise TimeoutError("time_budget_exhausted")
+        pdf_path = root / "resume.pdf"
+        metadata_path = root / "reactive-resume.json"
+        previous_metadata = current.get("files", {}).get("resume_metadata") if current else None
+        previous_metadata = previous_metadata or str(root.parents[1] / "reactive-resume.json")
+        if not metadata_path.exists() and Path(previous_metadata).is_file():
+            shutil.copyfile(previous_metadata, metadata_path)
+        started = time.monotonic()
+        try:
+            inputs = json.loads(self.store.task(state["task_id"])["input_payload"])
+            pdf_receipt = render_resume(
+                state["task_id"], version, root.parents[1], Path(files["resume_payload"]),
+                pdf_path, INPUT_ROOT / "config" / "profile.yml",
+                package["resume_payload"]["candidate"]["name"],
+                inputs["jd_report"]["company"], inputs["jd_report"]["role"],
+                timeout_seconds=min(120, max(1, int(remaining))),
+            )
+        finally:
+            self.store.add_usage(state["task_id"], time.monotonic() - started, 1)
+        files["resume_pdf"] = str(pdf_path)
+        files["resume_metadata"] = pdf_receipt["metadata_path"]
         artifact = {
             "files": files, "file_hashes": {
                 name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
                 for name, path in files.items()
             }, "package": package, "pdf_receipt": pdf_receipt,
         }
-        self.store.stage_draft(state, artifact, state["review"], approved)
-        return {"waiting_reason": "user_review" if approved else "review_budget_exhausted"}
-
-    def stage_unapproved(self, state: WorkflowState) -> dict:
-        return self.stage(state, approved=False)
+        self.store.stage_draft(state, artifact)
+        return {"waiting_reason": "user_review"}
 
     def graph(self, checkpointer: SqliteSaver):
         graph = StateGraph(WorkflowState)
         graph.add_node("evaluate", self.evaluate)
-        graph.add_node("review", self.review)
-        graph.add_node("wait_review", self.wait_review)
+        graph.add_node("wait", self.wait)
         graph.add_node("publish", self.publish)
         graph.add_node("stage", self.stage)
-        graph.add_node("stage_unapproved", self.stage_unapproved)
         graph.add_edge(START, "evaluate")
-        graph.add_conditional_edges("evaluate", self.route_evaluate, {"wait": "wait_review", "review": "review"})
-        graph.add_conditional_edges(
-            "review",
-            self.route_review,
-            {
-                "evaluate": "evaluate", "wait_review": "wait_review", "publish": "publish",
-                "stage": "stage", "stage_unapproved": "stage_unapproved",
-            },
-        )
-        graph.add_edge("wait_review", END)
+        graph.add_conditional_edges("evaluate", self.route_evaluate, {"wait": "wait", "publish": "publish", "stage": "stage"})
+        graph.add_edge("wait", END)
         graph.add_edge("publish", END)
         graph.add_edge("stage", END)
-        graph.add_edge("stage_unapproved", END)
         return graph.compile(checkpointer=checkpointer)
 
 
@@ -1076,11 +977,8 @@ def initial_state(task: sqlite3.Row) -> WorkflowState:
         "task_id": task["task_id"],
         "module": task["module"],
         "input_hash": task["input_hash"],
-        "revision": 0,
         "outcome": "score",
         "draft": "{}",
-        "review_approved": False,
-        "review": {},
         "waiting_reason": None,
         "material_hash": "",
         "tool_calls": 0,
@@ -1155,7 +1053,7 @@ def start_and_run(directory: Path, opportunity: str, module: str, input_text: st
         scan = store.module_result(input_text.removeprefix("scan:"), "scan")
         if not scan or scan["outcome"] != "jd_report":
             store.close()
-            raise ValueError("Missing reviewed scan result")
+            raise ValueError("Missing completed scan result")
         input_text = score_inputs(scan["artifact"])
     elif module == "score":
         input_text = canonical_score_input(input_text)
@@ -1165,7 +1063,7 @@ def start_and_run(directory: Path, opportunity: str, module: str, input_text: st
         score = store.module_result(upstream, "score")
         if not scan or scan["outcome"] != "jd_report" or not score or score["outcome"] != "score":
             store.close()
-            raise ValueError("Missing current reviewed scan and score results")
+            raise ValueError("Missing current completed scan and score results")
         if score["input_hash"] != digest(score_inputs(scan["artifact"])):
             store.close()
             raise ValueError("Current score is stale for the scan or candidate inputs")
@@ -1453,7 +1351,7 @@ def resume_task(
             if reuse_previous:
                 state.update(
                     draft=json.dumps(previous["package"], ensure_ascii=False, sort_keys=True),
-                    review=previous["review"], has_prior_package=True,
+                    has_prior_package=True,
                 )
             return run_task(directory, task_id, start_state=state, crash_at=crash_at)
         store.close()
@@ -1481,12 +1379,12 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("module", choices=("scan", "score", "apply"))
     start.add_argument("opportunity")
     start.add_argument("input")
-    start.add_argument("--crash-at", choices=("review", "publish"), help=argparse.SUPPRESS)
+    start.add_argument("--crash-at", choices=("before_publish", "publish"), help=argparse.SUPPRESS)
     start.add_argument("--re-evaluate", action="store_true")
     run = commands.add_parser("run")
     run.add_argument("task_id")
     run.add_argument("--state", help=argparse.SUPPRESS)
-    run.add_argument("--crash-at", choices=("review", "publish"), help=argparse.SUPPRESS)
+    run.add_argument("--crash-at", choices=("before_publish", "publish"), help=argparse.SUPPRESS)
     commands.add_parser("cron-score")
     discover_command = commands.add_parser("discover")
     discover_command.add_argument("--company")
@@ -1498,7 +1396,7 @@ def parser() -> argparse.ArgumentParser:
     resume.add_argument("--input")
     resume.add_argument("--feedback")
     resume.add_argument("--decision", choices=("confirm", "defer", "accept-jd-change"))
-    resume.add_argument("--crash-at", choices=("review", "publish"), help=argparse.SUPPRESS)
+    resume.add_argument("--crash-at", choices=("before_publish", "publish"), help=argparse.SUPPRESS)
     show = commands.add_parser("show")
     show.add_argument("identifier")
     commands.add_parser("list")
