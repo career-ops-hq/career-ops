@@ -95,10 +95,21 @@ for (const [name, probe, why] of [
     'without it the sweep treats a deliberate No on a boolean question as an unfilled field'],
   ['the repeat-until-stable pass', 'Repeat 1-4 until the list stops changing',
     'one pass surveys the form as it was, and a fill can create required controls'],
-  ['the action gate', 'Click Save, Next, Continue, or Submit only once a full pass adds no new required control',
+  ['the action gate', 'Click Save, Next or Continue only once a full pass adds no new required control',
     'the inventory is advisory unless something blocks the action on it'],
+  ['Submit staying the candidate\'s click', "Submit is the candidate's click, never the agent's",
+    'widening the gate to name Submit reads as authorization to click it, which contradicts the prepare-don\'t-submit flow this whole mode is built on'],
   ['the multi-step final Submit', 'Before every Save, Next, Continue, or Submit on a multi-step form',
     'a multi-step form ends in Submit, so a Save/Next/Continue-only clause leaves the one action that cannot be undone unswept'],
   ['the stop-and-ask covering every action', 'stop and ask before Save, Next, Continue, or Submit',
     'a gate that only blocks Save lets an unanswerable required field through on the final Submit'],
 ]) ok(`Step 7b pins ${name}`, has(probe), why);
+
+// Pinning Step 7b's own wording is not enough. The rule reaches the agent through
+// the step summary at the top and through the ATS quirk sections at the bottom,
+// and BOTH restated it as Save-and-Submit-only while Step 7b itself named four
+// actions. A consumer that narrows the rule it points at is the same defect this
+// suite already guards at Step 4b, so it is guarded here as a class.
+ok('no consumer narrows the sweep to Save and Submit alone',
+  !has('non-empty before Save/Submit') && !has('before Save or Submit'),
+  'a summary or quirk line that names only Save and Submit lets Next and Continue commit a step unswept');

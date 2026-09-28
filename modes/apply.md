@@ -24,7 +24,7 @@ Interactive mode for when the candidate is filling out an application form in Ch
 5c. PROHIBITED → Warn if a form field asks for content the candidate's jurisdiction prohibits (warn-only; candidate decides)
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
-7b. SWEEP      → Enumerate the step's required controls and assert each is non-empty before Save/Submit
+7b. SWEEP      → Enumerate the step's required controls and assert each is non-empty before Save/Next/Continue/Submit
 8. PRESENT     → Show formatted responses for copy-paste
 9. PERSIST     → Save the final filled/submitted answers into the report
 ```
@@ -174,7 +174,7 @@ tailoring that made the application relevant.
    bundle keeps its tailored CV at a path derived from the report number, the
    company and the role, so nothing has to stay in sync for it to resolve:
    `node application-artifacts.mjs --report {report#} --company "{company}" --role "{role}"`
-   prints every path as JSON, and the key `cv.tailored.html` holds the document's
+   prints every path as JSON, where `cv` → `tailored` → `html` holds the document's
    path, `cv/tailored/vNNN/cv.html` on disk. That is where `modes/pdf.md` writes it. Read the `.html` and not the `.pdf`: same content,
    readable directly.
 2. Several tailoring versions? The bundle keys them `v001`, `v002`, and so on. Take
@@ -321,8 +321,10 @@ below).
    answering a disclosure "Yes" reveals its follow-up, and picking a country can
    swap in a region field. An inventory taken before those controls existed cannot
    contain them, so a single pass surveys the form as it was, not as it is.
-6. Click Save, Next, Continue, or Submit only once a full pass adds no new
-   required control and every control on the list reads non-empty.
+6. Click Save, Next or Continue only once a full pass adds no new required
+   control and every control on the list reads non-empty. Submit is the candidate's
+   click, never the agent's, so the same pass has to come back clean before the
+   form is handed over for it.
 
 If a required field cannot be filled from the candidate's own sources, stop and ask
 before Save, Next, Continue, or Submit. Saving a step to see which errors come
@@ -419,7 +421,7 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 ### Workday — set-value doesn't register on React fields
 
 - **Symptom:** Setting a Workday text field's value programmatically (without real keystrokes) leaves it visually filled but empty to Workday's validation — the React `onChange` never fires, so Save throws "required" on a visibly-filled field. Yes/No dropdowns also vary their option order per question, so a positional click can select the wrong answer (e.g. "No" on *are you authorized to work?*).
-- **Agent:** For required text fields, **type** real keystrokes (focus → select-all → type), or verify each value registered before Save or Submit. Run the Step 7b required-field sweep on every step before Save or Submit — Workday adds a required `Role Description` to each experience block, which is invisible until the block exists and surfaces as one validation error per block otherwise. Fill from the Step 4b sources: `config/profile.yml` for identity and contact (the address block is often below the fold), the tailored CV for employers, titles, dates, and role descriptions. For dropdowns, use **type-ahead** (open → type the option text → confirm the highlight) instead of positional clicks, and verify each selection.
+- **Agent:** For required text fields, **type** real keystrokes (focus → select-all → type), or verify each value registered before Save, Next, Continue or Submit. Run the Step 7b required-field sweep on every step before Save, Next, Continue or Submit — Workday adds a required `Role Description` to each experience block, which is invisible until the block exists and surfaces as one validation error per block otherwise. Fill from the Step 4b sources: `config/profile.yml` for identity and contact (the address block is often below the fold), the tailored CV for employers, titles, dates, and role descriptions. For dropdowns, use **type-ahead** (open → type the option text → confirm the highlight) instead of positional clicks, and verify each selection.
 - **Candidate:** Reviews the filled step — especially work-authorization/sponsorship dropdowns and any EEO/legal attestations — before Save/Submit.
 
 ### SuccessFactors-family — uploaded resume can silently diverge from the stored profile (#1870)
