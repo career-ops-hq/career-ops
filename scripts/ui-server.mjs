@@ -94,10 +94,12 @@ function pollReady() {
     if (res.statusCode && res.statusCode < 500 && !opened && polling) {
       opened = true;
       openBrowser(url);
+    } else if (polling && !opened) {
+      setTimeout(pollReady, 500);
     }
   });
   req.on("error", () => {
-    if (polling) setTimeout(pollReady, 500);
+    if (polling && !opened) setTimeout(pollReady, 500);
   });
 }
 
