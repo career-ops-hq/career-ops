@@ -902,3 +902,43 @@ test('createLockWaitPolicy: a re-armed per-holder window still sleeps a full jit
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ── #4537: the ownerless grace floor must be reachable from the environment ──
+//
+// Its three siblings all read it (pipeline-lock.mjs:374-376), and
+// followup-seed.mjs layers a second set on top. This one is a bare constant,
+// so the single window whose budget process startup spends is the one window a
+// caller cannot widen. followup-seed-tests.mjs test 16 backdates a lock 100ms
+// into that 1s floor and then hands the rest to execFileSync plus Node startup;
+// on a slow runner the lock reads reclaimable, the child steals it and exits 0,
+// and both of test 16's assertions fail together. That is the macOS CI flake.
+//
+// The import is dynamic and cache-busted on purpose. This file's static import
+// above already evaluated the module, and ESM hoists it over any assignment
+// written here, so a plain re-import would read the value captured at load.
+test('the ownerless grace floor honors CAREER_OPS_OWNERLESS_GRACE_MS', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'grace-env-'));
+  const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+  process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '30000';
+  try {
+    const lock = await import('../pipeline-lock.mjs?grace-env');
+    const dir = join(root, 'x.lock');
+    mkdirSync(dir, { recursive: true });
+    backdate(dir, 5_000); // ownerless and 5s old: past the 1s default floor
+
+    assert.equal(
+      lock.OWNERLESS_GRACE_MS, 30_000,
+      'the floor is a bare constant, so a caller cannot widen the one window whose budget process startup spends',
+    );
+    // Two assertions on purpose. A fix that exports the number but leaves the
+    // comparison against a captured 1000 would satisfy the first and fail this.
+    assert.equal(
+      lock.lockRecoveryVerdict(dir, 10), lock.RECOVER_LIVE,
+      'a 5s-old ownerless lock is inside a 30s configured floor and must not be reclaimable',
+    );
+  } finally {
+    if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+    else process.env.CAREER_OPS_OWNERLESS_GRACE_MS = prior;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

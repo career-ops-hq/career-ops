@@ -35,7 +35,10 @@ import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 
 const DEFAULT_STALE_MS = 30_000;
-export const OWNERLESS_GRACE_MS = 1_000;
+// Reachable from the environment, like the three ceilings below. A caller that
+// needs a lock to still read LIVE when a spawned child looks at it has no other
+// knob: this floor bounds that window, and process startup spends it (#4537).
+export const OWNERLESS_GRACE_MS = Number(process.env.CAREER_OPS_OWNERLESS_GRACE_MS) || 1_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
 // Ceiling on progress-extended waiting (see the deadline logic in

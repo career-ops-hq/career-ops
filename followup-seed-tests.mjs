@@ -507,6 +507,13 @@ function cleanup(sandbox) {
   const res = run(['1'], sb, {
     CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
     CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '300',
+    // The 100ms backdate above has to still be inside the grace floor when the
+    // CHILD looks, and everything between here and there -- spawn, Node
+    // startup, followup-seed.mjs's module graph, up to 300ms of retries --
+    // comes out of that budget. At the 1s default this test measures the
+    // runner, not the lock. Test 17 deliberately leaves the default alone, so
+    // the pair still proves the floor works in both directions.
+    CAREER_OPS_OWNERLESS_GRACE_MS: '30000',
   });
   if (res.code === 4) pass('16. ownerless lock inside the grace period is not stolen → exit 4');
   else fail(`16. ownerless lock inside the grace period is not stolen → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);
