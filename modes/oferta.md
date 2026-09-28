@@ -726,7 +726,7 @@ Not every JD source is a scannable ATS API or even a URL — some only ever exis
 
 ### 2. Record in tracker
 
-**ALWAYS** record in `data/applications.md`:
+**ALWAYS** register it in the tracker as a tracker addition, never a direct edit to `data/applications.md` (row shape: `_shared.md` rule 9 and AGENTS.md → "TSV Format for Tracker Additions"; `merge-tracker.mjs` merges it), with these fields:
 - Next sequential number
 - Current date
 - Company — the END employer. If the JD is agency-mediated ("our client", agency domain, no employer named), ASK the user which agency it came through, use `?` as Company, and put a distinguishing descriptor in Notes (e.g. `fintech, Leeds`). Never write "Confidential" — the `?` marker is locale-invariant and can't collide with a real firm.

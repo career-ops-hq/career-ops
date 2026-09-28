@@ -353,5 +353,5 @@ After delivering the report:
 - **NEVER invent interview questions and attribute them to sources.** Inferred questions must be labeled `[inferred from JD]`.
 - **NEVER fabricate Glassdoor ratings or statistics.** If the data isn't there, say so.
 - **Cite everything.** Every question, every stat, every claim gets a source or an `[inferred]` tag.
-- Generate in the language of the JD (EN default).
+- Write in `language.output` from `config/profile.yml` (default `en`), regardless of the JD's language.
 - Be direct. This is a working prep document, not a pep talk.

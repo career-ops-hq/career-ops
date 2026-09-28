@@ -90,14 +90,14 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 **Framework per question:**
 - **Why this role?** → "Your [specific thing] maps directly to [specific thing I built]."
 - **Why this company?** → Mention something specific about the company. "I've been using [product] for [time/purpose]."
-- **Relevant experience?** → A quantified proof point. "Built [X] that [metric]. Sold the company in 2025."
+- **Relevant experience?** → A quantified proof point. "Built [X] that [metric]."
 - **Good fit?** → "I sit at the intersection of [A] and [B], which is exactly where this role lives."
 - **How did you hear?** → Honest: "Found through [portal/scan], evaluated against my criteria, and it scored highest."
 
-**Language**: Always in the language of the JD (EN default). Apply `/tech-translate`.
+**Language**: Write in `language.output` from `config/profile.yml` (default `en`), regardless of the JD's language.
 
 ## Step 5 — Update Tracker
 
-Record it in `data/applications.md` with all columns including Report and PDF as ✅.
+Write the tracker addition as a TSV in `batch/tracker-additions/` (format in AGENTS.md → "TSV Format for Tracker Additions"), with Report linked and PDF as ✅, then run `node merge-tracker.mjs`.
 
 **If any step fails**, continue with the next ones and mark the failed step as pending in the tracker.

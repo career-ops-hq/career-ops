@@ -102,4 +102,4 @@ Produce a concise addendum:
 - Do not invent work authorization, language level, compensation targets, degree equivalence, or relocation availability.
 - Do not put sensitive logistics in the CV unless the user explicitly wants that or the local market clearly expects it.
 - Do not provide legal advice. Provide verification prompts and cite official sources when legal facts are used.
-- Keep output in the JD language unless the user asks otherwise.
+- Write output in `language.output` from `config/profile.yml` (default `en`), regardless of the JD's language.

@@ -8,7 +8,7 @@ description: >-
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | offer-prep | titles | upskill | followup | reply-watch | outcome | triage | calibrate | intake | ats | update]"
 license: MIT
 ---
 
@@ -53,7 +53,6 @@ Determine the mode from `$mode`:
 | `interview-prep` | `interview-prep` |
 | `interview` | `interview` |
 | `eu-swe` | `regional/eu-swe` |
-| `eu-fintech` | `regional/eu-fintech` |
 | `interview/plan` | `interview/plan` |
 | `interview/practice` | `interview/practice` |
 | `interview/debrief` | `interview/debrief` |
@@ -84,6 +83,10 @@ Determine the mode from `$mode`:
 | `interview-redflag` | `interview-redflag` |
 | `update` | `update` |
 | `cover` | `cover` |
+| `triage` | `triage` |
+| `calibrate` | `calibrate` |
+| `intake` | `intake` |
+| `ats` | `ats` |
 
 **Auto-pipeline detection:** If `$mode` is not a known sub-command AND contains JD text (keywords: "responsibilities", "requirements", "qualifications", "about the role", "we're looking for", company name + role) or a URL to a JD, execute `auto-pipeline`.
 
@@ -136,7 +139,6 @@ Available commands:
   /career-ops interview-prep → Generate company-specific interview prep doc
   /career-ops interview    → Interactive profile/CV onboarding interview
   /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
-  /career-ops eu-fintech → Scan 21 EU fintech portals for Product Manager roles (zero-token)
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
@@ -186,7 +188,11 @@ Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `ap
 
 Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `interview-redflag`, `calibrate`, `intake`, `ats`
+
+### Triage (compact context only)
+
+Read `modes/triage.md` only; it loads `modes/_brief.md` itself and deliberately skips `_shared.md`, `_profile.md`, and `cv.md`.
 
 ### Modes delegated to subagent
 
