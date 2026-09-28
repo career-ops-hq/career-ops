@@ -1,6 +1,5 @@
 """Verify resume reuses a rendered score instead of repeating web research."""
 
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -79,32 +78,7 @@ assert revision_phases == ["apply_evaluate"]
 assert revised["artifact"] == {**complete_package, "questions": "# Corrected grounded questions"}
 assert complete_package["questions"] == "Grounded questions"
 
-inputs = {
-    "jd_report": {"prescreen": {"status": "uncertain"}},
-    "cv": "cv", "profile": "attractiveness:\n  weights:\n    direction: 0.25\n    compensation: 0.25\n    team: 0.25\n    company: 0.25\n",
-    "targeting": "targeting", "rules": "rules",
-}
-
 with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
-    runner.DRAFT_ROOT = Path(temporary)
-    key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    directory = runner.DRAFT_ROOT / key
-    directory.mkdir()
-    (directory / "report.md").write_text("# Completed draft")
-    (directory / "assessment.json").write_text(json.dumps({
-        "dimensions": {
-            "direction": {"score": 4, "evidence": ["grounded"]},
-            "compensation": {"score": None, "evidence": []},
-            "team": {"score": 3, "evidence": ["grounded"]},
-            "company": {"score": 5, "evidence": ["grounded"]},
-        }
-    }))
-    (directory / "evidence.json").write_text(json.dumps({"liveness_reason": "Verified active"}))
-    result = runner.evaluate({"inputs": inputs, "revision": 0})
-    assert result["artifact"]["report"] == "# Completed draft"
-    assert result["artifact"]["score"] == {"lower": 3.25, "upper": 4.25, "coverage": 0.75}
-    assert result["tool_calls"] == 0
-
     responses = iter((
         {"direction": {}, "compensation": {}, "team": {}, "company": {}},
         {"direction": {}, "compensation": {}, "team": {}, "company": {}, "sections": {}},

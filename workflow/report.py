@@ -28,10 +28,15 @@ def attractiveness(dimensions: dict, weights: dict) -> dict:
         raise ValueError("Weights must be positive and sum to one")
     lower = upper = coverage = 0.0
     for name in DIMENSIONS:
-        score = dimensions[name].get("score")
-        if score is not None and (not isinstance(score, int) or not 1 <= score <= 5):
+        dimension = dimensions[name]
+        if (not isinstance(dimension, dict) or set(dimension) != {"score", "rationale", "evidence"}
+                or not isinstance(dimension["rationale"], str) or not dimension["rationale"].strip()
+                or not isinstance(dimension["evidence"], list)):
+            raise ValueError(f"{name}: invalid dimension fields")
+        score = dimension["score"]
+        if score is not None and (type(score) is not int or not 1 <= score <= 5):
             raise ValueError(f"{name}: score must be null or an integer from 1 to 5")
-        if score is not None and not dimensions[name].get("evidence"):
+        if score is not None and not dimension["evidence"]:
             raise ValueError(f"{name}: known score requires evidence")
         lower += weights[name] * (score if score is not None else 1)
         upper += weights[name] * (score if score is not None else 5)
@@ -51,6 +56,8 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
             raise ValueError("External sources must be sequential web1, web2, ... with text")
         files[source["id"]] = directory / f"{source['id']}.txt"
         files[source["id"]].write_text(source["text"])
+    profile = yaml.safe_load(packet["sources"]["profile"])
+    score = attractiveness(assessment["dimensions"], profile["attractiveness"]["weights"])
     citations = [item for dimension in assessment["dimensions"].values() for item in dimension["evidence"]]
     citations += assessment["research"]["findings"]
     for citation in citations:
@@ -69,8 +76,6 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         citation["quote"] = match.group(0)
     files["research"] = directory / "research.json"
     files["research"].write_text(json.dumps(assessment["research"], ensure_ascii=False, indent=2) + "\n")
-    profile = yaml.safe_load(packet["sources"]["profile"])
-    score = attractiveness(assessment["dimensions"], profile["attractiveness"]["weights"])
     summary = {
         "report_format": "scoring-v2", "scoring_model": "attractiveness-v1", "score": None,
         "company": evidence["company"], "role": evidence["role"], "complete_jd": True, "jd_source": "jd",

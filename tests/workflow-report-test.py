@@ -1,6 +1,5 @@
 """Verify Python report rendering remains compatible with the strict report contract."""
 
-import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -36,15 +35,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
         "sections": {name: "Complete evidence mapping, unknowns and specific next actions." for name in ("overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")},
     }
     rendered = render_report(packet, evidence, assessment)
-    review = {
-        "reviewer": "independent-test", "report_sha256": hashlib.sha256(rendered["report"].encode()).hexdigest(),
-        "verdict": "approve", "ready": False,
-        "gates": {name: "Pass" if name == "liveness" else "Unknown" for name in ("location", "employment", "size", "compensation", "eligibility", "liveness")},
-        "checks": {name: {"status": "pass", "finding": "Reviewed original evidence and applicability."} for name in ("jd_complete", "source_grounding", "dimension_support", "capability_coverage", "no_double_count", "gate_evidence")},
-    }
-    (directory / "report.md.review.json").write_text(json.dumps(review))
     validator = Path(__file__).resolve().parents[1] / "scoring-report.mjs"
-    script = "import fs from 'node:fs'; const {validateReviewedReport}=await import(process.argv[1]); const p=process.argv[2]; validateReviewedReport(fs.readFileSync(p,'utf8'), JSON.parse(fs.readFileSync(p+'.review.json','utf8')), {root:process.argv[3]});"
+    script = "import fs from 'node:fs'; const {validateReport}=await import(process.argv[1]); const p=process.argv[2]; validateReport(fs.readFileSync(p,'utf8'), {root:process.argv[3]});"
     checked = subprocess.run(["node", "--input-type=module", "-e", script, validator.as_uri(), str(directory / "report.md"), str(root)], text=True, capture_output=True)
     assert checked.returncode == 0, (checked.stdout, checked.stderr)
     invalid = json.loads(json.dumps(assessment))
@@ -54,5 +46,12 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
         raise AssertionError("missing quote accepted")
     except ValueError as error:
         assert "Quote not found" in str(error)
+    invalid = json.loads(json.dumps(assessment))
+    invalid["dimensions"]["compensation"]["fact_to_inference"] = "Unexpected model field"
+    try:
+        render_report(packet, evidence, invalid)
+        raise AssertionError("extra dimension field accepted")
+    except ValueError as error:
+        assert "compensation: invalid dimension fields" in str(error)
 
 print("workflow report: strict contract compatibility and citation failure passed")

@@ -8,10 +8,8 @@ import os
 from pathlib import Path
 import sys
 
-import yaml
-
 from workflow.prescreen import evaluate as evaluate_prescreen
-from workflow.report import attractiveness, render_report
+from workflow.report import render_report
 
 ROOT = Path(__file__).resolve().parents[1]
 DRAFT_ROOT = Path(os.environ["CAREER_OPS_DRAFT_ROOT"]) if "CAREER_OPS_DRAFT_ROOT" in os.environ else ROOT / "data" / "workflow-drafts"
@@ -203,27 +201,11 @@ def evaluate(payload: dict) -> dict:
     key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     directory = DRAFT_ROOT / key
     directory.mkdir(parents=True, exist_ok=True)
-    report_path = directory / "report.md"
     cached_assessment = (
         json.loads((directory / "assessment.json").read_text())
         if (directory / "assessment.json").exists()
         else None
     )
-    if report_path.exists() and (directory / "assessment.json").exists() and (directory / "evidence.json").exists():
-        report = report_path.read_text()
-        evidence = json.loads((directory / "evidence.json").read_text())
-        assessment = json.loads((directory / "assessment.json").read_text())
-        score = attractiveness(assessment["dimensions"], yaml.safe_load(inputs["profile"])["attractiveness"]["weights"])
-        return {
-            "outcome": "score",
-            "artifact": {
-                "type": "score", "report": report,
-                "report_sha256": hashlib.sha256(report.encode()).hexdigest(),
-                "draft_directory": str(directory), "liveness_reason": evidence["liveness_reason"],
-                "score": score,
-            },
-            "tool_calls": 0,
-        }
     adapter = model_adapter
     tool_calls = 0
     if cached_assessment:
@@ -275,6 +257,7 @@ def evaluate(payload: dict) -> dict:
             adapter.ASSESS
             + "\nCorrect only these mechanical defects. Reuse completed research; no tools.\n"
             + str(error)
+            + "\nEach dimension must contain exactly score, rationale, and evidence; put the full reasoning inside rationale."
             + "\nOnly source IDs in frozen_sources are valid. Remove or replace every other source ID. "
               "If a non-null dimension has no valid supporting quote, set its score to null and evidence to [].\n"
             + json.dumps(
