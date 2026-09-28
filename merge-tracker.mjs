@@ -1533,6 +1533,15 @@ for (const file of tsvFiles) {
     return Boolean(normalizeUrl(cand.url)) && !addUrl;
   };
 
+  const additionReqNum = extractReqNumber(addition.notes);
+  // Req IDs are evidence against a heuristic match only when both sides carry
+  // one and they disagree. Missing on either side stays unknown, matching the
+  // existing tier-3 guard and the URL guard above.
+  const reqNumDiffers = (cand) => {
+    const appReqNum = extractReqNumber(cand.notes);
+    return Boolean(additionReqNum && appReqNum && additionReqNum !== appReqNum);
+  };
+
   // Pass 0.5 — the addition's own report link and an existing row's report
   // link resolve to the LITERAL SAME FILE on disk. This is unambiguous proof
   // of identity, stronger than tier 1 below (bracket-number equality): a
@@ -1580,6 +1589,7 @@ for (const file of tsvFiles) {
     // alone silently merges a brand-new role into an unrelated existing row.
     duplicate = existingApps.find(app =>
       !urlBlocksHeuristic(app) && app.num === addition.num && companiesMatch(app.company, addition.company)
+      && !reqNumDiffers(app)
       // Same-run num collisions are reservation races, not row-id references:
       // two TSVs that both claimed num=5 for DIFFERENT roles at one company
       // are two distinct evaluations, and folding them keeps the first title
@@ -1594,7 +1604,6 @@ for (const file of tsvFiles) {
 
   if (!duplicate) {
     // Company + role fuzzy match
-    const additionReqNum = extractReqNumber(addition.notes);
     // Two passes, exact company first. With a single find() the wider
     // corporate-form comparison (#3665) let an EARLIER "Acme Technologies" row
     // claim an addition for "Acme" while an exact "Acme" row sat further down
@@ -1681,7 +1690,7 @@ for (const file of tsvFiles) {
       // row's Notes) and must keep merging; blocking that direction too would
       // turn every such re-eval into a spurious duplicate row instead.
       const appReqNum = extractReqNumber(app.notes);
-      if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
+      if (reqNumDiffers(app)) return false;
       if (additionReqNum && !appReqNum) return false;
       return true;
     };

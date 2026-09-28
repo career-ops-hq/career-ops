@@ -524,6 +524,57 @@ try {
   fail(`merge-tracker one-sided req-number tests crashed: ${e.message}`);
 }
 
+// ── #4538: entry-number matching must respect conflicting req IDs ───────────
+// Tier 2 (same tracker number + company) runs before the fuzzy tier. Without
+// the shared conflict guard it overwrites the first posting before tier 3 can
+// see that the two notes identify different requisitions.
+console.log('\nmerge-tracker.mjs — entry-number match rejects different req IDs (#4538)');
+try {
+  const REQ_ROW =
+    '| 5 | 2026-01-01 | Acme | Administrative Assistant | 3.5/5 | Applied | ✅ | ' +
+    '[1](reports/001-acme-2026-01-01.md) | req JR-10423, first posting |\n';
+
+  const differentReqs = runMergeDetailed({
+    '002-acme.tsv': '5\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t3.9/5\t✅\t[2](reports/002-acme-2026-01-15.md)\treq JR-10424, second posting\n',
+  }, { rows: REQ_ROW });
+  const distinctRows = dataRows(differentReqs.tracker);
+  const original = distinctRows.find((row) => /^\|\s*5\s*\|/.test(row)) || '';
+  const addition = distinctRows.find((row) => /^\|\s*6\s*\|/.test(row)) || '';
+  if (distinctRows.length === 2
+      && /3\.5\/5/.test(original)
+      && /001-acme-2026-01-01/.test(original)
+      && /JR-10423/.test(original)
+      && /3\.9\/5/.test(addition)
+      && /002-acme-2026-01-15/.test(addition)
+      && /JR-10424/.test(addition)) {
+    pass('same company and entry number do not merge rows with different req IDs (#4538)');
+  } else {
+    fail(`entry-number tier merged or damaged distinct reqs: ${distinctRows.join(' // ')}`);
+  }
+
+  const sameReq = runMergeDetailed({
+    '002-acme.tsv': '5\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t3.9/5\t✅\t[2](reports/002-acme-2026-01-15.md)\treq JR-10423, re-scored\n',
+  }, { rows: REQ_ROW });
+  const sameReqRows = dataRows(sameReq.tracker);
+  if (sameReqRows.length === 1 && /3\.9\/5/.test(sameReqRows[0]) && /JR-10423/.test(sameReqRows[0])) {
+    pass('same req ID on both sides still matches by entry number');
+  } else {
+    fail(`same req ID entry-number re-evaluation did not merge: ${sameReqRows.join(' // ')}`);
+  }
+
+  const unknownReq = runMergeDetailed({
+    '002-acme.tsv': '5\t2026-01-15\tAcme\tAdministrative Assistant\tEvaluated\t3.9/5\t✅\t[2](reports/002-acme-2026-01-15.md)\tre-scored, req ID not restated\n',
+  }, { rows: REQ_ROW });
+  const unknownReqRows = dataRows(unknownReq.tracker);
+  if (unknownReqRows.length === 1 && /3\.9\/5/.test(unknownReqRows[0]) && /JR-10423/.test(unknownReqRows[0])) {
+    pass('a missing req ID remains unknown and does not block an entry-number match');
+  } else {
+    fail(`missing req ID changed entry-number matching: ${unknownReqRows.join(' // ')}`);
+  }
+} catch (e) {
+  fail(`merge-tracker #4538 tests crashed: ${e.message}`);
+}
+
 // ── #2394: a tracker with no separator row dropped everything, silently ─────
 // The insert point comes from SEPARATOR_ROW_RE. With no match, insertIdx
 // stayed -1, the splice was skipped with no else, and the run went on to write
