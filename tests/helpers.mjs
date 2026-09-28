@@ -6,6 +6,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmS
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -232,6 +233,77 @@ export function lastRunFailure() {
 }
 
 /**
+ * Today as `YYYY-MM-DD` in UTC — the form the scripts under test emit from
+ * their own `today()`.
+ *
+ * @param {Date} [at=new Date()] - Instant to render; injectable for tests.
+ * @returns {string}
+ */
+export function utcDay(at = new Date()) {
+  return at.toISOString().split('T')[0];
+}
+
+/**
+ * Every UTC day an operation bracketed by `before` and `after` could have
+ * observed, inclusive: one when it stayed inside a day, two when it crossed
+ * midnight, and each intervening day for anything longer.
+ *
+ * Returning only the two boundaries would be enough for a run() call left on
+ * its default timeout, but that timeout is caller-overridable, and a child
+ * spanning two midnights can report a day that sits between them. Filling the
+ * range keeps the result a property of the inputs rather than of a timeout
+ * somebody may change later.
+ *
+ * The bounds are ordered before use, so a clock stepped backwards mid-call
+ * (NTP correction on a CI runner) still yields the covering range instead of
+ * an empty one. Either bound unparseable yields [] — including when both are
+ * the same unparseable string, so the answer never depends on which branch a
+ * bad input happens to take.
+ *
+ * @param {string} before - utcDay() read before the operation.
+ * @param {string} after - utcDay() read after it.
+ * @returns {string[]} Ascending, inclusive of both bounds; [] if either is unparseable.
+ */
+export function daysSpanned(before, after) {
+  const start = Date.parse(`${before}T00:00:00Z`);
+  const end = Date.parse(`${after}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return [];
+  if (start === end) return [before];
+  const [lo, hi] = start < end ? [start, end] : [end, start];
+  const days = [];
+  for (let t = lo; t <= hi; t += 86_400_000) {
+    days.push(utcDay(new Date(t)));
+  }
+  return days;
+}
+
+/**
+ * run(), plus the UTC day(s) the child could have seen on its own clock.
+ *
+ * A test that captures the day once and compares it to a date the child
+ * computed for itself is reading the clock twice, and a UTC midnight between
+ * those two reads makes them disagree — turning an otherwise-green run red on
+ * whichever runner happens to straddle the boundary (#3816: macOS crossed
+ * midnight four seconds into test-all §12, while ubuntu and windows reached
+ * the same section after the rollover and passed).
+ *
+ * Bracketing the call removes the race without weakening the assertion: the
+ * child ran somewhere inside [before, after], so its own day is one of the
+ * returned days, and the caller still checks the date is current rather than
+ * merely date-shaped.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} [args=[]]
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {{out: string|null, days: string[]}}
+ */
+export function runAcrossUtcDay(cmd, args = [], opts = {}) {
+  const before = utcDay();
+  const out = run(cmd, args, opts);
+  return { out, days: daysSpanned(before, utcDay()) };
+}
+
+/**
  * The last failure rendered for interpolation into a failure message, or an
  * empty string when nothing has failed, so a caller can append it
  * unconditionally without changing its message on the success path.
@@ -321,6 +393,11 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
+      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
+      // which matches by NAME — never fires on one, and the walk descends into a
+      // whole second checkout of this repository (#3499, #3762). The caller's
+      // own set stays authoritative for everything else.
+      if (isNestedCheckout(full)) continue;
       if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
     } else if (match.test(entry.name)) {
       out.push(full);

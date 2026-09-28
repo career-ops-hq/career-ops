@@ -10,6 +10,7 @@
      original hardcoded values, so a profile without a `style:` block is unchanged. */
   :root {
     --accent-color: hsl(187 74% 32%);
+    --secondary-color: hsl(270, 70%, 45%);
     --font-family: "Liberation Sans", 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     --font-size: 11px;
     /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
@@ -83,9 +84,20 @@
     line-height: 1.1;
   }
 
+  .header-title {
+    font-family: var(--font-family);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent-color);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
   .header-gradient {
     height: 2px;
-    background: linear-gradient(to right, var(--accent-color), hsl(270, 70%, 45%));
+    background: linear-gradient(to right, var(--accent-color), var(--secondary-color));
     border-radius: 1px;
     margin-bottom: 10px;
   }
@@ -199,7 +211,7 @@
     font-family: var(--font-family);
     font-size: 12.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .job-period {
@@ -245,7 +257,7 @@
     font-family: var(--font-family);
     font-size: 11.5px;
     font-weight: 600;
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
   }
 
   .project-title a {
@@ -299,7 +311,7 @@
   }
 
   .edu-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     font-weight: 500;
   }
 
@@ -307,6 +319,11 @@
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+  }
+
+  .edu-location {
+    font-size: 10px;
+    color: #888;
   }
 
   .edu-desc {
@@ -339,7 +356,7 @@
   }
 
   .cert-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -377,7 +394,7 @@
   }
 
   .award-org {
-    color: hsl(270, 70%, 45%);
+    color: var(--secondary-color);
     white-space: nowrap;
   }
 
@@ -452,6 +469,7 @@
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -474,6 +492,7 @@
   }
 
   html[lang="ar"] .header h1,
+  html[lang="ar"] .header-title,
   html[lang="ar"] .section-title,
   html[lang="ar"] .job-company,
   html[lang="ar"] .project-title,
@@ -483,7 +502,7 @@
   }
 
   html[lang="ar"] .header-gradient {
-    background: linear-gradient(to left, var(--accent-color), hsl(270, 70%, 45%));
+    background: linear-gradient(to left, var(--accent-color), var(--secondary-color));
   }
 
   html[lang="ar"] .job ul {
@@ -523,6 +542,7 @@
   }
 
   html[lang="ja"] .header h1,
+  html[lang="ja"] .header-title,
   html[lang="ja"] .section-title,
   html[lang="ja"] .job-company,
   html[lang="ja"] .project-title,
@@ -549,6 +569,7 @@
   }
 
   html[lang="zh-CN"] .header h1,
+  html[lang="zh-CN"] .header-title,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
   html[lang="zh-CN"] .project-title,
@@ -556,6 +577,7 @@
   html[lang="zh-CN"] .competency-tag,
   html[lang="zh-CN"] .skill-category,
   html[lang="zh"] .header h1,
+  html[lang="zh"] .header-title,
   html[lang="zh"] .section-title,
   html[lang="zh"] .job-company,
   html[lang="zh"] .project-title,
@@ -583,6 +605,7 @@
   }
 
   html[lang="ko"] .header h1,
+  html[lang="ko"] .header-title,
   html[lang="ko"] .section-title,
   html[lang="ko"] .job-company,
   html[lang="ko"] .project-title,
@@ -614,6 +637,7 @@
   }
 
   html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .header-title,
   html[lang="zh-TW"] .section-title,
   html[lang="zh-TW"] .job-company,
   html[lang="zh-TW"] .project-title,
@@ -645,6 +669,7 @@
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>

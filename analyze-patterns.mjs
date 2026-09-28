@@ -20,7 +20,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -79,21 +79,11 @@ const USAGE = `Usage:
 
 // --- CLI args ---
 const summaryMode = args.includes('--summary');
-const MIN_THRESHOLD = (() => {
-  const raw = flagValue(args, '--min-threshold');
-  if (raw === undefined) return 5;
 
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) ? 5 : value;
-})();
-
-const MIN_VENDOR_N = (() => {
-  const raw = flagValue(args, '--min-vendor-n');
-  if (raw === undefined) return 8;
-
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) || value < 1 ? 8 : value;
-})();
+// CLI values stay at their defaults when this module is imported by tests.
+// Parsing/validation is performed only in the main-module guard below.
+let MIN_THRESHOLD = 5;
+let MIN_VENDOR_N = 8;
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
@@ -543,6 +533,70 @@ requirement_importance:
     if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
 
+  // Report header fields survive the locale they were written in. French output
+  // puts a space before the colon and accents "Archétype"; both used to make the
+  // field parse as absent, silently. parseReport strips `**` first, so the cases
+  // below are given in that post-strip form. Call the pattern rather than the
+  // string: `subject.match(re)` makes CodeQL read these URL fixtures as patterns
+  // (js/incomplete-hostname-regexp) because of their unescaped host dots.
+  const headerCases = [
+    ['URL: https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
+    ['URL : https://job-boards.greenhouse.io/acme/jobs/1', REPORT_URL_RE, 'https://job-boards.greenhouse.io/acme/jobs/1'],
+    ['URL\u00a0: https://jobs.lever.co/acme/x', REPORT_URL_RE, 'https://jobs.lever.co/acme/x'],
+    ['Archetype: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+    ['Archétype : Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+    ['Arquetipo: Delivery Manager', REPORT_ARCHETYPE_RE, 'Delivery Manager'],
+  ];
+  for (const [line, re, expected] of headerCases) {
+    const got = re.exec(line)?.[1] ?? null;
+    if (got !== expected) failures.push(`report header ${JSON.stringify(line)} → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+  }
+
+  // A header that is genuinely absent must still yield null, so the fix cannot
+  // turn "no field" into a false positive.
+  if (REPORT_URL_RE.test('Score: 4.4/5')) failures.push('REPORT_URL_RE matched a line with no URL field');
+
+  // A header field is single-line. A label split from its colon, or a value pushed to
+  // the next line, must not parse — otherwise the capture picks up whatever URL happens
+  // to follow in the document.
+  const splitHeaderCases = [
+    ['URL\n: https://elsewhere.example.com/x', REPORT_URL_RE],
+    ['URL :\nhttps://elsewhere.example.com/y', REPORT_URL_RE],
+    ['Archétype\n: Delivery Manager', REPORT_ARCHETYPE_RE],
+  ];
+  for (const [text, re] of splitHeaderCases) {
+    if (re.test(text)) failures.push(`split-line header parsed as valid: ${JSON.stringify(text)}`);
+  }
+
+  // One case per localized mode that ships its own archetype label, so a mode
+  // renaming its header breaks a named assertion instead of silently emptying
+  // the archetype breakdown.
+  const localeArchetypeCases = [
+    ['Arquétipo: Delivery Manager', 'pt'],
+    ['Arquetipo: Delivery Manager', 'es'],
+    ['Archétype : Delivery Manager', 'fr (accented)'],
+    ['Archetype : Delivery Manager', 'fr (as the mode writes it)'],
+    ['Archetipo: Delivery Manager', 'it'],
+    ['Archetyp: Delivery Manager', 'de, pl'],
+    ['Arketipe: Delivery Manager', 'id'],
+    ['Arketype: Delivery Manager', 'da'],
+    ['Arketip: Delivery Manager', 'tr'],
+    ['Архетип: Delivery Manager', 'ru, ua'],
+  ];
+  for (const [line, locale] of localeArchetypeCases) {
+    const got = REPORT_ARCHETYPE_RE.exec(line)?.[1] ?? null;
+    if (got !== 'Delivery Manager') failures.push(`archetype label for ${locale} → ${JSON.stringify(got)}`);
+  }
+
+  // Block A stays English-only on purpose, so the header fallback is what serves
+  // localized reports. Loosening the Block A cell pattern to accept a suffixed
+  // qualifier ("Archétype détecté") would also match a scoring row whose first
+  // cell merely starts with the word, and capture its weight as the archetype:
+  //   | **Archétype / séniorité** | 25 % | **2.0** | …
+  // That is the leak #3808 closed, reopened from the table side.
+  const scoringRow = '| Archétype / séniorité | 25 % | 2.0 |';
+  if (REPORT_ARCHETYPE_RE.test(scoringRow)) failures.push('archetype pattern matched a scoring table row');
+
   // Via channel analysis (#1596): agency vs direct yield, normalized buckets.
   const viaRows = [
     { via: 'Hays', normalizedStatus: 'interview' },
@@ -831,6 +885,53 @@ function readTextIfExists(path) {
 }
 
 // --- Parse a single report file ---
+// --- Report header field patterns (locale-tolerant) ---
+//
+// A report header is written by the modes in the user's output language, and
+// French typography puts a space before a colon: `**URL :**`, `**Archétype :**`.
+// The original patterns required `URL:` and `Archetype:` with no space and no
+// accent, so every French report parsed as "field absent" — silently, since a
+// missing header field is a legitimate state for older reports and never raises.
+//
+// The failure is invisible and it empties the analysis rather than breaking it:
+// on a 224-report corpus, 128 reports lost their URL (so their ATS vendor fell
+// into the `unknown` bucket, leaving the vendor breakdown to speak for 1 report
+// out of 22 submitted) and 61 lost their archetype. Same shape as #3495.
+//
+// The whitespace class is horizontal-only: space, tab, and U+00A0, the one French
+// editors insert automatically. `\s` would also match a line break, letting a header
+// split across two lines parse as valid and capture a value that belongs to the next
+// line; a header field is single-line by definition, so the class is bounded rather
+// than left permissive. Keep the accent-less spellings: reports written before this
+// fix, and the `Arquetipo` Spanish variant, must keep parsing.
+const REPORT_URL_RE = /^URL[ \t\u00a0]*:[ \t\u00a0]*(https?:\/\/\S+)/im;
+// Every archetype header label shipped by a localized evaluation mode in this
+// repo. Each form is extracted from the mode that writes it, never translated
+// here: an invented spelling adds a key no report ever carries while the real
+// one keeps being dropped. Same sourcing rule #3679 applies on the web side.
+//
+// Longest-first so a shorter form never shadows a longer one that starts with it
+// (Arketip / Arketipe). Backtracking would resolve it either way; the order makes
+// the intent explicit rather than incidental.
+const ARCHETYPE_LABELS = [
+  'Arquétipo',  // pt   — modes/pt/oferta.md
+  'Arquetipo',  // es   — modes/es/oferta.md
+  'Archétype',  // fr   — as generated when the agent writes the accent
+  'Archetype',  // en, nl, zh, zh-TW — and modes/fr/offre.md, which writes it unaccented
+  'Archetipo',  // it   — modes/it/annuncio.md
+  'Archetyp',   // de, pl — modes/de/angebot.md, modes/pl/oferta.md
+  'Arketipe',   // id   — modes/id/lowongan.md
+  'Arketype',   // da   — modes/da/oferta.md
+  'Arketip',    // tr   — modes/tr/is-ilani.md
+  'Архетип',    // ru, ua — modes/ru/oferta.md, modes/ua/oferta.md
+];
+
+const HEADER_HSPACE = '[ \\t\\u00a0]*';
+const REPORT_ARCHETYPE_RE = new RegExp(
+  `^(?:${ARCHETYPE_LABELS.join('|')})${HEADER_HSPACE}:${HEADER_HSPACE}(.+?)$`,
+  'im',
+);
+
 function parseReport(reportPath) {
   const content = readTextIfExists(reportPath);
   if (content === null) return null;
@@ -897,13 +998,13 @@ function parseReport(reportPath) {
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
   const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
 
-  // Fallback: report header field `Archetype: ...` or `Arquetipo: ...` (newer reports use this).
-  const headerArchRegex = /^(?:Archetype|Arquetipo):\s*(.+?)$/im;
+  // Fallback: report header field `Archetype: ...` (newer reports use this).
+  const headerArchRegex = REPORT_ARCHETYPE_RE;
 
   // Report header carries `**URL:**` between Score and PDF (see CLAUDE.md /
   // Pipeline Integrity). Capture the first http(s) URL on that line for vendor
   // detection; reports predating the field simply leave url null (→ unknown bucket).
-  const urlMatch = plain.match(/^URL:\s*(https?:\/\/\S+)/im);
+  const urlMatch = plain.match(REPORT_URL_RE);
   if (urlMatch && !report.url) report.url = urlMatch[1].trim().replace(/[)>\].,]+$/, '');
 
   const archMatch = plain.match(blockARegex) || plain.match(headerArchRegex);
@@ -1046,6 +1147,59 @@ function extractBlockerType(gap) {
   return 'other';
 }
 
+function recordedDiscardReasons(entry) {
+  if (!REASON_BEARING.has(entry.outcome)) return new Set();
+  const matches = (entry.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi) || [];
+  return new Set(matches
+    .map(match => match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase())
+    .filter(Boolean));
+}
+
+/**
+ * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
+ * entries whose linked report explicitly supplies prediction data, including
+ * an empty list; a missing or malformed field is unknown, not an empty forecast.
+ * All statuses remain eligible: advancing later does not erase a prediction.
+ * Labels stay open-ended; only case and surrounding whitespace are normalized.
+ */
+export function buildPredictedDiscardReasonSignals(enriched) {
+  const counts = new Map();
+  const coverage = {
+    entriesWithReports: 0,
+    entriesWithPredictionData: 0,
+    entriesWithPredictions: 0,
+    entriesWithRecordedReasons: 0,
+    // Valid prediction data (even []) plus an eligible recorded reason. This
+    // measures comparison coverage, never agreement between the two sources.
+    entriesWithBothSources: 0,
+  };
+  for (const entry of enriched) {
+    const hasRecordedReasons = recordedDiscardReasons(entry).size > 0;
+    if (hasRecordedReasons) coverage.entriesWithRecordedReasons++;
+    if (!entry.report) continue;
+    coverage.entriesWithReports++;
+    const raw = entry.report.machineSummary?.discard_reasons;
+    // normalizeList accepts scalars for older reports, but also stringifies
+    // objects inside lists. Do not publish those coercions as predicted reasons.
+    if (typeof raw !== 'string'
+        && !(Array.isArray(raw) && raw.every(reason => typeof reason === 'string'))) continue;
+    coverage.entriesWithPredictionData++;
+    if (hasRecordedReasons) coverage.entriesWithBothSources++;
+    const reasons = new Set((entry.report.discardReasons || [])
+      .map(reason => reason.trim().toLowerCase()).filter(Boolean));
+    if (reasons.size > 0) coverage.entriesWithPredictions++;
+    for (const reason of reasons) counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  const base = coverage.entriesWithPredictionData;
+  return {
+    predictedDiscardReasonStats: [...counts.entries()]
+      .map(([reason, frequency]) => ({ reason, frequency, percentage: Math.round(frequency / base * 100) }))
+      .sort((a, b) => b.frequency - a.frequency || a.reason.localeCompare(b.reason)),
+    predictedDiscardReasonBase: base,
+    discardReasonCoverage: coverage,
+  };
+}
+
 /**
  * Build the blocker, discard-reason, and technology signals used by both the
  * production analysis and regression fixtures.
@@ -1076,15 +1230,7 @@ function buildPatternSignals(enriched) {
 
   const discardReasonCounts = new Map();
   for (const e of enriched) {
-    if (!REASON_BEARING.has(e.outcome)) continue;
-    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
-    if (!notesMatch) continue;
-    const entryReasons = new Set();
-    for (const match of notesMatch) {
-      const key = match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
-      if (key) entryReasons.add(key);
-    }
-    for (const key of entryReasons) {
+    for (const key of recordedDiscardReasons(e)) {
       discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
     }
   }
@@ -1139,7 +1285,9 @@ function analyze() {
   const entries = parseTracker();
 
   if (entries.length === 0) {
-    return { error: 'No applications found in tracker.' };
+    // noData marks this as the empty-tracker case rather than a failure, so the
+    // exit status below does not have to match on the message text.
+    return { error: 'No applications found in tracker.', noData: true };
   }
 
   // Enrich entries with report data and classification
@@ -1428,6 +1576,7 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    ...buildPredictedDiscardReasonSignals(enriched),
     // Populations the percentages above are shares of. Exported because a
     // consumer cannot sanity-check a rate whose denominator is invisible —
     // that opacity is precisely what let the wrong base survive unnoticed.
@@ -1506,6 +1655,23 @@ function printSummary(result) {
     }
   }
 
+  const coverage = result.discardReasonCoverage;
+  console.log(`\nPREDICTED DISCARD / SKIP REASONS (of ${result.predictedDiscardReasonBase} entries with prediction data)`);
+  console.log('-'.repeat(40));
+  console.log(`  Prediction data: ${coverage.entriesWithPredictionData}/${coverage.entriesWithReports} entries with linked reports; ${coverage.entriesWithPredictions} contain reasons.`);
+  console.log(`  Recorded reasons: ${coverage.entriesWithRecordedReasons}/${result.discardReasonBase} eligible entries; ${coverage.entriesWithBothSources} entries have both sources.`);
+  console.log('  Forecasts cover all statuses; recorded reasons cover skipped, discarded, and rejected entries.');
+  console.log('  Predictions are not outcomes. Missing data is unknown; labels are grouped by spelling, not meaning.');
+  if (result.predictedDiscardReasonBase === 0) {
+    console.log('  No prediction data recorded yet.');
+  } else if (result.predictedDiscardReasonStats.length === 0) {
+    console.log('  No reasons predicted in the recorded data.');
+  } else {
+    for (const d of result.predictedDiscardReasonStats.slice(0, 10)) {
+      console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+  }
+
   // ATS vendor / channel analysis
   const va = result.vendorAnalysis;
   if (va && va.breakdown.length > 0) {
@@ -1567,6 +1733,27 @@ if (isMainModule(import.meta.url)) {
     requireOperand: true,
   });
 
+  const rawMinThreshold = flagValue(args, '--min-threshold');
+  const rawMinVendorN = flagValue(args, '--min-vendor-n');
+
+  if (hasFlag(args, '--min-threshold')) {
+    if (rawMinThreshold === undefined || !/^\d+$/.test(String(rawMinThreshold)) ||
+        !Number.isSafeInteger(Number(rawMinThreshold))) {
+      console.error(`Error: --min-threshold requires a non-negative integer, got "${rawMinThreshold ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_THRESHOLD = Number(rawMinThreshold);
+  }
+
+  if (hasFlag(args, '--min-vendor-n')) {
+    if (rawMinVendorN === undefined || !/^\d+$/.test(String(rawMinVendorN)) ||
+        !Number.isSafeInteger(Number(rawMinVendorN)) || Number(rawMinVendorN) < 1) {
+      console.error(`Error: --min-vendor-n requires a positive integer, got "${rawMinVendorN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_VENDOR_N = Number(rawMinVendorN);
+  }
+
   if (args.includes('--self-test')) {
     runSelfTest();
   }
@@ -1579,5 +1766,16 @@ if (isMainModule(import.meta.url)) {
     console.log(JSON.stringify(result, null, 2));
   }
 
-  if (result.error) process.exit(1);
+  // "No applications found" is the state of a NEW USER, not a failure. Every
+  // other analysis script over the same tracker — stats, upskill, salary-gap,
+  // process-quality, rejection-latency, detect-reposts, company-history,
+  // calibrate, funnel-velocity, tracker-sync-check — reports it and exits 0.
+  // This one exited 1, which breaks `&&` chaining and makes the batch runners
+  // treat an empty tracker as a broken command.
+  //
+  // Still non-zero for a genuine failure: the check is on the KIND of error, so
+  // a future `result.error` that is not "no data" keeps its exit 1. Written as
+  // an allowlist of no-data codes rather than a message match, so the exit
+  // status does not depend on prose.
+  if (result.error && !result.noData) process.exit(1);
 }

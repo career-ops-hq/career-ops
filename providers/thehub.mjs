@@ -30,6 +30,8 @@
 //
 // Wire in via a `job_boards:` entry with `provider: thehub`.
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+
 const FEED_BASE = 'https://thehub.io/api/v2/jobsandfeatured';
 const TRUSTED_HOST = 'thehub.io';
 const DEFAULT_COUNTRY_CODE = 'EU';
@@ -84,7 +86,12 @@ export function normalizeHubJob(j, fallbackCompany) {
 
   const id = typeof j.id === 'string' ? j.id.trim() : '';
   if (!id) return null;
-  const url = `https://${TRUSTED_HOST}/jobs/${encodeURIComponent(id)}`;
+  // A lone surrogate in id would throw URIError out of encodeURIComponent and
+  // abort the caller's pagination loop; id is also the dedup key (byUrl). Drop
+  // this one.
+  const encodedId = safeEncodeURIComponent(id);
+  if (encodedId === null) return null;
+  const url = `https://${TRUSTED_HOST}/jobs/${encodedId}`;
 
   const company =
     j.company && typeof j.company === 'object' && typeof j.company.name === 'string' && j.company.name.trim()

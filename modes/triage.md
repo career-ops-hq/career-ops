@@ -66,7 +66,7 @@ Assess five dimensions. 1–2 sentences per dimension — no prose, no headers.
 (Weights below are defaults; if `_brief.md` defines its own dimension weights,
 use those.)
 
-**Archetype fit (weight 30%):** Does this map to one of the target archetypes in
+**Archetype fit (weight 35%):** Does this map to one of the target archetypes in
 `_brief.md`? Score 1–5. A direct archetype hit = 4–5. Adjacent = 3. Mismatch = 1–2.
 
 **Comp (weight 25%):** Does stated or estimated comp clear the comp strategy
@@ -82,7 +82,7 @@ directly to JD requirements? Strong overlap = 4–5. Partial = 3. No match = 1�
 **Red flags (adjustment):** Apply the Soft Red Flags from `_brief.md` at −0.5 each.
 Hard DQs override to ≤2.5.
 
-**Global score** = (archetype × 0.30) + (comp × 0.25) + (location × 0.25) +
+**Global score** = (archetype × 0.35) + (comp × 0.25) + (location × 0.25) +
 (cv_match × 0.15) + red_flag_adjustment. Round to nearest 0.1 — matching the
 `X.X/5` scores the tracker and reports already carry, and the 0.1 granularity the
 MARGINAL band below depends on.

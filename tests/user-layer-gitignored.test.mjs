@@ -177,6 +177,33 @@ for (const path of timestampedBackupProbes) {
   else fail(`${path}: git check-ignore could not answer — ${stderr}`);
 }
 
+// The backups' sibling, from the same two writers: the temp file an atomic
+// write renames into place. `.{name}.{pid}.{ts}.{uuid}.tmp` (tracker-utils.mjs
+// writeFileAtomic and web/src/lib/core/safe-write.ts atomicWrite), plus the
+// `{file}.tmp-{pid}-{uuid}` shape safe-write.ts used before they were aligned —
+// a checkout that predates the alignment can still have one lying around.
+//
+// It exists only between the write and the rename, so a passing rename leaves
+// nothing. A rename that THROWS does: Windows contention for the destination
+// handle (the #3006/#3046 class), ENOSPC, a read-only mount. What it leaves is
+// a byte-for-byte copy of cv.md / profile.yml / portals.yml under a second
+// name — the same PII the backup probes above exist for, reached by a different
+// door.
+const atomicWriteTempProbes = [
+  '.cv.md.4821.1755900000000.1e0d6a0e-1b7c-4a1a-9f4a-7c1d2b3e4f56.tmp',
+  '.applications.md.4821.1755900000000.1e0d6a0e.tmp',
+  'cv.md.tmp-4821-1e0d6a0e-1b7c-4a1a-9f4a-7c1d2b3e4f56',
+  'config/profile.yml.tmp-4821-1e0d6a0e',
+  'portals.yml.tmp-4821-1e0d6a0e',
+];
+
+for (const path of atomicWriteTempProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — a leaked atomic-write temp file holds the same PII as the original`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 // The tracker's DERIVED SQLite index (tracker.mjs, #918), which carries the
 // same content as the markdown it indexes — company, role, score, status,
 // notes.
@@ -202,6 +229,53 @@ for (const path of timestampedBackupProbes) {
 // directory that can hold the index can hold all three names. Enumerating them
 // by hand is how the -shm sidecar ended up covered in the repo root and missed
 // one directory down.
+// The tracker and its follow-ups file in the LEGACY ROOT LAYOUT — the third
+// entry in resolveTrackerPath()'s own documented fallback chain
+// (CAREER_OPS_TRACKER > <root>/data/applications.md > <root>/applications.md),
+// and a supported install shape rather than a mistake.
+//
+// data/ is covered by the blanket rule at the top of .gitignore; the root
+// spelling was covered by nothing, so the file holding the user's entire job
+// search — company, role, score, status, notes — sat untracked and unignored,
+// one `git add .` from a commit. The derived .db index beside it was ignored
+// first, on the argument that it carries the same PII as the tracker.
+//
+// The career-data/ probes decide the SHAPE, exactly as they do for the index: a
+// relative CAREER_OPS_ROOT resolves against the codebase directory, so an
+// anchored rule would leave a configured data root inside the checkout
+// uncovered.
+const rootLayoutTrackerProbes = [
+  'applications.md',
+  'follow-ups.md',
+  'career-data/applications.md',
+  'career-data/follow-ups.md',
+  'career-data/data/applications.md',
+];
+
+for (const path of rootLayoutTrackerProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — the tracker holds the user's entire job search`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
+// The other direction. These names are also carried by the upgrade fixtures,
+// which are tracked on purpose and stay tracked through the `!test-fixtures/**`
+// rule — a later pattern, so it wins. A future fixture must land the same way,
+// which a rule ordered after that negation would silently break.
+const trackedFixtureProbes = [
+  'test-fixtures/upgrade/state-v1.16/data/applications.md',
+  'test-fixtures/upgrade/state-v1.18/data/follow-ups.md',
+  'test-fixtures/upgrade/state-v1.20/data/applications.md',   // the next one, not yet written
+];
+
+for (const path of trackedFixtureProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'not-ignored') pass(`${path} stays visible to git`);
+  else if (verdict === 'ignored') fail(`${path} became ignored — the upgrade fixtures cannot be committed`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 const derivedIndexLocations = [
   'applications',                // legacy layout: tracker markdown in the root
   'data/applications',           // standard layout

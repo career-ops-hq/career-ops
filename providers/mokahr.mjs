@@ -74,7 +74,9 @@
 //     keywords: ["AI", "大模型", "Agent"]
 
 import { createDecipheriv } from 'crypto';
+import { sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const API = 'https://app.mokahr.com/api/outer/ats-apply/website/jobs/v2';
 const DETAIL_HOST = 'app.mokahr.com';
@@ -152,7 +154,10 @@ export function parseMokaHrJobs(decrypted, companyName, tenantBaseUrl) {
     const title = j?.title;
     const id = j?.id;
     if (!title || id == null) continue;
-    const encodedId = encodeURIComponent(String(id));
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     // locations[].cityName is DISTRICT-level ("海淀区", "拱墅区"), not the
     // city/province — a plain cityName join produces a location string with
     // no "北京"/"China" substring at all, which portals.yml's location_filter
@@ -216,14 +221,13 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         const offset = (page - 1) * MAX_LIMIT;
 
         let envelope;

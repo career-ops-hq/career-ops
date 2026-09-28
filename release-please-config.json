@@ -5,6 +5,7 @@
     ".": {
       "release-type": "simple",
       "package-name": "career-ops",
+      "exclude-paths": ["web"],
       "extra-files": [
         {
           "type": "json",
@@ -38,6 +39,11 @@
         {
           "type": "json",
           "path": ".github/plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".codex-plugin/plugin.json",
           "jsonpath": "$.version"
         }
       ]
