@@ -39,27 +39,48 @@ export function isTrackerWriting(): boolean {
   return writing.size > 0;
 }
 
-// Serialization gate for tracker-writing runs. reports/ and applications.md are
-// single-writer resources, and two CONCURRENT evaluations each snapshotting
-// reports/ made "did THIS run write a report?" ambiguous — run A's close handler
-// claimed run B's just-written report as its own (PolicyBazaar job-12,
-// 2026-09-28, where A had no report at all yet read a green "report saved").
-// Rather than trusting an agent-typed marker — more prompt formatting for a
-// correctness boundary — serialize the writers: callers of acquireWriteGate()
-// hold the gate for the WHOLE run and release via the returned fn. The gate
-// still feeds the `writing` map, so a row delete is guarded exactly as before.
-let writeQueueTail: Promise<void> = Promise.resolve();
-export function acquireWriteGate(): Promise<() => void> {
+// Serialization gates for tracker-writing runs, split into TWO independent
+// FIFO lanes — evaluate and pdf. The old single shared gate serialized them
+// against each other too (a CV generation blocked evaluations and vice versa),
+// which is unnecessary: the CLI writers already serialize on the SAME
+// cross-process tracker lock (tracker-utils.mjs acquireTrackerLock — used by
+// merge-tracker, mark-pdf-ready, set-status), so a pdf's mark-pdf-ready cannot
+// clobber an evaluate's merge even when the web runs them concurrently. And the
+// web gate's one irreplaceable job — making "did THIS run write a report?"
+// (route.ts reportsBefore snapshot) exact by construction — is only threatened
+// by ANOTHER EVALUATE creating a report file; pdfs never write reports/.
+//
+// So: evaluates wait only on evaluates (lane "evaluate"), pdfs only on pdfs
+// (lane "pdf"), and the two kinds run side by side. Both lanes still feed the
+// `writing` map, so a row delete (which does NOT yet share the tracker lock)
+// stays guarded while a pdf is mid-run exactly as it was.
+export type RunLane = "evaluate" | "pdf";
+
+const laneTails = new Map<RunLane, Promise<void>>([
+  ["evaluate", Promise.resolve()],
+  ["pdf", Promise.resolve()],
+]);
+
+export function acquireLaneGate(lane: RunLane): Promise<() => void> {
+  const tail = laneTails.get(lane) ?? Promise.resolve();
   return new Promise((resolve) => {
     // The chain link stays pending until the holder RELEASES, not until the
     // token is acquired — otherwise every queued run would pile on after the
     // first acquisition instead of waiting for the first run to finish.
-    writeQueueTail = writeQueueTail.then(() => new Promise<void>((release) => {
+    laneTails.set(lane, tail.then(() => new Promise<void>((release) => {
       const token = acquireTrackerWrite();
       resolve(() => {
         releaseTrackerWrite(token);
         release();
       });
-    }));
+    })));
   });
+}
+
+export function acquireEvalGate(): Promise<() => void> {
+  return acquireLaneGate("evaluate");
+}
+
+export function acquirePdfGate(): Promise<() => void> {
+  return acquireLaneGate("pdf");
 }

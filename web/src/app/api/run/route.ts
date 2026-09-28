@@ -5,7 +5,7 @@ import { killCliTree, spawnCli } from "@/lib/cli-spawn";
 import { findExistingEvaluation, markInboxDone } from "@/lib/core/eval-dedupe";
 import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot, findApplication, primaryReportNum, readMemory } from "@/lib/career-ops";
-import { acquireWriteGate, isTrackerWriting } from "@/lib/core/run-registry";
+import { acquireEvalGate, acquirePdfGate, isTrackerWriting } from "@/lib/core/run-registry";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
 import { claudeCliArgs, toolScopeFor } from "@/lib/claude-invocation.mjs";
 
@@ -181,12 +181,16 @@ export async function POST(req: Request) {
     return false;
   };
 
-  // Tracker-mutating kinds (evaluate/pdf) hold a serialization gate for the
-  // WHOLE run: reports/ and applications.md are single-writer resources. The
-  // gate (run-registry.acquireWriteGate) also feeds `writing`, so a row delete
-  // stays guarded exactly as before; other kinds keep full parallelism. The
-  // child is spawned inside the stream so a queued run can report "waiting"
-  // and an abort while queued can skip the slot cleanly.
+  // Tracker-mutating kinds (evaluate/pdf) hold a per-lane serialization gate for
+  // the WHOLE run: reports/ and applications.md are single-writer resources.
+  // Evaluates serialize against evaluates and pdfs against pdfs (run-registry
+  // acquireEvalGate/acquirePdfGate), so the two kinds run side by side — the
+  // CLI writers already lock applications.md themselves (tracker-utils.mjs), and
+  // only another EVALUATE can falsify the "any new report?" check below. Both
+  // lanes still feed `writing`, so a row delete stays guarded exactly as
+  // before; other kinds keep full parallelism. The child is spawned inside the
+  // stream so a queued run can report "waiting" and an abort while queued can
+  // skip the slot cleanly.
   let child: ReturnType<typeof spawnCli> | undefined;
   let releaseWrite: (() => void) | null = null;
   const enc = new TextEncoder();
@@ -218,14 +222,23 @@ export async function POST(req: Request) {
         }
       };
 
-      // Serialization gate: only ONE tracker-writing worker at a time, so the
-      // "any new report" check below becomes exact by construction. Other runs
-      // queue here; the frontend card wears the "Waiting…" status step.
+      // Per-lane serialization gate: one EVALUATE at a time and one PDF at a
+      // time, but the two kinds run concurrently — only a concurrent evaluate
+      // can break the "any new report" check below, and the CLI writers lock the
+      // tracker themselves, so a pdf never has to wait for an evaluate (or vice
+      // versa). Runs queue on their own lane; the frontend card wears the
+      // "Waiting…" status step.
       if (kind === "evaluate" || kind === "pdf") {
         if (isTrackerWriting()) {
-          send({ type: "status", label: "Waiting for the running evaluation to finish…" });
+          send({
+            type: "status",
+            label:
+              kind === "evaluate"
+                ? "Waiting for the running evaluation to finish…"
+                : "Waiting for the running CV generation to finish…",
+          });
         }
-        releaseWrite = await acquireWriteGate();
+        releaseWrite = kind === "evaluate" ? await acquireEvalGate() : await acquirePdfGate();
         // The client aborted while queued — cede the slot to the next run.
         if (closed) {
           releaseWrite(); releaseWrite = null;
