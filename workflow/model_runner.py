@@ -116,14 +116,17 @@ def scan_evaluate(payload: dict) -> dict:
     if evidence["liveness"] == "expired":
         return {
             "outcome": "exclude",
-            "artifact": {"type": "exclusion", "reason": evidence["liveness_reason"], "evidence": source["url"]},
+            "artifact": {"type": "exclusion", "reason_code": "expired", "reason": evidence["liveness_reason"], "evidence": source["url"]},
             "tool_calls": 1,
         }
+    if prescreen["status"] == "incomplete":
+        return {"waiting_reason": "core_evidence_missing", "tool_calls": 1}
     if prescreen["status"] == "fail":
         return {
             "outcome": "exclude",
             "artifact": {
                 "type": "exclusion",
+                "reason_code": "prescreen_failed",
                 "reason": "; ".join(item["message"] for item in prescreen["discard_reasons"]),
                 "evidence": prescreen["discard_reasons"],
             },
@@ -147,6 +150,7 @@ def scan_evaluate(payload: dict) -> dict:
         "location_evidence": source.get("location_evidence"),
         "employment_evidence": source.get("employment_evidence"),
         "prescreen": prescreen,
+        "core_capabilities": evidence["prescreen"]["core_capabilities"],
     }
     return {"outcome": "jd_report", "artifact": report, "tool_calls": 1}
 

@@ -1204,8 +1204,8 @@ search_queries:
 # unaffected. Combined with title normalization, this suppresses URL-new
 # duplicates caused by requisition URL changes and per-location title splits
 # ("Engineer (Berlin)" vs "Engineer"). It does not classify repost patterns or
-# produce `postingChurn` evidence; detect-reposts.mjs and company-history.mjs own
-# that post-tracking layer.
+# produce `postingChurn` evidence; Python `insights reposts` and
+# `insights company` own that post-tracking layer.
 #
 # company_aliases:
 #   Fin: [Intercom]
@@ -1217,8 +1217,8 @@ search_queries:
 #
 # Everything in the post-tracking layer assumes "same company + same title = the
 # same opening". On such a board that assumption is false: two identical titles
-# are two different employers' jobs. detect-reposts.mjs therefore skips flagged
-# companies entirely, and company-history.mjs reports
+# are two different employers' jobs. `insights reposts` therefore skips flagged
+# companies entirely, and `insights company` reports
 # `postingChurn: aggregator-not-evaluated` for them — deliberately NOT
 # `none-detected`, which would claim a clean result from a check that never ran.
 #

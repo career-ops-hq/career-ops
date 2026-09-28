@@ -15,8 +15,10 @@ from langgraph.graph import END, START, StateGraph
 
 try:
     from workflow.application_lifecycle import ApplicationStore, mutate
+    from workflow.company_keys import normalize_company
 except ModuleNotFoundError:
     from application_lifecycle import ApplicationStore, mutate
+    from company_keys import normalize_company
 
 
 KEYWORDS = {
@@ -173,20 +175,6 @@ def _application_domains(company: str, notes: str) -> set[str]:
     return {domain for domain in domains if domain and _usable_domain(domain)}
 
 
-def _normalize_company(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value).lower()
-    value = re.sub(r"\([^)]*\)", " ", value).replace("&", " and ")
-    value = " ".join("".join(char if char.isalnum() or unicodedata.category(char).startswith("M") or char.isspace() else " " for char in value).split())
-    suffixes = ("incorporated", "inc", "corporation", "corp", "company", "co", "limited", "ltd", "llc", "llp", "lp", "plc")
-    while any(value.endswith(" " + suffix) for suffix in suffixes):
-        value = next(value[:-(len(suffix) + 1)] for suffix in suffixes if value.endswith(" " + suffix))
-    for descriptor in ("group", "holdings", "technologies", "technology", "solutions", "canada", "international"):
-        if value.endswith(" " + descriptor):
-            value = value[:-(len(descriptor) + 1)]
-            break
-    return value
-
-
 def _similarity(left: str, right: str) -> float:
     if not left or not right:
         return 0
@@ -201,13 +189,13 @@ def _similarity(left: str, right: str) -> float:
 
 def invite_candidates(signals: dict, applications: list[dict]) -> list[dict]:
     """Rank plausible same-company applications, retaining every candidate."""
-    target = _normalize_company(signals.get("company") or "")
+    target = normalize_company(signals.get("company") or "")
     if not target:
         return []
     priority = {"interview": 0, "responded": 1, "applied": 2, "offer": 4, "rejected": 5, "discarded": 6}
     candidates = []
     for app in applications:
-        name_score = _similarity(target, _normalize_company(app["company"]))
+        name_score = _similarity(target, normalize_company(app["company"]))
         if name_score <= 0:
             continue
         req = signals.get("req_id")

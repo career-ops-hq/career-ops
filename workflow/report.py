@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from workflow.insights.salary import parse_amount
+
 
 HEADINGS = (
     "A. 岗位概览", "B. 能力竞争力", "C. 入职吸引力", "D. 薪酬与需求",
@@ -74,11 +76,30 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         if not match:
             raise ValueError(f"Quote not found in frozen source: {citation['source']}")
         citation["quote"] = match.group(0)
+    advertised = assessment.get("advertised_comp")
+    if advertised is not None:
+        if (not isinstance(advertised, dict) or set(advertised) != {"amount", "currency", "quote"}
+                or any(not isinstance(advertised[key], str) or not advertised[key].strip()
+                       for key in ("amount", "currency", "quote"))
+                or parse_amount(advertised["amount"]) is None):
+            raise ValueError("Advertised annual compensation must have a parseable amount and JD quote")
+        quote = advertised["quote"]
+        match = re.search(r"\s+".join(re.escape(word) for word in quote.split()), evidence["jd"], re.I)
+        if not match or not re.search(r"\b(?:annual(?:ly)?|yearly|per year)\b|年薪|每年|/yr\b|/year\b", quote, re.I):
+            raise ValueError("Advertised compensation requires exact annual JD evidence")
+        if any(number not in quote for number in re.findall(r"\d[\d.,]*", advertised["amount"])):
+            raise ValueError("Advertised amount must appear in the JD quote")
+        currency = advertised["currency"]
+        if currency != "UNKNOWN" and (not re.fullmatch(r"[A-Z]{3}", currency)
+                                      or not re.search(r"(?<![A-Z])" + currency + r"(?![A-Z])", quote)):
+            raise ValueError("Advertised currency must appear as an ISO code in the JD quote")
+        advertised = {**advertised, "quote": match.group(0)}
     files["research"] = directory / "research.json"
     files["research"].write_text(json.dumps(assessment["research"], ensure_ascii=False, indent=2) + "\n")
     summary = {
         "report_format": "scoring-v2", "scoring_model": "attractiveness-v1", "score": None,
         "company": evidence["company"], "role": evidence["role"], "complete_jd": True, "jd_source": "jd",
+        "captured_at": evidence.get("captured_at"), "advertised_comp": advertised,
         "sources": [{"id": name, "path": str(path.relative_to(root)), "sha256": digest(path.read_bytes())} for name, path in files.items()],
         "dimensions": assessment["dimensions"], "attractiveness": score,
     }

@@ -14,6 +14,7 @@ import shlex
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -27,11 +28,25 @@ try:
     from workflow.application_lifecycle import ApplicationStore, mutate as mutate_application
     from workflow.resume_renderer import render_resume
     from workflow.replies import import_reply, view_reply, confirm_reply, parse_pasted
+    from workflow.insights.stats import stats_view
+    from workflow.insights.reposts import repost_view
+    from workflow.insights.company import company_view, company_signals
+    from workflow.insights.salary import salary_view, stated_view
+    from workflow.salary_observations import record_salary
+    from workflow.insights.upskill import targeted_skill_gap, upskill_view
+    from workflow.insights.preparation import build_preparation_plan
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
     from discovery import capture_jd, discover
     from application_lifecycle import ApplicationStore, mutate as mutate_application
     from resume_renderer import render_resume
     from replies import import_reply, view_reply, confirm_reply, parse_pasted
+    from insights.stats import stats_view
+    from insights.reposts import repost_view
+    from insights.company import company_view, company_signals
+    from insights.salary import salary_view, stated_view
+    from salary_observations import record_salary
+    from insights.upskill import targeted_skill_gap, upskill_view
+    from insights.preparation import build_preparation_plan
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
@@ -1422,6 +1437,23 @@ def parser() -> argparse.ArgumentParser:
     reply.add_argument("--status", choices=("responded", "interview", "offer", "rejected"))
     reply.add_argument("--reason", default="")
     reply.add_argument("--confirmed", action="store_true")
+    insights = commands.add_parser("insights")
+    insights.add_argument("kind", choices=("stats", "reposts", "company", "company-signals", "salary", "stated", "upskill", "jd-skill-gap", "preparation-plan"))
+    insights.add_argument("--company")
+    insights.add_argument("--silence-days", type=int, default=28)
+    insights.add_argument("--include-stale", action="store_true")
+    insights.add_argument("--min-reports", type=int, default=5)
+    insights.add_argument("--jd", type=Path)
+    insights.add_argument("--jd-url")
+    insights.add_argument("--opportunity")
+    insights.add_argument("--role")
+    insights.add_argument("--report", type=Path)
+    insights.add_argument("--output", type=Path)
+    salary = commands.add_parser("salary")
+    salary.add_argument("action", choices=("record",))
+    salary.add_argument("observation", help="JSON object or path to JSON file")
+    salary.add_argument("--idempotency-key", required=True)
+    salary.add_argument("--confirmed", action="store_true")
     return cli
 
 
@@ -1460,6 +1492,59 @@ def main() -> None:
                 result = store.score_views()
             finally:
                 store.close()
+        elif args.command == "insights":
+            if args.kind in {"jd-skill-gap", "preparation-plan"}:
+                if bool(args.jd) == bool(args.jd_url):
+                    raise ValueError("JD analysis requires exactly one of --jd or --jd-url")
+                if args.jd:
+                    jd = args.jd.read_text()
+                else:
+                    with tempfile.TemporaryDirectory(prefix="career-ops-jd-gap-") as temporary:
+                        snapshot = capture_jd(Path(temporary), args.jd_url)
+                    if not snapshot:
+                        raise ValueError("JD URL capture failed or was blocked")
+                    jd = snapshot["text"]
+                if args.kind == "jd-skill-gap":
+                    result = targeted_skill_gap(jd, (INPUT_ROOT / "cv.md").read_text())
+                else:
+                    if not args.company or not args.role:
+                        raise ValueError("preparation-plan requires --company and --role")
+                    result = build_preparation_plan(
+                        args.company, args.role, jd, (INPUT_ROOT / "cv.md").read_text(),
+                        (INPUT_ROOT / "config" / "profile.yml").read_text(),
+                        args.report.read_text() if args.report else "",
+                        sources={"jd": str(args.jd) if args.jd else args.jd_url,
+                                 "report": str(args.report) if args.report else None})
+                    if args.output:
+                        args.output.parent.mkdir(parents=True, exist_ok=True)
+                        args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+            else:
+                database = (args.directory / "opportunities.db").resolve()
+                with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
+                    db.row_factory = sqlite3.Row
+                    portals = INPUT_ROOT / "portals.yml"
+                    if args.kind == "stats":
+                        result = stats_view(db, portals, INPUT_ROOT / "config" / "profile.yml")
+                    elif args.kind == "reposts":
+                        result = repost_view(db, portals)
+                    elif args.kind == "salary":
+                        result = salary_view(db, INPUT_ROOT / "config" / "profile.yml")
+                    elif args.kind == "stated":
+                        if not args.opportunity:
+                            raise ValueError("insights stated requires --opportunity")
+                        result = stated_view(db, args.opportunity)
+                    elif args.kind == "upskill":
+                        result = upskill_view(db, INPUT_ROOT / "cv.md", min_reports=args.min_reports)
+                    else:
+                        view_result = company_view(db, portals, silence_days=args.silence_days,
+                                                   include_stale=args.include_stale, company=args.company)
+                        result = company_signals(view_result, INPUT_ROOT / "config" / "profile.yml",
+                                                 INPUT_ROOT / "package.json", include_stale=args.include_stale) if args.kind == "company-signals" else view_result
+        elif args.command == "salary":
+            if not args.confirmed:
+                raise ValueError("salary record requires --confirmed")
+            raw = args.observation if args.observation.lstrip().startswith("{") else Path(args.observation).read_text()
+            result = record_salary(args.directory, json.loads(raw), args.idempotency_key)
         elif args.command == "cancel":
             result = cancel_task(args.directory, args.task_id)
         elif args.command == "reply":

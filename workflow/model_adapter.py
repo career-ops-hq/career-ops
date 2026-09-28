@@ -71,6 +71,7 @@ If search tools cannot execute research, return {blocked:"reason"}; do not manuf
 ASSESS = '''Use the supplied frozen research; do not research again. Return ONLY
 {direction:{score:integer_or_null,rationale,evidence:[{source:"jd",quote:"exact quote"}]},
 compensation:{score,rationale,evidence:[]},team:{score,rationale,evidence:[]},company:{score,rationale,evidence:[]},
+advertised_comp:null OR {amount:"exact annual numeric amount or range",currency:"ISO 3-letter code or UNKNOWN",quote:"exact JD quote proving the amount and annual period"},
 sections:{overview,capabilities,compensation,questions,legitimacy,risks,checklist}}.
 Candidate source IDs are cv/profile/targeting/articles/voice and writing1, writing2, ...; JD is jd. Research source IDs are supplied web1, web2,...
 Every quote must be a contiguous EXACT substring of the supplied source, no edits or ellipses.
@@ -81,6 +82,7 @@ to Proven/Adjacent/Gap/Unverified, exact candidate evidence, hiring impact and r
 Checklist covers all gates and unresolved capabilities. Questions are evidence gaps only, no interview coaching.
 Keep project rollout in direction; use independent company-wide business evidence for company, not the same project signal twice.
 Never state all hard gates pass when employment, compensation or eligibility remain unresolved.
+Set advertised_comp only when the JD explicitly gives an annual amount or range; do not turn monthly/hourly pay or a market benchmark into advertised annual pay. Use UNKNOWN currency unless the same JD quote states an ISO code.
 Do not repeat the research object, write YAML, calculate scores, hashes or source paths.
 '''
 
@@ -212,5 +214,5 @@ def call_agent(phase, prompt, tools, directory):
         value = freeze_research(value, result.get('messages', []))
     elif phase in ('assessment', 'repair'):
         value = {'dimensions': {k: value[k] for k in ('direction', 'compensation', 'team', 'company')},
-                 'sections': value['sections']}
+                 'sections': value['sections'], 'advertised_comp': value.get('advertised_comp')}
     return value, session

@@ -53,5 +53,22 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
         raise AssertionError("extra dimension field accepted")
     except ValueError as error:
         assert "compensation: invalid dimension fields" in str(error)
+    salary_evidence = {**evidence, "jd": "Annual salary CNY 300k-400k for this role.", "captured_at": "2026-09-20"}
+    salary_assessment = {**assessment, "advertised_comp": {
+        "amount": "300k-400k", "currency": "CNY", "quote": "Annual salary CNY 300k-400k"
+    }}
+    paid = render_report(packet, salary_evidence, salary_assessment)
+    assert "advertised_comp:" in paid["report"] and "300k-400k" in paid["report"]
+    checked = subprocess.run(["node", "--input-type=module", "-e", script, validator.as_uri(),
+                              str(directory / "report.md"), str(root)], text=True, capture_output=True)
+    assert checked.returncode == 0, (checked.stdout, checked.stderr)
+    bad_salary = {**salary_assessment, "advertised_comp": {
+        "amount": "300k-400k", "currency": "USD", "quote": "Annual salary CNY 300k-400k"
+    }}
+    try:
+        render_report(packet, salary_evidence, bad_salary)
+        raise AssertionError("unquoted salary currency accepted")
+    except ValueError as error:
+        assert "currency" in str(error)
 
 print("workflow report: strict contract compatibility and citation failure passed")

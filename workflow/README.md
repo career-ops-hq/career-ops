@@ -36,6 +36,9 @@ workflow/.venv/bin/python -m workflow.career_ops reply import <message.json-or-p
 workflow/.venv/bin/python -m workflow.career_ops reply paste [email.txt]
 workflow/.venv/bin/python -m workflow.career_ops reply view <message-id>
 workflow/.venv/bin/python -m workflow.career_ops reply confirm <message-id> --opportunity <id> --status responded|interview|offer|rejected --confirmed [--reason <reason>]
+workflow/.venv/bin/python -m workflow.career_ops insights stats|reposts|company|company-signals|salary|stated|upskill|jd-skill-gap|preparation-plan [options]
+workflow/.venv/bin/python -m workflow.career_ops insights preparation-plan --jd <jd.md> --company <name> --role <title> [--report <score.md>] [--output <plan.json>]
+workflow/.venv/bin/python -m workflow.career_ops salary record <observation.json> --idempotency-key <operation-id> --confirmed
 ```
 
 All commands emit JSON. `discover` calls the existing Node provider scanner as
