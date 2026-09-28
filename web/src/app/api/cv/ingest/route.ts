@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, coreCheckoutRoot } from "@/lib/career-ops";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
@@ -27,7 +27,7 @@ export const maxDuration = 300;
 // (exactly how the explore route handles a missing discover.md).
 function readCanonicalMode(): string | null {
   try {
-    return fs.readFileSync(path.join(careerOpsRoot(), "modes", "cv-ingest.md"), "utf8");
+    return fs.readFileSync(path.join(coreCheckoutRoot(), "modes", "cv-ingest.md"), "utf8");
   } catch {
     return null;
   }

@@ -17,18 +17,33 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
 
 /**
- * Resolve the career-ops "home" — the directory holding the user's sibling
- * files (cv.md, data/, reports/). In production the web/ app lives inside the
- * career-ops checkout, so the home is its parent (..). Dev overrides via
- * CAREER_OPS_ROOT to read the user's real (gitignored) data from a separate
- * checkout — see web/.env.local.
+ * The career-ops CODE checkout — where the core scripts (*.mjs), system modes,
+ * templates/ and lib/ live. `process.cwd()` is `<core>/web` for `next dev`/
+ * `next start`, so its parent is the checkout — the same directory
+ * `path-resolver.mjs` calls `__dirname`.
+ *
+ * Distinct from careerOpsRoot(), the DATA root. The two are the same directory
+ * only in the default layout. With CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR or a
+ * `.career-ops-data` marker, the data root is elsewhere and holds no scripts, so
+ * anything that runs or reads SYSTEM files must resolve against this instead —
+ * otherwise a split-layout install reads as a data-only checkout (Explore's
+ * "Discovery needs the full toolkit", Doctor/Follow-ups/Portals silently off).
+ */
+export function coreCheckoutRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
+/**
+ * Resolve the career-ops DATA root — the directory holding the user's files
+ * (cv.md, data/, reports/). Same precedence as the core: CAREER_OPS_ROOT →
+ * CAREER_OPS_DATA_DIR → `.career-ops-data` marker → the checkout itself. For
+ * scripts, system modes and templates use coreCheckoutRoot().
  */
 export function careerOpsRoot(): string {
-  // `process.cwd()` is `<core>/web` for `next dev`/`next start`, so its parent is
-  // the core checkout — the same directory `path-resolver.mjs` calls `__dirname`.
-  // resolveDataRoot() needs it explicitly because relative env values and marker
-  // contents resolve against it; see data-root.mjs for why that base matters.
-  const coreRoot = path.resolve(process.cwd(), "..");
+  // resolveDataRoot() needs the checkout explicitly because relative env values
+  // and marker contents resolve against it; see data-root.mjs for why that base
+  // matters.
+  const coreRoot = coreCheckoutRoot();
   return resolveDataRoot(
     coreRoot,
     (p) => {
@@ -53,7 +68,8 @@ export function careerOpsRoot(): string {
 export function rootScript(nameNoExt: string): string {
   // The core checkout is selected at runtime and must not be bundled into the
   // web server output when Turbopack sees this dynamic script path.
-  return path.join(/* turbopackIgnore: true */ careerOpsRoot(), `${nameNoExt}.mjs`);
+  // Scripts live in the code checkout, never the data root — see coreCheckoutRoot().
+  return path.join(/* turbopackIgnore: true */ coreCheckoutRoot(), `${nameNoExt}.mjs`);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, coreCheckoutRoot } from "@/lib/career-ops";
 import { assembleDedupContext } from "@/lib/core/discover";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   // homegrown prompt. Missing (older core) → graceful 400 so the Scan tab stays usable.
   let mode: string;
   try {
-    mode = fs.readFileSync(path.join(careerOpsRoot(), "modes", "discover.md"), "utf8");
+    mode = fs.readFileSync(path.join(coreCheckoutRoot(), "modes", "discover.md"), "utf8");
   } catch {
     return Response.json({ code: "MODE_MISSING", error: "AI search needs a newer career-ops — update to enable it." }, { status: 400 });
   }
