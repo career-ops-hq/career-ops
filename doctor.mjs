@@ -253,8 +253,8 @@ async function checkPlaywright() {
 }
 
 // Per-CLI MCP config registry. `plugins: true` marks a CLI whose MCP servers
-// can also arrive from an installed plugin, i.e. from outside the project root
-// (see isPlaywrightMcpFromPlugin).
+// can also arrive from outside the project root: from .claude.json or from an
+// installed plugin (see isPlaywrightMcpFromClaudeJson, isPlaywrightMcpFromPlugin).
 const MCP_CONFIGS = [
   { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'], plugins: true },
   // opencode.jsonc is JSONC: OpenCode accepts comments and trailing commas
@@ -343,6 +343,28 @@ function isPlaywrightMcpFromPlugin(root) {
   });
 }
 
+// `claude mcp add` writes to .claude.json, not to any file in the checkout
+// (#4392): user scope under the top-level `mcpServers`, local scope (the
+// default) under `projects[<dir>].mcpServers`. The file lives in
+// CLAUDE_CONFIG_DIR when that is set, otherwise directly in the home dir -
+// beside ~/.claude/, not inside it.
+//
+// Claude Code on Windows can store one directory under both C:\... and C:/...
+// with the server under only one of them, while process.cwd() returns the
+// backslash form. So keys are compared with slashes and case folded, and every
+// matching key counts, not just the first.
+function isPlaywrightMcpFromClaudeJson(root) {
+  const dir = process.env.CLAUDE_CONFIG_DIR || homedir();
+  const cfg = readConfigIfPresent(join(dir, '.claude.json'));
+  if (!cfg || typeof cfg !== 'object') return false;
+  if (hasPlaywrightIn(cfg)) return true;
+  if (!root || !cfg.projects || typeof cfg.projects !== 'object') return false;
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const target = norm(root);
+  return Object.entries(cfg.projects)
+    .some(([key, project]) => norm(key) === target && hasPlaywrightIn(project));
+}
+
 function isPlaywrightMcpConfigured(root, activeCli) {
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
   if (!entry) return false; // known CLI but no MCP file mapping; caller warns
@@ -353,7 +375,8 @@ function isPlaywrightMcpConfigured(root, activeCli) {
   if (inProject) return true;
   // Gated behind the project scan, so an already-configured project pays no
   // extra I/O and non-plugin CLIs never touch the user config dir.
-  return entry.plugins === true && isPlaywrightMcpFromPlugin(root);
+  return entry.plugins === true
+    && (isPlaywrightMcpFromClaudeJson(root) || isPlaywrightMcpFromPlugin(root));
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
@@ -411,7 +434,7 @@ function checkPlaywrightMcp(root, activeCli) {
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
       entry.plugins
-        ? `No project-level MCP config, and no enabled plugin providing one, was detected for ${activeCli}.`
+        ? `No project-level MCP config, no server in ~/.claude.json, and no enabled plugin providing one, was detected for ${activeCli}.`
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
