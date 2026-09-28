@@ -54,6 +54,45 @@ test("the reported bug: two DIFFERENT Greenhouse postings (same host+path, disti
   assert.equal(webKey(jobB), coreKey(jobB));
 });
 
+test("Moka fragment-routed jobs keep distinct identity in both core and web keys", () => {
+  const base = "https://app.mokahr.com/social-recruitment/high-flyer/140576";
+  const jobA = `${base}#/job/7dcd6fde-84f1-4deb-890c-f1f275df0efc`;
+  const jobB = `${base}#/job/0cc59b14-538d-4b5c-8c82-05482810576b`;
+  assert.notEqual(webKey(jobA), webKey(jobB), "two distinct Moka openings collapsed to one web dedup key");
+  assert.equal(webKey(jobA), coreKey(jobA));
+  assert.equal(webKey(jobB), coreKey(jobB));
+});
+
+test("fragment promotion stays limited to recognized job routes", () => {
+  const base = "https://app.mokahr.com/social-recruitment/high-flyer/140576";
+  const job = `${base}#/job/abc-123`;
+  const cases = [
+    [`${job}?view=compact`, job, "fragment query state should not change job identity"],
+    [`${base}#/job/abc-123/extra`, base, "unsupported route suffix must not be promoted"],
+    ["https://example.com/tenant#apply", "https://example.com/tenant", "cosmetic fragments must not be promoted"],
+  ];
+  for (const [input, expectedInput, message] of cases) {
+    assert.equal(webKey(input), webKey(expectedInput), message);
+    assert.equal(webKey(input), coreKey(input), `root/web parity: ${input}`);
+  }
+});
+
+test("generic hash-route jobs keep distinct identity in both core and web keys", () => {
+  const base = "https://jobs.example.com/careers";
+  const jobA = `${base}#/jobs/123`;
+  const jobB = `${base}#/jobs/456`;
+  assert.notEqual(webKey(jobA), webKey(jobB), "two distinct hash-route openings collapsed to one web dedup key");
+  assert.equal(webKey(jobA), coreKey(jobA));
+  assert.equal(webKey(jobB), coreKey(jobB));
+});
+
+test("promoted fragment identity does not overwrite pre-existing internal comparison params", () => {
+  const input = "https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id";
+  const expected = "https://jobs.example.com/careers?_career_ops_fragment_job_id=hash-id&_career_ops_fragment_job_id=query-id";
+  assert.equal(webKey(input), expected);
+  assert.equal(coreKey(input), expected);
+});
+
 test("host+pathname-only shape must not return (regression lock on the pre-fix canon())", () => {
   // The pre-fix canon() discarded the ENTIRE query string, so both of these
   // collapsed to "boards.greenhouse.io/acme/jobs/apply". If that shape comes

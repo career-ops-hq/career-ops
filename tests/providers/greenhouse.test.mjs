@@ -321,6 +321,32 @@ try {
     pass('greenhouse.fetch() leaves a job absent from /offices on its bare work-model string');
   else fail(`greenhouse.fetch() enriched row 2 location = ${JSON.stringify(enriched[2]?.location)}`);
 
+  // Order stability (#3750). The folded city list must not inherit the order
+  // Greenhouse happened to return its offices in: that order is not promised to
+  // be stable, and this string is what lands in scan-history.tsv AND what
+  // scan.mjs keys the location dedupe on. Same two offices as above, declared
+  // the other way round — the emitted location must be byte-identical.
+  const reversedOffices = {
+    offices: [
+      {
+        name: 'Seattle, WA',
+        departments: [{ jobs: [{ id: 202 }] }],
+        children: [{ name: 'Austin, TX', departments: [{ jobs: [{ id: 202 }] }] }],
+      },
+    ],
+  };
+  const [reversed] = await greenhouse.fetch(
+    { name: 'Cloudflare', careers_url: 'https://job-boards.greenhouse.io/cloudflare' },
+    {
+      fetchJson: async (url) => (url.endsWith('/offices') ? reversedOffices : {
+        jobs: [{ id: 202, title: 'Staff SWE', absolute_url: 'https://job-boards.greenhouse.io/cloudflare/jobs/202', location: { name: 'Distributed; Hybrid' } }],
+      }),
+    },
+  );
+  if (reversed?.location === 'Distributed; Hybrid · Austin, TX · Seattle, WA')
+    pass('greenhouse.fetch() sorts the folded offices, so /offices ordering cannot rewrite the location');
+  else fail(`greenhouse.fetch() office order leaked into the location: ${JSON.stringify(reversed?.location)}`);
+
   // Cost guard: a board that already reports cities must not pay for /offices.
   const geoRequests = [];
   await greenhouse.fetch(

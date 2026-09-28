@@ -1,21 +1,29 @@
-// tests/portal-health-path.test.mjs — appendPortalHealth()/loadPortalHealth()
-// must resolve their default path against process.cwd(), not the directory
-// scan.mjs lives in.
+// tests/portal-health-path.test.mjs — appendPortalHealth() must resolve its
+// default path against the CONFIGURED DATA ROOT, and must never write into the
+// checkout that owns scan.mjs.
 //
-// Every sibling data path in scan.mjs (SCAN_HISTORY_PATH, PIPELINE_PATH,
-// APPLICATIONS_PATH, BLACKLIST_PATH, SCAN_RUNS_PATH) is a bare cwd-relative
-// string. PORTAL_HEALTH_PATH used to be the one exception, resolved via
-// path.dirname(fileURLToPath(import.meta.url)) -- the script's own directory.
-// Any invocation with a sandboxed cwd (a test run, a temp dir, a CI checkout)
-// still wrote fixture rows straight into the real data/portal-health.tsv of
-// whatever checkout happens to own scan.mjs, polluting real pipeline data with
-// test fixtures.
+// The second half is what this test has always been for. It was written when
+// PORTAL_HEALTH_PATH resolved via path.dirname(fileURLToPath(import.meta.url)) --
+// the script's own directory -- so any invocation with a sandboxed cwd (a test
+// run, a temp dir, a CI checkout) wrote fixture rows straight into the real
+// data/portal-health.tsv of whatever checkout happened to own scan.mjs. That
+// guarantee is unchanged and still asserted below.
 //
-// This spawns a real child process with cwd pinned to a temp dir that is NOT
-// the directory scan.mjs lives in, then calls appendPortalHealth() with no
-// filePath argument -- the exact call scan.mjs's own production code path
-// makes. The row must land under the given cwd, and the script's own
-// directory must be provably untouched.
+// What changed is the mechanism (#3510). Resolving from the cwd fixed the
+// pollution but left scan.mjs with two rules for where user data lives: this
+// path followed the shell, while SCAN_HISTORY_PATH, PIPELINE_PATH and
+// APPLICATIONS_PATH had already followed DATA_ROOT since the data-root feature
+// landed in 02daaf1 -- and stats.mjs:39, the only reader of this file, reads it
+// at join(DATA_ROOT, 'data', 'portal-health.tsv'). A user with a data root
+// configured got rows written somewhere their own reader never looked.
+//
+// So isolation now comes from CAREER_OPS_ROOT, the mechanism the rest of the
+// suite already uses, rather than from the cwd. This spawns a real child with a
+// data root pinned to a temp dir AND a cwd pinned to a second temp dir, so the
+// two are provably distinguishable, then calls appendPortalHealth() with no
+// filePath argument -- the exact call scan.mjs's own production path makes. The
+// row must land under the data root, not the cwd, and the script's own directory
+// must be provably untouched.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
@@ -25,10 +33,11 @@ import { pathToFileURL } from 'url';
 import { randomUUID } from 'crypto';
 import { applyScriptDirGuard } from './portal-health-guard.mjs';
 
-console.log('\nscan.mjs — portal-health.tsv resolves against cwd, not script dir');
+console.log('\nscan.mjs — portal-health.tsv resolves against the data root, never the checkout');
 
 const scanUrl = JSON.stringify(pathToFileURL(join(ROOT, 'scan.mjs')).href);
-const sandboxCwd = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-'));
+const sandboxCwd = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-cwd-'));
+const sandboxRoot = mkdtempSync(join(tmpdir(), 'career-ops-portal-health-root-'));
 
 // The script's own directory is ROOT in this checkout -- the same directory
 // the pre-fix bug always resolved to regardless of the cwd it was given.
@@ -51,9 +60,13 @@ try {
   `;
 
   const res = spawnSync(NODE, ['--input-type=module', '-e', script], {
+    // cwd and data root deliberately differ: if the two were the same directory
+    // this test could not tell an anchored path from a cwd-relative one, which
+    // is exactly how the resolution drifted in the first place.
     cwd: sandboxCwd,
     encoding: 'utf-8',
     timeout: 30000,
+    env: { ...process.env, CAREER_OPS_ROOT: sandboxRoot, CAREER_OPS_DATA_DIR: '' },
   });
 
   if (res.error || res.status !== 0) {
@@ -62,12 +75,22 @@ try {
     pass('appendPortalHealth() runs cleanly with a sandbox cwd');
   }
 
-  // 1. The row lands under the cwd the process was given, not the script dir.
-  const sandboxHealthPath = join(sandboxCwd, 'data', 'portal-health.tsv');
-  if (existsSync(sandboxHealthPath) && readFileSync(sandboxHealthPath, 'utf-8').includes(marker)) {
-    pass('the fixture row is written under the sandbox cwd');
+  // 1. The row lands under the configured data root, not the script dir.
+  const rootHealthPath = join(sandboxRoot, 'data', 'portal-health.tsv');
+  if (existsSync(rootHealthPath) && readFileSync(rootHealthPath, 'utf-8').includes(marker)) {
+    pass('the fixture row is written under the configured data root');
   } else {
-    fail(`expected ${sandboxHealthPath} to contain the fixture row, it does not`);
+    fail(`expected ${rootHealthPath} to contain the fixture row, it does not`);
+  }
+
+  // 1b. And NOT under the cwd, which is a different directory here. stats.mjs
+  //     reads this file at the data root; a row under the cwd is a row its only
+  //     reader will never see.
+  const cwdHealthPath = join(sandboxCwd, 'data', 'portal-health.tsv');
+  if (!existsSync(cwdHealthPath)) {
+    pass('nothing was written under the cwd, which no reader looks at');
+  } else {
+    fail(`appendPortalHealth() wrote to the cwd at ${cwdHealthPath} instead of the data root (#3510)`);
   }
 
   // 2. The script's own directory -- the real user-layer data dir in a normal
@@ -84,6 +107,7 @@ try {
   }
 } finally {
   rmSync(sandboxCwd, { recursive: true, force: true });
+  rmSync(sandboxRoot, { recursive: true, force: true });
   // Defensive cleanup, matching the pattern in tests/scan-no-targets.test.mjs
   // and tests/intake-mutex.test.mjs -- never observed to trigger once the path
   // is fixed, but leaves the tree exactly as found if it somehow still does.

@@ -1,10 +1,13 @@
 /**
- * followup-cadence.test.mjs — tests for computeNextFollowupDate cadence selection.
+ * tests/followup-cadence.test.mjs — tests for computeNextFollowupDate cadence selection.
  *
  * Focuses on the `responded` branch, where the first follow-up after a recruiter
  * reply must be scheduled with `responded_initial`, not `responded_subsequent`.
  *
- * Run: node followup-cadence.test.mjs
+ * Run: node test-all.mjs --only followup-cadence
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import { dirname, join } from 'path';
@@ -264,3 +267,20 @@ eq(
   DEFAULT_CADENCE.applied_first,
 );
 
+
+
+// ── parseAppliedDate: a requisition hash is not a row reference ──────────────
+// `isCrossReferencedMention` skips an apply-date that is cited ABOUT ANOTHER
+// ROW (`see #12, applied 2026-09-01`). A `#` preceded by a requisition label
+// is the row's own req number, not a row reference, and REQ_LABELLED_HASH_RE
+// shares tracker-parse.mjs's label vocabulary so the two never disagree. The
+// `r_` label was missing from that list (PR #4267 review), so
+// `R_#1311 Applied 2026-09-01` lost its own applied date while the equivalent
+// `req #1311` kept it.
+console.log('\nfollowup-cadence.mjs — parseAppliedDate vs requisition hashes');
+for (const label of ['R_#1311', 'r_#1311', 'req #1311', 'Req #1311']) {
+  eq(`parseAppliedDate: ${label} is the row's own requisition, so its applied date is kept`,
+    cadence.parseAppliedDate(`${label} Applied 2026-09-01`), '2026-09-01');
+}
+eq('parseAppliedDate: an unlabelled #N before the date is a row reference, so the date is not this row\'s',
+  cadence.parseAppliedDate('Sibling #1311 Applied 2026-09-01'), null);

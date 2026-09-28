@@ -1,9 +1,10 @@
 // tests/merge-tracker-url-dedup.test.mjs — URL-keyed deterministic dedup.
 //
-// Unit-tests normalizeUrl (pure), then drives the REAL merge-tracker.mjs CLI
-// end-to-end against a temp tracker via the CAREER_OPS_TRACKER /
-// CAREER_OPS_ADDITIONS env hooks — the merge path is where the bug lived, so
-// asserting on the resulting tracker rows is what actually proves the fix.
+// Drives the REAL merge-tracker.mjs CLI end-to-end against a temp tracker via
+// the CAREER_OPS_TRACKER / CAREER_OPS_ADDITIONS env hooks — the merge path is
+// where the bug lived, so asserting on the resulting tracker rows is what
+// actually proves the fix. normalizeUrl's own unit cases live in
+// tests/url-key.test.mjs.
 import { pass, fail } from './helpers.mjs';
 import assert from 'node:assert';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -11,43 +12,10 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { normalizeUrl } from '../url-key.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
-
-// ───────────────────────── normalizeUrl (unit) ─────────────────────────
-console.log('normalizeUrl()');
-ok('strips utm_* and gh_src, keeps gh_jid', () => {
-  const a = normalizeUrl('https://careers.airbnb.com/positions/8028783?gh_jid=8028783&utm_source=x&gh_src=abc');
-  assert.equal(a, 'https://careers.airbnb.com/positions/8028783?gh_jid=8028783');
-});
-ok('lowercases host, forces https, drops trailing slash + fragment', () => {
-  assert.equal(normalizeUrl('HTTP://Jobs.Lever.co/Stripe/123/#apply'), 'https://jobs.lever.co/Stripe/123');
-});
-ok('query order does not matter (sorted)', () => {
-  assert.equal(normalizeUrl('https://x.com/j?b=2&a=1'), normalizeUrl('https://x.com/j?a=1&b=2'));
-});
-ok('two genuinely different postings stay different', () => {
-  assert.notEqual(
-    normalizeUrl('https://job-boards.greenhouse.io/doordashusa/jobs/8027044'),
-    normalizeUrl('https://job-boards.greenhouse.io/doordashusa/jobs/8026972'));
-});
-ok('idempotent', () => {
-  const once = normalizeUrl('https://X.com/a/?utm_source=y');
-  assert.equal(once, normalizeUrl(once));
-});
-ok('anything that is not an http(s) posting yields NO key', () => {
-  assert.equal(normalizeUrl(''), '');
-  assert.equal(normalizeUrl(null), '');
-  // Non-http references and placeholders must not become comparable values.
-  // The earlier lowercased-string fallback gave every one of these a key, so
-  // two unrelated employers whose report said "N/A" matched each other.
-  for (const v of ['local:jds/foo.md', 'N/A', 'n/a', 'TBD', '—', '-', 'none', 'see email']) {
-    assert.equal(normalizeUrl(v), '', `${JSON.stringify(v)} must yield no key`);
-  }
-});
 
 // ───────────────────────── merge-tracker (integration) ─────────────────────────
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |';

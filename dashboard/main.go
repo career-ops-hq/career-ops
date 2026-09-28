@@ -254,7 +254,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func openCmd(target string) tea.Cmd {
 	return func() tea.Msg {
 		if err := openWithDefaultApp(target); err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: failed to open %q: %v\n", target, err)
+			// Issue 3913: the dashboard runs with tea.WithAltScreen(), so a
+			// message on stderr is never visible. Report the failure back to
+			// the pipeline screen, which flashes it in the help bar.
+			return screens.PipelineOpenFailedMsg{Target: target, Err: err.Error()}
 		}
 		return nil
 	}

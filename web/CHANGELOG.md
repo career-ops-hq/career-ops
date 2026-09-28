@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.12.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.11.0...web-v0.12.0) (2026-09-24)
+
+
+### Features
+
+* **web:** resizable assistant panel and a composer that grows with its content ([#4258](https://github.com/career-ops-hq/career-ops/issues/4258)) ([8be08ce](https://github.com/career-ops-hq/career-ops/commit/8be08ce362d45556b12bb659fd66360cd409ebb3))
+
+
+### Bug Fixes
+
+* run the web test suite on the minimum supported Node ([#4065](https://github.com/career-ops-hq/career-ops/issues/4065)) ([533a4a8](https://github.com/career-ops-hq/career-ops/commit/533a4a8dc0802fffc5a87afb3d380776bde6da14))
+* **web/explore:** honest, configurable scan timeout with partial results ([#4191](https://github.com/career-ops-hq/career-ops/issues/4191)) ([220ecd8](https://github.com/career-ops-hq/career-ops/commit/220ecd876bcb49152068ecc098f55e5be0f8b542))
+* **web:** a failed atomic write leaves a full copy of cv.md behind, unignored ([#3245](https://github.com/career-ops-hq/career-ops/issues/3245)) ([#3246](https://github.com/career-ops-hq/career-ops/issues/3246)) ([2d37f77](https://github.com/career-ops-hq/career-ops/commit/2d37f77fb6b29db1c43970e39df5f5f918ddc7e6))
+* **web:** add vertical padding to pipeline facet chips ([#4038](https://github.com/career-ops-hq/career-ops/issues/4038)) ([b6bc5ff](https://github.com/career-ops-hq/career-ops/commit/b6bc5ffb92e847e43b91042d4b828c99ce5960a2))
+* **web:** let report tables use the screen on large displays ([e571f2c](https://github.com/career-ops-hq/career-ops/commit/e571f2cb9de3f8952863e5c51adc437a09b83fef))
+* **web:** make CLI choices fully clickable ([b4be24f](https://github.com/career-ops-hq/career-ops/commit/b4be24f2b9e476888dedb5ee85d29df68baf53df))
+* **web:** make CLI choices fully clickable ([977bb11](https://github.com/career-ops-hq/career-ops/commit/977bb1144fec223f98b66984a9dfeb508d73f08f))
+* **web:** persist the default CLI at any installed count, not only a sole one ([#4151](https://github.com/career-ops-hq/career-ops/issues/4151)) ([ecbe651](https://github.com/career-ops-hq/career-ops/commit/ecbe651320d5da9a97ea29a0ee7e39cbd14207ed))
+* **web:** pluralize the Analytics evaluation count ([#3161](https://github.com/career-ops-hq/career-ops/issues/3161)) ([7c91c6d](https://github.com/career-ops-hq/career-ops/commit/7c91c6d9682c0441b8fdd1c0a6ce983524be02fd))
+* **web:** resolve the data root exactly as the core does ([#4064](https://github.com/career-ops-hq/career-ops/issues/4064)) ([1704575](https://github.com/career-ops-hq/career-ops/commit/17045758851f7c7294e23669f4e6c8d34edf1712))
+* **web:** surface a successful render's warnings instead of dropping them ([#3995](https://github.com/career-ops-hq/career-ops/issues/3995)) ([89ec0ec](https://github.com/career-ops-hq/career-ops/commit/89ec0ecf49052650cb9d3e53d3dae98ee0cba444))
+
+## [0.11.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.10.0...web-v0.11.0) (2026-09-16)
+
+
+### Features
+
+* **web:** opt-in origin allowlist for the local dashboard API ([#3597](https://github.com/career-ops-hq/career-ops/issues/3597)) ([0754973](https://github.com/career-ops-hq/career-ops/commit/075497329a55d7c1e5184cfffb21fd0efeaf13ba))
+
+
+### Bug Fixes
+
+* **tracker:** resolve addition columns by name so score and status cannot transpose ([00b0296](https://github.com/career-ops-hq/career-ops/commit/00b0296c6071eb955f38404e60a10ceaccad45b5))
+* **url-key:** preserve existing fragment comparison params ([02e632e](https://github.com/career-ops-hq/career-ops/commit/02e632e634280ef7224ec268279adbbe9f0650ce))
+* **url-key:** preserve hash-route posting identity ([52f314c](https://github.com/career-ops-hq/career-ops/commit/52f314cd268bd0b2de56b71ba236ce288138dac0))
+* **url-key:** preserve hash-route posting identity ([965fff3](https://github.com/career-ops-hq/career-ops/commit/965fff30149eff1da2f6b1a937ca3738260b9a2e))
+* **web:** detect a real tailored CV/cover on disk, not just the tracker flag ([0fb2080](https://github.com/career-ops-hq/career-ops/commit/0fb2080db1a5c90b3655bff7fdf74593026adf04))
+* **web:** don't let a failed fetch become a scored report ([#3826](https://github.com/career-ops-hq/career-ops/issues/3826)) ([10ede60](https://github.com/career-ops-hq/career-ops/commit/10ede60522f1abd71dfd8c93266f9176180213ac))
+* **web:** fence agent CLIs at the spawn boundary ([1d2cb1e](https://github.com/career-ops-hq/career-ops/commit/1d2cb1e125ea3034ff01b464e9a5e2628c0e315f))
+* **web:** give grok a parser, and make the token fold per-CLI ([#2689](https://github.com/career-ops-hq/career-ops/issues/2689)) ([c7549fb](https://github.com/career-ops-hq/career-ops/commit/c7549fb3593f9ee456d7118beb80b0ee6e76747c))
+* **web:** identify the verdict block by its heading, not by the letter ([#3502](https://github.com/career-ops-hq/career-ops/issues/3502)) ([0ef1bfb](https://github.com/career-ops-hq/career-ops/commit/0ef1bfbe2385551af415e05858900710d0aadd23))
+* **web:** parseCliJson misses set-status.mjs's pretty-printed success ([#3602](https://github.com/career-ops-hq/career-ops/issues/3602)) ([848ca44](https://github.com/career-ops-hq/career-ops/commit/848ca440fb2d243ae08205ab3d0bc12903a36c65))
+* **web:** resolve the tailored cover for THIS application, not the company's newest ([8fc2bb4](https://github.com/career-ops-hq/career-ops/commit/8fc2bb41db2aad7bf50902ad8a26e726c9637eec))
+
+## [0.10.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.9.0...web-v0.10.0) (2026-09-03)
+
+
+### Features
+
+* **oferta:** add evidence-tiered requirement importance to Block B ([#3596](https://github.com/career-ops-hq/career-ops/issues/3596)) ([14710e2](https://github.com/career-ops-hq/career-ops/commit/14710e29a6a801ea3ae52bb3f15756dc9ada7d29))
+* **providers:** add Feishu Jobs and MokaHR scanner providers ([#3491](https://github.com/career-ops-hq/career-ops/issues/3491)) ([1696bec](https://github.com/career-ops-hq/career-ops/commit/1696bec4d021768e7359f9aad6b329cba883da20))
+
+
+### Bug Fixes
+
+* **web,dashboard:** point two user-facing references at the repository's new home ([6c0e68d](https://github.com/career-ops-hq/career-ops/commit/6c0e68d472d4ee1e0082fd861c133778f262ecfe))
+* **web:** a company with no usable slug must not match every tailored CV ([#3214](https://github.com/career-ops-hq/career-ops/issues/3214)) ([880c58b](https://github.com/career-ops-hq/career-ops/commit/880c58b999033b7f38439f20246943e9342e7fdf))
+* **web:** enable apply from the generated pdf index ([ac761fa](https://github.com/career-ops-hq/career-ops/commit/ac761fa612fc943b1ef9458f704fefd653954955))
+* **web:** find Grok in its default install dirs, not only on PATH ([77657dc](https://github.com/career-ops-hq/career-ops/commit/77657dcd0bcb7c2e9a9950148d337d160aa5b459))
+* **web:** order the Today action queue before truncating it ([3a067ee](https://github.com/career-ops-hq/career-ops/commit/3a067ee580b7982cf5dd6edf7895112e4e99600b))
+* **web:** preserve a malformed portals.yml instead of overwriting it with the example ([07ed4f3](https://github.com/career-ops-hq/career-ops/commit/07ed4f31295bee9d03ce1ab61d6d59c835431ff7))
+* **web:** rank "Awaiting your decision" by every EVALUATED alias, not an English prefix ([d7573e1](https://github.com/career-ops-hq/career-ops/commit/d7573e189193993c56d19c9216313f0fd4cebee2))
+* **web:** require the cv- prefix so the tailored-CV resolvers stop returning the cover letter ([#2156](https://github.com/career-ops-hq/career-ops/issues/2156)) ([414d340](https://github.com/career-ops-hq/career-ops/commit/414d340b4425bf199ddad36dfc0a551da4e99fe0))
+* **web:** resolve the tailored CV for THIS application, not the newest for the company ([ca11627](https://github.com/career-ops-hq/career-ops/commit/ca116279d3a5ba9a18e57e3f03f056066c178649))
+* **web:** self-host the production fonts so the app starts without Google ([a2e46c3](https://github.com/career-ops-hq/career-ops/commit/a2e46c329fa9819ca6748a437c4ecdbdac4a6ec2))
+* **web:** tell the beta reporter's user when the dupe search could not run ([77bf490](https://github.com/career-ops-hq/career-ops/commit/77bf4906abc5c5f63ac07a6c27a7f24c1d03683d))
+
 ## [0.9.0](https://github.com/santifer/career-ops/compare/web-v0.8.1...web-v0.9.0) (2026-08-31)
 
 

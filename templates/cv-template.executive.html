@@ -88,6 +88,16 @@ version: 1.0.0
     line-height: 1.15;
   }
 
+  .header-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #555;
+    margin-top: 3px;
+    line-height: 1.2;
+  }
+
   .contact-row {
     margin-top: 6px;
     font-size: 10px;
@@ -226,6 +236,8 @@ version: 1.0.0
     white-space: nowrap;
   }
 
+  .edu-location { font-size: 9.5px; color: #6b7684; margin-top: 1px; }
+
   .edu-desc { margin-top: 1px; text-align: justify; }
 
   /* === CERTIFICATIONS === */
@@ -273,6 +285,7 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -319,6 +332,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
       <span class="separator">|</span>

@@ -6,6 +6,13 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — workday facet-split');
 
+// Expected jobs.workdayTruncated values, spelled out locally rather than
+// imported from providers/workday.mjs: these strings are the module's public
+// contract with scan-ats-full.mjs, and a test importing the same constant the
+// source uses can no longer catch that constant's value drifting by accident.
+const TRANSIENT = 'transient';
+const STRUCTURAL = 'structural';
+
 // Trimmed from a live dickssportinggoods|wd1|dsg page-0 response (2026-08-25).
 // `total` came back 2,000 while the facet counts sum to ~8,4xx — the clamp this
 // whole feature exists to route around. Counts are the real ones; the value
@@ -58,6 +65,51 @@ const DSG_FACETS = [
   },
 ];
 
+// The same board with `locationMainGroup` in the fuller shape a live tenant
+// ships (page 0, 2026-08-28): the id-less group parents above, each carrying
+// nested children that *do* have their own ids and counts.
+//
+// Those children double-count. A requisition open in several locations is
+// counted once per location, so the live facet's 938 children summed to 16,732
+// against a board of ~8,366 — almost exactly 2.00x — while every other counted
+// facet on the board agreed within 0.9% and erred downward. The children below
+// are collapsed from 938 to 4 with that sum preserved, since the sum is the
+// property under test.
+//
+// Neither function should reach them: `facetCoverage()` sums a facet's own
+// `values`, and `chooseSplitFacet()` filters on a string `id`. Recursing into
+// `values[].values` looks like a free improvement — more values, a finer
+// partition — and would instead double the true total, so every healthy board
+// would compare its honest `total` against it and read as offset-clamped. The
+// two assertions below go red if that refactor ever lands. See #3875.
+const DSG_NESTED_FACETS = [
+  ...DSG_FACETS.filter((f) => f.facetParameter !== 'locationMainGroup'),
+  {
+    facetParameter: 'locationMainGroup',
+    descriptor: null,
+    values: [
+      {
+        id: null,
+        descriptor: 'Location - State',
+        count: null,
+        values: [
+          { id: 'loc-pa', descriptor: 'Pennsylvania', count: 4183 },
+          { id: 'loc-ny', descriptor: 'New York', count: 4183 },
+        ],
+      },
+      {
+        id: null,
+        descriptor: 'Locations',
+        count: null,
+        values: [
+          { id: 'loc-pgh', descriptor: 'Pittsburgh', count: 4183 },
+          { id: 'loc-nyc', descriptor: 'New York City', count: 4183 },
+        ],
+      },
+    ],
+  },
+];
+
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
   const workday = workdayModule.default;
@@ -90,6 +142,19 @@ try {
     pass('trueTotalFromFacets() ignores facets whose values carry no usable counts');
   } else {
     fail(`trueTotalFromFacets(uncounted) returned ${uncounted}, expected null`);
+  }
+
+  // The board size must not move when the nested children are present. An
+  // implementation that summed them would return 16,732 and, because this
+  // function takes the maximum, every healthy tenant would then read as clamped.
+  const nestedTrue = trueTotalFromFacets(DSG_NESTED_FACETS);
+  if (nestedTrue === 8425) {
+    pass('trueTotalFromFacets() ignores nested facet children — locationMainGroup cannot double the board');
+  } else {
+    fail(
+      `trueTotalFromFacets(DSG_NESTED) returned ${nestedTrue}, expected 8425` +
+        ' — 16732 means the nested children were summed (#3875)',
+    );
   }
 
   // ── chooseSplitFacet ──────────────────────────────────────────────
@@ -134,6 +199,44 @@ try {
     pass('chooseSplitFacet() rejects facets whose values have no id (id-less group headers)');
   } else {
     fail('chooseSplitFacet() should reject id-less facet values');
+  }
+
+  // Same rejection, but against the shape that makes descending tempting: the
+  // parents are still id-less, yet their children carry usable ids and counts.
+  const nestedChosen = chooseSplitFacet(DSG_NESTED_FACETS);
+  if (nestedChosen && nestedChosen.facetParameter === 'jobFamily') {
+    pass('chooseSplitFacet() never picks a nested group facet, even when its children carry ids and counts');
+  } else {
+    fail(
+      `chooseSplitFacet(DSG_NESTED) chose ${JSON.stringify(nestedChosen?.facetParameter)}, expected "jobFamily" (#3875)`,
+    );
+  }
+
+  const locationFirst = chooseSplitFacet([
+    { facetParameter: 'jobFamily', descriptor: 'Job Family', values: [{ id: 'admin', count: 10 }, { id: 'ops', count: 20 }] },
+    { facetParameter: 'location', descriptor: 'Location', values: [
+      { id: 'us', descriptor: 'Remote - United States', count: 4000 },
+      { id: 'toronto', descriptor: 'Toronto, Ontario, Canada', count: 20 },
+      { id: 'london', descriptor: 'London, Ontario, Canada', count: 10 },
+    ] },
+  ], { locationHints: { allow: ['Canada', 'Ontario', 'Toronto', 'Remote'], block: ['Remote - United States'] } });
+  if (locationFirst?.facetParameter === 'location'
+      && locationFirst.values.map((value) => value.id).join('|') === 'toronto|london') {
+    pass('chooseSplitFacet() prioritizes configured location values over smaller unrelated facets');
+  } else {
+    fail(`chooseSplitFacet(location hints) returned ${JSON.stringify(locationFirst)}`);
+  }
+
+  const oneTarget = chooseSplitFacet([
+    { facetParameter: 'location', descriptor: 'Location', values: [
+      { id: 'us', descriptor: 'United States', count: 9000 },
+      { id: 'ca', descriptor: 'Toronto, Canada', count: 20 },
+    ] },
+  ], { locationHints: { allow: ['Canada'], block: ['United States'] } });
+  if (oneTarget?.values.length === 1 && oneTarget.values[0].id === 'ca') {
+    pass('chooseSplitFacet() can select one in-scope location slice when other values are excluded');
+  } else {
+    fail(`chooseSplitFacet(single target) returned ${JSON.stringify(oneTarget)}`);
   }
 
 } catch (e) {
@@ -291,17 +394,17 @@ try {
     fail(`facet split made ${deepCalls} requests — unbounded`);
   }
 
-  if (deepJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags a board it could not fully cover as truncated rather than reporting it complete');
+  if (deepJobs.workdayTruncated === STRUCTURAL) {
+    pass('workday.fetch() tags a board it could not fully cover as structurally truncated rather than reporting it complete');
   } else {
-    fail('facet split that ran out of depth should tag jobs.workdayTruncated');
+    fail(`facet split that ran out of depth should tag jobs.workdayTruncated='${STRUCTURAL}', got ${deepJobs.workdayTruncated}`);
   }
 
   // A pathological facet fan-out must not be able to spend a whole sweep on one
   // tenant: the live DSG board splits into 24 values whose dominant slice stays
   // clamped at every level, so the page budget is the only thing bounding it.
   let budgetCalls = 0;
-  await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+  const { result: budgetJobs } = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
     const body = JSON.parse(opts.body);
     budgetCalls++;
     if (budgetCalls > 2000) throw new Error('page budget not enforced');
@@ -321,6 +424,14 @@ try {
     pass('workday.fetch() caps total pages per tenant so one pathological board cannot eat a sweep');
   } else {
     fail(`clamped fan-out spent ${budgetCalls} requests, expected <= 501`);
+  }
+
+  // The page budget is a fixed resource, exhausted identically on a repeat
+  // run — a sequential retry would just spend it again for the same result.
+  if (budgetJobs.workdayTruncated === STRUCTURAL) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${STRUCTURAL}' when the tenant page budget runs out`);
+  } else {
+    fail(`a board that exhausted its page budget should tag jobs.workdayTruncated='${STRUCTURAL}', got ${budgetJobs.workdayTruncated}`);
   }
 
 
@@ -356,10 +467,10 @@ try {
     fail(`slice that failed mid-pagination produced recovery line ${JSON.stringify(dyingRecoveryLine)}, expected it to carry "(still incomplete)"`);
   }
 
-  if (dyingJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags jobs.workdayTruncated when a slice died mid-fetch, so the sweep retries the tenant');
+  if (dyingJobs.workdayTruncated === TRANSIENT) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${TRANSIENT}' when a slice died mid-fetch, so the sweep retries the tenant`);
   } else {
-    fail('a split whose slice hit fetch-error should tag jobs.workdayTruncated, not report the board complete');
+    fail(`a split whose slice hit fetch-error should tag jobs.workdayTruncated='${TRANSIENT}', got ${dyingJobs.workdayTruncated}`);
   }
 
   // 'cap' is the same shape of partial result: the slice stopped at max_pages
@@ -380,10 +491,10 @@ try {
     return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings('b', 0) : [] };
   }, { includeUndated: true })));
 
-  if (cappedJobs.workdayTruncated === true) {
-    pass('workday.fetch() tags jobs.workdayTruncated when a slice stopped at the page cap with pages left');
+  if (cappedJobs.workdayTruncated === STRUCTURAL) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${STRUCTURAL}' when a slice stopped at the page cap with pages left`);
   } else {
-    fail('a split whose slice hit the page cap should tag jobs.workdayTruncated');
+    fail(`a split whose slice hit the page cap should tag jobs.workdayTruncated='${STRUCTURAL}', got ${cappedJobs.workdayTruncated}`);
   }
 
   // A slice whose PAGE 0 dies is the dangerous shape: runQuery()'s first fetch
@@ -424,10 +535,10 @@ try {
     fail('a slice failing on page 0 stopped the split from trying the other slices');
   }
 
-  if (page0Jobs.workdayTruncated === true) {
-    pass('workday.fetch() tags jobs.workdayTruncated when a slice failed on page 0');
+  if (page0Jobs.workdayTruncated === TRANSIENT) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${TRANSIENT}' when a slice failed on page 0`);
   } else {
-    fail('a split whose slice failed on page 0 should tag jobs.workdayTruncated, not report the board complete');
+    fail(`a split whose slice failed on page 0 should tag jobs.workdayTruncated='${TRANSIENT}', got ${page0Jobs.workdayTruncated}`);
   }
 
   const page0RecoveryLine = page0Errors.find((e) => String(e).includes('offset-clamped at'));
@@ -477,6 +588,71 @@ try {
     pass('workday.fetch() leaves a slice that early-stopped past the --since window untagged');
   } else {
     fail('a slice that stopped past the --since window is complete for the sweep and must not tag workdayTruncated');
+  }
+
+
+  // ── #2: the chosen facet may not cover the whole board ─────────────
+  //
+  // The clamp is detected against the LARGEST facet sum, but the split runs on
+  // whichever facet partitions most finely. When the chosen facet covers
+  // materially less than that, the postings it does not partition are never
+  // requested by any slice — and if every slice completes, the board is
+  // reported recovered with no "(still incomplete)".
+  const coverageResponder = (rootFacets, sliceTotals) => async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    if (key === '') {
+      return { total: 2000, facets: rootFacets, jobPostings: postings('unfaceted', body.offset) };
+    }
+    if (!sliceTotals.includes(key)) throw new Error(`unexpected slice ${JSON.stringify(key)}`);
+    return { total: 20, facets: [], jobPostings: body.offset === 0 ? postings(key, 0) : [] };
+  };
+
+  // `tier` wins the split (largest slice 300 beats jobFamily's 1500) but covers
+  // 600 of a 2700 board. The 2100 postings outside it are unreachable.
+  const UNDERCOVERING = [
+    { facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] },
+    { facetParameter: 'tier', values: [{ id: 't1', count: 300 }, { id: 't2', count: 300 }] },
+  ];
+  const { result: underJobs, errors: underErrors } = await captureConsoleErrors(() => workday.fetch(
+    ENTRY,
+    mkCtx(coverageResponder(UNDERCOVERING, ['tier=t1', 'tier=t2']), { includeUndated: true }),
+  ));
+
+  if (underJobs.workdayTruncated === STRUCTURAL) {
+    pass(`workday.fetch() tags jobs.workdayTruncated='${STRUCTURAL}' for a split whose chosen facet covers materially less than the board`);
+  } else {
+    fail(`a split facet covering 600 of a 2700 board leaves 2100 postings unreachable and must tag workdayTruncated='${STRUCTURAL}', got ${underJobs.workdayTruncated}`);
+  }
+
+  const underLine = underErrors.find((e) => String(e).includes('offset-clamped at'));
+  if (underLine && String(underLine).includes('(still incomplete)')) {
+    pass('workday.fetch() says "(still incomplete)" when the chosen facet under-covers the board');
+  } else {
+    fail(`under-covering split printed ${JSON.stringify(underLine)}, expected "(still incomplete)"`);
+  }
+
+  // The materiality bar, and the reason it exists. Real facets disagree by a
+  // point or two because a posting missing a facet value is absent from that
+  // facet's counts, so the chosen facet is almost always just under the max —
+  // DSG's own numbers: trueTotal 8367, chosen jobFamily 8366, short by 1,
+  // against a 77-wide spread across the counted facets. A bare
+  // `chosen < trueTotal` fires here, which would tag essentially every board
+  // and make the tag mean nothing.
+  const NOISE = [
+    { facetParameter: 'jobFamily', values: [{ id: 'jf1', count: 800 }, { id: 'jf2', count: 783 }, { id: 'jf3', count: 783 }] },
+    { facetParameter: 'locType', values: [{ id: 'l1', count: 1184 }, { id: 'l2', count: 1183 }] },
+    { facetParameter: 'timeType', values: [{ id: 'tt1', count: 1200 }, { id: 'tt2', count: 1090 }] },
+  ];
+  const { result: noiseJobs } = await captureConsoleErrors(() => workday.fetch(
+    ENTRY,
+    mkCtx(coverageResponder(NOISE, ['jobFamily=jf1', 'jobFamily=jf2', 'jobFamily=jf3']), { includeUndated: true }),
+  ));
+
+  if (noiseJobs.workdayTruncated === undefined) {
+    pass('workday.fetch() ignores a chosen facet one posting under the max — inside the counted facets’ own spread');
+  } else {
+    fail('a 1-posting gap against a 77-wide facet spread is ordinary disagreement, not undercoverage, and must not tag');
   }
 
   // The unclamped path must not pay for any of this.

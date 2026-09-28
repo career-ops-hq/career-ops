@@ -85,6 +85,24 @@ try {
     fail(`double decode = ${JSON.stringify(doubled)}`);
   }
 
+  const doubleEncodedMarkup = htmlToText(
+    '&amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;After &#252; &quot;quoted&quot;'
+  );
+  if (doubleEncodedMarkup === 'After ü "quoted"') {
+    pass('htmlToText() keeps double-encoded active markup inert while decoding text entities');
+  } else {
+    fail(`double-encoded active markup = ${JSON.stringify(doubleEncodedMarkup)}`);
+  }
+
+  const incompleteEncodedMarkup = htmlToText(
+    'Before &amp;lt;script data-x=alert(1) After'
+  );
+  if (incompleteEncodedMarkup === 'Before script data-x=alert(1) After') {
+    pass('htmlToText() neutralizes incomplete double-encoded tag openers without dropping text');
+  } else {
+    fail(`incomplete double-encoded markup = ${JSON.stringify(incompleteEncodedMarkup)}`);
+  }
+
   // A keyword split across a tag boundary must survive stripping, since
   // visa/content filters substring-match over the result.
   const split = htmlToText('<p>No sponsorship is <span>provided</span> for this role</p>');

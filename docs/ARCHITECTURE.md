@@ -44,7 +44,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
 3. **Classify**: Detect archetype (1 of 6 types)
 4. **Evaluate**: 7 blocks (A-G):
    - A: Role summary
-   - B: CV match (gaps + mitigation)
+   - B: CV match (per-requirement importance + gaps + mitigation)
    - C: Level strategy
    - D: Comp research (WebSearch)
    - E: CV personalization plan

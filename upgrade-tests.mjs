@@ -28,7 +28,11 @@ import { seedFixture, loadExpectations } from './seed-fixture.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const CANONICAL = 'https://github.com/santifer/career-ops.git';
+const CANONICAL = 'https://github.com/career-ops-hq/career-ops.git';
+// Tags cut before the move to career-ops-hq ship an updater that still
+// fetches the old address; both must resolve to the local mirror or an
+// upgrade-from-old-tag scenario silently reaches the real network.
+const CANONICAL_LEGACY = 'https://github.com/santifer/career-ops.git';
 const TAG_RE = /^career-ops-v(\d+)\.(\d+)\.(\d+)$/;
 
 function git(cwd, ...args) {
@@ -62,7 +66,7 @@ function buildMirror(work, targetSha) {
 function writeGitConfig(work, mirror) {
   const cfg = join(work, 'gitconfig');
   const url = pathToFileURL(mirror).href;
-  writeFileSync(cfg, `[user]\n\tname = upgrade-tests\n\temail = upgrade-tests@career-ops.test\n[url "${url}"]\n\tinsteadOf = ${CANONICAL}\n[safe]\n\tdirectory = *\n`);
+  writeFileSync(cfg, `[user]\n\tname = upgrade-tests\n\temail = upgrade-tests@career-ops.test\n[url "${url}"]\n\tinsteadOf = ${CANONICAL}\n\tinsteadOf = ${CANONICAL_LEGACY}\n[safe]\n\tdirectory = *\n`);
   return cfg;
 }
 
@@ -81,6 +85,25 @@ function hermeticEnv(cfg) {
     GIT_CONFIG_GLOBAL: cfg,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_COUNT: '0',
+    // Hermeticity is not only a git concern. #3845 made apply() resolve its
+    // target through resolveTargetRef(), whose default 'release' channel
+    // curls RELEASES_API. The redirects above rewrite git URLs onto the local
+    // mirror and do nothing to a raw curl, so that call reaches the real
+    // api.github.com and apply upgrades to whatever the live newest release
+    // happens to be.
+    //
+    // Between releases that tag IS newestAncestorTag(), so the leg becomes a
+    // no-op ("Update complete: vX → vX"), nothing is written, and the
+    // non-vacuity oracle fails while naming whichever SYSTEM_PATHS file the PR
+    // touched. The gate then reports a defect in unrelated changes, which is
+    // the reading that costs the most time.
+    //
+    // The 'main' channel is what #2007 designed this harness around ("apply is
+    // pure git (curl lives only in check()), so the whole flow runs
+    // hermetically") and it is the only channel the mirror can actually serve.
+    // Production behaviour is untouched: this pins the harness, not
+    // resolveTargetRef().
+    CAREER_OPS_UPDATE_CHANNEL: 'main',
   };
 }
 
@@ -188,9 +211,11 @@ export function runLeg({ oldTag, targetSha, label = oldTag, mutateMirror = null,
 
     let exitCode = 0, output = '';
     try {
-      output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
+      // The fixture is an explicit installation acceptance test, so pass the
+      // same confirmation a user would provide after reviewing the preview.
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: hermeticEnv(cfg),
+        env: { ...hermeticEnv(cfg), CAREER_OPS_UPDATE_CONFIRM: '1' },
       });
     } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
 
@@ -414,7 +439,7 @@ function localPathsLeg() {
 
     let exitCode = 0, output = '';
     try {
-      output = execFileSync(process.execPath, ['update-system.mjs', 'apply'], {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
         cwd: install, encoding: 'utf-8', timeout: 300000,
         env: hermeticEnv(cfg),
       });

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import { resolveTailoredCv } from "@/lib/apply/cv";
 import { careerOpsRoot, isRegularContainedFile, pdfPathStatusForReport } from "@/lib/career-ops";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
@@ -20,14 +21,18 @@ function servePdf(file: string): Response {
 // Inline so it opens in the browser. Local-first: reads the user's own output/
 // dir.
 //
-// Two resolution paths, in order. The report number resolves the EXACT PDF
-// recorded in data/pdf-index.tsv; the company slug is the fallback for reports
-// generated before that manifest existed. The fallback uses the SAME matching
-// contract as resolveTailoredCv (see cv-match.mjs) so this and the apply flow
-// always land on the same file.
+// Three resolution paths, in order. "n" (a REPORT number, e.g. from a report's
+// own "View tailored CV" link) and "application" (a TRACKER ROW number, e.g.
+// from the Apply flow) are different number spaces and both resolve the EXACT
+// PDF recorded in data/pdf-index.tsv — application via the row's own Report
+// cell. The company slug is the fallback for reports generated before that
+// manifest existed. The fallback uses the SAME matching contract as
+// resolveTailoredCv (see cv-match.mjs) so this and the apply flow always land
+// on the same file.
 export async function GET(req: NextRequest) {
   const n = (req.nextUrl.searchParams.get("n") ?? "").trim();
   const company = (req.nextUrl.searchParams.get("company") ?? "").trim();
+  const application = (req.nextUrl.searchParams.get("application") ?? "").trim();
 
   // Preferred path: resolve the EXACT PDF indexed for this report number
   // (data/pdf-index.tsv). Two applications at the same company have two
@@ -48,6 +53,21 @@ export async function GET(req: NextRequest) {
     // No index entry (e.g. a report generated before pdf-index.tsv existed) —
     // fall through to the company-slug heuristic below rather than 404 on a
     // real, existing tailored CV.
+  }
+
+  // Same shape as the "n" path above, but resolved through the tracker row's
+  // own Report cell — the join the apply flow's file-upload uses.
+  if (application) {
+    const exact = await resolveTailoredCv(undefined, application);
+    if (exact) {
+      try {
+        return servePdf(exact);
+      } catch {
+        return new Response("could not read the PDF", { status: 500 });
+      }
+    }
+    // No resolvable report for this tracker row — fall through to the
+    // company-slug heuristic below, same as the "n" path.
   }
 
   if (!company) return new Response("company required", { status: 400 });

@@ -1,5 +1,5 @@
 /**
- * detect-reposts.test.mjs — Systematic test suite for detect-reposts.mjs
+ * tests/detect-reposts.test.mjs — Systematic test suite for detect-reposts.mjs
  *
  * Tests every exported and internal function across:
  * - Input validation (malformed, missing, boundary values)
@@ -14,7 +14,10 @@
  * - CLI behavior (args, flags, missing file)
  * - Integration (full TSV round-trip, multi-company, mixed statuses)
  *
- * Run: node detect-reposts.test.mjs
+ * Run: node test-all.mjs --only detect-reposts
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import { detectReposts, parseScanHistory, companyKey, titleIdentityKey } from '../detect-reposts.mjs';

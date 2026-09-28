@@ -36,6 +36,27 @@ const TRACKING_PARAMS = [
 ];
 
 /**
+ * Promote a known identity-bearing SPA fragment into a functional query key
+ * before generic URL normalization drops the fragment. Most fragments are
+ * presentation-only. The narrow exceptions are recognized `#/job/{id}` and
+ * `#/jobs/{id}` routes; MokaHR keeps its established board-specific key.
+ *
+ * @param {URL} url
+ */
+export function promoteKnownFragmentIdentity(url) {
+  const match = /^#\/jobs?\/([^/?#]+)(?:\?[^#]*)?$/i.exec(url.hash);
+  if (!match) return;
+  let jobId;
+  try { jobId = decodeURIComponent(match[1]); } catch { return; }
+  if (!jobId) return;
+  if (url.hostname.toLowerCase() === "app.mokahr.com") {
+    url.searchParams.append("mokahr_job_id", jobId);
+    return;
+  }
+  url.searchParams.append("_career_ops_fragment_job_id", jobId);
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string).
@@ -59,6 +80,7 @@ export function normalizeUrl(raw) {
 
   u.protocol = "https:";
   u.hostname = u.hostname.toLowerCase();
+  promoteKnownFragmentIdentity(u);
   u.hash = "";
 
   const keep = [];

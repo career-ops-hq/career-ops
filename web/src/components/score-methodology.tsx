@@ -16,7 +16,7 @@ const DIMENSIONS: [string, string][] = [
 
 const BLOCKS: [string, string][] = [
   ["A", "Plain-English summary of the role"],
-  ["B", "A table of how your CV matches each requirement, plus the gaps"],
+  ["B", "A table of how your CV matches each requirement, how much each requirement matters for this posting, and the gaps"],
   ["C", "Strategy — how to position yourself for this role"],
   ["D", "Compensation research, comparing the offer to market rates"],
   ["E", "Personalization notes for your application"],

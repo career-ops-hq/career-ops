@@ -37,6 +37,31 @@ test('cell neutralizes table-breaking characters without changing ordinary text'
   assert.equal(cell('Senior Engineer'), 'Senior Engineer');
 });
 
+// Asserted on the sanitizer itself, never through a writer. cell() is the one
+// chokepoint every tracker writer passes through — merge-tracker's buildRow for
+// company/role/location/notes/url (and so the web, which dictates rows through
+// the same merge path), set-status for its note. Testing a caller instead would
+// leave the guard un-asserted the moment a new writer is added; testing the
+// chokepoint means a new writer inherits it or bypasses cell() visibly.
+test('cell strips invisible control characters (#3892)', () => {
+  // The realistic path: a role title copied out of a rendered posting carries a
+  // C0 byte. It is invisible in markdown, on GitHub and in the web dashboard,
+  // and it shifts or truncates the positional `split('|')` parse downstream.
+  assert.equal(cell('Senior\x01 Engineer'), 'Senior Engineer');
+  assert.equal(cell('Head\x7f of Growth'), 'Head of Growth');
+  assert.equal(cell('Zeta\x9dCorp'), 'ZetaCorp');
+  assert.equal(cell('\x00\x1b'), '');
+
+  // Deleted, not replaced with a space: the byte renders as nothing, so a
+  // replacement would change the text a human already sees.
+  assert.equal(cell('Data\x0cEngineer'), 'DataEngineer');
+
+  // Whitespace that legitimately separates words is left alone — a tab is
+  // ordinary whitespace in a cell, and a newline still folds to one space.
+  assert.equal(cell('Staff\tEngineer'), 'Staff\tEngineer');
+  assert.equal(cell('Acme\r\nRemote'), 'Acme Remote');
+});
+
 test('normalizeCompany preserves meaningful non-Latin company names', () => {
   assert.equal(normalizeCompany('Acme, Inc. (Remote)'), 'acmeincremote');
   assert.equal(normalizeCompany('株式会社ゼータ'), '株式会社ゼータ');

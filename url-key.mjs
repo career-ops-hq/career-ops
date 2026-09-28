@@ -10,9 +10,9 @@
  *   - under-normalizing leaves two spellings of the SAME posting as two keys
  *     → a VISIBLE duplicate row you can see and fix.
  * So we strip only a denylist of known tracking params, lowercase the host,
- * force https, drop the fragment + a trailing slash, and sort the remaining
- * query — and KEEP every functional query param (e.g. gh_jid, which on some
- * corporate-hosted Greenhouse boards is the canonical posting id).
+ * force https, drop non-identity fragments + a trailing slash, and sort the
+ * remaining query — and KEEP every functional query param (e.g. gh_jid, which
+ * on some corporate-hosted Greenhouse boards is the canonical posting id).
  *
  * This mirrors RFC 3986 §6, whose comparison ladder runs simple-string →
  * syntax-based → scheme-based → protocol-based, and whose stated design goal is
@@ -45,6 +45,30 @@ const TRACKING_PARAMS = [
 ];
 
 /**
+ * Promote a known identity-bearing SPA fragment into a functional query key
+ * before generic URL normalization drops the fragment. Most fragments are
+ * presentation-only. The narrow exceptions are recognized `#/job/{id}` and
+ * `#/jobs/{id}` routes; MokaHR keeps its established board-specific key.
+ *
+ * The emitted/public URL remains untouched; this mutates only the URL object
+ * used to build a comparison key.
+ *
+ * @param {URL} url
+ */
+export function promoteKnownFragmentIdentity(url) {
+  const match = /^#\/jobs?\/([^/?#]+)(?:\?[^#]*)?$/i.exec(url.hash);
+  if (!match) return;
+  let jobId;
+  try { jobId = decodeURIComponent(match[1]); } catch { return; }
+  if (!jobId) return;
+  if (url.hostname.toLowerCase() === 'app.mokahr.com') {
+    url.searchParams.append('mokahr_job_id', jobId);
+    return;
+  }
+  url.searchParams.append('_career_ops_fragment_job_id', jobId);
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
@@ -73,7 +97,8 @@ export function normalizeUrl(raw) {
 
   u.protocol = 'https:';            // http vs https is the same posting
   u.hostname = u.hostname.toLowerCase();
-  u.hash = '';                      // fragments never identify the posting
+  promoteKnownFragmentIdentity(u);
+  u.hash = '';                      // unrecognized fragments do not identify it
 
   // Drop tracking params, keep functional ones, sort for order-independence.
   const keep = [];

@@ -21,7 +21,7 @@ test('Chinese Minimal template is discoverable and valid', () => {
 
 test('Chinese Minimal uses one restrained accent and removes chip styling', () => {
   const html = readFileSync(TEMPLATE, 'utf8');
-  assert.match(html, /--zhm-accent:\s*#174a7e/);
+  assert.match(html, /--zhm-accent:\s*var\(--accent-color,\s*#174a7e\)/);
   assert.match(html, /\.header-gradient\s*\{[^}]*height:\s*1px[^}]*background:\s*var\(--zhm-ink\)/s);
   assert.match(html, /\.competency-tag\s*\{[^}]*background:\s*none[^}]*border:\s*0/s);
   assert.doesNotMatch(html.slice(html.indexOf('CHINESE MINIMAL DESIGN')), /hsl\(270/);

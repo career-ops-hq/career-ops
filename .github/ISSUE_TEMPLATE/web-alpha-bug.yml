@@ -13,7 +13,7 @@ body:
     attributes:
       label: Code of Conduct
       options:
-        - label: I agree to follow the [Code of Conduct](https://github.com/santifer/career-ops/blob/main/CODE_OF_CONDUCT.md)
+        - label: I agree to follow the [Code of Conduct](https://github.com/career-ops-hq/career-ops/blob/main/CODE_OF_CONDUCT.md)
           required: true
   - type: textarea
     id: description
