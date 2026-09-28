@@ -118,6 +118,14 @@ export function isBlockedAddress(address) {
     const embedded = v4ToInt(tail);
     return embedded === null ? true : isBlockedAddress(tail);
   }
+  // The same two forms written in hex, which is how the URL parser prints them:
+  // `new URL('http://[::ffff:127.0.0.1]/').hostname` is `[::ffff:7f00:1]`.
+  const hexEmbedded = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(addr);
+  if (hexEmbedded) {
+    const high = Number.parseInt(hexEmbedded[1], 16);
+    const low = Number.parseInt(hexEmbedded[2], 16);
+    return isBlockedAddress(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
+  }
 
   if (addr === '::' || addr === '::1') return true;      // unspecified, loopback
   if (/^f[cd]/.test(addr)) return true;                   // fc00::/7 unique local

@@ -99,9 +99,21 @@ import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+// Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
+// DATA_ROOT is the user's, and getCareerOpsRoot() is the only thing that honours
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the .career-ops-data marker.
+//
+// One constant named CAREER_OPS did both, so resolveTrackerPath() looked inside
+// the checkout. AGENTS.md calls this script "the canonical (locked, validated,
+// atomic) write path" and #2901 converged the web layer's /api/status onto it —
+// so on any configured data root the one supported way to change a status
+// answered "No tracker found at <CHECKOUT>/applications.md", naming a file the
+// user never configured. Same defect #3715 fixed in the analysis scripts.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
@@ -128,7 +140,46 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
   once any row exists without a report. Prefer --row/--report (or the company
-  name) over a bare number, and prefer any of them over --force.`;
+  name) over a bare number, and prefer any of them over --force.
+
+Examples:
+  node set-status.mjs --report 12 Applied
+  node set-status.mjs --report 12 Interview --note "recruiter screen booked"
+  node set-status.mjs "Acme Corp" Rejected --on 2026-08-01
+  node set-status.mjs "Acme Corp" Applied --role "Platform Engineer"
+  node set-status.mjs --row 7 Discarded --dry-run`;
+
+/**
+ * Render the canonical states from states.yml for `--help`.
+ *
+ * A broken states.yml degrades to a pointer rather than throwing: that failure
+ * belongs to the run that tries to WRITE a state, not to `--help`.
+ *
+ * @returns {string} The states section, or a pointer line when unreadable.
+ */
+function renderStatesSection() {
+  let states;
+  try {
+    states = loadCanonicalStates(STATES_FILE);
+  } catch {
+    return `\nCanonical states: see ${STATES_FILE}`;
+  }
+  if (!states.length) return `\nCanonical states: see ${STATES_FILE}`;
+  const width = Math.max(...states.map(st => st.label.length));
+  const lines = states.map((st) => {
+    const terminal = st.terminal ? '  (terminal)' : '';
+    const desc = st.description ? `  ${st.description}` : '';
+    return `  ${st.label.padEnd(width)}${desc}${terminal}`;
+  });
+  return [
+    '',
+    'Canonical states (aliases also accepted — see templates/states.yml):',
+    ...lines,
+    '',
+    '  A terminal state ends the application. Discarded is YOUR decision or a',
+    '  closed req; Rejected is theirs; SKIP means never applied for.',
+  ].join('\n');
+}
 
 // ── argument parsing ─────────────────────────────────────────────
 
@@ -136,6 +187,31 @@ const rawArgs = process.argv.slice(2);
 const positional = [];
 const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
 const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+
+/**
+ * Is the caller asking for help, rather than passing "--help" as a VALUE?
+ *
+ * Runs before the main loop so help answers a line that still carries the bad
+ * arguments from a failed run. Value positions are skipped but never validated
+ * — validation stays in the loop, which owns the error messages and exit codes.
+ *
+ * @param {string[]} args - argv slice.
+ * @returns {boolean}
+ */
+function wantsHelp(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (Object.hasOwn(VALUE_FLAGS, a)) { i++; continue; } // skip this flag's value
+    if (a === '--help' || a === '-h') return true;
+  }
+  return false;
+}
+
+// Exits 0 so `cmd --help` works in CI smoke checks and `|| true` idioms.
+if (wantsHelp(rawArgs)) {
+  console.log(`${USAGE}\n${renderStatesSection()}`);
+  process.exit(EXIT_OK);
+}
 
 // Who is driving this write. A caller that delegates here instead of touching
 // the tracker itself — the web status route — needs its ledger rows to stay
@@ -171,7 +247,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
-  else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
+  else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
 }
 
@@ -235,6 +311,7 @@ const failWith = makeCliFailWith(flags.json);
 function failUsage(message) {
   const msg = message ?? 'Expected 2 arguments: <report#|company> <state>';
   if (rawArgs.includes('--json')) {
+    // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
     console.log(JSON.stringify({ error: msg, code: 'usage' }));
     console.error(`❌ ${msg}`);
   } else {
@@ -260,7 +337,7 @@ if (!newStatus) {
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }
@@ -649,6 +726,7 @@ const result = {
 };
 
 if (flags.json) {
+  // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
   console.log(JSON.stringify(result, null, 2));
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';

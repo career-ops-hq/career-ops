@@ -354,6 +354,34 @@ try {
   } else {
     fail(`SEM/SEMrush boundary => ${[...semBoundary].join(',')}`);
   }
+  // Testing / QA + observability (2026-09-20). Same two halves as the
+  // certification table: the token is recognized from ordinary JD prose, AND it
+  // canonicalizes to its display form, so a CV that names it suppresses the gap.
+  const qaCases = [
+    ['junit', 'JUnit'], ['testng', 'TestNG'], ['nunit', 'NUnit'],
+    ['xunit', 'xUnit'], ['mstest', 'MSTest'], ['cucumber', 'Cucumber'],
+    ['mockito', 'Mockito'], ['jest', 'Jest'], ['pytest', 'pytest'],
+    ['selenium', 'Selenium'], ['playwright', 'Playwright'],
+    ['cypress', 'Cypress'], ['karate', 'Karate'], ['postman', 'Postman'],
+    ['tdd', 'TDD'], ['bdd', 'BDD'],
+    ['opentelemetry', 'OpenTelemetry'], ['otel', 'OpenTelemetry'],
+    ['elk', 'ELK'], ['splunk', 'Splunk'], ['cloudwatch', 'CloudWatch'],
+  ];
+  const qaFailures = [];
+  for (const [raw, display] of qaCases) {
+    const found = extractSkills(`Requires ${raw} experience.`);
+    if (!found.has(display)) qaFailures.push(`extract "${raw}" => ${[...found].join(',') || '(none)'}`);
+    if (canonicalize(raw) !== display) qaFailures.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (qaFailures.length === 0) pass(`extractSkills covers all ${qaCases.length} testing/observability tokens (recognition + canonical form)`);
+  else fail(`testing/observability coverage => ${qaFailures.join(' | ')}`);
+
+  // The real report shape this was added for: report 463's Essential
+  // Requirements row, where JUnit/Cucumber previously extracted as nothing.
+  const jd = extractSkills('Core Java, Spring Boot, JUnit, Cucumber; TDD/BDD discipline | Observability: Grafana, ELK/Loki, Splunk, CloudWatch');
+  const wanted = ['JUnit', 'Cucumber', 'TDD', 'BDD', 'ELK', 'Splunk', 'CloudWatch'];
+  if (wanted.every(x => jd.has(x))) pass('extractSkills recovers the JUnit/Cucumber/TDD/BDD + log-stack gaps from a real gap row');
+  else fail(`report-463 gap row => ${[...jd].join(',')}`);
 
   // empty / falsy input
   if (extractSkills('').size === 0 && extractSkills(null).size === 0) pass('extractSkills returns an empty set for empty/null input');

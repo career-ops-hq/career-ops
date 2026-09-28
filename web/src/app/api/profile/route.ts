@@ -3,6 +3,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { isMapping } from "@/lib/portals-config.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,7 +87,12 @@ export async function POST(req: Request) {
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }
-    base = isObj(parsed) ? (parsed as Record<string, unknown>) : {};
+    // Valid YAML can still be a list, scalar, or null. Treating those as an
+    // empty profile would discard the existing document on this partial write.
+    if (!isMapping(parsed)) {
+      return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });
+    }
+    base = parsed as Record<string, unknown>;
   }
 
   const merged = deepMerge(base, proposed);

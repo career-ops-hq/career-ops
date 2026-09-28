@@ -33,6 +33,7 @@ import {
 } from './tracker-parse.mjs';
 import { CONTROL_CHARS } from './tracker-utils.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -395,11 +396,31 @@ for (const e of entries) {
 // channel while リクルート and パーソル stay two; the raw spelling is kept for
 // the message. Before this, both non-Latin agencies normalized to '' and fell
 // back to 'direct', hiding exactly the double-submission this check exists for.
+//
+// A SKIP row is not a channel (#3978). The canonical way to RESOLVE a
+// cross-channel collision is the one states.yml already provides: apply
+// through one channel, mark the other SKIP ("Doesn't fit, don't apply").
+// Counting that row as a channel warned forever about the double submission
+// the user had just avoided, with no "resolve by hand" action left that could
+// clear it — so the only ways out were ignoring the check permanently or
+// falsifying the Via/Company to silence it. A check correct behaviour cannot
+// satisfy is worse than no check.
+//
+// Deliberately narrow — skip only. `discarded` is ambiguous ("Discarded by
+// candidate or offer closed") and can follow a real application; `rejected`
+// implies one was sent; `evaluated` is pre-decision, and warning BEFORE a
+// second submission is this check's most valuable moment. All three stay
+// channels. Status is read through the shared states.yml-driven
+// normalizeStatus() for the same reason the column layout comes from
+// tracker-parse: a local alias table here would miss the states.yml spellings
+// it never got told about (geo_blocker, uygun değil) and drift from Check 1.
+const isNeverSubmitted = (status) => normalizeStatus(String(status || '')) === 'skip';
 const normalizeChannel = (v) => normalizeVia(v ?? '') || 'direct';
 const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
   if (!company || company === '?') continue;
+  if (isNeverSubmitted(e.status)) continue;
   const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
   if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
   const channels = channelsByRole.get(key);
@@ -531,6 +552,7 @@ if (!existsSync(PORTALS_FILE)) {
   try {
     const { findUnclaimedEntries } = await import('./audit-portals.mjs');
     const { loadProviders } = await import('./providers/_registry.mjs');
+    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
     const yaml = await import('js-yaml');
 
     const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
@@ -540,7 +562,15 @@ if (!existsSync(PORTALS_FILE)) {
       ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
       ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
     ];
-    const providers = await loadProviders(join(CAREER_OPS, 'providers'));
+    // providers/ and plugins/ both ship in the code layer — resolve them from
+    // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
+    // health check sees only providers/*.mjs and reports every enabled
+    // plugin-provider entry as an unknown provider that "never scans", while
+    // the scanner resolves and scans it (#4026). No-op for a plugin-free
+    // install: mergeProviderPlugins returns before any work when
+    // config/plugins.yml is absent.
+    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
+    await mergeProviderPlugins(providers, { root: CODE_ROOT });
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
     // findUnclaimedEntries silently skips an entry with no (or blank) `name` —

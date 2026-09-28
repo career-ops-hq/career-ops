@@ -13,8 +13,12 @@ import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
+import { resolveCvTemplate } from "@/lib/core/cv-template.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
+import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,19 +115,26 @@ export async function POST(req: Request) {
     kind === "evaluate"
       ? readInbox().find((j) => j.url === input)?.postedAt ?? readScanDates().get(input)
       : undefined;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang });
+  // Which CV template the worker fills. Resolved HERE, for the same reason `lang`
+  // is: the worker has no Bash (#2172), so it cannot run cv-templates.mjs and the
+  // prompt used to name the base template outright, silently ignoring cv.template
+  // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
+  // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
+  // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
+  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(careerOpsRoot()) : undefined;
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, postedAt, lang, cvTemplate });
 
   const isClaude = cliId === "claude";
   // Which tools each kind gets, and the whole claude argv, live in
   // claude-invocation.mjs — see its header for the policy and for why it is asserted on
   // built values rather than on this file's source. NEVER auto-submits; that
   // remains a prompt-level guarantee.
-  // Non-Claude CLIs get no tool flags from spec.args() at all, so their agents
-  // stay unrestricted here. That gap is route-wide (it applies to 'evaluate' too),
-  // not specific to pdf, and each CLI needs its own mechanism researched — tracked
-  // as #2507 rather than half-fixed here. On those CLIs the backend is the only
-  // INTENDED writer — the agent is not asked to write — but that is mitigation, not
-  // enforcement: the capability is still there for an injected posting to reach.
+  // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
+  // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
+  // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
+  // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
+  // verified mechanism. Those report level "none" and the run says so
+  // below, rather than looking identical to a fenced one (#2507).
   // A CLI with its own structured stream gets the argv that turns it on, so its
   // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
   // envelope-parsing routes rely on.
@@ -156,7 +167,26 @@ export async function POST(req: Request) {
   // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
   // which had the identical bug, and puts it behind one tested helper so it cannot
   // drift back in on any single call site.
-  const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  let child;
+  try {
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: process.env },
+      { cliId, capabilities: capabilitiesFor(kind) },
+    );
+  } catch (e) {
+    // Fencing refuses an argv that contradicts the capability record, so nothing
+    // spawned and the stream below — which owns releaseWriteTokenOnce — is never
+    // constructed. Release the tracker guard HERE or it is held for the lifetime
+    // of the process and acquireTrackerWrite blocks every later evaluate/pdf run:
+    // a refused argv would take the tracker down with it.
+    if (writeToken !== null) releaseTrackerWrite(writeToken);
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "failed to start the CLI" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
+  }
   // Decode once on the stream, not per chunk. Buffer#toString() decodes each chunk
   // independently, so a chunk boundary falling inside a multi-byte UTF-8 sequence
   // yields a replacement character and mis-decodes the bytes after it. Those bytes
@@ -168,24 +198,23 @@ export async function POST(req: Request) {
   child.stderr.setEncoding("utf8");
   const enc = new TextEncoder();
 
-  // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can
-  // flip `closed` before the child's late handlers run, and send() is try/catch'd —
-  // otherwise a late enqueue onto a closed controller throws uncaught (see #1155).
+  // Stream-lifetime state lives outside start() so cancel() (client disconnect)
+  // can stop every timer before the child's late handlers run. send() is also
+  // try/catch'd so a late enqueue cannot throw uncaught (see #1155).
   let closed = false;
   let killer: ReturnType<typeof setTimeout> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   // pdf-kind's render+mark work (renderPdf, below) keeps running detached even
   // after the agent child closes — and even after a client disconnect fires
   // cancel(). Track its promise so cancel() can defer releasing writeToken
   // until that work actually settles, instead of releasing the tracker-delete
   // guard while mark-pdf-ready.mjs is still actively writing applications.md.
   let pdfRenderPromise: Promise<void> | null = null;
-  let writeTokenReleased = false;
-  const releaseWriteTokenOnce = () => {
-    if (writeToken !== null && !writeTokenReleased) {
-      writeTokenReleased = true;
-      releaseTrackerWrite(writeToken);
-    }
-  };
+  // Cancellation only requests termination. Keep the guard until the child
+  // actually closes and any render/mark work has finished.
+  const finishRun = createRunFinalizer(child, () => {
+    if (writeToken !== null) releaseTrackerWrite(writeToken);
+  });
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let buf = "";
@@ -240,9 +269,6 @@ export async function POST(req: Request) {
         killedByTimeout = true;
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
-      // Declared before send() so send() can clear it the moment it sees the
-      // client disconnect; assigned just below, once close() exists.
-      let heartbeat: ReturnType<typeof setInterval> | undefined;
       const send = (obj: unknown) => {
         if (closed) return;
         try {
@@ -256,6 +282,18 @@ export async function POST(req: Request) {
           if (heartbeat) clearInterval(heartbeat);
         }
       };
+      // Say so when the chosen runtime has no permission mechanism we can apply.
+      // Claude gets tool allow/deny lists and Codex an OS sandbox; the rest run
+      // with whatever they grant by default. Without this the two cases are
+      // indistinguishable in the UI, and a run that is not fenced reads exactly
+      // like one that is — which is the assumption #2507 was filed against.
+      //
+      // Sent as a status so it lands in job.steps, which the run detail page and
+      // the saved run log both render in full. The worker card shows only the
+      // latest step, so it also carries a sticky notice, matched via
+      // isFencingNotice() rather than a literal spelled in two files.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: capabilitiesFor(kind) });
+      if (fencing.notice) send({ type: "status", label: fencing.notice });
       // Time-based keepalive. The stream is silent whenever the agent is thinking
       // or inside a long tool call, and in pdf mode it is silent for the whole
       // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured
@@ -267,11 +305,12 @@ export async function POST(req: Request) {
       // Unknown event types are ignored by the client's switch, so old tabs are safe.
       heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
+        // Resource cleanup is independent of whether the client can still read.
+        finishRun();
         if (!closed) {
           closed = true;
           if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
-          releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -405,12 +444,10 @@ export async function POST(req: Request) {
       child.on("close", (code) => {
         // A trailing line with no newline would otherwise never be tested.
         if (stderrBuf) { flagStderrLine(stderrBuf); stderrBuf = ""; }
-        // A client disconnect can fire cancel() (which kills `child`) before
-        // this event finally arrives — killing a process doesn't make its
-        // 'close' event disappear, just delays it. Without this guard a pdf
-        // run could still start a brand-new render (and re-touch the tracker)
-        // after the stream — and its writeToken guard — is already gone.
-        if (closed) return;
+        // A disconnected client must not start a new PDF render. Still finish
+        // the run here: an enqueue failure closes the transport without calling
+        // cancel(), and must not leave the tracker guard held forever.
+        if (closed) return close();
         // A timeout is the ROOT cause behind every "no report / not clean"
         // symptom the gates below test, so classify it FIRST, for any kind.
         // Otherwise a run we cut off at the time limit reads as "the CLI couldn't
@@ -511,15 +548,16 @@ export async function POST(req: Request) {
     },
     cancel() {
       closed = true;
+      if (heartbeat) clearInterval(heartbeat);
       if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
       if (pdfRenderPromise) {
         // Render/mark keeps running after this client disconnects — wait for
         // it to settle before releasing the guard, so a concurrent tracker
         // delete can't race mark-pdf-ready.mjs's still-in-flight write.
-        pdfRenderPromise.finally(releaseWriteTokenOnce);
+        pdfRenderPromise.finally(finishRun);
       } else {
-        releaseWriteTokenOnce();
+        finishRun();
       }
     },
   });

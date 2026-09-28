@@ -36,14 +36,23 @@ import {
   resolveTrackerPath,
   resolveWorkspaceRoot,
 } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { resolveOutcomeDir } from './lib/outcome-dir.mjs';
 import { parsePdfIndex } from './find.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// Two roots. CODE_ROOT locates the sibling scripts this file shells out to and
+// is the cwd it runs them from; DATA_ROOT is where the user's tracker and
+// outcome journals live. One constant named CAREER_OPS did both, so
+// resolveTrackerPath() looked inside the checkout and `outcome.mjs 1 rejected`
+// answered "Tracker not found at <CHECKOUT>/applications.md" — a path the user
+// never configured.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const NODE = process.execPath;
-const SET_STATUS_SCRIPT = join(CAREER_OPS, 'set-status.mjs');
-const ARCHIVE_POSTING_SCRIPT = join(CAREER_OPS, 'archive-posting.mjs');
+const SET_STATUS_SCRIPT = join(CODE_ROOT, 'set-status.mjs');
+const ARCHIVE_POSTING_SCRIPT = join(CODE_ROOT, 'archive-posting.mjs');
 
 const EXIT_OK = 0;
 const EXIT_USAGE = 1;
@@ -59,8 +68,17 @@ function slugify(text) {
     .slice(0, 60) || 'unknown';
 }
 
+// LOCAL calendar day, not the UTC one (#3070). This stamps the outcome journal
+// under data/outcomes/ — the `## Entry:` header and `**Date**:` — which
+// calibrate.mjs and funnel-velocity.mjs then read.
+//
+// tests/local-today-gates.test.mjs already covers assessment-log.mjs for
+// exactly this reason ("the date written into a user's assessments.tsv row").
+// This is the same kind of date, in an append-only file, and it was the UTC
+// one: an outcome recorded on a Sunday evening anywhere in the Americas was
+// journaled as Monday, moving it into the next week and the next funnel bucket.
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return localToday();
 }
 
 
@@ -142,7 +160,7 @@ if (!outcomeConfig) {
   failExit(`Invalid outcome_type "${rawOutcomeType}". Valid types: ${validTypes}`, 'invalid-outcome', EXIT_USAGE);
 }
 
-const appsFile = resolveTrackerPath(CAREER_OPS);
+const appsFile = resolveTrackerPath(DATA_ROOT);
 if (!existsSync(appsFile)) {
   failExit(`Tracker not found at ${appsFile}`, 'tracker-not-found', EXIT_NOT_FOUND);
 }
@@ -422,7 +440,7 @@ if (!resolvedPostingPath) {
 if (!resolvedPostingPath && targetUrl) {
   try {
     execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`, `--report=${matchedRow.num}`], {
-      cwd: CAREER_OPS,
+      cwd: CODE_ROOT,
       env: process.env,
       stdio: 'ignore',
       timeout: 45000,
@@ -503,7 +521,7 @@ if (matchedRow.role) {
 
 let setStatusResult = null;
 try {
-  const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CAREER_OPS, env: process.env, encoding: 'utf-8' });
+  const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
   setStatusResult = JSON.parse(statusOutput);
 } catch (err) {
   failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
