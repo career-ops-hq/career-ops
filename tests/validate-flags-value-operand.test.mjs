@@ -162,13 +162,15 @@ const OWN_GUARD = new Map([
   // Not in #3092's audit, found by this sweep: a guard that predates it.
   ['fix-slugs.mjs',
     'a hand-rolled --file check BEFORE validateFlags, covering more than requireOperand does: `--file=` (empty) and `--file -h` (single-dash next token) are rejected too.'],
+  ['validate-portals.mjs',
+    'a hand-rolled --file check AFTER validateFlags: hasFlag()/flagValue() collapse a missing operand to the same empty string as an explicit `--file=`, and the existing `!filePath` guard rejects both with the same usage error.'],
 ]);
 
 // The ratchet. Raising this is a review conversation, not a formality: it means
 // a caller runs a validator better than the shared one, and the entry above has
 // to say what that validator is. Lowering it is free — it follows a caller
 // opting in.
-const MAX_OWN_GUARD = 6;
+const MAX_OWN_GUARD = 7;
 
 // The sweep must never go green by finding nothing. A floor set below today's
 // count (6 own-guard + 14 opted into requireOperand = 20, and the opted-in half

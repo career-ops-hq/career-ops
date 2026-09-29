@@ -39,6 +39,7 @@ const SCRIPTS = [
   ['application-artifacts.mjs', '--reprot'],
   ['clean-markers.mjs', '--dryrun'],
   ['cv-sync-check.mjs', '--hlep'],
+  ['validate-portals.mjs', '--fiel'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -420,5 +421,28 @@ test('cv-sync-check.mjs -h exits 0 and prints usage', () => {
 test('cv-sync-check.mjs --help --bogus still errors', () => {
   const r = runScript('cv-sync-check.mjs', '--help', '--bogus');
   assert.equal(r.status, 1, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// validate-portals.mjs had no --help at all before #4601: --fiel (missing the
+// 'e') was silently dropped by hasFlag()/flagValue(), so it validated the
+// DEFAULT portals.yml instead of the file the caller named, and exited 0 with
+// that file's own counts — the path on the first output line was the only
+// hint the named file was never read.
+test('validate-portals.mjs --help exits 0 and prints usage', () => {
+  const r = runScript('validate-portals.mjs', '--help');
+  assert.equal(r.status, 0, `validate-portals.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'validate-portals.mjs --help printed no usage block');
+});
+
+test('validate-portals.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('validate-portals.mjs', '-h');
+  assert.equal(r.status, 0, `validate-portals.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'validate-portals.mjs -h printed no usage block');
+});
+
+test('validate-portals.mjs --help --bogus still errors', () => {
+  const r = runScript('validate-portals.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `validate-portals.mjs --help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
 });

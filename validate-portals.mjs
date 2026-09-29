@@ -7,6 +7,7 @@
  *   node validate-portals.mjs
  *   node validate-portals.mjs --file templates/portals.example.yml
  *   node validate-portals.mjs --self-test
+ *   node validate-portals.mjs --help
  */
 
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
@@ -14,7 +15,7 @@ import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -319,8 +320,18 @@ tracked_companies:
   }
 }
 
+const USAGE = 'Usage: node validate-portals.mjs [--file portals.yml] [--self-test]';
+
 async function main() {
   const args = process.argv.slice(2);
+  // #4601: a mistyped flag (`--fiel` for `--file`) was silently dropped —
+  // neither hasFlag() nor flagValue() ever saw it, so the script fell back to
+  // validating the DEFAULT portals.yml and exited 0 with its counts, and the
+  // path on the first output line was the only hint the named file was never
+  // read. validateFlags() rejects it before either --self-test or --file is
+  // even inspected, and also gives this script the --help it lacked.
+  validateFlags(args, ['--file', '--self-test', '--help', '-h'], USAGE, { valueFlags: ['--file'] });
+
   if (args.includes('--self-test')) {
     await runSelfTest();
     return;
@@ -332,7 +343,7 @@ async function main() {
   const fileFlag = hasFlag(args, '--file') ? (flagValue(args, '--file') ?? '') : undefined;
   const filePath = fileFlag === undefined ? resolve(DEFAULT_PORTALS_PATH) : (fileFlag ? resolve(fileFlag) : '');
   if (!filePath) {
-    console.error('Usage: node validate-portals.mjs [--file portals.yml] [--self-test]');
+    console.error(USAGE);
     process.exit(1);
   }
 
