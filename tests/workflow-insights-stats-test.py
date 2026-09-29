@@ -80,4 +80,13 @@ with tempfile.TemporaryDirectory() as temp:
     legacy = stats_view(db, portals, root / "profile.yml")
     assert legacy["runs"]["filter_removal_pct"] is None
     assert legacy["runs"]["filter_data_runs"] == 0
+    db.execute("INSERT INTO scan_observations(opportunity_id,company,observed_on) VALUES(1,'Acme','2026-W40')")
+    db.execute("INSERT INTO scan_runs(created_at,summary) VALUES(?,?)", (
+        "2026-W40", json.dumps({"found": 50, "newAdded": 50, "errors": 0})
+    ))
+    malformed_dates = stats_view(db, portals, root / "profile.yml")
+    assert malformed_dates["scan"]["invalid_dates"] == 1
+    assert malformed_dates["scan"]["last_seen"] == "2026-01-08"
+    assert malformed_dates["runs"]["malformed_runs"] == 1
+    assert malformed_dates["runs"]["total_runs"] == 2
     db.close()

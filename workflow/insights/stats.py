@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from datetime import date
 import json
 from pathlib import Path
+import re
 import sqlite3
 
 import yaml
@@ -18,6 +19,7 @@ except ModuleNotFoundError:
 
 APPLICATION_STATUSES = ("applied", "responded", "interview", "offer", "hired", "rejected", "discarded")
 ACTIVE = {"applied", "responded", "interview", "offer"}
+ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def _table(db: sqlite3.Connection, name: str) -> bool:
@@ -144,6 +146,8 @@ def _scan(db: sqlite3.Connection, *, weeks: int = 8) -> dict | None:
     weeks_count = Counter()
     for row in observations:
         try:
+            if not isinstance(row["observed_on"], str) or not ISO_DATE.fullmatch(row["observed_on"]):
+                raise ValueError("Invalid observation date")
             day = date.fromisoformat(row["observed_on"])
         except (TypeError, ValueError):
             continue
@@ -221,6 +225,8 @@ def _runs(db: sqlite3.Connection) -> dict | None:
             added = int(summary["newAdded"])
             errors = int(summary["errors"])
             handoff = int(summary.get("handoff", 0))
+            if not ISO_DATE.fullmatch(row["created_at"][:10]):
+                raise ValueError("Invalid scan run timestamp")
             date.fromisoformat(row["created_at"][:10])
         except (TypeError, ValueError, KeyError, json.JSONDecodeError):
             malformed += 1

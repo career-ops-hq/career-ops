@@ -47,6 +47,8 @@ Configured scan runs now retain their filter counters in the canonical run
 summary. `insights stats` computes the Node filter removal ratio from complete
 runs with those counters, excluding duplicate counts; older runs without filter
 data report a null ratio and an explicit zero coverage count.
+Scan observations and run timestamps require full `YYYY-MM-DD` dates before
+Python parses them; compact and ISO-week dates do not enter trends.
 
 `insights` opens the business SQLite database read-only. Current status comes
 from the retained lifecycle row; `ever_*` funnel values come from historical
