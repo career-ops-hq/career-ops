@@ -423,3 +423,20 @@ path, API-positive and API-expired results without modifying the store. The
 public AIA `JR-70003` URL returned `active` through the Workday API rung in a
 read-only current-code CLI run. The full 104-URL live browser/API check has
 not been run.
+
+The user subsequently authorized recurring Hermes score processing, including
+future CV/JD model calls to the configured endpoint, while notifications remain
+disabled. The original score schedule was resumed; scan remains paused. A
+direct Hermes trigger created a real opportunity `4` score task but Hermes
+again recorded the execution as `unknown` after a scheduler-owner restart.
+The still-live child ran seven model calls, then the business task waited with
+`failure:RuntimeError`. Its frozen assessment had all seven current report
+sections plus unused legacy heading keys; a stale `Evaluation Checklist` under
+one unused key denied retained location and snapshot evidence. The render
+node now keeps only the seven contract sections and persists that normalized
+assessment even when no model call was needed. A same-task resume completed
+on attempt two without another model call. Re-rendering the retained frozen
+materials reproduces published SHA-256
+`19c6fb0c9fc165917c06297559ec13a9b43320b9381db38914337d20ffbf21a7`.
+SQLite `PRAGMA quick_check` is `ok`, notification deliveries remain zero, and
+a clean built-in scheduled score run remains to be observed.

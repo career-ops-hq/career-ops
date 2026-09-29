@@ -51,7 +51,7 @@ def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict
         return None
 
     original = assessment.get("sections")
-    sections = {name: section_text(value) for name, value in original.items()} if isinstance(original, dict) else {}
+    sections = {name: section_text(original.get(name)) for name in required} if isinstance(original, dict) else {}
     missing = [name for name in required if sections.get(name) is None]
     if not missing:
         return {**assessment, "sections": sections}, 0
@@ -64,7 +64,8 @@ def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict
         "A browser_snapshot liveness_reason records a page capture; do not claim no snapshot exists. "
         "Do not repeat existing sections or change dimension scores.\n"
         + json.dumps({"jd_report": jd, "candidate_sources": sources, "research": research,
-                      "dimensions": assessment["dimensions"], "existing_sections": list(sections)}, ensure_ascii=False)
+                      "dimensions": assessment["dimensions"],
+                      "existing_sections": [name for name, value in sections.items() if value]}, ensure_ascii=False)
     )
     added = model_adapter.call_agent("score_sections", prompt, [], directory)[0]
     completed = {name: section_text(added.get(name)) for name in missing}
@@ -199,6 +200,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
         )
         if dimension_calls:
             _write_json(assessment_path, assessment)
+        previous_sections = assessment.get("sections")
         assessment, section_calls = _complete_sections(
             assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
         )
@@ -211,7 +213,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
                 assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
             )
             section_calls += correction_calls
-        if section_calls:
+        if section_calls or assessment["sections"] != previous_sections:
             _write_json(assessment_path, assessment)
         try:
             result = render_report(state["packet"], state["evidence"], assessment)

@@ -221,6 +221,10 @@ with tempfile.TemporaryDirectory(prefix="career-ops-section-completion-") as tem
         {"jd": "Source JD"}, {}, {}, Path(temporary),
     )
     assert count == 0 and ready["sections"]["risks"] == "- Known risk."
+    extra = {"dimensions": {}, "sections": {**ready["sections"],
+             "Evaluation Checklist": "地点未披露；冻结来源没有页面快照。"}}
+    bounded, count = score_graph._complete_sections(extra, {"jd": "Source JD"}, {}, {}, Path(temporary))
+    assert count == 0 and bounded["sections"] == ready["sections"]
 
 with tempfile.TemporaryDirectory(prefix="career-ops-dimension-completion-") as temporary:
     good = {"score": None, "rationale": "Evidence is insufficient for a rating.", "evidence": []}
@@ -313,6 +317,17 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     finally:
         model_adapter.call_agent = original_call_agent
     assert phases == ["repair"]
+    assessment_path = report_path.parent / "assessment.json"
+    cached = json.loads(assessment_path.read_text())
+    cached["sections"]["Legacy heading"] = "Unused section from a model repair."
+    assessment_path.write_text(json.dumps(cached))
+    report_path.unlink()
+    model_adapter.call_agent = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Normalized score repeated a model call"))
+    try:
+        runner.evaluate({"inputs": repair_inputs, "revision": 0})
+    finally:
+        model_adapter.call_agent = original_call_agent
+    assert "Legacy heading" not in json.loads(assessment_path.read_text())["sections"]
 
 with tempfile.TemporaryDirectory(prefix="career-ops-research-recovery-", dir=ROOT / "data") as temporary:
     runner.DRAFT_ROOT = Path(temporary)
