@@ -26,6 +26,14 @@ const PROVIDERS_DIR = join(ROOT, 'providers');
 // other directory validated whatever copy sat there.
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
 
+// Providers that narrow a large shared board with a block named after
+// themselves (`amazon:`, `ibm:`, ...) and silently treat a missing or unusable
+// block as `{}`. A block that narrows nothing therefore scans the whole board
+// (amazon.jobs: 100k+ postings) while the entry reads as coverage. Hand-kept:
+// there is no provider metadata to derive this from.
+// A warning, not an error: the entry still scans, just too broadly.
+const PROVIDER_NARROWING_BLOCKS = new Set(['amazon', 'builtin', 'ibm', 'phenom']);
+
 function add(list, path, message) {
   list.push({ path, message });
 }
@@ -271,6 +279,20 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
         } else if (!providerIds.has(entry.provider)) {
           add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
+        }
+      }
+
+      if (typeof entry.provider === 'string' && PROVIDER_NARROWING_BLOCKS.has(entry.provider)) {
+        const block = entry[entry.provider];
+        // Only a non-empty mapping narrows; null, {}, [], "" or a bare scalar
+        // (`amazon: DEU`) all degrade to `{}`. An absent block is not flagged.
+        const narrows = isObject(block) && Object.keys(block).length > 0;
+        if (block !== undefined && !narrows) {
+          add(
+            warnings,
+            `${base}.${entry.provider}`,
+            `${entry.provider} block sets no filter, so the scan reads the provider's entire board — add a location or keyword filter`
+          );
         }
       }
 

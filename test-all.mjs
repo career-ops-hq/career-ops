@@ -5546,6 +5546,8 @@ try {
   const badContentFilterPath = join(tmp, 'bad-content-filter.yml');
   const deadByTitleKeywordPath = join(tmp, 'dead-by-title-keyword.yml');
   const badVisaFilterPath = join(tmp, 'bad-visa-filter.yml');
+  const emptyProviderBlockPath = join(tmp, 'empty-provider-block.yml');
+  const filledProviderBlockPath = join(tmp, 'filled-provider-block.yml');
 
   writeFileSync(validPath, `
 title_filter:
@@ -5631,6 +5633,73 @@ tracked_companies:
     careers_url: "https://jobs.lever.co/acme"
 `, 'utf-8');
 
+  // A provider block that narrows nothing scans the provider's whole board.
+  // Every non-narrowing spelling warns, for each provider in the set and in
+  // both entry lists.
+  writeFileSync(emptyProviderBlockPath, `
+title_filter:
+  positive: ["Backend"]
+tracked_companies:
+  - name: "Null block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Germany"
+    amazon:
+  - name: "Brace block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=France"
+    amazon: {}
+  - name: "Empty list block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Spain"
+    amazon: []
+  - name: "Empty string block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Italy"
+    amazon: ""
+  - name: "Bare scalar block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Poland"
+    amazon: DEU
+  - name: "Ibm empty block"
+    provider: "ibm"
+    careers_url: "https://www.ibm.com/careers/search"
+    ibm:
+  - name: "Phenom empty block"
+    provider: "phenom"
+    careers_url: "https://jobs.cisco.com/jobs/SearchJobs"
+    phenom: {}
+  - name: "Builtin empty block"
+    provider: "builtin"
+    careers_url: "https://builtin.com/jobs"
+    builtin:
+job_boards:
+  - name: "Board with an empty block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Sweden"
+    amazon:
+`, 'utf-8');
+
+  // Must stay silent: a populated block, no block (a deliberate global sweep),
+  // and a disabled entry.
+  writeFileSync(filledProviderBlockPath, `
+title_filter:
+  positive: ["Backend"]
+tracked_companies:
+  - name: "Populated block"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Spain"
+    amazon:
+      normalized_country_code: [DEU]
+  - name: "No block at all"
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Italy"
+  - name: "Disabled with a leftover empty block"
+    enabled: false
+    provider: "amazon"
+    careers_url: "https://www.amazon.jobs/en/search?loc_query=Norway"
+    amazon:
+`, 'utf-8');
+
   const validResult = run(NODE, ['validate-portals.mjs', '--file', validPath]);
   if (validResult !== null && validResult.includes('0 errors')) {
     pass('validate-portals accepts a minimal valid portals file');
@@ -5671,6 +5740,30 @@ tracked_companies:
     pass('validate-portals warns on duplicate enabled company names');
   } else {
     fail('validate-portals should warn on duplicate enabled company names');
+  }
+
+  const emptyProviderBlockResult = run(NODE, ['validate-portals.mjs', '--file', emptyProviderBlockPath]);
+  if (emptyProviderBlockResult !== null
+      && emptyProviderBlockResult.includes('9 warnings')
+      && emptyProviderBlockResult.includes('tracked_companies[0].amazon')
+      && emptyProviderBlockResult.includes('tracked_companies[1].amazon')
+      && emptyProviderBlockResult.includes('tracked_companies[2].amazon')
+      && emptyProviderBlockResult.includes('tracked_companies[3].amazon')
+      && emptyProviderBlockResult.includes('tracked_companies[4].amazon')
+      && emptyProviderBlockResult.includes('tracked_companies[5].ibm')
+      && emptyProviderBlockResult.includes('tracked_companies[6].phenom')
+      && emptyProviderBlockResult.includes('tracked_companies[7].builtin')
+      && emptyProviderBlockResult.includes('job_boards[0].amazon')) {
+    pass('validate-portals warns on every provider config block that narrows nothing');
+  } else {
+    fail('validate-portals should warn on every non-narrowing provider config block, in both entry lists');
+  }
+
+  const filledProviderBlockResult = run(NODE, ['validate-portals.mjs', '--file', filledProviderBlockPath]);
+  if (filledProviderBlockResult !== null && filledProviderBlockResult.includes('0 warnings')) {
+    pass('validate-portals stays silent on a populated block, no block, and a disabled entry');
+  } else {
+    fail('validate-portals should not warn on a populated, missing, or disabled-entry provider block');
   }
 
   const badContentFilterResult = run(NODE, ['validate-portals.mjs', '--file', badContentFilterPath]);
