@@ -5633,14 +5633,9 @@ tracked_companies:
     careers_url: "https://jobs.lever.co/acme"
 `, 'utf-8');
 
-  // A provider that narrows a shared board with a config block named after
-  // itself degrades a missing block to {}, so a key written with NOTHING usable
-  // under it scans the provider's ENTIRE board while the entry reads as
-  // coverage. Every spelling that fails to narrow must warn: the two that look
-  // empty (a bare `amazon:` and `amazon: {}`), and the ones that do not but
-  // behave identically — an empty list, an empty string, and a bare scalar
-  // written where a nested key belongs. All four providers in the set are
-  // covered, across both entry lists, since each is read by a different module.
+  // A provider block that narrows nothing scans the provider's whole board.
+  // Every non-narrowing spelling warns, for each provider in the set and in
+  // both entry lists.
   writeFileSync(emptyProviderBlockPath, `
 title_filter:
   positive: ["Backend"]
@@ -5684,11 +5679,8 @@ job_boards:
     amazon:
 `, 'utf-8');
 
-  // The mirror cases, which must stay silent: a populated block, no block at
-  // all, and a disabled entry whose leftover empty block is skipped wholesale by
-  // the `enabled: false` guard. Absence is deliberately NOT flagged — a global
-  // sweep is a valid choice, and only a key that fails to narrow is
-  // unambiguously unfinished config.
+  // Must stay silent: a populated block, no block (a deliberate global sweep),
+  // and a disabled entry.
   writeFileSync(filledProviderBlockPath, `
 title_filter:
   positive: ["Backend"]
