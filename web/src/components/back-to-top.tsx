@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
 import { shouldShowBackToTop, scrollBehaviorFor } from "@/lib/scroll-to-top.mjs";
 
 // Floating control that returns the window to the top of long pages. Rendered
@@ -14,6 +15,7 @@ import { shouldShowBackToTop, scrollBehaviorFor } from "@/lib/scroll-to-top.mjs"
 // cleanly. When hidden it's also removed from the tab order and hidden from
 // assistive tech, so there's nothing to land on until it's actually usable.
 export function BackToTop() {
+  const t = useT();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function BackToTop() {
     <button
       type="button"
       onClick={toTop}
-      aria-label="Back to top"
+      aria-label={t("Back to top")}
       aria-hidden={!visible}
       tabIndex={visible ? 0 : -1}
       className={cn(

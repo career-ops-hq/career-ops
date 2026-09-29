@@ -7,6 +7,8 @@ import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CoMark } from "@/components/co-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LocaleToggle } from "@/components/locale-toggle";
+import { useT } from "@/components/i18n-provider";
 import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
@@ -36,6 +38,7 @@ const STYLE = `
 
 export function MobileNav() {
   const pathname = usePathname();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
   const { jobs } = useJobs();
@@ -72,11 +75,11 @@ export function MobileNav() {
       }
     };
     document.addEventListener("keydown", onKey);
-    const t = window.setTimeout(() => panelRef.current?.querySelector<HTMLElement>("a, button")?.focus(), 60);
+    const timer = window.setTimeout(() => panelRef.current?.querySelector<HTMLElement>("a, button")?.focus(), 60);
     return () => {
       document.body.style.overflow = prevOverflow;
       document.removeEventListener("keydown", onKey);
-      window.clearTimeout(t);
+      window.clearTimeout(timer);
     };
   }, [open]);
 
@@ -105,7 +108,7 @@ export function MobileNav() {
       <style>{STYLE}</style>
 
       <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
-        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="career-ops home">
+        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label={t("career-ops home")}>
           <CoMark size={26} />
           <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
         </Link>
@@ -114,7 +117,7 @@ export function MobileNav() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            aria-label="Open menu"
+            aria-label={t("Open menu")}
             aria-expanded={open}
             className="relative inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
@@ -130,7 +133,7 @@ export function MobileNav() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation menu"
+        aria-label={t("Navigation menu")}
         inert={!open}
         className={cn("co-mdrawer border-l border-border bg-surface md:hidden", open && "open")}
         onTouchStart={onTouchStart}
@@ -138,11 +141,11 @@ export function MobileNav() {
         onTouchEnd={onTouchEnd}
       >
         <div className="flex items-center justify-between px-4 py-3">
-          <span className={`${instrumentSerif.className} text-lg text-landing`}>Menu</span>
+          <span className={`${instrumentSerif.className} text-lg text-landing`}>{t("Menu")}</span>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="Close menu"
+            aria-label={t("Close menu")}
             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-1.5 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <X className="size-5" />
@@ -164,10 +167,10 @@ export function MobileNav() {
                 )}
               >
                 <Icon className="size-5" />
-                {label}
+                {t(label)}
                 {chip && (
                   <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
-                    {chip}
+                    {t(chip)}
                   </span>
                 )}
               </Link>
@@ -183,10 +186,11 @@ export function MobileNav() {
           <UsageMeter />
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              <span className="font-mono text-[10px] text-faint">THEME</span>
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>{t("local-first · v0")}</span>
+              <span className="font-mono text-[10px] text-faint">{t("THEME")}</span>
             </div>
             <ThemeToggle showLabel className="bg-surface-hover/40" />
+            <LocaleToggle />
           </div>
         </div>
       </aside>

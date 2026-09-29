@@ -33,6 +33,25 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
   CV editing with preview, settings.
 
+## Interface language
+
+The UI ships in **English** and **Turkish**. Switch with the TR / EN control under
+*Appearance* in the sidebar (or the mobile menu); the choice is remembered per
+browser. To change the default for a whole install, set `CAREER_OPS_LOCALE=tr` in
+`web/.env.local`.
+
+Only the interface chrome is translated. Your CV, reports, company names and AI
+output stay exactly as written, and the canonical tracker statuses in
+`data/applications.md` stay English (they are only *displayed* translated), so the
+CLI and the web keep reading the same files.
+
+**Adding a language:** English source strings are the keys (`t("Save")`), so a
+new locale is one dictionary file next to `src/lib/i18n/tr.mjs` plus its entry in
+`src/lib/i18n/core.mjs`. A missing entry falls back to English, never to a raw
+key. `tests/lib/i18n-tr.test.mjs` shows the checks worth copying: placeholders
+and `<tag>` markup preserved, no duplicate keys, and every literal `t()` call in
+`src/` covered.
+
 ## Safety
 
 - **Local-first:** the local web app runs entirely on your machine — no cloud,

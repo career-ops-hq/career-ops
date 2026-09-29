@@ -5,6 +5,7 @@ import { Bug, X, ShieldCheck, ThumbsUp, Search, Loader2 } from "lucide-react";
 import { collect, fingerprint, issueBody, issueUrl, type Diag } from "@/lib/report/report";
 import { searchIssues } from "@/lib/beta/issue-search.mjs";
 import "@/lib/report/logbuf"; // install the client error ring-buffer (side-effect)
+import { useT } from "@/components/i18n-provider";
 
 type SimilarIssue = { number: number; title: string; url: string };
 
@@ -21,6 +22,7 @@ const findSimilar = (q: string) => searchIssues(q, REPO, fetch);
 // telemetry to any server (local-first / firewall) — the user reviews the exact,
 // PII-scrubbed payload (preview-then-confirm) and clicks to open the issue himself.
 export function BetaBanner() {
+  const t = useT();
   const [meta, setMeta] = useState<{ version: string; channel: string; sha: string } | null>(null);
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState("");
@@ -93,17 +95,17 @@ export function BetaBanner() {
         </span>
         {meta.sha && <span className="hidden font-mono text-faint sm:inline">{meta.sha}</span>}
         <button onClick={openReport} className="ml-1 inline-flex items-center justify-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 font-medium text-brand-text transition-colors hover:bg-brand/15 max-sm:min-h-[44px]">
-          <Bug className="size-3" /> Report a bug
+          <Bug className="size-3" /> {t("Report a bug")}
         </button>
       </div>
 
       {open && diag && (
-        <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Report a bug" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t("Report a bug")} onClick={() => setOpen(false)}>
           <div className="w-full max-w-lg rounded-2xl border border-border bg-[var(--bg)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center gap-2">
               <Bug className="size-4 text-brand" />
-              <h2 className="text-sm font-semibold text-foreground">Report a bug · {diag.channel}</h2>
-              <button onClick={() => setOpen(false)} aria-label="Close" className="ml-auto text-faint transition-colors hover:text-foreground">
+              <h2 className="text-sm font-semibold text-foreground">{t("Report a bug")} · {diag.channel}</h2>
+              <button onClick={() => setOpen(false)} aria-label={t("Close")} className="ml-auto text-faint transition-colors hover:text-foreground">
                 <X className="size-4" />
               </button>
             </div>
@@ -112,7 +114,7 @@ export function BetaBanner() {
               onChange={(e) => setDesc(e.target.value)}
               rows={4}
               autoFocus
-              placeholder="What were you doing, and what went wrong?"
+              placeholder={t("What were you doing, and what went wrong?")}
               className="w-full resize-none rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
             />
             {desc.trim().split(/\s+/).length >= 3 && (
@@ -121,7 +123,7 @@ export function BetaBanner() {
                 disabled={searching}
                 className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand disabled:opacity-60"
               >
-                {searching ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} Check for existing reports first
+                {searching ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} {t("Check for existing reports first")}
               </button>
             )}
             {searchFailed && (
@@ -129,16 +131,16 @@ export function BetaBanner() {
               // check is to spare a duplicate, and if we cannot run it the
               // right move is to file anyway rather than to stall.
               <p className="mt-2 text-xs text-muted">
-                Couldn&apos;t reach GitHub to check — file it anyway, a duplicate is cheaper than a lost report.
+                {t("Couldn't reach GitHub to check — file it anyway, a duplicate is cheaper than a lost report.")}
               </p>
             )}
             <details className="mt-3 rounded-lg border border-border bg-surface/40">
-              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted">Exactly what gets attached — review before sending ↓</summary>
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted">{t("Exactly what gets attached — review before sending ↓")}</summary>
               <pre className="max-h-52 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-2 font-mono text-[11px] leading-relaxed text-muted">{issueBody(diag, desc)}</pre>
             </details>
             {similar.length > 0 && (
               <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
-                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Already reported? A 👍 on an existing issue beats a duplicate:</p>
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">{t("Already reported? A 👍 on an existing issue beats a duplicate:")}</p>
                 <ul className="mt-1.5 space-y-1">
                   {similar.map((s) => (
                     <li key={s.number}>
@@ -152,11 +154,11 @@ export function BetaBanner() {
               </div>
             )}
             <p className="mt-2 flex items-start gap-1.5 text-[11px] text-faint">
-              <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-500" /> Opens a GitHub issue you confirm — nothing is sent until you click. NEVER includes your CV, profile, application answers, or job URLs.
+              <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-500" /> {t("Opens a GitHub issue you confirm — nothing is sent until you click. NEVER includes your CV, profile, application answers, or job URLs.")}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setOpen(false)} className="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:text-foreground">
-                Cancel
+                {t("Cancel")}
               </button>
               <a
                 href={issueUrl(diag, desc)}
@@ -165,7 +167,7 @@ export function BetaBanner() {
                 onClick={() => setOpen(false)}
                 className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
               >
-                <Bug className="size-4" /> Open GitHub issue
+                <Bug className="size-4" /> {t("Open GitHub issue")}
               </a>
             </div>
           </div>

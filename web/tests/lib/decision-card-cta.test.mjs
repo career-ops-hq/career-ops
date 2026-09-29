@@ -15,5 +15,6 @@ test("Today primary action opens the report, not Mark applied", () => {
   assert.notEqual(primary, -1);
   assert.notEqual(mark, -1);
   assert.ok(primary < mark, "report link must come before the Applied writer");
-  assert.match(src, /> Review\s*</);
+  // The label is either literal or routed through the UI translator (t("Review")).
+  assert.match(src, />\s*(?:Review|\{t\("Review"\)\})\s*</);
 });

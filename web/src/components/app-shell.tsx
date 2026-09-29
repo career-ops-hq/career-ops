@@ -7,6 +7,8 @@ import { CoMark } from "@/components/co-mark";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LocaleToggle } from "@/components/locale-toggle";
+import { useT } from "@/components/i18n-provider";
 import { BackToTop } from "@/components/back-to-top";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
@@ -21,6 +23,7 @@ import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const t = useT();
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -50,10 +53,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                 >
                   <Icon className="size-4" />
-                  {label}
+                  {t(label)}
                   {chip && (
                     <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
-                      {chip}
+                      {t(chip)}
                     </span>
                   )}
                 </Link>
@@ -67,12 +70,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <UsageMeter />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between px-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
-                <span className="font-mono text-[10px] text-faint">THEME</span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">{t("Appearance")}</span>
+                <span className="font-mono text-[10px] text-faint">{t("THEME")}</span>
               </div>
               <ThemeToggle showLabel />
+              <LocaleToggle />
               <div className="px-1">
-                <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+                <span className={`${instrumentSerif.className} text-sm text-faint`}>{t("local-first · v0")}</span>
               </div>
             </div>
           </div>

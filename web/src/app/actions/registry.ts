@@ -11,6 +11,7 @@
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { Job } from "@/components/jobs/job-store";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { interpolate, type T, type Vars } from "@/lib/i18n";
 
 export const AUTO_FIRE_MAX = 3; // fire ≤3 evaluations silently; confirm above that
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
@@ -32,6 +33,11 @@ export type StartJobInput = {
   batchId?: string;
 };
 
+/** User-facing copy in the viewer's language (falls back to the English source). */
+function tx(ctx: ActionCtx, key: string, vars?: Vars): string {
+  return ctx.t ? ctx.t(key, vars) : interpolate(key, vars);
+}
+
 export type ActionCtx = {
   push: (path: string) => void; // router.push — section/detail change
   replace: (path: string) => void; // router.replace — incremental filter tweak
@@ -46,6 +52,7 @@ export type ActionCtx = {
   applyExplore?: (patch: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void; // build a FREE discovery search
   writeProfile?: (patch: Record<string, unknown>) => void; // merge-safe config/profile.yml write
   writePortals?: (roles: string[], location?: string[]) => void; // merge-safe portals.yml title_filter write
+  t?: T; // viewer's UI language for confirm summaries / notes; English when absent
 };
 
 export type ProfilePatch = {
@@ -145,9 +152,9 @@ const ACTIONS: Record<string, ActionDef> = {
       const url = raw.url;
       if (!isStr(url) || !/^https?:\/\//i.test(url)) return { status: "ignored", note: "invalid url" };
       const ex = ctx.jobForUrl(url);
-      if (ex && ex.status !== "error" && !raw.rerun) return { status: "ignored", note: "already evaluated" };
+      if (ex && ex.status !== "error" && !raw.rerun) return { status: "ignored", note: tx(ctx, "already evaluated") };
       const id = ctx.startJob({
-        title: isStr(raw.title) ? String(raw.title) : "Evaluate",
+        title: isStr(raw.title) ? String(raw.title) : tx(ctx, "Evaluate"),
         subtitle: isStr(raw.subtitle) ? String(raw.subtitle) : undefined,
         kind: "evaluate",
         input: url,
@@ -183,7 +190,7 @@ const ACTIONS: Record<string, ActionDef> = {
       if (pending.length === 0) {
         return {
           status: "ignored",
-          note: matches.length > 0 ? `Already evaluated every ${company} posting.` : `No pending ${company} postings in your inbox.`,
+          note: matches.length > 0 ? tx(ctx, "Already evaluated every {company} posting.", { company }) : tx(ctx, "No pending {company} postings in your inbox.", { company }),
         };
       }
 
@@ -192,7 +199,7 @@ const ACTIONS: Record<string, ActionDef> = {
         const ids = pending
           .map((j) =>
             ctx.startJob({
-              title: `Evaluate · ${j.company}`,
+              title: tx(ctx, "Evaluate · {company}", { company: j.company }),
               subtitle: j.role,
               kind: "evaluate",
               input: j.url,
@@ -207,7 +214,9 @@ const ACTIONS: Record<string, ActionDef> = {
       if (pending.length <= AUTO_FIRE_MAX) return { status: "done", ...fire() };
       return {
         status: "confirm",
-        summary: `Evaluate ${pending.length} ${company} postings? (~${pending.length} worker${pending.length > 1 ? "s" : ""})`,
+        summary: ctx.t
+          ? ctx.t.n(pending.length, "Evaluate {n} {company} postings? (~{n} worker)", "Evaluate {n} {company} postings? (~{n} workers)", { company })
+          : `Evaluate ${pending.length} ${company} postings? (~${pending.length} worker${pending.length > 1 ? "s" : ""})`,
         run: fire,
       };
     },
@@ -223,7 +232,7 @@ const ACTIONS: Record<string, ActionDef> = {
       const merge = raw.merge === true;
       ctx.push("/explore");
       ctx.applyExplore(raw, { merge, run });
-      return { status: "done", note: run ? "Scanning the ATS network for fresh roles (free)…" : "Opened Explore with your filters." };
+      return { status: "done", note: run ? tx(ctx, "Scanning the ATS network for fresh roles (free)…") : tx(ctx, "Opened Explore with your filters.") };
     },
   },
 
@@ -233,7 +242,7 @@ const ACTIONS: Record<string, ActionDef> = {
       const target = raw.target;
       if (!isStr(target)) return { status: "ignored", note: "missing target" };
       const id = ctx.startJob({
-        title: isStr(raw.title) ? String(raw.title) : "Research",
+        title: isStr(raw.title) ? String(raw.title) : tx(ctx, "Research"),
         kind: "research",
         input: target,
         page: "/pipeline",
@@ -248,7 +257,7 @@ const ACTIONS: Record<string, ActionDef> = {
       const n = String(raw.n ?? "").trim();
       if (!n) return { status: "ignored", note: "need an application #" };
       const app = ctx.applications.find((a) => a.n === n);
-      const id = ctx.startJob({ title: `CV PDF · ${app?.company ?? `#${n}`}`, subtitle: "tailored CV", kind: "pdf", input: n, page: `/pipeline/${n}` });
+      const id = ctx.startJob({ title: tx(ctx, "CV PDF · {company}", { company: app?.company ?? `#${n}` }), subtitle: tx(ctx, "tailored CV"), kind: "pdf", input: n, page: `/pipeline/${n}` });
       return { status: "done", jobIds: id ? [id] : [] };
     },
   },
@@ -264,10 +273,10 @@ const ACTIONS: Record<string, ActionDef> = {
       const label = app ? `${app.company} · ${app.role}` : `#${n}`;
       return {
         status: "confirm",
-        summary: `Mark ${label} → ${canon}?`,
+        summary: tx(ctx, "Mark {label} → {status}?", { label, status: tx(ctx, canon) }),
         run: () => {
           ctx.writeStatus(n, canon);
-          return { note: `Marked #${n} as ${canon}.` };
+          return { note: tx(ctx, "Marked #{n} as {status}.", { n, status: tx(ctx, canon) }) };
         },
       };
     },
@@ -279,7 +288,7 @@ const ACTIONS: Record<string, ActionDef> = {
       const url = raw.url;
       if (!isStr(url) || !/^https?:\/\//i.test(url)) return { status: "ignored", note: "need an application form URL" };
       ctx.startApply(url);
-      return { status: "done", note: "Opening the application form…" };
+      return { status: "done", note: tx(ctx, "Opening the application form…") };
     },
   },
 
@@ -290,7 +299,7 @@ const ACTIONS: Record<string, ActionDef> = {
       const value = raw.value;
       if (!isStr(field) || typeof value !== "string") return { status: "ignored", note: "need a field and a value" };
       ctx.setApplyField(String(field), value);
-      return { status: "done", note: `Updated "${field}".` };
+      return { status: "done", note: tx(ctx, "Updated \"{field}\".", { field: String(field) }) };
     },
   },
 
@@ -317,11 +326,11 @@ const ACTIONS: Record<string, ActionDef> = {
       const bits = [p.roles?.length ? `roles: ${p.roles.join(", ")}` : "", p.location ? `in ${p.location}` : "", p.compMin && p.compMax ? `comp ${p.compMin}–${p.compMax}` : ""].filter(Boolean).join(" · ");
       return {
         status: "confirm",
-        summary: `Save your profile?${bits ? ` (${bits})` : ""}`,
+        summary: tx(ctx, "Save your profile?") + (bits ? ` (${bits})` : ""),
         run: () => {
           ctx.writeProfile!(p as Record<string, unknown>);
           if (p.roles?.length) ctx.writePortals?.(p.roles, p.location ? [p.location] : undefined);
-          return { note: "Profile saved — your matches will sharpen." };
+          return { note: tx(ctx, "Profile saved — your matches will sharpen.") };
         },
       };
     },
@@ -336,10 +345,10 @@ const ACTIONS: Record<string, ActionDef> = {
       const location = Array.isArray(raw.location) ? raw.location.filter((l): l is string => typeof l === "string") : undefined;
       return {
         status: "confirm",
-        summary: `Set your scan targets to: ${roles.join(", ")}?`,
+        summary: tx(ctx, "Set your scan targets to: {roles}?", { roles: roles.join(", ") }),
         run: () => {
           ctx.writePortals!(roles, location);
-          return { note: "Scan targets updated." };
+          return { note: tx(ctx, "Scan targets updated.") };
         },
       };
     },

@@ -6,6 +6,8 @@ import { Loader2, Radar, Wrench } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
+import { rich } from "@/lib/i18n/rich";
 
 type Company = { name: string; status: string; detail: string };
 type Result = { available: boolean; configured: boolean; companies: Company[] };
@@ -22,6 +24,7 @@ export function PortalsView() {
   const [res, setRes] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const { jobs, startJob } = useJobs();
+  const t = useT();
 
   // map the agentic "fix-portal" workers to the company they're repairing
   const fixByCompany = useMemo(() => {
@@ -57,54 +60,60 @@ export function PortalsView() {
           className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50 max-sm:min-h-[44px]"
         >
           {loading ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />}
-          Check portal health
+          {t("Check portal health")}
         </button>
-        {loading && <span className="text-xs text-faint">Probing each company&apos;s ATS… (~30–60s)</span>}
+        {loading && <span className="text-xs text-faint">{t("Probing each company's ATS… (~30–60s)")}</span>}
       </div>
 
       {res && !res.available && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          <code className="text-foreground">verify-portals.mjs</code> not found — this needs a complete career-ops
-          checkout (the web orchestrates the core&apos;s validator).
+          {rich(t("<code>verify-portals.mjs</code> not found — this needs a complete career-ops checkout (the web orchestrates the core's validator)."), {
+            code: (c) => <code className="text-foreground">{c}</code>,
+          })}
         </p>
       )}
       {res && res.available && !res.configured && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          No <code className="text-foreground">portals.yml</code> yet — ask the assistant to set up the companies to scan.
+          {rich(t("No <code>portals.yml</code> yet — ask the assistant to set up the companies to scan."), {
+            code: (c) => <code className="text-foreground">{c}</code>,
+          })}
         </p>
       )}
 
       {res && res.configured && (
         <div className="mt-5">
           <p className="text-sm text-muted">
-            <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{liveN}</span> live ·{" "}
-            <span className="tabular-nums text-red-600 dark:text-red-400">{broken.length}</span> broken ·{" "}
-            <span className="tabular-nums">{companies.length}</span> tracked
+            {rich(t("{live} live · {broken} broken · {tracked} tracked"), {
+              live: <span className="tabular-nums text-emerald-600 dark:text-emerald-400">{liveN}</span>,
+              broken: <span className="tabular-nums text-red-600 dark:text-red-400">{broken.length}</span>,
+              tracked: <span className="tabular-nums">{companies.length}</span>,
+            })}
           </p>
           {broken.length > 0 && (
             <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">
               <span className="font-medium text-red-700 dark:text-red-400">
-                {broken.length} {broken.length === 1 ? "company silently drops" : "companies silently drop"} from every
-                scan
+                {t.n(broken.length, "{n} company silently drops from every scan", "{n} companies silently drop from every scan")}
               </span>{" "}
               <span className="text-muted">
-                — their careers link is broken. Fix the <code>careers_url</code> in <code>portals.yml</code> (or ask the
-                assistant to repair them).
+                {rich(t("— their careers link is broken. Fix the <code>careers_url</code> in <code2>portals.yml</code2> (or ask the assistant to repair them)."), {
+                  code: (c) => <code>{c}</code>,
+                  code2: (c) => <code>{c}</code>,
+                })}
               </span>
             </div>
           )}
           <ul className="mt-4 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
             {sorted.map((c) => {
-              const t = TONE[c.status] ?? TONE.skipped;
+              const tone = TONE[c.status] ?? TONE.skipped;
               return (
                 <li key={c.name} className="flex items-center gap-3 px-4 py-2.5">
                   <CompanyLogo name={c.name} size={20} />
-                  <span className={cn("size-1.5 shrink-0 rounded-full", t.dot)} />
+                  <span className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} />
                   <span className="shrink-0 text-sm font-medium">{c.name}</span>
                   <span className="truncate font-mono text-xs text-faint">{c.detail}</span>
                   <div className="ml-auto flex shrink-0 items-center gap-2">
-                    {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: `Fix · ${c.name}`, subtitle: "repair portal slug", kind: "fix-portal", input: c.name, page: "/portals" })} />}
-                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", t.chip)}>{t.label}</span>
+                    {c.status === "broken" && <FixAffordance company={c.name} job={fixByCompany.get(c.name)} onFix={() => startJob({ title: t("Fix · {company}", { company: c.name }), subtitle: t("repair portal slug"), kind: "fix-portal", input: c.name, page: "/portals" })} />}
+                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", tone.chip)}>{t(tone.label)}</span>
                   </div>
                 </li>
               );
@@ -117,25 +126,26 @@ export function PortalsView() {
 }
 
 function FixAffordance({ company, job, onFix }: { company: string; job?: Job; onFix: () => void }) {
+  const t = useT();
   if (job?.status === "running")
     return (
       <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand">
-        <Loader2 className="size-3 animate-spin" /> Fixing…
+        <Loader2 className="size-3 animate-spin" /> {t("Fixing…")}
       </Link>
     );
   if (job?.status === "done")
     return (
       <Link href={`/jobs/${job.id}`} className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-        repaired · re-check
+        {t("repaired · re-check")}
       </Link>
     );
   return (
     <button
       onClick={onFix}
-      title={`Have the agent repair ${company}'s portal slug`}
+      title={t("Have the agent repair {company}'s portal slug", { company })}
       className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
     >
-      <Wrench className="size-3" /> Fix
+      <Wrench className="size-3" /> {t("Fix")}
     </button>
   );
 }
