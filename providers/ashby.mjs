@@ -190,7 +190,10 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-// Build the full location string from primary + secondary locations.
+// Build the full location string from primary + secondary locations: the
+// posting's `location` name, the primary `address.postalAddress` locality and
+// country (the country only when `location` doesn't already name it), then
+// each secondary location.
 // Ashby's posting-api puts extra hiring regions in `secondaryLocations[]`
 // (each with a region label + a postalAddress). Using only `j.location` drops
 // them, so an EU-eligible role whose PRIMARY label is e.g. "Canada" reads as
@@ -215,6 +218,17 @@ function toEpochMs(value) {
 //
 // Mirrors existing behavior in bamboohr.mjs, gem.mjs, and thehub.mjs, which
 // already append "Remote" from their own providers' remote flags.
+/**
+ * Whole-word, case-insensitive containment (same check as recruitee's and
+ * breezy's containsWholeWord).
+ * @param {string} text
+ * @param {string} word
+ */
+function containsWholeWord(text, word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
 /** @param {any} j */
 function formatLocation(j) {
   const parts = [];
@@ -232,7 +246,12 @@ function formatLocation(j) {
   const primaryPa = j.address && j.address.postalAddress;
   if (primaryPa) {
     for (const k of ['addressLocality', 'addressCountry']) {
-      if (typeof primaryPa[k] === 'string' && primaryPa[k].trim()) parts.push(primaryPa[k].trim());
+      const v = typeof primaryPa[k] === 'string' ? primaryPa[k].trim() : '';
+      if (!v) continue;
+      // "London, United Kingdom" already names its country; appending it again
+      // would only repeat it.
+      if (k === 'addressCountry' && parts.some((p) => containsWholeWord(p, v))) continue;
+      parts.push(v);
     }
   }
   if (Array.isArray(j.secondaryLocations)) {

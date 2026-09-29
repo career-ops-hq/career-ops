@@ -222,6 +222,27 @@ try {
   } else {
     fail(`ashby.fetch() primary-address location = ${JSON.stringify(primaryAddr[0]?.location)}`);
   }
+  // A primary location that already names its country must not repeat it.
+  const namedCountry = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            title: 'London role',
+            location: 'London, United Kingdom',
+            address: { postalAddress: { addressCountry: 'United Kingdom' } },
+            isRemote: true,
+          },
+        ],
+      }),
+    },
+  );
+  if (namedCountry[0]?.location === 'London, United Kingdom · Remote') {
+    pass('ashby.fetch() does not append a primary addressCountry the location already names');
+  } else {
+    fail(`ashby.fetch() named-country location = ${JSON.stringify(namedCountry[0]?.location)}`);
+  }
   if (primaryAddr[1]?.location === 'Remote') {
     pass('ashby.fetch() tolerates a job with no address block at all (no crash, no stray fields)');
   } else {
