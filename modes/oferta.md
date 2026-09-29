@@ -1,4 +1,4 @@
-# Mode: job — Full A-G Evaluation
+# Mode: job — Full A-H Evaluation
 
 When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F evaluation + G legitimacy):
 
@@ -6,25 +6,31 @@ When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F 
 
 ## Liveness gate (URL inputs)
 
-When the candidate pastes a **URL** (not JD text), confirm the posting is still live before doing any evaluation. A dead link must never reach Block A — a 404/expired page wastes a full A-G evaluation, report, and PDF on phantom content.
+When the candidate pastes a **URL** (not JD text), confirm the posting is still live before doing any evaluation. A dead link must never reach Block A — a 404/expired page wastes a full A-H evaluation, report, and PDF on phantom content.
 
 1. Get the page content: if you arrived here from `auto-pipeline` (its Step 0.5 already navigated and cleared the link), reuse that snapshot — do not navigate again. On a direct URL entry, navigate with Playwright (`browser_navigate` + `browser_snapshot`) and read the title, URL, and visible content. **Opt-in:** if `scan.extractor: cli` is set in `config/profile.yml`, run `node browser-extract.mjs <url>` (default `--mode jd`) instead and use its compact `{ "url", "title", "text" }` (the distilled JD main text rather than the full page a11y tree — fewer tokens for the model, board-dependent), **falling back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing.
+   - The CLI extractor reads only the outer document. If its output lacks a real JD or apply path, use Playwright to check for an embedded iframe before making any closure decision, even when the extractor returned successfully.
 2. Classify the posting:
    - **active posting evidence:** title/role + a real job description or an application/apply path
-   - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer, hard redirect to a generic careers/search page, or 404/410
-3. If the posting appears closed, **stop before Block A**: tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
-4. If the candidate pasted JD text (no URL), liveness cannot be verified — note that and proceed; there is no link to check.
+   - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer after the iframe check below, hard redirect to a generic careers/search page, or 404/410
+3. An empty `main` or nav/footer-only snapshot is **inconclusive** when the page contains an iframe. Company careers pages commonly embed an Ashby board (`jobs.ashbyhq.com`), or another ATS, in an iframe that loads after the outer page. Wait briefly and take one fresh snapshot; inspect the iframe content directly if the browser tool exposes it. If the iframe still cannot be read, do not infer that the posting is closed from the empty outer page alone. Try the fallback sources from `auto-pipeline` Step 0 or ask the candidate for the JD.
+4. If the posting has confirmed closed evidence after that check, **stop before Block A**: tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
+5. If the candidate pasted JD text (no URL), liveness cannot be verified — note that and proceed; there is no link to check.
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
 
 ## Blacklist gate (#1742)
 
-If `data/blacklist.md` exists, check the posting's company against it before Block A. The file is the candidate's own do-not-apply list (user layer, opt-in): absent file = no gate, and nothing ever adds a company to it automatically. Match case- and punctuation-insensitively — "Acme Corp." on the list catches a JD that says "acme corp".
+If `data/blacklist.md` exists, check both the posting's company and posting URL against it before Block A. The file is the candidate's own do-not-apply list (user layer, opt-in): absent file = no gate, and nothing ever adds a company to it automatically. For `Scope: company` (also the default for blank or unsupported scopes), match the company case- and punctuation-insensitively. For `Scope: domain`, treat the Company cell as a hostname suffix: compare it with the posting URL's hostname, ignoring case and a trailing dot, and match only the exact host or a subdomain (`ibm.com` matches `jobs.ibm.com`, never `notibm.com`). Keep dots and hyphens distinct. If the URL is missing or invalid, domain rules cannot match; still check company rules.
 
 1. On a hit, **stop before Block A** and surface the candidate's own recorded decision:
    > "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want me to evaluate this posting?"
-2. Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes runs the full A-G evaluation as normal (note the override in the report notes); anything else stops here with no evaluation, report, or CV.
+2. Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes runs the full A-H evaluation as normal (note the override in the report notes); anything else stops here with no evaluation, report, or CV.
 3. No match, or no `data/blacklist.md` → proceed. A blacklist entry never changes any score anywhere — it is a gate, not a signal.
+
+## Agency confirmation gate (#1596, #4359)
+
+Before Block A or any tracker, report, or CV write, if the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named), ask which agency this posting came through and wait for an explicit answer. Follow `modes/_shared.md` → **Agency confirmation handoff**: a delegated/headless worker returns `needs_confirmation` with the posting identity, evidence, and question, then stops without artifacts. The parent asks and resumes only with the user's explicit answer for this posting. Never write `Company: ?` / Via first and seek confirmation afterward. After confirmation, retain `?` for an unknown employer and the confirmed agency in Via.
 
 ## Bounded Research Budget
 
@@ -93,6 +99,17 @@ On a ⛔ determination, add exactly one flag line at the top of Block B in the r
 `⛔ **No sponsorship:** JD states "{verbatim JD line}" and role is outside your authorized_in`
 
 The flag is additive only; ✅ / ➖ / ⚠️ emit no flag line.
+
+### PcD-quota check (Brazil-market)
+
+Opt-in, gated on the candidate's own profile — most evaluations skip this entirely. Run it only when **both** are true: `config/profile.yml` → `disability.br_pcd_quota_eligible` is `true`, **and** the role's own posting location is Brazil (not just the candidate's home country — the international/USD track never triggers this check).
+
+When gated in, scan the JD body (case-insensitive) for a statement, within one sentence or bullet, that **this opening itself** is a reserved PcD seat, e.g. "vaga exclusiva para PcD", "vaga reservada para pessoas com deficiência", "vaga afirmativa para PcD", or a line assigning this opening to the Lei 8.213/91 quota. A bare mention never qualifies: "PcD" or "pessoa com deficiência" on its own, an "also open to PcD" label or inclusion boilerplate ("vaga também para PcD", "todas as nossas vagas são abertas a PcD"), a "Lei de Cotas"/"Lei 8.213" compliance citation that does not reserve this opening, or an affirmative opening for another group ("vaga afirmativa para pessoas negras") emits no flag.
+
+- **Match found** → add exactly one flag line at the top of Block A: `🟢 **PcD-Quota:** [Render in {language.output}: a short factual statement that the posting reserves this opening for PcD candidates] — "{verbatim JD line}"`. Keep `PcD-Quota` as the literal marker (`_shared.md`'s scoring rule detects the flag by that name) and preserve the quoted JD line exactly as employer data — never translate or paraphrase it. This is a positive opportunity signal (legally mandated quota under Lei 8.213/91, typically a smaller applicant pool). **Scoring** (`_shared.md` § Scoring System, Cultural signals rule 8): the flag adds at most +1 to the Cultural signals dimension, and nothing while rule 5 or 6 caps it at 2/5; it cannot outweigh role fit because a reserved seat changes who competes for the opening, not how well the candidate matches it, so Match con CV and North Star alignment stay untouched.
+- **No match, or check not gated in** → emit no flag line at all. Silence is absence of signal, not a negative — same "don't penalize missing data" discipline as `location_filter`.
+
+**Hard rule:** this check NEVER discloses, implies, or references the candidate's diagnosis in any generated content — not the CV, not the cover letter, not a draft form answer. It only notices language the employer already put in the JD. If an application form later asks a disability/self-identification question, that goes through `modes/apply.md`'s existing `needs_candidate_confirmation` flow — always a per-application, candidate-confirmed decision, never auto-filled from this check.
 
 ## Block B — Match with CV
 
@@ -708,6 +725,9 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## Keywords extracted
 (list of 15-20 keywords from the JD for ATS optimization)
 
+## Keyword Coverage
+(auto-generated by `node keyword-match.mjs <report>` — coverage %, present, thin, missing)
+
 ## Job Description (archived verbatim)
 (the posting's full text, pasted verbatim — see requirement below)
 ```
@@ -718,6 +738,18 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 Not every JD source is a scannable ATS API or even a URL — some only ever exist as a pasted screenshot from a company on a custom/uncommon ATS with no API surface. Whatever posting-date text is visible on the source — `Posted 3 days ago`, an explicit date, etc. — transcribe it as the first line of the archived section regardless of source format (URL, pasted text, or screenshot): `Posted: {date or relative string as shown}`, or `Posted: not visible in source` when genuinely absent. Never substitute the report file's own filesystem mtime/creation time for this — it's fragile (overwritten by later edits, reset by sync-tool/git operations) and conceptually wrong (it records when the candidate processed the JD, not when the employer posted it).
 
+### 1b. Embed ATS keyword coverage
+
+After saving the report, run the coverage check and paste its `## Keyword Coverage` block into the report, directly below the `## Keywords extracted` section (after its keyword list, before `## Job Description (archived verbatim)`):
+
+```bash
+node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md
+```
+
+By default this scans the base `cv.md` — read it as a **pre-tailoring gap list** (which JD keywords to weave in while tailoring), not a verdict on the document you will send; the output labels what it scanned. To verify the final tailored CV, pass `--cv` (the `pdf` mode does this against the generated HTML).
+
+**Diagnostic only:** it flags missing/thin keywords so the user can decide what to reinforce. Never fabricate — add a keyword only if it reflects the user's real experience (see `modes/_shared.md`).
+
 ### 2. Record in tracker
 
 **ALWAYS** record in `data/applications.md`:
@@ -726,7 +758,7 @@ Not every JD source is a scannable ATS API or even a URL — some only ever exis
 - Company — the END employer. If the JD is agency-mediated ("our client", agency domain, no employer named), ASK the user which agency it came through, use `?` as Company, and put a distinguishing descriptor in Notes (e.g. `fintech, Leeds`). Never write "Confidential" — the `?` marker is locale-invariant and can't collide with a real firm.
 - Via (when the tracker has the column) — the agency/recruiter firm, `—` for direct. In the tracker-addition TSV, append it as a tagged extra field: `via={Agency}` (see the TSV format spec).
 - Role
-- Score: match average (1-5) — Read `modes/_custom.md` → Scoring Rules, if it exists, and apply its override here. Default (if absent or silent): average of block scores.
+- Score: copy the already-decided 1–5 Global Score from the report header and Machine Summary `score`. Apply any `modes/_custom.md` Scoring Rules when deciding that score, not again while writing the tracker. A–H are report sections, not scores to average.
 - Status: `Evaluated`
 - PDF: ❌ (or ✅ if auto-pipeline generated PDF)
 - Report: root-relative link `[001](reports/001-company-2026-01-01.md)` (when merged via `merge-tracker.mjs` it is normalized to be relative to the tracker's own dir, e.g. `../reports/...`; see #760)

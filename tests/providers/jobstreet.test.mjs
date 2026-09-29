@@ -42,6 +42,61 @@ try {
     fail(`parseJobstreetItem returned ${JSON.stringify(parsed)}`);
   }
 
+  // parseJobstreetItem — job-detail path is host-aware: only the Indonesian
+  // sites use the /id/ locale prefix; seek.com.au & co serve /job/<id>
+  const auParsed = parseJobstreetItem({ id: '94036672', title: 'Strategy Consultant' }, 'https://www.seek.com.au', 'Co');
+  if (auParsed && auParsed.url === 'https://www.seek.com.au/job/94036672') {
+    pass('parseJobstreetItem builds /job/<id> for www.seek.com.au (no /id/ locale prefix)');
+  } else {
+    fail(`parseJobstreetItem seek.com.au url was ${JSON.stringify(auParsed && auParsed.url)}`);
+  }
+  const sgParsed = parseJobstreetItem({ id: '94244276', title: 'Analyst' }, 'https://sg.jobstreet.com', 'Co');
+  if (sgParsed && sgParsed.url === 'https://sg.jobstreet.com/job/94244276') {
+    pass('parseJobstreetItem builds /job/<id> for sg.jobstreet.com');
+  } else {
+    fail(`parseJobstreetItem sg.jobstreet.com url was ${JSON.stringify(sgParsed && sgParsed.url)}`);
+  }
+
+  // parseJobstreetItem — appendWorkType is opt-in and suffixes the title
+  const wtItem = { id: '1', title: 'Strategy Consultant', workTypes: ['Part time'] };
+  const wtOff = parseJobstreetItem(wtItem, 'https://www.seek.com.au', 'Co');
+  const wtOn = parseJobstreetItem(wtItem, 'https://www.seek.com.au', 'Co', { appendWorkType: true });
+  if (wtOff && wtOff.title === 'Strategy Consultant'
+      && wtOn && wtOn.title === 'Strategy Consultant [Part time]') {
+    pass('parseJobstreetItem appends work type to the title only when appendWorkType is set');
+  } else {
+    fail(`appendWorkType titles were off=${JSON.stringify(wtOff && wtOff.title)} on=${JSON.stringify(wtOn && wtOn.title)}`);
+  }
+  const wtNone = parseJobstreetItem({ id: '2', title: 'Analyst' }, 'https://www.seek.com.au', 'Co', { appendWorkType: true });
+  if (wtNone && wtNone.title === 'Analyst') pass('parseJobstreetItem leaves the title alone when workTypes is absent');
+  else fail(`appendWorkType with no workTypes gave ${JSON.stringify(wtNone && wtNone.title)}`);
+
+  // fetch() — appendWorkType on the portal entry flows through to parsed titles
+  const auJobs = await jobstreet.fetch(
+    {
+      name: 'SEEK AU',
+      provider: 'jobstreet',
+      api: 'https://www.seek.com.au/api/jobsearch/v5/search',
+      siteKey: 'AU-Main',
+      searchKeywords: 'strategy',
+      appendWorkType: true,
+    },
+    {
+      transport: 'http',
+      fetchJson: async () => ({
+        data: [{ id: '94036672', title: 'Strategy Consultant', workTypes: ['Part time'], locations: [{ label: 'Melbourne VIC' }] }],
+        totalCount: 1,
+      }),
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (auJobs.length === 1 && auJobs[0].title === 'Strategy Consultant [Part time]'
+      && auJobs[0].url === 'https://www.seek.com.au/job/94036672') {
+    pass('jobstreet.fetch() honours entry.appendWorkType and builds seek.com.au /job/ links');
+  } else {
+    fail(`jobstreet.fetch() SEEK AU gave ${JSON.stringify(auJobs)}`);
+  }
+
   // parseJobstreetItem — uses companyName fallback when advertiser.description is absent
   const noAdvertiserItem = {
     id: '2',

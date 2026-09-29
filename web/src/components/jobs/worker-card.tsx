@@ -5,6 +5,7 @@ import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
+import { isFencingNotice } from "@/lib/cli-fencing.mjs";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -22,6 +23,19 @@ const STEP_LABELS: Record<string, string> = {
   Task: "Working",
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
+
+// The unfenced-runtime notice is emitted as the run's FIRST step, before the CLI
+// produces any output — and this card renders only the newest step, so it would be
+// displaced within a second of the run starting. Scan the whole list instead, and
+// render it in the sticky slot below, the same shape jobErrorHint already uses.
+// Returns the notice ITSELF, not a boolean. There are two shapes — a runtime that
+// cannot be restricted at all, and one only partly restricted — and a card that
+// matched either then printed one hardcoded sentence told a sandboxed Codex run it
+// "ran with its default access", which is false. Rendering what the route emitted
+// keeps one source for the wording and cannot misdescribe a level (#2507).
+function fencingNotice(job: Job): string | undefined {
+  return job.steps.find((s) => isFencingNotice(s.label))?.label;
+}
 
 const fmtElapsed = (ms: number): string => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -79,6 +93,7 @@ export function WorkerCard({
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const errorHint = jobErrorHint(job);
+  const fencing = fencingNotice(job);
   const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
@@ -122,6 +137,11 @@ export function WorkerCard({
       {errorHint && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {errorHint.text}
+        </div>
+      )}
+      {fencing && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          {fencing}
         </div>
       )}
       {tokens > 0 && (

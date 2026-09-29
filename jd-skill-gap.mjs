@@ -29,10 +29,22 @@
 import { readFileSync, existsSync } from 'fs';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const CV_PATH = 'cv.md';
+// From the data root, not the cwd. cv.md is a Source-of-Truth Boundary primary
+// file and lives wherever CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
+// .career-ops-data marker points; a bare relative path resolves against
+// whatever directory the process was started in.
+//
+// Everything this script reports is a comparison against that file, so without
+// it there is nothing to say at all. The error below therefore has to serve two
+// different users at once: one who never wrote a cv.md, and one who has one
+// sitting outside the data root this resolver just looked in. Naming only one
+// of them sends the other to the wrong fix.
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //
@@ -53,10 +65,28 @@ const CV_PATH = 'cv.md';
 // \W, and after a CJK char the following whitespace / colon / newline is also
 // \W, so no boundary fires. The fix is a separate alternation arm for CJK
 // terms that drops s?\b; both arms share the same ^#{0,6}\s* prefix.
+//
+// The prefix itself stays #{0,6} — it is NOT widened to also swallow `*`/`_`.
+// A bolded heading with no markdown hash ("**What We're Looking For**") is
+// handled instead by stripping `**`/`__` pairs from the line before testing
+// it against this pattern (see stripBoldMarkers() and its call site in
+// scanJd(), #4273). Widening the prefix character class was the first thing
+// tried here and it regressed a real, common shape: an asterisk-BULLET whose
+// text happens to start with a keyword — "* Required: Python and
+// Kubernetes" — would have its leading `*` consumed as a heading marker,
+// misclassifying the bullet itself as a new heading (and dropping the
+// skills on that exact line, since a heading match short-circuits before
+// bullet extraction runs). Stripping only doubled `**`/`__` markers — never
+// a single `*`/`_` — leaves a literal bullet character untouched, since a
+// real bullet is one asterisk, not two.
 const REQUIREMENT_HEADER_RE = new RegExp(
   '^#{0,6}\\s*(?:(?:' + [
     'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
-    "what\\s+we(?:'|’)?\\s*re\\s+looking\\s+for",
+    // (?:'|’)?\s*re|\s+are (not just (?:'|’)?\s*re): the contracted-only form
+    // matched "we're"/"we re" but not the equally common uncontracted "we are"
+    // (#4273 — the Netflix posting that surfaced this used the uncontracted,
+    // bolded form of this exact heading).
+    "what\\s+we(?:(?:'|’)?\\s*re|\\s+are)\\s+looking\\s+for",
     "what\\s+you(?:(?:'|’)ll|\\s+will)?\\s+bring",
     'who\\s+you\\s+are',
     'about\\s+you',
@@ -95,6 +125,11 @@ const REQUIREMENT_HEADER_RE = new RegExp(
 // heading levels. Without this the block stayed open to end-of-file and swept
 // the benefits list into "required skills" - turning perks like "401k",
 // "Equity" and "Carrot" into reported skill gaps.
+//
+// Same #{0,6} prefix, same reason for leaving it unwidened, as
+// REQUIREMENT_HEADER_RE above: a bolded "**Benefits**" with no markdown hash
+// is handled by stripBoldMarkers() before this pattern ever sees the line,
+// not by letting the prefix itself swallow `*`/`_` (#4273).
 const NON_REQUIREMENT_HEADER_RE = new RegExp(
   '^#{0,6}\\s*(?:(?:' + [
     // Responsibilities. The negative lookahead keeps "You will have" on the
@@ -131,6 +166,22 @@ const NON_REQUIREMENT_HEADER_RE = new RegExp(
 // `\r?$` is required, not cosmetic: JS treats \r as a line terminator, so `.`
 // cannot consume it and a bare `$` never matches on a CRLF-split line.
 const BULLET_LINE_RE = /^\s*[-*•]\s*(.+)\r?$/;
+
+// Strip markdown STRONG-emphasis markers (`**text**` / `__text__`) so a
+// bolded heading with no `#` at all — "**What We're Looking For**" — still
+// reaches REQUIREMENT_HEADER_RE / NON_REQUIREMENT_HEADER_RE's own `#{0,6}`
+// prefix as if the bold wrapper were never there (#4273).
+//
+// Only doubled markers: a single `*`/`_` is left completely alone, on
+// purpose. `*` is also how a plain markdown bullet starts (BULLET_LINE_RE),
+// and a bullet whose text happens to start with a keyword — "* Required:
+// Python and Kubernetes" — must stay a bullet, not become a misdetected
+// heading that swallows its own line's skills before bullet extraction ever
+// runs. `**` (two characters) can never be a single-asterisk bullet marker,
+// so this global-replace has no bullet-collision case to worry about.
+function stripBoldMarkers(line) {
+  return line.replace(/\*\*|__/g, '');
+}
 
 // A conservative skill-token extractor: pulls comma/slash/and-separated
 // technical-looking tokens out of a requirement bullet, rather than treating
@@ -192,19 +243,27 @@ function scanJd(jdText) {
   let sawRequirementSection = false;
 
   for (const line of lines) {
+    // Header-classification only, never bullet extraction below: a bolded
+    // heading ("**Benefits**") must match these two regexes as if the bold
+    // wrapper weren't there, but a bolded SKILL inside a bullet
+    // ("- **Docker** and **Kubernetes**") already extracts fine as-is via
+    // SKILL_TOKEN_RE, which skips right over `*` since it isn't in the
+    // token's character class — stripping there would be a no-op at best
+    // (#4273).
+    const headerLine = stripBoldMarkers(line);
     // Checked before the requirement test so a heading that satisfies both
     // (e.g. "Why this role") closes the block rather than reopening it.
-    if (NON_REQUIREMENT_HEADER_RE.test(line)) {
+    if (NON_REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(line)) {
+    if (REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(line)) {
+    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
     }
 
@@ -824,7 +883,8 @@ if (selfTestMode) {
     process.exit(1);
   }
   if (!existsSync(CV_PATH)) {
-    console.error(`Error: ${CV_PATH} not found — this is a user-layer file, create it first.`);
+    console.error(`Error: cv.md not found at ${CV_PATH}`);
+    console.error('Create it there, or point CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR (or a .career-ops-data marker) at the directory that already has it.');
     process.exit(1);
   }
 

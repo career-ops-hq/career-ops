@@ -104,9 +104,9 @@ directly. Containment is the same as everywhere else in open source:
 
 These don't belong in the plugin layer — they're a different direction:
 
-- **Centralized infrastructure** the project would operate — hosted job
-  aggregation, a shared matching service, proxies/Workers. That's a **separate,
-  opt-in service**, discussed in
+- **Centralized infrastructure** run by the project or by a licensed operator
+  on its behalf — hosted job aggregation, a shared matching service,
+  proxies/Workers. That's a **separate, opt-in service**, discussed in
   [Where career-ops is going (#904)](https://github.com/career-ops-hq/career-ops/discussions/904) —
   not the open-core.
 - **Auto-submitting / blind-applying** to jobs. career-ops is a decision-support
