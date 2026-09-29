@@ -58,3 +58,5 @@ Repost `none-detected` requires available observations and a non-aggregator
 employer. Missing observations and aggregator exclusions have distinct labels.
 Missing salary observations, incomparable currencies, and zero application
 samples return explicit nulls or source flags rather than inferred zero rates.
+An unreadable or malformed profile contributes no desired salary default;
+retained salary observations remain queryable, matching Node's fail-safe read.

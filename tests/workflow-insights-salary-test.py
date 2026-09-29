@@ -63,3 +63,7 @@ with tempfile.TemporaryDirectory() as temp:
     paid = salary_view(db, profile)
     assert paid["result"]["applications"][0]["advertised"]["value"] == 350000
     assert paid["result"]["applications"][0]["advertised"]["source"] == "jd"
+    profile.write_text("compensation: [")
+    invalid_profile = salary_view(db, profile)
+    assert invalid_profile["result"]["applications"][0]["advertised"]["value"] == 350000
+    assert invalid_profile["result"]["applications"][0]["desired"] is None

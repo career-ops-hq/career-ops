@@ -189,7 +189,10 @@ def salary_view(db: sqlite3.Connection, profile_path: Path) -> dict:
                                  "note": advertised.get("quote", "") if isinstance(advertised, dict) else "from retained score report",
                                  "report_sha256": result.get("artifact", {}).get("report_sha256"),
                                  "round": "", "interviewer": ""})
-    profile = yaml.safe_load(profile_path.read_text()) if profile_path.is_file() else {}
+    try:
+        profile = yaml.safe_load(profile_path.read_text()) if profile_path.is_file() else {}
+    except (OSError, yaml.YAMLError):
+        profile = {}
     compensation = profile.get("compensation", {}) if isinstance(profile, dict) else {}
     desired = ({"amount": compensation["target_range"], "currency": compensation.get("currency")}
                if isinstance(compensation, dict) and compensation.get("target_range") else None)
