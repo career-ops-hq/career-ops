@@ -168,7 +168,7 @@ const ATS_PROVIDERS = [
     api: ({ id }) => `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${id}`,
     // The endpoint is unauthenticated and rate-limited. Space our calls; the
     // interval sits on the provider so it holds for every caller rather than only
-    // the loop in check-liveness.mjs.
+    // one particular liveness collection loop.
     throttleMs: 3_500,
     // We parse HTML here, so ask for it. The endpoint also serves HTML under an
     // application/json Accept, but a request that misdescribes what it wants is one

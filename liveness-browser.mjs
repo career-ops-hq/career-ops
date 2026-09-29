@@ -1,7 +1,7 @@
 /**
  * liveness-browser.mjs — Playwright-driven liveness check for a single URL.
  *
- * Shared by check-liveness.mjs (CLI tool) and scan.mjs (--verify flag).
+ * Shared by the raw liveness collector and configured discovery verification.
  * Returns the same shape as classifyLiveness: { result, reason }.
  */
 

@@ -410,3 +410,16 @@ warnings; `--self-test` and the explicitly empty `--file=` rejection pass.
 The old `validate-portals.mjs` command and its Node-only title-filter test
 were retired. This validates the standalone config check, not an automatic
 pre-scan config gate.
+
+The read-only liveness CLI now selects current SQLite opportunities inside a
+Python LangGraph node rather than reading the historical `data/pipeline.md`.
+Its default includes discovered, evaluating, eligible, evaluated and preparing
+opportunities, excluding submitted and ineligible rows; the current store
+selects 104 distinct URLs. A raw Node collector retains the original ATS API
+first, then sequential Playwright fallback and browser-only throttling. Python
+owns selection, result validation, counts and exit status. Isolated tests cover
+current-store selection, explicit URL/file inputs, the historical Node CLI
+path, API-positive and API-expired results without modifying the store. The
+public AIA `JR-70003` URL returned `active` through the Workday API rung in a
+read-only current-code CLI run. The full 104-URL live browser/API check has
+not been run.

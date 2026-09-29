@@ -9,7 +9,7 @@
   "scripts": {
     "doctor": "node doctor.mjs",
     "lint": "node scripts/check-syntax.mjs",
-    "liveness": "node check-liveness.mjs",
+    "liveness": "workflow/.venv/bin/python -B -m workflow.liveness_check",
     "workflow": "workflow/.venv/bin/python -B -m workflow.career_ops",
     "application:lifecycle": "workflow/.venv/bin/python -B -m workflow.career_ops application",
     "interview:context": "workflow/.venv/bin/python -B -m workflow.interview_tools context",

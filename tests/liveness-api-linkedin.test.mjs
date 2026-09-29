@@ -191,7 +191,7 @@ const API = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${ID}`;
 // -- 7. throttling ------------------------------------------------------------
 // The guest endpoint is unauthenticated and rate-limited; a manual sweep of it has
 // to space calls 3-4s apart. The interval lives on the provider so it applies to
-// every caller, not just the one loop in check-liveness.mjs.
+// every caller, not just one liveness collection loop.
 {
   const resolved = resolveAtsApi(`https://www.linkedin.com/jobs/view/${ID}/`);
   check('the LinkedIn rung declares a throttle interval of at least 3s',
@@ -214,9 +214,9 @@ const API = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${ID}`;
 // browser rung is the thing being avoided here, so assert the caller checks the
 // API first rather than trusting the ordering to stay put.
 {
-  const src = readFileSync(join(ROOT, 'check-liveness.mjs'), 'utf-8');
+  const src = readFileSync(join(ROOT, 'lib/_liveness-observe.mjs'), 'utf-8');
   const apiAt = src.indexOf('checkLivenessViaApi(');
   const browserAt = src.indexOf('checkUrlLivenessWithFallback(');
-  check('check-liveness.mjs consults the API rung before the browser rung',
+  check('the liveness collector consults the API rung before the browser rung',
     apiAt > -1 && browserAt > -1 && apiAt < browserAt, `api=${apiAt} browser=${browserAt}`);
 }

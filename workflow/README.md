@@ -28,6 +28,8 @@ workflow/.venv/bin/python -m workflow.career_ops show <task-or-opportunity-id>
 workflow/.venv/bin/python -m workflow.career_ops list
 workflow/.venv/bin/python -m workflow.career_ops scores
 workflow/.venv/bin/python -m workflow.career_ops decisions
+workflow/.venv/bin/python -m workflow.portal_config --file portals.yml
+workflow/.venv/bin/python -m workflow.liveness_check [--file urls.txt | <url> ...] [--no-fallback] [--throttle=5000]
 workflow/.venv/bin/python -m workflow.cv_facts <generated-cv.md> [--source cv.md] [--json]
 workflow/.venv/bin/python -m workflow.application_prefill --url <ATS-apply-url> --pdf output/<reviewed-resume.pdf> [--cover <cover.txt>]
 workflow/.venv/bin/python -m workflow.notifications preview <opportunity-id>
