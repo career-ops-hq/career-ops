@@ -100,7 +100,8 @@ the draft. Confirmation checks the current inputs, PDF, and actual file
 bytes before committing the whole package; failed exports can resume on the
 same task. Apply pauses for user review/confirmation. No path submits an
 application or sends an application message. The separate high-score Discord
-notification runs from the scheduled score wrapper.
+notification runs from the scheduled score wrapper only when
+`CAREER_OPS_NOTIFICATIONS_ENABLED=1`.
 `application submit` records only a user-confirmed actual submission, not an
 apply-package confirmation. Pass `--payload '{"submitted_at":"YYYY-MM-DD"}'`
 when the submission date is known; otherwise follow-up dates are explicitly
@@ -151,8 +152,8 @@ checks so the operational database stays unchanged.
 stored version, source quotes, and review status as a human-readable draft
 without confirming or changing it.
 
-The scheduled score wrapper enables the notification graph after `cron-score`.
-It checks current score inputs, report
+The scheduled score wrapper can enable the notification graph after `cron-score`
+with `CAREER_OPS_NOTIFICATIONS_ENABLED=1`. It checks current score inputs, report
 bytes and the profile alert line before claiming a Discord delivery in SQLite.
 An interrupted or timed-out send remains uncertain and is never retried
 automatically.

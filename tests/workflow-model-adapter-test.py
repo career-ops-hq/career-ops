@@ -63,6 +63,27 @@ try:
 finally:
     adapter.create_agent = original_create_agent
 
+scan_attempts = []
+scan_responses = iter(({"jobs": []}, {"complete_jd": False, **dict.fromkeys((
+    "company", "role", "liveness", "liveness_reason", "assessment_complete",
+    "location", "employment", "compensation", "company_size", "years",
+    "core_capabilities", "credentials",
+))}))
+
+class ScanAgent(ResearchAgent):
+    def run_conversation(self, _prompt):
+        scan_attempts.append(True)
+        return {"completed": True, "final_response": json.dumps(next(scan_responses)), "messages": []}
+
+try:
+    adapter.create_agent = lambda **_kwargs: ScanAgent()
+    with tempfile.TemporaryDirectory() as temporary:
+        result, _ = adapter.call_agent("scan_evidence", "scan prompt", [], Path(temporary))
+    assert len(scan_attempts) == 2
+    assert result["complete_jd"] is False
+finally:
+    adapter.create_agent = original_create_agent
+
 class ToolAgent:
     def __init__(self):
         self._invoke_tool = lambda *_args, **_kwargs: "ok"

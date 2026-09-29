@@ -1,5 +1,7 @@
 #!/bin/sh
-# Advance one persisted scan/score task and deliver one eligible high-score report.
+# Advance one persisted scan/score task; deliver only when explicitly enabled.
 set -eu
 workflow/.venv/bin/python -B -m workflow.career_ops cron-score
-CAREER_OPS_NOTIFICATIONS_ENABLED=1 workflow/.venv/bin/python -B -m workflow.notifications cron
+if [ "${CAREER_OPS_NOTIFICATIONS_ENABLED:-0}" = 1 ]; then
+  workflow/.venv/bin/python -B -m workflow.notifications cron
+fi
