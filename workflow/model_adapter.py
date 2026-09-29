@@ -178,7 +178,8 @@ def normalize_research(research):
     findings = []
     for item in research['research']['findings']:
         finding = dict(item)
-        if not isinstance(finding.get('url'), str) or not re.match(r'^https?://', finding['url']):
+        invalid_url = not isinstance(finding.get('url'), str) or not re.match(r'^https?://', finding['url'])
+        if invalid_url and finding.get('source') is None and finding.get('quote') is None:
             continue
         if finding.get('scope') not in ('role', 'team', 'company', 'adjacent_role', 'market', 'unresolved'):
             finding['scope'] = 'unresolved'

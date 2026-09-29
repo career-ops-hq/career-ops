@@ -597,8 +597,9 @@ started opportunity `9`'s score, then durably failed. The new Python research
 gate exposed one model finding (`f7`) with access status `unresolved` and no
 URL, source or quote; its first repair also contradicted retained location
 evidence in the risks section. The graph now conservatively excludes
-unsupported access statuses from citable research, omits URL-less findings
-from the derived report record while retaining the raw model trace, and
+unsupported access statuses from citable research, omits uncitable URL-less
+findings from the derived report record while retaining the raw model trace,
+leaves sourced URL errors for the validator to reject, and
 rechecks conflicts after repair. Isolated status and repair regressions pass.
 The original task `a8d95881-3947-4053-bebe-99e78186ed0f` was resumed and
 completed without a new task or repeated web research. Its Microsoft report
