@@ -518,3 +518,14 @@ one scan run and no retained opportunities; SQLite `PRAGMA quick_check` is
 `ok`. See `evidence/oii-338-workday-shared-host-2026-09-29.json`. This
 verifies current-code serialization and honest failure handling; the earlier
 live AIA Workday sample remains the positive Workday collection evidence.
+
+The 18:40 recurring Hermes score tick also reached the business commit. Its
+execution-detail row is `unknown` after a scheduler-owner restart, but the
+task list reports the last run `ok` and the canonical store has a completed
+score task and evaluation for opportunity `7` (report hash
+`1f1dff7cb93173fdf3aa4a3e63e37326c0f86afa9f9ce41353ec1f90416ed9bf`).
+SQLite `PRAGMA quick_check` is `ok` and notification deliveries remain zero.
+The task was not retriggered. See
+`evidence/oii-338-recurring-score-2026-09-29.json` for the exact IDs and
+statuses. This proves another built-in scheduled score business result while
+retaining the Hermes execution-metadata ambiguity.
