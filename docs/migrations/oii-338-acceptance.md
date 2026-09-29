@@ -341,3 +341,10 @@ passed deterministic validation, and reproduced the published report bytes.
 `decisions` lists only opportunity `2` as current (`verify`, 2.75–4.75,
 50% coverage); older scores `1` and `3` remain stale. SQLite quick_check is
 `ok`, and notification deliveries remain zero.
+
+The former Node `followup-seed.mjs` and `followup-cadence.mjs` CLIs had no active
+callers after the OII-339 Python lifecycle and cadence migration. They were
+retired along with two unused Node-specific profile fixtures. Python cadence
+and application lifecycle checks passed; the retained lock protocol check and
+the permitted-environment Node suite passed 177/177 tests. Historical
+application data remains untouched.

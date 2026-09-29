@@ -222,9 +222,8 @@ export function lockRecoveryVerdict(lockDir, staleMs) {
 /**
  * The waiting half of the protocol, as one definition the copies can import.
  *
- * Both rules here were bought with measured failures in `pipeline-lock`, and
- * neither reached `followup-seed.mjs` or `tracker-utils.mjs`, which still slept a FIXED `retryMs` and timed out on a
- * plain elapsed check:
+ * Both rules here were bought with measured failures in `pipeline-lock` and
+ * shared with other lock users rather than duplicated:
  *
  *   - jitter (#2506). A fixed retry wakes every waiter at the same instant to
  *     re-race, which is the coupon-collector problem: serving N waiters takes

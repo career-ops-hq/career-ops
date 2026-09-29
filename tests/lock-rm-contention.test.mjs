@@ -64,10 +64,8 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 }
 
 // ── 3. One definition, EVERY copy of the protocol ────────────────────
-// The list is DERIVED, not written down. #2984 patched two files and said "one
-// definition, no sibling drift" — and there were other copies. followup-seed.mjs had been carrying all three faces of #2777 the whole
-// time, invisible because nobody had asked the repo how many copies there were.
-// A hand-kept list would have aged the same way (lesson #52): so the test asks.
+// The list is derived from implementations, so a new sibling cannot drift
+// without this test noticing.
 //
 // The signature of the protocol is `recoverGuardDir`, the second atomic guard
 // no other code in this repo uses. Any file that has one is implementing this

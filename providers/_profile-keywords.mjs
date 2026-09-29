@@ -18,10 +18,8 @@
 import { existsSync, readFileSync } from 'fs';
 import * as yaml from 'js-yaml';
 
-// Matches the CAREER_OPS_PROFILE override already honored by scan.mjs,
-// cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and
-// test-all.mjs — without this, a user with that env var set would get
-// silently different fallback behavior here than everywhere else.
+// Honor the same CAREER_OPS_PROFILE override used by Python discovery and
+// the provider bridge, so keyword filtering reads the selected profile.
 const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
 
 function cleanKeywords(value) {
