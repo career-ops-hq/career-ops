@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from workflow import communications
 from workflow.communications import review_node
+from workflow.discovery_store import DiscoveryStore
 
 
 PYTHON = Path(sys.executable)
@@ -50,12 +51,10 @@ with tempfile.TemporaryDirectory(prefix="career-ops-communications-") as tempora
     for market in ("cn", "hk", "remote"):
         (inputs / "markets" / market / "employment.md").write_text("Do not assume work authorization")
     directory.mkdir()
+    discovered = DiscoveryStore(directory / "opportunities.db")
+    discovered.ingest({"url": "https://example.com/1", "company": "Acme", "title": "AI Engineer"}, "official")
+    discovered.close()
     with sqlite3.connect(directory / "opportunities.db") as db:
-        db.execute("CREATE TABLE opportunities(id INTEGER PRIMARY KEY,url TEXT,company TEXT,role TEXT,source TEXT,state TEXT,application_state TEXT)")
-        db.execute("INSERT INTO opportunities VALUES(1,'https://example.com/1','Acme','AI Engineer','official','evaluated','none')")
-        db.execute("CREATE TABLE source_evidence(id INTEGER PRIMARY KEY,opportunity_id INTEGER,source TEXT,payload TEXT)")
-        db.execute("INSERT INTO source_evidence(opportunity_id,source,payload) VALUES(1,'official',?)", (json.dumps({"description": "JD evidence"}),))
-        db.execute("CREATE TABLE artifacts(id INTEGER PRIMARY KEY,opportunity_id INTEGER,kind TEXT,path TEXT,sha256 TEXT)")
         db.execute("INSERT INTO artifacts(opportunity_id,kind,path,sha256) VALUES(1,'report','reports/test.md','hash')")
     source = root / "job.json"
     source.write_text(json.dumps({
@@ -66,15 +65,13 @@ with tempfile.TemporaryDirectory(prefix="career-ops-communications-") as tempora
     call(directory, inputs, "workflow", "start", "scan", "1", str(source))
     call(directory, inputs, "workflow", "start", "score", "1", "scan:1")
     with sqlite3.connect(directory / "opportunities.db") as db:
-        for module in ("scan", "score"):
-            original = db.execute("SELECT payload FROM results WHERE opportunity_id='1' AND module=?", (module,)).fetchone()[0]
-            invalid = json.loads(original)
-            invalid["review"] = {"verdict": "approve", "checks": {"grounded": "fail"}}
-            db.execute("UPDATE results SET payload=? WHERE opportunity_id='1' AND module=?", (json.dumps(invalid), module))
-            db.commit()
-            call(directory, inputs, "communications", "draft", "1", expected=1)
-            db.execute("UPDATE results SET payload=? WHERE opportunity_id='1' AND module=?", (original, module))
-            db.commit()
+        original = db.execute("SELECT payload FROM results WHERE opportunity_id='1' AND module='score'").fetchone()[0]
+        invalid = json.loads(original)
+        invalid["artifact"]["report_sha256"] = "wrong"
+        db.execute("UPDATE results SET payload=? WHERE opportunity_id='1' AND module='score'", (json.dumps(invalid),))
+        db.commit()
+        call(directory, inputs, "communications", "draft", "1", expected=1)
+        db.execute("UPDATE results SET payload=? WHERE opportunity_id='1' AND module='score'", (original,))
     log = root / "calls.log"
     extra = {"COMMUNICATION_TEST_CALL_LOG": str(log), "COMMUNICATION_TEST_REPAIR_MARKER": str(root / "repair.marker"),
              "COMMUNICATION_TEST_REQUIRE_COMPLETE_REVIEW_CONTEXT": "1"}

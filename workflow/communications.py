@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 import yaml
 
-from workflow.career_ops import BusinessStore, INPUT_ROOT, digest, review_approved, score_inputs
+from workflow.career_ops import BusinessStore, INPUT_ROOT, digest, score_inputs
 from workflow.model_config import create_agent
 from workflow.model_adapter import parse_object
 
@@ -34,7 +34,7 @@ class DraftState(TypedDict):
 
 
 def source_context(directory: Path, opportunity_id: str, statement: str | None = None) -> dict:
-    """Use one reviewed, still-current score and its canonical JD as draft evidence."""
+    """Use one published, still-current score and its canonical JD as draft evidence."""
     if statement is not None and not statement.strip():
         raise ValueError("Current user statement cannot be blank")
     store = BusinessStore(directory / "opportunities.db")
@@ -54,15 +54,19 @@ def source_context(directory: Path, opportunity_id: str, statement: str | None =
     finally:
         store.close()
     if (not opportunity or not scan or scan.get("outcome") != "jd_report"
-            or not review_approved("scan", scan.get("review", {}))
-            or not score or score.get("outcome") != "score"
-            or not review_approved("score", score.get("review", {}))):
-        raise ValueError("Drafts require one canonical opportunity and its reviewed scan and score results")
+            or not score or score.get("outcome") != "score"):
+        raise ValueError("Drafts require one canonical opportunity and its published scan and score results")
     report = scan["artifact"]
     current_score_input = score_inputs(report)
     if (report["opportunity_id"] != opportunity_id or score["input_hash"] != digest(current_score_input)
             or any(report[key] != opportunity[key] for key in ("url", "company", "role"))):
-        raise ValueError("The reviewed score is stale for the JD or candidate inputs")
+        raise ValueError("The published score is stale for the JD or candidate inputs")
+    artifact = score["artifact"]
+    if artifact.get("report_sha256") != digest(artifact.get("report", "")):
+        raise ValueError("The published score report is invalid")
+    path = Path(artifact["path"])
+    if not path.is_file() or path.read_text() != artifact["report"]:
+        raise ValueError("The published score report changed")
     inputs = json.loads(current_score_input)
     profile = yaml.safe_load(inputs["profile"]) or {}
     candidate_sources = {
@@ -78,7 +82,7 @@ def source_context(directory: Path, opportunity_id: str, statement: str | None =
         "opportunity": dict(opportunity),
         "source_evidence": evidence,
         "artifact_refs": artifacts,
-        "score": score["artifact"], "score_review": score.get("review"),
+        "score": artifact,
         "candidate_sources": candidate_sources,
         "style_and_rules": {"rules": inputs["rules"], "voice": inputs["voice"]},
         "requirements": (INPUT_ROOT / "prompts/applications/workflow.md").read_text(),

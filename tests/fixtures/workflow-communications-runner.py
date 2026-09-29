@@ -42,7 +42,7 @@ elif phase == "review":
     if os.environ.get("COMMUNICATION_TEST_REQUIRE_COMPLETE_REVIEW_CONTEXT"):
         context = payload["context"]
         assert {"cv", "profile", "targeting", "articles", "writing-samples/sample.md"} <= set(context["candidate_sources"])
-        assert context["score"] and context["score_review"] and context["source_evidence"] and context["artifact_refs"]
+        assert context["score"] and context["source_evidence"] and context["artifact_refs"]
     if database := os.environ.get("COMMUNICATION_TEST_MUTATE_DB"):
         with sqlite3.connect(database) as db:
             db.execute("UPDATE source_evidence SET payload=? WHERE opportunity_id=1",
