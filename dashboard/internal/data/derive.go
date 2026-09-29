@@ -96,12 +96,15 @@ func buildMoneySpanRegex(currencies []string) *regexp.Regexp {
 			suffixParts = append(suffixParts, q)
 		}
 	}
+	// Left boundary guard (RE2 has no lookbehind): stops "G18 EUR" / "IC4
+	// EUR" level codes from being read as tiny money spans that shadow the
+	// real amount later in the string (#4600). Real span is in group 1.
 	pattern := fmt.Sprintf(
-		`~?(?:(?:%s)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
+		`(?:^|[^\p{L}\p{N}])(~?(?:(?:%s)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
 			`(?:\s*[-–]\s*(?:%s)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?`+
 			`|\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
 			`(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?`+
-			`\s+(?:%s))`,
+			`\s+(?:%s)))`,
 		strings.Join(prefixParts, "|"),
 		strings.Join(rangePrefixParts, "|"),
 		strings.Join(suffixParts, "|"),
@@ -196,12 +199,14 @@ func deriveNoteFields(app *model.CareerApplication) {
 	// (e.g. "$170K min floor") only when no range exists. Skip money spans
 	// that are actually funding/valuation figures ("$600M valuation", "$70M
 	// Series C") — they describe the company, not compensation.
+	// Submatch group 1: the real span, without reMoneySpan's boundary guard.
 	var matches []string
-	for _, idx := range reMoneySpan.FindAllStringIndex(app.Notes, -1) {
-		if reFundingContext.MatchString(app.Notes[idx[1]:]) {
+	for _, m := range reMoneySpan.FindAllStringSubmatchIndex(app.Notes, -1) {
+		start, end := m[2], m[3]
+		if reFundingContext.MatchString(app.Notes[end:]) {
 			continue
 		}
-		matches = append(matches, app.Notes[idx[0]:idx[1]])
+		matches = append(matches, app.Notes[start:end])
 	}
 	for _, mm := range matches {
 		if strings.ContainsAny(mm, "-–") {

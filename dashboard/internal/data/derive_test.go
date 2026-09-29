@@ -363,6 +363,18 @@ func TestDeriveNoteFields(t *testing.T) {
 			last:     "2026-06-14",
 			postedOn: "2026-05-20",
 		},
+		{
+			// #4600: "L4 EUR" used to be misread as pay "4 EUR".
+			name: "level code digit before currency does not steal the real range",
+			app: model.CareerApplication{
+				Date:  "2026-01-10",
+				Notes: "Remote EU; levels.fyi L4 EUR 100-150K Amsterdam",
+			},
+			location: "Amsterdam",
+			workMode: "Remote",
+			payRange: "EUR 100-150K",
+			last:     "2026-01-10",
+		},
 	}
 
 	for _, tc := range cases {
@@ -429,27 +441,27 @@ func TestBuildMoneySpanRegex(t *testing.T) {
 		{
 			name:    "single bare symbol ($)",
 			input:   []string{"$"},
-			wantPat: `~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$))`,
+			wantPat: `(?:^|[^\p{L}\p{N}])(~?(?:(?:\$)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$)))`,
 		},
 		{
 			name:    "single ISO code (PLN)",
 			input:   []string{"PLN"},
-			wantPat: `~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN))`,
+			wantPat: `(?:^|[^\p{L}\p{N}])(~?(?:(?:PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN)))`,
 		},
 		{
 			name:    "two ISO codes (PLN, UAH)",
 			input:   []string{"PLN", "UAH"},
-			wantPat: `~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN|UAH))`,
+			wantPat: `(?:^|[^\p{L}\p{N}])(~?(?:(?:PLN ?|UAH ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:PLN ?|UAH ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:PLN|UAH)))`,
 		},
 		{
 			name:    "mixed bare + ISO ($ bare, PLN ISO)",
 			input:   []string{"$", "PLN"},
-			wantPat: `~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$|PLN))`,
+			wantPat: `(?:^|[^\p{L}\p{N}])(~?(?:(?:\$|PLN ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:\$|PLN ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:\$|PLN)))`,
 		},
 		{
 			name:    "metachar token (escaped via QuoteMeta)",
 			input:   []string{"A.B"},
-			wantPat: `~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:A\.B))`,
+			wantPat: `(?:^|[^\p{L}\p{N}])(~?(?:(?:A\.B ?)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*(?:A\.B ?)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?|\d[\d,]*(?:\.\d+)?[KkMmBb]?(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?\s+(?:A\.B)))`,
 		},
 	}
 	for _, tc := range cases {
@@ -483,9 +495,14 @@ func TestBuildMoneySpanRegex_SuffixNoTrailingSpace(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := re.FindString(tc.input)
-			if got == "" {
+			// Group 1: production usage; group 0 also has the boundary char.
+			m := re.FindStringSubmatch(tc.input)
+			if m == nil {
 				t.Fatalf("no match for %q", tc.input)
+			}
+			got := m[1]
+			if got[0] == ' ' {
+				t.Errorf("matched span %q has leading space", got)
 			}
 			if got[len(got)-1] == ' ' {
 				t.Errorf("matched span %q has trailing space", got)
