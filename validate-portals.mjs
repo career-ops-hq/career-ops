@@ -26,13 +26,31 @@ const PROVIDERS_DIR = join(ROOT, 'providers');
 // other directory validated whatever copy sat there.
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
 
-// Providers that narrow a large shared board with a block named after
-// themselves (`amazon:`, `ibm:`, ...) and silently treat a missing or unusable
-// block as `{}`. A block that narrows nothing therefore scans the whole board
-// (amazon.jobs: 100k+ postings) while the entry reads as coverage. Hand-kept:
-// there is no provider metadata to derive this from.
+function hasText(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function hasValue(value) {
+  if (Array.isArray(value)) return value.some(hasValue);
+  return hasText(value) || typeof value === 'number' || typeof value === 'boolean';
+}
+
+// Providers that narrow a large board with a block named after themselves and
+// silently treat a missing or unusable block as `{}`. Each predicate reports
+// whether the block carries a filter the provider actually sends; without one
+// the scan reads the whole board (amazon.jobs: 100k+ postings) while the entry
+// reads as coverage. Hand-kept: there is no provider metadata to derive this from.
 // A warning, not an error: the entry still scans, just too broadly.
-const PROVIDER_NARROWING_BLOCKS = new Set(['amazon', 'builtin', 'ibm', 'phenom']);
+const PROVIDER_BLOCK_FILTERS = {
+  // Every key but these is sent verbatim as a query or facet filter.
+  amazon: (block) => Object.entries(block)
+    .some(([key, value]) => !['sort', 'result_limit', 'offset'].includes(key) && hasValue(value)),
+  ibm: (block) => hasText(block.country)
+    || (Array.isArray(block.categories) && block.categories.some(hasText)),
+  // lang and urlPrefix only shape the request; country 'global' is the default.
+  phenom: (block) => (hasText(block.country) && block.country !== 'global')
+    || (isObject(block.selectedFields) && Object.values(block.selectedFields).some(hasValue)),
+};
 
 function add(list, path, message) {
   list.push({ path, message });
@@ -282,12 +300,13 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
         }
       }
 
-      if (typeof entry.provider === 'string' && PROVIDER_NARROWING_BLOCKS.has(entry.provider)) {
+      const blockFilters = typeof entry.provider === 'string' && Object.hasOwn(PROVIDER_BLOCK_FILTERS, entry.provider)
+        ? PROVIDER_BLOCK_FILTERS[entry.provider]
+        : null;
+      // An absent block is not flagged: a global sweep is a valid choice.
+      if (blockFilters && entry[entry.provider] !== undefined) {
         const block = entry[entry.provider];
-        // Only a non-empty mapping narrows; null, {}, [], "" or a bare scalar
-        // (`amazon: DEU`) all degrade to `{}`. An absent block is not flagged.
-        const narrows = isObject(block) && Object.keys(block).length > 0;
-        if (block !== undefined && !narrows) {
+        if (!isObject(block) || !blockFilters(block)) {
           add(
             warnings,
             `${base}.${entry.provider}`,
