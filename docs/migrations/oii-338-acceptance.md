@@ -554,3 +554,8 @@ The same scan boundary now treats nameless or malformed capability and
 credential items as missing evidence. Such rows no longer crash the graph or
 create an unnamed hard failure; valid mandatory license failures still exclude.
 Isolated graph cases cover both malformed lists and the valid license gate.
+After these scan and recovery fixes, all 61 current
+`tests/workflow-*-test.py` files passed in one local run on 2026-09-29
+(118.7 seconds, zero failures). This broad regression result supplements the
+targeted red/green cases; it does not by itself resolve the formal-store
+opportunity `8` exclusion or the next natural scan acceptance.
