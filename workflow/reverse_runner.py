@@ -373,6 +373,8 @@ def discover_global(directory: Path, config_path: Path, *, ats: list[str] | None
                 entries = [entry for value in sample_companies(values, limit, shuffle=shuffle)
                            if (entry := to_entry(name, value)) is not None]
                 start = resume_at(checkpoint, name, values, fingerprint, entries_len=len(entries)) if checkpoint else 0
+                print(f"global {name}: {len(entries)} boards" + (f", resuming at {start}" if start else ""),
+                      file=sys.stderr, flush=True)
                 resolver_failures = 0
                 source_incomplete = status != "ok" or source_capped or name in health
                 for offset in range(start, len(entries), BATCH_SIZE):
@@ -476,6 +478,9 @@ def discover_global(directory: Path, config_path: Path, *, ats: list[str] | None
                         break
                     resumable = save({"name": name, "resume_at": offset + len(batch),
                                       "dataset_len": len(values), "dataset_hash": fingerprint})
+                    print(f"global {name}: {offset + len(batch)}/{len(entries)} boards, "
+                          f"{len(offers)} retained candidates, {counters['errors']} unreachable",
+                          file=sys.stderr, flush=True)
                 if stopped:
                     health[name] = {"company": name, "status": "network", "timestamp": checked_at}
                     resumable = save(pending_current)

@@ -369,3 +369,9 @@ The Python ATS requests now use the Node provider's pinned User-Agent and
 10-second timeout; board-owner HTML is limited to the first 8 KiB. The shared
 Python identity also applies to public directory downloads, and the direct
 file and package entrypoints both pass their scan tests.
+
+The Python reverse sweep now reports source size and completed 50-board batches
+to stderr while keeping `--json` stdout machine-readable. Its existing
+partial/resume fixture passes with progress output. The already-running full
+sweep began before this change, so its current process remains silent; its
+checkpoint is the progress source for that run.
