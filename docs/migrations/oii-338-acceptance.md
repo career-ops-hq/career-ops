@@ -543,3 +543,10 @@ Replaying the real saved extraction through the corrected adapter returns
 Chinese pure-tenure and English mixed requirements. The existing business
 exclusion still requires a fresh workflow re-evaluation before this sample
 can count as corrected live acceptance. No notification was sent.
+The recovery audit then found that `cron-score` excluded any opportunity with
+an old scan exclusion, even after a later `jd_report`, and that an unchanged
+source input reused a prior completed result after a policy fix. The cron
+selector now considers only the latest scan result; scan inputs carry policy
+version `2` so a deliberate re-evaluation uses a new fingerprint and a fresh
+LangGraph checkpoint. An isolated exclusion-to-report-to-score-selection case
+passes. Opportunity `8` still needs its business re-evaluation.

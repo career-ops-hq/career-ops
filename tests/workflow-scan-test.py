@@ -17,7 +17,7 @@ PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
 CLI = ROOT / "workflow" / "career_ops.py"
 RUNNER = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-model-runner.py'}"
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import BusinessStore, cron_score, scan_discovered, score_inputs
+from workflow.career_ops import BusinessStore, canonical_scan_input, cron_score, scan_discovered, score_inputs
 
 
 BUSINESS_RESULTS = """
@@ -342,5 +342,33 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-stale-") as temporary:
     store.wait(pending["task_id"], "user_deferred")
     store.close()
     assert cron_score(directory) == {"status": "idle", "reason": "no_unscored_opportunities"}
+
+with tempfile.TemporaryDirectory(prefix="career-ops-cron-rescanned-") as temporary:
+    directory = Path(temporary)
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.executescript("""
+      CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL, role TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'discovered', claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE page_evidence (opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL, captured_at TEXT NOT NULL);
+      CREATE TABLE opportunity_events (opportunity_id INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL);
+      INSERT INTO opportunities(id,url,company,role) VALUES (1,'https://example.com/jobs/recovered','Recovered','Engineer');
+    """)
+    database.close()
+    store = BusinessStore(directory / "opportunities.db")
+    for source, outcome in (("old", "exclude"), ("new", "jd_report")):
+        task = store.start("1", "scan", source, re_evaluate=True)
+        store.db.execute("UPDATE tasks SET status='completed' WHERE task_id=?", (task["task_id"],))
+        store.db.execute("INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?)",
+                         (task["task_id"], task["task_id"], "1", "scan", source,
+                          json.dumps({"outcome": outcome, "artifact": {}})))
+    store.close()
+    with patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+        assert cron_score(directory)["opportunity_id"] == "1"
+        assert start.call_args.args == (directory, "1", "score", "scan:1", None)
+    scan_input = {"schema_version": "scan_input_v1", "opportunity_id": "1",
+                  "url": "https://example.com/jobs/recovered", "company": "Recovered",
+                  "role": "Engineer", "jd": "Build systems.",
+                  "captured_at": "2026-09-29T00:00:00Z", "liveness": "active"}
+    assert json.loads(canonical_scan_input(json.dumps(scan_input)))["scan_policy_version"] == 2
 
 print("workflow scan: evidence, deduplication, and score handoff passed")

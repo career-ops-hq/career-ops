@@ -75,6 +75,7 @@ if __name__ == "__main__":
 
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
+SCAN_POLICY_VERSION = 2
 ATTEMPT_SECONDS = 900
 ATTEMPT_CALLS = 20
 MODEL_RUNNER = "workflow.model_runner"
@@ -142,6 +143,7 @@ def canonical_scan_input(value: str) -> str:
     if not isinstance(source["jd"], str) or source["liveness"] not in {"active", "uncertain"}:
         raise ValueError("Scan input JD or liveness is invalid")
     inputs = {
+        "scan_policy_version": SCAN_POLICY_VERSION,
         "source": source,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
         "profile": (INPUT_ROOT / "config" / "profile.yml").read_text(),
@@ -1394,8 +1396,10 @@ def cron_score(directory: Path) -> dict:
             )
             AND NOT EXISTS (
               SELECT 1 FROM results r
-              WHERE r.opportunity_id=CAST(o.id AS TEXT) AND r.module='scan'
-                AND json_extract(r.payload,'$.outcome')='exclude'
+              WHERE r.rowid=(
+                SELECT MAX(recent.rowid) FROM results recent
+                WHERE recent.opportunity_id=CAST(o.id AS TEXT) AND recent.module='scan'
+              ) AND json_extract(r.payload,'$.outcome')='exclude'
             )
             AND NOT EXISTS (
               SELECT 1 FROM tasks t
