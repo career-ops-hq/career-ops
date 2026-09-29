@@ -786,7 +786,11 @@ class BusinessStore:
             ).fetchone()
             if score and source_task:
                 try:
-                    current = score_inputs(json.loads(source_task["input_payload"])["jd_report"])
+                    scan = self.module_result(opportunity_id, "scan")
+                    if scan and scan["outcome"] != "jd_report":
+                        raise ValueError("Current scan excludes this opportunity")
+                    report = scan["artifact"] if scan else json.loads(source_task["input_payload"])["jd_report"]
+                    current = score_inputs(report)
                     valid = digest(current) == row["input_hash"]
                     reason = None if valid else "candidate_or_policy_inputs_changed"
                 except (KeyError, OSError, ValueError):
@@ -1346,6 +1350,7 @@ def scan_discovered(directory: Path, opportunity_id: str, re_evaluate: bool = Fa
 def cron_score(directory: Path) -> dict:
     """Advance at most one discovered scanner record through scan and score."""
     store = BusinessStore(directory / "opportunities.db")
+    stale_opportunity_id = None
     try:
         if not store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opportunities'").fetchone():
             return {"status": "idle", "reason": "scanner_store_not_initialized"}
@@ -1384,15 +1389,31 @@ def cron_score(directory: Path) -> dict:
             """
         ).fetchone()
         if not opportunity:
-            return {"status": "idle", "reason": "no_unscored_opportunities"}
-        opportunity_id = str(opportunity["id"])
-        scan = store.module_result(opportunity_id, "scan")
-        active = store.db.execute(
-            "SELECT task_id,module,status,waiting_reason,input_hash FROM tasks WHERE opportunity_id=? AND status IN ('running','waiting')",
-            (opportunity_id,),
-        ).fetchone()
+            for item in store.score_views():
+                if item["valid"] or item["stale_reason"] != "candidate_or_policy_inputs_changed":
+                    continue
+                candidate = item["opportunity_id"]
+                scan = store.module_result(candidate, "scan")
+                if not scan or scan["outcome"] != "jd_report" or store.db.execute(
+                    "SELECT 1 FROM tasks WHERE opportunity_id=? AND status IN ('running','waiting')", (candidate,)
+                ).fetchone():
+                    continue
+                stale_opportunity_id = candidate
+                break
+            if not stale_opportunity_id:
+                return {"status": "idle", "reason": "no_unscored_opportunities"}
+        else:
+            opportunity_id = str(opportunity["id"])
+            scan = store.module_result(opportunity_id, "scan")
+            active = store.db.execute(
+                "SELECT task_id,module,status,waiting_reason,input_hash FROM tasks WHERE opportunity_id=? AND status IN ('running','waiting')",
+                (opportunity_id,),
+            ).fetchone()
     finally:
         store.close()
+    if stale_opportunity_id:
+        result = start_and_run(directory, stale_opportunity_id, "score", f"scan:{stale_opportunity_id}", None, True)
+        return {"status": "advanced", "opportunity_id": stale_opportunity_id, "task": result}
     if active:
         if active["status"] == "waiting" and active["waiting_reason"].startswith("failure:"):
             result = resume_task(directory, active["task_id"], None, None)

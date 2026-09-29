@@ -17,7 +17,7 @@ PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
 CLI = ROOT / "workflow" / "career_ops.py"
 RUNNER = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-model-runner.py'}"
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import BusinessStore, cron_score, scan_discovered
+from workflow.career_ops import BusinessStore, cron_score, scan_discovered, score_inputs
 
 
 BUSINESS_RESULTS = """
@@ -298,6 +298,49 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-retry-") as temporary:
     database.execute("UPDATE tasks SET attempt=2 WHERE task_id=?", (failed["task_id"],))
     database.commit()
     database.close()
+    assert cron_score(directory) == {"status": "idle", "reason": "no_unscored_opportunities"}
+
+with tempfile.TemporaryDirectory(prefix="career-ops-cron-stale-") as temporary:
+    directory = Path(temporary)
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.executescript("""
+      CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL, role TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'discovered', claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE page_evidence (opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL, captured_at TEXT NOT NULL);
+      CREATE TABLE opportunity_events (opportunity_id INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT NOT NULL);
+      INSERT INTO opportunities(id,url,company,role) VALUES (1,'https://example.com/jobs/stale','Stale','Engineer');
+    """)
+    database.close()
+    store = BusinessStore(directory / "opportunities.db")
+    report = {"schema_version": "jd_report_v1", "opportunity_id": "1", "url": "https://example.com/jobs/stale",
+              "company": "Stale", "role": "Engineer", "jd": "Build reviewed systems.",
+              "captured_at": "2026-09-29T00:00:00Z", "liveness": "active", "prescreen": {"status": "uncertain"}}
+    scanned = store.start("1", "scan", "{}")
+    store.db.execute("UPDATE tasks SET status='completed' WHERE task_id=?", (scanned["task_id"],))
+    store.db.execute("INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?)",
+                     (scanned["task_id"], scanned["task_id"], "1", "scan", "old-scan", json.dumps({"outcome": "jd_report", "artifact": report})))
+    scored = store.start("1", "score", json.dumps({"jd_report": report}))
+    store.db.execute("UPDATE tasks SET status='completed' WHERE task_id=?", (scored["task_id"],))
+    store.db.execute("INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?)",
+                     (scored["task_id"], scored["task_id"], "1", "score", store.task(scored["task_id"])["input_hash"],
+                      json.dumps({"outcome": "score", "artifact": {"score": {"lower": 2, "upper": 4, "coverage": 0.5}}})))
+    store.close()
+    with patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+        assert cron_score(directory)["opportunity_id"] == "1"
+        assert start.call_args.args == (directory, "1", "score", "scan:1", None, True)
+    store = BusinessStore(directory / "opportunities.db")
+    current_input = score_inputs(report)
+    current_hash = hashlib.sha256(current_input.encode()).hexdigest()
+    store.db.execute("UPDATE tasks SET input_hash=?,input_payload=? WHERE task_id=?",
+                     (current_hash, current_input, scored["task_id"]))
+    store.db.execute("UPDATE results SET input_hash=? WHERE task_id=?", (current_hash, scored["task_id"]))
+    assert store.score_views()[0]["valid"] is True
+    store.db.execute("UPDATE results SET payload=? WHERE task_id=?",
+                     (json.dumps({"outcome": "jd_report", "artifact": {**report, "jd": "Changed current JD."}}), scanned["task_id"]))
+    assert store.score_views()[0]["stale_reason"] == "candidate_or_policy_inputs_changed"
+    pending = store.start("1", "score", "new-input", re_evaluate=True)
+    store.wait(pending["task_id"], "user_deferred")
+    store.close()
     assert cron_score(directory) == {"status": "idle", "reason": "no_unscored_opportunities"}
 
 print("workflow scan: evidence, deduplication, and score handoff passed")

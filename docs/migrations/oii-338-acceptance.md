@@ -268,3 +268,13 @@ report validator passed, and SQLite `PRAGMA quick_check` passed. `scores` marks
 only opportunity `2` current; opportunities `1` and `3` remain stale pending
 re-evaluation. Notification deliveries remain zero and both Hermes jobs remain
 paused.
+
+The score queue previously excluded every opportunity with any score result,
+even when current candidate/rule inputs or the latest scan JD made that result
+stale. `scores` now compares each result against the latest formal scan rather
+than only the JD report embedded in its old score task. `cron-score` advances
+unscored opportunities first, then explicitly re-evaluates one stale score
+whose opportunity has no running or waiting task. An isolated store verifies
+stale policy input selection, latest-JD invalidation, and suppression while a
+new task waits. This restores the old queue's fresh-before-reassessment
+ordering without using historical shortlist tiers.
