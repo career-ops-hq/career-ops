@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sqlite3
 import subprocess
+import sys
 from typing import Callable, TypedDict
 
 import yaml
@@ -26,8 +27,11 @@ class DeliveryState(TypedDict):
 def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
     """Read the current formal result, not a draft, historical score or shortlist row."""
     row = store.db.execute(
-        "SELECT r.input_hash,r.payload,t.input_payload FROM results r "
+        "SELECT r.input_hash,r.payload,t.input_payload,e.report_hash,l.status AS eligibility "
+        "FROM results r "
         "JOIN tasks t ON t.task_id=r.task_id "
+        "JOIN evaluations e ON e.opportunity_id=CAST(r.opportunity_id AS INTEGER) "
+        "JOIN eligibility l ON l.opportunity_id=e.opportunity_id "
         "WHERE r.opportunity_id=? AND r.module='score' ORDER BY r.rowid DESC LIMIT 1",
         (opportunity_id,),
     ).fetchone()
@@ -37,7 +41,7 @@ def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
     try:
         result = json.loads(row["payload"])
         artifact = result.get("artifact", {})
-        if result.get("outcome") != "score":
+        if result.get("outcome") != "score" or row["eligibility"] == "fail":
             return None
         current = score_inputs(scan["artifact"])
         if digest(current) != row["input_hash"] or digest(row["input_payload"]) != row["input_hash"]:
@@ -45,6 +49,8 @@ def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
         score = artifact["score"]
         report = artifact["report"]
         if artifact["type"] != "score" or artifact["report_sha256"] != digest(report):
+            return None
+        if row["report_hash"] != artifact["report_sha256"]:
             return None
         report_path = Path(artifact["path"])
         if not report_path.is_file() or report_path.read_text() != report:
@@ -96,7 +102,7 @@ def discord_sender(payload: dict) -> None:
     proxy_env.update({"HTTPS_PROXY": "http://127.0.0.1:7890", "HTTP_PROXY": "http://127.0.0.1:7890",
                       "ALL_PROXY": "http://127.0.0.1:7890", "NO_PROXY": "localhost,127.0.0.1"})
     subprocess.run(
-        ["python3", str(script), "--channel", channel, "--title", payload["title"],
+        [sys.executable, str(script), "--channel", channel, "--title", payload["title"],
          "--content", payload["report"]],
         check=True, capture_output=True, text=True, timeout=40, env=proxy_env,
     )
