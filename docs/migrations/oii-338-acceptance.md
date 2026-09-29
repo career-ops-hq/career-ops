@@ -569,6 +569,11 @@ explicit frozen-source `source`/`quote` pair. Previously a scored dimension
 could include a `search_only` item with null source and quote; the shared
 research-finding loop skipped it and allowed an unsupported score. A red/green
 report regression confirms rejection before publication.
+After the tenure, liveness, research-recovery and citation fixes, all 61
+`tests/workflow-*-test.py` files passed together on 2026-09-29 (zero failures).
+The two Hermes schedules were still active at 19:34 +08:00; the canonical
+store had 120 opportunities, 18 tasks, six evaluations, zero notification
+deliveries and `PRAGMA quick_check=ok`.
 After these scan and recovery fixes, all 61 current
 `tests/workflow-*-test.py` files passed in one local run on 2026-09-29
 (118.7 seconds, zero failures). This broad regression result supplements the
