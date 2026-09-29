@@ -438,5 +438,10 @@ assessment even when no model call was needed. A same-task resume completed
 on attempt two without another model call. Re-rendering the retained frozen
 materials reproduces published SHA-256
 `19c6fb0c9fc165917c06297559ec13a9b43320b9381db38914337d20ffbf21a7`.
-SQLite `PRAGMA quick_check` is `ok`, notification deliveries remain zero, and
-a clean built-in scheduled score run remains to be observed.
+SQLite `PRAGMA quick_check` is `ok`, and notification deliveries remain zero.
+The 17:20 built-in Hermes execution `af44caadd2a940ec87840f802bc1ba0a`
+subsequently completed durably. It advanced opportunity `5` through one
+LangGraph scan task, committed its scan result, and left notification
+deliveries at zero. This is a clean scheduler-to-Python execution; that tick
+did not run opportunity `5`'s score stage. The recurring score job remains
+active under the user's authorization, while the scan job remains paused.
