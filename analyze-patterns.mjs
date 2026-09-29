@@ -21,6 +21,7 @@ import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -1246,8 +1247,8 @@ function buildPatternSignals(enriched) {
 }
 
 // --- Main analysis ---
-function analyze() {
-  const entries = parseTracker();
+export function analyze(entries = parseTracker()) {
+ 
 
   if (entries.length === 0) {
     return { error: 'No applications found in tracker.' };
@@ -1522,7 +1523,7 @@ function analyze() {
     metadata: {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
-      analysisDate: new Date().toISOString().split('T')[0],
+      analysisDate: localToday(),
       byOutcome,
       // The same rates as every breakdown row, over the whole tracker — the
       // one honest place to quote "X% of what I sent advanced".

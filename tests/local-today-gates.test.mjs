@@ -649,3 +649,23 @@ test('two dates for one posting is all detect-reposts needs to call it a repost'
   const sameDay = tsv.replaceAll('2026-08-23', '2026-08-22');
   assert.deepEqual(detectReposts(parseScanHistory(sameDay), 90, 1, null), [], 'one evening, one date, no repost');
 });
+test('stats.mjs and analyze-patterns.mjs stamp the local day in report headers, not UTC', () => {
+  // At INSTANT (01:30 UTC), UTC_DAY is 2026-08-18 but NY_DAY is 2026-08-17.
+  // Both report headers must reflect the local day (NY_DAY).
+  const statsOut = inFrozenTz('America/New_York',
+    `const { computeAllStats } = await import('${spec('stats.mjs')}');` +
+    `const s = computeAllStats();` +
+    `process.stdout.write(s.metadata.generatedAt);`
+  );
+  assert.equal(statsOut, NY_DAY, `stats.mjs stamped ${statsOut}, expected local day ${NY_DAY}`);
+
+  const mockEntries = JSON.stringify(
+    Array(5).fill({ date: '2026-08-01', status: 'Applied', report: '', score: '85', notes: '' })
+  );
+  const patternsOut = inFrozenTz('America/New_York',
+    `const { analyze } = await import('${spec('analyze-patterns.mjs')}');` +
+    `const p = analyze(${mockEntries});` +
+    `process.stdout.write(p.metadata.analysisDate);`
+  );
+  assert.equal(patternsOut, NY_DAY, `analyze-patterns.mjs stamped ${patternsOut}, expected local day ${NY_DAY}`);
+});
