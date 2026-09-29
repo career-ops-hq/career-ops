@@ -16,6 +16,7 @@ Eine Zusammenstellung wiederverwendbarer Fähigkeiten für die gesamte Interview
 |---|---|---|
 | Unternehmensüberprüfung | `../../interview-prep.md` | Informiere dich vor einem Vorstellungsgespräch über ein bestimmtes Unternehmen und eine bestimmte Rolle |
 
+
 ## Dateikonventionen
 
 Diese Fähigkeiten setzen voraus, dass die folgenden Dateien vorhanden sind (career-ops Standardeinstellungen):

@@ -168,6 +168,7 @@ type Catalog struct {
 	SortLocation string
 	SortPay      string
 	SortLast     string
+	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
 }
@@ -189,6 +190,8 @@ func (c *Catalog) SortModeLabel(mode string) string {
 		return c.SortPay
 	case "last":
 		return c.SortLast
+	case "posted":
+		return c.SortPosted
 	default:
 		return mode
 	}
@@ -328,7 +331,7 @@ var En = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "SEARCH PROGRESS",
-	ProgressSummary: "%d evaluated | %.1f avg score",
+	ProgressSummary: "%d tracked | %.1f avg score",
 	FunnelTitle:     "Pipeline Funnel",
 	ScoresTitle:     "Score Distribution",
 	RatesTitle:      "Conversion Rates",
@@ -443,6 +446,7 @@ var En = Catalog{
 	SortLocation: "location",
 	SortPay:      "pay",
 	SortLast:     "last",
+	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
 }
@@ -492,7 +496,7 @@ var Tr = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "TAKİP İLERLEMESİ",
-	ProgressSummary: "%d değerlendirildi | %.1f ort. puan",
+	ProgressSummary: "%d takipte | %.1f ort. puan",
 	FunnelTitle:     "Pipeline Hunisi",
 	ScoresTitle:     "Puan Dağılımı",
 	RatesTitle:      "Dönüşüm Oranları",
@@ -607,6 +611,7 @@ var Tr = Catalog{
 	SortLocation: "konum",
 	SortPay:      "ücret",
 	SortLast:     "son",
+	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
 }
@@ -656,7 +661,7 @@ var Es = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "PROGRESO DE BÚSQUEDA",
-	ProgressSummary: "%d evaluadas | %.1f puntuación media",
+	ProgressSummary: "%d en seguimiento | %.1f puntuación media",
 	FunnelTitle:     "Embudo del proceso",
 	ScoresTitle:     "Distribución de puntuaciones",
 	RatesTitle:      "Tasas de conversión",
@@ -771,6 +776,7 @@ var Es = Catalog{
 	SortLocation: "ubicación",
 	SortPay:      "salario",
 	SortLast:     "último",
+	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
 }

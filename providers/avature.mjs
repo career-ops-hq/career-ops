@@ -28,6 +28,13 @@ import { sleep } from './_http.mjs';
 // Location isn't rendered in every tenant's list (the subtitle is Job ID /
 // hire-type / posted-date); we extract it when a marker is present and leave it
 // empty otherwise. postedAt comes from the "Posted DD-Mon-YYYY" subtitle.
+//
+// `api:`'s query string may carry the entry's own filter facets (picked in
+// the tenant's search UI — country, field of work, experience level, …); they
+// are preserved on every paginated request, not just the first, narrowing a
+// huge global board to a cheap-to-walk one. A first page with posting-shaped
+// `JobDetail/` links but zero parsed articles throws (a markup change), never
+// silently reads as an empty board — see `assertParsedSomething`.
 
 const PAGE_SIZE = 6; // Avature serves exactly 6 results per page
 const DEFAULT_MAX_PAGES = 50; // ~300 postings; override via entry.max_pages
@@ -37,10 +44,17 @@ const HARD_MAX_PAGES = 200;
 // gap risks the tenant's WAF rate-limiting the burst. Mirrors workday's
 // INTER_PAGE_DELAY_MS — only boards that paginate past page 0 pay it.
 const INTER_PAGE_DELAY_MS = 250;
-// The bare key we self-heal to when the primary (`jobOffset`) proves inert.
+// The default pagination key classic tenants honour.
+const PRIMARY_OFFSET_PARAM = 'jobOffset';
+// The bare key we self-heal to when the primary proves inert.
 const FALLBACK_OFFSET_PARAM = 'offset';
 
 const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+// Reserved keys the provider itself controls per page request. Stripped out
+// of any facet query string on the entry so a stray same-named facet can
+// never collide with (or be silently overwritten by) our own pagination key.
+const RESERVED_PAGINATION_KEYS = new Set([PRIMARY_OFFSET_PARAM.toLowerCase(), FALLBACK_OFFSET_PARAM.toLowerCase()]);
 
 /** @param {import('./_types.js').PortalEntry} entry */
 function resolveConfig(entry) {
@@ -55,7 +69,16 @@ function resolveConfig(entry) {
   // Honour an explicit SearchJobs path (branded tenants may prefix a locale,
   // e.g. /en_US/searchjobs/SearchJobs); otherwise default to the classic path.
   const searchPath = /\/SearchJobs\b/i.test(u.pathname) ? u.pathname.replace(/\/+$/, '') : '/careers/SearchJobs';
-  return { searchUrl: `${u.origin}${searchPath}`, origin: u.origin };
+  // Carry over any facet/filter query params the entry pinned (e.g. Avature's
+  // wizard-generated field-value facets, ?42386=[812132]&... for a country
+  // filter) so a pre-narrowed board (fewer pages to walk) stays narrowed on
+  // every paginated request, not just the first. Our own offset key is
+  // applied per-request in fetch() and always wins over a same-named facet.
+  const extraParams = new URLSearchParams(u.search);
+  for (const key of [...extraParams.keys()]) {
+    if (RESERVED_PAGINATION_KEYS.has(key.toLowerCase())) extraParams.delete(key);
+  }
+  return { searchUrl: `${u.origin}${searchPath}`, origin: u.origin, extraParams };
 }
 
 /** @param {string} s */
@@ -83,6 +106,27 @@ function parseLocation(block) {
     block.match(/class="[^"]*\blocation\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div|li)>/i) ||
     block.match(/glyphicon-map-marker[\s\S]{0,80}?>([^<]{2,60})</i);
   return m ? clean(m[1]) : '';
+}
+
+/**
+ * A first page with zero parsed articles is either a genuinely empty board
+ * or a markup change breaking the `<article class="article article--result">`
+ * selector — those must not look the same to a caller (the whole risk of
+ * scraping is a silent-zero failure reading as "no jobs" instead of "the
+ * parser broke"). Throws when the raw HTML still carries posting-shaped
+ * `JobDetail/` links (the page has rows; the selector just isn't finding
+ * them); returns silently for a page carrying neither — a genuinely empty
+ * board. Mirrors `providers/itviec.mjs`'s `assertParsedSomething`; called on
+ * the first page only (a later empty/short page is just the end of a real
+ * board, not a parser regression).
+ * @param {string} html
+ * @param {string} url
+ */
+export function assertParsedSomething(html, url) {
+  if (!/\/JobDetail\/[^"'\s]+/i.test(String(html ?? ''))) return;
+  throw new Error(
+    `avature: ${url} still contains JobDetail links but no article could be parsed — the listing markup changed`,
+  );
 }
 
 /** @param {string} htmlText @param {string} origin */
@@ -149,18 +193,21 @@ export default {
     // non-string/empty override falls back to the default so a malformed entry
     // can't produce `?=N`.
     const pinned = typeof entry.offset_param === 'string' && entry.offset_param.trim();
-    let offsetParam = pinned ? entry.offset_param.trim() : 'jobOffset';
+    let offsetParam = pinned ? entry.offset_param.trim() : PRIMARY_OFFSET_PARAM;
     let canHeal = !pinned; // once the key is pinned, never auto-switch
 
     const jobs = [];
     const seen = new Set();
 
     const getPage = async (param, page) => {
-      const htmlText = await ctx.fetchText(`${cfg.searchUrl}?${param}=${page * PAGE_SIZE}`, {
+      const usp = new URLSearchParams(cfg.extraParams);
+      usp.set(param, String(page * PAGE_SIZE));
+      const url = `${cfg.searchUrl}?${usp.toString()}`;
+      const htmlText = await ctx.fetchText(url, {
         redirect: 'error',
         headers: { accept: 'text/html' },
       });
-      return parseArticles(htmlText, cfg.origin);
+      return { url, html: htmlText, articles: parseArticles(htmlText, cfg.origin) };
     };
     // Absorb a page's articles, returning how many were not already seen.
     const absorb = (articles) => {
@@ -182,8 +229,8 @@ export default {
 
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      let articles = await getPage(offsetParam, page);
-      let fresh = absorb(articles);
+      let result = await getPage(offsetParam, page);
+      let fresh = absorb(result.articles);
 
       // Self-heal: the first paginated page didn't advance — either it repeated
       // page 0 (all-dup) or came back empty because the primary key is inert
@@ -196,17 +243,21 @@ export default {
       if (fresh === 0 && canHeal && page === 1) {
         canHeal = false;
         await sleep(INTER_PAGE_DELAY_MS, ctx);
-        const altArticles = await getPage(FALLBACK_OFFSET_PARAM, page);
-        const altFresh = absorb(altArticles);
+        const altResult = await getPage(FALLBACK_OFFSET_PARAM, page);
+        const altFresh = absorb(altResult.articles);
         if (altFresh > 0) {
           offsetParam = FALLBACK_OFFSET_PARAM;
-          articles = altArticles;
+          result = altResult;
           fresh = altFresh;
         }
       }
 
+      // Empty vs broken, first page only (see assertParsedSomething doc
+      // comment) — a later empty/short page is just the end of a real board.
+      if (page === 0 && result.articles.length === 0) assertParsedSomething(result.html, result.url);
+
       if (fresh === 0) break; // empty page / looped / offset ignored / last page
-      if (articles.length < PAGE_SIZE) break; // last page
+      if (result.articles.length < PAGE_SIZE) break; // last page
     }
     return jobs;
   },
