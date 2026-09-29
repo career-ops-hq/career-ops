@@ -420,8 +420,8 @@ owns selection, result validation, counts and exit status. Isolated tests cover
 current-store selection, explicit URL/file inputs, the historical Node CLI
 path, API-positive and API-expired results without modifying the store. The
 public AIA `JR-70003` URL returned `active` through the Workday API rung in a
-read-only current-code CLI run. The full 104-URL live browser/API check has
-not been run.
+read-only current-code CLI run. A later full current-URL run selected 103 URLs
+after business state changed; its results are recorded below.
 
 The user subsequently authorized recurring Hermes score processing, including
 future CV/JD model calls to the configured endpoint, while notifications remain
@@ -469,3 +469,23 @@ database hashes, counts, samples and limits are in
 `evidence/oii-338-reverse-full-sweep-2026-09-29.json`. This establishes a
 completed real full-source sweep with honest partial publication, not full
 upstream availability or a live recheck of current Workday serialization.
+
+The permitted-environment read-only Python LangGraph liveness command then
+checked all 103 URLs selected from the current canonical store: 75 active,
+zero confirmed expired and 28 uncertain, with 47 ATS API decisions. Of the
+uncertain results, 27 pages had content but no visible apply control and one
+had insufficient content. The command's exit code 1 reflects those uncertain
+results; it did not fail to complete. A first sandboxed attempt could not
+launch Chromium and produced no observations, so only the permitted run is
+counted. The URL selection, output hash and host/reason counts are in
+`evidence/oii-338-liveness-full-2026-09-29.json`. Uncertain pages remain
+unconfirmed, not expired.
+
+Current-store read-only `insights` commands for stats, reposts, salary,
+upskill, company history, company signals and stated salary all exited zero.
+Stats saw 104 scan observations, reposts saw no cluster, and upskill parsed
+five reports. The store has no real application events or stated salary
+observations, so those queries returned `source_missing` rather than invented
+history. Output hashes and limits are in
+`evidence/oii-338-insights-current-store-2026-09-29.json`; these runs add
+runtime evidence but do not replace the isolated OII-344 parity cases.

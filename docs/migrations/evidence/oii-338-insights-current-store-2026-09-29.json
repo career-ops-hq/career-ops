@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-29",
+  "scope": "Read-only current-store smoke of the migrated OII-344 insight commands; isolated tests remain the positive and rejection behavior evidence",
+  "commands": {
+    "insights stats": {"exit_code": 0, "sha256": "5b6dd043112abca8ddec7e734fd917ba3315cabb0a9498a070daca3f79a292be", "scan_observations": 104},
+    "insights reposts": {"exit_code": 0, "sha256": "ad8cc03c157787bcd815deee83149c4d3ee4879557ae7b957a2aa52f6ee4f1b5", "status": "observed", "observations": 104, "clusters": 0},
+    "insights salary": {"exit_code": 0, "sha256": "c7bc508358601ac798dfdf0984b1ed5dc6d8a9c5fda585d986e6f3c22f491227", "status": "observed"},
+    "insights upskill": {"exit_code": 0, "sha256": "80ae855d4c1c8a4c0ab6ce2439078bad805c5b8b776b77959222c084ba7bb304", "status": "observed", "reports": 5, "unparsed_reports": 0},
+    "insights company --company Microsoft": {"exit_code": 0, "sha256": "cc35bab76a1ae487bfaaef2af8f29ab46f7db0a34ee79d30bd330f5b73a949d8", "status": "source_missing", "missing": ["application_events", "application_lifecycle"]},
+    "insights company-signals --company Microsoft": {"exit_code": 0, "sha256": "0adead0f571b624e7a5b730de36ebd518d00e634c740338e2c177e81aa952225", "records": 0},
+    "insights stated --opportunity 2": {"exit_code": 0, "sha256": "4cd8ae88ffe76577e4d62740a1b1f3f85194c7abc1259ca8c7d2b26181fbdc84", "status": "source_missing"}
+  },
+  "acceptance_limit": "The current database lacks real post-application events and stated-salary observations, so company history and stated salary correctly return source_missing. These runs prove current-store execution and honest missing-data handling, not a full Node/Python behavior differential for those domains."
+}

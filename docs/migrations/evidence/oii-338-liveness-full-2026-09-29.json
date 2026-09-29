@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-29",
+  "scope": "Read-only Python LangGraph liveness check over every current URL selected from the canonical SQLite store at invocation time",
+  "command": "python -m workflow.liveness_check",
+  "selected_urls": 103,
+  "results": {
+    "active": 75,
+    "expired": 0,
+    "uncertain": 28,
+    "via_ats_api": 47
+  },
+  "uncertain_reasons": {
+    "content present but no visible apply control found": 27,
+    "insufficient content — liveness unconfirmed": 1
+  },
+  "uncertain_hosts": {
+    "jobs.smartrecruiters.com": 21,
+    "careers.se.com": 4,
+    "jobs.mercedes-benz.com": 1,
+    "careers.abb": 1,
+    "statestreet.wd1.myworkdayjobs.com": 1
+  },
+  "output_sha256": "50c8462186be250b28a5c4836bd3de9d92f19f29723e9f69e774ff9ff80b2b0e",
+  "exit_code": 1,
+  "exit_code_reason": "The command returns 1 when any URL is expired or uncertain; there were 28 uncertain URLs and no confirmed expired URLs.",
+  "first_attempt": "The sandboxed Chromium process was denied macOS Mach port registration before any observations were produced. The complete run was repeated in the permitted local environment.",
+  "acceptance_limit": "The 28 uncertain pages remain unconfirmed and must not be treated as expired. This is a read-only current-URL snapshot, not continuous liveness monitoring or a business-state update."
+}
