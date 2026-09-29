@@ -45,135 +45,65 @@
 
 ## Workflow Authority
 
-The user-facing workflow has exactly two top-level modules:
+The user-facing flow is discovery → scan → score → action decision → selected-role
+application preparation. `workflow.career_ops` owns task identity, business
+transitions, and the JSON CLI; Hermes only schedules the scan and score scripts.
+Node providers and guarded browser readers may collect evidence, but Python
+makes the filtering, prescreen, score, action, and publication decisions.
+`data/opportunities.db` is the business source of truth. LangGraph checkpoints
+record progress and never replace committed business facts.
 
-1. **A — 机会搜寻与评估 (Opportunity Discovery & Evaluation):** Discover/scan → Verify/Liveness → Pre-screen/Stage 0 → Evaluate/Stage 1 → Shortlist/Scored.
-2. **B — 申请准备与投递 (Application Preparation & Submission):** Select → Prepare/Preparation Plan → Tailor/Reactive Resume → Review/Drafter-Reviewer → Verify/PDF-ATS → Submit (user only).
+### Prescreen and JD handoff
 
-`scan`, `pipeline`, Stage 0, Stage 1, and Stage 2 remain internal compatibility
-terms. `pipeline` is the internal orchestrator; `data/pipeline.md` is the
-opportunity inbox/database. Stage 1 never generates a CV, PDF, cover letter,
-application answer, or tracker addition. It ends at Scored. The user selects a
-specific scored role and manually starts Stage 2. Nothing submits automatically.
+LangGraph scan freezes the source capture, extracts the complete JD, and calls
+`workflow.prescreen.evaluate` for deterministic Stage 0 decisions. Liveness is
+checked separately. A verified hard mismatch produces an exclusion with its
+reason and evidence; it does not produce a score or application package.
+Incomplete core evidence waits for a new capture. Unknown nonterminal facts
+remain Unknown and follow the JD report into the score checklist. A completed
+scan JD report is the normal score input; a changed JD or candidate/rule input
+requires explicit re-evaluation. A cache or historical report is reusable only
+when its content and input fingerprints still match.
 
-### Stage 0 — 统一预筛选
+### Score and action queue
 
-执行前阅读 [预筛选契约](../docs/PRESCREEN.md) 和 [pipeline 流程](pipeline.md#canonical-stage-0-pre-screen)。规则只由 `lib/prescreen-core.mjs` 实现，证据输入与缓存通过 `prescreen.mjs` 处理；liveness 单独检查。
+LangGraph score researches, assesses, and renders one opportunity at a time.
+The current JD, candidate sources, profile, rules, and research are frozen for
+each version. Python validates the full report and source citations before the
+business commit. Failed or interrupted stages wait or resume without
+publishing a partial result. The scheduled score run advances one opportunity;
+unscored jobs precede stale-score reassessment, and a second failed attempt
+waits for manual handling. One job's failure does not erase another result.
 
-- `fail`：移至 Processed，向 `data/discard.log` 追加原因，不分配报告号、不生成评分或申请材料；只有用户明确覆盖该岗位的淘汰决定才重新处理。
-- `pass`：进入 Stage 1。
-- `uncertain`：进入 Stage 1，并将确切问题带入 Evaluation Checklist；未知不等于失败。
-- `incomplete`：保留 Pending，补齐完整 JD 与所需证据后再评估。
+`workflow.career_ops scores` displays range, coverage, rank, and input
+validity. `workflow.career_ops decisions` displays current scored opportunities
+in apply/verify/deprioritize order, with stale results separate; verified hard
+failures remain exclusion events rather than scored rows. The action view does
+not initiate application work. The user selects one role
+and starts apply explicitly; daily scan and score never start apply.
 
-扫描仅写 `incomplete` 占位；pipeline/batch 复用合法且哈希匹配的完整缓存，仅重跑缺失、过期、无效或 `incomplete` 记录。
+### Selected-role application preparation
 
-### Stage 1 — Evaluate and produce a scored list
+LangGraph apply prepares the selected role's plan, materials, Reactive Resume
+payload, and PDF, then waits for whole-package human review and confirmation.
+It never mutates `cv.md` or the configured Reactive Resume mother resume and
+never submits an application or sends an application message. An unchosen
+scored role remains available.
 
-1. Generate an evaluation report only for roles that survive Stage 0. Confirmed
-   duplicates, expired postings, and terminal pre-screen mismatches skip the
-   full evaluation.
-   If an interrupted run already created a report for the same URL, reuse that
-   report number and finish its checklist instead of reserving a duplicate.
-2. Every report must end with an `## Evaluation Checklist` containing:
-   - Company gates: location, legal employer and employment type, company size,
-     five-day workweek/WLB, compensation, and posting legitimacy. Mark each
-     `Pass`, `Fail`, or `Unknown`, cite the evidence, and name what must be
-     confirmed.
-   - Capability match: every material JD requirement mapped to exact evidence
-     from the approved candidate sources. Mark each `Proven`, `Adjacent`,
-     `Gap`, or `Unverified`; state its hiring impact and the proposed response.
-   - Remaining evidence questions and material capability gaps. Detailed CV
-     changes and interview preparation belong to user-triggered Stage 2.
-3. Move evaluated roles out of Pending into the `## Scored（已评分 · 可手动启动申请）`
-   section using `- [~] #NNN | URL | Company | Role | Score/5 | Report: path`.
-   This is the automated scored-list state; it is NOT a per-role wait gate.
-4. Maintain one consolidated `reports/pipeline-review-{YYYY-MM-DD}.md` table
-   listing report number, company, role, score, company-gate result, material
-   gaps, recommendation, and report link.
-5. After all Stage 1 evaluations, output the scored list and STOP. The user
-   manually starts Stage 2 for a selected scored role.
-
-Existing reports or PDFs created before this workflow are not application-ready
-by default. If they lack a completed Evaluation Checklist, backfill it and
-include them in the consolidated review. Reapply Stage 0 using the complete JD
-and current candidate evidence before moving any legacy `[~]` role to Scored.
-Move a terminal mismatch to Processed and `data/discard.log`; re-extract the JD
-when no snapshot exists.
-
-### Stage 1 parallel orchestration
-
-Keep `/career-ops pipeline` as the only user-facing entry point. Internally run
-Stage 1 in waves of up to three jobs, matching the available worker-agent slots.
-
-1. The coordinator snapshots and hashes the approved candidate sources once per
-   run, reads every recognized Pending-like section, canonicalizes URLs/job IDs
-   across sections, and selects the next three unique jobs in first-seen order.
-   Duplicate rows become one evaluation packet; their useful annotations are
-   merged, and the coordinator removes or moves every duplicate row together at
-   commit. Report the duplicate count instead of silently processing one
-   section. Then obtain immutable JD/company evidence. Isolated CLI/static
-   extraction may run in parallel; any shared Playwright MCP fallback is queued
-   and executed one at a time by the coordinator.
-2. Dispatch one job per worker agent. Workers receive only the immutable job
-   evidence and candidate snapshot. They may research and evaluate their own job
-   but must not spawn agents, invoke skills, reserve report numbers, or write
-   `reports/`, `data/pipeline.md`, `output/`, tracker files, or application
-   artifacts.
-3. Each worker returns one structured evaluation packet containing report
-   Markdown, company gates, capability mapping, material gaps, recommendation,
-   remaining evidence questions, source citations, and the canonical URL. A worker may persist
-   only its own interruption-safe staging packet under
-   `data/pipeline-runs/{run-id}/{job-key}/`.
-4. The coordinator validates every packet against the source snapshot. Missing
-   checklist fields, unsupported candidate claims, URL mismatches, or malformed
-   scores are worker failures and are never published.
-5. Publish each independently approved packet when ready, preserving original
-   pipeline order in the consolidated display. Reuse
-   an existing report number for an exact URL; otherwise reserve all required
-   report numbers in one coordinator call. The coordinator alone writes reports,
-   moves rows to Scored, and deterministically rebuilds the daily
-   consolidated review.
-6. One worker failure never blocks successful siblings. Retry it once on another
-   worker; after that keep it Pending with `needs attention` and continue.
-7. Checkpoint each completed phase and report progress at least every 60 seconds.
-   Reruns resume by canonical URL and completed Evaluation Checklist, never by
-   worker completion order, so interruption cannot duplicate reports.
-
-The expensive evaluation work is parallel; shared-state publication remains
-single-writer and serial. Stage 1 ends with the consolidated scored list and
-never starts Stage 2 automatically. The user manually triggers Stage 2 for a
-chosen role.
-
-When an unverified quantified or scope claim appears, offer four outcomes:
-confirm it, correct it, mark it narrative-only, or `I don't know`. Never turn a
- guess into a verified fact.
-
-### Stage 2 — User-triggered application only
-
-Stage 2 starts only when the user invokes the application workflow for a
-specific scored role. Selecting that role is the trigger; there is no per-role
-queue or approval keyword.
-
-- Generate the selected role's preparation plan and application artifacts using
-  its scored report/checklist, then present the complete package for user review.
-- A scored role is never discarded merely because the user has not chosen it.
-- No Stage 2 work is run by the daily scan/evaluation cron.
-
-After manual selection, prepare the single-role plan and LangGraph apply package, including the role-specific Reactive Resume payload and PDF. Do not mutate `cv.md` or the configured Reactive Resume mother resume. Validate the complete package, accept evidence-backed feedback and revisions, then wait for the user's review and whole-package confirmation. Never submit.
-
-Before rendering a role-specific CV, write its actual changes to the application
-bundle's `cv/tailored/vNNN/changes.md`. The experience section must reflect the
-JD through evidence-backed selection, ordering, omission, or rewriting; changing
-only the summary and competency keywords is not a tailored CV. If no material,
-truthful experience change is possible, say that the base CV is already the best
-available version and ask whether to use it unchanged. Never label an unchanged
-CV as tailored.
+Before rendering a role-specific CV, record its actual changes in the
+application bundle's `cv/tailored/vNNN/changes.md`. Tailoring must make
+truthful, evidence-backed choices in the experience section, not only change
+the summary or keywords. If no material experience change is justified, state
+that the base CV is the best available version and ask whether to use it
+unchanged. Never label an unchanged CV as tailored. When a quantified or scope
+claim lacks verification, offer to confirm, correct, mark narrative-only, or
+record “I don't know”; never promote a guess to a verified fact.
 
 ## Output Preferences
 
 ### Scoring Rules — attractiveness-v1
 
-2026-09-11 正式启用：主分数表达入职吸引力（工作方向、待遇、团队、公司是否令人满意），能力竞争力单列。所有新评估与重评写入 reports/{报告号}-{公司}-{日期}.md，并经校验和复核进入 Scored。旧报告保留原始记录，显示为待重评；旧匹配分与吸引力分不可换算或混排。
+2026-09-11 正式启用：主分数表达入职吸引力（工作方向、待遇、团队、公司是否令人满意），能力竞争力单列。所有新评估与重评由 LangGraph 生成不可变报告成果，并经确定性校验和业务提交成为正式评分。旧报告保留原始记录，显示为待重评；旧匹配分与吸引力分不可换算或混排。
 
 本节是正式评分与格式契约，覆盖 `_shared.md`、`oferta.md`、batch 的整体判断、平均章节分和旧五维规则。历史报告仍属于原模型，不得标为 attractiveness-v1。
 
@@ -185,7 +115,7 @@ CV as tailored.
 5. 高吸引力且条件充分核实的岗位优先申请；高潜力但未知项多的岗位优先补证。不得仅按区间下限排序；不得把旧4.0/4.5匹配分阈值搬到吸引力范围上。既有 Stage 0 门槛不变；评分完成不等于门槛通过；申请始终由用户选择启动。
 6. 保持以下二级标题及顺序：`## A. 岗位概览`、`## B. 能力竞争力`、`## C. 入职吸引力`、`## D. 薪酬与需求`、`## E. 补证问题`、`## G. 岗位真实性`、`## Risk Summary`、`## Evaluation Checklist`、`## Machine Summary`。能力映射逐项列出 JD 的实质必备与加分要求，拆开复合要求，使用 Proven/Adjacent/Gap/Unverified，并列候选证据、招聘影响及应对；不得将原型、进行中或相邻经验提升为生产证明。正文不重复逐维 rationale，只给结论与关键数字；D 只保留 JD 报价与市场基准结论；G 限两三行；Risk 使用短表。Checklist 汇总地点、雇佣、规模、工时、待遇、真实性及未解决的能力问题。
 7. Machine Summary 使用 `report_format: scoring-v2`、`scoring_model: attractiveness-v1`、`score: null`、`company`、`role`、`complete_jd: true`、`jd_source`（冻结 JD 的 source id）、`sources`、`dimensions`、`attractiveness`。sources 为 `{id, path, sha256}` 数组（路径相对仓库）；dimensions 的四个键各为 `{score, rationale, evidence: [{source, quote}]}`，引用须逐字来自冻结来源。未知项也须解释缺失信息；已知项必须有证据。attractiveness 为 `{lower, upper, coverage}`，只由确定性计算生成。报告正文必须使用相同范围，不展示一个旧式总分。
-8. 交付前运行 `node scoring-report.mjs <报告路径>...`。必须通过标题顺序、完整 JD 声明、分项范围、权重、源哈希、引文及总分复算检查，再人工逐项审核证据是否支持判定、能力映射是否覆盖 JD。机械校验不能证明语义公允。重复盲评使用同一冻结材料，保留每次原始判定并报告差异，不能用重复计算代替重复评估。
+8. LangGraph 的报告阶段在业务提交前运行 Python 确定性校验：标题顺序、完整 JD、分项范围、权重、源哈希、引文及区间复算必须通过。真实验收样本另由人工检查证据是否支持判定、能力映射是否覆盖 JD；机械校验不能证明语义公允。重复盲评使用同一冻结材料，保留每次原始判定并报告差异，不能用重复计算代替重复评估。
 
 ### Report validation and decision gate
 
@@ -217,7 +147,7 @@ CV as tailored.
 
 ### Scoring Rules — 正式联网研究（research-required-v1）
 
-状态：2026-09-11 用户批准正式启用并试运行。所有新建或主动重评的岗位报告必须执行本节，包括 evaluate/oferta、auto-pipeline、pipeline Stage 1 与 batch；定时任务进入这些评估流程时同样适用。只扫描、只展示已有 shortlist 和历史报告不触发重评。统一使用上述 attractiveness-v1 区间评分与行动规则。
+状态：2026-09-11 用户批准正式启用并试运行。LangGraph score 的所有新建或主动重评岗位报告必须执行本节，定时评分同样适用。只扫描、只展示已有评分和历史报告不触发重评。统一使用上述 attractiveness-v1 区间评分与行动规则。
 
 本节覆盖 oferta 中“JD 未披露工资就压缩 D 并跳过研究/提问”的规则。沿用每岗位最多 5 次搜索、主评估者单轮研究；批量执行时把本节随 `_custom.md` 传给每个评分者。
 
@@ -230,7 +160,7 @@ CV as tailored.
 
 ### Scored 发布与重评
 
-- 完整 JD、确定性校验和业务提交均通过后，SQLite 才保存正式评分与报告；保留 URL、城市、报告号和报告链接。apply 表示建议用户启动申请准备，verify 表示优先补证，deprioritize 表示暂缓，discard 表示已核实硬门槛失败。它们不是投递状态，也不自动提交。
+- 完整 JD、确定性校验和业务提交均通过后，SQLite 才保存正式评分与报告；保留机会 ID、URL、城市、报告成果路径和哈希。apply 表示建议用户启动申请准备，verify 表示优先补证，deprioritize 表示暂缓，discard 表示已核实硬门槛失败。它们不是投递状态，也不自动提交。
 - 评分任务先处理未评分岗位，明确重评时使用当前候选资料、规则和 JD；取得完整 JD 并核验有效性。Hermes 定时评分每次只领取一岗，使用下节的预算与重试规则。新版本通过前保留旧报告。禁止把旧数值按比例变成新分数。
 - 只读查询展示范围、覆盖率和缺失信息；旧报告待重评、校验失败报告单列，不触发搜索或重评。能力差距分析不使用吸引力作为技能权重。
 

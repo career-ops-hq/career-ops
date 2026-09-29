@@ -313,3 +313,13 @@ validator. The permitted-environment Node suite passed 178/178 tests after
 the retirement; targeted report and Python action tests also passed.
 The first sandboxed full-suite attempt only failed where Chromium or a local
 test listener lacked sandbox permission.
+
+The active scoring rules still described the retired Node prescreen and report
+validator, the Markdown pipeline as business authority, and three-worker
+score publication despite the approved one-job Hermes budget. Their workflow
+authority section now names the Python prescreen, LangGraph scan/score/apply,
+SQLite facts, explicit user selection and whole-package confirmation while
+preserving the evidence and scoring policy below it. The report rule now names
+Python deterministic validation. This source-file change invalidates all
+previous score fingerprints, including the newly checked opportunity `2`;
+`decisions` correctly returns no current action until a new score completes.
