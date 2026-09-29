@@ -565,3 +565,20 @@ retained a `jd_report` with `uncertain` prescreen; no score was due in that
 single-stage tick. The canonical store passed `PRAGMA quick_check` and still
 had zero notification deliveries. This is a clean natural scheduler execution,
 not a re-evaluation of opportunity `8`.
+
+## Current open gates (2026-09-29 19:25 +08:00)
+
+- Opportunity `8` still has its historical `prescreen_failed` business result.
+  The corrected saved-extraction LangGraph replay produced `jd_report` with
+  `uncertain` prescreen and no discard reasons. Auto-review rejected a manual
+  formal-store `scan-discovered 8 --re-evaluate` because the prior consent did
+  not clearly cover that additional CV/profile/JD transfer to
+  `https://llm.goaichat.top/v1`; a targeted authorization request is pending.
+- The restored scan job has completed one direct run, but its next natural
+  06:00 tick has not occurred. The restored score job has clean completed
+  built-in ticks at 19:00 and 19:20; the 18:40 business score completed despite
+  ambiguous Hermes execution detail. Both jobs are active and notifications
+  remain disabled.
+
+OII-338 and parent OII-333 therefore remain open. The 61-file regression gate
+and live samples prove their recorded scopes, not these outstanding checks.
