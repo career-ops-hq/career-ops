@@ -17,7 +17,7 @@ from typing import TypedDict
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from workflow.career_ops import digest as text_digest, review_approved as workflow_review_approved, score_inputs
+from workflow.career_ops import digest as text_digest, score_inputs
 from workflow.interview_context import INPUT_ROOT, load_context
 from workflow.interview_evidence import match_stories
 from workflow.interview_plan import build_preparation_plan
@@ -49,19 +49,25 @@ class InterviewState(TypedDict):
 
 
 def current_context(directory: Path, opportunity_id: str) -> dict:
-    """Ground interview work in the latest formal scan and current reviewed score."""
+    """Ground interview work in the latest formal scan and current published score."""
     context = load_context(directory, opportunity_id, input_root=INPUT_ROOT)
     scan, score = (context["results"].get(name) for name in ("scan", "score"))
-    if not scan or scan.get("outcome") != "jd_report" or not workflow_review_approved("scan", scan.get("review", {})):
-        raise ValueError("A formal reviewed scan is required for interview work")
-    if not score or score.get("outcome") != "score" or not workflow_review_approved("score", score.get("review", {})):
-        raise ValueError("A formal reviewed score is required for interview work")
+    if not scan or scan.get("outcome") != "jd_report":
+        raise ValueError("A formal scan is required for interview work")
+    if not score or score.get("outcome") != "score":
+        raise ValueError("A formal score is required for interview work")
     report, opportunity = scan["artifact"], context["opportunity"]
     if (str(report.get("opportunity_id")) != str(opportunity["id"])
             or any(report.get(key) != opportunity[key] for key in ("url", "company", "role"))):
         raise ValueError("Interview scan does not match the canonical opportunity")
     if score.get("input_hash") != text_digest(score_inputs(scan["artifact"])):
         raise ValueError("Interview score is stale for current candidate or JD inputs")
+    artifact = score["artifact"]
+    if artifact.get("report_sha256") != text_digest(artifact.get("report", "")):
+        raise ValueError("Interview score report is invalid")
+    path = Path(artifact["path"])
+    if not path.is_file() or path.read_text() != artifact["report"]:
+        raise ValueError("Interview score report changed")
     return context
 
 
@@ -427,7 +433,7 @@ def start(directory: Path, opportunity_id: str, session_key: str, kind: str, req
                     company=context["opportunity"]["company"], role=context["opportunity"]["role"],
                     jd_text=scan["jd"], cv_text=candidate["cv.md"],
                     profile_text=candidate["config/profile.yml"], report_text=score["report"],
-                    sources={"jd": "reviewed-scan", "cv": "cv.md", "profile": "config/profile.yml", "report": "reviewed-score"},
+                    sources={"jd": "published-scan", "cv": "cv.md", "profile": "config/profile.yml", "report": "published-score"},
                 )
             task = store.start(opportunity_id, session_key, kind, payload)
             task_id, status = task["task_id"], task["status"]

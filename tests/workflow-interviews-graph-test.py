@@ -143,7 +143,6 @@ bound_context = {
     },
 }
 with patch("workflow.interviews.load_context", return_value=bound_context), \
-     patch("workflow.interviews.workflow_review_approved", return_value=True), \
      patch("workflow.interviews.score_inputs", return_value="score-input"):
     try:
         current_context(Path("unused"), "7")
