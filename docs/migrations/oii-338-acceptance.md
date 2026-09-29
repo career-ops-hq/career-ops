@@ -289,3 +289,16 @@ The present JD report has no evidence-backed deadline or effort estimate, so
 both ordering inputs remain null rather than fabricated. Adding the threshold
 changes the policy fingerprint, which makes earlier canonical scores stale
 until re-evaluated. No notification or application is sent by this view.
+
+After the approved 3.5/5 profile setting, real Microsoft opportunity `2` was
+re-evaluated from its retained scan result. Task
+`6b43ec56-708d-4703-be72-62b0c1588195` completed and published report SHA-256
+`86a229f6c65cfc7c326100778211672ae450f2cf5d3c9229d9b5ccf09df1207b`.
+The current Python renderer independently re-read frozen packet, evidence and
+assessment files, passed source and citation validation, and reproduced the
+published report byte-for-byte. `decisions` returned `verify` for this current
+2.25–4.25 score with 50% coverage; earlier opportunities `1` and `3` remained
+stale without an action. SQLite `PRAGMA quick_check` was `ok`, notification
+deliveries remained zero, and both Hermes schedules remained paused. The old
+Node CLI validator requires the intentionally removed independent review JSON,
+so it is not a valid gate for this current report contract.
