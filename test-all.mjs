@@ -7351,6 +7351,7 @@ try {
     formatPipelineOffer,
     formatScanHistoryRow,
   } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } = await import(pathToFileURL(join(ROOT, 'lib/scan-history-columns.mjs')).href);
 
   // ── posting-age filter (max_posting_age_days) ──
   // Opt-in freshness gate. `now` is injected so the boundary math is deterministic.
@@ -8087,6 +8088,8 @@ try {
     title: 'Senior Engineer | Growth\n- [ ] https://evil.example/job | EvilCorp | Injected',
     company: '=ACME\\Corp\t| R&D',
     location: '@Remote\nEU',
+    requisitionId: '=R1\tDROP\nx',
+    language: '@en\n-GB',
   };
   const pipelineRow = formatPipelineOffer(hostileOffer);
   const pendingLines = pipelineRow.split('\n').filter(line => /^\s*- \[ \] https?:\/\//.test(line));
@@ -8108,20 +8111,22 @@ try {
   }
 
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
-  const historyColumns = historyRow.split('\t');
+  const history = parseScanHistoryLine(historyRow);
   if (
-    historyColumns.length === 12 && // 7 metadata + fingerprint (#1597) + postedAt + trust score/flags (#1743) + normalized_company (#2093)
-    historyColumns[8] === '' && // no postedAt on hostileOffer → empty trailing col
-    historyColumns[9] === '' && historyColumns[10] === '' && // no trust signal → empty trailing cols
-    !historyColumns.some(col => /[\r\n\t]/.test(col)) &&
-    historyColumns[0] === 'https://jobs.example.com/123|evil' &&
-    historyColumns[3].includes('- [ ] https://evil.example/job') &&
-    historyColumns[4] === "'=ACME\\Corp | R&D" &&
-    historyColumns[6] === "'@Remote EU"
+    historyRow.split('\t').length === SCAN_HISTORY_COLUMNS.length && // every declared column, empty ones included
+    !historyRow.includes('\n') && !historyRow.includes('\r') &&
+    history.posted_at === '' && // no postedAt on hostileOffer
+    history.trust_score === '' && history.trust_flags === '' && // no trust signal
+    history.url === 'https://jobs.example.com/123|evil' &&
+    history.title.includes('- [ ] https://evil.example/job') &&
+    history.company === "'=ACME\\Corp | R&D" &&
+    history.location === "'@Remote EU" &&
+    history.requisition_id === "'=R1 DROP x" &&
+    history.language === "'@en -GB"
   ) {
     pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas');
   } else {
-    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(historyColumns)}`);
+    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(history)}`);
   }
 
   // ── postedAt persistence ──
@@ -8138,15 +8143,13 @@ try {
     description: '',
     postedAt: Date.parse('2026-06-18T00:00:00Z'),
   };
-  const datedHistory = formatScanHistoryRow(datedOffer, '2026-07-09').split('\t');
-  const noDateHistory = formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09').split('\t');
+  const datedHistory = parseScanHistoryLine(formatScanHistoryRow(datedOffer, '2026-07-09'));
+  const noDateHistory = parseScanHistoryLine(formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09'));
   if (
-    datedHistory.length === 12 &&
-    datedHistory[8] === '2026-06-18' && // epoch ms → YYYY-MM-DD in the trailing column
-    datedHistory[11] === 'acme' && // normalized company key (#2093), trailing col 12
-    noDateHistory.length === 12 &&
-    noDateHistory[8] === '' && // missing postedAt → empty trailing column, never a bogus date
-    noDateHistory[11] === 'acme'
+    datedHistory.posted_at === '2026-06-18' && // epoch ms → YYYY-MM-DD
+    datedHistory.normalized_company === 'acme' && // normalized company key (#2093)
+    noDateHistory.posted_at === '' && // missing postedAt → empty, never a bogus date
+    noDateHistory.normalized_company === 'acme'
   ) {
     pass('scan-history writer appends postedAt as an ISO trailing column (empty when absent)');
   } else {
@@ -8177,13 +8180,12 @@ try {
   const flaggedOffer = { ...trustBase, trustScore: 60, trustFlags: ['missing_apply_url', 'suspicious_domain'] };
   const cleanOffer = { ...trustBase, trustScore: 100, trustFlags: [] };
   const untrustedOffer = { ...trustBase }; // no trust fields (trust_filter disabled)
-  const flaggedHist = formatScanHistoryRow(flaggedOffer, '2026-07-09').split('\t');
-  const cleanHist = formatScanHistoryRow(cleanOffer, '2026-07-09').split('\t');
+  const flaggedHist = parseScanHistoryLine(formatScanHistoryRow(flaggedOffer, '2026-07-09'));
+  const cleanHist = parseScanHistoryLine(formatScanHistoryRow(cleanOffer, '2026-07-09'));
   if (
-    flaggedHist.length === 12 &&
-    flaggedHist[9] === '60' && flaggedHist[10] === 'missing_apply_url,suspicious_domain' &&
-    flaggedHist[11] === 'acme' && // normalized company key (#2093), after the trust cols
-    cleanHist.length === 12 && cleanHist[9] === '' && cleanHist[10] === '' // score 100 → not flagged → empty
+    flaggedHist.trust_score === '60' && flaggedHist.trust_flags === 'missing_apply_url,suspicious_domain' &&
+    flaggedHist.normalized_company === 'acme' && // normalized company key (#2093)
+    cleanHist.trust_score === '' && cleanHist.trust_flags === '' // score 100 → not flagged → empty
   ) {
     pass('scan-history writer appends trust score + flags trailing columns when flagged, empty otherwise (#1743)');
   } else {
@@ -16229,13 +16231,14 @@ try {
     fail('tracker.mjs no longer writes the canonical 9-col header — BREAKING for the web reader; coordinate web/ in lockstep');
   }
 
-  // 55.2 scan-history.tsv header prefix (scan.mjs → web whats-new + first_seen map)
-  const scanSrc = readFileSync(join(ROOT, 'scan.mjs'), 'utf-8');
-  const SCAN_HISTORY_PREFIX = 'url\\tfirst_seen\\tportal\\ttitle\\tcompany\\tstatus\\tlocation';
-  if (scanSrc.includes(SCAN_HISTORY_PREFIX)) {
-    pass('scan.mjs scan-history.tsv header keeps the canonical 7-col prefix (append-only beyond it)');
+  // 55.2 scan-history.tsv header prefix (lib/scan-history-columns.mjs, the
+  // scanner's header and row order → web whats-new + first_seen map)
+  const { SCAN_HISTORY_COLUMNS: scanHistoryColumns } = await import(pathToFileURL(join(ROOT, 'lib/scan-history-columns.mjs')).href);
+  const SCAN_HISTORY_PREFIX = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation';
+  if (scanHistoryColumns.slice(0, 7).join('\t') === SCAN_HISTORY_PREFIX) {
+    pass('scan-history.tsv columns keep the canonical 7-col prefix (append-only beyond it)');
   } else {
-    fail('scan.mjs scan-history.tsv header prefix changed — BREAKING for web readers; appending new columns at the END is the additive path');
+    fail('scan-history.tsv column prefix changed — BREAKING for web readers; appending new columns at the END is the additive path');
   }
 
   // 55.3 canonical statuses (templates/states.yml → web status pills/actions)
@@ -17318,26 +17321,25 @@ try {
 console.log('\n57. Scan history — fingerprint column (#1597)');
 try {
   const { formatScanHistoryRow } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { parseScanHistoryLine } = await import(pathToFileURL(join(ROOT, 'lib/scan-history-columns.mjs')).href);
   const longJd = Array.from({ length: 40 }, (_, i) => `requirement ${i}: build reliable pipelines with observability`).join('. ');
-  const withBody = formatScanHistoryRow(
+  const withBody = parseScanHistoryLine(formatScanHistoryRow(
     { url: 'https://x.example/j/1', source: 'lever', title: 'Data Engineer', company: 'Acme', location: 'Remote', description: longJd },
     '2026-07-06',
-  );
-  const cols = withBody.split('\t');
-  if (cols.length === 12 && /^[0-9a-f]{16}$/.test(cols[7]) && cols[11] === 'acme') {
+  ));
+  if (/^[0-9a-f]{16}$/.test(withBody.fingerprint) && withBody.normalized_company === 'acme') {
     pass('formatScanHistoryRow appends a fingerprint column for described offers');
   } else {
-    fail(`formatScanHistoryRow columns: ${cols.length}, fingerprint=${JSON.stringify(cols[7])}`);
+    fail(`formatScanHistoryRow row: fingerprint=${JSON.stringify(withBody.fingerprint)}, normalized_company=${JSON.stringify(withBody.normalized_company)}`);
   }
-  const withoutBody = formatScanHistoryRow(
+  const withoutBody = parseScanHistoryLine(formatScanHistoryRow(
     { url: 'https://x.example/j/2', source: 'greenhouse', title: 'Data Engineer', company: 'Acme', location: '' },
     '2026-07-06',
-  );
-  const cols2 = withoutBody.split('\t');
-  if (cols2.length === 12 && cols2[7] === '' && cols2[11] === 'acme') {
+  ));
+  if (withoutBody.fingerprint === '' && withoutBody.normalized_company === 'acme') {
     pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
   } else {
-    fail(`formatScanHistoryRow (no body) columns: ${cols2.length}, last=${JSON.stringify(cols2[7])}`);
+    fail(`formatScanHistoryRow (no body) row: fingerprint=${JSON.stringify(withoutBody.fingerprint)}, normalized_company=${JSON.stringify(withoutBody.normalized_company)}`);
   }
 } catch (e) {
   fail(`scan-history fingerprint tests crashed: ${e.message}`);

@@ -75,6 +75,7 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
 try {
@@ -1461,6 +1462,28 @@ export function resolveDedupIncludeLocation(config = {}) {
   return config.scan_history?.dedup_include_location === true;
 }
 
+/**
+ * Read the opt-in `scan_history.dedup_include_language` switch.
+ *
+ * An employer can publish one requisition in more than one language, with the
+ * same title and location in each. The company+role key collapses those
+ * versions into whichever one the provider returned first — correct for a
+ * candidate who reads every language, wrong for one who only applies to
+ * postings in some of them: the survivor may be the version they discard.
+ * With the switch on, two postings whose languages are both known and differ
+ * are not duplicates. An unknown language on either side keeps the default
+ * answer.
+ *
+ * Strict boolean `true` only, for the same reason as
+ * {@link resolveDedupIncludeLocation}.
+ *
+ * @param {object} [config] - Parsed portals.yml.
+ * @returns {boolean} Whether differing posting languages keep postings apart.
+ */
+export function resolveDedupIncludeLanguage(config = {}) {
+  return config.scan_history?.dedup_include_language === true;
+}
+
 // Query params that carry no identity information for a job posting — safe to
 // strip when computing the dedup key. Deliberately an allowlist rather than
 // "strip everything": several ATSes key the posting off a query param (e.g.
@@ -1725,7 +1748,8 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
+    const { url, first_seen: firstSeen, portal, status: rawStatus } = parseScanHistoryLine(line);
+    const status = rawStatus || 'added';
     if (!url) continue;
     // Not pinned and not a recheck candidate either: the row records a config
     // rejection, and the URL was never queued, so counting it as "eligible
@@ -2190,9 +2214,9 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 }
 
 /**
- * Marker for a seeded company+role row whose requisition is unknown. A single
- * such row keeps the key a plain duplicate, exactly as before requisitions were
- * read at all.
+ * Marker for a seeded company+role row whose requisition is unknown (in the
+ * language sets: whose language is unknown). A single such row keeps the key a
+ * plain duplicate, exactly as if neither signal were read at all.
  */
 export const ANY_REQUISITION = '*';
 
@@ -2205,6 +2229,10 @@ export const ANY_REQUISITION = '*';
  * departments), and the second was dropped as a duplicate of the first. The
  * requisition is the one signal that tells them apart. It is read from:
  *
+ * - a requisition id the provider read from a dedicated ATS field
+ *   (`Job.requisitionId`, e.g. SmartRecruiters `refNumber`), or the same value
+ *   recorded in scan-history's `requisition_id` column. Taken verbatim (case
+ *   folded), with no parsing: it is the employer's own identifier, not text;
  * - a Workday URL, via `workdayDedupKey` (the same parse the provider uses for
  *   cross-site dedupe, #3439, including its `-N` repost-suffix stripping);
  * - labelled free text (tracker Notes, a posting title) via the tracker's own
@@ -2244,13 +2272,18 @@ export const ANY_REQUISITION = '*';
  * text (`Req #25919`) may omit a prefix, so it supplies no proof of a distinct
  * requisition. A numeric ID extracted from a Workday URL is authoritative.
  *
- * @param {{url?: unknown, text?: unknown}} [source] - Posting URL and/or free text.
+ * @param {{url?: unknown, text?: unknown, requisitionId?: unknown}} [source] -
+ *   Posting URL, free text, and/or a provider-supplied requisition id. The id
+ *   wins when present.
  * @returns {string[]} Canonical requisition IDs, as-labelled form first.
  */
-export function requisitionIdsForDedup({ url, text } = {}) {
-  const workdayKey = typeof url === 'string' ? workdayDedupKey({ url }) : null;
+export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
+  const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   let raws;
-  if (workdayKey) {
+  if (suppliedId) {
+    raws = [suppliedId];
+  } else if (workdayKey) {
     // `workday:{hostname}:{reqId}` — a hostname has no colon, so the ID is
     // everything after the second one.
     raws = [workdayKey.split(':').slice(2).join(':')];
@@ -2305,12 +2338,58 @@ export function requisitionIdForDedup(source) {
  * @returns {boolean}
  */
 export function isDistinctRequisition(seededRequisitions, candidateRequisitions) {
-  const forms = toRequisitionForms(candidateRequisitions);
+  return unseenOnEveryRow(seededRequisitions, candidateRequisitions);
+}
+
+/**
+ * The posting language as dedup forms, or none when the source did not say.
+ *
+ * A value that parses as a language tag (`_` read as `-`) is reduced by
+ * `Intl.Locale` to its canonical language subtag: the region and script go
+ * (`en-GB`, `en_GLOBAL`, `zh-Hant-TW` → `en`, `en`, `zh`) — regional variants of
+ * one language are the same text for any reader — and legacy or three-letter
+ * codes map to the current two-letter one (`deu` → `de`, `iw` → `he`). Anything
+ * that doesn't parse, such as `English (US)`, is compared whole, case-folded; a
+ * name like `German` parses as a (non-standard) tag and comes back lowercased.
+ * The two postings being compared come from one employer, and almost always
+ * one provider, so the value only has to be consistent within a source, not
+ * standard across sources.
+ *
+ * @param {unknown} language - `Job.language`, or a scan-history `language` cell.
+ * @returns {string[]} Zero or one form.
+ */
+export function languageFormsForDedup(language) {
+  if (typeof language !== 'string') return [];
+  const value = language.trim();
+  if (!value) return [];
+  try {
+    return [new Intl.Locale(value.replace(/_/g, '-')).language];
+  } catch {
+    return [value.toLowerCase()];
+  }
+}
+
+/**
+ * Whether a candidate that matched a seen company+role key is nevertheless
+ * another language version of it. Same shape as {@link isDistinctRequisition}:
+ * true only when every seeded row for the key named its language and none of
+ * them is the candidate's. A row with no known language keeps the duplicate.
+ *
+ * @param {Set<string>|undefined} seededLanguages - Languages seen for matching keys.
+ * @param {string[]} candidateLanguages - From {@link languageFormsForDedup}.
+ * @returns {boolean}
+ */
+export function isDistinctLanguage(seededLanguages, candidateLanguages) {
+  return unseenOnEveryRow(seededLanguages, candidateLanguages);
+}
+
+function unseenOnEveryRow(seeded, candidate) {
+  const forms = toRequisitionForms(candidate);
   return forms.length > 0
-    && seededRequisitions instanceof Set
-    && seededRequisitions.size > 0
-    && !seededRequisitions.has(ANY_REQUISITION)
-    && forms.every(form => !seededRequisitions.has(form));
+    && seeded instanceof Set
+    && seeded.size > 0
+    && !seeded.has(ANY_REQUISITION)
+    && forms.every(form => !seeded.has(form));
 }
 
 function toRequisitionForms(requisitions) {
@@ -2318,25 +2397,33 @@ function toRequisitionForms(requisitions) {
   return requisitions ? [requisitions] : [];
 }
 
-/** Match only the requisition sets belonging to keys that match this location.
- * A locationless candidate overlaps every located row, but a located candidate
- * overlaps only its exact key and genuinely locationless wildcard rows.
+/** Match only the requisition and language sets belonging to keys that match
+ * this location. A locationless candidate overlaps every located row, but a
+ * located candidate overlaps only its exact key and genuinely locationless
+ * wildcard rows. A seen key stops being a duplicate when the candidate is a
+ * different requisition OR (with language-aware dedup, i.e. a non-empty
+ * `candidateLanguages`) a different language version.
  */
-export function matchesSeenCompanyRole({ key, baseKey, seen, requisitions, locatedRequisitions }, candidate) {
+export function matchesSeenCompanyRole({ key, baseKey, seen, requisitions, locatedRequisitions, languages = new Map(), locatedLanguages = new Map() }, candidate, candidateLanguages = []) {
   if (key === null) return false;
-  if (seen.has(key) && !isDistinctRequisition(requisitions.get(key), candidate)) return true;
+  const distinct = (requisitionSets, languageSets, k) =>
+    isDistinctRequisition(requisitionSets.get(k), candidate)
+    || isDistinctLanguage(languageSets.get(k), candidateLanguages);
+  if (seen.has(key) && !distinct(requisitions, languages, key)) return true;
   if (key !== baseKey && seen.has(baseKey)
-    && !isDistinctRequisition(requisitions.get(baseKey), candidate)) return true;
+    && !distinct(requisitions, languages, baseKey)) return true;
   return key === baseKey && locatedRequisitions.has(baseKey)
-    && !isDistinctRequisition(locatedRequisitions.get(baseKey), candidate);
+    && !distinct(locatedRequisitions, locatedLanguages, baseKey);
 }
 
-function recordRequisition(requisitionsByBase, baseKey, requisitions) {
-  let seen = requisitionsByBase.get(baseKey);
-  if (!seen) requisitionsByBase.set(baseKey, (seen = new Set()));
-  const forms = toRequisitionForms(requisitions);
-  if (forms.length === 0) seen.add(ANY_REQUISITION);
-  for (const form of forms) seen.add(form);
+/** Record a row's forms (requisitions or languages) under a key, or the
+ * {@link ANY_REQUISITION} marker when the row named none. */
+function recordForms(formsByKey, key, forms) {
+  let seen = formsByKey.get(key);
+  if (!seen) formsByKey.set(key, (seen = new Set()));
+  const list = toRequisitionForms(forms);
+  if (list.length === 0) seen.add(ANY_REQUISITION);
+  for (const form of list) seen.add(form);
 }
 
 /**
@@ -2382,13 +2469,24 @@ function recordRequisition(requisitionsByBase, baseKey, requisitions) {
  *   {@link ANY_REQUISITION} for a row that named none) — see
  *   {@link isDistinctRequisition}. `locatedRequisitionsByBase` separately
  *   aggregates located rows for matching a locationless candidate; it never
- *   acts as a bare wildcard against a located candidate.
+ *   acts as a bare wildcard against a located candidate. `languagesByBase` and
+ *   `locatedLanguagesByBase` do the same for posting languages (see
+ *   {@link isDistinctLanguage}).
+ *
+ * Requisition id and language are recorded per posting URL in scan-history
+ * (`requisition_id`, `language`). A tracker or pipeline row carries neither, so
+ * it inherits them from the scan-history row with the same URL; a row whose URL
+ * scan-history never recorded them for stays unknown.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null } = {}) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
   const { applicationsText = '', scanHistoryText = '', pipelineText = '' } = sources;
   const seen = new Set();
-  const add = (company, role, location, requisition = null) => {
+  const postingAttributes = collectPostingAttributes(scanHistoryText);
+  const attributesFor = (url) => (typeof url === 'string' && url
+    ? postingAttributes.get(normalizeUrlForDedup(url.trim())) ?? {}
+    : {});
+  const add = (company, role, location, requisition = null, language = null) => {
     const c = String(company ?? '').trim();
     const r = String(role ?? '').trim();
     if (!c || !r) return;
@@ -2408,11 +2506,17 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       if (key !== base) locatedBases.add(base);
     }
     if (requisitionsByBase) {
-      recordRequisition(requisitionsByBase, key, requisition);
+      recordForms(requisitionsByBase, key, requisition);
+    }
+    if (languagesByBase) {
+      recordForms(languagesByBase, key, language);
     }
     const base = companyRoleDedupKey(c, r, canonicalize);
     if (locatedRequisitionsByBase && key !== base) {
-      recordRequisition(locatedRequisitionsByBase, base, requisition);
+      recordForms(locatedRequisitionsByBase, base, requisition);
+    }
+    if (locatedLanguagesByBase && key !== base) {
+      recordForms(locatedLanguagesByBase, base, language);
     }
   };
 
@@ -2429,19 +2533,26 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     for (const line of lines) {
       const row = parseTrackerRow(line, colmap);
       if (!row) continue;
-      add(row.company, row.role, row.location, requisitionIdsForDedup({ url: row.url, text: row.notes }));
+      const attributes = attributesFor(row.url);
+      add(row.company, row.role, row.location,
+        requisitionIdsForDedup({ url: row.url, text: row.notes, requisitionId: attributes.requisitionId }),
+        languageFormsForDedup(attributes.language));
     }
   }
 
-  // scan-history.tsv — url, first_seen, portal, title, company, status, location.
-  // This is the source that carries a location for every scanned posting, and so
-  // the one that makes the opt-in key discriminate between two cities of one role.
+  // scan-history.tsv — url, first_seen, portal, title, company, status, location,
+  // and (trailing) requisition_id + language. This is the source that carries a
+  // location for every scanned posting, and so the one that makes the opt-in key
+  // discriminate between two cities of one role.
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, , title, company, status = 'added', location] = line.split('\t');
-    if (!url) continue;
+    const row = parseScanHistoryLine(line);
+    const status = row.status || 'added';
+    if (!row.url) continue;
     if (status !== 'added') continue;
-    if (!shouldDedupScanHistoryRow({ firstSeen, status }, policy)) continue;
-    add(company, title, location, requisitionIdsForDedup({ url }));
+    if (!shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) continue;
+    add(row.company, row.title, row.location,
+      requisitionIdsForDedup({ url: row.url, requisitionId: row.requisition_id }),
+      languageFormsForDedup(row.language));
   }
 
   // pipeline.md — company/title are the two cells after the URL cell, plus
@@ -2452,10 +2563,39 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   // wrong cells, so the seen-set keyed on garbage.
   for (const line of pipelineText.split('\n')) {
     const pair = extractPipelineCompanyRole(line);
-    if (pair) add(pair.company, pair.role, pair.location, requisitionIdsForDedup({ url: pair.url }));
+    if (!pair) continue;
+    const attributes = attributesFor(pair.url);
+    add(pair.company, pair.role, pair.location,
+      requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId }),
+      languageFormsForDedup(attributes.language));
   }
 
   return seen;
+}
+
+/**
+ * Requisition id and language per posting URL, from every scan-history row that
+ * recorded them (whatever its status: these describe the posting, not whether it
+ * was surfaced). Keyed by {@link normalizeUrlForDedup}, the same form the URL
+ * dedup uses, so a tracker or pipeline row spelling the URL differently still
+ * finds its posting.
+ *
+ * @param {string} scanHistoryText - Full scan-history.tsv contents.
+ * @returns {Map<string, {requisitionId?: string, language?: string}>}
+ */
+function collectPostingAttributes(scanHistoryText) {
+  const attributes = new Map();
+  for (const line of scanHistoryText.split('\n').slice(1)) {
+    const row = parseScanHistoryLine(line);
+    const requisitionId = row.requisition_id.trim();
+    const language = row.language.trim();
+    if (!row.url || (!requisitionId && !language)) continue;
+    attributes.set(normalizeUrlForDedup(row.url.trim()), {
+      ...(requisitionId ? { requisitionId } : {}),
+      ...(language ? { language } : {}),
+    });
+  }
+  return attributes;
 }
 
 function readIfExists(filePath) {
@@ -2618,40 +2758,41 @@ function postedAtIsoDate(postedAt) {
   return new Date(postedAt).toISOString().slice(0, 10);
 }
 export function formatScanHistoryRow(offer, date, status = 'added') {
-  return [
-    normalizeScanUrl(offer.url),
-    date,
-    offer.source,
-    offer.title,
-    offer.company,
+  const record = {
+    url: normalizeScanUrl(offer.url),
+    first_seen: date,
+    portal: offer.source,
+    title: offer.title,
+    company: offer.company,
     status,
-    offer.location || '',
+    location: offer.location || '',
     // JD-content fingerprint (#1597): 16 hex chars when the provider's list
     // API shipped a usable description, '' otherwise. Lets later scans flag
     // the same body re-posted under a different company (agency cross-listing)
-    // without storing the body. All readers tolerate the extra column.
-    offer.fingerprint ?? fingerprintText(offer.description),
-    // New trailing column: posting date. Existing readers index by position up to
-    // col 7, so appending col 8 is backward-compatible.
-    postedAtIsoDate(offer.postedAt),
+    // without storing the body.
+    fingerprint: offer.fingerprint ?? fingerprintText(offer.description),
+    posted_at: postedAtIsoDate(offer.postedAt),
     // Trust/legitimacy signal (#1743): score (only when the scanner flagged the
-    // posting, i.e. < 100) + comma-joined flags. Trailing cols 9-10, so existing
-    // index-based readers (fingerprint@7, postedAt@8) are unaffected; a clean
-    // posting or a scan without trust_filter leaves both empty.
-    trustIsFlagged(offer) ? String(offer.trustScore) : '',
-    trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
+    // posting, i.e. < 100) + comma-joined flags; a clean posting or a scan
+    // without trust_filter leaves both empty.
+    trust_score: trustIsFlagged(offer) ? String(offer.trustScore) : '',
+    trust_flags: trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
     // Normalized company key (#2093): the canonical company form shared across
     // the tracker (normalizeCompanyName — lowercased, punctuation/whitespace
     // folded, trailing legal-entity suffixes stripped) so "Acme Inc.",
     // "Acme, Inc." and "ACME  Inc" all key to `acme`. Stored at write time so
     // repost/name-matching never has to route through executing a script, and
-    // the raw display company in col 5 stays faithful to what the provider
-    // returned. Trailing col 12 — purely additive: index-based readers
-    // (fingerprint@7, postedAt@8, trust@9-10, and the web parser's first 7
-    // cols) are unaffected, and older rows that lack it are tolerated by
-    // consumers normalizing the raw name on the fly.
-    normalizeCompanyName(offer.company || ''),
-  ].map(sanitizeTsvField).join('\t');
+    // the raw display `company` stays faithful to what the provider returned.
+    normalized_company: normalizeCompanyName(offer.company || ''),
+    // Requisition id and posting language, as the provider reported them
+    // (Job.requisitionId / Job.language); '' when it didn't. They let
+    // company+role dedup tell apart two requisitions with one title, and two
+    // language versions of one requisition, across runs — see
+    // collectSeenCompanyRoles.
+    requisition_id: typeof offer.requisitionId === 'string' ? offer.requisitionId : '',
+    language: typeof offer.language === 'string' ? offer.language : '',
+  };
+  return SCAN_HISTORY_COLUMNS.map((name) => sanitizeTsvField(record[name])).join('\t');
 }
 
 /**
@@ -2665,19 +2806,18 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
 export function collectFingerprintHistory(scanHistoryText = '') {
   const rows = [];
   for (const line of scanHistoryText.split('\n')) {
-    const cols = line.split('\t');
-    // Skip the header row. Older 7-col headers fall out of the `cols.length < 8`
-    // guard below on their own, but the 12-col header names col 7 `fingerprint`
-    // (non-empty), so it would otherwise pass that guard and be read as data.
-    // Real rows always carry a URL in col 0, never the literal `url`.
-    if (cols[0] === 'url') continue;
-    if (cols.length < 8 || !cols[7].trim()) continue;
+    const row = parseScanHistoryLine(line);
+    // Skip the header row: a header that names the fingerprint column carries
+    // the non-empty word `fingerprint` there and would otherwise be read as
+    // data. Real rows always carry a URL, never the literal `url`.
+    if (row.url === 'url') continue;
+    if (!row.fingerprint.trim()) continue;
     rows.push({
-      url: (cols[0] || '').trim(),
-      dateStr: (cols[1] || '').trim(),
-      title: (cols[3] || '').trim(),
-      company: (cols[4] || '').trim(),
-      fingerprint: cols[7].trim(),
+      url: row.url.trim(),
+      dateStr: row.first_seen.trim(),
+      title: row.title.trim(),
+      company: row.company.trim(),
+      fingerprint: row.fingerprint.trim(),
     });
   }
   return rows;
@@ -2709,7 +2849,7 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
  *   Scan-history recheck policy, shared by the URL and company+role sets.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer for the role keys.
- * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, seenCompanyRoleRequisitions: Map<string, Set<string>>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
+ * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, seenCompanyRoleRequisitions: Map<string, Set<string>>, locatedRequisitionsByBase: Map<string, Set<string>>, seenCompanyRoleLanguages: Map<string, Set<string>>, locatedLanguagesByBase: Map<string, Set<string>>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
  */
 // Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
 // paths for a caller with its own lane or a test with a fixture.
@@ -2730,9 +2870,18 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   // Only locationless candidates consult the latter.
   const seenCompanyRoleRequisitions = new Map();
   const locatedRequisitionsByBase = new Map();
-  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases, requisitionsByBase: seenCompanyRoleRequisitions, locatedRequisitionsByBase });
+  const seenCompanyRoleLanguages = new Map();
+  const locatedLanguagesByBase = new Map();
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, {
+    includeLocation,
+    locatedBases: seenCompanyRoleBases,
+    requisitionsByBase: seenCompanyRoleRequisitions,
+    locatedRequisitionsByBase,
+    languagesByBase: seenCompanyRoleLanguages,
+    locatedLanguagesByBase,
+  });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
-  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, fingerprintHistory };
+  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -2802,19 +2951,18 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 // a malformed line quietly.
 export async function appendToScanHistory(offers, date, status = 'added') {
   await withPipelineLock(SCAN_HISTORY_PATH, () => {
-    // Ensure file + header exist. The header names every column the row writer
-    // (formatScanHistoryRow) emits, in the same order: the original 7 positional
-    // cols (url…location) plus the append-only trailing cols added since —
-    // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
-    // normalized_company (11). Written ONLY on fresh-file creation; existing files
-    // (including headerless legacy files and older 7-col-header files) are never
-    // rewritten. All readers either skip line 0 unconditionally, detect the header
-    // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
-    // backward-compatible. `status` is parameterized so callers can record verify
-    // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
+    // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
+    // list the row writer (formatScanHistoryRow) emits in order. Written ONLY
+    // on fresh-file creation; existing files (including headerless legacy files
+    // and files with an older, shorter header) are never rewritten. All readers
+    // either skip line 0 unconditionally, detect the header by its `url\t`
+    // prefix, or skip non-URL col-0 rows, so widening it stays
+    // backward-compatible. `status` is parameterized so callers can record
+    // verify outcomes (`skipped_expired`, etc.) without the legacy `(expired)`
+    // suffix.
     if (!existsSync(SCAN_HISTORY_PATH)) {
       mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      atomicWriteFile(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n');
+      atomicWriteFile(SCAN_HISTORY_PATH, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
     }
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
@@ -3523,11 +3671,14 @@ async function main() {
   const historyPolicy = scanHistoryPolicy(config);
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
   const dedupIncludeLocation = resolveDedupIncludeLocation(config);
+  const dedupIncludeLanguage = resolveDedupIncludeLanguage(config);
   const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany, { includeLocation: dedupIncludeLocation });
   const seenUrls = dedupSnapshot.seen;
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
   const seenCompanyRoleRequisitions = dedupSnapshot.seenCompanyRoleRequisitions ?? new Map();
   const locatedRequisitionsByBase = dedupSnapshot.locatedRequisitionsByBase ?? new Map();
+  const seenCompanyRoleLanguages = dedupSnapshot.seenCompanyRoleLanguages ?? new Map();
+  const locatedLanguagesByBase = dedupSnapshot.locatedLanguagesByBase ?? new Map();
 
   // 5. Fetch from each target
   // LOCAL day. This one value does two things that both care which day it is:
@@ -3726,9 +3877,12 @@ async function main() {
           : (dedupIncludeLocation
             ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
             : baseKey);
-        const requisition = requisitionIdsForDedup({ url: job.url, text: job.title });
+        const requisition = requisitionIdsForDedup({ url: job.url, text: job.title, requisitionId: job.requisitionId });
+        const language = languageFormsForDedup(job.language);
         if (matchesSeenCompanyRole({ key, baseKey, seen: seenCompanyRoles,
-          requisitions: seenCompanyRoleRequisitions, locatedRequisitions: locatedRequisitionsByBase }, requisition)) {
+          requisitions: seenCompanyRoleRequisitions, locatedRequisitions: locatedRequisitionsByBase,
+          languages: seenCompanyRoleLanguages, locatedLanguages: locatedLanguagesByBase },
+        requisition, dedupIncludeLanguage ? language : [])) {
           totalDupes++;
           continue;
         }
@@ -3748,8 +3902,12 @@ async function main() {
         seenUrls.add(dedupUrl);
         if (key !== null) {
           seenCompanyRoles.add(key);
-          recordRequisition(seenCompanyRoleRequisitions, key, requisition);
-          if (key !== baseKey) recordRequisition(locatedRequisitionsByBase, baseKey, requisition);
+          recordForms(seenCompanyRoleRequisitions, key, requisition);
+          recordForms(seenCompanyRoleLanguages, key, language);
+          if (key !== baseKey) {
+            recordForms(locatedRequisitionsByBase, baseKey, requisition);
+            recordForms(locatedLanguagesByBase, baseKey, language);
+          }
         }
         // Tag with the company's careers domain so verify can offer a 404/410
         // rediscovery fallback. A null domain (no careers_url) marks the offer
