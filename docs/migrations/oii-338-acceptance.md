@@ -323,3 +323,10 @@ preserving the evidence and scoring policy below it. The report rule now names
 Python deterministic validation. This source-file change invalidates all
 previous score fingerprints, including the newly checked opportunity `2`;
 `decisions` correctly returns no current action until a new score completes.
+
+The unused Node `prescreen.mjs` CLI was also retired after verifying the Python
+Stage 0 placeholder and LangGraph scan prescreen rejection/recovery tests.
+Its CLI-only Node cache test exited with it; the Node provider and retained
+historical baseline suite passed 177/177 tests in the permitted environment.
+The legacy Node prescreen helper remains only for differential fixtures, not
+as a runtime entrypoint.
