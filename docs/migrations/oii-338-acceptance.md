@@ -610,8 +610,14 @@ remains recorded as failed; the later manual resume supplied the business
 recovery evidence.
 All 61 `tests/workflow-*-test.py` files passed again after this recovery fix
 on 2026-09-29 (zero failures).
+The next built-in score tick at 20:00 (`46548582b1a1409a93877767123dbcee`)
+completed under the fixed code. Its single stage scanned opportunity `10`
+through LangGraph to a retained active `jd_report` with `uncertain`
+prescreen; no score was due in that tick. The task and result both completed,
+the canonical store passed `PRAGMA quick_check`, and notification deliveries
+remained zero.
 
-## Current open gates (2026-09-29 19:53 +08:00)
+## Current open gates (2026-09-29 20:02 +08:00)
 
 - Opportunity `8` still has its historical `prescreen_failed` business result.
   The corrected saved-extraction LangGraph replay produced `jd_report` with
@@ -621,9 +627,9 @@ on 2026-09-29 (zero failures).
   `https://llm.goaichat.top/v1`; a targeted authorization request is pending.
 - The restored scan job has completed one direct run, but its next natural
   06:00 tick has not occurred. The restored score job has clean completed
-  built-in ticks at 19:00 and 19:20; the 19:40 tick failed but its original
-  score task recovered to a validated business commit. Both jobs are active
-  and notifications remain disabled.
+  built-in ticks at 19:00, 19:20 and 20:00; the 19:40 tick failed but its
+  original score task recovered to a validated business commit. Both jobs are
+  active and notifications remain disabled.
 
 OII-338 and parent OII-333 therefore remain open. The 61-file regression gate
 and live samples prove their recorded scopes, not these outstanding checks.
