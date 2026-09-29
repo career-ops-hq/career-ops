@@ -1,0 +1,14 @@
+[
+  {
+    "url": "https://boards.greenhouse.io/example/jobs/1234",
+    "stdout": "\n── Greenhouse · example · job 1234 ────────────────────\n\n  first_name        Alice\n  last_name         Example\n  email             alice@example.invalid\n  phone             +1 555 0100\n  resume            resume.pdf  ← attach this file\n  cover_letter      9 words — I built documented workflows. I can explain the evidence.…\n  linkedin_profile  https://example.invalid/alice\n  website           https://portfolio.invalid\n\n  PDF     resume.pdf (2.0 KB)\n  Cover   cover.txt (9 words)\n\n── Next step ──────────────────────────────────────\n  Open:   https://boards.greenhouse.io/example/jobs/1234\n  Fill the form using the values above, attach the PDF, then submit.\n\n"
+  },
+  {
+    "url": "https://jobs.ashbyhq.com/example/role-1",
+    "stdout": "\n── Ashby · example · job role-1 ────────────────────\n\n  firstName    Alice\n  lastName     Example\n  email        alice@example.invalid\n  phone        +1 555 0100\n  resume       resume.pdf  ← attach this file\n  coverLetter  (9 words — paste from cover file)\n  linkedInUrl  https://example.invalid/alice\n\n  PDF     resume.pdf (2.0 KB)\n  Cover   cover.txt (9 words)\n\n── Next step ──────────────────────────────────────\n  Open:   https://jobs.ashbyhq.com/example/role-1\n  Fill the form using the values above, attach the PDF, then submit.\n\n"
+  },
+  {
+    "url": "https://jobs.lever.co/example/role-1",
+    "stdout": "\n── Lever · example · job role-1 ────────────────────\n\n  name             Alice Example\n  email            alice@example.invalid\n  phone            +1 555 0100\n  resume           resume.pdf  ← attach this file\n  comments         (9 words — paste from cover file)\n  urls[LinkedIn]   https://example.invalid/alice\n  urls[Portfolio]  https://portfolio.invalid\n\n  PDF     resume.pdf (2.0 KB)\n  Cover   cover.txt (9 words)\n\n── Next step ──────────────────────────────────────\n  Open:   https://jobs.lever.co/example/role-1\n  Fill the form using the values above, attach the PDF, then submit.\n\n"
+  }
+]
