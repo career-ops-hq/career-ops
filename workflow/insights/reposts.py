@@ -25,17 +25,17 @@ def title_key(title: str) -> str:
     return " ".join(sorted(set(words))) if words else title.strip().lower()
 
 
-def aggregator_keys(portals: Path) -> tuple[set[str], bool]:
-    """Read the current collector's explicit aggregator flags."""
+def aggregator_keys(portals: Path) -> tuple[dict[str, str], bool]:
+    """Keep flagged aggregator keys and their display names."""
     if not portals.is_file():
-        return set(), False
+        return {}, False
     try:
         data = yaml.safe_load(portals.read_text()) or {}
     except (OSError, yaml.YAMLError):
-        return set(), False
+        return {}, False
     if not isinstance(data, dict):
-        return set(), False
-    keys = set()
+        return {}, False
+    keys = {}
     for section in ("tracked_companies", "job_boards"):
         entries = data.get(section)
         if not isinstance(entries, list):
@@ -44,7 +44,7 @@ def aggregator_keys(portals: Path) -> tuple[set[str], bool]:
             if isinstance(entry, dict) and entry.get("aggregator") is True and isinstance(entry.get("name"), str):
                 name = entry["name"].strip()
                 if name:
-                    keys.add(normalize_company(name) or name.lower())
+                    keys[normalize_company(name) or name.lower()] = name
     return keys, True
 
 
@@ -114,7 +114,8 @@ def repost_view(db: sqlite3.Connection, portals: Path, *, window_days: int = 90,
         return {"status": "source_missing", "source": "scan_observations", "clusters": None}
     rows = [dict(row) for row in db.execute("SELECT url,company,title,observed_on FROM scan_observations ORDER BY observed_on,id")]
     aggregators, configured = aggregator_keys(portals)
-    clusters = detect_reposts(rows, window_days=window_days, min_span_days=min_span_days, aggregators=aggregators)
+    clusters = detect_reposts(rows, window_days=window_days, min_span_days=min_span_days,
+                              aggregators=set(aggregators))
     return {"status": "observed", "source": "scan_observations", "observations": len(rows),
             "aggregator_config_available": configured, "aggregators_skipped": len(aggregators),
             "window_days": window_days, "min_span_days": min_span_days, "clusters": clusters}

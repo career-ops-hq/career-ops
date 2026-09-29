@@ -22,7 +22,9 @@ accepts compact and ISO week dates and could admit false repost clusters.
 Node company cards combine application history, repost clusters and explicitly
 flagged aggregator boards independently. Python keeps the scan-side cards and
 single-company fallback when application tables are absent, while reporting
-those missing tables instead of inventing responsiveness facts.
+those missing tables instead of inventing responsiveness facts. Flagged
+aggregators retain their original display names in cards while normalized keys
+drive repost exclusion.
 
 The 2026-09-25 OII-341 decision removes stored job contacts, so the older
 OII-314 contact export requirement no longer applies. Independent interview

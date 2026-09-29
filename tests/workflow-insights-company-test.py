@@ -14,12 +14,13 @@ from workflow.insights.company import company_view, company_signals
 
 with tempfile.TemporaryDirectory() as temp:
     portals = Path(temp) / "portals.yml"
-    portals.write_text("job_boards:\n  - name: Board\n    aggregator: true\n")
+    portals.write_text("job_boards:\n  - name: Board\n    aggregator: true\n  - name: Joinup.ch\n    aggregator: true\n")
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     missing = company_view(db, portals)
     assert missing["status"] == "source_missing"
     assert missing["companies"][0]["postingChurn"]["label"] == "no-scan-data"
+    assert any(card["company"] == "Joinup.ch" for card in missing["companies"])
     assert company_view(db, portals, company="Unknown")["companies"][0]["responsiveness"]["label"] == "no-history"
     scan_only = sqlite3.connect(":memory:")
     scan_only.row_factory = sqlite3.Row

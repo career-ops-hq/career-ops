@@ -119,7 +119,7 @@ def company_view(db: sqlite3.Connection, portals: Path, *, today: date | None = 
         current = card(cluster["company"])
         if current is not None:
             current["postingChurn"]["clusters"].append({key: cluster[key] for key in ("role", "repostCount", "daysSpan", "lastSeen")})
-    for aggregator in aggregators:
+    for aggregator in aggregators.values():
         card(aggregator)
     key = normalize_company(company) if company else None
     if company and key not in cards:
