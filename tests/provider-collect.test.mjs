@@ -7,6 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { collect } from '../providers/_collect.mjs';
+import { normalizeDiscoveryOffer } from '../src/discovery/ingest.mjs';
+
+assert.equal(normalizeDiscoveryOffer({ description: 'Listing preview', scan_jd: { text: 'Captured full JD' } }).description, 'Captured full JD');
 
 const providers = new Map([
   ['fixture', { id: 'fixture', async fetch(target, context) {

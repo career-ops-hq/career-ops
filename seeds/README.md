@@ -1,6 +1,6 @@
 # seeds/ — VC Portfolio Seed Fetchers
 
-A complementary discovery path for startup job-seekers: pull a **public VC portfolio company list** and probe each company's ATS for openings, feeding results into the same pipeline as tracked companies in `portals.yml`.
+A complementary discovery path for startup job-seekers: pull a **public VC portfolio company list** and probe each company's ATS for openings, feeding results into the same SQLite opportunity store as tracked companies in `portals.yml`.
 
 ## What this does
 
@@ -11,31 +11,25 @@ Flow:
 VC portfolio API/page
     ↓ seeds/vc-portfolios.mjs
 SeedCompany[]
-    ↓ toPortalEntry()
-PortalEntry (careers_url set to best-guess ATS URL)
-    ↓ provider.detect() (same as portals.yml companies)
+    ↓ Python seed validation and board selection
 ATS provider fetches jobs
-    ↓ title_filter / location_filter / dedup
-data/pipeline.md
+    ↓ Python title, location, content and dedup decisions
+data/opportunities.db
 ```
 
 ## Usage
 
-### Via the unified scan command (recommended)
+### Via the Python workflow
 
 ```bash
 # Seed from Y Combinator portfolio, last 7 days
-node scan.mjs global --seeds yc --since 7
+workflow/.venv/bin/python -m workflow.career_ops global --seeds yc --since 7
 
 # Seed from both YC and a16z, dry-run preview
-node scan.mjs global --seeds yc,a16z --dry-run
+workflow/.venv/bin/python -m workflow.career_ops global --seeds yc,a16z --dry-run
 
 # Combine seeds + regular ATS sources
-node scan.mjs global --seeds yc --ats greenhouse,lever --since 5
-
-# npm shortcuts
-npm run scan:seeds   # yc + a16z
-npm run scan:yc      # YC only
+workflow/.venv/bin/python -m workflow.career_ops global --seeds yc --ats greenhouse,lever --since 5
 ```
 
 ### Programmatic

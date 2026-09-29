@@ -302,3 +302,14 @@ stale without an action. SQLite `PRAGMA quick_check` was `ok`, notification
 deliveries remained zero, and both Hermes schedules remained paused. The old
 Node CLI validator requires the intentionally removed independent review JSON,
 so it is not a valid gate for this current report contract.
+
+The obsolete `scan.mjs` Python relay and `scoring-decisions.mjs` shortlist CLI
+have been retired. Their wrapper-only tests were removed; a Python subprocess
+test now checks discovery help, unknown and malformed flags, and the empty
+global JSON route. The retained Node provider normalization assertion moved
+to the provider contract test. `scoring-report.mjs` and its validation tests
+remain because the historical SQLite migration script still imports that
+validator. The permitted-environment Node suite passed 178/178 tests after
+the retirement; targeted report and Python action tests also passed.
+The first sandboxed full-suite attempt only failed where Chromium or a local
+test listener lacked sandbox permission.

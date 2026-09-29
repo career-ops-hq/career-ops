@@ -1,12 +1,11 @@
 /** Exercise scoring arithmetic and reject malformed, unsupported or inconsistent reports. */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { dump } from 'js-yaml';
 import { calculateAttractiveness, SCORING_HEADINGS, scoreLabel, validateReport, validateReviewedReport, validateResearch } from '../scoring-report.mjs';
-import { readShortlist } from '../scoring-decisions.mjs';
 import { looksLikeScoreCell, parseScalarScore } from '../tracker-parse.mjs';
 
 const weights = { direction: 0.35, compensation: 0.3, team: 0.25, company: 0.1 };
@@ -90,17 +89,6 @@ try {
   assert.equal(validateReviewedReport(text, review, { root }).coverage, 0.7);
   assert.throws(() => validateReviewedReport(text, { ...review, gates: undefined }, { root }), /review gates/);
   assert.throws(() => validateReviewedReport(text, { ...review, ready: undefined }, { root }), /readiness/);
-  mkdirSync(join(root, 'reports'));
-  writeFileSync(join(root, 'reports/new.md'), text);
-  const gates = Object.fromEntries(['location', 'employment', 'size', 'compensation', 'eligibility', 'liveness'].map(k => [k, 'Pass']));
-  writeFileSync(join(root, 'reports/new.md.review.json'), JSON.stringify({ ...review, gates, ready: true }));
-  writeFileSync(join(root, 'reports/old.md'), '**Score:** 5.0/5');
-  const pipeline = '## Scored\n- [~] #1 | Report: reports/new.md\n- [~] #2 | Report: reports/old.md\n- [~] #3 | Report: reports/missing.md\n## Processed\n- [~] #4 | Report: reports/new.md';
-  const shortlist = readShortlist(pipeline, { root, profile: { attractiveness: { model: 'attractiveness-v1', weights, alert_line: 4 } } });
-  assert.equal(shortlist.decisions[0].action, 'deprioritize');
-  assert.deepEqual(shortlist.needs_review.map(x => x.id), ['2']);
-  assert.deepEqual(shortlist.invalid.map(x => x.id), ['3']);
-  assert.equal(shortlist.decisions.length, 1);
   const cell = '吸引力 3.10–4.30/5（覆盖率70%）';
   assert(looksLikeScoreCell(cell));
   assert(Number.isNaN(parseScalarScore(cell)));

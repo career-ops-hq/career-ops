@@ -15,9 +15,9 @@
  *  - `parseSeedEntries()` is a pure, synchronous function (no network) so it
  *    can be unit-tested with inline fixtures without any mocking.
  *
- * Typical usage (via scan.mjs global --seeds flag):
- *   node scan.mjs global --seeds yc
- *   node scan.mjs global --seeds yc,a16z --since 7 --dry-run
+ * Typical usage (via the Python workflow):
+ *   python -m workflow.career_ops global --seeds yc
+ *   python -m workflow.career_ops global --seeds yc,a16z --since 7 --dry-run
  *
  * Direct usage:
  *   import { fetchYCCompanies, fetchA16zCompanies } from './seeds/vc-portfolios.mjs';
