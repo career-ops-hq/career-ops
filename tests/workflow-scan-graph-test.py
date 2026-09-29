@@ -55,6 +55,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
     ]
     invalid_credentials = extracted()
     invalid_credentials["credentials"] = [{"mandatory": True, "status": "absent", "evidence": "Unnamed requirement"}]
+    invalid_years = extracted()
+    invalid_years["years"] = None
     absent_license = extracted()
     absent_license["credentials"] = [{"name": "Required professional license", "mandatory": True,
                                       "status": "absent", "evidence": "No license in CV"}]
@@ -68,11 +70,12 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
         ("combined", combined, "jd_report"),
         ("invalid-capabilities", invalid_capabilities, "core_evidence_missing"),
         ("invalid-credentials", invalid_credentials, "core_evidence_missing"),
+        ("invalid-years", invalid_years, "core_evidence_missing"),
         ("absent-license", absent_license, "prescreen_failed"),
     ):
         with patch.object(scan_graph.model_adapter, "call_agent", return_value=(response, "fixture")):
             result = scan_graph.run_scan(inputs(name), root)
-        if name in {"unknown", "incomplete", "invalid-capabilities", "invalid-credentials"}:
+        if name in {"unknown", "incomplete", "invalid-capabilities", "invalid-credentials", "invalid-years"}:
             assert result["waiting_reason"] == expected
         elif name in {"expired", "failed", "absent-license"}:
             assert result["outcome"] == "exclude"

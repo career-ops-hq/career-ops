@@ -186,7 +186,7 @@ def attach_evidence(value, snapshot):
     screen = {k: value[k] for k in ('complete_jd', 'assessment_complete', 'years', 'core_capabilities', 'credentials')}
     screen['gates'] = {k: value[k] for k in ('location', 'employment', 'compensation', 'company_size')}
     years = screen['years']
-    if type(years.get('verified')) in (int, float) and years['verified'] == 0:
+    if isinstance(years, dict) and type(years.get('verified')) in (int, float) and years['verified'] == 0:
         years['verified'] = None
     if isinstance(screen['credentials'], list):
         credentials = []
