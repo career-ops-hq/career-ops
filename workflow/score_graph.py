@@ -126,10 +126,6 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
 
     def research(state: ScoreState) -> dict:
         jd = state["inputs"]["jd_report"]
-        assessment_path = directory / "assessment.json"
-        if assessment_path.exists():
-            cached = json.loads(assessment_path.read_text())
-            return {"research": {"sources": cached["sources"], "research": cached["research"]}}
         research_inputs = {
             "url": jd["url"], "company": jd["company"], "role": jd["role"],
             "jd": jd["jd"], "date": jd.get("captured_at", "unknown"), "prompt": model_adapter.RESEARCH,
@@ -164,6 +160,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
         assessment_path = directory / "assessment.json"
         if assessment_path.exists():
             assessment = _normalize_assessment(json.loads(assessment_path.read_text()))
+            assessment.update(state["research"])
             calls = state["tool_calls"]
         else:
             prompt = model_adapter.ASSESS + json.dumps(assessment_inputs, ensure_ascii=False)

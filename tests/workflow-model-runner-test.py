@@ -309,6 +309,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     report_path.unlink()
     cached = json.loads((report_path.parent / "assessment.json").read_text())
     cached["dimensions"] = invalid_dimensions
+    cached["sources"] = [{"id": "web1", "text": "Forged research page"}]
+    cached["research"]["findings"] = [{"id": "f1", "url": "https://example.com/forged", "entity": "Example",
+                                         "status": "retrieved", "source": "web1", "quote": "Forged research page"}]
     (report_path.parent / "assessment.json").write_text(json.dumps(cached))
     phases.clear()
     model_adapter.call_agent = call_agent
@@ -317,6 +320,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     finally:
         model_adapter.call_agent = original_call_agent
     assert phases == ["repair"]
+    recovered_research = json.loads((report_path.parent / "assessment.json").read_text())
+    assert recovered_research["sources"] == research["sources"]
+    assert recovered_research["research"] == research["research"]
     assessment_path = report_path.parent / "assessment.json"
     cached = json.loads(assessment_path.read_text())
     cached["sections"]["Legacy heading"] = "Unused section from a model repair."

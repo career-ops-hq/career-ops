@@ -560,6 +560,10 @@ graph regression reproduces the old exception and verifies the waiting result.
 The liveness graph now waits on an unrecognized model liveness value instead
 of retaining a JD report, while explicit expired evidence still excludes an
 incomplete JD. Isolated graph cases reproduce both former routing errors.
+Score recovery now reloads the input- and content-checked research snapshot
+instead of trusting research copied into `assessment.json`. A regression
+mutates the latter, removes the rendered report, and verifies that recovery
+restores the original frozen research without repeating a model call.
 After these scan and recovery fixes, all 61 current
 `tests/workflow-*-test.py` files passed in one local run on 2026-09-29
 (118.7 seconds, zero failures). This broad regression result supplements the
