@@ -158,7 +158,7 @@ Na primeira execução ele pergunta tudo isso no chat. Nada para configurar à m
 - **Ligar para casa.** Sem telemetria, sem backend nosso. Seu currículo vai da sua máquina para o provedor de IA que você escolheu, e para nenhum outro lugar. O único registro público é este repositório: `HIRED.md` e suas issues.
 - **Empurrar você a se candidatar abaixo de 4.0/5.** Ele vai dizer para não fazer. Você pode ignorar, e ele vai avisar.
 
-Ele reformula seu currículo; nunca deve inventá-lo. Uma verificação no código barra o PDF que tiver números ou fatos ausentes do seu currículo, mas ainda não consegue julgar cada reformulação. Leia cada currículo antes de enviar. Detalhes no [FAQ](#faq).
+Ele reformula seu currículo; nunca deve inventá-lo. Uma verificação no código barra o PDF que tiver números ou fatos que não estão nem no seu currículo nem no seu `article-digest.md`, mas ainda não consegue julgar cada reformulação. Leia cada currículo antes de enviar. Detalhes no [FAQ](#faq).
 
 ## Funcionalidades
 
@@ -169,7 +169,7 @@ Ele reformula seu currículo; nunca deve inventá-lo. Uma verificação no códi
 | **Geração de PDF ATS**   | Currículos legíveis por ATS, adaptados a cada descrição a partir da sua própria experiência, com design Space Grotesk + DM Sans          |
 | **Gerador de carta de apresentação** | Cartas baseadas em pesquisa com espelhamento de palavras-chave, quatro perguntas interativas de ângulo (por quê/problemas/abordagem/tom), aprovação do rascunho no chat e PDF A4 pelo mesmo pipeline HTML + Playwright dos currículos. Cria um rascunho automaticamente a cada avaliação; complete e gere sob demanda com `/career-ops cover` |
 | **Além do currículo**    | A pesquisa de empresa ([`deep`](modes/deep.md)) revela a estratégia de IA, os movimentos recentes, a cultura de engenharia e o ângulo que seu perfil deve assumir. A descoberta de contatos ([`contacto`](modes/contacto.md)) identifica o hiring manager, o recrutador ou o colega de equipe que vale a pena contatar e redige uma mensagem de LinkedIn de ≤300 caracteres ajustada a cada tipo de contato. Os rascunhos de e-mail formal de candidatura ([`email`](modes/email.md)) transformam um relatório avaliado ou uma descrição colada em assunto, corpo e checklist de anexos sem enviar, submeter ou clicar em nada. A candidatura coloca você na fila; a pesquisa consegue uma conversa. |
-| **Análise de padrões**   | Padrões de rejeição e taxas de avanço por canal de ATS (`analyze-patterns.mjs`), estatísticas de funil de toda a busca (`stats.mjs`), detecção de republicações e vagas fantasma (`detect-reposts.mjs`) |
+| **Análise de padrões**   | Padrões de rejeição e taxas de avanço por canal de ATS (`analyze-patterns.mjs`), estatísticas de funil de toda a busca (`stats.mjs`), detecção de republicações, um possível sinal de vaga fantasma (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Todo o resto que ele faz</b></summary>

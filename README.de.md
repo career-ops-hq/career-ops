@@ -158,7 +158,7 @@ Beim ersten Start fragt es das alles im Chat ab. Nichts von Hand zu konfiguriere
 - **Nach Hause funken.** Keine Telemetrie, kein Backend von uns. Dein Lebenslauf geht von deinem Rechner zum KI-Anbieter deiner Wahl, und nirgendwo sonst. Das einzige öffentliche Register ist dieses Repository: `HIRED.md` und seine Issues.
 - **Dich zu Bewerbungen unter 4,0/5 drängen.** Es rät dir davon ab. Du kannst dich darüber hinwegsetzen, und es sagt es dir.
 
-Es formuliert deinen Lebenslauf um; es darf ihn nie erfinden. Eine Prüfung im Code stoppt ein PDF, dessen Zahlen oder Fakten in deinem Lebenslauf fehlen, kann aber noch nicht jede Umformulierung beurteilen. Lies jeden Lebenslauf, bevor du ihn abschickst. Details in den [FAQ](#faq).
+Es formuliert deinen Lebenslauf um; es darf ihn nie erfinden. Eine Prüfung im Code stoppt ein PDF, dessen Zahlen oder Fakten weder in deinem Lebenslauf noch in deinem `article-digest.md` stehen, kann aber noch nicht jede Umformulierung beurteilen. Lies jeden Lebenslauf, bevor du ihn abschickst. Details in den [FAQ](#faq).
 
 ## Features
 
@@ -169,7 +169,7 @@ Es formuliert deinen Lebenslauf um; es darf ihn nie erfinden. Eine Prüfung im C
 | **ATS-PDF-Generierung**  | ATS-lesbare Lebensläufe, aus deiner eigenen Erfahrung auf jede Stellenbeschreibung zugeschnitten, im Space-Grotesk- und DM-Sans-Design  |
 | **Anschreiben-Generator** | Recherchegestützte Anschreiben mit Keyword-Mirroring, vier interaktiven Angle-Prompts (warum/Probleme/Ansatz/Ton), Freigabe des Entwurfs im Chat und A4-PDF über dieselbe HTML- und Playwright-Pipeline wie Lebensläufe. Entwirft bei jeder Bewertung automatisch; vervollständigen und erzeugen bei Bedarf mit `/career-ops cover` |
 | **Über den Lebenslauf hinaus** | Die Unternehmensrecherche ([`deep`](modes/deep.md)) legt KI-Strategie, jüngste Schritte, Engineering-Kultur und den Winkel offen, den dein Profil einnehmen sollte. Die Kontaktsuche ([`contacto`](modes/contacto.md)) identifiziert Hiring Manager, Recruiter:in oder Teammitglied, bei denen sich eine Nachricht lohnt, und entwirft eine LinkedIn-Nachricht mit ≤300 Zeichen, abgestimmt auf den Kontakttyp. Formelle Bewerbungs-E-Mail-Entwürfe ([`email`](modes/email.md)) machen aus einem bewerteten Report oder einer eingefügten Stellenbeschreibung Betreff, Text und Anhang-Checkliste, ohne etwas zu senden, einzureichen oder anzuklicken. Bewerbungen bringen dich in die Warteschlange; Recherche bringt dich ins Gespräch. |
-| **Musteranalyse**        | Ablehnungsmuster und Weiterkommensquoten je ATS-Kanal (`analyze-patterns.mjs`), Funnel-Statistiken über die gesamte Suche (`stats.mjs`), Erkennung von Reposts und Ghost Jobs (`detect-reposts.mjs`) |
+| **Musteranalyse**        | Ablehnungsmuster und Weiterkommensquoten je ATS-Kanal (`analyze-patterns.mjs`), Funnel-Statistiken über die gesamte Suche (`stats.mjs`), Erkennung von Reposts, die auf einen Ghost Job hindeuten können (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Alles andere, was es tut</b></summary>

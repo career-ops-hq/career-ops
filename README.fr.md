@@ -158,7 +158,7 @@ Au premier lancement, il te demande tout ça dans le chat. Rien à configurer à
 - **Téléphoner à la maison.** Pas de télémétrie, pas de backend à nous. Ton CV va de ta machine au fournisseur d'IA que tu as choisi, et nulle part ailleurs. Le seul registre public, c'est ce dépôt : `HIRED.md` et ses issues.
 - **Te pousser à postuler sous 4,0/5.** Il te dira de ne pas le faire. Tu peux passer outre, et il te le dira.
 
-Il reformule ton CV ; il ne doit jamais l'inventer. Un contrôle dans le code bloque un PDF dont les chiffres ou les faits ne figurent pas dans ton CV, mais il ne sait pas encore juger chaque reformulation. Relis chaque CV avant de l'envoyer. Détails dans la [FAQ](#faq).
+Il reformule ton CV ; il ne doit jamais l'inventer. Un contrôle dans le code bloque un PDF dont les chiffres ou les faits ne figurent ni dans ton CV ni dans ton `article-digest.md`, mais il ne sait pas encore juger chaque reformulation. Relis chaque CV avant de l'envoyer. Détails dans la [FAQ](#faq).
 
 ## Fonctionnalités
 
@@ -169,7 +169,7 @@ Il reformule ton CV ; il ne doit jamais l'inventer. Un contrôle dans le code bl
 | **Génération de PDF ATS** | CV lisibles par les ATS, adaptés à chaque description de poste à partir de ta propre expérience, au design Space Grotesk + DM Sans         |
 | **Générateur de lettres de motivation** | Lettres fondées sur la recherche avec reflet des mots-clés, quatre questions interactives d'angle (pourquoi/problèmes/approche/ton), validation du brouillon dans le chat et PDF A4 via le même pipeline HTML + Playwright que les CV. Rédige un brouillon à chaque évaluation ; complète et génère à la demande avec `/career-ops cover` |
 | **Au-delà du CV**        | La recherche sur l'entreprise ([`deep`](modes/deep.md)) fait remonter sa stratégie IA, ses mouvements récents, sa culture d'ingénierie et l'angle que ton profil devrait adopter. La découverte de contacts ([`contacto`](modes/contacto.md)) identifie le hiring manager, le recruteur ou le pair d'équipe qu'il vaut la peine de contacter et rédige un message LinkedIn de ≤300 caractères adapté à chaque type de contact. Les brouillons d'e-mails formels de candidature ([`email`](modes/email.md)) transforment un rapport évalué ou une description collée en objet, corps et liste de pièces jointes sans rien envoyer, soumettre ni cliquer. La candidature te met dans la file d'attente ; la recherche t'obtient une conversation. |
-| **Analyse des tendances** | Schémas de refus et taux d'avancement par canal ATS (`analyze-patterns.mjs`), statistiques d'entonnoir sur toute la recherche (`stats.mjs`), détection des republications et des offres fantômes (`detect-reposts.mjs`) |
+| **Analyse des tendances** | Schémas de refus et taux d'avancement par canal ATS (`analyze-patterns.mjs`), statistiques d'entonnoir sur toute la recherche (`stats.mjs`), détection des republications, signe possible d'une offre fantôme (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Tout le reste</b></summary>

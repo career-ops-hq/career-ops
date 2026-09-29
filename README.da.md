@@ -158,7 +158,7 @@ Ved første start spørger den om alt det i chatten. Intet at konfigurere i hån
 - **Ringer hjem.** Ingen telemetri, ingen backend hos os. Dit CV går fra din maskine til den AI-udbyder, du har valgt, og ingen andre steder. Det eneste offentlige register er dette repository: `HIRED.md` og dets issues.
 - **Presser dig til at søge under 4,0/5.** Den siger, du skal lade være. Du kan tilsidesætte det, og den siger det.
 
-Den omformulerer dit CV; den må aldrig opdigte det. En kontrol i koden stopper en PDF med tal eller fakta, der ikke står i dit CV, men den kan endnu ikke vurdere enhver omformulering. Læs hvert CV, før du sender det. Detaljer i [FAQ](#faq).
+Den omformulerer dit CV; den må aldrig opdigte det. En kontrol i koden stopper en PDF med tal eller fakta, der hverken står i dit CV eller i `article-digest.md`, men den kan endnu ikke vurdere enhver omformulering. Læs hvert CV, før du sender det. Detaljer i [FAQ](#faq).
 
 ## Funktioner
 
@@ -169,7 +169,7 @@ Den omformulerer dit CV; den må aldrig opdigte det. En kontrol i koden stopper 
 | **ATS-PDF-generering**   | ATS-læsbare CV'er tilpasset hver jobbeskrivelse ud fra din egen erfaring, i Space Grotesk + DM Sans-design                                |
 | **Ansøgningsgenerator**  | Researchbaserede ansøgninger med spejling af nøgleord, fire interaktive vinkelspørgsmål (hvorfor/problemer/tilgang/tone), godkendelse af udkast i chatten og A4-PDF via samme HTML + Playwright-pipeline som CV'er. Laver automatisk udkast ved hver vurdering; færdiggør og generér efter behov via `/career-ops cover` |
 | **Ud over CV'et**        | Virksomhedsresearch ([`deep`](modes/deep.md)) afdækker AI-strategi, seneste træk, engineering-kultur og den vinkel, din profil bør tage. Kontaktsøgning ([`contacto`](modes/contacto.md)) finder den hiring manager, rekrutterer eller kollega, det er værd at kontakte, og skriver et LinkedIn-udkast på ≤300 tegn tilpasset hver kontakttype. Formelle udkast til ansøgningsmails ([`email`](modes/email.md)) gør en vurderet rapport eller indsat jobbeskrivelse til emnelinje, brødtekst og tjekliste over vedhæftninger uden at sende, indsende eller klikke på noget. Ansøgninger sætter dig i køen; research giver dig en samtale. |
-| **Mønsteranalyse**       | Afslagsmønstre og fremgangsrater pr. ATS-kanal (`analyze-patterns.mjs`), tragtstatistik for hele søgningen (`stats.mjs`), registrering af genopslag og spøgelsesjob (`detect-reposts.mjs`) |
+| **Mønsteranalyse**       | Afslagsmønstre og fremgangsrater pr. ATS-kanal (`analyze-patterns.mjs`), tragtstatistik for hele søgningen (`stats.mjs`), registrering af genopslag, et muligt tegn på et spøgelsesjob (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Alt det andet, den gør</b></summary>

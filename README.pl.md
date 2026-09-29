@@ -158,7 +158,7 @@ Przy pierwszym uruchomieniu pyta o to wszystko na czacie. Nic do ręcznej konfig
 - **Nie dzwoni do domu.** Bez telemetrii, bez naszego backendu. Twoje CV idzie z twojej maszyny do wybranego przez ciebie dostawcy AI i nigdzie indziej. Jedyny publiczny rejestr to to repozytorium: `HIRED.md` i jego issues.
 - **Nie namawia do aplikowania poniżej 4.0/5.** Powie, żeby tego nie robić. Możesz to zignorować, a on to powie.
 
-Przeredagowuje twoje CV; nigdy nie wolno mu go zmyślać. Kontrola w kodzie zatrzymuje PDF z liczbami lub faktami, których nie ma w twoim CV, ale nie potrafi jeszcze ocenić każdego przeformułowania. Czytaj każde CV przed wysłaniem. Szczegóły w [FAQ](#faq).
+Przeredagowuje twoje CV; nigdy nie wolno mu go zmyślać. Kontrola w kodzie zatrzymuje PDF z liczbami lub faktami, których nie ma ani w twoim CV, ani w `article-digest.md`, ale nie potrafi jeszcze ocenić każdego przeformułowania. Czytaj każde CV przed wysłaniem. Szczegóły w [FAQ](#faq).
 
 ## Funkcje
 
@@ -169,7 +169,7 @@ Przeredagowuje twoje CV; nigdy nie wolno mu go zmyślać. Kontrola w kodzie zatr
 | **Generowanie PDF pod ATS** | CV czytelne dla ATS, dopasowane do każdego opisu oferty na podstawie twojego własnego doświadczenia, w designie Space Grotesk + DM Sans |
 | **Generator listów motywacyjnych** | Listy oparte na researchu z odbiciem słów kluczowych, czterema interaktywnymi pytaniami o kąt (dlaczego/problemy/podejście/ton), zatwierdzaniem szkicu w czacie i PDF A4 przez ten sam pipeline HTML + Playwright co CV. Tworzy szkic przy każdej ocenie; dokończ i wygeneruj na żądanie przez `/career-ops cover` |
 | **Poza CV**              | Research firmy ([`deep`](modes/deep.md)) odsłania strategię AI, ostatnie ruchy, kulturę inżynierską i kąt, jaki powinien przyjąć twój profil. Wyszukiwanie kontaktów ([`contacto`](modes/contacto.md)) wskazuje hiring managera, rekrutera lub członka zespołu, do którego warto napisać, i tworzy szkic wiadomości na LinkedIn do 300 znaków dopasowanej do typu kontaktu. Szkice formalnych maili aplikacyjnych ([`email`](modes/email.md)) zamieniają oceniony raport lub wklejony opis w temat, treść i checklistę załączników bez wysyłania, składania ani klikania czegokolwiek. Aplikacja ustawia cię w kolejce; research daje ci rozmowę. |
-| **Analiza wzorców**      | Wzorce odrzuceń i wskaźniki przejścia per kanał ATS (`analyze-patterns.mjs`), statystyki lejka z całego poszukiwania (`stats.mjs`), wykrywanie ponownych publikacji i martwych ofert (`detect-reposts.mjs`) |
+| **Analiza wzorców**      | Wzorce odrzuceń i wskaźniki przejścia per kanał ATS (`analyze-patterns.mjs`), statystyki lejka z całego poszukiwania (`stats.mjs`), wykrywanie ponownych publikacji, które mogą wskazywać na ofertę-widmo (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Wszystko inne, co robi</b></summary>

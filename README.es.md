@@ -158,7 +158,7 @@ En el primer arranque te lo pregunta todo en el chat. Nada que configurar a mano
 - **Llamar a casa.** Sin telemetría, sin backend nuestro. Tu CV va de tu máquina al proveedor de IA que tú elijas, y a ningún otro sitio. El único registro público es este repositorio: `HIRED.md` y sus issues.
 - **Empujarte a aplicar por debajo de 4.0/5.** Te dirá que no lo hagas. Puedes ignorarlo, y te lo dirá.
 
-Reformula tu CV; nunca debe inventarlo. Un control en el código bloquea el PDF si tiene cifras o datos que no están en tu CV, pero todavía no puede juzgar cada reformulación. Lee cada CV antes de enviarlo. Detalles en las [preguntas frecuentes](#preguntas-frecuentes-faq).
+Reformula tu CV; nunca debe inventarlo. Un control en el código bloquea el PDF si tiene cifras o datos que no están ni en tu CV ni en tu `article-digest.md`, pero todavía no puede juzgar cada reformulación. Lee cada CV antes de enviarlo. Detalles en las [preguntas frecuentes](#preguntas-frecuentes-faq).
 
 ## Funcionalidades
 
@@ -169,7 +169,7 @@ Reformula tu CV; nunca debe inventarlo. Un control en el código bloquea el PDF 
 | **PDF optimizado para ATS** | CVs legibles por los ATS, adaptados a cada descripción a partir de tu propia experiencia, con diseño Space Grotesk + DM Sans             |
 | **Generador de cartas de presentación** | Cartas basadas en investigación con reflejo de palabras clave, cuatro preguntas interactivas de enfoque (por qué/problemas/planteamiento/tono), aprobación del borrador en el chat y PDF A4 por el mismo pipeline HTML + Playwright que los CVs. Redacta un borrador en cada evaluación; complétalo y genéralo cuando quieras con `/career-ops cover` |
 | **Más allá del CV**      | La investigación de empresa ([`deep`](modes/deep.md)) saca a la luz su estrategia de IA, movimientos recientes, cultura de ingeniería y el ángulo que debería tomar tu perfil. La búsqueda de contactos ([`contacto`](modes/contacto.md)) identifica al hiring manager, al recruiter o al compañero de equipo al que merece la pena escribir y redacta un mensaje de LinkedIn de ≤300 caracteres ajustado a cada tipo de contacto. Los borradores de correo formal de candidatura ([`email`](modes/email.md)) convierten un informe evaluado o una descripción pegada en asunto, cuerpo y lista de adjuntos sin enviar, presentar ni hacer clic en nada. La candidatura te mete en la cola; la investigación te consigue una conversación. |
-| **Análisis de patrones** | Patrones de rechazo y tasas de avance por canal ATS (`analyze-patterns.mjs`), estadísticas de embudo de toda la búsqueda (`stats.mjs`), detección de republicaciones y ofertas fantasma (`detect-reposts.mjs`) |
+| **Análisis de patrones** | Patrones de rechazo y tasas de avance por canal ATS (`analyze-patterns.mjs`), estadísticas de embudo de toda la búsqueda (`stats.mjs`), detección de republicaciones, posible señal de una oferta fantasma (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Todo lo demás que hace</b></summary>

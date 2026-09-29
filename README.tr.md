@@ -158,7 +158,7 @@ Bir ilan yapıştır. O akşama değip değmeyeceğini söyler.
 - **Eve rapor vermek.** Telemetri yok, bize ait bir arka uç yok. CV'n senin makinenden seçtiğin yapay zekâ sağlayıcısına gider, başka hiçbir yere gitmez. Tek kamuya açık kayıt bu depo: `HIRED.md` ve issue'ları.
 - **Seni 4,0/5 altına başvurmaya itmek.** Başvurma der. Yok sayabilirsin, o da bunu söyler.
 
-CV'ni yeniden ifade eder; asla uydurmamalıdır. Koddaki bir denetim, CV'nde bulunmayan sayı veya bilgi içeren bir PDF'i durdurur, ama henüz her ifade değişikliğini değerlendiremez. Göndermeden önce her CV'yi oku. Ayrıntılar [SSS](#sss) bölümünde.
+CV'ni yeniden ifade eder; asla uydurmamalıdır. Koddaki bir denetim, CV'nde de article digest'inde de bulunmayan sayı veya bilgi içeren bir PDF'i durdurur, ama henüz her ifade değişikliğini değerlendiremez. Göndermeden önce her CV'yi oku. Ayrıntılar [SSS](#sss) bölümünde.
 
 ## Özellikler
 
@@ -169,7 +169,7 @@ CV'ni yeniden ifade eder; asla uydurmamalıdır. Koddaki bir denetim, CV'nde bul
 | **ATS PDF Üretimi**      | Space Grotesk + DM Sans tasarımıyla, kendi deneyiminden yola çıkarak her iş tanımına uyarlanmış, ATS'nin okuyabildiği CV'ler                                                                |
 | **Ön Yazı Üretici**      | Araştırmaya dayalı ön yazılar: anahtar kelime yansıtma, dört etkileşimli açı sorusu (neden/sorunlar/yaklaşım/ton), sohbette taslak onayı ve CV'lerle aynı HTML + Playwright hattı üzerinden A4 PDF. Her değerlendirmede otomatik taslak yazar; istediğinde `/career-ops cover` ile tamamla ve üret |
 | **CV'nin Ötesi**         | Şirket araştırması ([`deep`](modes/deep.md)) yapay zekâ stratejisini, son hamleleri, mühendislik kültürünü ve profilinin alması gereken açıyı ortaya çıkarır. Kişi keşfi ([`contacto`](modes/contacto.md)) ulaşmaya değer işe alım yöneticisini, işe alım uzmanını veya ekip arkadaşını belirler ve her kişi tipine göre ayarlanmış ≤300 karakterlik bir LinkedIn mesajı taslağı yazar. Resmî başvuru e-postası taslakları ([`email`](modes/email.md)) değerlendirilmiş bir raporu veya yapıştırılan iş tanımını hiçbir şey göndermeden, iletmeden veya tıklamadan konu satırına, gövdeye ve ek listesine dönüştürür. Başvuru seni kuyruğa sokar; araştırma sana bir sohbet kazandırır. |
-| **Örüntü Analizi**       | Ret örüntüleri ve ATS kanalı başına ilerleme oranları (`analyze-patterns.mjs`), tüm arayışın huni istatistikleri (`stats.mjs`), yeniden yayın ve hayalet ilan tespiti (`detect-reposts.mjs`) |
+| **Örüntü Analizi**       | Ret örüntüleri ve ATS kanalı başına ilerleme oranları (`analyze-patterns.mjs`), tüm arayışın huni istatistikleri (`stats.mjs`), hayalet ilana işaret edebilecek yeniden yayınların tespiti (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>Yaptığı diğer her şey</b></summary>
