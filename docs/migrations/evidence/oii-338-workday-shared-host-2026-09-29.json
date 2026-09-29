@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-29",
+  "scope": "Current-code isolated Python LangGraph reverse sweep of three public Workday sites sharing wd1.wd1.myworkdayjobs.com",
+  "selected_sites": ["wd1|wd1|160over90us", "wd1|wd1|180medical", "wd1|wd1|21stmortgage"],
+  "effective_batch_concurrency": 1,
+  "provider_result": {
+    "status": "partial",
+    "companies_available": 3,
+    "companies_scanned": 3,
+    "unreachable_boards": 3,
+    "postings_kept": 0,
+    "errors": {"HTTP 422 Unprocessable Entity": 3},
+    "source_health": "incomplete",
+    "dataset_status": "ok",
+    "resumable": false
+  },
+  "isolated_store": {
+    "quick_check": "ok",
+    "scan_runs": 1,
+    "opportunities": 0,
+    "source_evidence": 0
+  },
+  "result_sha256": "25bc414ee078f49c6062695be01b8486266353c736d9f0df9477f8c158b6e971",
+  "acceptance_limit": "The current code chooses serial collection for the shared host and truthfully records all three live HTTP 422 failures. These sites do not prove positive Workday collection; the separate live AIA Workday sample supplies that evidence."
+}

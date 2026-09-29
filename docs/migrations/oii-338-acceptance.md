@@ -398,7 +398,8 @@ of one tenant per host does not hold for this directory. Python now serializes
 batches containing repeated Workday hosts as a preventive coverage guard;
 distinct-host batches keep 20-way collection. The live full sweep finished
 Workday using its original concurrency and marked the source incomplete.
-Its board-level error mix still needs a correctly configured diagnostic run.
+A later correctly configured current-code shared-host diagnostic is recorded
+below.
 
 The standalone portal configuration validator now runs as
 `python -m workflow.portal_config`. It retains the old validator's ordered
@@ -505,3 +506,12 @@ does not undo the verified business commit; the next natural 06:00 scan tick
 has not yet occurred. Exact run ID, summary hash and limits are in
 `evidence/oii-338-restored-scan-2026-09-29.json`. Both original Hermes tasks
 are now active, with notifications disabled.
+
+A current-code isolated Workday reverse-graph recheck fixed three public
+`wd1|wd1|...` sites on the same shared host. The Python batch selector used
+concurrency one, and all three live provider requests returned HTTP 422.
+The graph completed with `partial` status, one incomplete source-health row,
+one scan run and no retained opportunities; SQLite `PRAGMA quick_check` is
+`ok`. See `evidence/oii-338-workday-shared-host-2026-09-29.json`. This
+verifies current-code serialization and honest failure handling; the earlier
+live AIA Workday sample remains the positive Workday collection evidence.
