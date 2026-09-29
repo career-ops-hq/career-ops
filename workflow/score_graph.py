@@ -136,12 +136,12 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
         checkpoint = json.loads(checkpoint_path.read_text()) if checkpoint_path.exists() else {}
         if (research_path.exists() and checkpoint.get("input_hash") == research_key
                 and checkpoint.get("output_hash") == hashlib.sha256(research_path.read_bytes()).hexdigest()):
-            return {"research": json.loads(research_path.read_text())}
+            return {"research": model_adapter.normalize_research(json.loads(research_path.read_text()))}
         usage = {}
-        result = model_adapter.call_agent(
+        result = model_adapter.normalize_research(model_adapter.call_agent(
             "research", model_adapter.RESEARCH + json.dumps(research_inputs, ensure_ascii=False),
             ["web"], directory, usage=usage,
-        )[0]
+        )[0])
         model_adapter.save(research_path, result)
         model_adapter.save(checkpoint_path, {
             "input_hash": research_key, "output_hash": hashlib.sha256(research_path.read_bytes()).hexdigest(),
@@ -150,22 +150,23 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
 
     def assess(state: ScoreState) -> dict:
         values, jd = state["inputs"], state["inputs"]["jd_report"]
+        research = model_adapter.normalize_research(state["research"])
         sources = {name: values[name] for name in ("cv", "profile", "targeting", "rules")}
         sources.update({name: values[name] for name in ("articles", "voice") if values.get(name)})
         sources.update({f"writing{index}": content for index, content in enumerate(values.get("writing_samples", {}).values(), 1)})
         assessment_inputs = {
             "url": jd["url"], "sources": sources,
-            "evidence": jd, "research": state["research"], "prompt": model_adapter.ASSESS,
+            "evidence": jd, "research": research, "prompt": model_adapter.ASSESS,
         }
         assessment_path = directory / "assessment.json"
         if assessment_path.exists():
             assessment = _normalize_assessment(json.loads(assessment_path.read_text()))
-            assessment.update(state["research"])
+            assessment.update(research)
             calls = state["tool_calls"]
         else:
             prompt = model_adapter.ASSESS + json.dumps(assessment_inputs, ensure_ascii=False)
             assessment = _normalize_assessment(model_adapter.call_agent("assessment", prompt, [], directory)[0])
-            assessment.update(state["research"])
+            assessment.update(research)
             calls = state["tool_calls"] + 1
         packet = {
             "url": jd["url"], "root": str(root if directory.is_relative_to(root) else draft_root.parent),
@@ -187,19 +188,21 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
     def render(state: ScoreState) -> dict:
         assessment_path = directory / "assessment.json"
         assessment = json.loads(assessment_path.read_text()) if assessment_path.exists() else state["assessment"]
+        research = model_adapter.normalize_research(state["research"])
+        assessment.update(research)
         invalid = conflicting_sections(assessment.get("sections", {}), state["evidence"])
         if invalid:
             assessment = {**assessment, "sections": {
                 name: body for name, body in assessment["sections"].items() if name not in invalid
             }}
         assessment, dimension_calls = _complete_dimensions(
-            assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+            assessment, state["inputs"]["jd_report"], state["packet"]["sources"], research, directory
         )
         if dimension_calls:
             _write_json(assessment_path, assessment)
         previous_sections = assessment.get("sections")
         assessment, section_calls = _complete_sections(
-            assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+            assessment, state["inputs"]["jd_report"], state["packet"]["sources"], research, directory
         )
         conflicts = conflicting_sections(assessment["sections"], state["evidence"])
         if conflicts:
@@ -207,7 +210,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
                 name: body for name, body in assessment["sections"].items() if name not in conflicts
             }
             assessment, correction_calls = _complete_sections(
-                assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+                assessment, state["inputs"]["jd_report"], state["packet"]["sources"], research, directory
             )
             section_calls += correction_calls
         if section_calls or assessment["sections"] != previous_sections:
@@ -217,7 +220,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
             calls = state["tool_calls"] + dimension_calls + section_calls
         except ValueError as error:
             frozen_sources = {**state["packet"]["sources"], "jd": state["evidence"]["jd"]}
-            frozen_sources.update({source["id"]: source["text"] for source in state["research"]["sources"]})
+            frozen_sources.update({source["id"]: source["text"] for source in research["sources"]})
             prompt = (
                 "Repair this assessment using only the supplied frozen sources. Do not research or invent evidence. "
                 "Return a bare JSON object with top-level direction, compensation, team, company, "
@@ -229,13 +232,22 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
                 "from every section, including overview and checklist. Reuse valid claims.\n"
                 + str(error) + "\n"
                 + json.dumps({"assessment": assessment, "frozen_sources": frozen_sources,
-                              "research": state["research"]["research"]}, ensure_ascii=False)
+                              "research": research["research"]}, ensure_ascii=False)
             )
             assessment = _normalize_assessment(model_adapter.call_agent("repair", prompt, [], directory)[0])
-            assessment.update(state["research"])
+            assessment.update(research)
             assessment, repair_sections = _complete_sections(
-                assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+                assessment, state["inputs"]["jd_report"], state["packet"]["sources"], research, directory
             )
+            conflicts = conflicting_sections(assessment["sections"], state["evidence"])
+            if conflicts:
+                assessment["sections"] = {
+                    name: body for name, body in assessment["sections"].items() if name not in conflicts
+                }
+                assessment, corrected = _complete_sections(
+                    assessment, state["inputs"]["jd_report"], state["packet"]["sources"], research, directory
+                )
+                repair_sections += corrected
             _write_json(assessment_path, assessment)
             result = render_report(state["packet"], state["evidence"], assessment)
             calls = state["tool_calls"] + dimension_calls + section_calls + 1 + repair_sections

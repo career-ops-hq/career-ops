@@ -173,12 +173,23 @@ def freeze_research(value, messages):
         'dimensions': {k: value[k] for k in ('compensation', 'team', 'company')}}}
 
 
-def normalize_research_scope(research):
-    """An unrecognized applicability label is unresolved, never inferred as role evidence."""
-    for finding in research['research']['findings']:
+def normalize_research(research):
+    """Keep unsupported model labels outside the citable research set."""
+    findings = []
+    for item in research['research']['findings']:
+        finding = dict(item)
+        if not isinstance(finding.get('url'), str) or not re.match(r'^https?://', finding['url']):
+            continue
         if finding.get('scope') not in ('role', 'team', 'company', 'adjacent_role', 'market', 'unresolved'):
             finding['scope'] = 'unresolved'
-    return research
+        if finding.get('status') not in ('retrieved', 'search_only', 'failed', 'excluded'):
+            previous = finding.get('status')
+            finding['status'] = 'excluded'
+            finding['source'] = None
+            finding['quote'] = None
+            finding['limitation'] = f"{finding.get('limitation') or 'Access status unavailable'}; unrecognized access status: {previous}"
+        findings.append(finding)
+    return {**research, 'research': {**research['research'], 'findings': findings}}
 
 
 def attach_evidence(value, snapshot):

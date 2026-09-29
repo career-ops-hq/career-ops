@@ -592,8 +592,25 @@ retained a `jd_report` with `uncertain` prescreen; no score was due in that
 single-stage tick. The canonical store passed `PRAGMA quick_check` and still
 had zero notification deliveries. This is a clean natural scheduler execution,
 not a re-evaluation of opportunity `8`.
+The 19:40 built-in score execution (`7b550700b51d40dead841c0bae0dc6a3`)
+started opportunity `9`'s score, then durably failed. The new Python research
+gate exposed one model finding (`f7`) with access status `unresolved` and no
+URL, source or quote; its first repair also contradicted retained location
+evidence in the risks section. The graph now conservatively excludes
+unsupported access statuses from citable research, omits URL-less findings
+from the derived report record while retaining the raw model trace, and
+rechecks conflicts after repair. Isolated status and repair regressions pass.
+The original task `a8d95881-3947-4053-bebe-99e78186ed0f` was resumed and
+completed without a new task or repeated web research. Its Microsoft report
+passed both Python rendering and Node `validateReport`; the report bytes match
+the committed SHA-256, seven evaluations exist, notification deliveries remain
+zero and canonical `PRAGMA quick_check` is `ok`. The 19:40 Hermes execution
+remains recorded as failed; the later manual resume supplied the business
+recovery evidence.
+All 61 `tests/workflow-*-test.py` files passed again after this recovery fix
+on 2026-09-29 (zero failures).
 
-## Current open gates (2026-09-29 19:25 +08:00)
+## Current open gates (2026-09-29 19:53 +08:00)
 
 - Opportunity `8` still has its historical `prescreen_failed` business result.
   The corrected saved-extraction LangGraph replay produced `jd_report` with
@@ -603,9 +620,9 @@ not a re-evaluation of opportunity `8`.
   `https://llm.goaichat.top/v1`; a targeted authorization request is pending.
 - The restored scan job has completed one direct run, but its next natural
   06:00 tick has not occurred. The restored score job has clean completed
-  built-in ticks at 19:00 and 19:20; the 18:40 business score completed despite
-  ambiguous Hermes execution detail. Both jobs are active and notifications
-  remain disabled.
+  built-in ticks at 19:00 and 19:20; the 19:40 tick failed but its original
+  score task recovered to a validated business commit. Both jobs are active
+  and notifications remain disabled.
 
 OII-338 and parent OII-333 therefore remain open. The 61-file regression gate
 and live samples prove their recorded scopes, not these outstanding checks.

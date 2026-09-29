@@ -34,6 +34,15 @@ frozen = adapter.freeze_research(research, messages)
 assert frozen["sources"] == [{"id": "web1", "text": "Exact\nsource"}]
 assert frozen["research"]["findings"][1]["source"] is None
 assert frozen["research"]["findings"][1]["quote"] is None
+invalid_status = json.loads(json.dumps(frozen))
+invalid_status["research"]["findings"][1]["status"] = "unresolved"
+normalized = adapter.normalize_research(invalid_status)
+assert normalized["research"]["findings"][1]["status"] == "excluded"
+assert "unrecognized access status: unresolved" in normalized["research"]["findings"][1]["limitation"]
+assert invalid_status["research"]["findings"][1]["status"] == "unresolved"
+missing_url = json.loads(json.dumps(invalid_status))
+missing_url["research"]["findings"][1]["url"] = None
+assert [item["id"] for item in adapter.normalize_research(missing_url)["research"]["findings"]] == ["f1"]
 
 responses = iter(({key: value for key, value in research.items() if key != "findings"},
                   {**research, "findings": []}))

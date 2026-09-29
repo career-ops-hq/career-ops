@@ -254,6 +254,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
             "opportunity_id": "real-job", "url": "https://example.com/real-job",
             "company": "Example", "role": "Engineer", "jd": jd,
             "captured_at": "2026-09-24T00:00:00Z", "liveness_reason": "Official page active",
+            "location_evidence": "Shanghai, China",
             "prescreen": {"status": "uncertain", "unknowns": ["compensation"]},
         },
         "cv": "Verified candidate facts.",
@@ -289,14 +290,17 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
         phases.append(phase)
         if phase == "research":
             return research, "research-session"
+        if phase == "score_sections":
+            return {"risks": sections["risks"]}, "sections-session"
         dimensions = invalid_dimensions if phase == "assessment" else valid_dimensions
-        return {"dimensions": dimensions, "sections": sections}, f"{phase}-session"
+        bodies = {**sections, "risks": "岗位办公城市未披露。"} if phase == "repair" else sections
+        return {"dimensions": dimensions, "sections": bodies}, f"{phase}-session"
     model_adapter.call_agent = call_agent
     try:
         rendered = runner.evaluate({"inputs": repair_inputs, "revision": 0})
     finally:
         model_adapter.call_agent = original_call_agent
-    assert phases == ["research", "assessment", "repair"]
+    assert phases == ["research", "assessment", "repair", "score_sections"]
     phases.clear()
     model_adapter.call_agent = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Completed score repeated"))
     try:
@@ -319,7 +323,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
         recovered = runner.evaluate({"inputs": repair_inputs, "revision": 0})
     finally:
         model_adapter.call_agent = original_call_agent
-    assert phases == ["repair"]
+    assert phases == ["repair", "score_sections"]
     recovered_research = json.loads((report_path.parent / "assessment.json").read_text())
     assert recovered_research["sources"] == research["sources"]
     assert recovered_research["research"] == research["research"]
