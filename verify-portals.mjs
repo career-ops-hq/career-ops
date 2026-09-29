@@ -151,10 +151,9 @@ export function parseAtsSlug(url) {
  *
  * Offering those to `--add` is fine: an operator reads the slug beside the
  * company name and picks one, and a wrong guess costs a 404. Offering them to
- * discoverAlternates is not. That result is attached as `suggested`, and
- * `fix-slugs --fix` writes it into portals.yml with no further identity check,
- * after which scan.mjs labels the other employer's postings with this
- * company's name. Pass `firstWordSuffixes: false` on any path that writes.
+ * discoverAlternates is not. That result is attached as `suggested`, so an
+ * unconfirmed board could be copied into portals.yml and relabel another
+ * employer's postings. Pass `firstWordSuffixes: false` on any write path.
  *
  * The bare first word stays on both paths deliberately: many boards really are
  * just the brand ('Acme Corp' → 'acme'), and it adds no token that the company
@@ -405,10 +404,9 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
 /**
  * Probe slug variants across all ATSes; prefer live boards over empty ones.
  *
- * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
- * the winner is attached as `suggested` and `fix-slugs --fix` writes it into
- * portals.yml, so 'Nimbus Data' adopting the live board 'nimbusai' silently
- * relabels Nimbus AI's postings. Those candidates are never this company's name
+ * No first-word suffix variants (#2937). The winner is attached as `suggested`,
+ * so 'Nimbus Data' adopting the live board 'nimbusai' could relabel Nimbus AI's
+ * postings. Those candidates are never this company's name
  * to begin with, so dropping them here costs nothing and they stay available to
  * `--add`, where an operator sees the slug beside the name before adopting it.
  */

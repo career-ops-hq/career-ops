@@ -1,0 +1,26 @@
+{
+  "text": "tracked_companies:\n  - name: Alpha Labs\n    careers_url: https://jobs.ashbyhq.com/alphalabs\n    notes: \"old note (slug migrated greenhouse->ashby 2026-09-29, verify-portals)\" # keep this\n    enabled: true\n  - name: Beta Tech\n    careers_url: https://job-boards.greenhouse.io/betatech\n    api: https://boards-api.greenhouse.io/v1/boards/betatech/jobs\n    notes: \"quoted \\\"value\\\" (slug migrated ashby->greenhouse 2026-09-29, verify-portals)\" # annotation\n    enabled: true\n  - name: Gamma\n    careers_url: https://jobs.eu.lever.co/gamma\n    notes: |\n      first line\n      second line\n      (slug migrated lever->lever 2026-09-29, verify-portals)\n    enabled: true\n  - name: Delta\n    careers_url: https://jobs.ashbyhq.com/delta\n    enabled: true\n",
+  "fixes": [
+    {
+      "name": "Alpha Labs",
+      "oldAts": "greenhouse",
+      "newAts": "ashby",
+      "careersUrlOld": "https://boards.greenhouse.io/oldalpha",
+      "careersUrlNew": "https://jobs.ashbyhq.com/alphalabs"
+    },
+    {
+      "name": "Gamma",
+      "oldAts": "lever",
+      "newAts": "lever",
+      "careersUrlOld": "https://jobs.lever.co/oldgamma",
+      "careersUrlNew": "https://jobs.eu.lever.co/gamma"
+    },
+    {
+      "name": "Beta Tech",
+      "oldAts": "ashby",
+      "newAts": "greenhouse",
+      "careersUrlOld": "https://jobs.ashbyhq.com/oldbeta",
+      "careersUrlNew": "https://job-boards.greenhouse.io/betatech"
+    }
+  ]
+}
