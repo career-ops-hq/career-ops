@@ -29,8 +29,8 @@ const SEP_NO_URL = '|---|---|---|---|---|---|---|---|---|';
 function withTracker(header, sep, rows, fn) {
   const dir = mkdtempSync(join(tmpdir(), 'dedup-url-test-'));
   const tracker = join(dir, 'applications.md');
-  writeFileSync(tracker, ['# Applications Tracker', '', header, sep, ...rows, ''].join('\n'));
   try {
+    writeFileSync(tracker, ['# Applications Tracker', '', header, sep, ...rows, ''].join('\n'));
     execFileSync(process.execPath, [DEDUP], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker },
@@ -104,5 +104,18 @@ ok('a URL conflict also blocks a shared report number (same order as merge-track
     '| 2 | 2026-09-02 | Acme | Backend Engineer | 3.8/5 | Evaluated | ❌ | [7](reports/007-acme-2026-09-01.md) | second | https://job-boards.greenhouse.io/acme/jobs/2002 |',
   ], (rows) => {
     assert.deepEqual(nums(rows), ['1', '2']);
+  });
+});
+
+ok('a URL-less row cannot bridge two different postings into one cluster', () => {
+  // Clustering compares each candidate with the seed row. A seed with no URL
+  // matches both URL rows on its own, so without a check against every member
+  // the two postings landed in one cluster and one was deleted.
+  withTracker(HEADER_URL, SEP_URL, [
+    '| 1 | 2026-09-01 | Acme | Backend Engineer | 3.5/5 | Evaluated | ❌ | [1](reports/001-acme-2026-09-01.md) | first |  |',
+    '| 2 | 2026-09-02 | Acme | Backend Engineer | 4.2/5 | Evaluated | ❌ | [2](reports/002-acme-2026-09-02.md) | req A | https://job-boards.greenhouse.io/acme/jobs/1001 |',
+    '| 3 | 2026-09-03 | Acme | Backend Engineer | 3.8/5 | Evaluated | ❌ | [3](reports/003-acme-2026-09-03.md) | req B | https://job-boards.greenhouse.io/acme/jobs/2002 |',
+  ], (rows) => {
+    assert.deepEqual(nums(rows), ['2', '3'], 'both postings survive; only the URL-less row merges');
   });
 });

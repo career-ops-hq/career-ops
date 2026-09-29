@@ -199,6 +199,22 @@ function normalizeRole(role) {
 }
 
 /**
+ * Check whether two tracker rows name two different postings.
+ *
+ * Only two present-and-different keys are evidence: a blank or placeholder URL
+ * yields no key from normalizeUrl() and is UNKNOWN, never a conflict.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {boolean} True when both rows carry a URL and the URLs differ.
+ */
+function urlsConflict(a, b) {
+  const urlA = normalizeUrl(a.url);
+  const urlB = normalizeUrl(b.url);
+  return Boolean(urlA && urlB && urlA !== urlB);
+}
+
+/**
  * Decide whether two same-company tracker rows should be deduplicated.
  *
  * Rows merge only when they describe the same opening: either the exact same
@@ -226,9 +242,7 @@ function normalizeRole(role) {
  * @returns {boolean} True when dedup may cluster the two rows as duplicates.
  */
 function roleMatch(a, b) {
-  const urlA = normalizeUrl(a.url);
-  const urlB = normalizeUrl(b.url);
-  if (urlA && urlB && urlA !== urlB) return false;
+  if (urlsConflict(a, b)) return false;
 
   if (sameReportIdentity(a, b)) return true;
   if (normalizeRole(a.role) !== normalizeRole(b.role)) return false;
@@ -378,7 +392,11 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
+      // roleMatch() only compares against the seed row, so a seed with no URL
+      // would admit two rows naming different postings and one would be
+      // deleted. Check the candidate's URL against every member already in.
       if (roleMatch(companyEntries[i], companyEntries[j])
+          && !cluster.some(member => urlsConflict(member, companyEntries[j]))
           && (!isBlindGroup || withinBlindWindow(companyEntries[i].date, companyEntries[j].date))) {
         cluster.push(companyEntries[j]);
         processed.add(j);
