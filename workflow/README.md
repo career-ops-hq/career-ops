@@ -28,6 +28,7 @@ workflow/.venv/bin/python -m workflow.career_ops show <task-or-opportunity-id>
 workflow/.venv/bin/python -m workflow.career_ops list
 workflow/.venv/bin/python -m workflow.career_ops scores
 workflow/.venv/bin/python -m workflow.career_ops decisions
+workflow/.venv/bin/python -m workflow.cv_facts <generated-cv.md> [--source cv.md] [--json]
 workflow/.venv/bin/python -m workflow.notifications preview <opportunity-id>
 workflow/.venv/bin/python -m workflow.career_ops resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
 workflow/.venv/bin/python -m workflow.career_ops cancel <task-id>
@@ -102,7 +103,7 @@ configuration authority. Each model attempt runs in its own process group; a tim
 attempt terminates its descendants before the task waits for recovery. After
 package generation, the graph calls the retained
 Reactive Resume tool to update a task-owned copy and export a PDF. Readable
-PDF pages, candidate identity, and every package file hash are recorded with
+PDF pages, candidate identity, source-backed CV facts, and every package file hash are recorded with
 the draft. Confirmation checks the current inputs, PDF, and actual file
 bytes before committing the whole package; failed exports can resume on the
 same task. Apply pauses for user review/confirmation. No path submits an

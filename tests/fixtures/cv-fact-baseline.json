@@ -1,0 +1,315 @@
+[
+  {
+    "source": "Managed 20 staff",
+    "target": "Managed 45 staff",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [
+        "45 staff"
+      ],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Managed 20 staff",
+    "target": "Managed 20 personnel",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Served 16,181 users",
+    "target": "Served 16181 users",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Served 50 users",
+    "target": "Served 50k users",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [
+        "50k users"
+      ],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Saved $120k and €90,000",
+    "target": "Saved $120k and €90,000",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Saved $120k",
+    "target": "Saved $5M and £2.5M",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [
+        "$5m",
+        "£2.5m"
+      ],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Senior Platform Engineer at Acme Labs. Built using React and Docker.",
+    "target": "I worked at Acme Labs as a Senior Platform Engineer, using React and Docker.",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Senior Platform Engineer at Acme Labs. Built using React and Docker.",
+    "target": "I worked at Invented Labs as a Principal Platform Engineer, using React and Terraform.",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [],
+      "unsupportedFacts": [
+        {
+          "kind": "employer",
+          "value": "invented labs"
+        },
+        {
+          "kind": "title",
+          "value": "principal platform engineer"
+        },
+        {
+          "kind": "tool",
+          "value": "terraform"
+        }
+      ],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Built using React",
+    "target": "built using react with kubernetes and google cloud.",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [],
+      "unsupportedFacts": [
+        {
+          "kind": "tool",
+          "value": "kubernetes"
+        },
+        {
+          "kind": "tool",
+          "value": "google cloud"
+        }
+      ],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "5 deployments",
+    "target": "5 live Cloud Run deployments",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "20 staff",
+    "target": "٢٠ staff",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Reached 16,181 active users across 80 courses. Cut cost 60%.",
+    "target": "Reached ٩٤٧٧٢ users",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [
+        "94772 users"
+      ],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Reached 16,181 active users across 80 courses. Cut cost 60%.",
+    "target": "Cut cost ٩٩٪",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [
+        "99%"
+      ],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Reached 16,181 active users.",
+    "target": "Reached 16 181 users",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Reached 1234567 active users.",
+    "target": "Reached 1 234 567 users",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Reached 16.181 active users.",
+    "target": "Reached 16,181 users",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Consolidated 25+ services down to ~5 live Cloud Run deployments.",
+    "target": "Consolidated to ~9 live Cloud Run deployments",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [
+        "9 deployments"
+      ],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Ran 7 tests. Logged 40 hours.",
+    "target": "Ran 7 tests over 40 hours",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Senior Platform Engineer at Acme Labs",
+    "target": "Worked at the office as a manager",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Served as Head of Data",
+    "target": "Served as Head of Engineering",
+    "config": {},
+    "expected": {
+      "verdict": "block",
+      "invented": [],
+      "unsupportedFacts": [
+        {
+          "kind": "title",
+          "value": "head of engineering"
+        }
+      ],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "<li>Worked at Acme Labs as a Principal Engineer</li><li>Built React</li>",
+    "target": "Worked at Acme Labs as a Principal Engineer. Built using React.",
+    "config": {},
+    "expected": {
+      "verdict": "pass",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": []
+    }
+  },
+  {
+    "source": "Verified candidate facts",
+    "target": "Maintained 77 repositories. Please review.",
+    "config": {
+      "allow_metrics": [
+        "77 repos"
+      ],
+      "warn_phrases": [
+        "review"
+      ]
+    },
+    "expected": {
+      "verdict": "warn",
+      "invented": [],
+      "unsupportedFacts": [],
+      "forbidden": [],
+      "warnings": [
+        "review"
+      ]
+    }
+  }
+]

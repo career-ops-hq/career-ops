@@ -1,0 +1,178 @@
+[
+  {
+    "text": "- Worked at Initech as a Principal Engineer",
+    "facts": [
+      {
+        "kind": "employer",
+        "value": "initech"
+      },
+      {
+        "kind": "title",
+        "value": "principal engineer"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "he worked at Initech as a Principal Engineer",
+    "facts": [
+      {
+        "kind": "employer",
+        "value": "initech"
+      },
+      {
+        "kind": "title",
+        "value": "principal engineer"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Joined Globex in 2024",
+    "facts": [
+      {
+        "kind": "employer",
+        "value": "globex"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Employer: Initech",
+    "facts": [
+      {
+        "kind": "employer",
+        "value": "initech"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Served as Head of Data",
+    "facts": [
+      {
+        "kind": "title",
+        "value": "head of data"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Served as Vice President of Sales",
+    "facts": [
+      {
+        "kind": "title",
+        "value": "vice president of sales"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Worked at Initech as Head of Data",
+    "facts": [
+      {
+        "kind": "employer",
+        "value": "initech"
+      },
+      {
+        "kind": "title",
+        "value": "head of data"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Worked at the office as a manager",
+    "facts": [],
+    "metrics": []
+  },
+  {
+    "text": "<ul><li>Worked at Initech as a Principal Engineer</li><li>Built pipelines</li></ul>",
+    "facts": [
+      {
+        "kind": "employer",
+        "value": "initech"
+      },
+      {
+        "kind": "title",
+        "value": "principal engineer"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "I built this using React and Docker for containerized deployments.",
+    "facts": [
+      {
+        "kind": "tool",
+        "value": "react"
+      },
+      {
+        "kind": "tool",
+        "value": "docker"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "I built this using React with Redux in Dify.",
+    "facts": [
+      {
+        "kind": "tool",
+        "value": "react"
+      },
+      {
+        "kind": "tool",
+        "value": "redux"
+      },
+      {
+        "kind": "tool",
+        "value": "dify"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "I worked with the team in London.",
+    "facts": [],
+    "metrics": []
+  },
+  {
+    "text": "I built using React in production.",
+    "facts": [
+      {
+        "kind": "tool",
+        "value": "react"
+      }
+    ],
+    "metrics": []
+  },
+  {
+    "text": "Reached 50 million users",
+    "facts": [],
+    "metrics": [
+      "50 users"
+    ]
+  },
+  {
+    "text": "Shipped 50kg servers",
+    "facts": [],
+    "metrics": [
+      "50 servers"
+    ]
+  },
+  {
+    "text": "Reached 1 234 567 users",
+    "facts": [],
+    "metrics": [
+      "1234567 users"
+    ]
+  },
+  {
+    "text": "Cut cost ٩٩٪",
+    "facts": [],
+    "metrics": [
+      "99%"
+    ]
+  }
+]

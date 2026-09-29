@@ -9,7 +9,11 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
-import tempfile
+
+try:
+    from workflow.cv_facts import verify_document
+except ModuleNotFoundError:
+    from cv_facts import verify_document
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,27 +77,9 @@ def render_resume(
             or any(f"{left}-{right}" not in source_text for left, right in wrapped_compounds)):
         raise ValueError("Reactive Resume PDF contains non-source line-end hyphens")
     input_root = profile.parent.parent
-    if not (input_root / "cv.md").is_file():
-        raise ValueError("CV fact gate source is unavailable")
-    with tempfile.TemporaryDirectory(prefix="career-ops-resume-facts-") as temporary:
-        extracted_path = Path(temporary) / "resume.txt"
-        extracted_path.write_text(extracted.stdout)
-        try:
-            checked = subprocess.run(
-                ["node", str(ROOT / "verify-cv-facts.mjs"), str(extracted_path),
-                 "--source", str(input_root / "cv.md"),
-                 "--source", str(input_root / "article-digest.md"),
-                 "--config", str(input_root / "config" / "cv-facts.json"), "--json"],
-                text=True, capture_output=True, timeout=15,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise RuntimeError(f"CV fact gate unavailable: {error}") from error
-    try:
-        facts = json.loads(checked.stdout)
-    except json.JSONDecodeError as error:
-        raise ValueError("CV fact gate returned no valid result") from error
-    if checked.returncode or not isinstance(facts, dict) or facts.get("verdict") not in {"pass", "warn"}:
-        raise ValueError("Reactive Resume PDF failed the CV fact gate: " + checked.stdout[-1500:])
+    facts = verify_document(extracted.stdout, input_root)
+    if facts["verdict"] == "block":
+        raise ValueError("Reactive Resume PDF failed the CV fact gate: " + json.dumps(facts, ensure_ascii=False))
     return {
         "resume_id": metadata["resumeId"], "pages": int(pages.group(1)),
         "text_sha256": hashlib.sha256(extracted.stdout.encode()).hexdigest(),
