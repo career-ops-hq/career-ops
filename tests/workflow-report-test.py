@@ -71,6 +71,14 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     except ValueError as error:
         assert "Quote not found" in str(error)
     invalid = json.loads(json.dumps(assessment))
+    invalid["dimensions"]["direction"] = {"score": 4, "rationale": "Unsupported direction fit.",
+                                            "evidence": [{"status": "search_only", "source": None, "quote": None}]}
+    try:
+        render_report(packet, evidence, invalid)
+        raise AssertionError("unsourced dimension score accepted")
+    except ValueError as error:
+        assert "Citation requires a quote" in str(error)
+    invalid = json.loads(json.dumps(assessment))
     invalid["dimensions"]["compensation"]["fact_to_inference"] = "Unexpected model field"
     try:
         render_report(packet, evidence, invalid)

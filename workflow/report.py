@@ -86,8 +86,10 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         files[source["id"]].write_text(source["text"])
     profile = yaml.safe_load(packet["sources"]["profile"])
     score = attractiveness(assessment["dimensions"], profile["attractiveness"]["weights"])
-    citations = [item for dimension in assessment["dimensions"].values() for item in dimension["evidence"]]
-    citations += assessment["research"]["findings"]
+    dimension_citations = [item for dimension in assessment["dimensions"].values() for item in dimension["evidence"]]
+    if any(not isinstance(item, dict) or set(item) != {"source", "quote"} for item in dimension_citations):
+        raise ValueError("Citation requires a quote from a frozen source")
+    citations = dimension_citations + assessment["research"]["findings"]
     for citation in citations:
         if citation.get("status") not in (None, "retrieved"):
             if citation.get("quote") is not None or citation.get("source") is not None:

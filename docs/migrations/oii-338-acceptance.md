@@ -564,6 +564,11 @@ Score recovery now reloads the input- and content-checked research snapshot
 instead of trusting research copied into `assessment.json`. A regression
 mutates the latter, removes the rendered report, and verifies that recovery
 restores the original frozen research without repeating a model call.
+The report gate now requires each nonempty dimension evidence item to be an
+explicit frozen-source `source`/`quote` pair. Previously a scored dimension
+could include a `search_only` item with null source and quote; the shared
+research-finding loop skipped it and allowed an unsupported score. A red/green
+report regression confirms rejection before publication.
 After these scan and recovery fixes, all 61 current
 `tests/workflow-*-test.py` files passed in one local run on 2026-09-29
 (118.7 seconds, zero failures). This broad regression result supplements the
