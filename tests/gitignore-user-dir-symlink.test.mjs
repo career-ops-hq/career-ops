@@ -4,7 +4,7 @@
 // a mode-120000 link containing a local filesystem path.
 
 import { spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
+import { lstatSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, warn, rmSync, ROOT } from './helpers.mjs';
@@ -39,14 +39,23 @@ try {
   else fail('control failed: check-ignore did not report an unignored path as unignored');
 
   for (const name of names) {
-    let linked = true;
+    // 'dir', never 'junction'. A junction is an NTFS reparse point that git
+    // reads as a real directory, so the `!name/` negation re-includes it and the
+    // probe judges the symlink rule against something that is not a symlink. It
+    // then reports the rule as broken on Windows while it is doing its job.
+    // lstat confirms what was actually created rather than what was requested,
+    // because the third argument is advisory: POSIX ignores it, and Windows may
+    // refuse a 'dir' link without the privilege it needs.
+    let link = null;
     try {
-      symlinkSync('target', join(dir, name), 'junction');
+      symlinkSync('target', join(dir, name), 'dir');
+      link = lstatSync(join(dir, name));
     } catch (err) {
-      linked = false;
       warn(`${name} symlink probe skipped (${err.code}) — static rule check still applies`);
     }
-    if (linked) {
+    if (link && !link.isSymbolicLink()) {
+      warn(`${name} symlink probe skipped (created a non-symlink) — static rule check still applies`);
+    } else if (link) {
       if (ask(name) === 0) pass(`symlink named ${name} is ignored`);
       else fail(`symlink named ${name} is NOT ignored — git add could stage it`);
     }
