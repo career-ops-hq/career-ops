@@ -63,8 +63,10 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
     for name, response, expected in (
         ("active", extracted(), "jd_report"),
         ("unknown", extracted(liveness="uncertain"), "source_access_unknown"),
+        ("invalid-liveness", extracted(liveness="stale"), "source_access_unknown"),
         ("incomplete", extracted(complete=False), "core_evidence_missing"),
         ("expired", extracted(liveness="expired"), "expired"),
+        ("expired-incomplete", extracted(liveness="expired", complete=False), "expired"),
         ("failed", extracted(location="fail"), "prescreen_failed"),
         ("borderline", borderline, "jd_report"),
         ("combined", combined, "jd_report"),
@@ -75,9 +77,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
     ):
         with patch.object(scan_graph.model_adapter, "call_agent", return_value=(response, "fixture")):
             result = scan_graph.run_scan(inputs(name), root)
-        if name in {"unknown", "incomplete", "invalid-capabilities", "invalid-credentials", "invalid-years"}:
+        if name in {"unknown", "invalid-liveness", "incomplete", "invalid-capabilities", "invalid-credentials", "invalid-years"}:
             assert result["waiting_reason"] == expected
-        elif name in {"expired", "failed", "absent-license"}:
+        elif name in {"expired", "expired-incomplete", "failed", "absent-license"}:
             assert result["outcome"] == "exclude"
             assert result["artifact"]["reason_code"] == expected
         else:

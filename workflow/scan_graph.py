@@ -41,9 +41,9 @@ def run_scan(inputs: dict, draft_root: Path) -> dict:
         }, ensure_ascii=False)
         extracted = model_adapter.call_agent("scan_evidence", prompt, [], directory)[0]
         evidence = model_adapter.attach_evidence(extracted, {"text": source["jd"]})
-        if evidence["liveness"] == "uncertain":
+        if evidence["liveness"] not in ("active", "expired"):
             return {"evidence": evidence, "waiting_reason": "source_access_unknown", "tool_calls": 1}
-        if evidence["complete_jd"] is not True:
+        if evidence["complete_jd"] is not True and evidence["liveness"] != "expired":
             return {"evidence": evidence, "waiting_reason": "core_evidence_missing", "tool_calls": 1}
         return {"evidence": evidence, "tool_calls": 1}
 

@@ -557,6 +557,9 @@ Isolated graph cases cover both malformed lists and the valid license gate.
 The scan extraction boundary also treats a model-returned `years: null` as
 missing core evidence rather than crashing in evidence normalization. The
 graph regression reproduces the old exception and verifies the waiting result.
+The liveness graph now waits on an unrecognized model liveness value instead
+of retaining a JD report, while explicit expired evidence still excludes an
+incomplete JD. Isolated graph cases reproduce both former routing errors.
 After these scan and recovery fixes, all 61 current
 `tests/workflow-*-test.py` files passed in one local run on 2026-09-29
 (118.7 seconds, zero failures). This broad regression result supplements the
