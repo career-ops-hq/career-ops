@@ -40,6 +40,7 @@ tracked_companies:${[
     entry('Ibm blank values', 'ibm', '    ibm:\n      country: " "\n      categories: [""]'),
     entry('Phenom brace block', 'phenom', '    phenom: {}'),
     entry('Phenom non-filter keys', 'phenom', '    phenom:\n      lang: en_global\n      country: global\n      selectedFields: { country: [] }'),
+    entry('Facets only', 'amazon', '    amazon:\n      facets: [normalized_country_code, job_category]'),
   ].join('')}
 job_boards:${entry('Board null block', 'amazon', '    amazon:')}
 `, 'utf-8');
@@ -67,6 +68,7 @@ tracked_companies:${[
     'tracked_companies[8].ibm',
     'tracked_companies[9].phenom',
     'tracked_companies[10].phenom',
+    'tracked_companies[11].amazon',
     'job_boards[0].amazon',
   ];
   const empty = summarize(run(NODE, ['validate-portals.mjs', '--file', emptyPath]));

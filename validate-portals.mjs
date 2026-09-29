@@ -42,9 +42,10 @@ function hasValue(value) {
 // reads as coverage. Hand-kept: there is no provider metadata to derive this from.
 // A warning, not an error: the entry still scans, just too broadly.
 const PROVIDER_BLOCK_FILTERS = {
-  // Every key but these is sent verbatim as a query or facet filter.
+  // Every key but these is sent verbatim as a query or facet filter; `facets`
+  // only asks for facet counts in the response and filters nothing.
   amazon: (block) => Object.entries(block)
-    .some(([key, value]) => !['sort', 'result_limit', 'offset'].includes(key) && hasValue(value)),
+    .some(([key, value]) => !['sort', 'result_limit', 'offset', 'facets'].includes(key) && hasValue(value)),
   ibm: (block) => hasText(block.country)
     || (Array.isArray(block.categories) && block.categories.some(hasText)),
   // lang and urlPrefix only shape the request; country 'global' is the default.
