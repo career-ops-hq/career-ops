@@ -239,3 +239,12 @@ with ten recorded calls, one formal score result and a report artifact whose
 stored and actual hashes match. The strict report validator and SQLite
 `PRAGMA quick_check` passed; notification deliveries remained zero. Both Hermes
 jobs remain paused until a clean scheduled execution is observed.
+
+A later direct Hermes score execution selected opportunity `4`, returned
+`succeeded` and committed its scan result with no notification delivery. Hermes
+persisted that direct execution as `unknown` after another gateway restart, so
+it is not counted as a clean scheduler run. The score job is active for its
+14:00 built-in execution; the scan job remains paused. `hermes cron status`
+reported a running gateway and a recent ticker heartbeat. The built-in run's
+business and durable status must be read before restoring scan or closing this
+issue.
