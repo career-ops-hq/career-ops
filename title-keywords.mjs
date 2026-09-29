@@ -1,11 +1,4 @@
-// title-keywords.mjs — one definition of how a `title_filter` keyword matches a
-// job title, imported by every path that filters titles.
-//
-// It lives in its own module because there are two such paths and they must not
-// drift: scan.mjs (the main pipeline) and openrouter-runner.mjs (the no-Claude
-// path, which deliberately does not import the scanner's broad dependencies).
-// Same reason user-agent.mjs and profile-language.mjs
-// are separate modules rather than exports of a bigger one.
+// Match configured title-filter keywords for retained provider parity checks.
 //
 // Opt-in whole-word matching for a keyword too long to get it automatically.
 // Chosen over widening the 2-3 char rule to every single-word keyword, because
