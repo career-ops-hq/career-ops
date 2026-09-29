@@ -198,3 +198,9 @@ excluded every failed waiting task, so no scheduled retry was possible. It now
 selects first failures after fresh jobs, resumes the same task for attempt two,
 and leaves second failures waiting for manual review. An isolated queue test
 covers all three choices; the two live waiting tasks remain unverified.
+The 13:00 built-in Hermes score execution `c342a9447c1f41d29194f2348d5d6967`
+completed under the corrected code and committed a second scan result on a new
+opportunity. The business database passed `PRAGMA quick_check`; it had two
+completed scan results, no score result and no notification delivery. This
+proves one scheduled scan handoff, not a completed scheduled score or a live
+retry of either waiting task.
