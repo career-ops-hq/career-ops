@@ -607,6 +607,8 @@ The LinkedIn rung reads the guest posting endpoint, which returns the rendered p
 
 Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the posting is live; Ashby's public API is org-level (the whole job board), so that rung parses the board and confirms the specific job id is still listed. A definitive 404/410 from any ATS API is authoritative and short-circuits the browser check entirely — zero tokens, no browser launch.
 
+Workday answers a withdrawn posting with a 403 whose body carries `errorCode: "S22"` ("permission denied"). That exact body is authoritative the same way a 404 is; any other 403 — a bot wall, or a different Workday error code — stays inconclusive and falls back to the browser.
+
 ```bash
 npm run liveness -- https://example.com/job/123
 npm run liveness -- https://a.com/job/1 https://b.com/job/2
