@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
+from dotenv import load_dotenv
 
 try:
     from workflow.http_identity import DEFAULT_USER_AGENT
@@ -293,6 +294,7 @@ def verify_portals_file(path: Path, *, ats_only: bool = False) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv(ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description="Verify tracked portal reachability")
     parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", "portals.yml"))
     parser.add_argument("--add", metavar="COMPANY")

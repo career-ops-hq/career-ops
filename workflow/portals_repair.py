@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 
 import yaml
+from dotenv import load_dotenv
 
 from workflow.portal_health import verify_ats_company
 
@@ -18,6 +19,7 @@ SLUG = re.compile(r"^[A-Za-z0-9._-]+$")
 BLOCK_SCALAR = re.compile(r"^[|>][-+]?\d*\s*(#.*)?$")
 DOUBLE_QUOTED = re.compile(r'^"((?:[^"\\]|\\.)*)"[ \t]*(#.*)?$')
 SINGLE_QUOTED = re.compile(r"^'((?:[^']|'')*)'[ \t]*(#.*)?$")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _blocks(lines: list[str]) -> dict[str, tuple[int, int, str]]:
@@ -168,6 +170,7 @@ def repair_file(path: Path, *, apply: bool = False, verify=verify_ats_company) -
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv(ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description="Verify and repair tracked ATS board URLs")
     parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", "portals.yml"))
     parser.add_argument("--fix", "--apply", dest="apply", action="store_true")

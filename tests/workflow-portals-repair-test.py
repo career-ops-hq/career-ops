@@ -1,14 +1,19 @@
 """Check Python portal repairs against the original line-preserving Node edit."""
 
 import json
+from contextlib import redirect_stdout
+from io import StringIO
+import os
 from pathlib import Path
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from workflow import portals_repair
 from workflow.portals_repair import compute_fixes, repair_file
 
 
@@ -68,5 +73,11 @@ with TemporaryDirectory() as directory:
                               "--file", str(Path(directory) / "missing.yml")],
                              cwd=ROOT, text=True, capture_output=True, check=True)
     assert "nothing to fix" in missing.stdout
+
+    (Path(directory) / ".env").write_text("CAREER_OPS_ALLOW_FAKE_IP_RANGE=1\n")
+    with patch.object(portals_repair, "ROOT", Path(directory)), \
+            patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()):
+        assert portals_repair.main(["--file", str(Path(directory) / "missing.yml")]) == 0
+        assert os.environ["CAREER_OPS_ALLOW_FAKE_IP_RANGE"] == "1"
 
 print("workflow portal repair: Node line-preserving baseline passed")

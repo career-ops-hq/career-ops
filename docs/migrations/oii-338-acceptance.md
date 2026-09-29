@@ -364,7 +364,16 @@ its ATS-only JSON result. Frozen Node slug and identity outputs and synthetic
 positive, mismatch, partial-budget and failure checks pass. A current AIA
 Workday probe returned the same `fetch failed` network result in both old and
 new implementations; Bosch's new probe also returned `fetch failed`, so those
-runs are not live-positive acceptance samples.
+runs are not live-positive acceptance samples. Those direct probes did not
+load the formal CLI's `.env`, so they cannot establish upstream reachability.
+Correctly configured read-only rechecks returned `live` for AIA Workday with
+20 first-page jobs and Bosch SmartRecruiters with 100 first-page jobs through
+the Python health path. Both are bounded health probes, not full collections.
+The standalone Python health and repair CLIs now load the project `.env`
+without overriding inherited values. A subprocess with the fake-IP variable
+removed from its inherited environment ran `workflow.portal_health` against
+the public AIA board and returned `live` with 20 first-page jobs.
+
 The Python ATS requests now use the Node provider's pinned User-Agent and
 10-second timeout; board-owner HTML is limited to the first 8 KiB. The shared
 Python identity also applies to public directory downloads, and the direct
@@ -376,14 +385,18 @@ partial/resume fixture passes with progress output. The already-running full
 sweep began before this change, so its current process remains silent; its
 checkpoint is the progress source for that run.
 
-The in-progress public Workday directory has 12,884 entries but only 3,781
-distinct hosts; 6,643 entries share one of 21 hosts that each hold more than
-20 sites. In the `dd3dce319a911cff` dataset, `wd1.wd1.myworkdayjobs.com`
-alone carries 2,480 consecutive sites. Three sampled entries around offset
-8,000 returned raw `fetch failed`; a separate public request to that shared
-host returned HTTP 429 while AIA's Workday API returned 200. The earlier
-20-worker assumption of one tenant per host therefore does not hold for this
-directory. Python now runs a batch serially when two Workday entries share a
-host, while retaining 20-way collection for distinct-host batches. The live
-full sweep started before this change and keeps its original concurrency;
-its eventual partial result cannot establish complete Workday coverage.
+The public Workday directory has 12,884 entries but only 3,781 distinct
+hosts; 6,643 entries share one of 21 hosts that each hold more than 20 sites.
+In the `dd3dce319a911cff` dataset, `wd1.wd1.myworkdayjobs.com` alone carries
+2,480 consecutive sites. The initial three-site diagnostic bypassed the
+formal CLI's `.env` loading and hit the local fake-IP guard, so its `fetch
+failed` results do not describe those boards. With the documented proxy
+exception, two of that host's sites returned HTTP 422; AIA's distinct
+Workday host fetched 983 jobs. An unguarded request to the shared host also
+observed HTTP 429 during the sweep, but that observation alone does not
+attribute the run's failures to rate limiting. The old 20-worker assumption
+of one tenant per host does not hold for this directory. Python now serializes
+batches containing repeated Workday hosts as a preventive coverage guard;
+distinct-host batches keep 20-way collection. The live full sweep finished
+Workday using its original concurrency and marked the source incomplete.
+Its board-level error mix still needs a correctly configured diagnostic run.

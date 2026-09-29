@@ -1,8 +1,10 @@
 """Compare portal identity decisions and reject cross-company slug repairs."""
 
 from pathlib import Path
+from contextlib import redirect_stdout
 import json
-from io import BytesIO
+from io import BytesIO, StringIO
+import os
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -98,5 +100,10 @@ with TemporaryDirectory() as directory:
                               "--json", "--strict", "--file", str(portal)],
                              cwd=ROOT, capture_output=True, text=True, check=True)
     assert json.loads(command.stdout) == {"found": True, "results": []}
+    (Path(directory) / ".env").write_text("CAREER_OPS_ALLOW_FAKE_IP_RANGE=1\n")
+    with patch.object(portal_health, "ROOT", Path(directory)), \
+            patch.dict(os.environ, {}, clear=True), redirect_stdout(StringIO()):
+        assert portal_health.main(["--file", str(Path(directory) / "missing.yml"), "--json"]) == 0
+        assert os.environ["CAREER_OPS_ALLOW_FAKE_IP_RANGE"] == "1"
 
 print("workflow portal health: Node decisions and ownership rejection passed")
