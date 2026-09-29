@@ -154,7 +154,7 @@ healthy.
 
 ## Local cutover disposition
 
-Current authoritative `data/opportunities.db` passes `PRAGMA quick_check` and has 87 opportunities, 5 tasks, 4 results, 87 source-evidence rows, 3 scan runs and 81 source-health rows. Its SHA-256 is `c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac`. The OII-334 archive separately retains the earlier 312-opportunity history. The historical 2026-09-20 `docs/acceptance/oii-338.md` records a previous empty-store restoration; it does not describe this current database or prove the pending cutover.
+Before cutover, authoritative `data/opportunities.db` passed `PRAGMA quick_check` and had 87 opportunities, 5 tasks, 4 results, 87 source-evidence rows, 3 scan runs and 81 source-health rows. Its SHA-256 was `c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac`. The OII-334 archive separately retains the earlier 312-opportunity history. The historical 2026-09-20 `docs/acceptance/oii-338.md` records a previous empty-store restoration; it does not describe this cutover.
 
 The user approved archive-and-empty-store cutover on 2026-09-29. The 87-opportunity
 database and associated `data`, `output`, `reports`, and `jds` files were copied to
@@ -168,5 +168,17 @@ returned idle. The current scan and score scripts were copied byte-for-byte
 to Hermes and their SHA-256 values matched. `hermes cron doctor` passed; only
 the original scan `504a0b3c252c` and score `9ff33a7a6d12` jobs were resumed,
 with their original workdir and schedule. The first direct Hermes score run
-completed successfully on the empty store. The first scan run was triggered
-and its final business result must be recorded after completion.
+completed successfully on the empty store. The scheduled 12:40 score run
+completed and published one formal scan task and `jd_report` result. The first
+full configured scan process exited zero: its Python business run checked
+36,809 raw postings, added 104 unique opportunities and 104 source-evidence
+rows, and committed one configured `scan_runs` row with 34 source-health rows.
+Health was 28 `reachable`, three `auth` and three `incomplete`; eight upstream
+error or coverage records include Workday page caps and provider auth gaps.
+The business database passed `PRAGMA quick_check` after that run. Hermes CLI
+reported `Ran now: succeeded`, but its durable execution record remains
+`unknown` because the gateway restarted while the long direct run was active.
+This bookkeeping status cannot be counted as a durable scheduler success;
+the process exit and business commit provide direct-run acceptance evidence.
+The original jobs remain active on their unchanged schedules, and the next
+built-in scan will supply a fresh durable scheduler observation.
