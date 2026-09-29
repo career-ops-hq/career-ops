@@ -652,9 +652,9 @@ test('two dates for one posting is all detect-reposts needs to call it a repost'
 test('stats.mjs and analyze-patterns.mjs stamp the local day in report headers, not UTC', () => {
   // At INSTANT (01:30 UTC), UTC_DAY is 2026-08-18 but NY_DAY is 2026-08-17.
   // Both report headers must reflect the local day (NY_DAY).
-  const statsOut = inFrozenTz('America/New_York',
+ const statsOut = inFrozenTz('America/New_York',
     `const { computeAllStats } = await import('${spec('stats.mjs')}');` +
-    `const s = computeAllStats();` +
+    `const s = computeAllStats({ apps: '', scanHist: '', cadence: '', patterns: '', rejected: '' });` +
     `process.stdout.write(s.metadata.generatedAt);`
   );
   assert.equal(statsOut, NY_DAY, `stats.mjs stamped ${statsOut}, expected local day ${NY_DAY}`);
