@@ -41,6 +41,8 @@ tracked_companies:${[
     entry('Phenom brace block', 'phenom', '    phenom: {}'),
     entry('Phenom non-filter keys', 'phenom', '    phenom:\n      lang: en_global\n      country: global\n      selectedFields: { country: [] }'),
     entry('Facets only', 'amazon', '    amazon:\n      facets: [normalized_country_code, job_category]'),
+    entry('Scalar facet', 'amazon', '    amazon:\n      normalized_country_code: DEU'),
+    entry('Location query only', 'amazon', '    amazon:\n      loc_query: Germany'),
   ].join('')}
 job_boards:${entry('Board null block', 'amazon', '    amazon:')}
 `, 'utf-8');
@@ -50,6 +52,8 @@ job_boards:${entry('Board null block', 'amazon', '    amazon:')}
 tracked_companies:${[
     entry('Amazon facet', 'amazon', '    amazon:\n      normalized_country_code: [DEU]'),
     entry('Amazon query', 'amazon', '    amazon:\n      base_query: backend'),
+    entry('Amazon bracketed scalar', 'amazon', '    amazon:\n      "normalized_country_code[]": DEU'),
+    entry('Amazon city', 'amazon', '    amazon:\n      city: Berlin'),
     entry('Ibm country', 'ibm', '    ibm:\n      country: Germany'),
     entry('Ibm categories', 'ibm', '    ibm:\n      categories: [Software Engineering]'),
     entry('Phenom facet', 'phenom', '    phenom:\n      selectedFields: { country: [Germany] }'),
@@ -69,6 +73,8 @@ tracked_companies:${[
     'tracked_companies[9].phenom',
     'tracked_companies[10].phenom',
     'tracked_companies[11].amazon',
+    'tracked_companies[12].amazon',
+    'tracked_companies[13].amazon',
     'job_boards[0].amazon',
   ];
   const empty = summarize(run(NODE, ['validate-portals.mjs', '--file', emptyPath]));

@@ -35,6 +35,17 @@ function hasValue(value) {
   return hasText(value) || typeof value === 'number' || typeof value === 'boolean';
 }
 
+// amazon.jobs facets filter only as `key[]=`, which the provider emits for a
+// YAML array (or a key already ending in `[]`); a scalar facet is ignored.
+const AMAZON_FACETS = new Set([
+  'normalized_country_code', 'normalized_state_name', 'normalized_city_name', 'normalized_location',
+  'location', 'category', 'business_category', 'job_function_id', 'schedule_type_id',
+  'employee_class', 'is_manager', 'is_intern',
+]);
+// Never narrow: request shaping, facet-count requests, and loc_query, which
+// leaves the hit count unchanged.
+const AMAZON_NON_FILTERS = new Set(['sort', 'result_limit', 'offset', 'facets', 'loc_query']);
+
 // Providers that narrow a large board with a block named after themselves and
 // silently treat a missing or unusable block as `{}`. Each predicate reports
 // whether the block carries a filter the provider actually sends; without one
@@ -42,10 +53,12 @@ function hasValue(value) {
 // reads as coverage. Hand-kept: there is no provider metadata to derive this from.
 // A warning, not an error: the entry still scans, just too broadly.
 const PROVIDER_BLOCK_FILTERS = {
-  // Every key but these is sent verbatim as a query or facet filter; `facets`
-  // only asks for facet counts in the response and filters nothing.
-  amazon: (block) => Object.entries(block)
-    .some(([key, value]) => !['sort', 'result_limit', 'offset', 'facets'].includes(key) && hasValue(value)),
+  amazon: (block) => Object.entries(block).some(([key, value]) => {
+    if (key.endsWith('[]')) return hasValue(value);
+    if (AMAZON_NON_FILTERS.has(key)) return false;
+    if (AMAZON_FACETS.has(key)) return Array.isArray(value) && value.some(hasValue);
+    return hasValue(value);
+  }),
   ibm: (block) => hasText(block.country)
     || (Array.isArray(block.categories) && block.categories.some(hasText)),
   // lang and urlPrefix only shape the request; country 'global' is the default.
