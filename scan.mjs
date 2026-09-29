@@ -2578,19 +2578,23 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
  * recorded them (whatever its status: these describe the posting, not whether it
  * was surfaced). Keyed by {@link normalizeUrlForDedup}, the same form the URL
  * dedup uses, so a tracker or pipeline row spelling the URL differently still
- * finds its posting.
+ * finds its posting. One URL can have several rows (a re-add, a verify
+ * outcome); they merge field by field, a later non-empty value replacing an
+ * earlier one and an empty cell keeping it.
  *
  * @param {string} scanHistoryText - Full scan-history.tsv contents.
  * @returns {Map<string, {requisitionId?: string, language?: string}>}
  */
-function collectPostingAttributes(scanHistoryText) {
+export function collectPostingAttributes(scanHistoryText) {
   const attributes = new Map();
   for (const line of scanHistoryText.split('\n').slice(1)) {
     const row = parseScanHistoryLine(line);
     const requisitionId = row.requisition_id.trim();
     const language = row.language.trim();
     if (!row.url || (!requisitionId && !language)) continue;
-    attributes.set(normalizeUrlForDedup(row.url.trim()), {
+    const key = normalizeUrlForDedup(row.url.trim());
+    attributes.set(key, {
+      ...attributes.get(key),
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
     });

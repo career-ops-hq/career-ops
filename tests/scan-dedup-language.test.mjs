@@ -19,6 +19,7 @@
 import { pass, fail } from './helpers.mjs';
 import {
   ANY_REQUISITION,
+  collectPostingAttributes,
   collectSeenCompanyRoles,
   companyRoleDedupKey,
   formatScanHistoryRow,
@@ -170,6 +171,20 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
     `seeded [${langs ? [...langs].join(', ') : 'nothing'}]`);
   check(isDistinctLanguage(langs, ['en']) === true,
     'collectSeenCompanyRoles: the English version of that requisition is distinct in a later run');
+}
+{
+  // One URL, several rows: fields merge, a later value wins, an empty cell
+  // keeps what an earlier row recorded.
+  const attributes = collectPostingAttributes([
+    HEADER,
+    historyRow(DE_URL, { requisition: 'ID2608-00427A', language: 'de' }),
+    historyRow(DE_URL, { requisition: 'ID2608-00427B' }),
+    historyRow(DE_URL),
+  ].join('\n'));
+  const merged = [...attributes.values()];
+  check(merged.length === 1 && merged[0].requisitionId === 'ID2608-00427B' && merged[0].language === 'de',
+    'collectPostingAttributes: rows for one URL merge field by field (later value wins, empty keeps)',
+    `got ${JSON.stringify(merged)}`);
 }
 {
   const languagesByBase = new Map();
