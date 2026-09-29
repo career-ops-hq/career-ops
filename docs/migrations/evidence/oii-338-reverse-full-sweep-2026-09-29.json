@@ -1,0 +1,82 @@
+{
+  "date": "2026-09-29",
+  "scope": "Uncapped live Python LangGraph reverse sweep over five public ATS directories and both VC portfolio seeds in an isolated store",
+  "command": "python -m workflow.career_ops --directory /private/tmp/oii338-global-full-20260929 global --ats greenhouse,lever,ashby,workday,icims --seeds yc,a16z --json",
+  "run_id": "c867647c62fb4c4aae43708f17146480",
+  "result_sha256": "93c245ee2156a1c3794e8ae543cac4849a01052392cff026ceab5e177c32502d",
+  "status": "partial",
+  "saved": true,
+  "resumable": false,
+  "stopped_by_outage": false,
+  "cap_hit": false,
+  "since_days": 3,
+  "directory_boards": {
+    "greenhouse": 8333,
+    "lever": 4368,
+    "ashby": 3161,
+    "workday": 12884,
+    "icims": 10108
+  },
+  "companies_available": 45979,
+  "companies_scanned": 45979,
+  "unreachable_boards": 28084,
+  "capped_boards": 32,
+  "postings_dropped_no_date": 164011,
+  "postings_kept": 35,
+  "retained_by_source": {
+    "ashby-full": 11,
+    "greenhouse-full": 1,
+    "icims-full": 16,
+    "lever-full": 1,
+    "workday-full": 6
+  },
+  "dataset_status": {
+    "greenhouse": "ok",
+    "lever": "ok",
+    "ashby": "ok",
+    "workday": "ok",
+    "icims": "ok",
+    "yc": "partial",
+    "a16z": "partial"
+  },
+  "source_health": {
+    "greenhouse": "incomplete",
+    "lever": "incomplete",
+    "ashby": "incomplete",
+    "workday": "incomplete",
+    "icims": "incomplete",
+    "yc": "incomplete",
+    "a16z": "incomplete"
+  },
+  "isolated_store": {
+    "quick_check": "ok",
+    "opportunities": 35,
+    "source_evidence": 35,
+    "source_health": 7,
+    "scan_runs": 1,
+    "graph_checkpoint_rows": 6,
+    "batch_checkpoint_removed": true,
+    "database_sha256": "470df8906e748f01f8b743f5f6ef44212dd657e483ecec153abe5122e9164149"
+  },
+  "icims_observed_batch_samples": [
+    {
+      "checkpoint_resume_at": 8150,
+      "observed_targets": 49,
+      "fetched": 28,
+      "errors": {"HTTP 404 Not Found": 17, "HTTP 403 Forbidden": 1, "fetch failed": 3}
+    },
+    {
+      "checkpoint_resume_at": 8200,
+      "observed_targets": 49,
+      "fetched": 11,
+      "errors": {"HTTP 404 Not Found": 35, "HTTP 403 Forbidden": 1, "HTTP 500 Internal Server Error": 1, "fetch failed": 1}
+    },
+    {
+      "checkpoint_resume_at": 8450,
+      "observed_targets": 49,
+      "fetched": 21,
+      "errors": {"HTTP 404 Not Found": 23, "HTTP 503 Service Unavailable": 1, "fetch failed": 4}
+    }
+  ],
+  "acceptance_limit": "The full source lists and live provider calls were exercised, but every source is incomplete because many public board coordinates failed, truncated, or were unavailable. The three iCIMS samples omit the last target in each 50-board batch and do not explain the full error population. This run predates the shared-host Workday serialization change loaded by the already-running process. It proves honest partial publication and isolation, not full upstream coverage or successful current-code Workday host serialization."
+}
