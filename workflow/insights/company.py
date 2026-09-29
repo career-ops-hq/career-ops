@@ -34,7 +34,9 @@ def company_view(db: sqlite3.Connection, portals: Path, *, today: date | None = 
     today = today or date.today()
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     required = {"opportunities", "application_lifecycle", "application_events"}
-    if not required <= tables:
+    reposts = repost_view(db, portals)
+    aggregators, _ = aggregator_keys(portals)
+    if not required <= tables and reposts["status"] == "source_missing" and not aggregators and not company:
         return {"status": "source_missing", "missing": sorted(required - tables), "companies": None}
 
     cards = {}
@@ -47,8 +49,9 @@ def company_view(db: sqlite3.Connection, portals: Path, *, today: date | None = 
                                       "postingChurn": {"label": "no-scan-data", "clusters": []}})
 
     events = defaultdict(list)
-    for row in db.execute("SELECT opportunity_id,to_status,payload,created_at FROM application_events ORDER BY id"):
-        events[str(row["opportunity_id"])].append(dict(row))
+    if "application_events" in tables:
+        for row in db.execute("SELECT opportunity_id,to_status,payload,created_at FROM application_events ORDER BY id"):
+            events[str(row["opportunity_id"])].append(dict(row))
     followups = defaultdict(int)
     if "application_activity" in tables:
         for row in db.execute("SELECT opportunity_id,COUNT(*) AS count FROM application_activity WHERE type='followup_sent' GROUP BY opportunity_id"):
@@ -56,9 +59,11 @@ def company_view(db: sqlite3.Connection, portals: Path, *, today: date | None = 
 
     evaluated = ("(SELECT created_at FROM evaluations ev WHERE ev.opportunity_id=o.id ORDER BY rowid DESC LIMIT 1)"
                  if "evaluations" in tables else "NULL")
-    for row in db.execute(f"""SELECT o.id,o.company,o.created_at,l.status,{evaluated} AS evaluated_at
-                               FROM application_lifecycle l
-                               LEFT JOIN opportunities o ON CAST(o.id AS TEXT)=l.opportunity_id"""):
+    application_rows = (db.execute(f"""SELECT o.id,o.company,o.created_at,l.status,{evaluated} AS evaluated_at
+                                      FROM application_lifecycle l
+                                      LEFT JOIN opportunities o ON CAST(o.id AS TEXT)=l.opportunity_id""")
+                        if {"opportunities", "application_lifecycle"} <= tables else ())
+    for row in application_rows:
         if row["company"] is None:
             continue
         current = card(row["company"])
@@ -110,14 +115,15 @@ def company_view(db: sqlite3.Connection, portals: Path, *, today: date | None = 
                 **({"note": "a rejection is an answer"} if row["status"] == "rejected" else {}),
             })
 
-    reposts = repost_view(db, portals)
-    aggregators, _ = aggregator_keys(portals)
     for cluster in reposts.get("clusters") or []:
         current = card(cluster["company"])
         if current is not None:
             current["postingChurn"]["clusters"].append({key: cluster[key] for key in ("role", "repostCount", "daysSpan", "lastSeen")})
     for aggregator in aggregators:
         card(aggregator)
+    key = normalize_company(company) if company else None
+    if company and key not in cards:
+        card(company)
 
     for current in cards.values():
         facts = current["responsiveness"]["facts"]
@@ -133,10 +139,18 @@ def company_view(db: sqlite3.Connection, portals: Path, *, today: date | None = 
                           "aggregator-not-evaluated" if current["key"] in aggregators else
                           "reposts-detected" if churn["clusters"] else "none-detected")
 
-    key = normalize_company(company) if company else None
     selected = [item for item in cards.values() if key is None or item["key"] == key]
-    return {"status": "observed", "as_of": today.isoformat(), "silence_window_days": silence_days,
+    if required <= tables and reposts["status"] != "source_missing":
+        status = "observed"
+    elif not required <= tables and reposts["status"] == "source_missing":
+        status = "source_missing"
+    else:
+        status = "partial"
+    return {"status": status,
+            "missing": sorted(required - tables), "as_of": today.isoformat(), "silence_window_days": silence_days,
             "stale_after_days": stale_days, "sources": {"application_activity": "application_activity" in tables,
+                                                    "application_lifecycle": "application_lifecycle" in tables,
+                                                    "application_events": "application_events" in tables,
                                                     "scan_observations": reposts["status"] != "source_missing"},
             "companies": sorted(selected, key=lambda item: item["key"])}
 

@@ -17,7 +17,25 @@ with tempfile.TemporaryDirectory() as temp:
     portals.write_text("job_boards:\n  - name: Board\n    aggregator: true\n")
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
-    assert company_view(db, portals)["status"] == "source_missing"
+    missing = company_view(db, portals)
+    assert missing["status"] == "source_missing"
+    assert missing["companies"][0]["postingChurn"]["label"] == "no-scan-data"
+    assert company_view(db, portals, company="Unknown")["companies"][0]["responsiveness"]["label"] == "no-history"
+    scan_only = sqlite3.connect(":memory:")
+    scan_only.row_factory = sqlite3.Row
+    scan_only.executescript("""
+        CREATE TABLE scan_observations(id INTEGER PRIMARY KEY,url TEXT,company TEXT,title TEXT,observed_on TEXT);
+        INSERT INTO scan_observations(url,company,title,observed_on) VALUES
+            ('a','Acme','Engineer','2026-01-01'),('b','Acme','Engineer','2026-02-01');
+    """)
+    scanned = company_view(scan_only, portals)
+    assert scanned["status"] == "partial"
+    assert scanned["companies"][0]["responsiveness"]["label"] == "no-history"
+    assert scanned["companies"][0]["postingChurn"]["label"] == "reposts-detected"
+    unknown = company_view(scan_only, portals, company="Unknown")["companies"][0]
+    assert unknown["responsiveness"]["label"] == "no-history"
+    assert unknown["postingChurn"]["label"] == "none-detected"
+    scan_only.close()
     db.executescript("""
         CREATE TABLE opportunities(id INTEGER PRIMARY KEY,company TEXT,created_at TEXT);
         CREATE TABLE application_lifecycle(opportunity_id TEXT,status TEXT);

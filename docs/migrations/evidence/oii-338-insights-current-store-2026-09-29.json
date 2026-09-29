@@ -10,5 +10,15 @@
     "insights company-signals --company Microsoft": {"exit_code": 0, "sha256": "0adead0f571b624e7a5b730de36ebd518d00e634c740338e2c177e81aa952225", "records": 0},
     "insights stated --opportunity 2": {"exit_code": 0, "sha256": "4cd8ae88ffe76577e4d62740a1b1f3f85194c7abc1259ca8c7d2b26181fbdc84", "status": "source_missing"}
   },
-  "acceptance_limit": "The current database lacks real post-application events and stated-salary observations, so company history and stated salary correctly return source_missing. These runs prove current-store execution and honest missing-data handling, not a full Node/Python behavior differential for those domains."
+  "post_fix_company_recheck": {
+    "command": "insights company --company Microsoft",
+    "exit_code": 0,
+    "sha256": "fc743fca01ed263fd22568337f8581a4b2e81c7b925245a93042665b9ed56156",
+    "status": "partial",
+    "company_cards": 1,
+    "missing": ["application_events", "application_lifecycle"],
+    "posting_churn": "none-detected",
+    "responsiveness": "no-history"
+  },
+  "acceptance_limit": "The initial company-history source_missing result exposed a Node/Python parity gap: it hid scan-side company cards when application tables were absent. After the OII-344 fix, the current-store recheck returns a partial Microsoft card while naming the missing application sources. Stated salary remains source_missing because there are no observations. These runs do not replace the isolated positive and rejection cases."
 }

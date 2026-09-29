@@ -19,6 +19,10 @@
 The Node repost parser accepts only full `YYYY-MM-DD` observation dates.
 Python applies that grammar before `date.fromisoformat`, which otherwise also
 accepts compact and ISO week dates and could admit false repost clusters.
+Node company cards combine application history, repost clusters and explicitly
+flagged aggregator boards independently. Python keeps the scan-side cards and
+single-company fallback when application tables are absent, while reporting
+those missing tables instead of inventing responsiveness facts.
 
 The 2026-09-25 OII-341 decision removes stored job contacts, so the older
 OII-314 contact export requirement no longer applies. Independent interview

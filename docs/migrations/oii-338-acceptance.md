@@ -486,8 +486,11 @@ Current-store read-only `insights` commands for stats, reposts, salary,
 upskill, company history, company signals and stated salary all exited zero.
 Stats saw 104 scan observations, reposts saw no cluster, and upskill parsed
 five reports. The store has no real application events or stated salary
-observations, so those queries returned `source_missing` rather than invented
-history. Output hashes and limits are in
+observations. The initial company-history `source_missing` result exposed a
+parity gap: Node could still show scan-side company cards. OII-344 now returns
+a `partial` Microsoft card with `no-history` responsiveness and named missing
+application tables; stated salary still returns `source_missing`. Output
+hashes and limits are in
 `evidence/oii-338-insights-current-store-2026-09-29.json`; these runs add
 runtime evidence but do not replace the isolated OII-344 parity cases.
 
