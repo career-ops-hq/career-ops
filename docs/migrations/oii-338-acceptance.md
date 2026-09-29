@@ -445,3 +445,11 @@ LangGraph scan task, committed its scan result, and left notification
 deliveries at zero. This is a clean scheduler-to-Python execution; that tick
 did not run opportunity `5`'s score stage. The recurring score job remains
 active under the user's authorization, while the scan job remains paused.
+
+The next built-in score tick at 17:40 completed durably as Hermes execution
+`5f43aee9fe7e448986923101eb775319`. It completed opportunity `6`'s
+LangGraph scan task with a retained `jd_report` for an active Microsoft job;
+the prescreen remains `uncertain` on undisclosed compensation and one adjacent
+capability. SQLite `PRAGMA quick_check` is `ok` and notification deliveries
+remain zero. This second scheduled tick confirms repeat execution after resume;
+it does not establish a score result for opportunity `6`.
