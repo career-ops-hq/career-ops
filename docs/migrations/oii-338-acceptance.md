@@ -365,3 +365,7 @@ positive, mismatch, partial-budget and failure checks pass. A current AIA
 Workday probe returned the same `fetch failed` network result in both old and
 new implementations; Bosch's new probe also returned `fetch failed`, so those
 runs are not live-positive acceptance samples.
+The Python ATS requests now use the Node provider's pinned User-Agent and
+10-second timeout; board-owner HTML is limited to the first 8 KiB. The shared
+Python identity also applies to public directory downloads, and the direct
+file and package entrypoints both pass their scan tests.

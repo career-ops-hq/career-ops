@@ -11,6 +11,11 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+try:
+    from workflow.http_identity import DEFAULT_USER_AGENT
+except ModuleNotFoundError:
+    from http_identity import DEFAULT_USER_AGENT
+
 
 DATASET_BASE = "https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data"
 SOURCES = {name: f"{DATASET_BASE}/{name}_companies.json" for name in
@@ -26,7 +31,7 @@ def dataset_fingerprint(values: list) -> str:
 
 
 def fetch_dataset(url: str) -> object:
-    with urlopen(Request(url, headers={"User-Agent": "career-ops/1.0"}), timeout=30) as response:
+    with urlopen(Request(url, headers={"User-Agent": DEFAULT_USER_AGENT}), timeout=30) as response:
         return json.load(response)
 
 

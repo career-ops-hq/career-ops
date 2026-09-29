@@ -18,6 +18,11 @@ from urllib.request import Request, urlopen
 
 import yaml
 
+try:
+    from workflow.http_identity import DEFAULT_USER_AGENT
+except ModuleNotFoundError:
+    from http_identity import DEFAULT_USER_AGENT
+
 
 LATIN = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ß": "ss", "đ": "d", "ł": "l",
                        "þ": "th", "ð": "d", "ħ": "h", "ı": "i", "ŋ": "ng", "ŧ": "t", "ĸ": "k", "ſ": "s"})
@@ -98,13 +103,13 @@ def parse_ats_slug(raw_url: str | None) -> dict | None:
 
 
 def fetch_json(url: str) -> object:
-    with urlopen(Request(url, headers={"User-Agent": "career-ops/1.0"}), timeout=20) as response:
+    with urlopen(Request(url, headers={"User-Agent": DEFAULT_USER_AGENT}), timeout=10) as response:
         return json.load(response)
 
 
 def fetch_text(url: str) -> str:
-    with urlopen(Request(url, headers={"User-Agent": "career-ops/1.0", "Range": "bytes=0-65535"}), timeout=20) as response:
-        return response.read(65536).decode("utf-8", errors="replace")
+    with urlopen(Request(url, headers={"User-Agent": DEFAULT_USER_AGENT}), timeout=10) as response:
+        return response.read(8192).decode("utf-8", errors="replace")
 
 
 def error_kind(error: Exception, *, status: int | None = None, name: str | None = None) -> str:

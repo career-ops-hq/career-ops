@@ -2,14 +2,18 @@
 
 from pathlib import Path
 import json
+from io import BytesIO
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from urllib.error import HTTPError
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from workflow import portal_health
+from workflow.http_identity import DEFAULT_USER_AGENT
 from workflow.portal_health import (board_title_owner, identity_matches, parse_ats_slug,
                                     probe_provider, ProviderHealthSession, slug_candidates, verify_ats_company,
                                     verify_companies)
@@ -29,6 +33,15 @@ assert board_title_owner("<title>Soci&eacute;t&eacute; G&eacute;n&eacute;rale Jo
 assert board_title_owner("<title>A &amp;lt; B Jobs</title>") == "A &lt; B"
 assert board_title_owner("<body>no title</body>") is None
 assert not identity_matches("Mercury Systems", board_title_owner("<title>Mercury &amp; Co Jobs</title>"))
+
+node_ua = subprocess.run(["node", "--input-type=module", "-e",
+                          "import {DEFAULT_USER_AGENT} from './user-agent.mjs'; console.log(DEFAULT_USER_AGENT)"],
+                         cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+assert DEFAULT_USER_AGENT == node_ua
+with patch.object(portal_health, "urlopen", return_value=BytesIO(b"x" * 9000)) as open_url:
+    assert len(portal_health.fetch_text("https://example.com")) == 8192
+    assert open_url.call_args.args[0].get_header("User-agent") == DEFAULT_USER_AGENT
+    assert open_url.call_args.kwargs["timeout"] == 10
 
 
 def missing(url):
