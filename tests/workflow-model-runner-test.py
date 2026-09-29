@@ -168,9 +168,12 @@ assert _normalize_assessment(split_reasoning)["dimensions"]["compensation"] == {
 }
 
 with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
+    complete_sections = {name: "Evidence and next step." for name in (
+        "overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist"
+    )}
     responses = iter((
         {"direction": {}, "compensation": {}, "team": {}, "company": {}},
-        {"direction": {}, "compensation": {}, "team": {}, "company": {}, "sections": {}},
+        {"direction": {}, "compensation": {}, "team": {}, "company": {}, "sections": complete_sections},
     ))
 
     class Agent:
@@ -191,9 +194,26 @@ with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
         repaired, _ = model_adapter.call_agent("repair", "prompt", [], calls_dir)
     finally:
         model_adapter.create_agent = original_create_agent
-    assert repaired["sections"] == {}
+    assert repaired["sections"] == complete_sections
     assert len(calls) == 2
     assert len((calls_dir / "calls.jsonl").read_text().splitlines()) == 2
+
+with tempfile.TemporaryDirectory(prefix="career-ops-section-completion-") as temporary:
+    partial = {"dimensions": {}, "sections": {"overview": "Existing source-bound overview."}}
+    missing = ("capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")
+    original_call_agent = model_adapter.call_agent
+    seen = []
+    def fill_sections(phase, prompt, *_args, **_kwargs):
+        seen.append((phase, prompt))
+        return {name: "Grounded evidence and next action." for name in missing}, "sections-session"
+    model_adapter.call_agent = fill_sections
+    try:
+        completed, count = score_graph._complete_sections(partial, {"jd": "Source JD"}, {}, {}, Path(temporary))
+    finally:
+        model_adapter.call_agent = original_call_agent
+    assert count == 1 and completed["sections"]["overview"] == partial["sections"]["overview"]
+    assert all(completed["sections"].get(name) for name in missing)
+    assert seen[0][0] == "score_sections" and "Source JD" in seen[0][1]
 
 with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / "data") as temporary:
     runner.DRAFT_ROOT = Path(temporary)

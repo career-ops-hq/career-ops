@@ -50,6 +50,10 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
     root, directory = Path(packet["root"]), Path(packet["directory"])
     if evidence.get("complete_jd") is not True or evidence.get("liveness") != "active" or not evidence.get("jd", "").strip():
         raise ValueError("Complete live JD required")
+    required_sections = ("overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")
+    sections = assessment.get("sections")
+    if not isinstance(sections, dict) or any(not isinstance(sections.get(name), str) or not sections[name].strip() for name in required_sections):
+        raise ValueError("Report sections are incomplete")
     files = {name: directory / f"{name}.txt" for name in packet["sources"]}
     files["jd"] = directory / "jd.txt"
     files["jd"].write_text(evidence["jd"])
@@ -110,7 +114,6 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
     findings = "\n".join(f"- {item['id']} {item['url']} {item['entity']}" for item in assessment["research"]["findings"]) or "- 无外部研究发现"
     research_status = ("已留存可引用网页来源" if any(item.get("status") == "retrieved" for item in assessment["research"]["findings"])
                        else "已检索，但未取得可引用网页；外部事项保持未知")
-    sections = assessment["sections"]
     bodies = {
         "A. 岗位概览": sections["overview"], "B. 能力竞争力": sections["capabilities"],
         "C. 入职吸引力": f"**入职吸引力：** {score['lower']:.2f}–{score['upper']:.2f}/5；证据覆盖率：{score['coverage'] * 100:g}%\n\n{table}",

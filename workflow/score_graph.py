@@ -41,6 +41,29 @@ def _normalize_assessment(assessment: dict) -> dict:
     return assessment
 
 
+def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict, directory: Path) -> tuple[dict, int]:
+    required = ("overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")
+    sections = assessment.get("sections")
+    if not isinstance(sections, dict):
+        sections = {}
+    missing = [name for name in required if not isinstance(sections.get(name), str) or not sections[name].strip()]
+    if not missing:
+        return assessment, 0
+    prompt = (
+        "Complete only these missing score report sections as a JSON object with exactly these top-level keys: "
+        + ", ".join(missing) + ". Write concise Chinese Markdown strings without level-two headings. "
+        "Map every material requirement when capabilities is requested. Keep unknown facts unknown. "
+        "Ground claims only in the supplied JD, candidate sources, frozen research, and existing dimension judgments. "
+        "Do not repeat existing sections or change dimension scores.\n"
+        + json.dumps({"jd_report": jd, "candidate_sources": sources, "research": research,
+                      "dimensions": assessment["dimensions"], "existing_sections": list(sections)}, ensure_ascii=False)
+    )
+    added = model_adapter.call_agent("score_sections", prompt, [], directory)[0]
+    if any(not isinstance(added.get(name), str) or not added[name].strip() for name in missing):
+        raise ValueError("Score section completion is incomplete")
+    return {**assessment, "sections": {**sections, **{name: added[name] for name in missing}}}, 1
+
+
 def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
     """Resume an interrupted score stage before starting a fresh evaluation."""
     key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -126,9 +149,14 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
     def render(state: ScoreState) -> dict:
         assessment_path = directory / "assessment.json"
         assessment = json.loads(assessment_path.read_text()) if assessment_path.exists() else state["assessment"]
+        assessment, section_calls = _complete_sections(
+            assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+        )
+        if section_calls:
+            _write_json(assessment_path, assessment)
         try:
             result = render_report(state["packet"], state["evidence"], assessment)
-            calls = state["tool_calls"]
+            calls = state["tool_calls"] + section_calls
         except ValueError as error:
             frozen_sources = {**state["packet"]["sources"], "jd": state["evidence"]["jd"]}
             frozen_sources.update({source["id"]: source["text"] for source in state["research"]["sources"]})
@@ -147,9 +175,12 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
             )
             assessment = _normalize_assessment(model_adapter.call_agent("repair", prompt, [], directory)[0])
             assessment.update(state["research"])
+            assessment, repair_sections = _complete_sections(
+                assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+            )
             _write_json(assessment_path, assessment)
             result = render_report(state["packet"], state["evidence"], assessment)
-            calls = state["tool_calls"] + 1
+            calls = state["tool_calls"] + section_calls + 1 + repair_sections
         return {
             "outcome": "score", "tool_calls": calls,
             "artifact": {

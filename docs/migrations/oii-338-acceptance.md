@@ -204,3 +204,21 @@ opportunity. The business database passed `PRAGMA quick_check`; it had two
 completed scan results, no score result and no notification delivery. This
 proves one scheduled scan handoff, not a completed scheduled score or a live
 retry of either waiting task.
+
+The subsequent direct Hermes score run selected the new Microsoft opportunity
+`3` and saved research and an assessment, but that assessment contained only
+`overview` and `capabilities` sections. Report rendering failed on the missing
+`compensation` section. Hermes marked the run `unknown` after its gateway
+restarted; the SQLite task recorded `failure:RuntimeError`. Both original jobs
+were paused and read back as paused before recovery. A full-assessment repair
+again omitted required sections. The score graph now requests only missing
+sections, validates their presence, and merges them with the retained assessment.
+The same task `e96a5d09-3b44-4c6b-a841-f52755128d78` resumed at the render
+checkpoint, completed on attempt one with eight recorded calls, and committed
+one score result for opportunity `3`. Its report hash is
+`afe20941be068fc8010a7ca767c492098d512b2b837fdf8f9e84a0dfcff8dd20`;
+the result is 2.75–3.75/5 with 75% coverage. The report file hash matches its
+artifact row and the strict report validator passed. A repeated run returned
+the completed task without a second evaluation or report artifact. SQLite
+`PRAGMA quick_check` passed and `notification_deliveries` remained empty. The
+jobs remain paused pending a clean scheduler run and remaining acceptance gates.

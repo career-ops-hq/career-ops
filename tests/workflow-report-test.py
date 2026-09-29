@@ -36,6 +36,13 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     }
     rendered = render_report(packet, evidence, assessment)
     assert "已留存可引用网页来源" in rendered["report"]
+    missing_section = json.loads(json.dumps(assessment))
+    del missing_section["sections"]["compensation"]
+    try:
+        render_report(packet, evidence, missing_section)
+        raise AssertionError("incomplete report sections accepted")
+    except ValueError as error:
+        assert "Report sections are incomplete" in str(error)
     no_sources = json.loads(json.dumps(assessment))
     no_sources["sources"] = []
     no_sources["research"]["findings"] = []
