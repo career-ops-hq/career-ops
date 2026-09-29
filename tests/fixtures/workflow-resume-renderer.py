@@ -23,6 +23,8 @@ if os.environ.get("CAREER_OPS_RESUME_STRAY_HYPHEN"):
 if os.environ.get("CAREER_OPS_RESUME_SPLIT_HYPHEN"):
     stream += b"\nBT /F1 12 Tf 72 675 Td (Owns the full-) Tj ET"
     stream += b"\nBT /F1 12 Tf 72 650 Td (arc) Tj ET"
+if os.environ.get("CAREER_OPS_RESUME_UNSUPPORTED_METRIC"):
+    stream += b"\nBT /F1 12 Tf 72 625 Td (Managed 45 staff) Tj ET"
 objects = [
     b"<< /Type /Catalog /Pages 2 0 R >>",
     b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
