@@ -1,41 +1,67 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-<table align="center">
-<tr>
-<td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
-<td valign="middle">
-<strong>何か月も履歴書を送り続けて、返事は沈黙。</strong> だから、自分に必要なフィルターを作った。<br>
-<strong>求人 740 件。応募 68 件。面接 12 回。オファー 1 件。</strong><br>
-最初のユーザーは私だった。<strong>仕事を得た。</strong> そしてオープンソースにした。
-</td>
-</tr>
-</table>
-
-<div align="center">
-<details>
-<summary>🌍 17 言語で読む</summary>
-<div align="center">
-
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
-
-</div>
-</details>
-</div>
+<p align="center">オープンソースの AI 求職エージェント。</p>
 
 <p align="center">
-  企業はAIで候補者をフィルタリングしている。<strong>ならば候補者にもAIを渡し、企業を<em>選ばせる</em>側にした。</strong><br>
-  あなたのマシン上で、どの求人が本物か、どれが合うかを教え、<strong>あなたの名前で応募することは決してない。</strong>
+  <a href="README.md">English</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.pt-BR.md">Português (Brasil)</a> |
+  <a href="README.ko-KR.md">한국어</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.cn.md">简体中文</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.ua.md">Українська</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ta.md">தமிழ்</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.hi.md">हिन्दी</a> |
+  <a href="README.tr.md">Türkçe</a>
+</p>
+
+<!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
+
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+
+<p align="center">
+<strong>何か月も履歴書を送り続けて、返&#8288;事&#8288;は&#8288;沈&#8288;黙。</strong><br>
+だから、自分に必要なフ&#8288;ィ&#8288;ル&#8288;タ&#8288;ー&#8288;を&#8288;作&#8288;っ&#8288;た。
 </p>
 
 <p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="著者自身の求職活動：履歴書を送る前に、赤で「応募しない」と印を付けられた求人" width="800"></a>
+<strong>求人&nbsp;740&nbsp;件を評価。応募&nbsp;68&nbsp;件。面&#8288;接&nbsp;12&nbsp;回。&#8288;内&#8288;定&nbsp;1&nbsp;件。</strong><br>
+最初のユーザーは私だった。仕&#8288;事&#8288;を&#8288;得&#8288;た。そ&#8288;し&#8288;て&#8288;オ&#8288;ー&#8288;プ&#8288;ン&#8288;ソ&#8288;ー&#8288;ス&#8288;に&#8288;し&#8288;た。
 </p>
 
-<p align="center"><sub>あの赤いタブがプロダクトだ。<em>応募しない。</em> <a href="https://santifer.io/career-ops-system">全文はこちら →</a></sub></p>
+<p align="center">
+求人を貼り付ける。あなたのマ&#8288;シ&#8288;ン&#8288;上&#8288;で、ま&#8288;だ&#8288;募&#8288;集&#8288;中&#8288;か、自&#8288;分&#8288;に&#8288;合&#8288;う&#8288;か&#8288;を&#8288;教&#8288;え&#8288;て&#8288;く&#8288;れ&#8288;る。<br>
+履歴書を求人に合わせ、回&#8288;答&#8288;を&#8288;下&#8288;書&#8288;き&#8288;す&#8288;る。<strong>送&#8288;信&#8288;ボ&#8288;タ&#8288;ン&#8288;を&#8288;押&#8288;す&#8288;の&#8288;は、&#8288;あ&#8288;な&#8288;た。</strong>
+</p>
+
+<p align="center">
+  <img src="docs/demo.gif" alt="career-ops のダッシュボードで見る著者自身の求職活動：スコア付きの求人一覧、「応募しない」と印が付いた求人の赤い件数、そして評価レポートの全文" width="800">
+</p>
+
+<p align="center"><sub>私自身の求職活動、その途中経過。UI&nbsp;は&#8288;ス&#8288;ペ&#8288;イ&#8288;ン&#8288;語。</sub></p>
+
+<p align="center">
+  企業はAIで候補者をフ&#8288;ィ&#8288;ル&#8288;タ&#8288;リ&#8288;ン&#8288;グ&#8288;し&#8288;て&#8288;い&#8288;る。<br>
+  <strong>私は候補者に、企&#8288;業&#8288;を&#8288;<em>選&#8288;ぶ&#8288;</em>た&#8288;め&#8288;の&nbsp;AI&nbsp;を&#8288;渡&#8288;し&#8288;た&#8288;だ&#8288;け&#8288;だ。</strong>
+</p>
+
+<p align="center">
+  半年後、<strong>私はその仕事を辞めた。</strong><br>
+  今、私たちは career-ops を&#8288;作&#8288;っ&#8288;て&#8288;い&#8288;る。あ&#8288;な&#8288;た&#8288;が&#8288;自&#8288;分&#8288;の&#8288;仕&#8288;事&#8288;を&#8288;つ&#8288;か&#8288;め&#8288;る&#8288;よ&#8288;う&#8288;に。
+</p>
+
+<p align="center"><a href="#あなたの番">求人ひとつで試す&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">ス&#8288;ト&#8288;ー&#8288;リ&#8288;ー&#8288;の&#8288;全&#8288;文&#8288;を&#8288;読&#8288;む&nbsp;→</a></p>
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops で採用：検証済みの件数"></a></p>
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">私の後に来た人たちが、どうやって採用されたかを書き残してくれた。</p>
 
@@ -45,16 +71,24 @@
 
 <p align="center"><sub>どのカードも、開いて読める公開 Issue。あなたも決まった？ <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">カードを残す →</a></sub></p>
 
+<p align="center">⭐ <strong>career-ops&nbsp;が役に立ったなら、ス&#8288;タ&#8288;ー&#8288;ひ&#8288;と&#8288;つ&#8288;で、次&#8288;の&#8288;人&#8288;が&#8288;見&#8288;つ&#8288;け&#8288;や&#8288;す&#8288;く&#8288;な&#8288;る。</strong></p>
+
 <br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
+</p>
+
+<p align="center">
+  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
+</p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
 </p>
 
 ## あなたの番
@@ -92,7 +126,7 @@ npx @santifer/career-ops init
 
 ## スポンサー
 
-career-ops は求職者にとって永久に無料。下記の企業がメンテナーの時間を支え、それを保っている。
+career-ops は求職者にとって永久に無料。以下の企業がこのプロジェクトをスポンサーしている：
 
 <p align="center">
   <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
@@ -106,7 +140,7 @@ career-ops は求職者にとって永久に無料。下記の企業がメンテ
 
 求人を貼り付ける。その夜を使う価値があるかを教えてくれる。
 
-- **偽物か、古いか？** 一文字も書く前に、幽霊求人と詐欺に印を付ける。
+- **まだ募集中？** 一文字も書く前に、その求人がまだ掲載されているかを確認する。
 - **あなた向きではない？** あなたの本当の履歴書に照らして求人を採点し、合わなければ見送れと言う。無視することもできる。
 - **応募する価値がある？** 履歴書、カバーレター、回答の下書きを作る。読むのはあなた。送るのもあなた。
 - **誰に話せばいい？** その人を見つけ、メッセージの下書きを作る。送ることは決してない。
@@ -124,15 +158,15 @@ career-ops は求職者にとって永久に無料。下記の企業がメンテ
 - **外部に送信する。** テレメトリなし、こちらのバックエンドなし。あなたの履歴書は、あなたのマシンから自分で選んだ AI プロバイダーへ行くだけで、他のどこにも行きません。唯一の公開台帳はこのリポジトリ、`HIRED.md` とその issue です。
 - **4.0/5 未満の求人に応募させる。** 応募しないよう伝えます。無視することはできますが、その旨を伝えます。
 
-履歴書を言い換えることはあっても、でっち上げることは決してあってはならない。今この規則はプロンプトの中にあり、コードで強制されてはいません。送る前にすべての履歴書を読んでください。詳細は [FAQ](#faq) に。
+履歴書を言い換えることはあっても、でっち上げることは決してあってはならない。あなたの履歴書にない数字や事実を含む PDF はコードのチェックで止まりますが、言い換えの一つひとつまではまだ判断できません。送る前にすべての履歴書を読んでください。詳細は [FAQ](#faq) に。
 
 ## 機能
 
 | 機能                     | 説明                                                                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **A-H 評価**             | 職務サマリー、CV との適合（この求人で各要件がどれだけ重要か、その重みが求人票の文言・構造・推定のどれに由来するかを要件ごとにラベル付け。推定は決して最上位帯にならない）、レベル戦略、報酬リサーチ、パーソナライズ、面接準備（STAR+R）、さらに詐欺やゴーストジョブを検出するブロック G の正当性チェックと、ビザスポンサーなしを明記した求人票を絶対的なブロッカーとして示す就労許可シグナル |
+| **A-H 評価**             | 職務サマリー、CV との適合（この求人で各要件がどれだけ重要か、その重みが求人票の文言・構造・推定のどれに由来するかを要件ごとにラベル付け。推定は決して最上位帯にならない）、レベル戦略、報酬リサーチ、パーソナライズ、面接準備（STAR+R）、さらにブロック G の求人の正当性チェック（まだ募集中か、再掲載か：判定ではなく観察）と、ビザスポンサーなしを明記した求人票を絶対的なブロッカーとして示す就労許可シグナル |
 | **Human-in-the-Loop**    | AI が評価して推薦し、あなたが決めて行動する。システムが応募を送信することは決してありません。最終判断は常にあなたのものです <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
-| **ATS 向け PDF 生成**    | Space Grotesk + DM Sans のデザインでキーワードを織り込んだ CV                                                                             |
+| **ATS 向け PDF 生成**    | あなた自身の経験をもとに求人票ごとに調整した、ATS が読み取れる CV（Space Grotesk + DM Sans のデザイン）                                     |
 | **カバーレター生成**     | リサーチに基づくカバーレター。キーワードの反映、4 つの対話式の切り口（理由／課題／アプローチ／トーン）、チャット内での下書き承認、CV と同じ HTML + Playwright パイプラインによる A4 PDF。評価のたびに自動で下書きし、`/career-ops cover` で必要なときに仕上げて生成 |
 | **CV の先へ**            | 企業調査（[`deep`](modes/deep.md)）は AI 戦略、最近の動き、エンジニアリング文化、あなたのプロフィールが取るべき角度を明らかにします。連絡先の発見（[`contacto`](modes/contacto.md)）は、連絡する価値のある採用責任者・リクルーター・チームメンバーを特定し、相手のタイプに合わせた 300 文字以内の LinkedIn メッセージを下書きします。正式な応募メールの下書き（[`email`](modes/email.md)）は、評価済みレポートや貼り付けた求人票を件名・本文・添付チェックリストに変えます。何も送信・提出・クリックしません。応募はあなたを列に並ばせる。調査は会話を生む。 |
 | **パターン分析**         | 不採用パターンと ATS チャネル別の通過率（`analyze-patterns.mjs`）、求職全体のファネル統計（`stats.mjs`）、再掲載・ゴーストジョブの検出（`detect-reposts.mjs`） |
@@ -143,7 +177,7 @@ career-ops は求職者にとって永久に無料。下記の企業がメンテ
 | 機能                     | 説明                                                                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **自動パイプライン**     | URL を貼るだけで、完全な評価 + PDF + トラッカー登録                                                                                       |
-| **面接ストーリーバンク** | 評価をまたいで STAR+Reflection のストーリーを蓄積：どんな行動面接の質問にも答えられる 5〜10 本のマスターストーリー                            |
+| **面接ストーリーバンク** | 評価をまたいで STAR+Reflection のストーリーを蓄積：実際に受ける行動面接の質問に合わせて調整できる 5〜10 本のマスターストーリー                            |
 | **交渉スクリプト**       | 給与交渉のフレームワーク、地域差による減額への反論、競合オファーの活用                                                                     |
 | **応募メールの下書き**   | レポートまたは貼り付けた求人票から、リクルーター向け・紹介向け・コールド応募向けの正式なメールを作成。件名、添付チェックリスト、根拠付きの適合ポイント、プロフィール由来の連絡先ブロック付き。下書きのみ：career-ops は決して送信・提出・クリックしません。 |
 | **ポータルスキャナー**   | 100 社以上を事前設定（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ Ashby、Greenhouse、Lever、Wellfound を横断するカスタムクエリ         |
@@ -160,7 +194,7 @@ career-ops は求職者にとって永久に無料。下記の企業がメンテ
 
 ## クイックスタート
 
-**いちばん速い方法：コマンド 1 つ：**
+**いちばん速い方法、コマンド 1 つで：**
 
 ```bash
 npx @santifer/career-ops init
@@ -177,7 +211,7 @@ cd career-ops
 claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 ```
 
-**初回起動時、career-ops は会話だけでセットアップを案内します：CV、プロフィール、目標とする職種。手で編集するものはありません。**
+**初回起動時、career-ops は会話だけでセットアップ（CV、プロフィール、目標とする職種）を案内します。手で編集するものはありません。**
 
 <details>
 <summary><b>手動でセットアップしたい？（git clone）</b></summary>
@@ -186,6 +220,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -248,6 +286,7 @@ career-ops は共有のコマンドルーターを使います。スラッシュ
 /career-ops deep      → 企業についての詳細リサーチ用プロンプト
 /career-ops interview-prep → 企業別の面接準備ドキュメントを生成
 /career-ops interview    → 対話形式のプロフィール／CV オンボーディング面談
+/career-ops master-profile → マスターキャリアプロフィールをインポート・確認・検証
 /career-ops eu-swe    → CV・応募・面接の前に欧州向け SWE 応募を調整
 /career-ops eu-fintech → 欧州フィンテック 21 ポータルで Product Manager 職をスキャン（トークン消費なし）
 /career-ops interview/plan → 今後の面接に向けた時間割型の準備プラン
@@ -382,6 +421,35 @@ grok
 
 ヘッドレスのバッチワーカーには `grok -p "prompt"` を使います（ツール実行を自動承認するには `--yolo` を追加）。
 
+## Pi 連携
+
+career-ops は [Pi](https://github.com/earendil-works/pi) をネイティブにサポートしており、メンテナンスの必要なラッパーファイルはありません：Pi はリポジトリのルートにある `AGENTS.md` をプロジェクトのコンテキストとして読み込み、`.agents/skills/career-ops/SKILL.md` の共有スキルを自分で見つけます。ルーターは `/skill:career-ops` として使えます。
+
+### ネイティブ Pi
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+pi
+
+# 2. Use the shared skill with subcommands:
+/skill:career-ops "Senior AI Engineer at Anthropic..."
+/skill:career-ops pipeline
+/skill:career-ops scan
+/skill:career-ops pdf
+/skill:career-ops tracker
+```
+
+### ワンショット Pi（`pi -p`）
+
+```bash
+pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p "Run career-ops scan mode and summarize new matches."
+pi -p "Run career-ops tracker mode and summarize the current statuses."
+```
+
+Pi のビルドがプロジェクトのリソースを使う前に信頼の確認を求める場合は、リポジトリ内で一度 `/trust` を実行してから `pi` を再起動し、プロジェクトのスキルを読み込ませてください（`/trust` は以降の Pi プロセスに適用されます）。あるいは `-a` を付けて起動すれば、その 1 回の実行だけを信頼するので再起動は不要です。
+
 ### スタンドアロン Gemini API スクリプト（CLI のインストール不要）
 
 ```bash
@@ -403,7 +471,7 @@ npm run gemini:eval -- "JD text here"
 
 ## 事前設定済みポータル
 
-スキャナーには、すぐにスキャンできる **100 社以上**と、主要な求人サイトを横断する **45 件以上の検索クエリ**が付属しています。`templates/portals.example.yml` を `portals.yml` にコピーして、自分の分を追加してください：
+スキャナーには、すぐにスキャンできる **100 社以上**と、主要な求人サイトを横断する **35 件以上の検索クエリ**が付属しています。`templates/portals.example.yml` を `portals.yml` にコピーして、自分の分を追加してください：
 
 **AI ラボ：** Anthropic、OpenAI、Mistral、Cohere、LangChain、Pinecone
 **音声 AI：** ElevenLabs、PolyAI、Parloa、Hume AI、Deepgram、Vapi、Bland AI
@@ -435,7 +503,7 @@ npm run build:dashboard   # optional: build the standalone binary
 
 機能：6 つのフィルタータブ、4 種類のソートモード、グループ表示／フラット表示、遅延読み込みのプレビュー、インラインでのステータス変更。
 
-**実験的な Web UI** もあります（アルファ版、オプトイン：自分で起動しない限り何も動きません）：[`web/README.md`](web/README.md) を参照してください。
+**実験的な Web UI** もあります（アルファ版かつオプトイン：自分で起動しない限り何も動きません）：[`web/README.md`](web/README.md) を参照してください。
 
 ## プロジェクト構成
 
@@ -492,6 +560,10 @@ career-ops/
 
 - **トラッカーの上書き：** `CAREER_OPS_TRACKER` を設定して、応募トラッカーファイルのパスを直接上書きすることもできます。
 - **書き込み：** すべての書き込み操作（マージなど）は正規に `{DATA_ROOT}/data/applications.md` を対象とします。
+- **スキャナーの設定：** `portals.yml` は `{DATA_ROOT}/portals.yml` で読み込まれ検証されるので、`node validate-portals.mjs` は `scan.mjs` が読むのと同じファイルをチェックします。
+- **生成されるドキュメント：** 調整済みの CV とカバーレターは `{DATA_ROOT}/output/` の下に書き込まれ、それらをレポートに結び付ける PDF マニフェストは `{DATA_ROOT}/data/pdf-index.tsv` にあります。`CAREER_OPS_TRACKER` が未設定の間は、これらの書き込み先を限定するトラッカーのワークスペースはデータルートであり、チェックアウトではありません。
+- **トラッカー上書き時の PDF：** `generate-pdf.mjs` はワークスペースを決める前に `CAREER_OPS_TRACKER` を解決します。そのため上書きが設定されていると、ワークスペースはそのトラッカーを含むフォルダ（トラッカーが `data/` フォルダにある場合はその一つ上のフォルダ）になります。このとき CV の HTML とすべての PDF はそのワークスペース内に置く必要があり、マニフェストはその `data/pdf-index.tsv` に移ります。カバーレターは引き続き `{DATA_ROOT}/output/` を対象とするため、そのフォルダがトラッカーのワークスペースの外にある場合は拒否されます。
+- **コード層は動かない：** `node_modules/`、`providers/`、`modes/`、そしてスクリプト自体は常にリポジトリを基準に解決され、データルートを基準にすることはありません。
 
 Go のダッシュボード TUI、Node.js スクリプト、AI エージェントモードのすべてが、この解決の階層を自動的に尊重します。
 
@@ -529,6 +601,7 @@ Go のダッシュボード TUI、Node.js スクリプト、AI エージェン�
   <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
   <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
   <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
   <br>
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
@@ -548,7 +621,7 @@ Go のダッシュボード TUI、Node.js スクリプト、AI エージェン�
 career-ops（[career-ops.org](https://career-ops.org)、別名 **careerops**） は、あなたの AI コーディング CLI（Claude Code、Codex、OpenCode など）の中でローカルで動くオープンソースの AI 求職ツールで、すべての判断をあなたに委ねます。求人を CV と照らして評価し、ATS 向けに調整した PDF を生成し、連絡すべき相手を見つけ、すべてを一か所で追跡します：最終判断は常にあなたのものです。[CareerOps マニフェスト](https://career-ops.org/manifesto)の最初のリファレンス実装です。
 
 **カスタマイズされた履歴書が事実をでっち上げることはありますか？**
-あってはならず、プロンプトにもそう書いてあります：言い換えはしても、でっち上げはしない。ただしこの規則は、まだコードのゲートで強制されていません。2 つのオープンな issue が追跡しています：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（職名は cv.md と一致させる）と [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不一致なら止める忠実性チェック）。マージされるまでは、送る前にすべての履歴書を読んでください。[免責事項](LEGAL_DISCLAIMER.md) にも同じことがより長く書いてあります。
+あってはならず、プロンプトにもそう書いてあります：言い換えはしても、でっち上げはしない。`generate-pdf` は、あなたの情報源にない数字や事実を含む CV をブロックします（`--skip-fact-check` を渡した場合を除く）。職名のチェックや言い換えの判断はまだしません。2 つのオープンな issue がそれを追跡しています：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（職名は cv.md と一致させる）と [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不一致なら止める忠実性チェック）。マージされるまでは、送る前にすべての履歴書を読んでください。[免責事項](LEGAL_DISCLAIMER.md) にも同じことがより長く書いてあります。
 
 **career-ops を無料で、あるいはより安価なモデルやローカルモデルで動かせますか？**
 はい。career-ops は CLI に依存せず、無料モデルやローカルモデル（OpenRouter の無料モデル、Ollama、または OpenAI 互換のエンドポイント）で動くので、有料サブスクリプションに縛られません。完全なセットアップは [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) を参照してください。
@@ -563,16 +636,16 @@ career-ops はオープンな Agent Skill Standard を通じて、主要な AI �
 career-ops は Windows で動きます。プラットフォーム固有のセットアップと既知の落とし穴（Git Bash の検出、改行コード、タスクスケジューラ）は [docs/WINDOWS.md](docs/WINDOWS.md) にあります。インストール中にシンボリックリンクのエラーでスキルが読み込めない場合、対処法は [docs/FAQ.md](docs/FAQ.md) にあります。完全な手順は [docs/SETUP.md](docs/SETUP.md) を参照してください。
 
 **career-ops は私の代わりに自動で応募しますか？**
-いいえ。career-ops はフィルターであって、数を撃つ自動応募ツールではありません。AI が評価し、順位を付け、下書きを作り、あなたが確認して決めます。送信・提出・クリックは決してしません：最終判断は常にあなたのものです。この Human-in-the-Loop の設計こそが核心です。
+いいえ。career-ops はフィルターであって、数を撃つ自動応募ツールではありません。AI が評価し、順位を付け、下書きを作り、あなたが確認して決めます。下書きも入力もしますが、送信は決してしません。送信ボタンを押すのはあなたです。この Human-in-the-Loop の設計こそが核心です。
 
 **career-ops は無料でオープンソースですか？**
-はい。career-ops は無料でオープンソースであり、候補者にとってはこれからもずっとそうです：[CareerOps マニフェスト](https://career-ops.org/manifesto)の最初のリファレンス実装です。読んで、あなたの信じることが書いてあるなら、署名してください。
+はい。career-ops は無料でオープンソースであり、候補者にとってはこれからもずっとそうです。これは [CareerOps マニフェスト](https://career-ops.org/manifesto)の最初のリファレンス実装です。読んで、あなたの信じることが書いてあるなら、署名してください。
 
 ## 作者について
 
-[Santiago Fernández de Valderrama Aparicio](https://santifer.io/about)（santifer）です：Head of Applied AI、元創業者（自分の名前を冠した事業を立ち上げて売却、その事業は今も稼働中）。career-ops は自分自身の求職活動を管理するために作りました。結果、現職を獲得することに成功しました。
+[Santiago Fernández de Valderrama Aparicio](https://santifer.io/about)（santifer）です。元創業者で、事業を立ち上げて売却しました。その事業は今も私の名前を冠して稼働しています。career-ops は自分自身の求職活動を管理するために作ったもので、実際に機能しました：Head of Applied AI のポジションを得たのです。その半年後、career-ops の開発にフルタイムで専念するため、そのポジションを離れました。
 
-このリポジトリが週およそ 4 時間でどうメンテナンスされているか気になりますか？ [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) を読んでください。
+この規模のリポジトリが、AI エージェントの一団と、すべてのマージを決める一人の人間によってどうメンテナンスされているか気になりますか？ [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) を読んでください。
 
 ポートフォリオと他のオープンソースプロジェクト → [santifer.io](https://santifer.io)
 

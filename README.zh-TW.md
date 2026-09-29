@@ -1,41 +1,67 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-<table align="center">
-<tr>
-<td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
-<td valign="middle">
-<strong>幾個月投出去的履歷，全都石沉大海。</strong>所以我做了自己需要的那個過濾器。<br>
-<strong>740 個職缺。68 個已投遞。12 場面試。1 份 offer。</strong><br>
-我是它的第一個使用者。<strong>我拿到了那份工作。</strong>然後把它開源了。
-</td>
-</tr>
-</table>
-
-<div align="center">
-<details>
-<summary>🌍 以 17 種語言閱讀</summary>
-<div align="center">
-
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
-
-</div>
-</details>
-</div>
+<p align="center">開源的 AI 求職代理人。</p>
 
 <p align="center">
-  企業用 AI 篩選候選人。<strong>我把 AI 交給候選人，讓他們來<em>挑選</em>企業。</strong><br>
-  在你自己的機器上，它告訴你哪些職缺是真的、哪些適合你，並且<strong>絕不以你的名義投遞。</strong>
+  <a href="README.md">English</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.pt-BR.md">Português (Brasil)</a> |
+  <a href="README.ko-KR.md">한국어</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.cn.md">简体中文</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.ua.md">Українська</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ta.md">தமிழ்</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.hi.md">हिन्दी</a> |
+  <a href="README.tr.md">Türkçe</a>
+</p>
+
+<!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
+
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+
+<p align="center">
+<strong>幾個月投出去的履歷，全都石&#8288;沉&#8288;大&#8288;海。</strong><br>
+所以我做了自己需要的那個過&#8288;濾&#8288;器。
 </p>
 
 <p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="作者本人的求職過程：在任何一份履歷送出之前，就已用紅色標為不要投的職缺" width="800"></a>
+<strong>740&nbsp;個職缺已評估。68&nbsp;個已投遞。12&nbsp;場&#8288;面&#8288;試。&#8288;1&nbsp;份&nbsp;offer。</strong><br>
+我是它的第一個使用者。我&#8288;拿&#8288;到&#8288;了&#8288;那&#8288;份&#8288;工&#8288;作。然&#8288;後&#8288;把&#8288;它&#8288;開&#8288;源&#8288;了。
 </p>
 
-<p align="center"><sub>那個紅色標籤就是產品。<em>不要投。</em> <a href="https://santifer.io/career-ops-system">完整故事 →</a></sub></p>
+<p align="center">
+貼上一個職缺，它在你的機器上告&#8288;訴&#8288;你：還&#8288;有&#8288;沒&#8288;有&#8288;在&#8288;徵&#8288;人，適&#8288;不&#8288;適&#8288;合&#8288;你。<br>
+它為你客製履歷、草擬回&#8288;答。<strong>由&#8288;你&#8288;按&#8288;下&#8288;送&#8288;出。</strong>
+</p>
+
+<p align="center">
+  <img src="docs/demo.gif" alt="作者本人在 career-ops 儀表板裡的求職：評過分的職缺清單、標為「不要投」的職缺的紅色計數，接著是一份完整的評估報告" width="800">
+</p>
+
+<p align="center"><sub>我自己的求職，進行到一半，介面是西&#8288;班&#8288;牙&#8288;文。</sub></p>
+
+<p align="center">
+  企業用 AI 篩選候選人。<br>
+  <strong>我把&nbsp;AI&nbsp;交給候選人，讓&#8288;他&#8288;們&#8288;來&#8288;<em>挑&#8288;選</em>&#8288;企&#8288;業。</strong>
+</p>
+
+<p align="center">
+  六個月後，<strong>我離開了那份工作。</strong><br>
+  現在我們打造&nbsp;career-ops，讓&#8288;你&#8288;也&#8288;能&#8288;上&#8288;岸。
+</p>
+
+<p align="center"><a href="#輪到你了">拿一個職缺試試&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">閱讀完整故事&nbsp;→</a></p>
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="透過 career-ops 獲得錄取：已核實數量"></a></p>
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">在我之後來的人，寫下了他們是怎麼拿到 offer 的。</p>
 
@@ -45,16 +71,24 @@
 
 <p align="center"><sub>每張卡片都是一個可以打開的公開 issue。你也上岸了？<a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">留下你的卡片 →</a></sub></p>
 
+<p align="center">⭐ <strong>如果&nbsp;career-ops&nbsp;幫到了你，一&#8288;顆&#8288;星就&#8288;能幫&#8288;下&#8288;一&#8288;個&#8288;人找&#8288;到&#8288;它。</strong></p>
+
 <br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
+</p>
+
+<p align="center">
+  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
+</p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
 </p>
 
 ## 輪到你了
@@ -92,7 +126,7 @@ npx @santifer/career-ops init
 
 ## 贊助商
 
-career-ops 對求職者永久免費。下面這些公司資助維護者的時間，讓這一點得以延續。
+career-ops 對求職者永久免費。這些公司贊助了本專案：
 
 <p align="center">
   <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
@@ -106,7 +140,7 @@ career-ops 對求職者永久免費。下面這些公司資助維護者的時間
 
 貼上一個職缺。它告訴你這個晚上值不值得。
 
-- **假的還是過期的？** 在你寫下一個字之前，就標出幽靈職缺和詐騙。
+- **還在徵人嗎？** 在你寫下一個字之前，它先確認這則職缺仍然有效。
 - **不是你？** 用你真實的履歷給職缺打分，匹配度弱就叫你跳過。你可以不聽。
 - **值得投？** 它起草履歷、求職信和申請答案。你來讀。你來送。
 - **該找誰聊？** 它找到那個人，起草那則訊息。它從不替你送出。
@@ -124,15 +158,15 @@ career-ops 對求職者永久免費。下面這些公司資助維護者的時間
 - **回傳資料。** 沒有遙測，沒有我們的後端。你的履歷只從你的機器送往你選擇的 AI 供應商，不去任何別的地方。唯一的公開紀錄就是這個儲存庫：`HIRED.md` 和它的 issue。
 - **催你申請低於 4.0/5 的職缺。** 它會告訴你別申請。你可以不聽，它會明說。
 
-它會改寫你的履歷，但絕不能捏造。目前這條規則寫在提示詞裡，還沒有變成程式碼裡的強制檢查。每份履歷送出前都請自己讀一遍。詳情見 [FAQ](#常見問題faq)。
+它會改寫你的履歷，但絕不能捏造。程式碼裡有一道檢查：PDF 裡的數字或事實如果在你的履歷中找不到，就會被擋下；但它還無法判斷每一處改寫。每份履歷送出前都請自己讀一遍。詳情見 [FAQ](#常見問題faq)。
 
 ## 功能特色
 
 | 功能                     | 說明                                                                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **A-H 評估**             | 職缺摘要、履歷比對（標註每條要求在這個職缺裡有多重要，以及權重來自職缺描述的措辭、結構還是估算，逐條標註；估算永遠不能進入最高一級）、職級策略、薪酬調查、個人化、面試準備（STAR+R），再加上區塊 G 的職缺真實性檢查（標記詐騙與幽靈職缺），以及一個工作許可訊號（把明確不提供簽證擔保的職缺描述標記為硬性阻礙） |
+| **A-H 評估**             | 職缺摘要、履歷比對（標註每條要求在這個職缺裡有多重要，以及權重來自職缺描述的措辭、結構還是估算，逐條標註；估算永遠不能進入最高一級）、職級策略、薪酬調查、個人化、面試準備（STAR+R），再加上區塊 G 的職缺可信度檢查（是否仍在徵人、是否為重複刊登：只陳述觀察，不下定論），以及一個工作許可訊號（把明確不提供簽證擔保的職缺描述標記為硬性阻礙） |
 | **Human-in-the-Loop**    | AI 評估並推薦，你決定並行動。系統從不送出申請：最終決定權永遠在你手上 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
-| **ATS PDF 產生**         | 注入關鍵字的履歷，Space Grotesk + DM Sans 設計                                                                                            |
+| **ATS PDF 產生**         | ATS 可讀的履歷，根據你自己的經歷、針對每份職缺描述客製，採用 Space Grotesk + DM Sans 設計                                                  |
 | **求職信產生器**         | 基於調查的求職信：關鍵字呼應、四個互動式角度提問（為什麼／問題／方法／語氣）、在對話中審核草稿，以及透過與履歷相同的 HTML + Playwright 流程產生 A4 PDF。每次評估自動起草；用 `/career-ops cover` 依需求完成並產生 |
 | **履歷之外**             | 企業調查（[`deep`](modes/deep.md)）揭示 AI 策略、近期動向、工程文化，以及你的履歷應該採取的角度。聯絡人探索（[`contacto`](modes/contacto.md)）找出值得聯絡的招募主管、招募人員或團隊成員，並草擬一則不超過 300 字元、針對聯絡人類型調整過的 LinkedIn 訊息。正式申請郵件草稿（[`email`](modes/email.md)）把已評估的報告或貼上的職缺描述變成主旨、內文和附件清單，不寄送、不送出、不點擊任何內容。申請讓你排進隊伍，調查讓你獲得對話。 |
 | **模式分析**             | 拒信模式與各 ATS 管道的推進率（`analyze-patterns.mjs`）、整個求職週期的漏斗統計（`stats.mjs`）、重複刊登與幽靈職缺偵測（`detect-reposts.mjs`） |
@@ -143,7 +177,7 @@ career-ops 對求職者永久免費。下面這些公司資助維護者的時間
 | 功能                     | 說明                                                                                                                                     |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **自動流程**             | 貼上一個 URL，獲得完整評估 + PDF + 追蹤紀錄                                                                                               |
-| **面試故事庫**           | 跨評估累積 STAR+反思故事：5 到 10 個能回答任何行為面試問題的主故事                                                                         |
+| **面試故事庫**           | 跨評估累積 STAR+反思故事：5 到 10 個主故事，可以針對你遇到的行為面試問題靈活調整                                                                         |
 | **談判話術**             | 薪資談判框架、應對地域折價、以競爭 offer 作為籌碼                                                                                         |
 | **申請郵件草稿**         | 從報告或貼上的職缺描述產生給招募人員、內推或主動應徵的正式郵件，包含主旨、附件清單、有憑有據的契合點，以及來自你個人資料的聯絡資訊區塊。僅限草稿：career-ops 從不寄送、送出或點擊任何內容。 |
 | **求職平台掃描器**       | 預先設定 100+ 家企業（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自訂查詢                     |
@@ -160,7 +194,7 @@ career-ops 對求職者永久免費。下面這些公司資助維護者的時間
 
 ## 快速開始
 
-**最快的方式：一道指令：**
+**最快的方式，一道指令：**
 
 ```bash
 npx @santifer/career-ops init
@@ -177,7 +211,7 @@ cd career-ops
 claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 ```
 
-**首次啟動時，career-ops 會透過對話引導你完成設定：你的履歷、個人資料和目標職缺。不需要手動編輯任何東西。**
+**首次啟動時，career-ops 會透過對話引導你完成設定（你的履歷、個人資料和目標職缺）。不需要手動編輯任何東西。**
 
 <details>
 <summary><b>想手動設定？（git clone）</b></summary>
@@ -186,6 +220,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -248,6 +286,7 @@ career-ops 使用共用的指令路由。在會註冊斜線指令的 CLI 裡，�
 /career-ops deep      → 針對企業的深度調查提示詞
 /career-ops interview-prep → 產生針對特定企業的面試準備文件
 /career-ops interview    → 互動式的個人資料／履歷入門訪談
+/career-ops master-profile → 匯入、審閱並驗證你的主職涯檔案（Master Career Profile）
 /career-ops eu-swe    → 在履歷／申請／面試前校準一份歐洲 SWE 申請
 /career-ops eu-fintech → 掃描 21 個歐洲金融科技求職平台的 Product Manager 職缺（零 token）
 /career-ops interview/plan → 為即將到來的面試制定按時間區塊安排的準備計畫
@@ -382,6 +421,35 @@ grok
 
 無頭批次 worker 請使用 `grok -p "prompt"`（加上 `--yolo` 可自動核准工具執行）。
 
+## Pi 整合
+
+career-ops 原生支援 [Pi](https://github.com/earendil-works/pi)，不需要維護任何包裝檔案：Pi 會把儲存庫根目錄的 `AGENTS.md` 讀作專案脈絡，並自行找到位於 `.agents/skills/career-ops/SKILL.md` 的共用 skill。之後路由就能以 `/skill:career-ops` 的形式使用。
+
+### 原生 Pi
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+pi
+
+# 2. Use the shared skill with subcommands:
+/skill:career-ops "Senior AI Engineer at Anthropic..."
+/skill:career-ops pipeline
+/skill:career-ops scan
+/skill:career-ops pdf
+/skill:career-ops tracker
+```
+
+### 單次執行的 Pi（`pi -p`）
+
+```bash
+pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p "Run career-ops scan mode and summarize new matches."
+pi -p "Run career-ops tracker mode and summarize the current statuses."
+```
+
+如果某個 Pi 版本要求先對專案資源做信任確認，就在儲存庫裡執行一次 `/trust`，然後重新啟動 `pi`，讓專案 skill 載入（`/trust` 對之後啟動的 Pi 程序生效）；或者用 `-a` 啟動，它只信任單次執行，不需要重新啟動。
+
 ### 獨立的 Gemini API 腳本（無需安裝 CLI）
 
 ```bash
@@ -403,7 +471,7 @@ npm run gemini:eval -- "JD text here"
 
 ## 預設掃描平台
 
-掃描器內建 **100+ 家企業**可直接掃描，以及涵蓋主流求職網站的 **45+ 條搜尋查詢**。把 `templates/portals.example.yml` 複製為 `portals.yml`，再加入你自己的：
+掃描器內建 **100+ 家企業**可直接掃描，以及涵蓋主流求職網站的 **35+ 條搜尋查詢**。把 `templates/portals.example.yml` 複製為 `portals.yml`，再加入你自己的：
 
 **AI 實驗室：** Anthropic、OpenAI、Mistral、Cohere、LangChain、Pinecone
 **語音 AI：** ElevenLabs、PolyAI、Parloa、Hume AI、Deepgram、Vapi、Bland AI
@@ -492,6 +560,10 @@ career-ops/
 
 - **覆寫追蹤檔：** 你也可以設定 `CAREER_OPS_TRACKER` 直接覆寫申請追蹤檔的路徑。
 - **寫入：** 所有寫入操作（如合併）都以 `{DATA_ROOT}/data/applications.md` 為標準目標。
+- **掃描器設定：** `portals.yml` 在 `{DATA_ROOT}/portals.yml` 讀取和驗證，所以 `node validate-portals.mjs` 檢查的正是 `scan.mjs` 讀取的那個檔案。
+- **產生的文件：** 客製履歷和求職信寫入 `{DATA_ROOT}/output/`，把它們連結到報告的 PDF 清單位於 `{DATA_ROOT}/data/pdf-index.tsv`。在未設定 `CAREER_OPS_TRACKER` 時，限定這些寫入範圍的追蹤工作區是資料根目錄，而不是程式碼的 checkout。
+- **追蹤檔覆寫下的 PDF：** `generate-pdf.mjs` 會先解析 `CAREER_OPS_TRACKER`，再推導工作區，所以設定了覆寫時，工作區就是存放該追蹤檔的資料夾（如果追蹤檔位於 `data/` 資料夾中，則是它的上一層資料夾）。這時履歷的 HTML 和每個 PDF 都必須位於該工作區內，清單也會移到它的 `data/pdf-index.tsv`。求職信仍以 `{DATA_ROOT}/output/` 為目標，所以當該資料夾不在追蹤檔的工作區內時，求職信會被拒絕寫入。
+- **程式碼層維持不動：** `node_modules/`、`providers/`、`modes/` 以及腳本本身一律相對於儲存庫解析，從不相對於資料根目錄。
 
 Go 版儀表板 TUI、Node.js 腳本和 AI 代理模式都會自動遵循這個解析層級。
 
@@ -529,6 +601,7 @@ Go 版儀表板 TUI、Node.js 腳本和 AI 代理模式都會自動遵循這個�
   <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
   <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
   <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
   <br>
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
@@ -548,7 +621,7 @@ Go 版儀表板 TUI、Node.js 腳本和 AI 代理模式都會自動遵循這個�
 career-ops（[career-ops.org](https://career-ops.org)，也稱 **careerops**） 是一個開源的 AI 求職工具，在你的 AI 程式碼 CLI（Claude Code、Codex、OpenCode 等）裡於本機執行，把每一個決定都留給你。它依你的履歷評估職缺、產生適配 ATS 的 PDF、找出該聯絡的對象，並在一個地方追蹤所有進度：最終決定權永遠在你手上。它是 [CareerOps 宣言](https://career-ops.org/manifesto)的第一個參考實作。
 
 **客製化履歷會捏造內容嗎？**
-不應該，提示詞裡也這麼寫：只改寫，絕不捏造。但這條規則還沒有由程式碼裡的檢查強制執行。兩個未關閉的 issue 在追蹤：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（職稱必須與 cv.md 一致）和 [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通過即阻止的真實性檢查）。在它們合併之前，每份履歷送出前都請自己讀一遍。[法律聲明](LEGAL_DISCLAIMER.md) 用更長的篇幅說了同樣的話。
+不應該，提示詞裡也這麼寫：只改寫，絕不捏造。`generate-pdf` 會擋下數字或事實在你的資料來源中找不到的履歷，除非你傳入 `--skip-fact-check`。它目前還不檢查職稱，也不評判改寫。兩個未關閉的 issue 在追蹤這些：[#2677](https://github.com/career-ops-hq/career-ops/issues/2677)（職稱必須與 cv.md 一致）和 [#1411](https://github.com/career-ops-hq/career-ops/issues/1411)（不通過即阻止的真實性檢查）。在它們合併之前，每份履歷送出前都請自己讀一遍。[法律聲明](LEGAL_DISCLAIMER.md) 用更長的篇幅說了同樣的話。
 
 **我可以免費執行 career-ops，或改用較便宜／本機的模型嗎？**
 可以。career-ops 不綁定特定 CLI，也能跑在免費與本機模型上（OpenRouter 的免費模型、Ollama，或任何相容 OpenAI 的端點），所以你不必被付費訂閱綁住。完整設定見 [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)。
@@ -563,16 +636,16 @@ career-ops 透過開放的 Agent Skill Standard 跑在各主流 AI 程式碼 CLI
 career-ops 可以在 Windows 上執行。平台相關的設定和已知的坑（Git Bash 偵測、行尾符號、工作排程器）在 [docs/WINDOWS.md](docs/WINDOWS.md)。如果安裝過程中技能因 symlink 錯誤而載入失敗，解法在 [docs/FAQ.md](docs/FAQ.md)。完整步驟見 [docs/SETUP.md](docs/SETUP.md)。
 
 **career-ops 會自動幫我投遞職缺嗎？**
-不會。career-ops 是篩選器，不是亂槍打鳥的自動投遞工具。AI 負責評估、排序與草擬；審閱與決定由你來做。它從不送出、寄出或點擊任何東西：最終決定權永遠在你手上。這種保留人工把關的設計，正是整套系統的重點。
+不會。career-ops 是篩選器，不是亂槍打鳥的自動投遞工具。AI 負責評估、排序與草擬；審閱與決定由你來做。它會草擬、填寫，但從不送出。由你按下送出。這種保留人工把關的設計，正是整套系統的重點。
 
 **career-ops 是免費且開源的嗎？**
-是。career-ops 免費且開源，而且對求職者而言永遠都會是：它是 [CareerOps 宣言](https://career-ops.org/manifesto)的第一個參考實作。讀一讀，如果它說中了你的想法，就簽署它。
+是。career-ops 免費且開源，而且對求職者而言永遠都會是。它是 [CareerOps 宣言](https://career-ops.org/manifesto)的第一個參考實作。讀一讀，如果它說中了你的想法，就簽署它。
 
 ## 關於作者
 
-我是 [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about)（santifer）：Head of Applied AI，前創業者（創辦並賣掉了一家至今仍以我的名字營運的公司）。我打造 career-ops 是為了管理自己的求職。它奏效了：我用它拿到了現在的職位。
+我是 [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about)（santifer），曾經是創業者：我創辦並賣掉了一家至今仍以我的名字營運的公司。我打造 career-ops 是為了管理自己的求職，它奏效了：它幫我拿到了一個 Head of Applied AI 的職位。六個月後，我離開了那個職位，全職投入 career-ops 的開發。
 
-想知道這個儲存庫是怎麼用每週大約 4 小時維護的？讀一讀 [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet)。
+想知道這麼大的儲存庫，是怎麼由一支 AI 代理團隊維護、每次合併都由人來決定的？讀一讀 [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet)。
 
 我的作品集和其他開源專案 → [santifer.io](https://santifer.io)
 
