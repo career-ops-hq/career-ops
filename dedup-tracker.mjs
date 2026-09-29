@@ -3,7 +3,8 @@
  * dedup-tracker.mjs — Remove duplicate entries from applications.md
  *
  * Groups by normalized company, then merges only rows whose full role title
- * matches exactly (case- and whitespace-normalized). Keeps entry with highest
+ * matches exactly (case- and whitespace-normalized) and whose posting URLs, when
+ * both rows carry one, do not conflict. Keeps entry with highest
  * score. If discarded entry had more advanced status, preserves that status.
  * Merges notes.
  *
@@ -15,6 +16,7 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { normalizeUrl } from './url-key.mjs';
 import {
   openTrackerTransaction, rebuildRow, normalizeCompany,
 } from './tracker-utils.mjs';
@@ -211,11 +213,23 @@ function normalizeRole(role) {
  * status, report link, and notes unless the rows are the exact same report
  * identity.
  *
+ * Two present-and-different posting URLs veto every tier, report identity
+ * included (#4562). That is the rule merge-tracker.mjs applies (`urlDiffers`),
+ * through the same normalizeUrl(): two rows cannot be one application while
+ * naming two postings. A blank or placeholder URL yields no key and is
+ * UNKNOWN, never a conflict, so rows without URLs behave exactly as before.
+ * Blocking fails toward a duplicate the user can see; merging on a conflict
+ * deletes a real application.
+ *
  * @param {object} a - First parsed applications.md row.
  * @param {object} b - Second parsed applications.md row.
  * @returns {boolean} True when dedup may cluster the two rows as duplicates.
  */
 function roleMatch(a, b) {
+  const urlA = normalizeUrl(a.url);
+  const urlB = normalizeUrl(b.url);
+  if (urlA && urlB && urlA !== urlB) return false;
+
   if (sameReportIdentity(a, b)) return true;
   if (normalizeRole(a.role) !== normalizeRole(b.role)) return false;
 
