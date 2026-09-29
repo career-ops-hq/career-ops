@@ -489,3 +489,19 @@ observations, so those queries returned `source_missing` rather than invented
 history. Output hashes and limits are in
 `evidence/oii-338-insights-current-store-2026-09-29.json`; these runs add
 runtime evidence but do not replace the isolated OII-344 parity cases.
+
+The original Hermes scan task `504a0b3c252c` was then resumed with its
+unchanged 06:00/18:00 schedule and Python `discover` script; no scan process
+was in flight before resumption. A direct run completed the provider and
+LangGraph business path: 34 configured sources, 39,119 postings checked,
+16 new opportunities, 120 total opportunities and matching source-evidence
+rows, two scan runs, 30 reachable and four incomplete source-health rows,
+SQLite `PRAGMA quick_check=ok` and zero notification deliveries. The
+remaining incomplete sources are Kering, Microsoft, NVIDIA and Walmart
+China, with recorded coverage gaps or page caps. The direct command reported
+success and Hermes task-list last run is `ok`, while its execution-detail row
+remains `unknown` after a scheduler-owner restart. This metadata ambiguity
+does not undo the verified business commit; the next natural 06:00 scan tick
+has not yet occurred. Exact run ID, summary hash and limits are in
+`evidence/oii-338-restored-scan-2026-09-29.json`. Both original Hermes tasks
+are now active, with notifications disabled.

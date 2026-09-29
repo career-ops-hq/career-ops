@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-29",
+  "scope": "First direct run of the original Hermes scan task after resuming its original schedule",
+  "job_id": "504a0b3c252c",
+  "execution_id": "3776855d42af4bd494bd265df7425306",
+  "script": "scripts/career-ops-scan.sh",
+  "python_entry": "python -B -m workflow.career_ops discover",
+  "run_id": "35fc3aae8805462290ddfe8036f7a600",
+  "summary_sha256": "a807883e82874ca12a3688caa32e790646c7bb6790aed01af3a4611e47513f0d",
+  "scan_summary": {
+    "companies": 34,
+    "postings_found": 39119,
+    "duplicates": 126,
+    "new_opportunities": 16,
+    "errors": 6,
+    "handoff": 0
+  },
+  "source_health": {
+    "reachable": 30,
+    "incomplete": 4,
+    "incomplete_sources": ["Kering", "Microsoft", "NVIDIA", "Walmart China"]
+  },
+  "business_store_after": {
+    "quick_check": "ok",
+    "opportunities": 120,
+    "source_evidence": 120,
+    "scan_observations": 120,
+    "scan_runs": 2,
+    "notification_deliveries": 0
+  },
+  "hermes_state_after": {
+    "scan": "active",
+    "scan_next_run": "2026-09-30T06:00:00+08:00",
+    "scan_last_run": "2026-09-29T18:23:00.336236+08:00",
+    "scan_last_status": "ok",
+    "score": "active",
+    "execution_detail_status": "unknown",
+    "direct_command_result": "Ran now: succeeded"
+  },
+  "acceptance_limit": "The direct invocation completed and committed authoritative business facts, but Hermes execution detail was marked unknown after its scheduler owner restarted. The task-list last_status and direct command report success; a future built-in scan tick is needed to verify durable execution metadata for the restored scan schedule. Four provider sources remain incomplete due page caps or coverage gaps."
+}
