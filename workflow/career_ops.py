@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 from urllib.parse import parse_qs, urlsplit
 
+import yaml
 from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -41,6 +42,7 @@ try:
     from workflow.salary_observations import record_salary
     from workflow.insights.upskill import targeted_skill_gap, upskill_view
     from workflow.insights.preparation import build_preparation_plan
+    from workflow.decisions import classify as classify_decision, order as order_decisions
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
     from board_resolution import VENDOR_ORDER, format_summary, resolve_boards
     from reverse_runner import discover_global
@@ -55,6 +57,7 @@ except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on 
     from salary_observations import record_salary
     from insights.upskill import targeted_skill_gap, upskill_view
     from insights.preparation import build_preparation_plan
+    from decisions import classify as classify_decision, order as order_decisions
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
@@ -803,6 +806,31 @@ class BusinessStore:
                 })
         values.sort(key=lambda item: (-item["_rank"], -item["coverage"], item["opportunity_id"]))
         return [{key: value for key, value in item.items() if key != "_rank"} for item in values]
+
+    def decision_views(self) -> dict:
+        """Derive the current action queue only from valid formal score inputs."""
+        profile = yaml.safe_load((INPUT_ROOT / "config" / "profile.yml").read_text())
+        acceptable_line = profile["attractiveness"]["acceptable_line"]
+        ready, stale = [], []
+        for item in self.score_views():
+            if not item["valid"]:
+                stale.append(item)
+                continue
+            scan = self.module_result(item["opportunity_id"], "scan")
+            if scan:
+                report = scan["artifact"]
+            else:
+                source = self.db.execute(
+                    "SELECT t.input_payload FROM results r JOIN tasks t ON t.task_id=r.task_id "
+                    "WHERE r.opportunity_id=? AND r.module='score' ORDER BY r.rowid DESC LIMIT 1",
+                    (item["opportunity_id"],),
+                ).fetchone()
+                report = json.loads(source["input_payload"])["jd_report"]
+            ready.append({
+                **item, "action": classify_decision(item, report["prescreen"], acceptable_line),
+                "deadline": None, "effort_days": None,
+            })
+        return {"decisions": order_decisions(ready), "stale": stale}
 
 
 def task_view(store: BusinessStore, task: sqlite3.Row) -> dict:
@@ -1621,6 +1649,7 @@ def parser() -> argparse.ArgumentParser:
     show.add_argument("identifier")
     commands.add_parser("list")
     commands.add_parser("scores")
+    commands.add_parser("decisions")
     cancel = commands.add_parser("cancel")
     cancel.add_argument("task_id")
     application = commands.add_parser("application")
@@ -1724,6 +1753,12 @@ def main() -> None:
             store = BusinessStore(args.directory / "opportunities.db")
             try:
                 result = store.score_views()
+            finally:
+                store.close()
+        elif args.command == "decisions":
+            store = BusinessStore(args.directory / "opportunities.db")
+            try:
+                result = store.decision_views()
             finally:
                 store.close()
         elif args.command == "insights":

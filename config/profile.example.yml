@@ -2,6 +2,16 @@
 # Copy this file to config/profile.yml and fill in your details.
 # This is the single source of truth for your personal data across all modes.
 
+attractiveness:
+  model: attractiveness-v1
+  acceptable_line: 3.5  # Minimum acceptable attractiveness for action decisions.
+  alert_line: 3.5       # Independent threshold for user notifications.
+  weights:
+    direction: 0.25
+    compensation: 0.25
+    team: 0.25
+    company: 0.25
+
 candidate:
   full_name: "Jane Smith"
   email: "jane@example.com"

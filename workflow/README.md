@@ -27,6 +27,7 @@ workflow/.venv/bin/python -m workflow.career_ops cron-score
 workflow/.venv/bin/python -m workflow.career_ops show <task-or-opportunity-id>
 workflow/.venv/bin/python -m workflow.career_ops list
 workflow/.venv/bin/python -m workflow.career_ops scores
+workflow/.venv/bin/python -m workflow.career_ops decisions
 workflow/.venv/bin/python -m workflow.notifications preview <opportunity-id>
 workflow/.venv/bin/python -m workflow.career_ops resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
 workflow/.venv/bin/python -m workflow.career_ops cancel <task-id>
@@ -81,6 +82,12 @@ arrives. Scan produces the validated
 apply consume completed upstream results by opportunity ID. The module fingerprint
 binds those results to the current CV, profile, targeting, and rules. Existing
 valid results are reused; changed inputs require `--re-evaluate`.
+`scores` shows range, coverage and input validity. `decisions` groups only
+current scores by the profile's `acceptable_line` and the frozen prescreen
+status: apply, verify or deprioritize; a failed hard gate is excluded before
+scoring. Stale scores are listed separately and receive no action. The current
+JD report does not retain a verified deadline or work estimate, so those
+ordering fields remain null. The notification `alert_line` is independent.
 
 Tasks use `running`, `waiting`, `completed`, and `cancelled`. Business tables in
 `opportunities.db` are authoritative; `workflow-checkpoints.db` records outer task

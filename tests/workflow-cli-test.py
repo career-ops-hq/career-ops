@@ -29,7 +29,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     (inputs / "config").mkdir(parents=True)
     (inputs / "modes").mkdir()
     (inputs / "cv.md").write_text("Verified candidate facts v1")
-    (inputs / "config" / "profile.yml").write_text("language:\n  output: zh-CN\n")
+    (inputs / "config" / "profile.yml").write_text(
+        "language:\n  output: zh-CN\nattractiveness:\n  acceptable_line: 3.5\n"
+    )
     (inputs / "modes" / "_profile.md").write_text("Verified targeting")
     (inputs / "modes" / "_custom.md").write_text("Current evaluation rules")
     runner = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-model-runner.py'}"
@@ -125,6 +127,14 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     scores = run(directory, "scores", env=model_env)
     assert {item["opportunity_id"] for item in scores if item["valid"]} == {"job-1", "job-2", "job-real", "job-uncertain"}
     assert all(set(item) == {"opportunity_id", "lower", "upper", "coverage", "valid", "stale_reason"} for item in scores)
+    decisions = run(directory, "decisions", env=model_env)
+    assert {item["opportunity_id"] for item in decisions["decisions"] if item["action"] == "apply"} == {
+        "job-1", "job-2", "job-real"
+    }
+    assert [(item["opportunity_id"], item["action"]) for item in decisions["decisions"]][-1] == (
+        "job-uncertain", "verify"
+    )
+    assert decisions["stale"] == []
     reevaluated = run(
         directory, "start", "score", "job-2", str(report("job-2")), "--re-evaluate", env=model_env
     )
@@ -141,5 +151,6 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     (inputs / "cv.md").write_text("Verified candidate facts v2")
     stale = run(directory, "scores", env=model_env)
     assert stale and all(not item["valid"] and item["stale_reason"] == "candidate_or_policy_inputs_changed" for item in stale)
+    assert run(directory, "decisions", env=model_env)["decisions"] == []
 
 print("workflow CLI: start/show/list/resume/cancel contract passed")

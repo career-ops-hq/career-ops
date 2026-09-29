@@ -278,3 +278,14 @@ whose opportunity has no running or waiting task. An isolated store verifies
 stale policy input selection, latest-JD invalidation, and suppression while a
 new task waits. This restores the old queue's fresh-before-reassessment
 ordering without using historical shortlist tiers.
+
+The remaining Node shortlist action policy exposed another gap: Python `scores`
+showed numeric ranges but offered no current apply/verify/deprioritize action
+queue. The read-only `decisions` command now derives actions from current formal
+score inputs, the frozen Stage 0 prescreen, and the profile's separate
+`acceptable_line` (3.5/5, confirmed by the user); stale scores receive no action. Deterministic checks cover
+threshold equality, unknown gates, hard failures, ordering and invalid dates.
+The present JD report has no evidence-backed deadline or effort estimate, so
+both ordering inputs remain null rather than fabricated. Adding the threshold
+changes the policy fingerprint, which makes earlier canonical scores stale
+until re-evaluated. No notification or application is sent by this view.
