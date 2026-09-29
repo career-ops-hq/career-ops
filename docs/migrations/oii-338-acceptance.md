@@ -191,3 +191,10 @@ opportunity and failed when the scan model returned a `jobs` array instead of
 the requested single-job fields. The adapter now checks those required fields
 at the model boundary and retries one invalid response. These two waiting
 tasks have not been counted as completed acceptance evidence.
+
+The legacy score queue gives untried jobs priority over one failed attempt and
+parks a job after its second failure. The Python `cron-score` selector had
+excluded every failed waiting task, so no scheduled retry was possible. It now
+selects first failures after fresh jobs, resumes the same task for attempt two,
+and leaves second failures waiting for manual review. An isolated queue test
+covers all three choices; the two live waiting tasks remain unverified.

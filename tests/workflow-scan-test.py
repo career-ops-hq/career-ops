@@ -269,4 +269,35 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-fair-") as temporary:
     with patch("workflow.career_ops.capture_jd", return_value=refreshed), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
         assert scan_discovered(directory, "2")["task_id"] == waiting["task_id"]
 
+with tempfile.TemporaryDirectory(prefix="career-ops-cron-retry-") as temporary:
+    directory = Path(temporary)
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.executescript("""
+      CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL, role TEXT NOT NULL);
+      CREATE TABLE page_evidence (opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL, captured_at TEXT NOT NULL);
+      INSERT INTO opportunities VALUES (1,'https://example.com/jobs/failed','Failed','Engineer');
+      INSERT INTO opportunities VALUES (2,'https://example.com/jobs/fresh','Fresh','Engineer');
+    """)
+    database.close()
+    store = BusinessStore(directory / "opportunities.db")
+    failed = store.start("1", "scan", "{}")
+    store.wait(failed["task_id"], "failure:RuntimeError")
+    store.close()
+    with patch("workflow.career_ops.current_discovered_scan_source", return_value={"jd": "fixture"}), \
+         patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+        assert cron_score(directory)["opportunity_id"] == "2"
+        assert start.call_args.args[1] == "2"
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.execute("DELETE FROM opportunities WHERE id=2")
+    database.commit()
+    database.close()
+    with patch("workflow.career_ops.resume_task", return_value={"status": "completed"}) as resume:
+        assert cron_score(directory)["opportunity_id"] == "1"
+        assert resume.call_args.args == (directory, failed["task_id"], None, None)
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.execute("UPDATE tasks SET attempt=2 WHERE task_id=?", (failed["task_id"],))
+    database.commit()
+    database.close()
+    assert cron_score(directory) == {"status": "idle", "reason": "no_unscored_opportunities"}
+
 print("workflow scan: evidence, deduplication, and score handoff passed")

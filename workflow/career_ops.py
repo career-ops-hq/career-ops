@@ -1368,8 +1368,12 @@ def cron_score(directory: Path) -> dict:
               SELECT 1 FROM tasks t
               WHERE t.opportunity_id=CAST(o.id AS TEXT) AND t.status='waiting'
                 AND NOT (t.module='scan' AND t.waiting_reason='source_access_unknown')
+                AND NOT (t.waiting_reason LIKE 'failure:%' AND t.attempt<2)
             )
             ORDER BY EXISTS(
+              SELECT 1 FROM tasks t WHERE t.opportunity_id=CAST(o.id AS TEXT)
+                AND t.status='waiting' AND t.waiting_reason LIKE 'failure:%'
+            ), EXISTS(
               SELECT 1 FROM tasks t WHERE t.opportunity_id=CAST(o.id AS TEXT)
                 AND t.status='waiting' AND t.module='scan'
             ), COALESCE((
@@ -1390,6 +1394,9 @@ def cron_score(directory: Path) -> dict:
     finally:
         store.close()
     if active:
+        if active["status"] == "waiting" and active["waiting_reason"].startswith("failure:"):
+            result = resume_task(directory, active["task_id"], None, None)
+            return {"status": "advanced", "opportunity_id": opportunity_id, "task": result}
         if active["status"] == "waiting" and active["module"] == "scan" and active["waiting_reason"] == "source_access_unknown":
             source = current_discovered_scan_source(opportunity, directory)
             input_text = json.dumps(source, ensure_ascii=False)
