@@ -26,6 +26,33 @@ const PROVIDERS_DIR = join(ROOT, 'providers');
 // other directory validated whatever copy sat there.
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
 
+// Providers that narrow a huge shared board with a config block named after
+// themselves, read as `entry[provider]`. Seventeen providers use that block
+// shape; these four are the ones that degrade a missing or unusable block to
+// `{}` SILENTLY (providers/amazon.mjs, ibm.mjs, phenom.mjs, builtin.mjs), so a
+// key written with NOTHING under it behaves exactly like no key at all — and on
+// a global board that means the whole board. The others are excluded on purpose:
+// arbeitsagentur and wttj throw when the block carries no keywords/filters, and
+// thehub falls back to a real default country, so none of them can fail this way.
+//
+// Hand-maintained: providers/_types.js declares no capability metadata and
+// providers/_registry.mjs has no notion of a provider's config shape, so there
+// is nothing to derive this list from. A new provider with the same silent
+// degradation has to be added here by hand.
+//
+// Measured: `provider: amazon` with a bare `amazon:` scans the unfiltered
+// amazon.jobs board (100k+ postings) sorted by recency, because buildQuery()
+// defaults base_query and loc_query to ''. The entry reads as coverage while
+// returning whatever the employer posted worldwide in the last hour, with no
+// relation to the role or location the entry was meant to track.
+// providers/amazon.mjs says it outright: "a location and/or keyword filter is
+// effectively required".
+//
+// A WARNING, not an error: the entry does still scan, so erroring would fail
+// configs that work today, and verify-pipeline.mjs check 15 cannot catch this
+// either — a provider does claim the entry.
+const PROVIDER_NARROWING_BLOCKS = new Set(['amazon', 'builtin', 'ibm', 'phenom']);
+
 function add(list, path, message) {
   list.push({ path, message });
 }
@@ -271,6 +298,25 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
         } else if (!providerIds.has(entry.provider)) {
           add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
+        }
+      }
+
+      // Only meaningful once the provider name is known and recognized; an
+      // unknown provider already errored above and its block is unreadable.
+      if (typeof entry.provider === 'string' && PROVIDER_NARROWING_BLOCKS.has(entry.provider)) {
+        const block = entry[entry.provider];
+        // A block narrows only if it is a mapping with at least one key. Every
+        // other spelling — null, {}, [], "", 0, false, or a bare scalar like
+        // `amazon: DEU` written instead of a nested key — is read as `{}` by all
+        // four providers and scans the whole board just the same, so they all
+        // warn rather than only the two that look empty.
+        const narrows = isObject(block) && Object.keys(block).length > 0;
+        if (block !== undefined && !narrows) {
+          add(
+            warnings,
+            `${base}.${entry.provider}`,
+            `${entry.provider} config block is present but narrows nothing — the scan reads the provider's entire board. Give it a filter key or remove the block`
+          );
         }
       }
 
