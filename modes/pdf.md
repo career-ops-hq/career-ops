@@ -27,7 +27,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
    > ⚠️ **Skill-gap check inconclusive:** [Render in {language.output}: state that the automated skill-gap check returned no classified skills for this JD and so cannot be read as "no gaps"; name which of the three shapes occurred from the reason code (requirements section never found, or found but no candidates extracted, or the JD file was empty); for an empty file, say the JD may not have been saved correctly and should be checked; otherwise say that you will read the JD directly to identify required skills before drafting. Keep the CLI's own English diagnostic out of the user-facing message.]
 5. Use `language.output` for the CV language. The JD language and `language.modes_dir` supply market vocabulary and evaluation context, but never override the configured output language.
-6. Detect company location → paper format:
+6. Detect company location → paper format. Skip this when `config/profile.yml` sets `page_format` to `letter` or `a4`, in any casing and with any surrounding spaces; that is the user's standing answer and it already reaches every renderer. Any other value there is ignored, so keep detecting.
    - US/Canada → `letter`
    - Rest of the world → `a4`
 7. Detect role archetype → adapt framing
@@ -56,7 +56,9 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
     - The rendered PDF has a two-page warning threshold by default. `--max-pages=N` accepts a positive integer; pass `--max-pages=1` when the user or market prefers a one-page CV.
     - If the rendered PDF exceeds its threshold, generation warns loudly with the actual and allowed page counts plus trimming guidance, then reports and indexes the unchanged PDF so existing longer-CV flows keep working.
     - Pass `--strict-pages` only when the user or market requires a hard limit. Strict overflow leaves the draft available for inspection but does not report or index it as successful; trim lower-priority content and rerun.
-22. Report: PDF path, number of pages, keyword coverage %, and any skill gaps from Step 4 still unaddressed
+    - Generation fails when Work Experience is not newest-first, quoting the dates of the role that starts later than the one above it. Return to Step 17 with the roles in reverse-chronological order, rebuild the HTML, and re-run the fact gate before rendering; tailor through the summary, competencies, and bullet selection, never by moving roles. Pass `--allow-nonchronological`, which turns the failure into a warning, only when the user explicitly asks for a non-chronological CV.
+22. Verify ATS keyword coverage of the **tailored** CV against the role's evaluation report (when one exists): `node keyword-match.mjs "reports/{###}-{company-slug}-{YYYY-MM-DD}.md" --cv "{html-path}"`. Pass the report's full filename (e.g. `reports/008-acme-2026-09-28.md`), not the bare NNN that Step 21's `--report` takes, and keep both paths quoted. This text-extracts the HTML you just built and reports coverage %, present, thin, and missing keywords — the diagnostic for the document being sent. Surface any missing/thin keywords to the user (reformulate from real experience, never fabricate).
+23. Report: PDF path, number of pages, keyword coverage % (when Step 22 ran), and any skill gaps from Step 4 still unaddressed
 
 ## ATS Rules (clean parsing)
 
@@ -144,6 +146,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
   "page_format": "letter",
   "candidate": {
     "name": "Jane Smith",
+    "title": "Senior Backend Engineer",
     "phone": "+1 415 555 0100",
     "email": "jane@example.com",
     "linkedin": { "url": "https://linkedin.com/in/janesmith", "display": "linkedin.com/in/janesmith" },
@@ -170,6 +173,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
       "company": "Company Name",
       "role": "Job Title",
       "location": "Remote",
+      "context": "Early-stage startup, ~40 people; acquired by BigCo in 2023.",
       "dates": "June 2022 - Present",
       "bullets": ["Achievement bullet with JD keywords injected", "Another quantified-impact bullet"]
     }
@@ -198,8 +202,9 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | Field | Type | Notes |
 |-------|------|-------|
 | `lang` | string | CV language code (`en`, `es`, `zh-CN`, `ja`, `ar`). Drives language-specific CSS: `zh-CN` enables Simplified Chinese fonts and strict CJK line breaking; `ja` enables a Japanese CJK font fallback; `ar` enables RTL + Arabic fonts. Defaults to `en`. |
-| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Defaults to `letter`. Pass the SAME value to `generate-pdf.mjs --format`. |
+| `page_format` | string | `letter` → `8.5in` page width, `a4` → `210mm`. Omit it and both the body width and the sheet fall back to `config/profile.yml` `page_format`, then to `letter`. Set it and you should pass the SAME value to `generate-pdf.mjs --format`, so the body and the sheet match. |
 | `candidate.name` | string | From `profile.yml`. |
+| `candidate.title` | string | Optional professional headline shown directly under the name (e.g. "Senior Backend Engineer"). Read it from `candidate.title` in `config/profile.yml`. An ATS reads this first to place the candidate; a CV with no title forces the reader to infer the role. Omit or leave empty → no title element, byte-identical to before. Tailor it to the JD's own title wording when the candidate's real level supports it (never inflate). |
 | `candidate.phone` | string | Optional — **omit or leave empty** to drop the `tel:` link and its separator (no empty cell). |
 | `candidate.email` | string | From `profile.yml`. |
 | `candidate.linkedin` | `{url, display}` | Optional — omit to drop the item and its separator. |
@@ -211,7 +216,7 @@ Write a JSON file with this structure, then run `node build-cv-html.mjs <input.j
 | `sections` | object | Optional localized section titles; any omitted key falls back to the English default shown above. |
 | `summary` | string | Personalized summary with keywords. Supports `**…**` emphasis (see **Markdown bold** below). |
 | `competencies` | string[] | 6-8 keyword phrases → competency tags. |
-| `experience[]` | object | `company`, `role`, `location` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
+| `experience[]` | object | `company`, `role`, `location` (optional), `context` (optional), `dates`, `bullets` (reordered, keyword-injected; `**…**` emphasis supported). `context` is an un-bulleted italic line rendered directly under the role, for one line of background about the company (stage, size, an acquisition), not an achievement. Use only facts already in `cv.md`: when it states none for that role, omit `context` rather than write one. Keep it short; keep achievements in `bullets`. Optional section — omit the key or pass `[]` and the whole block is dropped, header included. Only for candidates with no professional history to list (students, new graduates, career changers); never drop it to hide a gap. |
 | `projects[]` | object | `name`, `url` (optional project/repo link), `badge` (optional), `tech` (optional), `description` (a `bullets` array is also accepted and joined into the description line). |
 | `education[]` | object | `title` (degree), `org` (institution), `location` (optional, city/state), `year`, `description` (optional). |
 | `certifications[]` | object | `title`, `org`, `year`. |

@@ -96,6 +96,16 @@ version: 1.0.0
     line-height: 1.1;
   }
 
+  .header-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-color);
+    margin-top: 3px;
+    line-height: 1.2;
+  }
+
   .contact-row {
     margin-top: 4px;
     font-size: 9.5px;
@@ -187,6 +197,19 @@ version: 1.0.0
     font-size: 9.5px;
     color: #55606d;
     text-align: right;
+  }
+
+  /* Cleared onto its own line under the floated role; floated full-width so
+     the location after it in the DOM still sits beside the role. */
+  .job-context {
+    clear: both;
+    float: left;
+    width: 100%;
+    font-style: italic;
+    font-size: 10px;
+    line-height: 1.5;
+    color: #55606d;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -285,6 +308,7 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .job-context,
   .edu-location,
   .project-title {
     break-after: avoid;
@@ -336,6 +360,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
       <span class="separator">|</span>

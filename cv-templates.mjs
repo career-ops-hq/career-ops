@@ -10,11 +10,14 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// templates/ is System Layer (code root); config/profile.yml is User Layer and
+// follows the data root. CAREER_OPS_PROFILE still wins over both.
 const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
 const DEFAULT_PROFILE_PATH =
-  process.env.CAREER_OPS_PROFILE || resolve(__dirname, 'config', 'profile.yml');
+  process.env.CAREER_OPS_PROFILE || resolve(getCareerOpsRoot(), 'config', 'profile.yml');
 
 export const KINDS = {
   cv: {

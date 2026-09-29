@@ -33,6 +33,7 @@
 // vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 const PAGE_SIZE = 25; // server default; verified OHB serves exactly 25/page
 const MAX_PAGES = 40; // safety cap on request count (40*25 = 1000 postings)
@@ -206,14 +207,13 @@ export default {
     const token = extractToken(html);
     if (!token) throw new Error(`csod: no anonymous token on ${cfg.homeUrl}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
     let total = null;
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await wait(PAGE_DELAY_MS);
+      if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       const json = await ctx.fetchJson(cfg.searchApi, {
         method: 'POST',
         redirect: 'error',

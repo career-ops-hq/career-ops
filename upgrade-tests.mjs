@@ -85,6 +85,25 @@ function hermeticEnv(cfg) {
     GIT_CONFIG_GLOBAL: cfg,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_COUNT: '0',
+    // Hermeticity is not only a git concern. #3845 made apply() resolve its
+    // target through resolveTargetRef(), whose default 'release' channel
+    // curls RELEASES_API. The redirects above rewrite git URLs onto the local
+    // mirror and do nothing to a raw curl, so that call reaches the real
+    // api.github.com and apply upgrades to whatever the live newest release
+    // happens to be.
+    //
+    // Between releases that tag IS newestAncestorTag(), so the leg becomes a
+    // no-op ("Update complete: vX → vX"), nothing is written, and the
+    // non-vacuity oracle fails while naming whichever SYSTEM_PATHS file the PR
+    // touched. The gate then reports a defect in unrelated changes, which is
+    // the reading that costs the most time.
+    //
+    // The 'main' channel is what #2007 designed this harness around ("apply is
+    // pure git (curl lives only in check()), so the whole flow runs
+    // hermetically") and it is the only channel the mirror can actually serve.
+    // Production behaviour is untouched: this pins the harness, not
+    // resolveTargetRef().
+    CAREER_OPS_UPDATE_CHANNEL: 'main',
   };
 }
 
