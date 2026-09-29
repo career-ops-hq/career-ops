@@ -19,6 +19,25 @@ HEADINGS = (
 DIMENSIONS = ("direction", "compensation", "team", "company")
 
 
+def conflicting_sections(sections: dict, evidence: dict) -> list[str]:
+    """Reject claims that deny direct posting facts retained by scan."""
+    if not isinstance(sections, dict):
+        return []
+    conflicts = []
+    for name, body in sections.items():
+        if not isinstance(body, str):
+            continue
+        if evidence.get("location_evidence") and re.search(
+            r"(?:地点|城市).{0,8}(?:未披露|未知|未提供|无法确认)", body
+        ):
+            conflicts.append(name)
+        elif "browser_snapshot" in str(evidence.get("liveness_reason", "")) and re.search(
+            r"(?:不含|缺少|没有|未提供).{0,16}(?:岗位页面|页面|快照|liveness)", body, re.I
+        ):
+            conflicts.append(name)
+    return conflicts
+
+
 def digest(value: bytes | str) -> str:
     return hashlib.sha256(value if isinstance(value, bytes) else value.encode()).hexdigest()
 
@@ -54,6 +73,9 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
     sections = assessment.get("sections")
     if not isinstance(sections, dict) or any(not isinstance(sections.get(name), str) or not sections[name].strip() for name in required_sections):
         raise ValueError("Report sections are incomplete")
+    conflicts = conflicting_sections(sections, evidence)
+    if conflicts:
+        raise ValueError(f"Report contradicts retained posting evidence: {', '.join(conflicts)}")
     files = {name: directory / f"{name}.txt" for name in packet["sources"]}
     files["jd"] = directory / "jd.txt"
     files["jd"].write_text(evidence["jd"])

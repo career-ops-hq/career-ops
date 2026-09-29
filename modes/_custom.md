@@ -155,11 +155,11 @@ specific scored role. Selecting that role is the trigger; there is no per-role
 queue or approval keyword.
 
 - Generate the selected role's preparation plan and application artifacts using
-  its scored report/checklist, then run the drafter-reviewer gate below.
+  its scored report/checklist, then present the complete package for user review.
 - A scored role is never discarded merely because the user has not chosen it.
 - No Stage 2 work is run by the daily scan/evaluation cron.
 
-After manual selection, write the single-role `preparation/plan.json`, then use a drafter-reviewer handoff. The drafter may create the role-specific Reactive Resume payload, PDF, and application answers; it must not mutate `cv.md` or the configured Reactive Resume mother resume. A separate reviewer writes `review/application-review.json` using the validated `approve|revise|blocked` contract in `application-artifacts.mjs`. Required fixes go to `review/change-plan.json`; apply them and rerun validation before presenting an application as ready. Never submit.
+After manual selection, prepare the single-role plan and LangGraph apply package, including the role-specific Reactive Resume payload and PDF. Do not mutate `cv.md` or the configured Reactive Resume mother resume. Validate the complete package, accept evidence-backed feedback and revisions, then wait for the user's review and whole-package confirmation. Never submit.
 
 Before rendering a role-specific CV, write its actual changes to the application
 bundle's `cv/tailored/vNNN/changes.md`. The experience section must reflect the
@@ -177,7 +177,7 @@ CV as tailored.
 
 本节是正式评分与格式契约，覆盖 `_shared.md`、`oferta.md`、batch 的整体判断、平均章节分和旧五维规则。历史报告仍属于原模型，不得标为 attractiveness-v1。
 
-1. 冻结完整 JD、批准的候选来源和本规则，记录源路径与 SHA-256。历史报告只供审计，不能作为候选事实或完整 JD 的替代品。完整 JD 缺失则记录 incomplete，不生成评分报告；历史快照评估必须注明未复核当前有效性。
+1. 冻结完整 JD、批准的候选来源和本规则，记录源路径与 SHA-256。历史报告只供审计，不能作为候选事实或完整 JD 的替代品。完整 JD 缺失则记录 incomplete，不生成评分报告；历史快照评估必须注明未复核当前有效性。scan 交接的 `location_evidence`、`employment_evidence` 和 `liveness_reason` 属于正式岗位来源证据；有官方地点时不得写成未披露，有浏览器快照时不得写成缺少页面快照。快照证明采集时的状态，申请前仍须重新核验。
 2. 权重只读取 `config/profile.yml` 的 `attractiveness.weights`。四维为 direction（实际工作内容与职业方向）、compensation（相对所在地个人底线和目标的薪酬福利）、team（工时、管理、协作、自主权、工作安排）、company（业务前景、稳定性、技术投入）。能力缺口、资格门槛和真实性独立展示；同一负面事实只在一个吸引力维度计分。公司名气本身不加分；公司资料不等于团队资料；明确远程是 team 的正面依据，现场办公不扣分。
 3. 先定档再加权：1=明显不符合偏好；2=明显不足、需要较大妥协；3=达到可接受水平；4=明显诱人、符合期待；5=非常理想且有充分证据。分项仅取整数；普通后端在可接受方向内，不能仅因非 AI 岗打低分。薪酬刚达到个人最低线为3分，达到明确个人目标支持4分，5分需要显著超出目标的证据；没有具体目标时不能自行补造。薪酬区间上限、OTE、股权或公司支付能力不能冒充保证底薪。
    direction 定档边界：5=JD 明确以首选 Agent/Applied AI 产品系统为主要工作，并明确承担从设计到交付或运营的职责；4=明确符合全栈/后端/AI 工程方向且有具体产品贡献，但首选 AI 产品职责并非主要工作或未明确；3=可接受的软件岗位，缺乏上述方向增益；2=明显偏离但仍有可迁移内容；1=主要工作不在可接受方向内。未声明行业偏好不扣分，也不阻止5分；候选人技能或年限不足单列竞争力，不改变工作内容本身的吸引力。team 评价实际管理与工作安排，不重复给 direction 的产品职责加分。
@@ -187,13 +187,13 @@ CV as tailored.
 7. Machine Summary 使用 `report_format: scoring-v2`、`scoring_model: attractiveness-v1`、`score: null`、`company`、`role`、`complete_jd: true`、`jd_source`（冻结 JD 的 source id）、`sources`、`dimensions`、`attractiveness`。sources 为 `{id, path, sha256}` 数组（路径相对仓库）；dimensions 的四个键各为 `{score, rationale, evidence: [{source, quote}]}`，引用须逐字来自冻结来源。未知项也须解释缺失信息；已知项必须有证据。attractiveness 为 `{lower, upper, coverage}`，只由确定性计算生成。报告正文必须使用相同范围，不展示一个旧式总分。
 8. 交付前运行 `node scoring-report.mjs <报告路径>...`。必须通过标题顺序、完整 JD 声明、分项范围、权重、源哈希、引文及总分复算检查，再人工逐项审核证据是否支持判定、能力映射是否覆盖 JD。机械校验不能证明语义公允。重复盲评使用同一冻结材料，保留每次原始判定并报告差异，不能用重复计算代替重复评估。
 
-### Review and decision gate
+### Report validation and decision gate
 
-- `scoring-report.mjs` 的命令行交付检查同时读取 `<报告路径>.review.json`。独立复核者提供 reviewer、report_sha256、verdict=approve，以及 checks 中 jd_complete/source_grounding/dimension_support/capability_coverage/no_double_count/gate_evidence 各自的 `{status: pass, finding}`。复核须解释引文如何支持档位、是否遗漏必备能力；不能仅核对字面存在。哈希绑定整份报告，修改后重新复核。复核记录是责任记录，不是数字签名，也不保证评估者永不出错。
-- 复核还提供 gates（location/employment/size/compensation/eligibility/liveness，每项 Pass/Fail/Unknown）及 ready（boolean，表示工时等申请前必要条件已充分核实）。历史快照的 liveness=Unknown、ready=false。不能把信息未知写成条件失败。
+- LangGraph score 在业务提交前校验完整 JD、当前输入、来源状态、报告结构、引文、区间复算和报告哈希；失败则保留待修订任务，不发布。正式结果和来源保留为业务证据。机器校验不能证明语义公允，真实样本仍须人工质量抽查；日常评分不设独立模型审查或人工审批。
+- 初筛门槛保留 location/employment/size/compensation/eligibility/liveness 的 Pass/Fail/Unknown。历史快照的当前有效性须重新核验，信息未知不能写成失败。
 - 正式决策读取 profile 的 `attractiveness.acceptable_line`，这是吸引力可接受线，不是旧匹配分阈值。任意硬门槛Fail→discard；否则上限低于线→deprioritize；否则门槛有Unknown、申请条件未核实或下限低于线→verify；其余→apply。等于线视为达到。完整JD缺失不产生评分，不进入该评分队列。
-- Agent 可基于多个独立、同向且无可信反向证据的强信号进行事实推理并定档，不必机械等待单一来源直接给出结论。必须在复核记录中写明事实、适用范围、推理链、置信度与反向证据检查；品牌页自填、搜索摘要或市场数据单独不足以判定硬门槛，但与注册时间、官网业务阶段、JD 明示阶段等独立信号一致时，可支持 `Fail` 或 `Pass`。无法排除关键反向解释时仍用 `Unknown`。
-- `node scoring-decisions.mjs` 只读读取 data/pipeline.md 的 Scored，重新验证报告与复核，生成 decisions、needs_review 和 invalid。shortlist、日报和申请选择统一使用此结果；invalid 不得进入推荐池。新评估发布前也可用显式 queue.json 验证，gate/readiness 必须与报告复核一致。deadline为已知ISO日期或null，effort_days为有依据的补证/准备预计工作日或null；无证据不填数。
+- Agent 可基于多个独立、同向且无可信反向证据的强信号进行事实推理并定档，不必机械等待单一来源直接给出结论。报告理由写明事实、适用范围、推理链与反向证据；品牌页自填、搜索摘要或市场数据单独不足以判定硬门槛，但与注册时间、官网业务阶段、JD 明示阶段等独立信号一致时，可支持 `Fail` 或 `Pass`。无法排除关键反向解释时仍用 `Unknown`。
+- `workflow.career_ops scores` 只读展示区间、覆盖率、排序及输入过期原因；无效或过期报告不得进入通知或申请准备。deadline 为已知 ISO 日期或 null，effort_days 为有依据的工作日或 null；无证据不填数。
 - 先分apply/verify/deprioritize/discard；组内按已知截止日期较早、预计工作量较少、证据覆盖较高排列；仅apply组再按下限降序，其余以id稳定打破平局。缺失日期或工作量排在该字段已知项后。此顺序是透明的行动调度，不是假定未知机会不值得去；重叠区间不声称存在满意度的严格排序。
 - 补充定档锚点用于定档校准：compensation的1/2分别是明显/轻微低于个人底线（均不能补偿硬门槛），3达到底线但未达目标，4达到明确目标，5有显著超出目标上沿的保证收入证据；无法区分相邻档时记录分歧，不能随意加小数。
 - team：1有明确长期强制无补偿加班和差管理证据；2有明确需要较大妥协的工作安排；3同团队证据确认可接受工时、协作和管理；4在3基础上有明确弹性/自主权等正面实践；5在4基础上有实际远程选择、稳定可持续安排和团队证据支持。公司级福利宣传、hybrid单词或导师承诺不足以判定整个维度，保留Unknown。
@@ -224,26 +224,26 @@ CV as tailored.
 - 打分前主动搜索待遇、团队和公司三维，不能因为 JD 没写就停止。先识别品牌、法律实体、招聘代理与实际雇主，再按公司+城市+职级查薪酬，按团队+地点查工时/管理/远程实践，按实际业务查经营、资金与技术投入。优先官方招聘、财报/公告、薪酬机构原始数据；员工反馈注明日期、地区、团队与自述性质，多个转载不算独立印证。预留至少一次查询给每个维度，可共用查询；访问失败记录失败，不能当作无风险或零结果。
 - 综合评估允许外部证据支持分项，不要求全部来自 JD 或 offer。需要写清“事实→适用范围→推断→档位”：同公司同城同职级工资可帮助判断，但市场工资不能冒充岗位工资，保证底薪门槛仍需可对应本岗位的证据；公司级文化只能作线索，同团队的可核查实践可支持 team；财报、经营和投入证据可支持 company。过时、矛盾或身份不匹配的证据单列，无法定档才保留 Unknown。没搜到负面不是正面证据；没有薪资报价也不删除市场分析。
 - 冻结短摘录及研究日志，不复制整页。新报告 sources 必须含 research（JSON）和本版 rules，校验器由规则标记强制检查研究记录；历史报告保留原版本，重评时必须采用当前规则。JSON含 searched_at、实际 queries（最多5条）、dimensions 的 compensation/team/company（queries为查询下标，conclusion、next_step），findings含唯一id、url、entity、scope（role/team/company/adjacent_role/market/unresolved）、status（retrieved/search_only/failed/excluded）、published_at（未知null）、limitation，以及 retrieved 才有的 source/quote（其他状态均null）。来源文件继续通过 SHA-256 校验。
-- C 的理由纳入研究结论；D 保留 JD 报价与市场基准的区别；E 写剩余问题；Checklist 更新门槛证据。搜索结果摘要不能作为已读取正文；其他职位的远程政策不能直接转移；匿名客户不能借代理的工资/人数/口碑评分。独立语义复核须核对来源实体、时间、地区/职级/团队适用性及冲突处理，不能只验证引文存在。浏览器有效性核验仍单独执行。
+- C 的理由纳入研究结论；D 保留 JD 报价与市场基准的区别；E 写剩余问题；Checklist 更新门槛证据。搜索结果摘要不能作为已读取正文；其他职位的远程政策不能直接转移；匿名客户不能借代理的工资/人数/口碑评分。报告理由须核对来源实体、时间、地区/职级/团队适用性及冲突处理，不能只验证引文存在。浏览器有效性核验仍单独执行。
 - 正式报告交付条件：在 E 中保留“外部研究记录”，列出研究日期、实际查询，以及待遇/团队/公司各自的来源链接、短摘录、来源日期（未知写未知）、适用范围、结论和下一步；来源摘录随报告冻结保存。Evaluation Checklist 增加“联网研究：完成/受阻”及记录链接。三维均执行查询并说明结论才算完成；没有结果可算搜索完成，但不能把未知项判为通过。搜索工具不可用时标受阻，报告作为待完善草稿，保留原队列状态，不能宣称完整评分已完成。正常搜索后仍缺岗位资料则保留 Unknown 和补证问题，可按既有流程交付。
-- 发布前运行 `node scoring-report.mjs <报告路径>`，再运行行动决策。复核缺失、过期或未通过则留在 Pending/待完善，不发布 Scored。Score 单元格统一为 `吸引力 L–U/5（覆盖率P%）`，行动以复核和当前 profile 重算；不再使用单分平均或4.0/4.5阈值。Stage 2 的 tracker 同样保留范围，不生成替代单分。
+- 发布前完成确定性报告与来源校验；不合格或过期则保留待完善任务，不发布正式评分。展示统一为 `吸引力 L–U/5（覆盖率P%）`，行动依据当前门槛证据和 profile 判断；不再使用单分平均或旧 4.0/4.5 阈值。
 
 ### Scored 发布与重评
 
-- pipeline/auto-pipeline/batch 在报告及相邻 .review.json 校验通过后才把岗位移入 Scored；保留 URL、城市、报告号和报告链接。apply 表示建议用户启动申请准备，verify 表示优先补证，deprioritize 表示暂缓，discard 表示已核实硬门槛失败。它们不是投递状态，也不自动提交。
-- 评分任务先处理 Pending，再按现有顺序重评 Scored 中 needs_review 的历史报告；取得完整JD并核验有效性。Hermes 定时评分每次只领取一岗，使用下节的预算与重试规则。新版本通过前保留旧报告和原条目；更新时使用新日期报告与新复核记录。禁止把旧数值按比例变成新分数。
-- shortlist/日报直接读取 `node scoring-decisions.mjs`：按行动分组展示范围、覆盖率和缺失信息；needs_review 单列旧报告待重评，invalid 单列校验失败。仅展示不触发搜索或重评。统计分开计算旧匹配分与新吸引力；能力差距分析不使用吸引力作为技能权重。
+- 完整 JD、确定性校验和业务提交均通过后，SQLite 才保存正式评分与报告；保留 URL、城市、报告号和报告链接。apply 表示建议用户启动申请准备，verify 表示优先补证，deprioritize 表示暂缓，discard 表示已核实硬门槛失败。它们不是投递状态，也不自动提交。
+- 评分任务先处理未评分岗位，明确重评时使用当前候选资料、规则和 JD；取得完整 JD 并核验有效性。Hermes 定时评分每次只领取一岗，使用下节的预算与重试规则。新版本通过前保留旧报告。禁止把旧数值按比例变成新分数。
+- 只读查询展示范围、覆盖率和缺失信息；旧报告待重评、校验失败报告单列，不触发搜索或重评。能力差距分析不使用吸引力作为技能权重。
 
 
 ### Hermes 定时评分
 
-- 固定 score cron 每二十分钟触发一次，使用 `scripts/hermes-score.py`，每次只领取一个岗位。端到端预算900秒，870秒后不再启动新阶段，已在途调用可在硬截止前完成并保存或发布，截止终止子进程树；间隔不能替代互斥。
-- `data/pipeline.md` 是机会队列。`data/pipeline-runs/score/` 保存每岗尝试次数、阶段成果和耗时；首次失败排在未尝试岗位后，第二次失败标为 needs_attention 并暂停自动重试。手动处理或候选资料/规则更新后重新评估。
-- scan 在筛选、去重后，为准备入队的岗位抓取浏览器正文，保存到 `data/scan-jds/`；浏览器补充发现通过 `score-job.mjs append-pending` 执行相同交接。失败保留原因并入队待补抓，不写 complete_jd=true。score 复用24小时内的正文和抓取时的页面证据，由证据阶段判断完整性及开放状态；缺失、过期、不完整或状态不确定时重新抓取。缓存时间代表观察时间，不代表岗位此刻仍开放；申请前重新核验。
-- 运行锁防止 score 重入；队列变更复用 `pipeline-lock.mjs` 的短事务锁，与扫描共享。网络和模型调用在队列锁外执行。扫描不持有覆盖全程的 `.pipeline.lock`，也不得直接覆写旧队列快照。
-- 初始上下文由程序一次组装：当前评分规则、候选主来源和本岗位证据。定时任务不预载全功能 skill、上轮自然语言输出、全池报告或通用操作历史。独立复核只读取最终报告、冻结证据及当前规则。
-- 预筛中明确未知的相关年限保留为待确认并继续评分、独立复核；不能把“尚未证明满足年限”写成零年并淘汰。
-- JSON由模型提供事实和判断；`score-job.mjs` 负责序列化、源标识、哈希、区间复算、报告格式和发布。机械校验先于独立语义复核。一个岗位的同版材料最多返修一次，复核不通过不发布。
+- 固定 score cron 每二十分钟触发一次，使用 `scripts/career-ops-score.sh` 调用 Python `cron-score`，每次只推进一个岗位。单次任务预算900秒，870秒后不再启动新阶段；硬截止终止模型子进程树，调度间隔不能代替互斥。
+- `data/opportunities.db` 是机会与任务的权威队列；任务行记录尝试次数、模型调用与耗时。首次失败排在未尝试岗位后，第二次失败留待人工处理，不再自动重试。手动处理或候选资料/规则更新后可重评。
+- scan 在筛选、去重后保留来源抓取证据；失败保留原因，不能写 complete_jd=true。score 使用 scan 正式交接的完整 JD 和来源有效性证据；历史快照不代表岗位此刻仍开放，申请前重新核验。
+- 任务锁防止同一岗位并发执行；SQLite 短事务维护业务归属，网络和模型调用不占用业务事务。
+- 初始上下文由程序组装：当前评分规则、候选主来源、本岗位 JD 与冻结研究。定时任务不预载全功能 skill、上轮自然语言输出或全池报告。
+- 预筛中明确未知的相关年限保留待确认并继续评分；不能把“尚未证明满足年限”写成零年并淘汰。
+- 模型提供事实和判断；Python/LangGraph 负责来源冻结、结构化校验、哈希、区间复算、报告及业务发布。同一输入仅发布一次；证据或报告不合格则修订或等待，不越过确定性门禁。
 - 研究与评分分别保存检查点；研究最多五次查询，正文只读取一批、最多三个页面，每页最多4000字符；冻结实际返回的正文摘录，同一URL只保存一份，供评分与复核核对上下文。读取失败保留原因和Unknown，不追加浏览循环。评分只接收冻结研究，不重放搜索过程。
-- 检查点绑定输入和产物哈希；候选事实、评分规则或JD变化使受影响阶段失效。有效性证据超过30分钟重新取得。每岗通过校验与独立复核后立即发布，历史报告保留原格式和原始证据。
+- 检查点绑定输入和产物哈希；候选事实、评分规则或 JD 变化使受影响阶段失效。来源有效性不足则等待补证；每岗通过确定性校验后立即发布，历史报告保留原格式和原始证据。
 - 单次发布率、超时率、尝试次数和累计耗时分别记录；恢复运行的耗时不得称为从头完成的耗时。CV详细改写和面试准备在用户选岗后执行。

@@ -248,3 +248,23 @@ it is not counted as a clean scheduler run. The score job is active for its
 reported a running gateway and a recent ticker heartbeat. The built-in run's
 business and durable status must be read before restoring scan or closing this
 issue.
+
+Human quality inspection of the first opportunity `2` score report found two
+contradictions: it called the work city undisclosed despite official structured
+Shanghai/Suzhou location evidence, and denied a page snapshot despite the
+retained `browser_snapshot` capture. Both Hermes jobs were paused before the
+next built-in run. The report renderer now rejects these source-denial claims;
+the score graph retains structured location, employment and capture-time facts
+and requests only the conflicting sections again. Current scoring rules were
+updated to state that source contract and remove obsolete independent
+scan/score/apply model-review instructions. The rule change invalidated all
+three earlier canonical score input fingerprints; no old result was deleted.
+An explicit same-opportunity re-evaluation of opportunity `2` completed as task
+`00a91f48-b374-424b-9755-021134389eff`. Its report hash is
+`704f3248adf74796dcdf8ea165387569097529362885c6b074618586ec8bf382`.
+The report now states Shanghai/Suzhou and the official browser snapshot;
+source-claim rejection found no contradiction, the stored file hash and strict
+report validator passed, and SQLite `PRAGMA quick_check` passed. `scores` marks
+only opportunity `2` current; opportunities `1` and `3` remain stale pending
+re-evaluation. Notification deliveries remain zero and both Hermes jobs remain
+paused.

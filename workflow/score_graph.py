@@ -11,7 +11,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from workflow import model_adapter
-from workflow.report import render_report
+from workflow.report import conflicting_sections, render_report
 
 
 class ScoreState(TypedDict, total=False):
@@ -60,6 +60,8 @@ def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict
         + ", ".join(missing) + ". Write concise Chinese Markdown strings without level-two headings. "
         "Map every material requirement when capabilities is requested. Keep unknown facts unknown. "
         "Ground claims only in the supplied JD, candidate sources, frozen research, and existing dimension judgments. "
+        "Structured location_evidence is official location evidence; do not claim the city is undisclosed when present. "
+        "A browser_snapshot liveness_reason records a page capture; do not claim no snapshot exists. "
         "Do not repeat existing sections or change dimension scores.\n"
         + json.dumps({"jd_report": jd, "candidate_sources": sources, "research": research,
                       "dimensions": assessment["dimensions"], "existing_sections": list(sections)}, ensure_ascii=False)
@@ -174,7 +176,8 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
         evidence = {
             "company": jd["company"], "role": jd["role"], "complete_jd": True,
             "liveness": "active", "liveness_reason": jd.get("liveness_reason", "JD report verified active"),
-            "prescreen": jd["prescreen"], "jd": jd["jd"],
+            "location_evidence": jd.get("location_evidence"), "employment_evidence": jd.get("employment_evidence"),
+            "captured_at": jd.get("captured_at"), "prescreen": jd["prescreen"], "jd": jd["jd"],
         }
         _write_json(directory / "packet.json", packet)
         _write_json(directory / "evidence.json", evidence)
@@ -186,6 +189,11 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
     def render(state: ScoreState) -> dict:
         assessment_path = directory / "assessment.json"
         assessment = json.loads(assessment_path.read_text()) if assessment_path.exists() else state["assessment"]
+        invalid = conflicting_sections(assessment.get("sections", {}), state["evidence"])
+        if invalid:
+            assessment = {**assessment, "sections": {
+                name: body for name, body in assessment["sections"].items() if name not in invalid
+            }}
         assessment, dimension_calls = _complete_dimensions(
             assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
         )
@@ -194,6 +202,15 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
         assessment, section_calls = _complete_sections(
             assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
         )
+        conflicts = conflicting_sections(assessment["sections"], state["evidence"])
+        if conflicts:
+            assessment["sections"] = {
+                name: body for name, body in assessment["sections"].items() if name not in conflicts
+            }
+            assessment, correction_calls = _complete_sections(
+                assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+            )
+            section_calls += correction_calls
         if section_calls:
             _write_json(assessment_path, assessment)
         try:

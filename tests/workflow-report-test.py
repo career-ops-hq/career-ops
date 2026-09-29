@@ -36,6 +36,17 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     }
     rendered = render_report(packet, evidence, assessment)
     assert "已留存可引用网页来源" in rendered["report"]
+    sourced = {**evidence, "location_evidence": "China, Shanghai, Shanghai",
+               "liveness_reason": "browser_snapshot at official job URL returned captured"}
+    for section, claim in (("overview", "岗位办公城市未披露。"),
+                           ("legitimacy", "冻结素材中不含岗位页面 liveness/快照。")):
+        contradicted = json.loads(json.dumps(assessment))
+        contradicted["sections"][section] = claim
+        try:
+            render_report(packet, sourced, contradicted)
+            raise AssertionError("claim contradicting retained posting evidence accepted")
+        except ValueError as error:
+            assert "contradicts retained posting evidence" in str(error)
     missing_section = json.loads(json.dumps(assessment))
     del missing_section["sections"]["compensation"]
     try:
