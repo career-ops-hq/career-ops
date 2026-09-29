@@ -190,7 +190,7 @@ export default {
 
   async fetch(entry, ctx) {
     // `max_pages` on the portals entry is the user's setting; `ctx.maxPages` is a
-    // caller-side bound — verify-portals' health probe passes 1. Reading only the
+    // caller-side bound — the portal health probe passes 1. Reading only the
     // latter ignored the configuration entirely. Same shape as alibaba.mjs.
     const entryMaxPages = Number.isInteger(entry?.max_pages) && entry.max_pages > 0
       ? Math.min(entry.max_pages, MAX_PAGES_CAP)

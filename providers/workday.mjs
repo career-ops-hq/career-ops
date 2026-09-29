@@ -202,7 +202,7 @@ export default {
       ? Math.min(Math.ceil(total / PAGE_SIZE), maxPages)
       : (firstPostings.length >= PAGE_SIZE ? maxPages : 1);
 
-    // Honor a context page cap — verify-portals' liveness probe sets
+    // Honor a context page cap — the portal health probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its full
     // count. Without this we'd fetch page 0, then request page 1 and trip the
     // probe's second-request sentinel; fetchJsonWithRetry treats that abort as
@@ -290,7 +290,7 @@ export default {
     //
     // Absence means "tracked": global discovery is the only caller that
     // synthesizes entries AND can reach the cap (the board resolver and
-    // verify-portals.mjs both probe with ctx.maxPages: 1, which never sets
+    // the board resolver and portal health probe both probe with ctx.maxPages: 1, which never sets
     // stopReason to 'cap'), so it is the one place that opts out.
     const syntheticEntries = ctx?.syntheticEntries === true;
     if (stopReason === 'cap') {

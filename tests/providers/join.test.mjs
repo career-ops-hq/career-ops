@@ -109,7 +109,7 @@ try {
     fail(`join.fetch() redirect opts wrong: ${JSON.stringify(redirectCalls)}`);
   }
 
-  // fetch() — honors ctx.maxPages (verify-portals' liveness probe passes 1)
+  // fetch() — honors ctx.maxPages (the portal health probe passes 1)
   // so a health check never crawls a tenant's full multi-page board.
   let cappedCalls = 0;
   const cappedCtx = {

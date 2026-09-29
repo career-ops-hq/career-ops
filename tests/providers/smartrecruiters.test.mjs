@@ -346,7 +346,7 @@ try {
     }
   }
 
-  // Probing (verify-portals passes ctx.maxPages=1): enrichment must never
+  // Probing (the portal health probe passes ctx.maxPages=1): enrichment must never
   // spend budget a liveness check has no use for (same rule as vdab).
   {
     let probeDetailCalls = 0;

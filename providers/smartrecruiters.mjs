@@ -15,7 +15,7 @@
 //     detailLimit: 25      # max detail calls per sweep when fetchDetails=true
 //
 // Detail enrichment answers "what does this job say", not "is this endpoint
-// alive" — it is skipped entirely while verify-portals is probing, and runs
+// alive" — it is skipped entirely while the portal health probe runs, and runs
 // in small batches so a 400-posting board cannot hammer the shared API host.
 
 import { intInRange } from './_config-utils.mjs';

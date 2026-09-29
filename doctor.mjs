@@ -6,6 +6,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { spawnSync } from 'node:child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -419,18 +420,19 @@ function checkAutoDir(name) {
   }
 }
 
-// --strict only: probe the ATS slug of every tracked company in portals.yml so
-// a typo'd slug (which 404s silently on scans) surfaces here. Skipped gracefully
-// when portals.yml is absent. Delegates to verify-portals.mjs so there is one
-// slug-probing implementation. Network-bound, hence opt-in.
+// --strict only: inspect ATS board health through Python's authoritative verifier.
 async function checkPortalSlugs(root) {
   const portalsPath = join(root, 'portals.yml');
   if (!existsSync(portalsPath)) {
     return { pass: true, label: 'ATS slugs: no portals.yml yet (skipped)' };
   }
   try {
-    const { verifyPortalsFile } = await import('./verify-portals.mjs');
-    const { results } = await verifyPortalsFile(portalsPath);
+    const venv = join(root, 'workflow', '.venv', 'bin', 'python');
+    const python = existsSync(venv) ? venv : 'python3';
+    const probe = spawnSync(python, ['-B', '-m', 'workflow.portal_health', '--ats-only', '--json', '--file', portalsPath],
+      { cwd: root, encoding: 'utf8', timeout: 300_000 });
+    if (probe.error || probe.status !== 0) throw new Error(probe.error?.message || probe.stderr?.trim() || 'Python verifier failed');
+    const { results } = JSON.parse(probe.stdout);
     const unresolved = results.filter((r) => r.status === 'missing');
     if (unresolved.length === 0) {
       return { pass: true, label: 'All ATS slugs in portals.yml resolve' };
@@ -444,7 +446,7 @@ async function checkPortalSlugs(root) {
           if (r.suggested) line += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
           return line;
         }),
-        'Probe variants with: node verify-portals.mjs --add "<company>"',
+        'Probe variants with: python -m workflow.portal_health --add "<company>"',
       ],
     };
   } catch (err) {

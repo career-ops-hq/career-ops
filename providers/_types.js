@@ -98,7 +98,7 @@
  * @property {(url: string, opts?: FetchOptions) => Promise<string>}  fetchText
  * @property {(url: string, opts?: FetchOptions) => Promise<unknown>} fetchJson
  * @property {(url: string, opts?: FetchOptions) => Promise<Response>} fetchResponse  Raw Response (timeout + non-2xx guard applied); for providers needing response headers.
- * @property {number} [maxPages] Optional pagination hint. When set (verify-portals.mjs's
+ * @property {number} [maxPages] Optional pagination hint. When set (the portal health probe's
  *                              health probe passes 1), a paginating provider SHOULD stop
  *                              after this many pages — the probe only needs the first page
  *                              to tell a live board from a broken one, and must not walk an

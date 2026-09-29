@@ -295,7 +295,7 @@ try {
     fail(`max_pages: ${capped.calls.length} requests, ${cappedJobs.length} jobs (expected 4 / 40)`);
   }
 
-  // ctx.maxPages is verify-portals.mjs's health-probe hint — it must narrow further.
+  // ctx.maxPages is the portal health probe's hint — it must narrow further.
   const probe = mockCtx(bigPages);
   await ef.fetch({ name: 'Big', careers_url: 'https://big.eightfold.ai/careers' }, { ...probe.ctx, maxPages: 1 });
   if (probe.calls.length === 1) {

@@ -2,10 +2,7 @@
 // health check. Files prefixed with _ are never loaded as providers by scan.mjs,
 // so this helper module lives safely alongside the provider plugins.
 //
-// Extracted from scan.mjs (#1451-era inline definitions) so verify-portals.mjs
-// can route non-ATS boards through the SAME provider layer the scanner uses,
-// without importing scan.mjs itself (which has top-level side effects and would
-// form an import cycle via classifyFetchError).
+// Shared by raw discovery collection and bounded portal-health probes.
 
 import { existsSync, readdirSync } from 'fs';
 import path from 'path';

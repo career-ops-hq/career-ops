@@ -173,7 +173,7 @@ export default {
 
   async fetch(entry, ctx) {
     assertYouratorUrl(FEED_BASE);
-    // ctx.maxPages is verify-portals.mjs's "first page only" health probe — it
+    // ctx.maxPages is the portal health probe's first-page hint — it
     // always wins over the entry's own bound.
     const maxPages = Math.min(resolveMaxPages(entry), ctx?.maxPages ?? Number.POSITIVE_INFINITY);
     const fallbackCompany = entry?.name;

@@ -167,7 +167,7 @@ export default {
       throw new Error(`mycareersfuture: entry "${entry?.name || '(unnamed)'}" has no mycareersfuture.keywords[] and no config/profile.yml target_roles to fall back to`);
     }
 
-    // Same probe-vs-real-scan split as vdab.mjs/jobbankca.mjs: verify-portals.mjs's
+    // Same probe-vs-real-scan split as vdab.mjs/jobbankca.mjs: the portal health probe's
     // bounded health probe passes ctx.maxPages so a liveness check can't walk
     // the whole board; a real scan (ctx.maxPages unset) uses the configured cap.
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;

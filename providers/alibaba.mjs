@@ -124,7 +124,7 @@ export default {
       ? entry.keywords
       : DEFAULT_KEYWORDS;
     const entryMaxPages = Number(entry.max_pages) > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES;
-    // Honor the ctx.maxPages pagination hint (verify-portals' health probe passes 1).
+    // Honor the ctx.maxPages pagination hint (the portal health probe passes 1).
     const maxPages = Math.min(entryMaxPages, Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity);
 
     // One token per run, sent as both cookie and header (see file header).

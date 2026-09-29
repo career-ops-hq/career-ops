@@ -246,7 +246,7 @@ export function parseEightfoldResponse(json, tenant, companyName) {
 /**
  * Resolve the page cap: a positive integer `max_pages` on the entry, capped
  * at MAX_PAGES_CAP; then narrowed further by ctx.maxPages when the caller is
- * only probing (verify-portals.mjs's health check passes 1).
+ * only probing (the portal health probe passes 1).
  *
  * @param {any} entry
  * @param {any} ctx

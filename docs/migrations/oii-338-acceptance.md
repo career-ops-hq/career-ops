@@ -348,3 +348,20 @@ retired along with two unused Node-specific profile fixtures. Python cadence
 and application lifecycle checks passed; the retained lock protocol check and
 the permitted-environment Node suite passed 177/177 tests. Historical
 application data remains untouched.
+
+The ATS portal repair command now runs in Python. A frozen Node output fixture
+checks its line-preserving edits, including notes, comments, Greenhouse API
+updates and Lever EU URLs. Python confirms candidate board ownership before
+suggesting an unattended repair; the old `fix-slugs.mjs` entry was retired in
+commit `597c9002`. A live public Greenhouse `stripe` probe returned 704 jobs.
+
+Portal health verification now also runs in Python. The retained Node provider
+tool returns bounded raw reachability facts through one sequential process, so
+the former verifier's shared DNS cache and request budget remain effective.
+Python owns live/empty/missing classification, error categories, candidate
+selection, owner matching and the `--strict` result; `doctor --strict` reads
+its ATS-only JSON result. Frozen Node slug and identity outputs and synthetic
+positive, mismatch, partial-budget and failure checks pass. A current AIA
+Workday probe returned the same `fetch failed` network result in both old and
+new implementations; Bosch's new probe also returned `fetch failed`, so those
+runs are not live-positive acceptance samples.

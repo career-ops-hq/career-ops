@@ -194,7 +194,7 @@ export function normalizeRemotliJob(row, fallbackCompany) {
   // cannot see that invariant, and the two failure modes are not symmetric: a
   // dropped field would silently publish closed roles as dead links, whereas
   // rejecting unknown status yields a visibly empty board that the
-  // verify-portals health probe surfaces.
+  // portal health probe surfaces.
   const status = typeof job.status === 'string' ? job.status.trim().toLowerCase() : '';
   if (status !== 'active') return null;
 
@@ -262,7 +262,7 @@ export default {
   },
 
   async fetch(entry, ctx) {
-    // verify-portals.mjs passes maxPages:1 for its health probe — one page is
+    // the portal health probe passes maxPages:1 — one page is
     // enough to tell a live board from a broken one.
     const cap =
       Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0

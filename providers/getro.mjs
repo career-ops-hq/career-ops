@@ -197,7 +197,7 @@ export default {
   // Getro tenants live on arbitrary vanity domains (careers.atomico.com,
   // talent.cherry.vc, ...) with no common suffix to auto-detect against.
   // Still reports a hit when `getro_collection` is set explicitly, so
-  // verify-portals has a probe URL for those entries without a live fetch.
+  // the portal health probe has a probe URL for those entries without a live fetch.
   detect(entry) {
     const id = resolveCollectionOverride(entry);
     return id ? { url: `${API_BASE}/${id}/search/jobs` } : null;

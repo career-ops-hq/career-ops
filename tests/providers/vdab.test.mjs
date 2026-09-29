@@ -328,7 +328,7 @@ try {
   if (totalOutageThrew) pass('vdab.fetch() throws when every keyword request fails (total outage)');
   else fail('vdab.fetch() should throw when every keyword request fails');
 
-  // fetch() — cooperates with verify-portals.mjs's bounded health-check probe
+  // fetch() — cooperates with the bounded portal health probe
   // (ctx.maxPages set): caps pagination per keyword, and does NOT swallow a
   // mid-run error into the recall-first per-keyword tolerance loop, so the
   // probe's own budget-exhaustion sentinel (or any real error hit while
@@ -352,8 +352,7 @@ try {
 
     // probing: a per-keyword error propagates immediately, unwrapped, instead
     // of being flattened into a generic "all keyword requests failed" Error —
-    // this is what lets verify-portals.mjs's `err instanceof
-    // ProbePageBudgetReached` check (and any other error-identity check)
+    // this is what lets the bounded caller's budget-sentinel check (and any other error-identity check)
     // still work when a provider is probed instead of scanned normally.
     class FakeSentinel extends Error {}
     let caught = null;

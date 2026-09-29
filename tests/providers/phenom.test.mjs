@@ -226,7 +226,7 @@ try {
     }
   }
 
-  // fetch() honors ctx.maxPages (verify-portals' liveness probe passes 1) so
+  // fetch() honors ctx.maxPages (the portal health probe passes 1) so
   // a health check never crawls a tenant's full multi-page board. Also must
   // NOT fire the "raise max_pages" warning — that's the entry cap's advice,
   // meaningless for a probe-imposed stop.

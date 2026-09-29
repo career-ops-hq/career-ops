@@ -65,7 +65,7 @@ export default {
     if (!Array.isArray(firstJobs)) throw new Error('join: __NEXT_DATA__ not found or unexpected structure');
     allItems.push(...firstJobs);
 
-    // Honor a context page cap — verify-portals' liveness probe sets
+    // Honor a context page cap — the portal health probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its
     // full count (mirrors providers/workday.mjs). No effect on real scans,
     // which don't set ctx.maxPages. Kept separate from `maxPages` below so

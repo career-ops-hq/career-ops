@@ -254,7 +254,7 @@ try {
 
   // ── fetch(): entry.max_pages configures the run, ctx.maxPages only caps it ──
   // The convention alibaba.mjs and 4dayweek.mjs already follow: `max_pages` on
-  // the portals entry is the user's setting; ctx.maxPages is verify-portals'
+  // the portals entry is the user's setting; ctx.maxPages is the portal health probe's
   // health probe passing 1. Reading only ctx.maxPages ignored the configuration.
   {
     const wide = new Map([

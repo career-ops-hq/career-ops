@@ -284,7 +284,7 @@ try {
   if (requested.every(r => r.redirect === 'error')) pass('fetch() passes redirect:"error" on every page (SSRF guard)');
   else fail(`fetch() redirect opts = ${JSON.stringify(requested.map(r => r.redirect))}`);
 
-  // ctx.maxPages (verify-portals health probe) caps the walk at one page.
+  // ctx.maxPages (portal health probe) caps the walk at one page.
   const capped = [];
   await remotli.fetch({ name: 'Remotli' }, {
     maxPages: 1,

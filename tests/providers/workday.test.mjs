@@ -701,7 +701,7 @@ try {
     fail(`fallback pagination: requests=${fallbackRequests}, jobs=${fallbackJobs.length} (expected 2/25)`);
   }
 
-  // fetch() honors ctx.maxPages — verify-portals' liveness probe sets maxPages:1.
+  // fetch() honors ctx.maxPages — the portal health probe sets maxPages:1.
   // It must stop after the first page and NOT request page 2, which would trip
   // the probe's second-request sentinel; fetchPageWithRetry treats that abort as
   // transient and retries it MAX_RETRIES times (4 requests) plus a truncation

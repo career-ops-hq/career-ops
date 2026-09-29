@@ -233,13 +233,12 @@ export default {
       body: JSON.stringify(body),
     });
 
-    // ctx.maxPages is set only by verify-portals.mjs's bounded health-check
-    // probe (never during a real scan). While probing: (a) cap pagination
+    // ctx.maxPages is set only by the bounded portal health probe (never during a real scan). While probing: (a) cap pagination
     // per keyword so a popular keyword (e.g. "Python" with 200+ live
     // postings) doesn't burn the probe's whole request budget on one
     // keyword alone, and (b) let the first per-keyword error propagate
     // as-is instead of being flattened into a generic summary Error —
-    // verify-portals.mjs's probeProvider() specifically recognizes its own
+    // the bounded caller recognizes its own
     // budget-exhaustion sentinel (instanceof check) to report a bounded
     // probe as "live, partial" rather than "board is down"; recall-first
     // tolerance would swallow that sentinel's identity and misreport a live

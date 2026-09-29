@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadProviders, resolveProvider } from './_registry.mjs';
 import { makeHttpCtx } from './_http.mjs';
 import { isResolverFailure } from './_dns-cache.mjs';
-import { classifyFetchError } from '../verify-portals.mjs';
+import { classifyFetchError } from './_fetch_error.mjs';
 
 const providerDirectory = dirname(fileURLToPath(import.meta.url));
 const REVERSE_TIMEOUT_MS = 5 * 60_000;

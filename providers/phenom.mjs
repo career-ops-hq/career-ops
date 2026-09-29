@@ -165,7 +165,7 @@ export default {
 
     const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
-    // Honor a context page cap — verify-portals' liveness probe sets
+    // Honor a context page cap — the portal health probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its
     // full count (mirrors providers/workday.mjs). Kept separate from
     // maxPages so the entry-cap warning below (page === maxPages) doesn't

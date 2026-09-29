@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
 import html
 import json
+import os
+from pathlib import Path
 import re
+import select
+import subprocess
+import sys
 import unicodedata
 from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+import yaml
 
 
 LATIN = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ß": "ss", "đ": "d", "ł": "l",
@@ -17,6 +25,7 @@ DESIGNATORS = frozenset("inc incorporated llc llp lp ltd limited plc corp corpor
                         "gmbh ag kg sa sas sarl srl spa bv nv ab as oy aps pty pte kk kft".split())
 SUFFIXES = ("ai", "tech", "io", "hq", "labs")
 ATS = ("greenhouse", "ashby", "lever")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def ascii_fold(value: str, *, punctuation: str = "space") -> str:
@@ -98,13 +107,22 @@ def fetch_text(url: str) -> str:
         return response.read(65536).decode("utf-8", errors="replace")
 
 
-def error_kind(error: Exception) -> str:
-    status = getattr(error, "status", None) or getattr(error, "code", None)
+def error_kind(error: Exception, *, status: int | None = None, name: str | None = None) -> str:
+    if name == "AbortError" or re.search(
+            r"ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|network", str(error), re.I):
+        return "network"
+    status = status or getattr(error, "status", None) or getattr(error, "code", None)
     if status in (404, 410):
         return "slug_gone"
     if status in (401, 403):
         return "auth"
     if isinstance(status, int) and status >= 500:
+        return "server"
+    if re.search(r"HTTP (?:404|410)", str(error)):
+        return "slug_gone"
+    if re.search(r"HTTP (?:401|403)", str(error)):
+        return "auth"
+    if re.search(r"HTTP 5\d\d", str(error)):
         return "server"
     if isinstance(error, (URLError, TimeoutError, ConnectionError)):
         return "network"
@@ -173,3 +191,142 @@ def verify_ats_company(company: dict, *, get_json=fetch_json, get_text=fetch_tex
         if suggestion:
             result["suggested"] = suggestion
     return {"name": name, **result}
+
+
+def collect_provider_health(company: dict) -> dict:
+    with ProviderHealthSession() as session:
+        return session.probe(company)
+
+
+class ProviderHealthSession:
+    """Keep one provider process and DNS cache across a sequential portal sweep."""
+
+    def __enter__(self):
+        try:
+            self.process = subprocess.Popen(["node", str(ROOT / "providers/_health_probe.mjs"), "--stream"],
+                                            cwd=ROOT, text=True, bufsize=1, stdin=subprocess.PIPE,
+                                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            raise RuntimeError(f"provider health process failed: {error}") from error
+        return self
+
+    def __exit__(self, *_):
+        if self.process.stdin:
+            try:
+                self.process.stdin.close()
+            except OSError:
+                pass
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        if self.process.stdout:
+            self.process.stdout.close()
+
+    def probe(self, company: dict) -> dict:
+        try:
+            self.process.stdin.write(json.dumps(company) + "\n")
+            self.process.stdin.flush()
+            if not select.select([self.process.stdout], [], [], 120)[0]:
+                self.process.kill()
+                raise TimeoutError("provider health probe exceeded 120 seconds")
+            raw = self.process.stdout.readline()
+            if not raw:
+                raise RuntimeError("provider health process exited")
+            return json.loads(raw)
+        except (OSError, ValueError, RuntimeError, TimeoutError) as error:
+            return {"matched": True, "provider": company.get("provider") or "?", "error": str(error)}
+
+
+def probe_provider(company: dict, *, collect=collect_provider_health) -> dict:
+    name = company.get("name") if isinstance(company.get("name"), str) else "(unnamed)"
+    raw = collect(company)
+    if not raw.get("matched"):
+        return {"name": name, "status": "skipped", "reason": "no provider matched careers_url or api"}
+    result = {"name": name, "provider": raw.get("provider") or "?"}
+    if raw.get("error"):
+        error = RuntimeError(str(raw["error"]))
+        return {**result, "status": "missing", "errorKind": error_kind(
+                    error, status=raw.get("httpStatus"), name=raw.get("errorName")),
+                "httpStatus": raw.get("httpStatus"), "reason": raw["error"]}
+    if raw.get("budgetReached"):
+        return {**result, "status": "live", "partial": True,
+                **({"jobCount": raw["jobCount"]} if raw.get("jobCount", 0) > 0 else {})}
+    count = raw.get("jobCount", 0)
+    return {**result, "status": "live" if count > 0 else "empty", "jobCount": count}
+
+
+def verify_companies(companies: list, *, ats_probe=verify_ats_company, provider_probe=probe_provider,
+                     ats_only: bool = False) -> list[dict]:
+    results = []
+    for company in companies:
+        if not isinstance(company, dict) or company.get("enabled") is False:
+            continue
+        ats_result = ats_probe(company)
+        if ats_result is not None:
+            results.append(ats_result)
+        elif not ats_only:
+            results.append(provider_probe(company))
+    return results
+
+
+def verify_portals_file(path: Path, *, ats_only: bool = False) -> dict:
+    if not path.is_file():
+        return {"found": False, "results": []}
+    data = yaml.safe_load(path.read_text())
+    companies = data.get("tracked_companies", []) if isinstance(data, dict) else []
+    if not isinstance(companies, list):
+        raise ValueError("tracked_companies must be a list")
+    if ats_only:
+        results = verify_companies(companies, ats_only=True)
+    else:
+        with ProviderHealthSession() as session:
+            results = verify_companies(companies,
+                                       provider_probe=lambda company: probe_provider(company, collect=session.probe))
+    return {"found": True, "results": results}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Verify tracked portal reachability")
+    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", "portals.yml"))
+    parser.add_argument("--add", metavar="COMPANY")
+    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--ats-only", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    arguments = parser.parse_args(argv)
+    if not arguments.file:
+        parser.error("--file requires a value")
+    if arguments.add is not None:
+        candidates = slug_candidates(arguments.add, first_word_suffixes=True)
+        if not candidates:
+            parser.error("--add requires a Latin company name with an ASCII slug")
+        hits = [row for slug in candidates for ats in ATS
+                if (row := probe_slug(ats, slug))["status"] != "missing"]
+        if arguments.json:
+            print(json.dumps({"candidates": candidates, "hits": hits}))
+        else:
+            print(f"Probing {len(candidates)} slug candidate(s) for '{arguments.add}'")
+            for row in hits:
+                print(f"  {row['ats']}/{row['slug']}: {row['status']} ({row['jobCount']} jobs)")
+            if hits:
+                best = next((row for row in hits if row["status"] == "live"), hits[0])
+                print(f"Suggested: careers_url for {best['ats']} → slug '{best['slug']}'")
+            else:
+                print("No slug variant resolved on any ATS.")
+        return 0
+    result = verify_portals_file(Path(arguments.file), ats_only=arguments.ats_only)
+    if arguments.json:
+        print(json.dumps(result))
+    elif not result["found"]:
+        print(f"No portals file at {arguments.file}; nothing to verify.")
+    else:
+        for row in result["results"]:
+            source = f"{row['ats']}/{row['slug']}" if row.get("ats") else row.get("provider") or "?"
+            print(f"{row['name']}: {source} {row['status']}"
+                  + (f" → {row['suggested']['ats']}/{row['suggested']['slug']}" if row.get("suggested") else ""))
+    return int(arguments.strict and any(row["status"] == "missing" for row in result["results"]))
+
+
+if __name__ == "__main__":
+    sys.exit(main())
