@@ -27,6 +27,21 @@ assert directory_concurrency("workday", same_host) == 1
 assert directory_concurrency("workday", distinct_hosts) == 20
 assert directory_concurrency("greenhouse", distinct_hosts) == 6
 
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    portal = root / "portals.yml"
+    portal.write_text("title_filter:\n  positive:\n    - Engineer\nlocation_filter:\n  allow:\n    - Shanghai\n")
+    workday_concurrency = []
+
+    def empty_workday(targets, cutoff_ms, include_undated, concurrency):
+        workday_concurrency.append(concurrency)
+        return [{"status": "fetched", "provider": "workday", "jobs": []} for _ in targets]
+
+    result = discover_global(root / "data", portal, ats=["workday"],
+                             load_source=lambda *_: (["wd1|wd1|site-a", "wd1|wd1|site-b"], "ok"),
+                             collect=empty_workday, now_ms=NOW)
+    assert result["status"] == "completed" and workday_concurrency == [1]
+
 
 def enriched_then_hung(command, **kwargs):
     Path(command[-1] + ".progress").write_text(json.dumps({"index": 0, "job": {"title": "Engineer",
