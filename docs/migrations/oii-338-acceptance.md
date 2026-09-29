@@ -559,3 +559,9 @@ After these scan and recovery fixes, all 61 current
 (118.7 seconds, zero failures). This broad regression result supplements the
 targeted red/green cases; it does not by itself resolve the formal-store
 opportunity `8` exclusion or the next natural scan acceptance.
+The 19:20 built-in score tick (`a15a1e804c8043ee8ba9782258e73ea2`)
+then completed opportunity `9`'s scan through the current LangGraph code. It
+retained a `jd_report` with `uncertain` prescreen; no score was due in that
+single-stage tick. The canonical store passed `PRAGMA quick_check` and still
+had zero notification deliveries. This is a clean natural scheduler execution,
+not a re-evaluation of opportunity `8`.
