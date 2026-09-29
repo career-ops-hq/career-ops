@@ -35,6 +35,8 @@ assert detect_reposts(rows[:2]) == []
 assert detect_reposts(rows, aggregators={"acme"}) == []
 assert detect_reposts([row("a", "Acme", "Engineer", "2026-01-01"), row("a", "Acme", "Engineer", "2026-02-01")]) == []
 assert detect_reposts([row("a", "Acme", "Engineer", "invalid"), row("b", "Acme", "Engineer", "2026-02-01")]) == []
+assert detect_reposts([row("a", "Acme", "Engineer", "20260101"), row("b", "Acme", "Engineer", "2026-02-01")]) == []
+assert detect_reposts([row("a", "Acme", "Engineer", "2026-W01-1"), row("b", "Acme", "Engineer", "2026-02-01")]) == []
 
 with tempfile.TemporaryDirectory() as temp:
     root = Path(temp)

@@ -16,6 +16,10 @@
 | `jd-skill-gap.mjs` requirement extraction and named/prose/gap classification; `upskill.mjs --url-text` | `insights jd-skill-gap --jd PATH` or `--jd-url URL`; JD and CV, with the guarded provider capture tool for URLs |
 | `preparation-plan.mjs` source-grounded evidence buckets, reviewed report overrides, and pre-application/interview actions | `insights preparation-plan --jd PATH --company NAME --role TITLE [--report PATH] [--output PATH]`; JD, CV and profile |
 
+The Node repost parser accepts only full `YYYY-MM-DD` observation dates.
+Python applies that grammar before `date.fromisoformat`, which otherwise also
+accepts compact and ISO week dates and could admit false repost clusters.
+
 The 2026-09-25 OII-341 decision removes stored job contacts, so the older
 OII-314 contact export requirement no longer applies. Independent interview
 CV maintenance remains in its own migration slice. The standalone preparation

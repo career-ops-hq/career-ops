@@ -76,6 +76,8 @@ def detect_reposts(rows: list[dict], *, window_days: int = 90, min_span_days: in
     for row in rows:
         if not all(isinstance(row.get(key), str) and row[key].strip() for key in ("url", "company", "title", "observed_on")):
             continue
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", row["observed_on"]):
+            continue
         try:
             observed = date.fromisoformat(row["observed_on"])
         except ValueError:
