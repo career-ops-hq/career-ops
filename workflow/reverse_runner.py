@@ -172,6 +172,18 @@ def collect_boards(targets: list[dict], cutoff_ms: float, include_undated: bool,
     return rows
 
 
+def directory_concurrency(name: str, batch: list[dict]) -> int:
+    """Keep shared-host Workday directory batches from flooding one WAF."""
+    if name in {"greenhouse", "lever", "ashby"}:
+        return 6
+    if name == "workday":
+        hosts = [urlsplit(entry["careers_url"]).hostname for entry in batch]
+        if len(hosts) != len(set(hosts)):
+            # ponytail: serializes mixed batches too; use per-host semaphores if throughput becomes limiting.
+            return 1
+    return 20
+
+
 def enrich_dates(jobs: list[dict], *, timeout_seconds: float = 300) -> tuple[list[dict], bool]:
     """Ask the guarded iCIMS detail reader only about Python-selected rows."""
     if not jobs:
@@ -380,7 +392,7 @@ def discover_global(directory: Path, config_path: Path, *, ats: list[str] | None
                 for offset in range(start, len(entries), BATCH_SIZE):
                     batch = entries[offset:offset + BATCH_SIZE]
                     try:
-                        outcomes = collect(batch, cutoff_ms, include_undated, 6 if name in {"greenhouse", "lever", "ashby"} else 20)
+                        outcomes = collect(batch, cutoff_ms, include_undated, directory_concurrency(name, batch))
                     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
                         counters["errors"] += 1
                         if verbose:

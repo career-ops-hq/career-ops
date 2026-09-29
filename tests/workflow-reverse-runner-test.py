@@ -15,11 +15,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from workflow.reverse_checkpoint import write_checkpoint
-from workflow.reverse_runner import collect_boards, discover_global, enrich_dates, load_seed, publish_reverse_offers, seed_entry
+from workflow.reverse_runner import (collect_boards, directory_concurrency, discover_global, enrich_dates,
+                                     load_seed, publish_reverse_offers, seed_entry)
 
 
 NOW = 1_800_000_000_000
 BOARDS = [f"board{index}" for index in range(51)]
+same_host = [{"careers_url": f"https://wd1.wd1.myworkdayjobs.com/site-{index}"} for index in range(2)]
+distinct_hosts = [{"careers_url": f"https://company-{index}.wd1.myworkdayjobs.com/site"} for index in range(2)]
+assert directory_concurrency("workday", same_host) == 1
+assert directory_concurrency("workday", distinct_hosts) == 20
+assert directory_concurrency("greenhouse", distinct_hosts) == 6
 
 
 def enriched_then_hung(command, **kwargs):

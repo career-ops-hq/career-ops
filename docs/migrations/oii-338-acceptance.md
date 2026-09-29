@@ -375,3 +375,15 @@ to stderr while keeping `--json` stdout machine-readable. Its existing
 partial/resume fixture passes with progress output. The already-running full
 sweep began before this change, so its current process remains silent; its
 checkpoint is the progress source for that run.
+
+The in-progress public Workday directory has 12,884 entries but only 3,781
+distinct hosts; 6,643 entries share one of 21 hosts that each hold more than
+20 sites. In the `dd3dce319a911cff` dataset, `wd1.wd1.myworkdayjobs.com`
+alone carries 2,480 consecutive sites. Three sampled entries around offset
+8,000 returned raw `fetch failed`; a separate public request to that shared
+host returned HTTP 429 while AIA's Workday API returned 200. The earlier
+20-worker assumption of one tenant per host therefore does not hold for this
+directory. Python now runs a batch serially when two Workday entries share a
+host, while retaining 20-way collection for distinct-host batches. The live
+full sweep started before this change and keeps its original concurrency;
+its eventual partial result cannot establish complete Workday coverage.
