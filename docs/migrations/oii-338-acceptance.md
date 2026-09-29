@@ -574,6 +574,13 @@ After the tenure, liveness, research-recovery and citation fixes, all 61
 The two Hermes schedules were still active at 19:34 +08:00; the canonical
 store had 120 opportunities, 18 tasks, six evaluations, zero notification
 deliveries and `PRAGMA quick_check=ok`.
+Comparing Python report rendering with Node `validateResearch` exposed a
+remaining publication gap: an unsupported research access status with no
+source or quote still rendered and could be published. Python now validates
+the full research audit shape, query references, status/scope, URL and source
+metadata, exact retrieved quotations and null evidence for unretrieved
+findings before writing the score report. A rejection regression reproduced
+the old acceptance; report, model-runner and required workflow gates passed.
 After these scan and recovery fixes, all 61 current
 `tests/workflow-*-test.py` files passed in one local run on 2026-09-29
 (118.7 seconds, zero failures). This broad regression result supplements the

@@ -65,6 +65,49 @@ def attractiveness(dimensions: dict, weights: dict) -> dict:
     return {"lower": round(lower, 2), "upper": round(upper, 2), "coverage": round(coverage, 6)}
 
 
+def validate_research(research: dict, sources: dict[str, Path]) -> None:
+    """Require the Node research audit contract before a scored report is written."""
+    if not isinstance(research, dict) or not isinstance(research.get("searched_at"), str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", research["searched_at"]):
+        raise ValueError("research date required")
+    queries = research.get("queries")
+    if not isinstance(queries, list) or not 1 <= len(queries) <= 5 or any(not isinstance(query, str) or not query.strip() for query in queries):
+        raise ValueError("research requires 1–5 executed queries")
+    dimensions = research.get("dimensions")
+    if not isinstance(dimensions, dict) or set(dimensions) != {"compensation", "team", "company"}:
+        raise ValueError("research dimensions are incomplete")
+    for name, dimension in dimensions.items():
+        refs = dimension.get("queries") if isinstance(dimension, dict) else None
+        if (not isinstance(refs, list) or not refs or any(type(index) is not int or not 0 <= index < len(queries) for index in refs)
+                or any(not isinstance(dimension.get(field), str) or not dimension[field].strip() for field in ("conclusion", "next_step"))):
+            raise ValueError(f"{name}: research conclusion or query reference is invalid")
+    findings = research.get("findings")
+    if not isinstance(findings, list):
+        raise ValueError("research findings required")
+    ids = set()
+    for finding in findings:
+        if not isinstance(finding, dict):
+            raise ValueError("research finding must be an object")
+        identifier = finding.get("id")
+        if not isinstance(identifier, str) or not identifier.strip() or identifier in ids:
+            raise ValueError("research finding IDs must be unique")
+        ids.add(identifier)
+        if finding.get("status") not in ("retrieved", "search_only", "failed", "excluded"):
+            raise ValueError("research access status required")
+        if finding.get("scope") not in ("role", "team", "company", "adjacent_role", "market", "unresolved"):
+            raise ValueError("research scope required")
+        if (not isinstance(finding.get("url"), str) or not re.match(r"^https?://", finding["url"])
+                or any(not isinstance(finding.get(field), str) or not finding[field].strip() for field in ("entity", "limitation"))
+                or finding.get("published_at") is not None and (not isinstance(finding["published_at"], str) or not finding["published_at"].strip())):
+            raise ValueError("research URL, entity, limitations or publication date is invalid")
+        if finding["status"] == "retrieved":
+            source_id = finding.get("source")
+            source = sources.get(source_id) if isinstance(source_id, str) else None
+            if not isinstance(finding.get("quote"), str) or not finding["quote"].strip() or source is None or finding["quote"] not in source.read_text():
+                raise ValueError("research quote missing from frozen source")
+        elif finding.get("source") is not None or finding.get("quote") is not None:
+            raise ValueError("unretrieved research cannot provide scored evidence")
+
+
 def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
     root, directory = Path(packet["root"]), Path(packet["directory"])
     if evidence.get("complete_jd") is not True or evidence.get("liveness") != "active" or not evidence.get("jd", "").strip():
@@ -84,6 +127,7 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
             raise ValueError("External sources must be sequential web1, web2, ... with text")
         files[source["id"]] = directory / f"{source['id']}.txt"
         files[source["id"]].write_text(source["text"])
+    validate_research(assessment.get("research"), files)
     profile = yaml.safe_load(packet["sources"]["profile"])
     score = attractiveness(assessment["dimensions"], profile["attractiveness"]["weights"])
     dimension_citations = [item for dimension in assessment["dimensions"].values() for item in dimension["evidence"]]

@@ -58,6 +58,15 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     no_sources["sources"] = []
     no_sources["research"]["findings"] = []
     assert "未取得可引用网页；外部事项保持未知" in render_report(packet, evidence, no_sources)["report"]
+    malformed_research = json.loads(json.dumps(assessment))
+    malformed_research["research"]["findings"][0]["status"] = "unsupported"
+    malformed_research["research"]["findings"][0]["source"] = None
+    malformed_research["research"]["findings"][0]["quote"] = None
+    try:
+        render_report(packet, evidence, malformed_research)
+        raise AssertionError("unsupported research access status accepted")
+    except ValueError as error:
+        assert "research access status" in str(error)
     render_report(packet, evidence, assessment)
     validator = Path(__file__).resolve().parents[1] / "scoring-report.mjs"
     script = "import fs from 'node:fs'; const {validateReport}=await import(process.argv[1]); const p=process.argv[2]; validateReport(fs.readFileSync(p,'utf8'), {root:process.argv[3]});"
