@@ -222,3 +222,20 @@ artifact row and the strict report validator passed. A repeated run returned
 the completed task without a second evaluation or report artifact. SQLite
 `PRAGMA quick_check` passed and `notification_deliveries` remained empty. The
 jobs remain paused pending a clean scheduler run and remaining acceptance gates.
+
+The two older first-failure tasks were then resumed by their original IDs in
+the permitted runtime: scan task `26ef23fc-a368-4c85-8065-69a8c6094f38`
+completed a JD report, and score task `c7438536-7576-42e7-b12e-380e91aa4899`
+completed a report. A resumed Hermes score run next selected opportunity `2`
+but failed because its section-completion model returned nonempty string lists
+for `questions`, `risks` and `checklist`. Both jobs were paused again. The
+LangGraph boundary now renders such lists as Markdown bullets without changing
+their text, while still rejecting empty or unsupported shapes. A same-task
+resume then exposed a model-produced compensation dimension as a plain string;
+full-assessment repair stopped without a usable response. The graph now repairs
+only malformed dimensions against frozen sources before report validation.
+Score task `dda3f24c-1445-409b-9265-ba675dd82141` completed on attempt one
+with ten recorded calls, one formal score result and a report artifact whose
+stored and actual hashes match. The strict report validator and SQLite
+`PRAGMA quick_check` passed; notification deliveries remained zero. Both Hermes
+jobs remain paused until a clean scheduled execution is observed.

@@ -205,7 +205,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-section-completion-") as tem
     seen = []
     def fill_sections(phase, prompt, *_args, **_kwargs):
         seen.append((phase, prompt))
-        return {name: "Grounded evidence and next action." for name in missing}, "sections-session"
+        return {name: ["Grounded evidence.", "Next action."] if name in ("questions", "risks", "checklist")
+                else "Grounded evidence and next action." for name in missing}, "sections-session"
     model_adapter.call_agent = fill_sections
     try:
         completed, count = score_graph._complete_sections(partial, {"jd": "Source JD"}, {}, {}, Path(temporary))
@@ -213,7 +214,33 @@ with tempfile.TemporaryDirectory(prefix="career-ops-section-completion-") as tem
         model_adapter.call_agent = original_call_agent
     assert count == 1 and completed["sections"]["overview"] == partial["sections"]["overview"]
     assert all(completed["sections"].get(name) for name in missing)
+    assert completed["sections"]["questions"] == "- Grounded evidence.\n- Next action."
     assert seen[0][0] == "score_sections" and "Source JD" in seen[0][1]
+    ready, count = score_graph._complete_sections(
+        {"dimensions": {}, "sections": {**completed["sections"], "risks": ["Known risk."]}},
+        {"jd": "Source JD"}, {}, {}, Path(temporary),
+    )
+    assert count == 0 and ready["sections"]["risks"] == "- Known risk."
+
+with tempfile.TemporaryDirectory(prefix="career-ops-dimension-completion-") as temporary:
+    good = {"score": None, "rationale": "Evidence is insufficient for a rating.", "evidence": []}
+    original = {name: dict(good) for name in ("direction", "team", "company")}
+    original["compensation"] = "Market benchmark does not prove this job's pay."
+    original_call_agent = model_adapter.call_agent
+    seen = []
+    def repair_dimension(phase, prompt, *_args, **_kwargs):
+        seen.append((phase, prompt))
+        return dict(good), "dimension-session"
+    model_adapter.call_agent = repair_dimension
+    try:
+        repaired, count = score_graph._complete_dimensions(
+            {"dimensions": original}, {"jd": "Official JD"}, {}, {}, Path(temporary)
+        )
+    finally:
+        model_adapter.call_agent = original_call_agent
+    assert count == 1 and repaired["dimensions"]["compensation"] == good
+    assert repaired["dimensions"]["direction"] == original["direction"]
+    assert seen[0][0] == "score_dimension" and "Official JD" in seen[0][1]
 
 with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / "data") as temporary:
     runner.DRAFT_ROOT = Path(temporary)

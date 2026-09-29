@@ -43,12 +43,18 @@ def _normalize_assessment(assessment: dict) -> dict:
 
 def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict, directory: Path) -> tuple[dict, int]:
     required = ("overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")
-    sections = assessment.get("sections")
-    if not isinstance(sections, dict):
-        sections = {}
-    missing = [name for name in required if not isinstance(sections.get(name), str) or not sections[name].strip()]
+    def section_text(value: object) -> str | None:
+        if isinstance(value, str) and value.strip():
+            return value
+        if isinstance(value, list) and value and all(isinstance(item, str) and item.strip() for item in value):
+            return "\n".join(f"- {item}" for item in value)
+        return None
+
+    original = assessment.get("sections")
+    sections = {name: section_text(value) for name, value in original.items()} if isinstance(original, dict) else {}
+    missing = [name for name in required if sections.get(name) is None]
     if not missing:
-        return assessment, 0
+        return {**assessment, "sections": sections}, 0
     prompt = (
         "Complete only these missing score report sections as a JSON object with exactly these top-level keys: "
         + ", ".join(missing) + ". Write concise Chinese Markdown strings without level-two headings. "
@@ -59,9 +65,40 @@ def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict
                       "dimensions": assessment["dimensions"], "existing_sections": list(sections)}, ensure_ascii=False)
     )
     added = model_adapter.call_agent("score_sections", prompt, [], directory)[0]
-    if any(not isinstance(added.get(name), str) or not added[name].strip() for name in missing):
+    completed = {name: section_text(added.get(name)) for name in missing}
+    if any(value is None for value in completed.values()):
         raise ValueError("Score section completion is incomplete")
-    return {**assessment, "sections": {**sections, **{name: added[name] for name in missing}}}, 1
+    return {**assessment, "sections": {**sections, **completed}}, 1
+
+
+def _complete_dimensions(assessment: dict, jd: dict, sources: dict, research: dict, directory: Path) -> tuple[dict, int]:
+    dimensions = dict(assessment["dimensions"])
+    calls = 0
+    for name in ("direction", "compensation", "team", "company"):
+        value = dimensions.get(name)
+        if (isinstance(value, dict) and set(value) == {"score", "rationale", "evidence"}
+                and isinstance(value["rationale"], str) and value["rationale"].strip()
+                and isinstance(value["evidence"], list)
+                and (value["score"] is None or value["evidence"])
+                and (value["score"] is None or type(value["score"]) is int and 1 <= value["score"] <= 5)):
+            continue
+        prompt = (
+            f"Repair only the {name} score dimension. Return one JSON object with exactly score, rationale, evidence. "
+            "Score must be an integer 1–5 or null. Each evidence item must have a frozen source ID and an exact contiguous quote. "
+            "Explain fact, applicability, inference, and rating. If evidence cannot support a rating, use score:null and explain Unknown. "
+            "Do not change other dimensions or report sections.\n"
+            + json.dumps({"previous": value, "jd_report": jd, "candidate_sources": sources,
+                          "research": research}, ensure_ascii=False)
+        )
+        repaired = model_adapter.call_agent("score_dimension", prompt, [], directory)[0]
+        if (set(repaired) != {"score", "rationale", "evidence"}
+                or not isinstance(repaired["rationale"], str) or not repaired["rationale"].strip()
+                or not isinstance(repaired["evidence"], list)
+                or (repaired["score"] is not None and (type(repaired["score"]) is not int or not 1 <= repaired["score"] <= 5 or not repaired["evidence"]))):
+            raise ValueError(f"{name}: repaired dimension is incomplete")
+        dimensions[name] = repaired
+        calls += 1
+    return {**assessment, "dimensions": dimensions}, calls
 
 
 def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
@@ -149,6 +186,11 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
     def render(state: ScoreState) -> dict:
         assessment_path = directory / "assessment.json"
         assessment = json.loads(assessment_path.read_text()) if assessment_path.exists() else state["assessment"]
+        assessment, dimension_calls = _complete_dimensions(
+            assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
+        )
+        if dimension_calls:
+            _write_json(assessment_path, assessment)
         assessment, section_calls = _complete_sections(
             assessment, state["inputs"]["jd_report"], state["packet"]["sources"], state["research"], directory
         )
@@ -156,7 +198,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
             _write_json(assessment_path, assessment)
         try:
             result = render_report(state["packet"], state["evidence"], assessment)
-            calls = state["tool_calls"] + section_calls
+            calls = state["tool_calls"] + dimension_calls + section_calls
         except ValueError as error:
             frozen_sources = {**state["packet"]["sources"], "jd": state["evidence"]["jd"]}
             frozen_sources.update({source["id"]: source["text"] for source in state["research"]["sources"]})
@@ -180,7 +222,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
             )
             _write_json(assessment_path, assessment)
             result = render_report(state["packet"], state["evidence"], assessment)
-            calls = state["tool_calls"] + section_calls + 1 + repair_sections
+            calls = state["tool_calls"] + dimension_calls + section_calls + 1 + repair_sections
         return {
             "outcome": "score", "tool_calls": calls,
             "artifact": {
