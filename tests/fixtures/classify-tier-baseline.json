@@ -1,0 +1,318 @@
+[
+  {
+    "title": "Intern - Office of the Chief Technology Officer",
+    "tier": "intern"
+  },
+  {
+    "title": "Software Engineering Intern, Lead Generation Platform",
+    "tier": "intern"
+  },
+  {
+    "title": "Marketing Intern - Senior Living Community",
+    "tier": "intern"
+  },
+  {
+    "title": "Summer Intern, Director of Product",
+    "tier": "intern"
+  },
+  {
+    "title": "Graduate Trainee - Head of Retail Division",
+    "tier": "intern"
+  },
+  {
+    "title": "Junior Developer - Team Lead Support",
+    "tier": "entry"
+  },
+  {
+    "title": "Junior Staff Accountant",
+    "tier": "entry"
+  },
+  {
+    "title": "Senior Intern Coordinator",
+    "tier": "senior"
+  },
+  {
+    "title": "Lead Software Engineer",
+    "tier": "senior"
+  },
+  {
+    "title": "VP of Engineering",
+    "tier": "senior"
+  },
+  {
+    "title": "Director of Engineering, Junior Talent",
+    "tier": "senior"
+  },
+  {
+    "title": "Software Engineer Intern",
+    "tier": "intern"
+  },
+  {
+    "title": "Junior Software Engineer",
+    "tier": "entry"
+  },
+  {
+    "title": "Senior Software Engineer",
+    "tier": "senior"
+  },
+  {
+    "title": "Software Engineer I",
+    "tier": "entry"
+  },
+  {
+    "title": "Software Engineer II",
+    "tier": "mid"
+  },
+  {
+    "title": "Software Engineer",
+    "tier": "mid"
+  },
+  {
+    "title": "Senior Software Engineer III",
+    "tier": "senior"
+  },
+  {
+    "title": "Engineer II - Senior Platform Group",
+    "tier": "mid"
+  },
+  {
+    "title": "A.I. Researcher",
+    "tier": "mid"
+  },
+  {
+    "title": "I.T. Specialist II",
+    "tier": "mid"
+  },
+  {
+    "title": "Graduate Engineer",
+    "tier": "mid"
+  },
+  {
+    "title": "Graduate Engineer Program",
+    "tier": "intern"
+  },
+  {
+    "title": "Associate Director, Data Science",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Creative Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Vice President, Technology",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Principal Scientist",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Chief Nursing Officer",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Head of Product",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Software Engineer",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Developer",
+    "tier": "entry"
+  },
+  {
+    "title": "Intern Program Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Internship Program Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Graduate Program Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Graduate Scheme Lead",
+    "tier": "senior"
+  },
+  {
+    "title": "Trainee Program Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Junior Talent Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Junior Talent Lead",
+    "tier": "senior"
+  },
+  {
+    "title": "Entry-Level Program Director",
+    "tier": "senior"
+  },
+  {
+    "title": "Intern Program Coordinator",
+    "tier": "intern"
+  },
+  {
+    "title": "Graduate Scheme Analyst",
+    "tier": "intern"
+  },
+  {
+    "title": "Trainee Program Engineer",
+    "tier": "intern"
+  },
+  {
+    "title": "Associate Professor",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Research Professor",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Dean",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Dean of Students",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Provost",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Chancellor",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Vice Chancellor",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Superintendent",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate General Counsel",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Vice President",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Partner",
+    "tier": "senior"
+  },
+  {
+    "title": "Associate Counsel",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Attorney",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Editor",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Producer",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Manager",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Consultant",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Rector",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Registrar",
+    "tier": "entry"
+  },
+  {
+    "title": "Intern, Associate Dean of Student Life",
+    "tier": "intern"
+  },
+  {
+    "title": "Student Intern, Office of the Associate Provost",
+    "tier": "intern"
+  },
+  {
+    "title": "Summer Intern, Associate Professor Research Group",
+    "tier": "intern"
+  },
+  {
+    "title": "Graduate Trainee, Office of the Associate Dean",
+    "tier": "intern"
+  },
+  {
+    "title": "Entry-Level Associate, Dean of Admissions Office",
+    "tier": "entry"
+  },
+  {
+    "title": "Junior Associate Professor Support Specialist",
+    "tier": "entry"
+  },
+  {
+    "title": "Administrative Associate, Office of the Dean",
+    "tier": "entry"
+  },
+  {
+    "title": "Program Associate, Office of the Provost",
+    "tier": "entry"
+  },
+  {
+    "title": "Research Associate - Professor Smith Laboratory",
+    "tier": "entry"
+  },
+  {
+    "title": "Postdoctoral Research Associate, Lab of Professor Jane Doe",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Consultant - Dean & Company",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Attorney - Provost Umphrey Law Firm",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Manager, Dean Foods",
+    "tier": "entry"
+  },
+  {
+    "title": "Junior Associate, Dean Witter",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Counsel, Office of the General Counsel",
+    "tier": "entry"
+  },
+  {
+    "title": "Associate Counsel - Office of General Counsel",
+    "tier": "entry"
+  },
+  {
+    "title": null,
+    "tier": "mid"
+  }
+]
