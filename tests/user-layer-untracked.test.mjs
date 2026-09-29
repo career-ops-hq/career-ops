@@ -75,9 +75,21 @@ try {
   const paths = parseUserLayerPaths(contract);
   pass(`parsed ${paths.length} user-layer paths from DATA_CONTRACT.md`);
 
-  const violations = trackedIgnoredUserLayerFiles(ROOT, paths);
+  // These are system-owned directory scaffolds, not user data. A root-level
+  // ignore rule must cover a same-named symlink as well as the real directory,
+  // which means Git also reports the already-tracked scaffolds as ignored.
+  // Keep this allowlist exact so real user files in the same paths still fail.
+  const trackedScaffolds = new Set([
+    'data/offers/.gitkeep',
+    'documents/.gitkeep',
+    'documents/README.md',
+    'jds/.gitkeep',
+    'output/.gitkeep',
+  ]);
+  const violations = trackedIgnoredUserLayerFiles(ROOT, paths)
+    .filter((path) => !trackedScaffolds.has(path));
   if (violations.length === 0) {
-    pass('no ignored User Layer file remains tracked');
+    pass('no ignored User Layer data file remains tracked (known scaffolds are exempt)');
   } else {
     for (const path of violations) {
       fail(`${path} is User Layer, git-ignored, and still tracked — remove it from the index`);

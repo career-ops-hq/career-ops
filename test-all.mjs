@@ -422,6 +422,7 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  { name: 'keyword-match.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
@@ -15279,6 +15280,126 @@ try {
   }
 } catch (e) {
   fail(`scan Unicode dedup/match key tests crashed: ${e.message}`);
+}
+
+// ── 46. Keyword coverage (ATS match) ────────────────────────────
+console.log('\n46. Keyword coverage (ATS match)');
+
+try {
+  const { analyzeCoverage, extractKeywords, countOccurrences, variantForms, htmlToText } =
+    await import(pathToFileURL(join(ROOT, 'keyword-match.mjs')).href);
+
+  const cv = [
+    'Senior engineer. Built Python services with FastAPI. Python remains my primary language.',
+    'Deployed on k8s. Owned CI/CD pipelines. Wrote C++ modules and some JavaScript.',
+    'Strong in machine  learning and PostgreSQL. Set up observability once.',
+  ].join('\n');
+  const keywords = ['Python', 'FastAPI', 'Kubernetes', 'CI/CD', 'C++',
+    'Machine Learning', 'Postgres', 'observability', 'Java', 'gRPC'];
+  const r = analyzeCoverage(keywords, cv);
+
+  if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
+  else fail('keyword coverage: Python should be present');
+
+  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
+  else fail('keyword coverage: Python appears twice and must not be thin');
+
+  if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
+  else fail('keyword coverage: Kubernetes should match via k8s synonym');
+
+  if (r.present.includes('Machine Learning')) pass('keyword coverage: case + collapsed-whitespace match');
+  else fail('keyword coverage: Machine Learning should match "machine  learning"');
+
+  if (r.present.includes('C++') && r.present.includes('CI/CD')) pass('keyword coverage: symbol-bearing keywords match (C++, CI/CD)');
+  else fail('keyword coverage: C++ / CI/CD should match');
+
+  if (r.present.includes('Postgres')) pass('keyword coverage: synonym match (PostgreSQL -> Postgres)');
+  else fail('keyword coverage: Postgres should match via postgresql synonym');
+
+  if (!r.present.includes('Java') && r.missing.includes('Java')) pass('keyword coverage: word boundary holds (Java != JavaScript)');
+  else fail('keyword coverage: Java must not match inside JavaScript');
+
+  if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
+  else fail('keyword coverage: gRPC should be missing');
+
+  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
+  else fail('keyword coverage: observability should be thin');
+
+  if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
+  else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
+
+  if (countOccurrences('java', 'javascript and java') === 1) pass('keyword coverage: countOccurrences respects word boundaries');
+  else fail(`keyword coverage: countOccurrences boundary wrong: ${countOccurrences('java', 'javascript and java')}`);
+
+  if (!variantForms('aws').includes('aw') && !variantForms('k8s').includes('k8')) pass('keyword coverage: variantForms does not truncate short acronyms (aws, k8s)');
+  else fail(`keyword coverage: variantForms truncates acronyms: ${JSON.stringify(variantForms('aws'))}`);
+
+  const stripped = htmlToText('<style>.x{}</style><p>Python &amp; <b>gRPC</b></p>');
+  if (stripped === 'Python & gRPC') pass('keyword coverage: htmlToText strips tags/style and decodes entities');
+  else fail(`keyword coverage: htmlToText wrong: ${JSON.stringify(stripped)}`);
+
+  // Adversarial: a nested entity must resolve to the literal text "&lt;" (guards the
+  // &amp;-decoded-last fix, so it is not re-decoded into a "<" tag char), and a
+  // comment-sheltered or attribute-laden <script> must still be stripped (tag-filter fix).
+  const hardened = htmlToText('<!--<script>x</script>--><script type="text/js">evil()</script>a &amp;lt;b&gt; c');
+  if (hardened === 'a &lt;b> c') pass('keyword coverage: htmlToText resists nested-entity + sheltered-script bypass');
+  else fail(`keyword coverage: htmlToText hardening wrong: ${JSON.stringify(hardened)}`);
+
+  const htmlCv = '<html><body><h2>Summary</h2><p>Built Python and gRPC services.</p></body></html>';
+  const rHtml = analyzeCoverage(['Python', 'gRPC', 'Java'], htmlToText(htmlCv));
+  if (rHtml.coveragePct === 67 && rHtml.present.includes('gRPC')) pass('keyword coverage: scans text extracted from tailored HTML');
+  else fail(`keyword coverage: HTML scan wrong: ${JSON.stringify(rHtml)}`);
+
+  const kws = extractKeywords('## Keywords extracted\n- Python\n- FastAPI, gRPC\n\n## Next');
+  if (kws.length === 3 && kws[0] === 'Python' && kws[2] === 'gRPC') pass('keyword coverage: extractKeywords parses bullets + commas, stops at next heading');
+  else fail(`keyword coverage: extractKeywords wrong: ${JSON.stringify(kws)}`);
+
+  // Negative-path CLI: --self-test never touches the report/CV file-resolution path,
+  // so exercise it directly. A nonexistent report (and a no-arg invocation) must fail
+  // GRACEFULLY — clean exit 1 + a readable message, never an uncaught stack trace.
+  const kmCli = join(ROOT, 'keyword-match.mjs');
+  const noStack = (s) => !/\n\s+at\s/.test(s); // Node prints "    at <frame>" on an uncaught throw
+  const runCli = (argv) => {
+    try {
+      execFileSync(NODE, [kmCli, ...argv], { cwd: ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 });
+      return { status: 0, stderr: '' };
+    } catch (e) {
+      return { status: e.status, stderr: (e.stderr || '').toString() };
+    }
+  };
+
+  const missing = runCli([join(ROOT, '.tmp-test-no-such-report.md')]);
+  if (missing.status === 1 && /not found/i.test(missing.stderr) && noStack(missing.stderr)) {
+    pass('keyword coverage: CLI exits 1 with a clean message on a missing report file');
+  } else {
+    fail(`keyword coverage: CLI missing-report handling wrong: status=${missing.status} stderr=${JSON.stringify(missing.stderr)}`);
+  }
+
+  const noArg = runCli([]);
+  if (noArg.status === 1 && /Usage:/i.test(noArg.stderr) && noStack(noArg.stderr)) {
+    pass('keyword coverage: CLI prints usage + exits 1 when no report arg is given');
+  } else {
+    fail(`keyword coverage: CLI no-arg handling wrong: status=${noArg.status} stderr=${JSON.stringify(noArg.stderr)}`);
+  }
+
+  // A mistyped flag or a stray second path must fail fast instead of silently
+  // producing Markdown when JSON was asked for (both rejected before any file I/O).
+  const unknownOpt = runCli(['--jsno']);
+  if (unknownOpt.status === 1 && /Unknown option: --jsno/.test(unknownOpt.stderr) && noStack(unknownOpt.stderr)) {
+    pass('keyword coverage: CLI rejects an unknown option with exit 1');
+  } else {
+    fail(`keyword coverage: CLI unknown-option handling wrong: status=${unknownOpt.status} stderr=${JSON.stringify(unknownOpt.stderr)}`);
+  }
+
+  const extraArg = runCli(['first-report.md', 'second-report.md']);
+  if (extraArg.status === 1 && /Unexpected argument: second-report\.md/.test(extraArg.stderr) && noStack(extraArg.stderr)) {
+    pass('keyword coverage: CLI rejects an extra positional argument with exit 1');
+  } else {
+    fail(`keyword coverage: CLI extra-argument handling wrong: status=${extraArg.status} stderr=${JSON.stringify(extraArg.stderr)}`);
+  }
+
+} catch (e) {
+  fail(`keyword coverage tests crashed: ${e.message}`);
 }
 
 // ── Plugin engine (contract + sandbox + firewall) ────────────────

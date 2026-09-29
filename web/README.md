@@ -30,8 +30,8 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
-- **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
-  preview, settings.
+- **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
+  CV editing with preview, settings.
 
 ## Safety
 
@@ -63,6 +63,8 @@ npm run build        # production build
 
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
+Root scripts such as `doctor.mjs` run from the checkout that holds `web/`, not
+from `CAREER_OPS_ROOT`; set `CAREER_OPS_CODE_ROOT` when the app runs outside it.
 
 `/api` is gated by the same-origin + loopback guard in `src/lib/origin-guard.mjs`.
 Two opt-ins widen it, both unset by default and both in `web/.env.local`:

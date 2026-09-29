@@ -88,7 +88,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
 
 ### Codex invocation
 
@@ -96,11 +96,21 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Headless:** `codex exec "prompt"` for one-shot workers.
 - **Examples:** `Run career-ops scan mode`, `Run career-ops pipeline mode for data/pipeline.md`, `Run career-ops pdf mode`, `Run career-ops tracker mode`, `Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123`
 
+### Pi invocation
+
+- **Project context:** `pi` reads `AGENTS.md` from the repo root automatically; there is no wrapper file to keep in sync.
+- **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. If a Pi build gates project resources behind a trust decision, run `/trust` once in the repo, then restart `pi` before `/skill:career-ops` (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
+- **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
+- **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
+- **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+
+
 ### Main Files
 
 | File | Function |
 |------|----------|
 | `data/applications.md` | Application tracker |
+| `data/career-profile.yml` | Source-backed Master Career Profile (created after explicit CV-fact review) |
 | `data/pipeline.md` | Inbox of pending URLs |
 | `data/scan-history.tsv` | Scanner dedup history |
 | `data/scan-runs.tsv` | Per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
@@ -126,6 +136,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
+| `keyword-match.mjs` | ATS keyword-coverage check — JD keywords (from a report) vs CV/HTML → coverage %, present/thin/missing (diagnostic only, never injects keywords) |
 | `upskill.mjs` | Weighted skill-gap map from tracked reports; known skills from `cv.md`/`config/profile.yml` excluded (JSON) |
 | `stats.mjs` | Lifetime pipeline stats: tracker roll-up, canonical `ever*` funnel, scan totals, portal coverage, follow-up compliance, scan-run trends (JSON or `--summary`) |
 | `data/status-log.tsv` | Append-only status transition ledger, sibling of the tracker file: `{tracker#}\t{date}\t{from}\t{to}\t{source}\t{note}`. Appended by `set-status.mjs` on every real status change; the tracker stays the source of truth for *state*, the ledger records *when*. An unknown from/to state is the sentinel `-`, and the source column is a closed set whose members are `VALID_SOURCES` in `funnel-velocity.mjs` — see `DATA_CONTRACT.md` before writing to it from anywhere else |
@@ -324,6 +335,7 @@ Two separate axes:
 | Wants to debrief after a real interview and close gaps | `interview/debrief` |
 | Wants to check if a company is safe to join (red-flag analysis) | `interview-redflag` |
 | Wants to generate CV/PDF | `pdf` |
+| Wants to build, import, review, or validate a Master Career Profile | `master-profile` — source-backed CV import with explicit approval; profile selection and PDF integration are not yet implemented |
 | Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |
 | Wants a hiring-manager's read on a tailored CV before sending | `pdf --hm-audit` — opt-in pass (`modes/pdf/hm-audit.md`), off by default: researches the likely reviewer, dispatches a separate agent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict |
 | Wants the LaTeX/Overleaf CV path | `latex` |
@@ -380,6 +392,20 @@ Two separate axes:
 
 **Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
 
+### Aggregator Listings -- Confirm at the Employer
+
+Job aggregators keep stale, filled, and ghost listings live long after the employer closed the req. A closed role's aggregator page still renders a title, a description, and an Apply button, so `check-liveness.mjs` reads it as `active` — the aggregator page itself proves nothing. **A listing sourced from an aggregator is UNCONFIRMED by default: it is not a real opening until the employer says so.** This covers Wellfound / LinkedIn / Instahyre / Cutshort / Internshala / Naukri and similar, however the listing arrived — pasted, scanned, or found via WebSearch.
+
+**Before an aggregator listing is evaluated, applied to, or presented to the user as live:**
+
+1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as above.
+2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
+3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Mark it in `data/scan-history.tsv`; if it is already in the tracker, run `node set-status.mjs <report#|company> Discarded --note "not found at employer"` — never silently delete the record, since that is what stops it being re-added as new on the next scan.
+4. **Employer has no careers page / ATS you can find → leave it UNCONFIRMED, not stale.** Keep the aggregator URL and tell the user the role could not be confirmed at the employer.
+5. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
+
+This is a confirmation step, not a replacement for `check-liveness.mjs` — run the liveness checker against the **employer** URL once you have it. The headless-batch exception above still applies.
+
 ---
 
 ## CI/CD, Community and Governance
@@ -400,6 +426,7 @@ Headless worker command per CLI:
 |-----|---------|
 | Claude Code | `claude -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
+| Pi | `pi -p "prompt"` |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
 | Qwen | `qwen -p "prompt"` |

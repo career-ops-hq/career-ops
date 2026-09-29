@@ -3,7 +3,9 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
+import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
 import { parseInbox, splitLines } from "@/lib/pipeline-table.mjs";
@@ -49,11 +51,18 @@ export function careerOpsRoot(): string {
  * is assembled here from the bare name so the literal never appears as a direct
  * `execFile`/`spawn` argument — Next's bundler statically traces such literals
  * as module imports and fails the production build otherwise.
+ *
+ * Scripts live in the engine checkout — never in the data root. Under the #524
+ * split layout (CAREER_OPS_ROOT pointing at a data-only directory) the data
+ * root has no `.mjs` files, so resolving here made every script-driven endpoint
+ * (Explore discovery, doctor, portals verify, followups, run) report the
+ * checkout as missing. CAREER_OPS_CODE_ROOT selects the checkout explicitly.
  */
 export function rootScript(nameNoExt: string): string {
-  // The core checkout is selected at runtime and must not be bundled into the
-  // web server output when Turbopack sees this dynamic script path.
-  return path.join(/* turbopackIgnore: true */ careerOpsRoot(), `${nameNoExt}.mjs`);
+  // resolveRootScript() already returns the absolute `<checkout>/<name>.mjs`, and
+  // its path.join carries the Turbopack ignore: the core checkout is selected at
+  // runtime and must not be bundled into the web server output.
+  return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), nameNoExt);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
@@ -137,6 +146,31 @@ export function readApplications(): Application[] {
   const md = read("data/applications.md");
   if (!md) return [];
   return parseApplications(md, careerOpsRoot(), path.resolve(process.cwd(), ".."));
+}
+
+export type StatusLogRow = {
+  num: number;
+  date: string;
+  from: string;
+  to: string;
+  source: string;
+  note: string;
+};
+
+/** Append-only tracker transitions from data/status-log.tsv. A missing log is
+ *  normal (no status change recorded yet) and yields []. Any other read failure
+ *  is rethrown: an unreadable log must not pass for an empty one, which would
+ *  silently drop recorded interview paths from the Sankey (web/AGENTS.md: a
+ *  missing file is not a malformed file). */
+export function readStatusLog(): StatusLogRow[] {
+  let tsv: string;
+  try {
+    tsv = fs.readFileSync(path.join(careerOpsRoot(), "data/status-log.tsv"), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw err;
+  }
+  return parseStatusLog(tsv);
 }
 
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
