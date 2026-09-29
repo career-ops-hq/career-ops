@@ -330,3 +330,13 @@ Its CLI-only Node cache test exited with it; the Node provider and retained
 historical baseline suite passed 177/177 tests in the permitted environment.
 The legacy Node prescreen helper remains only for differential fixtures, not
 as a runtime entrypoint.
+
+Following the active-rule cleanup, the same retained Microsoft scan produced
+current score task `23a28afa-d043-411d-b7b3-79092f594e81` and published
+report SHA-256
+`7efb3410994a97674d917002ab5b71bf1b574aab50c4f3401b487212ffbde539`.
+The Python renderer re-read the frozen packet, posting evidence and assessment,
+passed deterministic validation, and reproduced the published report bytes.
+`decisions` lists only opportunity `2` as current (`verify`, 2.75–4.75,
+50% coverage); older scores `1` and `3` remain stale. SQLite quick_check is
+`ok`, and notification deliveries remain zero.
