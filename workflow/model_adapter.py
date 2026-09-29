@@ -175,8 +175,9 @@ def freeze_research(value, messages):
 
 def normalize_research(research):
     """Keep unsupported model labels outside the citable research set."""
+    record = research['research']
     findings = []
-    for item in research['research']['findings']:
+    for item in record['findings']:
         finding = dict(item)
         invalid_url = not isinstance(finding.get('url'), str) or not re.match(r'^https?://', finding['url'])
         if invalid_url and finding.get('source') is None and finding.get('quote') is None:
@@ -190,7 +191,18 @@ def normalize_research(research):
             finding['quote'] = None
             finding['limitation'] = f"{finding.get('limitation') or 'Access status unavailable'}; unrecognized access status: {previous}"
         findings.append(finding)
-    return {**research, 'research': {**research['research'], 'findings': findings}}
+    dimensions = {}
+    queries = record['queries']
+    for index, name in enumerate(('compensation', 'team', 'company')):
+        dimension = dict(record['dimensions'][name])
+        refs = dimension.get('queries')
+        if (isinstance(refs, list) and
+                (not refs or any(type(ref) is not int or not 0 <= ref < len(queries) for ref in refs)) and
+                index < len(queries)):
+            dimension['queries'] = [index]
+            dimension['conclusion'] = 'Unknown: model returned an invalid executed-query reference.'
+        dimensions[name] = dimension
+    return {**research, 'research': {**record, 'findings': findings, 'dimensions': dimensions}}
 
 
 def attach_evidence(value, snapshot):

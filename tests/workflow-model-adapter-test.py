@@ -46,6 +46,16 @@ assert [item["id"] for item in adapter.normalize_research(missing_url)["research
 invalid_citable_url = json.loads(json.dumps(frozen))
 invalid_citable_url["research"]["findings"][0]["url"] = None
 assert adapter.normalize_research(invalid_citable_url)["research"]["findings"][0]["id"] == "f1"
+invalid_query = json.loads(json.dumps(frozen))
+invalid_query["research"]["queries"] = ["pay", "team", "company"]
+invalid_query["research"]["dimensions"] = {
+    name: {"queries": [index], "conclusion": "Original conclusion", "next_step": "Verify"}
+    for index, name in enumerate(("compensation", "team", "company"))
+}
+invalid_query["research"]["dimensions"]["company"]["queries"] = [3]
+normalized_query = adapter.normalize_research(invalid_query)["research"]["dimensions"]["company"]
+assert normalized_query["queries"] == [2] and normalized_query["conclusion"].startswith("Unknown")
+assert invalid_query["research"]["dimensions"]["company"]["queries"] == [3]
 
 responses = iter(({key: value for key, value in research.items() if key != "findings"},
                   {**research, "findings": []}))

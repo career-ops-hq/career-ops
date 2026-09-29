@@ -616,8 +616,23 @@ through LangGraph to a retained active `jd_report` with `uncertain`
 prescreen; no score was due in that tick. The task and result both completed,
 the canonical store passed `PRAGMA quick_check`, and notification deliveries
 remained zero.
+The 20:20 built-in score execution (`fdf960a5329d44838bc098f957f5b370`)
+then failed while scoring opportunity `10`: its saved research listed three
+executed searches but the company dimension referenced nonexistent query
+index `3`. The deterministic research gate prevented publication. Recovery
+now replaces an invalid dimension query reference with its executed primary
+query index and marks that dimension's research conclusion Unknown, retaining
+the original model trace. The saved research passes the Python validator and
+an isolated report preflight; the original task
+`60985e38-9b92-4ea6-a511-943fb5e048b1` resumed with zero new model calls
+and committed a report that passes Node `validateReport` and matches its
+stored SHA-256. The canonical store has ten evaluations, zero notification
+deliveries and `PRAGMA quick_check=ok`. The 20:20 Hermes execution remains
+failed; later score ticks completed independently.
+All 61 `tests/workflow-*-test.py` files passed again after this query-reference
+recovery change (zero failures).
 
-## Current open gates (2026-09-29 20:02 +08:00)
+## Current open gates (2026-09-29 22:06 +08:00)
 
 - Opportunity `8` still has its historical `prescreen_failed` business result.
   The corrected saved-extraction LangGraph replay produced `jd_report` with
@@ -627,9 +642,9 @@ remained zero.
   `https://llm.goaichat.top/v1`; a targeted authorization request is pending.
 - The restored scan job has completed one direct run, but its next natural
   06:00 tick has not occurred. The restored score job has clean completed
-  built-in ticks at 19:00, 19:20 and 20:00; the 19:40 tick failed but its
-  original score task recovered to a validated business commit. Both jobs are
-  active and notifications remain disabled.
+  built-in ticks at 19:00, 19:20, 20:00 and later; the 19:40 and 20:20 ticks
+  failed but their original score tasks recovered to validated business
+  commits. Both jobs are active and notifications remain disabled.
 
 OII-338 and parent OII-333 therefore remain open. The 61-file regression gate
 and live samples prove their recorded scopes, not these outstanding checks.
