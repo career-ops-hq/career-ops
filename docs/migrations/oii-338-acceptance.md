@@ -400,3 +400,13 @@ batches containing repeated Workday hosts as a preventive coverage guard;
 distinct-host batches keep 20-way collection. The live full sweep finished
 Workday using its original concurrency and marked the source incomplete.
 Its board-level error mix still needs a correctly configured diagnostic run.
+
+The standalone portal configuration validator now runs as
+`python -m workflow.portal_config`. It retains the old validator's ordered
+errors and warnings for 11 frozen Node cases, including the
+`title_filter_full.positve` rejection that prevents an unintended unbounded
+reverse title match. The current `portals.yml` reports zero errors and zero
+warnings; `--self-test` and the explicitly empty `--file=` rejection pass.
+The old `validate-portals.mjs` command and its Node-only title-filter test
+were retired. This validates the standalone config check, not an automatic
+pre-scan config gate.

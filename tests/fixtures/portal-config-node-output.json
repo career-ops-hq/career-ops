@@ -1,0 +1,95 @@
+[
+  {
+    "ok": false,
+    "messages": [
+      "error: <root>: portals config must be a YAML object",
+      "1 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: title_filter.positive[1]: keyword must not be empty",
+      "error: title_filter.positive[2]: keyword must be a string",
+      "error: title_filter.negative[0]: keyword must not be empty",
+      "3 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: title_filter_full.positve: unknown title_filter_full field - expected one of positive, negative, seniority_boost",
+      "1 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: location_filter.allow[1]: keyword must be a string",
+      "error: location_filter.block_hard[0]: keyword must not be empty",
+      "2 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "warning: content_filter.by_title_keyword.Data: \"Data\" does not match any title_filter.positive keyword and will never apply",
+      "error: content_filter.positive[0]: keyword must be a string",
+      "error: content_filter.by_title_keyword.Data.positive[1]: keyword must be a string",
+      "error: content_filter.by_title_keyword.AI: must be an object with positive/negative keyword lists",
+      "3 errors, 1 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: visa_filter.enabled: must be a boolean when set",
+      "error: visa_filter.require_mention: must be a boolean when set",
+      "error: visa_filter.negative[0]: keyword must be a string",
+      "3 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: search_queries: search_queries must be an array when set",
+      "error: tracked_companies: tracked_companies must be an array when set",
+      "2 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "warning: tracked_companies[3].name: duplicate enabled company name also seen at tracked_companies[2].name",
+      "error: tracked_companies[0]: company entry must be an object",
+      "error: tracked_companies[1].name: enabled company must have a non-empty string name",
+      "2 errors, 1 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: tracked_companies[0].careers_url: invalid URL: not a URL",
+      "error: tracked_companies[0].api: unsupported URL protocol: mailto:",
+      "error: tracked_companies[0].provider: unknown provider \"not-real\"",
+      "3 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": false,
+    "messages": [
+      "error: tracked_companies[0].parser.command: parser.command must be a non-empty string",
+      "error: tracked_companies[0].parser.script: parser.script must be a non-empty string when set",
+      "error: tracked_companies[0].parser.args: parser.args must be an array when set",
+      "error: tracked_companies[0].parser.timeout_ms: parser.timeout_ms must be a positive number when set",
+      "error: tracked_companies[0].parser.max_buffer_bytes: parser.max_buffer_bytes must be a positive number when set",
+      "5 errors, 0 warnings"
+    ]
+  },
+  {
+    "ok": true,
+    "messages": [
+      "0 errors, 0 warnings"
+    ]
+  }
+]
