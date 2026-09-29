@@ -38,7 +38,19 @@ const DEFAULT_STALE_MS = 30_000;
 // Reachable from the environment, like the three ceilings below. A caller that
 // needs a lock to still read LIVE when a spawned child looks at it has no other
 // knob: this floor bounds that window, and process startup spends it (#4537).
-export const OWNERLESS_GRACE_MS = Number(process.env.CAREER_OPS_OWNERLESS_GRACE_MS) || 1_000;
+//
+// Validated rather than read with the `|| default` idiom its siblings use,
+// because this constant is a FLOOR and that idiom only refuses the values that
+// happen to be falsy. `Number('-5') || 1_000` is -5, and the comparison below
+// is Math.max(staleMs, OWNERLESS_GRACE_MS), so a negative override does not
+// widen the floor, it REMOVES it: with a small staleMs a directory created
+// microseconds ago becomes reclaimable, which is the one case this floor exists
+// to refuse. Infinity fails the other way and is worse, because nothing ever
+// ages out and stale recovery stops for good. Same reasoning as maxWaitMs in
+// acquirePipelineLock, which is read this way for the same reason.
+const configuredGraceMs = Number(process.env.CAREER_OPS_OWNERLESS_GRACE_MS);
+export const OWNERLESS_GRACE_MS =
+  Number.isFinite(configuredGraceMs) && configuredGraceMs > 0 ? configuredGraceMs : 1_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
 // Ceiling on progress-extended waiting (see the deadline logic in
