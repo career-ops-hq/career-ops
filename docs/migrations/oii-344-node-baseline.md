@@ -43,6 +43,10 @@ and PDF coverage remain explicit counts and percentages over canonical
 opportunities.
 The old `activePortals` count is now `producing_sources`: canonical observations
 retain the provider source, not the old per-portal TSV column.
+Configured scan runs now retain their filter counters in the canonical run
+summary. `insights stats` computes the Node filter removal ratio from complete
+runs with those counters, excluding duplicate counts; older runs without filter
+data report a null ratio and an explicit zero coverage count.
 
 `insights` opens the business SQLite database read-only. Current status comes
 from the retained lifecycle row; `ever_*` funnel values come from historical

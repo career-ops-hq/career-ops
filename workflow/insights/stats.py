@@ -225,13 +225,21 @@ def _runs(db: sqlite3.Connection) -> dict | None:
         except (TypeError, ValueError, KeyError, json.JSONDecodeError):
             malformed += 1
             continue
+        filtered = summary.get("filtered")
+        filter_count = (sum(value for name, value in filtered.items() if name != "dupes")
+                        if isinstance(filtered, dict) and all(type(value) is int and value >= 0
+                                                           for value in filtered.values()) else None)
         rows.append({"date": row["created_at"][:10], "found": found, "added": added,
-                     "complete": errors == 0 and handoff == 0})
+                     "complete": errors == 0 and handoff == 0, "filtered": filter_count})
     complete = [row for row in rows if row["complete"]]
+    filter_rows = [row for row in complete if row["filtered"] is not None]
     return {"total_runs": len(rows), "incomplete_runs": len(rows) - len(complete),
             "malformed_runs": malformed, "last_run_date": max((row["date"] for row in rows), default=None),
             "average_found_per_complete_run": round(sum(row["found"] for row in complete) / len(complete), 1) if complete else None,
             "average_added_per_complete_run": round(sum(row["added"] for row in complete) / len(complete), 1) if complete else None,
+            "filter_removal_pct": _percent(sum(row["filtered"] for row in filter_rows),
+                                           sum(row["found"] for row in filter_rows)) if filter_rows else None,
+            "filter_data_runs": len(filter_rows),
             "source": "scan_runs; complete means no recorded errors or handoffs"}
 
 

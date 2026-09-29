@@ -39,7 +39,9 @@ with tempfile.TemporaryDirectory() as temp:
         INSERT INTO scan_outcomes VALUES('added'),('skipped_expired');
         INSERT INTO source_health(source,status) VALUES('Acme','network'),('Acme','reachable'),('Beta','auth');
     """)
-    db.execute("INSERT INTO scan_runs(created_at,summary) VALUES(?,?)", ("2026-01-01", json.dumps({"found": 10, "newAdded": 2, "errors": 0})))
+    db.execute("INSERT INTO scan_runs(created_at,summary) VALUES(?,?)", ("2026-01-01", json.dumps({
+        "found": 10, "newAdded": 2, "errors": 0, "filtered": {"title": 2, "dupes": 3}
+    })))
     db.execute("INSERT INTO scan_runs(created_at,summary) VALUES(?,?)", ("2026-01-08", json.dumps({"found": 0, "newAdded": 0, "errors": 1})))
     db.execute("INSERT INTO results VALUES(?,?,?)", ("1", "scan", json.dumps({
         "outcome": "jd_report", "artifact": {"liveness": "active"}
@@ -72,4 +74,10 @@ with tempfile.TemporaryDirectory() as temp:
     assert view["followups"]["total_followups"] == 1
     assert view["runs"]["total_runs"] == 2 and view["runs"]["incomplete_runs"] == 1
     assert view["runs"]["average_found_per_complete_run"] == 10
+    assert view["runs"]["filter_removal_pct"] == 20
+    assert view["runs"]["filter_data_runs"] == 1
+    db.execute("UPDATE scan_runs SET summary=? WHERE id=1", (json.dumps({"found": 10, "newAdded": 2, "errors": 0}),))
+    legacy = stats_view(db, portals, root / "profile.yml")
+    assert legacy["runs"]["filter_removal_pct"] is None
+    assert legacy["runs"]["filter_data_runs"] == 0
     db.close()

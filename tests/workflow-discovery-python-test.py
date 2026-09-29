@@ -36,6 +36,9 @@ with tempfile.TemporaryDirectory() as temporary:
     assert db.execute("SELECT count(*) FROM opportunities").fetchone()[0] == 1
     assert db.execute("SELECT count(*) FROM source_evidence").fetchone()[0] == 1
     assert db.execute("SELECT count(*) FROM scan_runs").fetchone()[0] == 2
+    summaries = [json.loads(row[0]) for row in db.execute("SELECT summary FROM scan_runs ORDER BY id")]
+    assert summaries[0]["filtered"]["dupes"] == 2
+    assert summaries[1]["filtered"]["dupes"] == 3
     assert db.execute("SELECT count(*) FROM scan_observations").fetchone()[0] == 1
     db.close()
 

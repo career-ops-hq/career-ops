@@ -354,7 +354,7 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
         crosslist = cross_listings(accepted, snapshot["fingerprint_history"], today=today)
         summary = {"companies": companies, "boards": boards, "found": found, "dupes": counts["dupes"],
                    "newAdded": len(accepted), "errors": len(failures), "handoff": len(handoffs),
-                   "failures": failures, "handoff_sources": handoffs}
+                   "filtered": counts, "failures": failures, "handoff_sources": handoffs}
         try:
             threshold = int(config.get("portal_health_threshold") or 3)
         except (TypeError, ValueError):
