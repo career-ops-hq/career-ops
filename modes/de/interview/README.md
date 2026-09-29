@@ -14,7 +14,7 @@ Eine Zusammenstellung wiederverwendbarer Fähigkeiten für die gesamte Interview
 
 | Fähigkeit | Datei | Wann zu verwenden |
 |---|---|---|
-| Unternehmensüberprüfung | `../interview-prep.md` | Informiere dich vor einem Vorstellungsgespräch über ein bestimmtes Unternehmen und eine bestimmte Rolle |
+| Unternehmensüberprüfung | `../../interview-prep.md` | Informiere dich vor einem Vorstellungsgespräch über ein bestimmtes Unternehmen und eine bestimmte Rolle |
 
 ## Dateikonventionen
 
