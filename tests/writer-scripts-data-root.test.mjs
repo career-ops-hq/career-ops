@@ -255,8 +255,13 @@ test('generate-pdf honours a .career-ops-data marker for its workspace boundary'
 // environment: the marker is a file on disk and can change while every
 // CAREER_OPS_* variable stays the same. An env-only key kept serving the first
 // data root to every later call in the same process.
-test('generate-pdf follows a .career-ops-data marker that changes mid-process', () => {
+test('generate-pdf follows a .career-ops-data marker that changes mid-process', (t) => {
   const f = markerFixture('generate-pdf.mjs');
+  // Same vacuity as the two above, one step further in: the probe imports
+  // generate-pdf.mjs from the copied code root, so playwright at module scope
+  // kills it before it prints RESULT and the assertion reports a missing line
+  // rather than the absent dependency tree.
+  if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
   const moved = join(f.dir, 'data-moved');
   mkdirSync(join(moved, 'output'), { recursive: true });
   try {
