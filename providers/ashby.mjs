@@ -219,6 +219,22 @@ function toEpochMs(value) {
 function formatLocation(j) {
   const parts = [];
   if (typeof j.location === 'string' && j.location.trim()) parts.push(j.location.trim());
+  // Fold the PRIMARY location's own address block too, mirroring what we
+  // already do for secondaryLocations below. Ashby's `location` field is
+  // often a first-level subdivision name ("England", "Scotland") rather than
+  // the country ("United Kingdom") that location_filter.allow/always_allow
+  // actually match on — j.address.postalAddress.addressCountry carries the
+  // country string that's missing. Added 2026-09-29: this silently dropped
+  // live UK-primary + US-secondary remote postings (Docker Ashby board,
+  // reqs f7beef23.../9c8d86d4...) — "England · United States · Remote" hit
+  // location_filter.block's "United States" entry with no "United Kingdom"
+  // in the string to rescue it via always_allow.
+  const primaryPa = j.address && j.address.postalAddress;
+  if (primaryPa) {
+    for (const k of ['addressLocality', 'addressCountry']) {
+      if (typeof primaryPa[k] === 'string' && primaryPa[k].trim()) parts.push(primaryPa[k].trim());
+    }
+  }
   if (Array.isArray(j.secondaryLocations)) {
     for (const s of j.secondaryLocations) {
       if (!s || typeof s !== 'object') continue;

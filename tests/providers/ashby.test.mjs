@@ -188,6 +188,46 @@ try {
     pass('ashby.fetch() folds secondaryLocations (region/locality/country) into location, deduped, " · "-joined');
   else fail(`ashby.fetch() row 0 location = ${JSON.stringify(fetched[0]?.location)}`);
 
+  // Primary-location address block — added 2026-09-29. Ashby's `location`
+  // field is often a first-level subdivision name ("England", "Scotland")
+  // rather than the country a location_filter matches on; the country lives
+  // in `address.postalAddress.addressCountry` instead, and only the
+  // SECONDARY-location version of that field was being folded in (test
+  // above). A UK-primary + US-secondary posting composed to
+  // "England · United States · Remote" — no "United Kingdom" substring
+  // anywhere — which silently dropped two live Docker reqs behind a
+  // location_filter.block entry meant only for US-only postings.
+  const primaryAddr = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            title: 'UK role with US as a secondary hiring region',
+            location: 'England',
+            address: { postalAddress: { addressCountry: 'United Kingdom' } },
+            secondaryLocations: [{ location: 'United States' }],
+            isRemote: true,
+          },
+          {
+            title: 'No address block at all',
+            location: 'Remote',
+          },
+        ],
+      }),
+    },
+  );
+  if (primaryAddr[0]?.location === 'England · United Kingdom · United States · Remote') {
+    pass("ashby.fetch() folds the PRIMARY location's own address.postalAddress.addressCountry into location");
+  } else {
+    fail(`ashby.fetch() primary-address location = ${JSON.stringify(primaryAddr[0]?.location)}`);
+  }
+  if (primaryAddr[1]?.location === 'Remote') {
+    pass('ashby.fetch() tolerates a job with no address block at all (no crash, no stray fields)');
+  } else {
+    fail(`ashby.fetch() no-address-block location = ${JSON.stringify(primaryAddr[1]?.location)}`);
+  }
+
   // Remote work model — `workplaceType` / `isRemote` live outside `location`,
   // which keeps naming the office city on a fully remote posting. Without
   // folding them in, a location_filter blocking that city silently drops a
