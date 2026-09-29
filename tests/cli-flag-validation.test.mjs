@@ -39,6 +39,7 @@ const SCRIPTS = [
   ['application-artifacts.mjs', '--reprot'],
   ['clean-markers.mjs', '--dryrun'],
   ['cv-sync-check.mjs', '--hlep'],
+  ['scan-interamt.mjs', '--dryrun'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -422,3 +423,41 @@ test('cv-sync-check.mjs --help --bogus still errors', () => {
   assert.equal(r.status, 1, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
 });
+
+// scan-interamt.mjs matched its flags with args.includes() before #4599, so
+// --help, or --dryrun for --dry-run, started a live Playwright scan of
+// interamt.de and appended the offers to data/pipeline.md. Every case here has
+// to exit before main() launches a browser, which is what keeps them hermetic.
+test('scan-interamt.mjs --help exits 0 and prints usage without scanning', () => {
+  const r = runScript('scan-interamt.mjs', '--help');
+  assert.equal(r.status, 0, `scan-interamt.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'scan-interamt.mjs --help printed no usage block');
+  assert.match(r.all, /--debug/, 'scan-interamt.mjs --help does not list --debug');
+  assert.doesNotMatch(r.all, /Searching "|Fatal:/, '--help still started a scan');
+});
+
+test('scan-interamt.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('scan-interamt.mjs', '-h');
+  assert.equal(r.status, 0, `scan-interamt.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'scan-interamt.mjs -h printed no usage block');
+});
+
+test('scan-interamt.mjs --help --bogus still errors', () => {
+  const r = runScript('scan-interamt.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `scan-interamt.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// The missing-operand check predates #4599 and keeps its own wording.
+for (const [form, args] of [
+  ['a trailing --keyword', ['--keyword']],
+  ['--keyword --help', ['--keyword', '--help']],
+  ['--keyword --dry-run', ['--keyword', '--dry-run']],
+  ['an empty --keyword=', ['--keyword=']],
+]) {
+  test(`scan-interamt.mjs rejects ${form} instead of scanning`, () => {
+    const r = runScript('scan-interamt.mjs', ...args);
+    assert.equal(r.status, 1, `scan-interamt.mjs ${args.join(' ')} exited ${r.status}, want 1`);
+    assert.match(r.all, /--keyword requires a value/);
+  });
+}
