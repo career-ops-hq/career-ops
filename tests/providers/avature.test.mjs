@@ -89,11 +89,21 @@ try {
   else fail('avature.fetch() should use offset_param when set');
   if (await captureFirstUrl({ name: 'X', api: base, offset_param: '  ' }) === `${base}?jobOffset=0`) pass('avature.fetch() falls back to jobOffset for a blank offset_param');
   else fail('avature.fetch() should ignore a blank offset_param');
+  const filteredUrl = await captureFirstUrl({ name: 'X', api: `${base}?region=china&folderRecordsPerPage=6`, offset_param: 'folderOffset' });
+  if (new URL(filteredUrl).searchParams.get('region') === 'china'
+      && new URL(filteredUrl).searchParams.get('folderRecordsPerPage') === '6'
+      && new URL(filteredUrl).searchParams.get('folderOffset') === '0') {
+    pass('avature.fetch() preserves configured search filters while paging');
+  } else fail(`avature.fetch() dropped configured search filters: ${filteredUrl}`);
 
   // Self-heal — jobOffset→offset when the primary key is inert.
   const originB = 'https://acme.avature.net';
   const mkHtml = (ids) => ids.map((id) =>
     `<article class="article article--result"><h3 class="title"><a class="link" href="${originB}/careers/JobDetail/Role-${id}/${id}">Role ${id}</a></h3></article>`).join('');
+  const capped = await avature.fetch({ name: 'X', api: base, max_pages: 1 },
+    { sleep: async () => {}, fetchText: async () => mkHtml([1, 2, 3, 4, 5, 6]) });
+  if (capped.length === 6 && capped.collectionTruncated === true) pass('avature.fetch() reports a full final page at the page cap');
+  else fail('avature.fetch() silently accepted a page-capped result');
   // Build a ctx whose fetchText answers from a {param: (pageIndex)=>ids} map.
   const mkCtx = () => {
     const calls = [];

@@ -29,11 +29,11 @@
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { collectSeenUrls } from '../scan.mjs';
+import { collectSeenUrls } from './fixtures/legacy-scan-helpers.mjs';
 
 console.log('\nscan.mjs — normalizeUrlForDedup() ignores tracking params, preserves identity');
 try {
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'tests/fixtures/legacy-scan-helpers.mjs')).href);
 
   // The reported bug: one StepStone posting, two scans, two `rltr` values.
   const SS = 'https://www.stepstone.de/stellenangebote--AI-Engineer-Berlin-Acme--12345-inline.html';
@@ -89,7 +89,7 @@ try {
 
 console.log('\nscan.mjs — collectSeenUrls() finds the URL in every documented pipeline.md shape');
 try {
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'tests/fixtures/legacy-scan-helpers.mjs')).href);
 
   // Transcribed from the docs that specify each shape, so these fail if the
   // documented format changes. Only the first leads with the URL.

@@ -58,8 +58,18 @@ elif phase == "apply_evaluate":
         "tool_calls": 20 if "force-budget" in feedback else 1,
     }))
 elif phase == "evaluate":
+    if os.environ.get("WORKFLOW_TEST_DURABLE_FAIL") or os.environ.get("WORKFLOW_TEST_DURABLE_SUCCESS"):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        from workflow.model_adapter import record_call
+        record_call()
+        if os.environ.get("WORKFLOW_TEST_DURABLE_FAIL"):
+            raise SystemExit("injected failure after model dispatch")
+        record_call()
     if os.environ.get("WORKFLOW_TEST_SLEEP"):
         time.sleep(float(os.environ["WORKFLOW_TEST_SLEEP"]))
+    if os.environ.get("WORKFLOW_TEST_INVALID_JSON"):
+        print("not JSON")
+        raise SystemExit
     if os.environ.get("WORKFLOW_TEST_RUNNER_FAIL") == "1":
         raise SystemExit("injected model failure")
     report = payload["inputs"]["jd_report"]

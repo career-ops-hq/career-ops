@@ -13,7 +13,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import BusinessStore, digest, resume_task
+from workflow.career_ops import BusinessStore, digest, resume_task, run_task
+from workflow.model_adapter import record_call
 
 PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
 CLI = ROOT / "workflow" / "career_ops.py"
@@ -74,6 +75,42 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     )
     assert failed.returncode == 1
     assert call_log.read_text().splitlines() == ["evaluate"]
+    metered = subprocess.run(
+        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "failed-metered", str(report("failed-metered"))],
+        text=True, capture_output=True,
+        env={**os.environ, **model_env, "WORKFLOW_TEST_DURABLE_FAIL": "1"},
+    )
+    assert metered.returncode == 1
+    metered_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "failed-metered")
+    with sqlite3.connect(directory / "opportunities.db") as usage_db:
+        usage = usage_db.execute(
+            "SELECT tool_calls,attempt_tool_calls FROM tasks WHERE task_id=?", (metered_task["task_id"],)
+        ).fetchone()
+    assert usage == (1, 1)
+    malformed = subprocess.run(
+        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "malformed-output", str(report("malformed-output"))],
+        text=True, capture_output=True,
+        env={**os.environ, **model_env, "WORKFLOW_TEST_DURABLE_SUCCESS": "1",
+             "WORKFLOW_TEST_INVALID_JSON": "1", "WORKFLOW_TEST_SLEEP": "0.05"},
+    )
+    assert malformed.returncode == 1
+    malformed_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "malformed-output")
+    with sqlite3.connect(directory / "opportunities.db") as usage_db:
+        calls, seconds = usage_db.execute(
+            "SELECT attempt_tool_calls,attempt_elapsed_seconds FROM tasks WHERE task_id=?",
+            (malformed_task["task_id"],),
+        ).fetchone()
+    assert calls == 2 and seconds >= 0.05
+    metered_success = call(
+        directory, "start", "score", "metered-success", str(report("metered-success")),
+        env={**model_env, "WORKFLOW_TEST_DURABLE_SUCCESS": "1"},
+    )
+    assert metered_success["status"] == "completed"
+    with sqlite3.connect(directory / "opportunities.db") as usage_db:
+        usage = usage_db.execute(
+            "SELECT tool_calls,attempt_tool_calls FROM tasks WHERE task_id=?", (metered_success["task_id"],)
+        ).fetchone()
+    assert usage == (2, 2)
     isolated = call(directory, "start", "score", "isolated", str(report("isolated")), env=model_env)
     assert isolated["status"] == "completed"
 
@@ -185,6 +222,21 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     else:
         raise AssertionError("Cancelled checkpoint resume was accepted")
     budget_task = store.start("attempt-budget", "apply", "{}")
+    capped_task = store.start("child-budget", "apply", "{}")
+    store.add_usage(capped_task["task_id"], 0, 19)
+    with patch.dict(os.environ, {
+        "CAREER_OPS_USAGE_DB": str(store.path),
+        "CAREER_OPS_USAGE_TASK_ID": capped_task["task_id"],
+        "CAREER_OPS_TOOL_LIMIT": "20",
+    }):
+        record_call()
+        try:
+            record_call()
+        except TimeoutError as error:
+            assert str(error) == "tool_budget_exhausted"
+        else:
+            raise AssertionError("Child call exceeded the task budget")
+    assert store.task(capped_task["task_id"])["attempt_tool_calls"] == 20
     store.add_usage(budget_task["task_id"], 899, 19)
     store.wait(budget_task["task_id"], "user_review")
     continued = store.reset_input(budget_task["task_id"], '{"feedback":"revise"}')
@@ -198,8 +250,19 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     resumed = store.resume_current(budget_task["task_id"])
     assert resumed["elapsed_seconds"] == 901 and resumed["tool_calls"] == 20
     assert resumed["attempt_elapsed_seconds"] == 0 and resumed["attempt_tool_calls"] == 0
+    failed_apply = store.start("apply-checkpoint-resume", "apply", "{}")
+    store.add_usage(failed_apply["task_id"], 3, 2)
+    store.wait(failed_apply["task_id"], "failure:RuntimeError")
+    with patch("workflow.career_ops.run_task", return_value={"status": "resumed"}) as run:
+        assert resume_task(directory, failed_apply["task_id"], None, None) == {"status": "resumed"}
+    assert run.call_args.args[1] == failed_apply["task_id"]
+    assert "start_state" not in run.call_args.kwargs
+    recovered_apply = store.task(failed_apply["task_id"])
+    assert recovered_apply["status"] == "running" and recovered_apply["attempt"] == 1
+    assert recovered_apply["attempt_tool_calls"] == 2 and recovered_apply["attempt_elapsed_seconds"] == 3
     feedback_task = store.start("feedback-rollback", "apply", "{}")
     store.wait(feedback_task["task_id"], "user_review")
+    assert run_task(directory, feedback_task["task_id"])["reason"] == "user_review"
     with patch("workflow.career_ops.current_apply_input", return_value="{}"), \
          patch.object(BusinessStore, "reset_input", side_effect=ValueError("simulated reset failure")):
         try:

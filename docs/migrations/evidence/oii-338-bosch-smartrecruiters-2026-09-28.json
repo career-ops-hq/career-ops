@@ -1,0 +1,11 @@
+{
+  "observed_at": "2026-09-28T04:24:54.017275+00:00",
+  "target": "Bosch",
+  "provider": "smartrecruiters",
+  "public_listing_count": 4804,
+  "raw_capture": "data/acceptance/oii-338-bosch-2026-09-28/collector-output.json",
+  "raw_sha256": "adb89c2a1a74691c4fcc286127d6410d3d4aaae0c43b81ae8f577022ffb1f799",
+  "collector_status": "fetched",
+  "truncated": false,
+  "note": "Full public listing capture retained in the isolated ignored acceptance directory; no business database was changed."
+}

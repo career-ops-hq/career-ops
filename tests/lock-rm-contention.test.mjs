@@ -65,8 +65,7 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 
 // ── 3. One definition, EVERY copy of the protocol ────────────────────
 // The list is DERIVED, not written down. #2984 patched two files and said "one
-// definition, no sibling drift" — and there were four. followup-seed.mjs and
-// portal-health-lock.mjs had been carrying all three faces of #2777 the whole
+// definition, no sibling drift" — and there were other copies. followup-seed.mjs had been carrying all three faces of #2777 the whole
 // time, invisible because nobody had asked the repo how many copies there were.
 // A hand-kept list would have aged the same way (lesson #52): so the test asks.
 //

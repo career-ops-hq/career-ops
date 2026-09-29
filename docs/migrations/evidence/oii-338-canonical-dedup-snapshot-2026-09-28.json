@@ -1,0 +1,15 @@
+{
+  "source": "data/opportunities.db",
+  "source_sha256_before_and_after": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "method": "SQLite read-only backup to temporary database, then Node loadDatabaseDedupSnapshot and Python database_snapshot over the same copy with today=2026-09-28",
+  "policy": {"recheck_after_days": null},
+  "seen_urls": 87,
+  "seen_company_roles": 87,
+  "recheck_eligible": 0,
+  "fingerprint_history": 0,
+  "mismatches": {"seen_urls": 0, "seen_company_roles": 0, "recheck_eligible": 0, "fingerprint_history": 0},
+  "limitations": [
+    "This compares the current canonical business snapshot; it does not exercise aged-row recheck behavior because the current portal config has no recheck window.",
+    "No canonical business row was changed."
+  ]
+}

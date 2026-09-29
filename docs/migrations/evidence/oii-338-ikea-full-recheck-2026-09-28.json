@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-28",
+  "company": "IKEA China",
+  "provider": "ikea",
+  "audit": {
+    "pages": 100,
+    "declared_total": 1486,
+    "parsed_rows": 1486,
+    "unique_urls": 1486,
+    "invalid_rows": 0,
+    "page_or_total_shifts": 0
+  },
+  "provider_result": {
+    "status": "fetched",
+    "jobs": 1486,
+    "truncated": false,
+    "raw_output": "data/acceptance/oii-338-ikea-2026-09-28/full-recheck-output.json",
+    "raw_output_sha256": "d9d0c9f69d16a2b593ac08e3edd0d33bd1d076eb2adbfa9fae5f557acaea7fc9"
+  },
+  "python_dry_run": {
+    "status": "completed",
+    "checked": 1486,
+    "added": 0,
+    "filtered_title": 1472,
+    "filtered_location": 14,
+    "errors": 0
+  },
+  "acceptance_limit": "A later full pass completed, but the cause of the earlier six-job shortfall was not established",
+  "personal_data_sent": false
+}

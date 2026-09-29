@@ -18,13 +18,15 @@ import * as yaml from 'js-yaml';
 const PROVIDER = 'reactive-resume';
 const EMPTY_WEBSITE = { url: '', label: '', inlineLink: false };
 
+/** Avoid PDF line-end hyphenation between a number and its Chinese unit. */
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+    .replaceAll("'", '&#39;')
+    .replace(/(\d)(?=[\p{Script=Han}])/gu, '$1\u00a0');
 }
 
 function paragraph(value) {

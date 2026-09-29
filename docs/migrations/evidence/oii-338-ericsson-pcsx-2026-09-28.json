@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://jobs.ericsson.com/api/pcsx/search?domain=ericsson.com",
+  "local_raw_capture": "data/acceptance/ericsson-pcsx-2026-09-28/output.json",
+  "raw_capture_sha256": "ca018b40d664b9bf4fa53fb1f75123b4120cb2acf94bcfc547ca35f37277eb7d",
+  "provider": "pcsx",
+  "advertised_and_fetched_jobs": 576,
+  "unique_job_urls": 576,
+  "truncated": false,
+  "isolated_python_run": {
+    "directory": "data/acceptance/ericsson-pcsx-2026-09-28/python-verified",
+    "status": "completed",
+    "checked": 576,
+    "added": 0,
+    "errors": 0,
+    "handoff": 0,
+    "filtered": {"title": 567, "tier": 1, "location": 8},
+    "opportunities": 0,
+    "source_evidence_rows": 0
+  },
+  "acceptance_limit": "Complete real provider collection and Python rejection path; no retained role or downstream scan/score/apply sample"
+}

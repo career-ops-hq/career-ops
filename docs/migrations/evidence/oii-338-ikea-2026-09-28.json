@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-28",
+  "company": "IKEA China",
+  "provider": "ikea",
+  "official_search_total_first_observed": 1485,
+  "collected_unique": 1479,
+  "truncated": true,
+  "truncation_kind": "coverage_gap",
+  "python_discovery": {
+    "status": "partial",
+    "checked": 1479,
+    "added": 0,
+    "errors": 1
+  },
+  "raw_output_path": "/Users/oii/dev/career-ops/data/acceptance/oii-338-ikea-2026-09-28/coverage-output.json",
+  "raw_output_sha256": "7e6fd2266c867d2b364a8378375755fd8452333be86df4ac80c49bb467827ecd",
+  "personal_data_sent": false
+}

@@ -9,7 +9,7 @@
 // The widget API returns the account's FULL posting list in one request (verified
 // live against a 259-posting account) and ships `description` + `published_on`
 // for free, so scan.mjs's content_filter and the recency logic in
-// scan-ats-full.mjs both work for Workable companies.
+// Python global discovery both work for Workable companies.
 //
 // The older markdown feed at /<slug>/jobs.md is kept as a fallback only. It
 // cannot be the primary path:

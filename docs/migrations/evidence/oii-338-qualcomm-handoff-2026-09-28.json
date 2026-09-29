@@ -1,0 +1,24 @@
+{
+  "checked_at": "2026-09-28",
+  "configured_company": "Qualcomm",
+  "configured_url": "https://careers.qualcomm.com/careers",
+  "node_dry_run": {
+    "command": "node scan.mjs --company Qualcomm --dry-run --quiet",
+    "exit_code": 0,
+    "companies_scanned": 0,
+    "handoff": 1,
+    "method": "websearch",
+    "query": "site:careers.qualcomm.com China (\"AI\" OR \"Software\" OR \"Machine Learning\")"
+  },
+  "python_dry_run": {
+    "command": "workflow/.venv/bin/python -m workflow.career_ops --directory data/acceptance/oii-338-qualcomm-handoff discover --company Qualcomm --dry-run",
+    "exit_code": 1,
+    "status": "failed",
+    "sources": 0,
+    "checked": 0,
+    "handoff": 1,
+    "method": "websearch",
+    "query": "site:careers.qualcomm.com China (\"AI\" OR \"Software\" OR \"Machine Learning\")"
+  },
+  "acceptance_limit": "Node/Python configured handoff parity only; no live Qualcomm posting was collected or evaluated"
+}

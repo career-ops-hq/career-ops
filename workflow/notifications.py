@@ -76,6 +76,7 @@ def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
             "report_hash": artifact["report_sha256"],
             "title": prefix + role[:max(0, 100 - len(prefix) - len(suffix))] + suffix,
             "report": report,
+            "path": str(report_path),
             "lower": lower,
             "upper": upper,
             "coverage": coverage,
@@ -95,7 +96,7 @@ def init_delivery_table(db: sqlite3.Connection) -> None:
 
 def discord_sender(payload: dict) -> None:
     """Use the existing delivery helper; a timeout is always an uncertain result."""
-    channel = os.environ["CAREER_OPS_DISCORD_CHANNEL_ID"]
+    channel = os.environ.get("CAREER_OPS_DISCORD_CHANNEL_ID", "1519136110515585184")
     script = Path(__file__).resolve().parents[1] / "scripts" / "discord-idempotent-post.py"
     proxy_env = {key: value for key, value in os.environ.items()
                  if key.lower() not in ("http_proxy", "https_proxy", "all_proxy", "no_proxy")}
@@ -103,7 +104,7 @@ def discord_sender(payload: dict) -> None:
                       "ALL_PROXY": "http://127.0.0.1:7890", "NO_PROXY": "localhost,127.0.0.1"})
     subprocess.run(
         [sys.executable, str(script), "--channel", channel, "--title", payload["title"],
-         "--content", payload["report"]],
+         "--file", payload["path"]],
         check=True, capture_output=True, text=True, timeout=40, env=proxy_env,
     )
 

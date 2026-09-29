@@ -10,10 +10,8 @@
 //
 // Career page URL:
 //   https://<tenant>.eightfold.ai/careers[?domain=<domain>]
-// Many tenants also front the same board on a branded CNAME
-// (careers.<company>.com). That host is deliberately NOT accepted: the API is
-// host-pinned to *.eightfold.ai, so an entry must point at the canonical
-// tenant host. Set `careers_url` (or `api`) to the eightfold.ai form.
+// Most tenants use *.eightfold.ai. HSBC's verified branded API is pinned
+// explicitly below; other branded hosts are not accepted.
 //
 // JSON API (GET, zero-auth):
 //   https://<tenant>.eightfold.ai/api/apply/v2/jobs
@@ -40,6 +38,8 @@
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
 
 const EIGHTFOLD_HOST_RE = /^[a-z0-9-]+\.eightfold\.ai$/i;
+const BRANDED_HOSTS = new Set(['portal.careers.hsbc.com']);
+const trustedHost = (host) => EIGHTFOLD_HOST_RE.test(host) || BRANDED_HOSTS.has(host);
 
 // The API refuses to return more than 10 rows per request regardless of `num`.
 const PAGE_SIZE = 10;
@@ -69,8 +69,8 @@ function assertEightfoldUrl(url) {
     throw new Error(`eightfold: invalid URL: ${url}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`eightfold: URL must use HTTPS: ${url}`);
-  if (!EIGHTFOLD_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}" — must match *.eightfold.ai`);
+  if (!trustedHost(parsed.hostname)) {
+    throw new Error(`eightfold: untrusted hostname "${parsed.hostname}"`);
   }
   return url;
 }
@@ -114,7 +114,7 @@ export function resolveTenant(entry) {
       continue;
     }
     if (parsed.protocol !== 'https:') continue;
-    if (!EIGHTFOLD_HOST_RE.test(parsed.hostname)) continue;
+    if (!trustedHost(parsed.hostname)) continue;
 
     const override = typeof entry.domain === 'string' && entry.domain.trim()
       ? entry.domain.trim()
@@ -293,7 +293,7 @@ export default {
         {
           // redirect:'error' prevents SSRF via a server-side redirect; with
           // assertEightfoldUrl above it guarantees the final hostname stays
-          // inside *.eightfold.ai.
+          // inside the pinned tenant hosts.
           redirect: 'error',
           headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'application/json' },
         },
@@ -317,6 +317,7 @@ export default {
     }
 
     if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
+      all.collectionTruncated = true;
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
     }
 

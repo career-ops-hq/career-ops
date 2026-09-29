@@ -1,13 +1,7 @@
-// Owns discovery operation routing and the provider registry shared by every scanner.
+// Owns the provider registry shared by the remaining Node collection tools.
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadProviders as loadProviderModules, resolveProvider } from '../../providers/_registry.mjs';
-export const discoveryOperations = Object.freeze({
-  global: 'scan-ats-full.mjs',
-  resolve: 'discover-ats.mjs',
-  'resolve-company': 'discover-ats.mjs',
-});
-
 const providers = await loadProviderModules(join(dirname(fileURLToPath(import.meta.url)), '../../providers'));
 
 export function discoveryProvider(id) {

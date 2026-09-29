@@ -40,12 +40,13 @@ with tempfile.TemporaryDirectory(prefix="career-ops-draft-migration-") as tempor
     store.close()
 
 
-def call(directory: Path, input_root: Path, *args: str, expected: int = 0) -> dict:
+def call(directory: Path, input_root: Path, *args: str, expected: int = 0,
+         extra_env: dict | None = None) -> dict:
     result = subprocess.run(
         [str(PYTHON), str(CLI), "--directory", str(directory), *args],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER, "CAREER_OPS_RESUME_RENDERER": RESUME_RENDERER,
-             "CAREER_OPS_INPUT_ROOT": str(input_root)},
+             "CAREER_OPS_INPUT_ROOT": str(input_root), **(extra_env or {})},
     )
     assert result.returncode == expected, (args, result.stdout, result.stderr)
     return json.loads(result.stdout) if result.stdout else {}
@@ -221,17 +222,21 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     fourth = source(root / "fourth.json", "job-4", "Build verifiable AI agents.")
     call(directory, inputs, "start", "scan", "job-4", str(fourth))
     call(directory, inputs, "start", "score", "job-4", "scan:job-4")
+    apply_call_log = root / "failed-export-model-calls.txt"
     failed_export = subprocess.run(
         [str(PYTHON), str(CLI), "--directory", str(directory), "start", "apply", "job-4", "score:job-4"],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER, "CAREER_OPS_RESUME_RENDERER": RESUME_RENDERER,
-             "CAREER_OPS_INPUT_ROOT": str(inputs), "CAREER_OPS_RESUME_FAIL_ONCE": str(root / "export-failed")},
+             "CAREER_OPS_INPUT_ROOT": str(inputs), "CAREER_OPS_RESUME_FAIL_ONCE": str(root / "export-failed"),
+             "WORKFLOW_TEST_CALL_LOG": str(apply_call_log)},
     )
     assert failed_export.returncode == 1
     export_task = next(task for task in call(directory, inputs, "list") if task["opportunity_id"] == "job-4" and task["module"] == "apply")
     assert export_task["reason"] == "failure:RuntimeError"
-    export_recovered = call(directory, inputs, "run", export_task["task_id"])
+    export_recovered = call(directory, inputs, "run", export_task["task_id"],
+                            extra_env={"WORKFLOW_TEST_CALL_LOG": str(apply_call_log)})
     assert export_recovered["status"] == "waiting" and export_recovered["reason"] == "user_review"
+    assert apply_call_log.read_text().splitlines() == ["apply_evaluate"]
     assert export_recovered["artifact"]["version"] == 1
     assert Path(export_recovered["artifact"]["files"]["resume_pdf"]).is_file()
 

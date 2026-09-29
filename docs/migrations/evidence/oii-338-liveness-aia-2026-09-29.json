@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-29",
+  "scope": "Public AIA Workday job URL checked by the shared Node browser classifier used by Python discovery",
+  "url": "https://aia.wd3.myworkdayjobs.com/external/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+  "contemporaneous_provider_evidence": "The permitted-network mixed reverse graph retained this job from AIA's public Workday API in the same acceptance session; see oii-338-mixed-reverse-live-2026-09-29.json.",
+  "before": {
+    "result": "expired",
+    "code": "insufficient_content"
+  },
+  "after": {
+    "result": "uncertain",
+    "code": "insufficient_content"
+  },
+  "comparison": "The same public URL was rechecked with the corrected classifier; a short browser shell no longer establishes expiry. Flexport's public Greenhouse sample independently returned active/apply_control_visible.",
+  "acceptance_limit": "Uncertain does not prove the AIA browser page is active; explicit HTTP 404/410 and hard-expired evidence remain expired."
+}

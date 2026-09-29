@@ -1,0 +1,54 @@
+{
+  "operation": "Python global reverse ATS discovery",
+  "date": "2026-09-28",
+  "isolation": "data/acceptance/oii338-global-aia",
+  "public_directory": "https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data/workday_companies.json",
+  "directory_entry": "aia|wd3|external",
+  "directory_entry_verified": true,
+  "options": {
+    "ats": [
+      "workday"
+    ],
+    "since_days": 30,
+    "limit": null,
+    "dry_run": false,
+    "selected_directory_entries": 1
+  },
+  "opportunity": {
+    "id": 1,
+    "url": "https://aia.wd3.myworkdayjobs.com/external/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+    "company": "aia",
+    "role": "Sr. System Analyst, GenAI Application",
+    "source": "workday-full",
+    "state": "discovered"
+  },
+  "source_evidence": {
+    "source": "workday-full",
+    "sha256": "2985f84bff8c04dd11026bf8f17887f0a420452c856f67f34bea75df3d5d4eaa",
+    "created_at": "2026-09-28 05:58:52"
+  },
+  "scan_run": {
+    "operation": "global",
+    "summary": {
+      "run_id": "8b3ccca525e64208b94c5c2d2bb83d72",
+      "found": 1,
+      "errors": 0,
+      "sources": [
+        "workday"
+      ],
+      "stopped": false,
+      "dataset_status": {
+        "workday": "ok"
+      }
+    },
+    "created_at": "2026-09-28 05:58:52"
+  },
+  "source_health": [
+    {
+      "source": "workday",
+      "status": "reachable",
+      "checked_at": "2026-09-28T05:57:25.794488+00:00"
+    }
+  ],
+  "checkpoint_removed": true
+}

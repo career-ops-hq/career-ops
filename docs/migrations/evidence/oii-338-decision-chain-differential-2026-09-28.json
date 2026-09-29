@@ -1,0 +1,27 @@
+{
+  "source": "data/acceptance/enabled-provider-matrix-2026-09-28/output.json",
+  "source_sha256": "69463410745935abfb9f48547942710b9bf701660ad7c5f103e47c3de6e31002",
+  "portals_sha256": "987edd24f03ef7e111f680a0a1100976f810a02efee64c681d33f95746171558",
+  "profile_sha256": "dea50cfb213001c51602a322d7bd8cae55ae92ed1b32982e733ac898a21d7323",
+  "postings_compared": 32306,
+  "comparison": "Node configured filters, URL and company-role keys, and sequential in-batch deduplication versus Python discovery_filters and discovery_dedup, with one shared now_ms and an empty prior-history snapshot",
+  "mismatches": 0,
+  "outcomes": {
+    "title": 30987,
+    "tier": 17,
+    "location": 1118,
+    "posting_age": 62,
+    "duplicate_role": 26,
+    "accepted": 96
+  },
+  "cooldown_comparison": {
+    "window_source": "Synthetic active and expired windows for Bosch, AIA, NVIDIA and ABB, applied to all saved postings on 2026-09-28",
+    "skipped": 2209,
+    "mismatches": 0
+  },
+  "limitations": [
+    "The current user blacklist and reapplication windows are empty, so their live configured branches did not fire.",
+    "The differential starts from an empty deduplication snapshot; existing SQLite history, browser verification, and storage are covered separately.",
+    "The capture is saved public-provider data, not a new live fetch."
+  ]
+}

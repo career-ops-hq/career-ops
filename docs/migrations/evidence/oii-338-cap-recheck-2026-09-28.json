@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-28",
+  "raw_output_path": "/Users/oii/dev/career-ops/data/acceptance/oii-338-cap-recheck-2026-09-28/output.json",
+  "raw_output_sha256": "188720364b832db203e2c9d898292f79d246e8d6f10641d9d2b468ffa9bc57f7",
+  "results": [
+    {
+      "company": "Siemens",
+      "provider": "avature",
+      "count": 1198,
+      "truncated": true,
+      "truncation_kind": "page_cap",
+      "python_discovery": {
+        "status": "partial",
+        "checked": 1198,
+        "added": 0,
+        "errors": 1
+      }
+    },
+    {
+      "company": "Mercedes-Benz",
+      "provider": "beesite",
+      "count": 2595,
+      "truncated": false,
+      "truncation_kind": null,
+      "python_discovery": {
+        "status": "completed",
+        "checked": 2595,
+        "added": 1,
+        "errors": 0
+      }
+    }
+  ],
+  "personal_data_sent": false
+}

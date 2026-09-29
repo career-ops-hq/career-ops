@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-28",
+  "scope": "Real public YC seed source, Python reverse discovery positive path in an isolated database",
+  "source_capture": "data/acceptance/yc-full-2026-09-28/output.json",
+  "source_capture_sha256": "6204bcbb86dafee42c853731b6ace090480096401e96d472bed4150e8014f73a",
+  "source_companies": 6258,
+  "source_partial": false,
+  "board_intersection_capture": "data/acceptance/oii-338-yc-greenhouse-intersection/output.json",
+  "board_intersection_sha256": "0dd51da398dceb6c4e69c3e8a00c621021d5d23b5685b7b8b1d06289bacc2f76",
+  "board_intersection": {
+    "selected_from_saved_yc_and_greenhouse_directories": 281,
+    "fetched": 140,
+    "errors": 141,
+    "filtered_positive_jobs": 3,
+    "positive_companies": ["Nex", "Flexport"]
+  },
+  "python_run": {
+    "selected_company": "Nex",
+    "selection": "Nex moved first in the saved official YC catalogue for an isolated --limit 1 sample",
+    "directory": "data/acceptance/oii-338-yc-nex-positive",
+    "summary_sha256": "edcc139c9b9e6bdf2bd027bbd17398905a9ce98d9d78e2d48085c85888bcca90",
+    "status": "partial",
+    "cap_hit": true,
+    "companies_available": 6258,
+    "companies_scanned": 1,
+    "postings_kept": 2,
+    "unreachable_boards": 0,
+    "source_health": "incomplete",
+    "opportunities": 2,
+    "source_evidence_rows": 2,
+    "scan_runs": 1,
+    "digest_sha256": "c6039ecef48290d58daabfeabec299b1566900ace09019d810ed18b05d34eb29"
+  },
+  "liveness_recheck": {
+    "capture": "data/acceptance/oii-338-yc-nex-positive/liveness-recheck.json",
+    "sha256": "8669a083c1ab43e2b85b4f858dc101a123d4eefc8267ffef7ceb4d2244b545ea",
+    "active": 2,
+    "codes": ["apply_control_visible", "apply_control_visible"]
+  },
+  "canonical_database_counts": {
+    "opportunities": 87,
+    "tasks": 5,
+    "results": 4
+  },
+  "acceptance_limit": "This proves a selected real seed positive path, not a full 6,258-company portfolio sweep or scan/score/apply assessment. No CV, model call, submission or message was involved."
+}

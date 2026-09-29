@@ -37,7 +37,8 @@ with tempfile.TemporaryDirectory() as temp:
         assert result["artifact"]["core_capabilities"] == capabilities
         incomplete = {**evidence, "core_capabilities": None}
         model_adapter.call_agent = lambda *_args: (incomplete, "session")
-        waiting = model_runner.scan_evaluate({"inputs": {"source": source, "cv": "CV", "profile": "profile",
+        changed_source = {**source, "jd": "Build Terraform infrastructure for a new team"}
+        waiting = model_runner.scan_evaluate({"inputs": {"source": changed_source, "cv": "CV", "profile": "profile",
                                                        "targeting": "targeting", "rules": "rules"}})
         assert waiting["waiting_reason"] == "core_evidence_missing"
     finally:

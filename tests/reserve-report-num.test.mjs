@@ -1,6 +1,6 @@
 // Regression: a dated file in reports/ must not be read as a report number.
 //
-// `scan-ats-full.mjs --md-out reports/` writes `reports/YYYY-MM-DD.md`. The old
+// `global --md-out reports/` writes `reports/YYYY-MM-DD.md`. The old
 // occupancy scan matched `/^(\d+)-/`, so `2026-08-12.md` was read as report
 // #2026 and the next reservation jumped to 2027 — silently, and permanently.
 

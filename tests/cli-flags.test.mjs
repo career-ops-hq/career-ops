@@ -62,8 +62,7 @@ try {
   check('hasFlag on a non-array is false', hasFlag(null, '--only'), false);
 
   // validateFlags — the unrecognized-flag / --help shape hand-rolled
-  // identically by scan-ats-full.mjs (#1633/#1635) and
-  // dedup-tracker.mjs (#2744/#2746), consolidated here for
+  // identically by several scripts, consolidated here for
   // #2775 and reused as-is by scan.mjs's own fix (#2270).
   const { validateFlags } = await import(pathToFileURL(join(ROOT, 'lib/cli-flags.mjs')).href);
 

@@ -5,8 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openOpportunityStore } from '../src/opportunities/store.mjs';
 import { ingestScanOffers } from '../src/discovery/ingest.mjs';
-import { loadDatabaseDedupSnapshot } from '../scan.mjs';
-import { companyRoleDedupKey } from '../scan.mjs';
+import { loadDatabaseDedupSnapshot, companyRoleDedupKey } from './fixtures/legacy-scan-helpers.mjs';
 import { DatabaseSync } from 'node:sqlite';
 
 const directory = mkdtempSync(join(tmpdir(), 'career-ops-opportunity-'));

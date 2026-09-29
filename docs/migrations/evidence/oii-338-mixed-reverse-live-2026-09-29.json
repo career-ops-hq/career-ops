@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-29",
+  "scope": "One selected public AIA Workday board plus one selected public Flexport Greenhouse board from the a16z portfolio, in the same four-node Python LangGraph reverse sweep",
+  "source_selection": "Directory and portfolio loader outputs were fixed to the two previously verified public coordinates; provider HTTP collection, Python decisions, and SQLite publication were live",
+  "directory": "/var/folders/qs/62_5blvx2hn7jq7k0dnn24_40000gn/T/oii338-mixed-reverse-live-zigozap_",
+  "network": "Permitted public-network environment with CAREER_OPS_ALLOW_FAKE_IP_RANGE=1",
+  "summary": {
+    "run_id": "811f55c9bc724bb6b4136cb87b70a4d3",
+    "found": 7,
+    "errors": 0,
+    "sources": [
+      "workday"
+    ],
+    "stopped": false,
+    "dataset_status": {
+      "workday": "ok",
+      "a16z": "ok"
+    }
+  },
+  "counts": {
+    "opportunities": 7,
+    "source_evidence": 7,
+    "scan_runs": 1,
+    "source_health": 2
+  },
+  "source_health": [
+    [
+      "a16z",
+      "reachable"
+    ],
+    [
+      "workday",
+      "reachable"
+    ]
+  ],
+  "offers": [
+    {
+      "company": "Flexport",
+      "role": "Senior Software Engineer",
+      "url": "https://job-boards.greenhouse.io/flexport/jobs/8131941"
+    },
+    {
+      "company": "Flexport",
+      "role": "Software Engineer II",
+      "url": "https://job-boards.greenhouse.io/flexport/jobs/7906161"
+    },
+    {
+      "company": "Flexport",
+      "role": "Software Engineer Ⅰ",
+      "url": "https://job-boards.greenhouse.io/flexport/jobs/7978696"
+    },
+    {
+      "company": "aia",
+      "role": "Manager, AI Backend Developer",
+      "url": "https://aia.wd3.myworkdayjobs.com/external/job/Shanghai-Hongkou-CN---AIA-Group-Office/Manager--AI-Backend-Developer_JR-66978"
+    },
+    {
+      "company": "aia",
+      "role": "Manager, Full Stack Engineer",
+      "url": "https://aia.wd3.myworkdayjobs.com/external/job/Shanghai-Hongkou-CN---AIA-Group-Office/Manager--Full-Stack-Engineer_JR-69087"
+    },
+    {
+      "company": "aia",
+      "role": "Senior Manager, Agentic Applications & Emerging Technology",
+      "url": "https://aia.wd3.myworkdayjobs.com/external/job/Shanghai-Hongkou-CN---AIA-Group-Office/Senior-Manager--Agentic-Applications---Emerging-Technology_JR-68577-1"
+    },
+    {
+      "company": "aia",
+      "role": "Sr. System Analyst, GenAI Application",
+      "url": "https://aia.wd3.myworkdayjobs.com/external/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003"
+    }
+  ],
+  "graph_checkpoint_rows": 6,
+  "decision_sha256": "7b7fba9e6f2c30b35d21a243fd3f0fdec2b9403fa780032ffb8a5dd3633bcfea",
+  "result_sha256": "4c6c7f4c3ed4a2090f5f16eee917c71b6e5ba15580c75c8b31e60c90d15f3345",
+  "batch_checkpoint_removed": true,
+  "isolated_database_sha256": "e06ba5e700d6689af043c8415d1f77a43ee81fdcd87a14914a84d75047c8be3f",
+  "canonical_database_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "acceptance_limit": "Selected two-board sample; not a full public ATS directory or portfolio sweep."
+}

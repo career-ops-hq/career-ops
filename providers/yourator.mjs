@@ -60,7 +60,7 @@
 // No postedAt. The API publishes only `lastActiveAt`, a localized relative
 // string ("一天內更新"), with no absolute timestamp anywhere in the payload.
 // Per the Job contract, postedAt is omitted rather than guessed — a synthesized
-// date would silently corrupt scan-ats-full.mjs's recency filtering.
+// date would silently corrupt global discovery's recency filtering.
 
 const SITE_ORIGIN = 'https://www.yourator.co';
 const FEED_BASE = `${SITE_ORIGIN}/api/v4/jobs`;

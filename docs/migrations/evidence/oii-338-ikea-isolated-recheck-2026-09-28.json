@@ -1,0 +1,18 @@
+{
+  "scope": "OII-338 IKEA China official search isolated Python dry-run",
+  "command": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 workflow/.venv/bin/python -B -m workflow.career_ops --directory data/acceptance/oii-338-ikea-isolated-recheck-2026-09-28 discover --company 'IKEA China' --dry-run",
+  "exit_code": 0,
+  "result_path": "data/acceptance/oii-338-ikea-isolated-recheck-2026-09-28/result.json",
+  "result_sha256": "e0e7af11ad7ecd7c63abc742e49c75729ece0ab783b7c2b2e99cd3b64876f54d",
+  "result": {
+    "status": "completed",
+    "sources": 1,
+    "checked": 1486,
+    "added": 0,
+    "errors": 0,
+    "failures": [],
+    "filtered": {"title": 1472, "location": 14}
+  },
+  "canonical_db_sha256_after": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "limitation": "The isolated source was complete at recheck time; the preceding concurrent 34-source run reported coverage_gap. This read-only dry-run did not retain candidates and does not turn the preceding partial run into a complete run."
+}

@@ -1,0 +1,60 @@
+{
+  "source": "AIA Workday",
+  "operation": "Python discover",
+  "run_created_at": "2026-09-28 04:18:38",
+  "summary": {
+    "companies": 1,
+    "boards": 0,
+    "found": 1005,
+    "dupes": 0,
+    "newAdded": 4,
+    "errors": 0,
+    "handoff": 0,
+    "failures": [],
+    "handoff_sources": []
+  },
+  "acceptance_store": "data/acceptance/oii-338-aia-2026-09-28/opportunities.db",
+  "captures": [
+    {
+      "id": 1,
+      "url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+      "role": "Sr. System Analyst, GenAI Application",
+      "capture_method": "browser_snapshot",
+      "retrieved_at": "2026-09-28T04:18:10.725Z",
+      "jd_sha256": "4566c049bcb9f47f524e144118d07ea14f952614a59bb9e37bde986972c913ab",
+      "jd_length": 5873,
+      "scan_input_hash": "f013feaba5676c3b04ea7c86dc14c9aaef515e96dba5383c0386fbc4dde7e792"
+    },
+    {
+      "id": 2,
+      "url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-Hongkou-CN---AIA-Group-Office/Manager--Full-Stack-Engineer_JR-69087",
+      "role": "Manager, Full Stack Engineer",
+      "capture_method": "browser_snapshot",
+      "retrieved_at": "2026-09-28T04:18:21.848Z",
+      "jd_sha256": "00a458678b49f2a85d8d31d2ef66aadaa631f5aa871bb2e992654cd098528929",
+      "jd_length": 5370,
+      "scan_input_hash": "5265da8de0cb4230353d1ba40b3eee8fbf026acd5831363dfb2c6f3aa5f3f943"
+    },
+    {
+      "id": 3,
+      "url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-Hongkou-CN---AIA-Group-Office/Senior-Manager--Agentic-Applications---Emerging-Technology_JR-68577-1",
+      "role": "Senior Manager, Agentic Applications & Emerging Technology",
+      "capture_method": "browser_snapshot",
+      "retrieved_at": "2026-09-28T04:18:30.625Z",
+      "jd_sha256": "e027c63baee75a6b5a43cf0fc3801720690160fb41cc98c18e22cf29c0bdba0c",
+      "jd_length": 4705,
+      "scan_input_hash": "2d0f0b42f87e8cad71d0f24b04a41e29a74d6f65b6f77ee785f9e8b5a5d0cbb0"
+    },
+    {
+      "id": 4,
+      "url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-Hongkou-CN---AIA-Group-Office/Manager--AI-Backend-Developer_JR-66978",
+      "role": "Manager, AI Backend Developer",
+      "capture_method": "browser_snapshot",
+      "retrieved_at": "2026-09-28T04:18:38.502Z",
+      "jd_sha256": "899bbd38b068981afb4d707eb343a790078f6acaab753a851cebfe89ce027829",
+      "jd_length": 4874,
+      "scan_input_hash": "b3e0ae0585104b9c9aa92081c30178a14b098faec43860d270b7e3baa2f27e58"
+    }
+  ],
+  "note": "The isolated acceptance store and browser snapshots are retained locally; the canonical data/opportunities.db was not changed."
+}

@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-29",
+  "scope": "Current-code public Greenhouse Flexport collection through the four-node LangGraph reverse sweep in an isolated SQLite directory",
+  "directory": "data/acceptance/oii-338-reverse-graph-current-2026-09-29",
+  "source": "https://job-boards.greenhouse.io/flexport",
+  "local_network": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 for this run; other DNS guards remained active",
+  "run_id": "8f2922dcf3bb45efb0502abbc5140d07",
+  "summary": {
+    "run_id": "8f2922dcf3bb45efb0502abbc5140d07",
+    "found": 1,
+    "errors": 0,
+    "sources": [
+      "greenhouse"
+    ],
+    "stopped": false,
+    "dataset_status": {
+      "greenhouse": "ok"
+    }
+  },
+  "result_status": "completed",
+  "companies_available": 1,
+  "companies_scanned": 1,
+  "postings_kept": 1,
+  "unreachable_boards": 0,
+  "counts": {
+    "opportunities": 1,
+    "source_evidence": 1,
+    "scan_runs": 1,
+    "source_health": 1
+  },
+  "source_health": [
+    [
+      "greenhouse",
+      "reachable"
+    ]
+  ],
+  "offer": [
+    "flexport",
+    "Senior Software Engineer",
+    "https://job-boards.greenhouse.io/flexport/jobs/8131941"
+  ],
+  "decision_offers": 1,
+  "graph_checkpoint_has_artifact_references": true,
+  "graph_checkpoint_rows": 6,
+  "batch_checkpoint_removed": true,
+  "isolated_database_sha256": "c6c0dd1e8299a5fa3564dc8ab202b9126f724f0a9fd6902898eebd1c1386c7c3",
+  "decision_sha256": "a91a06bc2cc78c5eec7903fb6becf095fb6f0ef056bac37b95673f30741de6d1",
+  "result_sha256": "f625c2f6c9e2ee3a108435360ad7f6e0fe1f62ff61df08ec926950017c8132a7",
+  "canonical_database_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "acceptance_limit": "One selected live board. It does not establish coverage of all reverse ATS directories or VC portfolios, nor scan/score/apply acceptance."
+}

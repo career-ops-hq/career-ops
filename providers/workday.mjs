@@ -36,7 +36,7 @@ const MAX_PAGES_CAP = 1500;
 const RETRY_POLICY = { retries: 3 };
 
 // Delay between successive pages *within one tenant's own pagination loop*
-// (not between tenants — that's scan-ats-full.mjs's concurrency, a separate
+// (not between tenants — that's the global collector's concurrency, a separate
 // knob). A burst of same-host requests with zero delay risks Workday's
 // WAF-level rate limiting on any tenant that paginates several pages deep
 // (large boards like rollsroyce, sec, roche). Only tenants that loop past
@@ -72,15 +72,12 @@ function sleep(ms, ctx) {
 /**
  * True once a page's oldest unambiguously-dated posting is past the --since window.
  *
- * Undated postings are invisible here. A page of nothing but undated postings
- * never stops pagination (the `dated.length === 0` guard), but a page that
- * mixes stale dated postings with undated ones does — and the undated ones on
- * later pages are then never fetched, even though scan.mjs's date filters
- * would have accepted them. Exported for test-all.mjs, which pins that
- * behaviour so it can't drift without the docs drifting too.
+ * A scan that accepts undated postings cannot safely stop by date: later
+ * pages may contain undated postings even after an all-dated stale page.
  */
-export function pageIsPastWindow(pageJobs, sinceMs) {
-  if (typeof sinceMs !== 'number') return false;
+export function pageIsPastWindow(pageJobs, sinceMs, includeUndated = false) {
+  if (typeof sinceMs !== 'number' || includeUndated) return false;
+  if (pageJobs.some((j) => typeof j.postedAt !== 'number')) return false;
   const dated = pageJobs.map((j) => j.postedAt).filter((v) => typeof v === 'number');
   if (dated.length === 0) return false;
   return Math.min(...dated) < sinceMs - EARLY_STOP_MARGIN_MS;
@@ -222,7 +219,7 @@ export default {
     // 'fetch-error' must NOT produce the "raise max_pages" advice: that knob
     // does nothing for a tenant that died on a rate limit rather than hit the cap.
     let stopReason = 'complete';
-    if (pageIsPastWindow(jobs, sinceMs)) stopReason = 'early-stop';
+    if (pageIsPastWindow(jobs, sinceMs, ctx?.includeUndated === true)) stopReason = 'early-stop';
     // Some tenants' CXS responses never include postedOn at all (e.g.
     // adventhealth, on every page). Early-stop can't apply then — there's
     // no dated posting to recognize as "past the window".
@@ -266,7 +263,7 @@ export default {
           const postings = Array.isArray(json?.jobPostings) ? json.jobPostings : [];
           if (postings.length < PAGE_SIZE) break; // short page → last page reached
         }
-        if (pageIsPastWindow(pageJobs, sinceMs)) { stopReason = 'early-stop'; break; }
+        if (pageIsPastWindow(pageJobs, sinceMs, ctx?.includeUndated === true)) { stopReason = 'early-stop'; break; }
       }
       if (stopReason === 'complete' && page === pagesToFetch && pagesToFetch === maxPages) {
         stopReason = 'cap';
@@ -278,21 +275,21 @@ export default {
     // (a full-directory scan can hit this on dozens of tenants).
     //
     // "raise max_pages" only applies when `entry` is a real portals.yml
-    // tracked_companies entry — there is something to edit. scan-ats-full.mjs's
+    // tracked_companies entry — there is something to edit. Global discovery's
     // reverse scan synthesizes entries from the external dataset, so there's no
     // portal entry to point at, and no fixed cap can guarantee full coverage of
     // an unbounded company directory anyway; nothing else to suggest there.
     //
     // The branch below used to key on `sinceMs === null` as a proxy for that
-    // distinction, which held only because scan-ats-full.mjs was the sole
+    // distinction, which held only because reverse discovery was the sole
     // caller setting it. #2418 broke the proxy — `scan.mjs --since` sets
     // ctx.sinceMs too, so a tracked entry lost the actionable half of the
     // message on every --since run (#2495). Provenance is now stated by the
     // caller instead of inferred from an unrelated flag, so a future caller
     // that starts setting sinceMs cannot re-couple the two concerns.
     //
-    // Absence means "tracked": scan-ats-full.mjs is the only caller that
-    // synthesizes entries AND can reach the cap (discover-ats.mjs and
+    // Absence means "tracked": global discovery is the only caller that
+    // synthesizes entries AND can reach the cap (the board resolver and
     // verify-portals.mjs both probe with ctx.maxPages: 1, which never sets
     // stopReason to 'cap'), so it is the one place that opts out.
     const syntheticEntries = ctx?.syntheticEntries === true;
@@ -313,11 +310,12 @@ export default {
     // 'no-date-skip' hits many tenants in a full-directory scan (a company
     // with several Workday sites, like a1group or ashealthnet, triggers it
     // once per site) — a console.error per hit would repeat thousands of
-    // times, so tag the array instead; scan-ats-full.mjs aggregates it into
+    // times, so tag the array instead; global discovery aggregates it into
     // one summary line.
     if (stopReason === 'no-date-skip') jobs.workdayNoDateSkip = true;
+    if (stopReason === 'cap') jobs.workdayCapReached = true;
     // 'fetch-error' means retries were exhausted mid-pagination while 19
-    // other tenants were hammering the same uplink. scan-ats-full.mjs
+    // other tenants were hammering the same uplink. Global discovery
     // collects tagged tenants and retries them sequentially after the
     // parallel sweep, when the line is quiet — same array-tag pattern as
     // workdayNoDateSkip (no extra per-tenant logging here).

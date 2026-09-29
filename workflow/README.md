@@ -8,31 +8,37 @@ Install the locked environment with:
 uv sync --project workflow
 ```
 
+Direct CLI execution loads the repository `.env` without overriding inherited
+environment variables, matching the former Node scan entrypoint. This includes
+the local transparent-proxy setting used by provider fetches.
+
 The CLI writes business state to the canonical `data/opportunities.db` and
 execution checkpoints to `data/workflow-checkpoints.db`:
 
 ```bash
-workflow/.venv/bin/python workflow/career_ops.py start scan <opportunity-id> <scan-input.json>
-workflow/.venv/bin/python workflow/career_ops.py start score <opportunity-id> scan:<opportunity-id>
-workflow/.venv/bin/python workflow/career_ops.py start apply <opportunity-id> score:<opportunity-id>
-workflow/.venv/bin/python -m workflow.career_ops discover
+workflow/.venv/bin/python -m workflow.career_ops start scan <opportunity-id> <scan-input.json>
+workflow/.venv/bin/python -m workflow.career_ops start score <opportunity-id> scan:<opportunity-id>
+workflow/.venv/bin/python -m workflow.career_ops start apply <opportunity-id> score:<opportunity-id>
+workflow/.venv/bin/python -m workflow.career_ops discover [--dry-run] [--resume]
+workflow/.venv/bin/python -m workflow.career_ops global --ats greenhouse,workday [--seeds yc,a16z] [--since 3] [--limit 100] [--liveness] [--md-out DIR] [--dry-run] [--resume]
+workflow/.venv/bin/python -m workflow.career_ops resolve-company --in <companies.yml> [--vendors gh,ashby,lever,workday] [--write]
 workflow/.venv/bin/python -m workflow.career_ops scan-discovered <opportunity-id> [--re-evaluate]
-workflow/.venv/bin/python workflow/career_ops.py cron-score
-workflow/.venv/bin/python workflow/career_ops.py show <task-or-opportunity-id>
-workflow/.venv/bin/python workflow/career_ops.py list
-workflow/.venv/bin/python workflow/career_ops.py scores
+workflow/.venv/bin/python -m workflow.career_ops cron-score
+workflow/.venv/bin/python -m workflow.career_ops show <task-or-opportunity-id>
+workflow/.venv/bin/python -m workflow.career_ops list
+workflow/.venv/bin/python -m workflow.career_ops scores
 workflow/.venv/bin/python -m workflow.notifications preview <opportunity-id>
-workflow/.venv/bin/python workflow/career_ops.py resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
-workflow/.venv/bin/python workflow/career_ops.py cancel <task-id>
-workflow/.venv/bin/python workflow/career_ops.py application submit <opportunity-id> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application transition <opportunity-id> <status> --confirmed --source <source> --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application activity <opportunity-id> <type> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application outcome <opportunity-id> <outcome> --confirmed --source <source> --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application schedule <opportunity-id> <YYYY-MM-DD> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application retire <opportunity-id> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application reopen <opportunity-id> --confirmed --idempotency-key <operation-id>
-workflow/.venv/bin/python workflow/career_ops.py application view [opportunity-id]
-workflow/.venv/bin/python workflow/career_ops.py application followups [--overdue-only] [--applied-days <days>]
+workflow/.venv/bin/python -m workflow.career_ops resume <task-id> [--input <scan-input.json>] [--feedback <text>] [--decision confirm|defer|accept-jd-change]
+workflow/.venv/bin/python -m workflow.career_ops cancel <task-id>
+workflow/.venv/bin/python -m workflow.career_ops application submit <opportunity-id> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application transition <opportunity-id> <status> --confirmed --source <source> --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application activity <opportunity-id> <type> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application outcome <opportunity-id> <outcome> --confirmed --source <source> --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application schedule <opportunity-id> <YYYY-MM-DD> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application retire <opportunity-id> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application reopen <opportunity-id> --confirmed --idempotency-key <operation-id>
+workflow/.venv/bin/python -m workflow.career_ops application view [opportunity-id]
+workflow/.venv/bin/python -m workflow.career_ops application followups [--overdue-only] [--applied-days <days>]
 workflow/.venv/bin/python -m workflow.career_ops reply import <message.json-or-pasted-email.txt>
 workflow/.venv/bin/python -m workflow.career_ops reply paste [email.txt]
 workflow/.venv/bin/python -m workflow.career_ops reply view <message-id>
@@ -44,10 +50,25 @@ workflow/.venv/bin/python -m workflow.communications draft <opportunity-id>
 workflow/.venv/bin/python -m workflow.communications show <opportunity-id>
 ```
 
-All commands emit JSON. `discover` calls the existing Node provider scanner as
-a collection tool; its configured sources, filters, deduplication and source
-health remain in that layer. The scanner writes to the same SQLite database and
-retains browser JD captures for the LangGraph scan handoff. A WebSearch handoff
+Commands emit JSON unless `resolve-company --summary` requests a human-readable
+table. `resolve-company` probes public ATS boards through Node provider tools;
+Python owns input validation, vendor priority, Workday hints, deduplication and
+the preview or explicit `--write` decision. The default preview leaves
+`portals.yml` untouched. `global` runs directory collection, VC seed collection,
+final evidence gates and publication as checkpointed LangGraph nodes. Its
+per-batch JSON checkpoint retains the original date window and exact source
+position under the selected `--directory`; the SQLite stage checkpoint keeps
+hashed references to decision and result artifacts. Accepted postings go to
+the same SQLite business store.
+`--resume` checks the directory fingerprint before continuing. `discover` runs
+collection, decision and business publication as a checkpointed LangGraph under
+`cache/configured-discovery` in the selected directory. Its checkpoint stores
+artifact paths and hashes; raw provider batches and decisions stay in separate
+local JSON files. `discover --resume` continues the last interrupted run with
+its original date cutoffs and refuses changed inputs. Node provider plugins
+fetch raw postings and the guarded browser reads JD pages; Python applies the
+configured filters, trust rules, deduplication, cooldowns, verification outcomes,
+and source health before writing to the same SQLite database. A WebSearch handoff
 or failed capture is not a completed scan. `scan-discovered` and `cron-score`
 retry one stale or missing JD snapshot through the same guarded browser reader;
 redirects away from the posting and failed reads remain Unknown. A different
@@ -62,14 +83,24 @@ binds those results to the current CV, profile, targeting, and rules. Existing
 valid results are reused; changed inputs require `--re-evaluate`.
 
 Tasks use `running`, `waiting`, `completed`, and `cancelled`. Business tables in
-`opportunities.db` are authoritative; `workflow-checkpoints.db` records execution
-progress only. After package generation, the graph calls the retained
+`opportunities.db` are authoritative; `workflow-checkpoints.db` records outer task
+progress. `workflow-drafts/<input-hash>/scan-checkpoints.db` records JD extraction,
+prescreen and report nodes; the neighboring `score-checkpoints.db` records score
+research, assessment and report nodes. `apply-checkpoints.db` records drafting,
+revision merge, validation and one repair under the package input fingerprint.
+The model process uses the same Python interpreter as the workflow so these
+LangGraph nodes are available. It loads the local Hermes agent and its installed
+dependencies from `~/.hermes/hermes-agent/venv`, while Hermes remains the model
+configuration authority. Each model attempt runs in its own process group; a timed-out
+attempt terminates its descendants before the task waits for recovery. After
+package generation, the graph calls the retained
 Reactive Resume tool to update a task-owned copy and export a PDF. Readable
 PDF pages, candidate identity, and every package file hash are recorded with
 the draft. Confirmation checks the current inputs, PDF, and actual file
 bytes before committing the whole package; failed exports can resume on the
 same task. Apply pauses for user review/confirmation. No path submits an
-application or sends a message.
+application or sends an application message. The separate high-score Discord
+notification runs from the scheduled score wrapper.
 `application submit` records only a user-confirmed actual submission, not an
 apply-package confirmation. Pass `--payload '{"submitted_at":"YYYY-MM-DD"}'`
 when the submission date is known; otherwise follow-up dates are explicitly
@@ -83,7 +114,7 @@ classification, match signals, and ranked invite candidates. It only suggests
 a status. Confirmation runs the application lifecycle graph; an unmatched or
 ambiguous application or a different status needs an explicit reason.
 
-Communication drafts use the same reviewed scan and current score, candidate
+Communication drafts use the same published scan and current score, candidate
 sources, and application language/market rules. The LangGraph draft and
 independent review must both succeed before the pair is saved. No contact
 record is needed; these commands never send messages.
@@ -93,7 +124,7 @@ draft. Repeat the same `--statement` with `show` to retrieve its version;
 without it, the statement cannot validate a claim in another draft.
 
 Interview preparation is a separate LangGraph task over the same canonical
-opportunity and reviewed scan/score. The read-only evidence tools replace the
+opportunity and published scan/score. The read-only evidence tools replace the
 former Node interview commands:
 
 ```bash
@@ -120,8 +151,8 @@ checks so the operational database stays unchanged.
 stored version, source quotes, and review status as a human-readable draft
 without confirming or changing it.
 
-The scheduled score wrapper runs the notification graph after `cron-score` when
-`CAREER_OPS_NOTIFICATIONS_ENABLED=1`. It checks current score inputs, report
+The scheduled score wrapper enables the notification graph after `cron-score`.
+It checks current score inputs, report
 bytes and the profile alert line before claiming a Discord delivery in SQLite.
 An interrupted or timed-out send remains uncertain and is never retried
-automatically. Both scheduled jobs remain paused during migration acceptance.
+automatically.

@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-29",
+  "environment": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 for the documented local transparent proxy; dry-run with isolated temporary directories",
+  "ibm": {
+    "command": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 workflow/.venv/bin/python -B -m workflow.career_ops --directory /private/tmp/oii338-ibm-live-corrected-20260929 discover --company IBM --dry-run",
+    "status": "completed",
+    "checked": 1895,
+    "errors": 0,
+    "added": 0,
+    "limitations": "Normal current pagination only; the later-page failure preservation branch remains fixture-verified."
+  },
+  "ikea": {
+    "command": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 workflow/.venv/bin/python -B -m workflow.career_ops --directory /private/tmp/oii338-ikea-live-corrected-20260929 discover --company 'IKEA China' --dry-run",
+    "status": "partial",
+    "checked": 1515,
+    "errors": 1,
+    "added": 0,
+    "failure": {"kind": "coverage_warning", "reason": "coverage_gap"},
+    "raw_provider_page_probe": {
+      "advertised_on_page_1": {"total": 1532, "pages": 103, "rows": 15},
+      "pages_100_to_102": "Each returned 15 rows and still advertised 1532 total over 103 pages.",
+      "page_103": {"total": 0, "pages": 1, "rows": 0},
+      "unique_jobs_retained": 1515,
+      "collection_truncated": true,
+      "truncation_kind": "coverage_gap"
+    },
+    "limitations": "The official endpoint contradicted its advertised final page. The provider retained the trusted prefix and did not claim complete coverage."
+  },
+  "canonical_business_db_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac"
+}

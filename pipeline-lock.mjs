@@ -1,12 +1,7 @@
-// pipeline-lock.mjs — a cross-process advisory lock for data/pipeline.md.
+// pipeline-lock.mjs — a cross-process advisory lock for local Markdown files.
 //
-// appendToPipeline() (scan.mjs) is a plain read-modify-write: readFileSync,
-// mutate the string, writeFileSync. It's exported and called from three
-// places — scan.mjs itself, scan-ats-full.mjs, and plugins.mjs (pipeline
-// mode) — so any two of them running concurrently (a scheduled scan
-// overlapping a manual `/career-ops pipeline` run, or two plugin jobs) can
-// silently drop one side's offers: whichever write lands second overwrites
-// the first's in-memory read, with no error and no trace anything was lost.
+// Pipeline and tracker writers use this lock around read-modify-write updates
+// so concurrent jobs cannot silently overwrite one another's changes.
 //
 // Protocol — deliberately the same shape as the tracker lock in
 // tracker-utils.mjs, so there is one lock idiom in the codebase:
@@ -228,8 +223,7 @@ export function lockRecoveryVerdict(lockDir, staleMs) {
  * The waiting half of the protocol, as one definition the copies can import.
  *
  * Both rules here were bought with measured failures in `pipeline-lock`, and
- * neither reached `followup-seed.mjs`, `portal-health-lock.mjs` or
- * `tracker-utils.mjs`, which still slept a FIXED `retryMs` and timed out on a
+ * neither reached `followup-seed.mjs` or `tracker-utils.mjs`, which still slept a FIXED `retryMs` and timed out on a
  * plain elapsed check:
  *
  *   - jitter (#2506). A fixed retry wakes every waiter at the same instant to

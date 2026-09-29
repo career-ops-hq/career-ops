@@ -98,7 +98,7 @@ const DEFAULT_NEGATIVE_TTL_MS = 30_000;
 // headroom left for the rest of the machine (#2229).
 const DEFAULT_LOOKUPS_PER_MIN = 400;
 // One sweep worker per token, so a cold start of CONCURRENCY=20 workers
-// (scan-ats-full.mjs) is admitted at once and pacing only bites afterwards.
+// (Python global discovery) is admitted at once and pacing only bites afterwards.
 // Small runs against a handful of hostnames are therefore never slowed.
 const DEFAULT_BURST = 20;
 // setTimeout clamps anything larger to 1ms (and warns), which would turn a

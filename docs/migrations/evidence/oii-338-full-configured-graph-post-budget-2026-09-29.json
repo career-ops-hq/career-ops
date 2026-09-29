@@ -1,0 +1,119 @@
+{
+  "date": "2026-09-29",
+  "scope": "Post-budget-fix all 34 enabled configured sources through checkpointed LangGraph into isolated SQLite",
+  "command_mode": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1; discover with capture disabled and isolated directory",
+  "directory": "data/acceptance/oii-338-full-configured-graph-post-budget-2026-09-29",
+  "run_id": "83445d7c08f841b99c65b799eb91c292",
+  "status": "partial",
+  "sources": 34,
+  "checked": 32722,
+  "added": 100,
+  "errors": 10,
+  "failures": [
+    {
+      "company": "provider-collector",
+      "error": "⚠️  workday: NVIDIA truncated at max_pages=100 (2000 of 2000 jobs) — raise max_pages on this entry for more",
+      "kind": "coverage_warning"
+    },
+    {
+      "company": "provider-collector",
+      "error": "⚠️  workday: Walmart China truncated at max_pages=100 (1887 of 2000 jobs) — raise max_pages on this entry for more",
+      "kind": "coverage_warning"
+    },
+    {
+      "company": "Microsoft",
+      "error": "Provider collection stopped before all pages were fetched",
+      "kind": "coverage_warning",
+      "reason": "network"
+    },
+    {
+      "company": "NVIDIA",
+      "error": "Provider collection stopped before all pages were fetched",
+      "kind": "coverage_warning",
+      "reason": "page_cap"
+    },
+    {
+      "company": "Qualcomm",
+      "error": "Provider collection stopped before all pages were fetched",
+      "kind": "coverage_warning",
+      "reason": "auth"
+    },
+    {
+      "company": "IBM",
+      "error": "ibm-careers: search count or page changed",
+      "kind": "unknown"
+    },
+    {
+      "company": "HSBC",
+      "error": "HTTP 403 Forbidden",
+      "kind": "auth"
+    },
+    {
+      "company": "Kering",
+      "error": "Provider collection stopped before all pages were fetched",
+      "kind": "coverage_warning",
+      "reason": "auth"
+    },
+    {
+      "company": "Walmart China",
+      "error": "Provider collection stopped before all pages were fetched",
+      "kind": "coverage_warning",
+      "reason": "page_cap"
+    },
+    {
+      "company": "IKEA China",
+      "error": "ikea: empty page 103 before result end",
+      "kind": "unknown"
+    }
+  ],
+  "counts": {
+    "opportunities": 100,
+    "source_evidence": 100,
+    "scan_runs": 1,
+    "source_health": 34
+  },
+  "incomplete_health": [
+    [
+      "HSBC",
+      "auth"
+    ],
+    [
+      "IBM",
+      "unknown"
+    ],
+    [
+      "IKEA China",
+      "unknown"
+    ],
+    [
+      "Kering",
+      "auth"
+    ],
+    [
+      "Microsoft",
+      "network"
+    ],
+    [
+      "NVIDIA",
+      "incomplete"
+    ],
+    [
+      "Qualcomm",
+      "auth"
+    ],
+    [
+      "Walmart China",
+      "incomplete"
+    ]
+  ],
+  "collected_targets": 34,
+  "decision_status": "partial",
+  "checkpoint_references_only": true,
+  "graph_db_bytes": 28672,
+  "result_sha256": "f4ff5ecaf981c28aecf4b87fbc1cc3f0d81a49ebb24fa806cbd8717cc94f7533",
+  "collected_sha256": "b91079327ecf13ad699e8f76a2f22d1d13ace76aab8a53f3294135747c3f3427",
+  "decision_sha256": "9c313ce8031bce45928699a8ec86ba41ff62d541235e17cc58d9fdda9ba33094",
+  "isolated_database_sha256": "72bde9ebd643546d2ebf5f0c45926358b5125fe4c8f823db97dce7d761b27696",
+  "canonical_database_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "acceptance_limit": "The all-source graph and persistence path completed, but source coverage is partial. Current upstream pagination/auth failures and IBM/IKEA provider errors remain; positive or complete coverage cannot be inferred for those sources."
+}

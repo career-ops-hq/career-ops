@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { runPrescreen } from '../prescreen.mjs';
-import { persistScanPrescreens } from '../scan.mjs';
+import { persistScanPrescreens } from './fixtures/legacy-scan-helpers.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'career-ops-prescreen-'));
 const complete = {

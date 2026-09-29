@@ -61,7 +61,7 @@ for (const flag of ['--posted-after', '--posted-before']) {
     assert.doesNotMatch(r.all, expects, 'a valid date must not be rejected');
     // Proof it got PAST the date gate rather than never reaching it: the run
     // stops at the pinned-missing portals file, which is checked afterwards.
-    assert.match(r.all, /portals\.yml not found|not found/i);
+    assert.match(r.all, /Portal configuration is missing/i);
   });
 
   test(`${flag} with no operand is rejected, not treated as absent`, () => {
@@ -75,7 +75,7 @@ test('--company=VALUE reaches the filter (regression for the = form)', () => {
   // A bare indexOf missed this too, silently scanning every tracked company.
   const r = runScan('--company=acme');
   assert.doesNotMatch(r.all, /--company requires a value/);
-  assert.match(r.all, /portals\.yml not found|not found/i);
+  assert.match(r.all, /Portal configuration is missing/i);
 });
 
 test('--company with no operand is rejected', () => {

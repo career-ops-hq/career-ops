@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-28",
+  "scope": "Real public VC-seed board failure through isolated Python reverse discovery",
+  "source_capture": "data/acceptance/yc-full-2026-09-28/output.json",
+  "source_sha256": "6204bcbb86dafee42c853731b6ace090480096401e96d472bed4150e8014f73a",
+  "selected_company": "Mantle",
+  "selected_board": "https://job-boards.greenhouse.io/mantle-2",
+  "selection": "First company from the saved official YC catalogue; one-company --limit sample",
+  "summary": "data/acceptance/oii-338-yc-first-negative/summary.json",
+  "summary_sha256": "547ec686e8d6f72a1afd23586dbf77b0f3a45f368bfe4abc284462a926cb7be2",
+  "result": {
+    "status": "partial",
+    "companies_available": 6258,
+    "companies_scanned": 1,
+    "unreachable_boards": 1,
+    "provider_error": "HTTP 404 Not Found",
+    "dataset_status": "partial",
+    "source_health": "incomplete",
+    "opportunities": 0,
+    "scan_runs": 1,
+    "checkpoint_retained": false
+  },
+  "acceptance_limit": "A single real negative board path, not a full YC sweep or evidence that every catalogue company has a Greenhouse board. No CV, model call, application or message was involved."
+}

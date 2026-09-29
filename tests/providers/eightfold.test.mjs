@@ -92,6 +92,12 @@ try {
   } else {
     fail(`api precedence returned ${JSON.stringify(apiFirst)}`);
   }
+  const hsbc = ef.detect({ name: 'HSBC', api: 'https://portal.careers.hsbc.com/api/apply/v2/jobs?domain=hsbc.com' });
+  if (hostOf(hsbc?.url) === 'portal.careers.hsbc.com' && new URL(hsbc.url).searchParams.get('domain') === 'hsbc.com') {
+    pass('eightfold.detect() accepts the pinned HSBC public API host');
+  } else {
+    fail(`HSBC API resolution returned ${JSON.stringify(hsbc)}`);
+  }
 
   // ── detect: SSRF pin (do not delete) ────────────────────────────────
   // The host regex is what stands between a portals.yml entry and an arbitrary
@@ -100,6 +106,7 @@ try {
     // branded CNAME — a real tenant's board, but not *.eightfold.ai
     { name: 'B', careers_url: 'https://careers.acme.example/careers' },
     { name: 'B', careers_url: 'https://evil.example/careers' },
+    { name: 'B', api: 'https://portal.careers.hsbc.com.evil.example/api/apply/v2/jobs' },
     // the apex itself and multi-label subdomains are not tenant hosts
     { name: 'B', careers_url: 'https://eightfold.ai/careers' },
     { name: 'B', careers_url: 'https://a.b.eightfold.ai/careers' },
@@ -282,8 +289,8 @@ try {
     { name: 'Big', careers_url: 'https://big.eightfold.ai/careers', max_pages: 4 },
     capped.ctx,
   );
-  if (capped.calls.length === 4 && cappedJobs.length === 40) {
-    pass('eightfold.fetch() honors max_pages on the entry (4 pages → 40 jobs)');
+  if (capped.calls.length === 4 && cappedJobs.length === 40 && cappedJobs.collectionTruncated === true) {
+    pass('eightfold.fetch() honors max_pages and marks incomplete collection');
   } else {
     fail(`max_pages: ${capped.calls.length} requests, ${cappedJobs.length} jobs (expected 4 / 40)`);
   }

@@ -1,0 +1,288 @@
+{
+  "captured_at": "2026-09-28",
+  "local_raw_capture": "data/acceptance/enabled-provider-matrix-2026-09-28/output.json",
+  "raw_capture_sha256": "69463410745935abfb9f48547942710b9bf701660ad7c5f103e47c3de6e31002",
+  "enabled_sources": 34,
+  "classifications": {
+    "error": 2,
+    "truncated": 2,
+    "complete": 27,
+    "handoff": 2,
+    "empty": 1
+  },
+  "sources": [
+    {
+      "company": "Microsoft",
+      "classification": "error",
+      "provider": "pcsx",
+      "jobs": 0,
+      "truncation_kind": null,
+      "error": "pcsx/Microsoft: timed out after 300s"
+    },
+    {
+      "company": "SAP",
+      "classification": "error",
+      "provider": "successfactors",
+      "jobs": 0,
+      "truncation_kind": null,
+      "error": "This operation was aborted"
+    },
+    {
+      "company": "NVIDIA",
+      "classification": "truncated",
+      "provider": "workday",
+      "jobs": 1996,
+      "truncation_kind": "page_cap",
+      "error": null
+    },
+    {
+      "company": "Qualcomm",
+      "classification": "complete",
+      "provider": "pcsx",
+      "jobs": 1987,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Siemens",
+      "classification": "complete",
+      "provider": "avature",
+      "jobs": 209,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "IBM",
+      "classification": "handoff",
+      "provider": null,
+      "jobs": 0,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Ericsson",
+      "classification": "handoff",
+      "provider": null,
+      "jobs": 0,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Cisco",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 1315,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Bosch",
+      "classification": "complete",
+      "provider": "smartrecruiters",
+      "jobs": 4790,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "BMW Group",
+      "classification": "complete",
+      "provider": "successfactors",
+      "jobs": 615,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Mercedes-Benz",
+      "classification": "complete",
+      "provider": "beesite",
+      "jobs": 2593,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Volvo Cars",
+      "classification": "complete",
+      "provider": "successfactors",
+      "jobs": 43,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Schneider Electric",
+      "classification": "complete",
+      "provider": "jibeapply",
+      "jobs": 634,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "ABB",
+      "classification": "complete",
+      "provider": "phenom",
+      "jobs": 2050,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Honeywell",
+      "classification": "complete",
+      "provider": "oraclecloud",
+      "jobs": 999,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Philips",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 854,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "HSBC",
+      "classification": "complete",
+      "provider": "eightfold",
+      "jobs": 1487,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Standard Chartered",
+      "classification": "complete",
+      "provider": "successfactors",
+      "jobs": 777,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "State Street",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 1305,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "AIA",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 984,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Prudential plc",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 506,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Allianz",
+      "classification": "complete",
+      "provider": "phenom",
+      "jobs": 13,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "HKEX",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 174,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "MTR Corporation",
+      "classification": "complete",
+      "provider": "mtr-taleo",
+      "jobs": 25,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "AstraZeneca",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 1153,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Roche",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 1159,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Novartis",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 848,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Sanofi",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 828,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "GSK",
+      "classification": "complete",
+      "provider": "phenom",
+      "jobs": 630,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Bayer",
+      "classification": "complete",
+      "provider": "successfactors",
+      "jobs": 400,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Kering",
+      "classification": "empty",
+      "provider": "workday",
+      "jobs": 0,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "Walmart China",
+      "classification": "truncated",
+      "provider": "workday",
+      "jobs": 2000,
+      "truncation_kind": "page_cap",
+      "error": null
+    },
+    {
+      "company": "IKEA China",
+      "classification": "complete",
+      "provider": "ikea",
+      "jobs": 1489,
+      "truncation_kind": null,
+      "error": null
+    },
+    {
+      "company": "LEGO Group",
+      "classification": "complete",
+      "provider": "workday",
+      "jobs": 443,
+      "truncation_kind": null,
+      "error": null
+    }
+  ],
+  "acceptance_limit": "Raw public provider collection only; full Python discovery, JD capture and scan/score/apply acceptance remain separate"
+}

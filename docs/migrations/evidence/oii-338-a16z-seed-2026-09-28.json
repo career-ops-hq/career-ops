@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://a16z.com/portfolio/",
+  "source_html_sha256": "459d54f234d2de8d3aef7d6431398ffa53f750f13c587da0e028336e63564a03",
+  "source_html_bytes": 3616376,
+  "local_source_capture": "data/acceptance/oii-338-a16z-seed/source-captures/a16z-portfolio-2026-09-28.html.gz",
+  "local_capture_sha256": "fa8e396e73e5a3720c89cb3ee85c4f946e21dbb8f39c80c9a65610799fcb09dd",
+  "parsed_companies": 860,
+  "selected_company": "Databricks",
+  "selected_board": "https://job-boards.greenhouse.io/databricks",
+  "direct_board_jobs": 888,
+  "isolated_python_run": {
+    "since_days": 3,
+    "companies_scanned": 1,
+    "postings_kept": 0,
+    "unreachable_boards": 0,
+    "status": "completed",
+    "scan_runs": 1,
+    "source_health_rows": 1
+  },
+  "acceptance_limit": "Historical Databricks rejection sample before --limit status changed to partial. The later Flexport positive sample is recorded in oii-338-a16z-flexport-positive-2026-09-28.json; neither run is a full portfolio sweep."
+}

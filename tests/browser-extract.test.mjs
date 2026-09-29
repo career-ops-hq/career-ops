@@ -11,7 +11,46 @@ console.log('\nbrowser-extract.mjs (config + normalizers)');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
-  const { resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs } = mod;
+  const { resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
+    readPage, microsoftStructuredJd } = mod;
+
+  const microsoftUrl = 'https://apply.careers.microsoft.com/careers/job/123456';
+  const posting = JSON.stringify({ '@type': 'JobPosting', url: microsoftUrl,
+    title: 'Software Engineer', description: 'Build reviewed software. '.repeat(15) });
+  if (microsoftStructuredJd([posting], microsoftUrl)?.text.startsWith('Build reviewed software.')
+      && microsoftStructuredJd([posting], microsoftUrl + '7') === null) {
+    pass('Microsoft structured JD requires the exact official posting URL');
+  } else fail('Microsoft structured JD accepted a mismatched URL');
+  const structuredPage = await readPage({
+    url: () => microsoftUrl,
+    locator: () => ({ allTextContents: async () => [posting] }),
+    waitForFunction: async () => { throw new Error('Waited for visible Microsoft hydration despite JSON-LD'); },
+  });
+  if (structuredPage.title === 'Software Engineer') pass('Microsoft JD reads official JobPosting JSON-LD');
+  else fail('Microsoft JD missed structured content');
+
+  for (const host of ['careers.qualcomm.com', 'apply.careers.microsoft.com']) {
+    let waitedForContent = false;
+    await readPage({
+      url: () => `https://${host}/careers/job/123456`,
+      locator: () => ({ allTextContents: async () => [] }),
+      waitForFunction: async (check) => { waitedForContent = check.toString().includes('Job ID'); },
+      waitForTimeout: async () => { throw new Error('Used a fixed wait for a PCSX JD'); },
+      evaluate: async () => ({ title: 'Role', text: 'Full JD', anchors: [] }),
+    });
+    if (waitedForContent) pass(`${host} JD waits for substantive hydrated content`);
+    else fail(`${host} JD did not wait for content`);
+  }
+
+  let waitedForIbm = false;
+  await readPage({
+    url: () => 'https://careers.ibm.com/en_US/careers/JobDetail?jobId=131606',
+    waitForFunction: async (check) => { waitedForIbm = check.toString().includes('document.title'); },
+    waitForTimeout: async () => { throw new Error('Used a fixed wait for an IBM JD'); },
+    evaluate: async () => ({ title: 'IBM Role', text: 'Full JD', anchors: [] }),
+  });
+  if (waitedForIbm) pass('IBM JD waits for hydrated content after its locale redirect');
+  else fail('IBM JD did not wait for content');
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-extractor-'));

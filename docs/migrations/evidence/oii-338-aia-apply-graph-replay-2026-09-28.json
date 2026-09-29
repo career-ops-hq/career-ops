@@ -1,0 +1,12 @@
+{
+  "scope": "OII-338 checkpointed LangGraph apply draft replay against the user-accepted AIA v002 package",
+  "source_store": "data/acceptance/oii-338-aia-current-code-2026-09-28/opportunities.db",
+  "isolated_replay": "data/acceptance/oii-338-aia-apply-graph-replay/workflow-drafts",
+  "input_fingerprint": "659cdd2f7db3b21e31bd64f04c0b322fe1c76bf61b82fc7818bd78b40e2737a1",
+  "frozen_model_trace_sha256": "5c538786a63b59e62f8a054650ac08cc5f9dc8d68296c22448268e4624aa5229",
+  "changed_fields": ["resume_payload"],
+  "accepted_package_sha256": "fff0e28609c6dacf0491d6634a081d34cfc7544b412bcf8bb2d2b5f115449764",
+  "replayed_package_sha256": "fff0e28609c6dacf0491d6634a081d34cfc7544b412bcf8bb2d2b5f115449764",
+  "external_model_calls": 0,
+  "limitations": "Replays the frozen AIA v002 revision patch against the prior package through the new apply graph. It does not repeat live generation, PDF rendering, package confirmation, or application submission. The original acceptance store was opened read-only."
+}

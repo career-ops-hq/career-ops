@@ -8,7 +8,7 @@
 // iCIMS list pages carry title/location/URL but NO posted date; dates live
 // only on the job detail page's JSON-LD (schema.org JobPosting `datePosted`).
 // The provider therefore returns undated jobs plus an `enrichDate(job, ctx)`
-// hook — scan-ats-full.mjs calls it only for jobs that already passed the
+// hook — reverse discovery calls it only for jobs that already passed the
 // cheap title/location filters, so a 10k-tenant sweep pays detail-page
 // requests for real candidates only, never for noise.
 

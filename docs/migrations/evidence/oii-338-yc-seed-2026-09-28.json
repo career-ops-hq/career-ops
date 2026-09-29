@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://api.ycombinator.com/v0.1/companies?page=1&per_page=1000",
+  "local_source_capture": "data/acceptance/yc-full-2026-09-28/output.json",
+  "source_capture_sha256": "6204bcbb86dafee42c853731b6ace090480096401e96d472bed4150e8014f73a",
+  "parsed_companies": 6258,
+  "source_partial": false,
+  "selected_company": "Stripe",
+  "selection": "Selected from the complete captured directory and placed first for a one-company isolated Python sample",
+  "selected_board": "https://job-boards.greenhouse.io/stripe",
+  "direct_board_collection": {
+    "provider": "greenhouse",
+    "jobs": 701,
+    "truncated": false
+  },
+  "isolated_python_run": {
+    "directory": "data/acceptance/yc-full-2026-09-28/isolated",
+    "since_days": 30,
+    "companies_available": 6258,
+    "companies_scanned": 1,
+    "dataset_status": "ok",
+    "status": "completed",
+    "postings_kept": 0,
+    "errors": 0,
+    "scan_runs": 1,
+    "source_health": "reachable"
+  },
+  "acceptance_limit": "Historical Stripe rejection sample before --limit status changed to partial. The later Nex positive sample is recorded in oii-338-yc-nex-positive-2026-09-28.json; neither run is a full-company sweep."
+}

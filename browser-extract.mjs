@@ -92,6 +92,20 @@ export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
   };
 }
 
+/** Read only a JobPosting whose canonical URL matches the requested posting. */
+export function microsoftStructuredJd(scripts, expectedUrl) {
+  for (const source of scripts) {
+    try {
+      const posting = JSON.parse(source);
+      if (posting?.['@type'] !== 'JobPosting' || new URL(posting.url).href !== expectedUrl
+          || typeof posting.title !== 'string' || typeof posting.description !== 'string'
+          || posting.description.trim().length < 200) continue;
+      return { title: posting.title, text: posting.description, anchors: [] };
+    } catch {}
+  }
+  return null;
+}
+
 /**
  * Shape a listing-mode result: keep visible anchors that look like individual
  * job postings, deduped by resolved URL, capped at `max`. Pure — exported for
@@ -198,11 +212,13 @@ export function parseArgs(argv) {
 /** Extract readable content and visible links without changing the live document. */
 async function readDom(page) {
   return page.evaluate(() => {
-    const title = ((location.hostname.endsWith('.myworkdayjobs.com') ? document.title : '')
-      || document.querySelector('h1')?.innerText || document.title || '').trim();
+    const title = (location.hostname === 'careers.ibm.com'
+      ? document.title.replace(/ - \d+ - IBM$/, '')
+      : (location.hostname.endsWith('.myworkdayjobs.com') ? document.title : '')
+        || document.querySelector('h1')?.innerText || document.title || '').trim();
 
-    const root =
-      document.querySelector('main, [role="main"], article') || document.body;
+    const root = location.hostname === 'careers.ibm.com'
+      ? document.body : document.querySelector('main, [role="main"], article') || document.body;
     let text = '';
     if (root) {
       const clone = root.cloneNode(true);
@@ -226,12 +242,30 @@ async function readDom(page) {
 
 /** Workday renders its shell before the JD; wait for the description, not a fixed sleep. */
 export async function readPage(page, { mode = 'jd', timeout = DEFAULT_TIMEOUT_MS } = {}) {
-  if (mode === 'jd' && new URL(page.url()).hostname.endsWith('.myworkdayjobs.com')) {
+  const url = new URL(page.url());
+  if (mode === 'jd' && url.hostname === 'apply.careers.microsoft.com' && /^\/careers\/job\/\d+$/.test(url.pathname)) {
+    const posting = microsoftStructuredJd(
+      await page.locator('script[type="application/ld+json"]').allTextContents(), url.href,
+    );
+    if (posting) return posting;
+  }
+  if (mode === 'jd' && url.hostname.endsWith('.myworkdayjobs.com')) {
     await page.waitForFunction(() => {
       const description = document.querySelector('[data-automation-id="jobPostingDescription"]');
       return Boolean(description?.innerText?.trim())
         || /job (?:is no longer available|has been removed|you are looking for.*(?:not|no longer))|position (?:has been filled|is no longer available)/i.test(document.body?.innerText ?? '');
     }, undefined, { timeout });
+  } else if (mode === 'jd' && ['careers.qualcomm.com', 'apply.careers.microsoft.com'].includes(url.hostname)
+             && /^\/careers\/job\/\d+$/.test(url.pathname)) {
+    await page.waitForFunction(() => {
+      const text = document.body?.innerText ?? '';
+      return text.length > 500 && /Job ID\s*\d+/i.test(text);
+    }, undefined, { timeout });
+  } else if (mode === 'jd' && url.hostname === 'careers.ibm.com'
+             && /^\/(?:[a-z]{2}_[A-Z]{2}\/)?careers\/JobDetail$/.test(url.pathname)
+             && /^\d+$/.test(url.searchParams.get('jobId') || '')) {
+    await page.waitForFunction(() => document.body?.innerText?.length > 1000
+      && /IBM/.test(document.title), undefined, { timeout });
   } else await page.waitForTimeout(Math.min(HYDRATION_WAIT_MS, timeout));
   return readDom(page);
 }

@@ -1,0 +1,52 @@
+{
+  "scope": "OII-338 real AIA scan, score and apply execution through the current LangGraph subgraphs",
+  "isolated_database": "data/acceptance/oii-338-aia-live-scan-graph-2026-09-28/opportunities.db",
+  "source_url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+  "scan": {
+    "task_id": "17996ea5-3d7a-4ebc-b1e4-1d22ed04e849",
+    "status": "completed",
+    "jd_sha256": "4566c049bcb9f47f524e144118d07ea14f952614a59bb9e37bde986972c913ab",
+    "liveness": "active",
+    "prescreen": "uncertain",
+    "first_attempt_failure": "Default model subprocess interpreter lacked LangGraph; no model call was made.",
+    "recovery": "The same task resumed after switching the model subprocess to the workflow interpreter."
+  },
+  "score": {
+    "task_id": "60bcda38-bdc0-49a0-8439-f7a2eb08330f",
+    "status": "completed",
+    "report_sha256": "a68145f15806df67d1b7a1d3d5fd5daea12d3cfa4fe28e4e8e543108172eec81",
+    "lower": 2.0,
+    "upper": 5.0,
+    "coverage": 0.25,
+    "recovery": "The same task retained research and assessment checkpoints across invalid research citations and failed repairs, then published after a targeted citation repair.",
+    "limitation": "Research produced no frozen retrieved webpage sources. Compensation, team and company remain Unknown; this is a conservative technical sample, not a replacement for the separately accepted AIA score report."
+  },
+  "apply": {
+    "task_id": "4de73ab2-eb99-4826-a877-f3ec44c596d2",
+    "status": "waiting",
+    "waiting_reason": "user_review",
+    "package_version": 1,
+    "resume_pdf": "data/acceptance/oii-338-aia-live-scan-graph-2026-09-28/artifacts/4de73ab2-eb99-4826-a877-f3ec44c596d2/d3b884113db449d2636b81e2ceb330f491c6f46c09339445bed589f0e6d1420b/package-v001/resume.pdf",
+    "pdf_sha256": "c1e44a1f40b4d8ce91712dc844ab20337ee6a68b834fb22c162189706b3d06d9",
+    "pdf_pages": 3,
+    "recovery": "The same task resumed after accepting a model-produced basics grouping, then exported via the configured loopback Reactive Resume API. It stopped at human review.",
+    "limitation": "This new v001 package has not been reviewed for factual quality or layout by the user. The separately accepted AIA v002 package remains the apply quality sample. No confirmation, application submission or message occurred."
+  },
+  "business_state": {
+    "opportunity_state": "evaluated",
+    "application_state": "none",
+    "scan_results": 1,
+    "score_results": 1,
+    "evaluations": 1,
+    "deliveries": 0
+  },
+  "completed_graph_replay": {
+    "model_calls_allowed": 0,
+    "scan_outcome": "jd_report",
+    "score_report_sha256": "a68145f15806df67d1b7a1d3d5fd5daea12d3cfa4fe28e4e8e543108172eec81",
+    "apply_outcome": "package",
+    "result": "All three completed subgraphs returned their saved results with model_adapter.call_agent patched to raise on any call."
+  },
+  "canonical_db_sha256_after": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "known_test_artifact": "The apply task's stored tool-call count includes replay overcount from before the counting fix and failed PDF exports. The call traces contain three apply model calls. This historical isolated counter is not evidence that the corrected replay counter has been exercised live."
+}

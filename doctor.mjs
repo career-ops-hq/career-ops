@@ -263,7 +263,7 @@ function isPlaywrightMcpConfigured(root, activeCli) {
     return hasPlaywrightIn(readConfigIfPresent(file));
   });
   if (inProject) return true;
-  return false;
+  return entry.plugins === true && isPlaywrightMcpFromPlugin();
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >

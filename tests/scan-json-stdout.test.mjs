@@ -3,8 +3,7 @@
 //
 // scan.mjs loads dotenv at module top level. dotenv v17 prints a startup
 // banner to stdout, gated on the `quiet` option rather than on isTTY, so it
-// fires even when stdout is a pipe. scan-ats-full.mjs imports scan.mjs, which
-// means the import alone is enough to put that banner on the stdout channel
+// fires even when stdout is a pipe. Importing scan.mjs could put that banner on the stdout channel
 // that --json reserves for a single JSON object. Consumers that accumulate
 // stdout and JSON.parse it then fail on the leading banner.
 //
@@ -40,7 +39,7 @@ try {
 
     // The contract a --json consumer depends on: accumulate the child's stdout,
     // JSON.parse it, get the object back. Emitting the JSON after the import
-    // reproduces the ordering that scan-ats-full.mjs --json produces.
+    // reproduces the ordering a JSON-emitting importer would produce.
     const jsonOut = run(NODE, [
       '-e',
       `await import(${scanUrl}); process.stdout.write(JSON.stringify({ date: '2026-01-01', offers: [] }));`,

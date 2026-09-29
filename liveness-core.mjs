@@ -189,7 +189,7 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   }
 
   if (bodyText.trim().length < MIN_CONTENT_CHARS) {
-    return { result: 'expired', code: 'insufficient_content', reason: 'insufficient content — likely nav/footer only' };
+    return { result: 'uncertain', code: 'insufficient_content', reason: 'insufficient content — liveness unconfirmed' };
   }
 
   return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found' };

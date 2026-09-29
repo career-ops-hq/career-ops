@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-28",
+  "company": "HSBC",
+  "provider": "eightfold",
+  "api_host": "portal.careers.hsbc.com",
+  "raw_output_path": "/Users/oii/dev/career-ops/data/acceptance/oii-338-hsbc-2026-09-28/output.json",
+  "raw_output_sha256": "0091155e4482c878a1195ee2050542d6d5778d9a623ae976cd84a262009c8320",
+  "count": 1474,
+  "truncated": false,
+  "python_discovery": {
+    "status": "completed",
+    "checked": 1474,
+    "added": 7,
+    "errors": 0
+  },
+  "personal_data_sent": false
+}

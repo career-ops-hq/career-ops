@@ -35,6 +35,48 @@ assert frozen["sources"] == [{"id": "web1", "text": "Exact\nsource"}]
 assert frozen["research"]["findings"][1]["source"] is None
 assert frozen["research"]["findings"][1]["quote"] is None
 
+responses = iter(({key: value for key, value in research.items() if key != "findings"},
+                  {**research, "findings": []}))
+attempts = []
+original_create_agent = adapter.create_agent
+
+
+class ResearchAgent:
+    def __init__(self):
+        self._invoke_tool = lambda *_args, **_kwargs: None
+        self.request_overrides = {}
+
+    def run_conversation(self, _prompt):
+        attempts.append(True)
+        return {"completed": True, "final_response": json.dumps(next(responses)), "messages": []}
+
+    def close(self):
+        pass
+
+
+try:
+    adapter.create_agent = lambda **_kwargs: ResearchAgent()
+    with tempfile.TemporaryDirectory() as temporary:
+        result, _ = adapter.call_agent("research", "research prompt", ["web"], Path(temporary))
+    assert len(attempts) == 2
+    assert result["research"]["findings"] == []
+finally:
+    adapter.create_agent = original_create_agent
+
+class ToolAgent:
+    def __init__(self):
+        self._invoke_tool = lambda *_args, **_kwargs: "ok"
+
+
+usage = {}
+tool_agent = ToolAgent()
+adapter.limit_research(tool_agent, usage)
+for _ in range(5):
+    assert tool_agent._invoke_tool("web_search", {}) == "ok"
+assert tool_agent._invoke_tool("web_search", {}) != "ok"
+assert tool_agent._invoke_tool("web_extract", {"urls": ["a", "b", "c", "d"]}) == "ok"
+assert usage == {"tool_calls": 6}
+
 for years, expected in [(0, None), (None, None), (3, 3), (False, False)]:
     evidence = adapter.attach_evidence({
         **dict.fromkeys((

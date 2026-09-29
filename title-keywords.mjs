@@ -3,8 +3,8 @@
 //
 // It lives in its own module because there are two such paths and they must not
 // drift: scan.mjs (the main pipeline) and openrouter-runner.mjs (the no-Claude
-// path, which deliberately does not import scan.mjs because scan.mjs creates
-// data/ at import time). Same reason user-agent.mjs and profile-language.mjs
+// path, which deliberately does not import the scanner's broad dependencies).
+// Same reason user-agent.mjs and profile-language.mjs
 // are separate modules rather than exports of a bigger one.
 //
 // Opt-in whole-word matching for a keyword too long to get it automatically.

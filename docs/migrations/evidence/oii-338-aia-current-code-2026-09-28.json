@@ -1,0 +1,42 @@
+{
+  "scope": "OII-338 current-code AIA LangGraph scan/score/apply isolated acceptance",
+  "date": "2026-09-28",
+  "database": "data/acceptance/oii-338-aia-current-code-2026-09-28/opportunities.db",
+  "source_url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+  "scan": {
+    "outcome": "jd_report",
+    "jd_chars": 5873,
+    "jd_sha256": "4566c049bcb9f47f524e144118d07ea14f952614a59bb9e37bde986972c913ab",
+    "liveness": "active",
+    "prescreen": "uncertain"
+  },
+  "score": {
+    "opportunity_state": "evaluated",
+    "eligibility": "unknown",
+    "lower": 1.75,
+    "upper": 4.75,
+    "coverage": 0.25,
+    "report_sha256": "9db98fe413cc0a552033f74faff2c221ac714fe45e11d49ee81648a50ffa5ad9",
+    "report_file_sha256": "9db98fe413cc0a552033f74faff2c221ac714fe45e11d49ee81648a50ffa5ad9",
+    "business_checkpoint": "publish",
+    "research_queries": 3,
+    "research_findings": 0
+  },
+  "apply": {
+    "status": "completed",
+    "outcome": "package_confirmed",
+    "user_review": "accepted as OII-338 acceptance sample on 2026-09-28",
+    "confirmed_at": "2026-09-28 08:53:50",
+    "package_version": 2,
+    "pdf_path": "data/acceptance/oii-338-aia-current-code-2026-09-28/artifacts/591c842d-4365-4b21-8026-75357d9767e6/3323e77be10057cbbc1f3aecce0e24ab4b3863e371e0f1e6d4617b5f502f1645/package-v002/resume.pdf",
+    "pdf_sha256": "66370f48e445179c898577dcff08dfc6b4df4071c968dd64e1aa82dfd6466fe1",
+    "pdf_pages": 2,
+    "application_state": "none",
+    "delivery_count": 0
+  },
+  "limitations": [
+    "Earlier v001 PDF contained a render error; v002 is the checked artifact.",
+    "Research returned no retrieved findings; compensation, team and company remain unknown.",
+    "No application submission, Discord notification, or canonical database write occurred."
+  ]
+}

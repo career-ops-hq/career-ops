@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://apply.careers.microsoft.com/api/pcsx/search?domain=microsoft.com",
+  "local_raw_capture": "data/acceptance/microsoft-pcsx-2026-09-28/output.json",
+  "raw_capture_sha256": "1ba7785ca1e4f1d98b2361f1b0b4d95e866ae4685bee626025d2c0d7f43616f1",
+  "provider": "pcsx",
+  "advertised_and_fetched_jobs": 2301,
+  "unique_job_urls": 2301,
+  "truncated": false,
+  "isolated_python_run": {
+    "directory": "data/acceptance/microsoft-pcsx-2026-09-28/python-verified",
+    "status": "completed",
+    "checked": 2301,
+    "added": 9,
+    "errors": 0,
+    "handoff": 0,
+    "opportunities": 9,
+    "source_evidence_rows": 9,
+    "scan_runs": 1,
+    "source_health_rows": 1,
+    "jd_lengths": [3572, 2316, 1629, 2031, 1136, 1962, 2433, 2200, 1599],
+    "jd_sha256": [
+      "746d94ee3e8815e48d6217fa39f97b8d9b63c227cadcc9cd300b698285adcb40",
+      "0d70705a1eec2578b6f8c10be3d5fb7466d8fc3365bd337b39ca255f5e094741",
+      "f9af9c118155fca60973be7201ebc4678f2a0503024bab9b162153a3a01d6470",
+      "0428aa4db2f82acb10b1e81563861d4873ae97ad0077f5f6b2d4087c49599996",
+      "06bfc3c58fa329a3b1f862f96763d2d53c7fe2ac9b61cd84b253e350de88af8c",
+      "769e1de7b349f49950c0bb74ec961b5828a54bffb1908adbb706df935b8c2c2b",
+      "b4f71bf70cb2eb2331414b351ac67a4c926f049239729481598fc0a4d1483a7f",
+      "64b5736cae9e6504914d7938b424e4872662389aee7dcf2e1b7b6159fde03c74",
+      "36f26976f46e32e4f2753cbb764671f3ff869db0abe35e35fb410bde0156a5ab"
+    ]
+  },
+  "prior_failures": "Earlier official API attempts returned HTTP 429; the initial guarded Microsoft browser read saw only a Single Position page shell. Bounded provider retry and exact-URL JobPosting JSON-LD extraction corrected these before the verified run.",
+  "acceptance_limit": "Complete real provider collection and Python discovery with nine substantive JD captures; scan/score/apply quality and other workflow branches remain separate acceptance gates"
+}

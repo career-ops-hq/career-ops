@@ -14,7 +14,8 @@
 // while that conversion sat in review — which is exactly why the rule needs a
 // guard rather than a one-time sweep.
 //
-// Scoped to TRACKED source, enumerated with `git ls-files`. A recursive walk with
+// Scoped to tracked source still present in the worktree, enumerated with
+// `git ls-files`. A recursive walk with
 // a skip-list cannot work here: it also reads whatever untracked scratch the tree
 // happens to be carrying — a killed test-all.mjs run leaves a `.tmp-script-test-*`
 // copy of the whole repo behind, and every pre-conversion file in it reports as an
@@ -43,9 +44,12 @@ function sourceFiles() {
     encoding: 'utf-8',
     maxBuffer: 64 * 1024 * 1024,
   });
+  const deleted = new Set(execFileSync('git', ['-C', ROOT, 'ls-files', '--deleted', '-z'], {
+    encoding: 'utf-8',
+  }).split('\0'));
   return out
     .split('\0')
-    .filter((p) => p && EXTS.some((e) => p.endsWith(e)))
+    .filter((p) => p && !deleted.has(p) && EXTS.some((e) => p.endsWith(e)))
     .map((p) => join(ROOT, p));
 }
 

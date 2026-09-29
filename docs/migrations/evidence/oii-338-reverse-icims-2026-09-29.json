@@ -1,0 +1,62 @@
+{
+  "date": "2026-09-29",
+  "scope": "Current public iCIMS provider collection and selected ISACA board through the Python reverse LangGraph",
+  "directory": "/var/folders/qs/62_5blvx2hn7jq7k0dnn24_40000gn/T/oii338-reverse-icims-hkdd88yh",
+  "raw_provider_samples": [
+    {
+      "board": "isaca",
+      "jobs": 7,
+      "truncated": false,
+      "capped": false
+    },
+    {
+      "board": "intrastaff",
+      "jobs": 91,
+      "truncated": false,
+      "capped": false
+    },
+    {
+      "board": "edmorse",
+      "jobs": 126,
+      "truncated": false,
+      "capped": false
+    },
+    {
+      "board": "blanchard",
+      "jobs": 9,
+      "truncated": false,
+      "capped": false
+    },
+    {
+      "board": "wafd",
+      "jobs": 101,
+      "truncated": false,
+      "capped": false
+    }
+  ],
+  "graph_summary": {
+    "run_id": "f55209649dcc459c80b084e57f17d941",
+    "found": 0,
+    "errors": 0,
+    "sources": [
+      "icims"
+    ],
+    "stopped": false,
+    "dataset_status": {
+      "icims": "ok"
+    }
+  },
+  "source_health": [
+    [
+      "icims",
+      "reachable"
+    ]
+  ],
+  "graph_checkpoint_rows": 6,
+  "decision_sha256": "54e3922251bff7846c43c824998385aad8afe19696198cca6533d305ae111229",
+  "result_sha256": "0e2518ba656ea615141a5d40f8aadc843b1f6b262ee428a557bfdb080803ba2e",
+  "batch_checkpoint_removed": true,
+  "isolated_database_sha256": "3381354e9120f013216d8e7e0130afefd507d132ea00b3c5958e7b842c8a5d1b",
+  "canonical_database_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "acceptance_limit": "ISACA returned seven raw public jobs but current title/location/content filters retained zero; this proves live iCIMS collection and empty-result publication, not a positive retained iCIMS opportunity or full directory sweep."
+}

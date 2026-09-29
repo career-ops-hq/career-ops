@@ -1,0 +1,71 @@
+{
+  "date": "2026-09-29",
+  "scope": "One selected public board for each Greenhouse, Lever, Ashby, and Workday directory, plus a public a16z portfolio entry overlapping the Greenhouse board, through one Python LangGraph reverse sweep",
+  "source_selection": "Directory and portfolio loader outputs fixed to previously verified public coordinates; provider HTTP collection and Python decisions/publication live",
+  "directory": "/var/folders/qs/62_5blvx2hn7jq7k0dnn24_40000gn/T/oii338-reverse-provider-matrix-jxejk27r",
+  "summary": {
+    "run_id": "c4e62383bc38429490a86a2a2c823cbb",
+    "found": 7,
+    "errors": 0,
+    "sources": [
+      "greenhouse",
+      "lever",
+      "ashby",
+      "workday"
+    ],
+    "stopped": false,
+    "dataset_status": {
+      "greenhouse": "ok",
+      "lever": "ok",
+      "ashby": "ok",
+      "workday": "ok",
+      "a16z": "ok"
+    }
+  },
+  "counts": {
+    "opportunities": 7,
+    "source_evidence": 7,
+    "scan_runs": 1,
+    "source_health": 5
+  },
+  "source_health": [
+    [
+      "a16z",
+      "reachable"
+    ],
+    [
+      "ashby",
+      "reachable"
+    ],
+    [
+      "greenhouse",
+      "reachable"
+    ],
+    [
+      "lever",
+      "reachable"
+    ],
+    [
+      "workday",
+      "reachable"
+    ]
+  ],
+  "retained_by_source": [
+    [
+      "greenhouse-full",
+      3
+    ],
+    [
+      "workday-full",
+      4
+    ]
+  ],
+  "flexport_opportunities_after_directory_and_seed": 3,
+  "graph_checkpoint_rows": 6,
+  "decision_sha256": "aad86849cd46c5099fe389cd9f1b62014babce21af52e8c9a44eec266661088d",
+  "result_sha256": "dc67ed402c341f89144d3fe4a5f00fc869c07d9a6435ab30004c72590aefe859",
+  "batch_checkpoint_removed": true,
+  "isolated_database_sha256": "45fe5ae822936e864b8306bed60e8192804e1552f69971b718ba8c8a12f9471d",
+  "canonical_database_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "acceptance_limit": "Selected public boards show live provider reachability and cross-source deduplication; Lever and Ashby yielded no retained roles under the current filters. Not a full public directory sweep or iCIMS live sample."
+}

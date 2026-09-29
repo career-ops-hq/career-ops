@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-28",
+  "company": "MTR Corporation",
+  "provider": "mtr-taleo",
+  "official_listing_rows": 28,
+  "page_1_rows": 25,
+  "page_2_rows": 3,
+  "page_2_ids_already_on_page_1": 3,
+  "unique_jobs": 25,
+  "page_1_capture": "data/acceptance/oii-338-mtr-2026-09-28/source-captures/page1-2026-09-28.html.gz",
+  "page_1_sha256": "a24ddd6dcbc49492ffa6641f73c3fae30645c43f5ba4937c2ddde528b999079d",
+  "page_2_capture": "data/acceptance/oii-338-mtr-2026-09-28/source-captures/page2-2026-09-28.html.gz",
+  "page_2_sha256": "d7a13359f09c3d6c4b85256084bd0b8c7f15b4fd3c470c584fbc4e7605aaeeaa",
+  "provider_result": {
+    "status": "fetched",
+    "unique_jobs": 25,
+    "truncated": false,
+    "raw_output": "data/acceptance/oii-338-mtr-2026-09-28/duplicate-check-output.json",
+    "raw_output_sha256": "a6bcac3c03d5dbbde03e4d1a34c4db9df50c491bdd16a9ffc8b2e99c09ef3537"
+  },
+  "python_dry_run": {
+    "status": "completed",
+    "checked": 25,
+    "added": 0,
+    "filtered_title": 25,
+    "errors": 0
+  },
+  "personal_data_sent": false
+}

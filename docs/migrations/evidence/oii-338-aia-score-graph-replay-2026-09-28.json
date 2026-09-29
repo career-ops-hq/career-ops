@@ -1,0 +1,12 @@
+{
+  "scope": "OII-338 checkpointed LangGraph score subgraph replay against the user-accepted AIA score",
+  "source_store": "data/acceptance/oii-338-aia-current-budget-2026-09-28/opportunities.db",
+  "isolated_replay": "data/acceptance/oii-338-aia-score-graph-replay/workflow-drafts",
+  "input_fingerprint": "75db491320430cf8f58835f7e584dda0ea382b437adb9b41bd6e2c8718c987f6",
+  "frozen_assessment_sha256": "24326858a0a073643845414fb69d9f3d2afd477cb164b29bd9740abc42d4d68a",
+  "accepted_report_sha256": "11d18ba3155462f63a72d2b5498ef03ef93093c378497b8adedcbea61e5f8e78",
+  "replayed_report_sha256": "11d18ba3155462f63a72d2b5498ef03ef93093c378497b8adedcbea61e5f8e78",
+  "score": {"lower": 3.0, "upper": 4.0, "coverage": 0.75},
+  "external_model_calls": 0,
+  "limitations": "Replays frozen real AIA assessment through the new score graph and report validator. It does not repeat live research or assessment, and it does not validate provider collection. The original acceptance store was opened read-only."
+}

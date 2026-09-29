@@ -23,7 +23,7 @@ try {
     sections: { competencies: 'Core Competencies', experience: 'Work Experience' },
     summary: 'Builds reliable AI systems.',
     competencies: ['LLMOps', 'RAG'],
-    experience: [{ company: 'Acme', role: 'Engineer', dates: '2024 - Present', bullets: ['Shipped <safe> systems'] }],
+    experience: [{ company: 'Acme', role: 'Engineer', dates: '2024 - Present', bullets: ['Shipped <safe> systems', '10000次访问'] }],
     projects: [], education: [], certifications: [], awards: [],
     skills: [{ category: 'Languages', items: 'Python, TypeScript' }],
   };
@@ -65,6 +65,7 @@ try {
   const operations = buildResumePatch(payload);
   assert.equal(operations.find((op) => op.path === '/sections/skills/items').value[0].name, 'Core Competencies');
   assert.match(operations.find((op) => op.path === '/sections/experience/items').value[0].description, /&lt;safe&gt;/);
+  assert.match(operations.find((op) => op.path === '/sections/experience/items').value[0].description, /10000\u00a0次访问/);
   assert.equal(operations.some((op) => op.path.startsWith('/picture')), false, 'the base portrait is preserved');
   assert.equal(operations.find((op) => op.path === '/basics/headline').value, '', 'unverified base content is cleared');
   assert.deepEqual(operations.find((op) => op.path === '/customSections').value, [], 'base custom content is cleared');

@@ -227,11 +227,11 @@ try {
   // Which cap warning fires is keyed on ENTRY PROVENANCE, not on the date
   // bound (#2495). "raise max_pages on this entry for more" is only actionable
   // when the caller has a real portals.yml tracked_companies entry to edit;
-  // scan-ats-full.mjs synthesizes its entries from an external dataset and has
+  // global discovery synthesizes its entries from an external dataset and has
   // nothing to point at, so it gets the terser line.
   //
   // `sinceMs === null` used to stand in for that distinction because
-  // scan-ats-full.mjs was the only caller setting it. Since #2418 `scan.mjs
+  // reverse discovery was the only caller setting it. Since #2418 `scan.mjs
   // --since` sets ctx.sinceMs too, so the proxy silently mislabels a tracked
   // entry as synthesized. These three cases pin the two messages to provenance
   // so the next caller to start setting sinceMs cannot re-couple them.
@@ -266,7 +266,7 @@ try {
     fail(`workday cap warning (--since run): expected the raise-max_pages advice, got ${JSON.stringify(capSinceRun)}`);
   }
 
-  // scan-ats-full.mjs — synthesized entries, nothing for the user to edit.
+  // Global discovery — synthesized entries, nothing for the user to edit.
   const capReverseScan = await runCapCase({ sinceMs: sevenDaysAgo, syntheticEntries: true });
   if (capReverseScan.some(w => /truncated at 3 pages/.test(w)) && !capReverseScan.some(w => ADVICE.test(w))) {
     pass('workday.fetch() cap warning: a reverse scan (synthesized entries) stays terse, no advice');
@@ -328,7 +328,7 @@ try {
     // Number.isNaN(NaN) is true but JSON.stringify(NaN) === 'null', which would
     // be indistinguishable from the literal `null` case in the log below.
     const label = Number.isNaN(invalidMaxPages) ? 'NaN' : JSON.stringify(invalidMaxPages);
-    if (invalidRequests === 100 && fetchedInvalid.length === 2000) {
+    if (invalidRequests === 100 && fetchedInvalid.length === 2000 && fetchedInvalid.workdayCapReached === true) {
       pass(`workday.fetch() falls back to DEFAULT_MAX_PAGES for invalid max_pages=${label}`);
     } else {
       fail(`workday fetch invalid max_pages=${label}: requests=${invalidRequests}, total=${fetchedInvalid.length} (expected 100/2000)`);
@@ -376,7 +376,7 @@ try {
     fail(`workday fetch-error stop should not also warn about max_pages: ${JSON.stringify(flakyWarnings)}`);
   }
 
-  // fetch-error truncation must TAG the returned array so scan-ats-full.mjs
+  // fetch-error truncation must TAG the returned array so global discovery
   // can queue the tenant for a calm sequential retry (the workdayNoDateSkip
   // pattern — no per-tenant logging beyond the existing truncation warning).
   {
@@ -483,7 +483,7 @@ try {
   // fetch() early-stop — once a page's postings are all clearly past
   // ctx.sinceMs, pagination stops without hitting max_pages, and the
   // "raise max_pages" warning does NOT fire (this isn't a cap hit).
-  const SINCE_DAYS = 3; // mirrors scan-ats-full.mjs's --since default
+  const SINCE_DAYS = 3; // mirrors global discovery's --since default
   const nowMs = Date.now();
   const sinceMs = nowMs - SINCE_DAYS * 86_400_000;
   let earlyStopRequests = 0;
@@ -511,6 +511,39 @@ try {
     fail(`workday early-stop should not warn about max_pages: ${JSON.stringify(earlyStopWarnings)}`);
   }
 
+  let mixedPageRequests = 0;
+  const mixedPageJobs = await workday.fetch(entry, mkWorkdayCtx(async (_url, opts) => {
+    mixedPageRequests++;
+    const page = JSON.parse(opts.body).offset / 20;
+    const postings = Array.from({ length: 20 }, (_, i) => ({
+      title: `Mixed ${page}-${i}`,
+      externalPath: `/job/board/mixed-${page}-${i}`,
+      postedOn: page === 0 && i !== 0 ? 'Posted 20 Days Ago' : undefined,
+    }));
+    return { total: 40, jobPostings: postings };
+  }, { sinceMs, includeUndated: true }));
+  if (mixedPageRequests === 2 && mixedPageJobs.length === 40) {
+    pass('workday.fetch() retains later undated postings after a mixed stale page');
+  } else {
+    fail(`workday mixed page: requests=${mixedPageRequests}, jobs=${mixedPageJobs.length} (expected 2/40)`);
+  }
+
+  let datedThenUndatedRequests = 0;
+  const datedThenUndatedJobs = await workday.fetch(entry, mkWorkdayCtx(async (_url, opts) => {
+    datedThenUndatedRequests++;
+    const page = JSON.parse(opts.body).offset / 20;
+    return { total: 40, jobPostings: Array.from({ length: 20 }, (_, i) => ({
+      title: `Late undated ${page}-${i}`,
+      externalPath: `/job/board/late-undated-${page}-${i}`,
+      postedOn: page === 0 ? 'Posted 20 Days Ago' : undefined,
+    })) };
+  }, { sinceMs, includeUndated: true }));
+  if (datedThenUndatedRequests === 2 && datedThenUndatedJobs.length === 40) {
+    pass('workday.fetch() retains later undated postings after an all-dated stale page');
+  } else {
+    fail(`workday late undated: requests=${datedThenUndatedRequests}, jobs=${datedThenUndatedJobs.length} (expected 2/40)`);
+  }
+
   // fetch() early-stop — a wide --since window (>= 30 days) never triggers
   // early-stop off the unbounded "30+ Days Ago" bucket; pagination still
   // proceeds until max_pages/total, as before. includeUndated: true isolates
@@ -535,7 +568,7 @@ try {
   }
 
   // fetch() cap-hit warning — reverse-scan context (ctx.syntheticEntries set,
-  // as scan-ats-full.mjs does) where entries are synthesized from an
+  // as global discovery does) where entries are synthesized from an
   // external dataset, not portals.yml: there's no portal entry to edit, and
   // — per the "no fixed cap can guarantee full coverage" conclusion — no
   // fix to advise at all, so the message is just the short fact, with
@@ -560,7 +593,7 @@ try {
   }
 
   // fetch() no-date-skip — the default case (includeUndated NOT set, as
-  // scan-ats-full.mjs leaves it by default): a tenant whose first page has
+  // global discovery leaves it by default): a tenant whose first page has
   // zero dated postings stops right there instead of grinding through up to
   // maxPages requests whose results would all be dropped as 'undated'
   // downstream anyway. Only 1 request should fire, not maxPages (100).
@@ -582,7 +615,7 @@ try {
   // A full-directory scan hits this on a large fraction of tenants — a
   // console.error per occurrence would just be the same line thousands of
   // times, so the signal is a tag on the returned array instead (aggregated
-  // by scan-ats-full.mjs into one summary line at the end of the run).
+  // by global discovery in its run summary).
   if (skipJobs.workdayNoDateSkip === true) {
     pass('workday.fetch() tags the returned jobs array for no-date-skip aggregation');
   } else {

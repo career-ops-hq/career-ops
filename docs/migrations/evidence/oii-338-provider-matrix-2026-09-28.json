@@ -1,0 +1,162 @@
+{
+  "date": "2026-09-28",
+  "scope": "public provider collection only; no CV, JD model call, or business DB write",
+  "raw_output_path": "/Users/oii/dev/career-ops/data/acceptance/oii-338-provider-matrix-2026-09-28/output.json",
+  "raw_output_sha256": "7197c747ce381ca2aa733f557605a49d28708b6b13e6736e13235bc03db86574",
+  "results": [
+    {
+      "company": "Microsoft",
+      "configured_provider": "microsoft-careers",
+      "resolved_provider": "microsoft-careers",
+      "status": "error",
+      "count": 0,
+      "jobs_sha256": null,
+      "truncated_reported": null,
+      "warning": null,
+      "kind": "unknown",
+      "error": "HTTP 429 Too Many Requests"
+    },
+    {
+      "company": "SAP",
+      "configured_provider": "successfactors",
+      "resolved_provider": "successfactors",
+      "status": "fetched",
+      "count": 819,
+      "jobs_sha256": "550538e9ef2c94ce45966616b7469d36064b1e6755793d914575cb7f3ea9f06e",
+      "truncated_reported": false,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "Qualcomm",
+      "configured_provider": null,
+      "resolved_provider": null,
+      "status": "handoff",
+      "count": 0,
+      "jobs_sha256": null,
+      "truncated_reported": null,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "Siemens",
+      "configured_provider": "avature",
+      "resolved_provider": "avature",
+      "status": "fetched",
+      "count": 240,
+      "jobs_sha256": "ec9d78f451a4b19865e7b3888707e0b932ac32ddfcca83a9243eb91390a042cd",
+      "truncated_reported": false,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "Mercedes-Benz",
+      "configured_provider": "beesite",
+      "resolved_provider": "beesite",
+      "status": "fetched",
+      "count": 1000,
+      "jobs_sha256": "b9e329f8b30ec7b17df36db9648529fa12423a70216f4372ccf421fabf808bbd",
+      "truncated_reported": false,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "Schneider Electric",
+      "configured_provider": "jibeapply",
+      "resolved_provider": "jibeapply",
+      "status": "fetched",
+      "count": 631,
+      "jobs_sha256": "2264e6b40785951ed1b5ffe9d5de87fc070bcdbea16b4ac6d7312692ab3be54e",
+      "truncated_reported": false,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "ABB",
+      "configured_provider": "phenom",
+      "resolved_provider": "phenom",
+      "status": "fetched",
+      "count": 2053,
+      "jobs_sha256": "8e246ebfd12a4e1ddac52da0b46a50d1f8f5bbb7c70c040f9265ad63315d7654",
+      "truncated_reported": false,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "Honeywell",
+      "configured_provider": "oraclecloud",
+      "resolved_provider": "oraclecloud",
+      "status": "fetched",
+      "count": 999,
+      "jobs_sha256": "0695c05ba2ece478295682beba1792e1fcbfde4d23a6cef7a495a2fe4b2ed2b9",
+      "truncated_reported": false,
+      "warning": null,
+      "kind": null,
+      "error": null
+    },
+    {
+      "company": "HSBC",
+      "configured_provider": "eightfold",
+      "resolved_provider": "eightfold",
+      "status": "error",
+      "count": 0,
+      "jobs_sha256": null,
+      "truncated_reported": null,
+      "warning": null,
+      "kind": "unknown",
+      "error": "eightfold: cannot derive API URL for HSBC"
+    },
+    {
+      "company": "MTR Corporation",
+      "configured_provider": "mtr-taleo",
+      "resolved_provider": null,
+      "status": "error",
+      "count": 0,
+      "jobs_sha256": null,
+      "truncated_reported": null,
+      "warning": null,
+      "kind": "configuration",
+      "error": "unknown provider: mtr-taleo"
+    },
+    {
+      "company": "IKEA China",
+      "configured_provider": "ikea",
+      "resolved_provider": null,
+      "status": "error",
+      "count": 0,
+      "jobs_sha256": null,
+      "truncated_reported": null,
+      "warning": null,
+      "kind": "configuration",
+      "error": "unknown provider: ikea"
+    }
+  ],
+  "cap_recheck": {
+    "raw_output_path": "/Users/oii/dev/career-ops/data/acceptance/oii-338-provider-matrix-2026-09-28/cap-output.json",
+    "raw_output_sha256": "5f7ad75a624cc07be9809571ccc9f9d5e47396d220357e2f3ea5cb58a4353ed0",
+    "results": [
+      {
+        "company": "Siemens",
+        "count": 240,
+        "truncated": true,
+        "truncation_kind": "page_cap",
+        "python_discovery_status": "partial",
+        "python_discovery_error": "coverage_warning/page_cap"
+      },
+      {
+        "company": "Mercedes-Benz",
+        "count": 1000,
+        "truncated": true,
+        "truncation_kind": "page_cap",
+        "python_discovery_status": "partial",
+        "python_discovery_error": "coverage_warning/page_cap"
+      }
+    ]
+  }
+}

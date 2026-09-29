@@ -150,6 +150,18 @@ try {
       fail(`expected ${EXPECTED_YC_MAX_PAGES} requests, got ${requested.length} (companies ${out.length})`);
     }
   }
+
+  // Keep collected pages, but expose missing later pages to the Python runner.
+  {
+    global.fetch = async (url) => {
+      const page = Number(new URL(url).searchParams.get('page'));
+      if (page === 2) throw new Error('page unavailable');
+      return { ok: true, async json() { return { companies: [co('Alpha')], totalPages: 3 }; } };
+    };
+    const out = await fetchYCCompanies();
+    if (out.length === 1 && out.partial === true) pass('marks a later-page failure as partial');
+    else fail('later-page failure lost the partial coverage signal');
+  }
 } finally {
   global.fetch = realFetch;
 }

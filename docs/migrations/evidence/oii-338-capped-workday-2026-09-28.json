@@ -1,0 +1,28 @@
+{
+  "captured_at": "2026-09-28",
+  "raw_matrix_capture": "data/acceptance/enabled-provider-matrix-2026-09-28/output.json",
+  "offset_probe_capture": "data/acceptance/capped-replay-2026-09-28/offset-probes.json",
+  "offset_probe_sha256": "17462abbf06cc03cd4aa6dcc63453952450e6dc583181cac18e76f73dd78d8c9",
+  "public_api_observation": "Both NVIDIA and Walmart China returned total=2000 and the same first three job paths at offsets 0 and 2000; increasing max_pages would not reveal the additional postings.",
+  "isolated_python_replays": [
+    {
+      "company": "NVIDIA",
+      "directory": "data/acceptance/capped-replay-2026-09-28/nvidia",
+      "checked": 1996,
+      "added": 19,
+      "status": "partial",
+      "errors": 1,
+      "reason": "page_cap"
+    },
+    {
+      "company": "Walmart China",
+      "directory": "data/acceptance/capped-replay-2026-09-28/walmart-china",
+      "checked": 2000,
+      "added": 0,
+      "status": "partial",
+      "errors": 1,
+      "reason": "page_cap"
+    }
+  ],
+  "acceptance_limit": "Python preserves the coverage warning and can ingest fetched candidates; neither source is a complete collection sample and these replays skipped browser JD capture"
+}

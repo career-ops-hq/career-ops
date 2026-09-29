@@ -20,6 +20,28 @@ sys.path.insert(0, str(ROOT))
 from workflow.career_ops import BusinessStore, cron_score, scan_discovered
 
 
+BUSINESS_RESULTS = """
+CREATE TABLE eligibility (opportunity_id INTEGER PRIMARY KEY,status TEXT NOT NULL,evidence TEXT NOT NULL);
+CREATE TABLE evaluations (opportunity_id INTEGER PRIMARY KEY,lower_score REAL NOT NULL,
+  upper_score REAL NOT NULL,coverage REAL NOT NULL,report_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE artifacts (opportunity_id INTEGER NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,
+  sha256 TEXT NOT NULL,UNIQUE(opportunity_id,kind,path));
+CREATE TABLE opportunity_events (opportunity_id INTEGER NOT NULL,type TEXT NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE checkpoints (opportunity_id INTEGER NOT NULL,phase TEXT NOT NULL,input_hash TEXT NOT NULL,
+  output_hash TEXT NOT NULL,PRIMARY KEY(opportunity_id,phase));
+CREATE TRIGGER eligibility_requires_evaluating BEFORE INSERT ON eligibility
+  WHEN (SELECT state FROM opportunities WHERE id=NEW.opportunity_id)!='evaluating'
+  BEGIN SELECT RAISE(ABORT,'eligibility requires evaluating opportunity'); END;
+CREATE TRIGGER evaluation_requires_eligible BEFORE INSERT ON evaluations
+  WHEN (SELECT state FROM opportunities WHERE id=NEW.opportunity_id)!='eligible'
+  BEGIN SELECT RAISE(ABORT,'evaluation requires eligible opportunity'); END;
+CREATE TRIGGER artifact_requires_evaluated BEFORE INSERT ON artifacts
+  WHEN (SELECT state FROM opportunities WHERE id=NEW.opportunity_id)!='evaluated'
+  BEGIN SELECT RAISE(ABORT,'artifact requires evaluated opportunity'); END;
+"""
+
+
 def run(directory: Path, *args: str) -> dict:
     result = subprocess.run(
         [str(PYTHON), str(CLI), "--directory", str(directory), *args],
@@ -151,7 +173,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-") as temporary:
     database.executescript("""
       CREATE TABLE opportunities (
         id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL,
-        role TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered'
+        role TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered',
+        claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE page_evidence (
         opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL,
@@ -166,27 +189,42 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-") as temporary:
     database.execute("INSERT INTO source_evidence(opportunity_id,payload) VALUES(1,?)", (
         capture_payload("https://example.com/jobs/cron", "Build reviewed AI agent workflows."),
     ))
+    database.executescript(BUSINESS_RESULTS)
     database.commit()
     database.close()
     assert run(directory, "cron-score")["task"]["status"] == "completed"
-    assert run(directory, "cron-score")["task"]["status"] == "completed"
+    score_crash = subprocess.run(
+        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "1", "scan:1", "--crash-at", "publish"],
+        text=True, capture_output=True, env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
+    )
+    assert score_crash.returncode == 86
+    crashed_score = next(task for task in run(directory, "list") if task["opportunity_id"] == "1" and task["module"] == "score")
+    assert run(directory, "run", crashed_score["task_id"], "--crash-at", "publish")["status"] == "completed"
     assert run(directory, "cron-score") == {"status": "idle", "reason": "no_unscored_opportunities"}
+    database = sqlite3.connect(directory / "opportunities.db")
+    assert database.execute("SELECT state FROM opportunities WHERE id=1").fetchone()[0] == "evaluated"
+    assert database.execute("SELECT count(*) FROM evaluations WHERE opportunity_id=1").fetchone()[0] == 1
+    assert database.execute("SELECT count(*) FROM artifacts WHERE opportunity_id=1 AND kind='report'").fetchone()[0] == 1
+    assert database.execute("SELECT count(*) FROM checkpoints WHERE opportunity_id=1 AND phase='publish'").fetchone()[0] == 1
+    assert database.execute("SELECT count(*) FROM opportunity_events WHERE opportunity_id=1 AND type='published'").fetchone()[0] == 1
+    database.close()
 
 with tempfile.TemporaryDirectory(prefix="career-ops-cron-wait-") as temporary:
     directory = Path(temporary)
     database = sqlite3.connect(directory / "opportunities.db")
     database.executescript("""
-      CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL, role TEXT NOT NULL);
+      CREATE TABLE opportunities (id INTEGER PRIMARY KEY, url TEXT NOT NULL, company TEXT NOT NULL, role TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'discovered', claimed_by TEXT, attempts INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE page_evidence (opportunity_id INTEGER PRIMARY KEY, content TEXT NOT NULL, captured_at TEXT NOT NULL);
       CREATE TABLE source_evidence (id INTEGER PRIMARY KEY, opportunity_id INTEGER, payload TEXT NOT NULL);
-      INSERT INTO opportunities VALUES (1,'https://example.com/jobs/blocked','Blocked','Engineer');
-      INSERT INTO opportunities VALUES (2,'https://example.com/jobs/ready','Ready','Engineer');
+      INSERT INTO opportunities(id,url,company,role) VALUES (1,'https://example.com/jobs/blocked','Blocked','Engineer');
+      INSERT INTO opportunities(id,url,company,role) VALUES (2,'https://example.com/jobs/ready','Ready','Engineer');
       INSERT INTO page_evidence VALUES (2,'Build reviewed AI systems.','2026-09-20T04:00:00Z');
       INSERT INTO page_evidence VALUES (1,'Old JD text alone is not liveness evidence.','2026-09-20T04:00:00Z');
     """)
     database.execute("INSERT INTO source_evidence(opportunity_id,payload) VALUES(2,?)", (
         capture_payload("https://example.com/jobs/ready", "Build reviewed AI systems."),
     ))
+    database.executescript(BUSINESS_RESULTS)
     database.commit()
     database.close()
     assert run(directory, "cron-score")["task"]["status"] == "waiting"

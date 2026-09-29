@@ -1,0 +1,55 @@
+{
+  "issue": "OII-338",
+  "sample": "live isolated HSBC configured discovery through LangGraph",
+  "run_id": "ccdb1c89d64f43dfa590d48366d77aa0",
+  "inputs_hash": "073f112073afd414ba18d109653d2436668abfcae36e44d5e69c8a42bde64693",
+  "source": "public HSBC careers provider",
+  "result": {
+    "status": "completed",
+    "sources": 1,
+    "checked": 1526,
+    "added": 8,
+    "errors": 0
+  },
+  "business_counts": {
+    "opportunities": 8,
+    "source_evidence": 8,
+    "scan_runs": 1,
+    "source_health": 1
+  },
+  "source_health": [
+    "HSBC",
+    "reachable"
+  ],
+  "summary": {
+    "companies": 1,
+    "boards": 0,
+    "found": 1526,
+    "dupes": 7,
+    "newAdded": 8,
+    "errors": 0,
+    "handoff": 0,
+    "failures": [],
+    "handoff_sources": []
+  },
+  "artifacts": {
+    "collected.json": {
+      "bytes": 321107,
+      "sha256": "2b23bbfa4d8382aa70fb35664338315bf2f573f4f017a773ebca574c2975ae75"
+    },
+    "decision.json": {
+      "bytes": 3800,
+      "sha256": "9162defcd884d4ef1e2bbb9b90c3ff89c7567d27634e73fdab3c7787040b30e9"
+    }
+  },
+  "checkpoint": {
+    "count": 5,
+    "bytes": 28672
+  },
+  "same_run_resume": "completed with identical result and no additional business rows",
+  "canonical_business_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "limitations": [
+    "one enabled public source, not the full 34-source schedule",
+    "no model scan/score/apply or notification in this acceptance lane"
+  ]
+}

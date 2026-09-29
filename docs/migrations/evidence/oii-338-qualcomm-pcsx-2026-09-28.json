@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://careers.qualcomm.com/api/pcsx/search?domain=qualcomm.com",
+  "local_raw_capture": "data/acceptance/qualcomm-pcsx-2026-09-28/output.json",
+  "raw_capture_sha256": "091ea5e41502bd8b3fc44a9bfbd493e88f136db1a47fe524a14ff584c9cc186d",
+  "provider": "pcsx",
+  "advertised_and_fetched_jobs": 2014,
+  "unique_job_urls": 2014,
+  "truncated": false,
+  "isolated_python_run": {
+    "directory": "data/acceptance/qualcomm-pcsx-2026-09-28/python-verified",
+    "status": "completed",
+    "checked": 2014,
+    "added": 5,
+    "errors": 0,
+    "handoff": 0,
+    "opportunities": 5,
+    "source_evidence_rows": 5,
+    "scan_runs": 1,
+    "source_health_rows": 1,
+    "jd_lengths": [3919, 4897, 3866, 6023, 5540],
+    "jd_sha256": [
+      "d6f06165d78a0ccfb9423efbf0ea070982b8395be1e1d75a5130d794b3d6da9f",
+      "7e181813bf0f16d26be3a11f81369ef4dec09f4e8ca5e2f37700a54f819db735",
+      "63795dad051746451a0329b22ccea6f337cf55fb772552ceb41b8599a552e35d",
+      "bfc869da9d5098d1283c2bff672da03d86de7e37ced739e0c955cbe1871e507d",
+      "91864e7e4bb1475f18d6ceb3638faea96052bb9f995fc417ecf7f93fc2b24dd3"
+    ]
+  },
+  "prior_failures": "The first faster full pass returned HTTP 429; an earlier browser JD read captured a 130-character page shell. Bounded retry, slower pagination and content readiness corrected both before the verified run.",
+  "acceptance_limit": "Complete real provider collection and Python discovery with five substantive JD captures; scan/score/apply quality and all other configured sources remain separate acceptance gates"
+}

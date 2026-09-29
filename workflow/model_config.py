@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import site
 import sys
 
 
 def create_agent(*, system_prompt: str, tools: list[str], session_id: str, max_iterations: int | None = None):
     """Create a fresh agent while keeping Hermes as the configuration authority."""
     hermes = Path.home() / ".hermes" / "hermes-agent"
+    hermes_packages = hermes / "venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    if not hermes_packages.is_dir():
+        raise RuntimeError(f"Hermes Python environment is missing: {hermes_packages}")
+    site.addsitedir(str(hermes_packages))
     if str(hermes) not in sys.path:
         sys.path.insert(0, str(hermes))
     from hermes_cli.env_loader import load_hermes_dotenv

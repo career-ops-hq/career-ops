@@ -61,6 +61,20 @@ try {
   const beeJobs = await beesite.fetch({ name: 'MB', api: 'https://x.app.beesite.de' }, beeCtx);
   if (beeJobs.length === 102 && beeCalls === 2 && beeSeen[1].includes('"FirstItem":101')) pass('beesite.fetch() paginates via FirstItem and dedups across pages');
   else fail(`beesite.fetch() returned ${beeJobs.length} jobs after ${beeCalls} calls`);
+  const cappedJobs = await beesite.fetch({ name: 'MB', api: 'https://x.app.beesite.de', max_pages: 1 },
+    { sleep: async () => {}, fetchJson: async () => beePages[0] });
+  if (cappedJobs.length === 100 && cappedJobs.collectionTruncated === true) pass('beesite.fetch() reports page-capped results');
+  else fail('beesite.fetch() silently accepted a page-capped result');
+  let pageNumber = 0;
+  const largeBoard = await beesite.fetch({ name: 'MB', api: 'https://x.app.beesite.de' },
+    { sleep: async () => {}, fetchJson: async () => {
+      const first = pageNumber++ * 100;
+      return { SearchResult: { SearchResultCount: Math.min(100, 1205 - first), SearchResultCountAll: 1205,
+        SearchResultItems: Array.from({ length: Math.max(0, Math.min(100, 1205 - first)) }, (_, i) =>
+          mkItem(first + i + 1, `Job ${first + i + 1}`, `https://jobs.example.com/j-${first + i + 1}`)) } };
+    } });
+  if (largeBoard.length === 1205 && largeBoard.collectionTruncated !== true) pass('beesite.fetch() completes a board above the old 1,000-job limit');
+  else fail(`beesite.fetch() lost jobs above 1,000: ${largeBoard.length}`);
 } catch (e) {
   fail(`beesite provider tests crashed: ${e.message}`);
 }

@@ -35,6 +35,12 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
         "sections": {name: "Complete evidence mapping, unknowns and specific next actions." for name in ("overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")},
     }
     rendered = render_report(packet, evidence, assessment)
+    assert "已留存可引用网页来源" in rendered["report"]
+    no_sources = json.loads(json.dumps(assessment))
+    no_sources["sources"] = []
+    no_sources["research"]["findings"] = []
+    assert "未取得可引用网页；外部事项保持未知" in render_report(packet, evidence, no_sources)["report"]
+    render_report(packet, evidence, assessment)
     validator = Path(__file__).resolve().parents[1] / "scoring-report.mjs"
     script = "import fs from 'node:fs'; const {validateReport}=await import(process.argv[1]); const p=process.argv[2]; validateReport(fs.readFileSync(p,'utf8'), {root:process.argv[3]});"
     checked = subprocess.run(["node", "--input-type=module", "-e", script, validator.as_uri(), str(directory / "report.md"), str(root)], text=True, capture_output=True)

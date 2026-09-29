@@ -1,0 +1,1134 @@
+{
+  "api": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage",
+  "configured_max_pages": null,
+  "observed_at": "2026-09-28T04:14:43.930995+00:00",
+  "provider": "workday",
+  "result": {
+    "jobs": [
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 43/F",
+        "postedAt": 1790568874616,
+        "title": "Assistant Vice President (Team Member) - IPO Vetting",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-43F/Assistant-Vice-President--Team-Member----IPO-Vetting_R004336"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 12/F",
+        "postedAt": 1790568874616,
+        "title": "Associate, IPO Vetting",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-12F/Associate--IPO-Vetting_R003740"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1790396074616,
+        "title": "(Senior) Business & System Analyst - Associate - Listing Systems - IT - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/System-Analyst---Associate---Listing-Systems---IT---12-months-Contract_R004508"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1790396074616,
+        "title": "(Senior) Technical BA/ System Development Manager - AVP - Listing Systems - IT - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/System-Development-Manager--AVP----Listing-Systems---IT---12-months-Contract_R004119"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1790396074616,
+        "title": "AVP - Senior Systems Manager– Infrastructure Critical Services - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/AVP---Senior-Systems-Manager--Infrastructure-Critical-Services---IT_R003569"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-DTH 9/F",
+        "postedAt": 1790396074616,
+        "title": "Associate - IT Service Management Analyst - Technology Service Management - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-DTH-9F/Associate---IT-Service-Management-Analyst---Technology-Service-Management---IT_R003852"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1790396074616,
+        "title": "Principal Systems Analyst – AVP – Market Systems – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Principal-Systems-Analyst---AVP---Market-Systems---IT_R004493"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-DTH 9/F",
+        "postedAt": 1790396074616,
+        "title": "Identity and Access Management Analyst (Associate) - IT - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-DTH-9F/Identity-and-Access-Management-Analyst---Information-Technology--TSO-_R004046"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "postedAt": 1790396074616,
+        "title": "Assistant Vice President - Group Risk Management - IT Risk",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Assistant-Vice-President_R004505"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1790309674616,
+        "title": "Modern Workspace EUC Technology Lead",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Modern-Workspace-EUC-Technology-Lead_R003781"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "postedAt": 1790309674616,
+        "title": "Vice President - Senior System Development Manager (C++) - LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Vice-President---LME-Market-Data_R004151"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1790309674616,
+        "title": "Senior Systems Manager - Assistant Vice President - Workplace Technology - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-DTH-9F/Assistant-Vice-President---Senior-Systems-Manager---Workplace-Technology---IT_R004058"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "postedAt": 1790223274616,
+        "title": "Associate /Assistant Vice President, Business Audit",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Associate--Assistant-Vice-President--Business-Audit_R004503"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1790223274616,
+        "title": "(Senior) Systems Analyst - OTC Clearing & Risk - IT (12-month contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/XMLNAME--Senior--Systems-Analyst---OTC-Clearing---Risk---IT--12-month-contract-_R004498"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "postedAt": 1790223274616,
+        "title": "Senior Vice President, Trading Development (Project Management)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Senior-Vice-President--Trading-Development--Project-Management-_R004499"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1790223274616,
+        "title": "System Engineer - Associate -  Critical Services Engineering - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Associate-System-Engineer--Infrastructure-Critical-Services---IT_R004258-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ES 2/F",
+        "postedAt": 1790136874616,
+        "title": "Associate, Depository & Participant Services",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ES-2F/Associate--Depository---Participant-Services_R004373"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 7/F",
+        "postedAt": 1790136874616,
+        "title": "Assistant Vice President / Vice President, Community Engagement",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Assistant-Vice-President---Vice-President--Community-Engagement_R004497"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1790050474616,
+        "title": "Associate - Linux Senior Systems Engineer - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Associate---Linux-Senior-Systems-Engineer---IT_R004201"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1789791274616,
+        "title": "Senior Software Engineer – Group Risk Management Systems - AVP",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Senior-Software-Engineer---Group-Risk-Management-Systems---AVP_R004492"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 10/F",
+        "postedAt": 1789791275752,
+        "title": "AVP - Listing Regulation and Enforcement",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-10F/AVP---Listing-Regulation-and-Enforcement_R003100"
+      },
+      {
+        "company": "HKEX",
+        "location": "",
+        "postedAt": 1789791275752,
+        "title": "Associate - Listing Regulation and Enforcement (Legal, Accounting, Corporate Finance, Investment Banking)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/Associate---Listing-Regulation-and-Enforcement--Legal--Accounting--Corporate-Finance--Investment-Banking-_R002559"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 10/F",
+        "postedAt": 1789791275752,
+        "title": "Associate, IPO Vetting",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-10F/Associate--IPO-Vetting_R003244"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1789791275752,
+        "title": "Vice President, Network Engineering & Architecture -  (System & Network Operations) - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Vice-President--Network-Engineering---Architecture-----System---Network-Operations----IT_R004489"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 7/F",
+        "postedAt": 1789791275752,
+        "title": "Operations Manager - Assistant Vice President –Workplace Technology -  IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Operations-Manager---Assistant-Vice-President--Workplace-Technology----IT_R004422"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 43/F",
+        "postedAt": 1789791275752,
+        "title": "Assistant Vice President, IPO Vetting",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-43F/Assistant-Vice-President--IPO-Vetting_R004436"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "postedAt": 1789791275752,
+        "title": "Assistant Vice President - Derivatives Trading Operations (Morning Shift) - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Assistant-Vice-President---Derivatives-Trading-Operations--Morning-Shift----Operations_R004442"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "postedAt": 1789791275752,
+        "title": "Vice President, Market Infrastructure Development",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Vice-President--Market-Infrastructure-Development_R004487"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1789704875752,
+        "title": "(Senior) Systems Development Manager - AVP - Listing & Corporate Systems - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/XMLNAME--Senior--Systems-Development-Manager---AVP---Listing---Corporate-Systems---IT_R004484"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 7/F",
+        "postedAt": 1789704875752,
+        "title": "Assistant Vice President, Corporate Responsibility & Foundation",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Assistant-Vice-President_R004481"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1789618475752,
+        "title": "ITSM Service Manager",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/ITSM-Service-Manager_R004479"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1789618475752,
+        "title": "Principal Systems Engineer - Assistant Vice President - Critical Services Delivery (Linux/Windows) - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Principal-Systems-Engineer---Assistant-Vice-President---Critical-Services-Delivery--Linux-Windows----12-months-Contract_R004113"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1789618475752,
+        "title": "Senior Engineer - LMEsmart",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Senior-Engineer---LMEsmart_R004477"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1789618475752,
+        "title": "Principal Cloud Services Engineer - Assistant Vice President - Cloud Platform Services - IT - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Assistant-Vice-President---Principal-Cloud-Services-Engineer_R003696-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "postedAt": 1789618475752,
+        "title": "Vice President, Clearing Risk Control",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Vice-President--Clearing-Risk-Control_R004472"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "postedAt": 1789532075752,
+        "title": "Vice President, Nominee & Issuer Service Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Vice-President--Nominee---Issuer-Service-Operations_R004251"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "postedAt": 1789532075752,
+        "title": "Officer – Nominee & Issuer Service Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Officer---Nominee---Issuer-Service-Operations_R004416"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1789532075752,
+        "title": "Senior Vice President - Post-Trade Systems - Applications – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Senior-Vice-President---Post-Trade-Systems---Applications---IT_R004476"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "postedAt": 1789532075752,
+        "title": "Assistant Vice President, Derivatives Operations (Evening Shift)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Assistant-Vice-President--Derivatives-Operations--Evening-Shift-_R004471"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 8/F",
+        "postedAt": 1789445675752,
+        "title": "HKEX 2027 Graduate Associate Programme",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-8F/HKEX-2027-Graduate-Associate-Programme_R004464"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 8/F",
+        "postedAt": 1789445676833,
+        "title": "HKEX 2027 Summer Internship Programme - Information Technology",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-8F/HKEX-2027-Summer-Internship-Programme---Information-Technology_R004458"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 8/F",
+        "postedAt": 1789445676833,
+        "title": "HKEX 2027 Summer Internship Programme",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-8F/HKEX-2027-Summer-Internship-Programme_R004457"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1789100076833,
+        "title": "Quantitative Analyst",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Quantitative-Analyst_R004459"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 10/F",
+        "postedAt": 1789100076833,
+        "title": "Senior Vice President, IT Project Management",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-10F/Senior-Vice-President--IT-Project-Management_R004449"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1789100076833,
+        "title": "Legal Counsel, Regulatory",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Legal-Counsel--Regulatory_R004452"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1789013676833,
+        "title": "Senior Engineer",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Senior-Engineer_R004453"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-CMP 6/F",
+        "postedAt": 1789013676833,
+        "title": "Officer – Depository Solutions & Transformation",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-CMP-6F/Officer---Depository---Participant-Services--Depository---Vault-Operations-_R004352"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1789013676833,
+        "title": "Assistant Vice President, Data Analytics - Chief Data Office - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-34F/Assistant-Vice-President--Data-Analytics---Chief-Data-Office---IT_R004174"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "postedAt": 1788927276833,
+        "title": "AVP,  Senior Test Manager, ITD",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/AVP--Automation-Testing-Engineer--ITD_R004441"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "postedAt": 1788927276833,
+        "title": "Officer",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Officer_R004381"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "postedAt": 1788927276833,
+        "title": "Officer - Nominee & Issuer Service Operations - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Officer---Nominee---Issuer-Service-Operations---Operations_R004445"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "postedAt": 1788927276833,
+        "title": "Associate – Trading Operations – Business Reporting & Controls",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Associate---Trading-Operations---Business-Reporting---Controls_R004444"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "postedAt": 1788927276833,
+        "title": "Assistant Vice President, Information Technology Audit",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Assistant-Vice-President--Information-Technology-Audit_R004303"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "postedAt": 1788927276833,
+        "title": "Assistant Vice President, Information Technology Audit",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Assistant-Vice-President--Information-Technology-Audit_R004305"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "postedAt": 1788927276833,
+        "title": "Associate, Information Technology Audit",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Associate--Information-Technology-Audit_R003032"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "postedAt": 1788927276833,
+        "title": "Associate, Information Technology Audit",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Associate--Information-Technology-Audit_R004311"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "postedAt": 1788927276833,
+        "title": "Associate (12 months contract)  – Post Trade Business Implementation and Analytics",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Associate--12-months-contract-----Post-Trade-Business-Implementation-and-Analytics_R004247"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1788840876833,
+        "title": "Digital Automation Engineer - Officer - System & Network Operations - IT - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-3F/Digital-Automation-Engineer---Associate---System---Network-Operations---IT---12-months-Contract_R004300"
+      },
+      {
+        "company": "HKEX",
+        "location": "",
+        "postedAt": 1788840876834,
+        "title": "AVP, Listing Enforcement",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/AVP--Listing-Enforcement_R002743"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1788840876834,
+        "title": "Assistant Vice President (AVP), Information Security Governance",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Assistant-Vice-President--AVP---Information-Security-Governance_R004433"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1788581678039,
+        "title": "Systems Development Manager - AVP - Post Trade Systems (Derivatives Clearing & New Initiatives)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Systems-Development-Manager---Assistant-Vice-President---Post-Trade-Systems---IT_R004324-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1788581678039,
+        "title": "Assistant Vice President - Derivatives Clearing & New Initiatives – Post-Trade Systems – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Vice-President---Assistant-Vice-President---AHT---Post-Trade-Systems---IT_R004270"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1788581678039,
+        "title": "(Senior) Systems & Testing Engineer - Post-Trade Systems (Derivatives Clearing & New Initiatives) - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/XMLNAME--Senior--Systems-Analyst---Post-Trade-Systems--Derivatives-Clearing----IT_R004268"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "postedAt": 1788495278039,
+        "title": "Technical Regulatory Reporting Analyst",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Technical-Regulatory-Reporting-Analyst_R004420"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "postedAt": 1788495278039,
+        "title": "Assistant Vice President - Group Data Protection Office (Privacy Advisory & Implementation - Qualified Lawyer)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Assistant-Vice-President---Group-Data-Protection-Office--Privacy-Advisory---Implementation_R004304"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 49/F",
+        "postedAt": 1788495278039,
+        "title": "Assistant Vice President",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-49F/Assistant-Vice-President_R004400"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "postedAt": 1788408878039,
+        "title": "Officer, Clearing & Participant Services, Post Trade Operations (12 months contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Officer--Clearing---Participant-Services--Post-Trade-Operations--12-months-contract-_R004386"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1788408878039,
+        "title": "Senior Cloud Services Engineer - Associate - Cloud Platform Services - 12month contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Associate---Senior-Cloud-Services-Engineer_R003697"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1788322478039,
+        "title": "Senior Computer Operator - Officer - Enterprise System Operations - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-3F/Senior-Computer-Operator---Officer---System---Network-Operations---IT_R004261"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1788322478039,
+        "title": "(Senior) Network Engineer - Associate - System & Network Operations - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Associate---Senior-Network-Engineer---System---Network-Operations---IT_R003907"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1788322478039,
+        "title": "Senior Project Manager - AVP -  Information Security - IT - 12 months contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Senior-Project-Manager---AVP----Information-Security---IT_R004176"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "postedAt": 1788322478039,
+        "title": "Vice President – Post-Trade Systems - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Vice-President---Post-Trade-Systems---IT_R003909"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "postedAt": 1788322478039,
+        "title": "Technical Project Manager - Assistant Vice President - Systems & Network Operations - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Technical-Project-Manager---Assistant-Vice-President---Systems---Network-Operations---IT_R004391"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 7/F",
+        "postedAt": 1788322478039,
+        "title": "Head of Executive Engagement & Events",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Head-of-Executive-Engagement---Events_R004388"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Vice President – Participant Services - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Vice-President---Participant-Services---Operations_R004378"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Officer, Derivatives Trading Operations (Morning Shift)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Officer--Derivatives-Trading-Operations--Morning-Shift-_R004364"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-CMP 6/F",
+        "title": "Officer, Depository Services (Driver & Administrative Support)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-CMP-6F/Officer--Depository-Services--Driver---Administrative-Support-_R004222"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Vice President - LME Data Platform",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Vice-President---LME-Market-Data_R004150"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-CMP 6/F",
+        "title": "Officer - Depository & Participant Services - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-CMP-6F/Officer---Depository---Participant-Services---Operations_R004366"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 11/F",
+        "title": "Associate, Structured Products & Fixed Income",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-11F/Associate--Structured-Products---Fixed-Income_R004353"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 34/F",
+        "title": "Vice President - Data Analytics - Chief Data Office - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-34F/Vice-President---Data-Analytics---Chief-Data-Office---IT_R004164"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 9/F",
+        "title": "Associate, HR Technology and Analytics (Contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-9F/Associate--HR-Technology-and-Analytics--Contract-_R004290"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "(Senior) Systems Analyst - Post-Trade Systems (Derivatives Clearing) - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/XMLNAME--Senior--Systems-Analyst---Post-Trade-Systems--Derivatives-Clearing----IT_R003941"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "(Senior) Systems Analysts - Associate - Listing Systems - IT - 12 months Contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/XMLNAME--Senior--Systems-Analysts---Associate---Listing-Systems---IT---12-months-Contract_R003502"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "Network Operation Centre Engineer - Officer - Network & System Operations - IT (Shift Rotations)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-3F/Network-Operation-Centre-Engineer--Shift-Rotations----Officer---Network---System-Operations---IT_R004036-2"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Officer - Sales Enablement, Client Portal Services & Derivatives Client Services - Operations (18 Months Contract )",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Officer---Sales-Enablement--Client-Portal-Services---Derivatives-Client-Services---Operations--18-Months-Contract--_R004365"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Associate,  Post Trade Market Access & Administration",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Associate---Post-Trade-Market-Access---Administration_R004355"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 34/F",
+        "title": "Vice President - Integrated Fund Platform",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-34F/Vice-President---Integrated-Fund-Platform_R004345"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "AVP - Senior Java Developer - LMEC",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Sr-Test-Manager---AVP---LMEC---IT_R003413-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "Vice President - IT Risk & Control",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Vice-President---IT-Risk---Control_R003627"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "Officer, Client Portal Support, Client Services - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Officer--Client-Portal-Support--Client-Services---Operations_R004313"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Executive Assistant - Officer",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Executive-Assistant---Officer_R004346-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 49/F",
+        "title": "Assistant Vice President - Global Client Development",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-49F/Assistant-Vice-President---Global-Client-Development_R004331"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Officer – Depository & Participant Services (Depository & Vault Operations)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Officer---Depository---Participant-Services--Depository---Vault-Operations-_R004327"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Associate - Derivatives Trading Operations (Night Shift) - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Associate---Derivatives-Trading-Operations--Night-Shift----Operations_R004326"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 12/F",
+        "title": "Associate, IPO Vetting",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-12F/Operation-Associate--IPO-Vetting_R004246"
+      },
+      {
+        "company": "HKEX",
+        "location": "",
+        "title": "Associate, Structured Products & Fixed Income",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/Associate--Structured-Products---Fixed-Income_R003746"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 11/F",
+        "title": "Assistant Vice President - Listing Project and Support, Listing Division",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-11F/Assistant-Vice-President_R004308-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Assistant Vice President, Post-Trade, Market Structure (12 months Contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Assistant-Vice-President--Post-Trade--Market-Structure--6-Month-Contract-_R004188"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Associate - Derivatives Trading Operations (Mid Shift) - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Associate---Derivatives-Trading-Operations--Mid-Shift----Operations_R004315"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Assistant Vice President - Derivatives Trading Operations (Morning Shift) - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Assistant-Vice-President---Derivatives-Trading-Operations--Morning-Shift----Operations_R004314"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Associate - Java Developer - LMEC",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Sr-Test-Engineer---Associate---LMEC-Testing---IT_R003520"
+      },
+      {
+        "company": "HKEX",
+        "location": "",
+        "title": "Operation Officer (IPO Vetting)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/Operation-Officer--IPO-Vetting----12-months-contract_R003528"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Associate, AI-Assists Quality Assurance team (12 months contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Associate---Quality-Assurance-Analyst--Post-Trade-Business-Implementation---Analytics---12-months-Contract_R004195"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "title": "Brand Operations Associate",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Brand-Operations-Associate_R004285"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Officer, Derivatives Clearing Risk Control",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Officer--Derivatives-Clearing-Risk-Control_R004291"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Assistant Vice President – Post-Trade Systems – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Assitant-Vice-President---Post-Trade-Systems---IT_R004296"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "title": "Trading Operations Associate",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Trading-Operations-Associate_R004281"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-CMP 6/F",
+        "title": "Vice President – Depository - Solution & Transformation",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-CMP-6F/Vice-President---Depository---Payment---Transformation_R004254"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Associate - Post Trade, Market Structure (contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Associate---Post-Trade--Market-Structure--6-months-contract-_R004189"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Associate - Market Surveillance & Monitoring (12 months contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Associate---Market-Surveillance---Monitoring--12-months-contract-_R004273"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Vice President - Market Surveillance & Monitoring",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Vice-President---Market-Surveillance---Monitoring_R004231"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 12/F",
+        "title": "Operation Officer (IPO Vetting)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-12F/Operation-Officer--IPO-Vetting-_R004237"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "title": "Head of Operational Risk & Resilience",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Head-of-Operational-Risk---Resilience_R003821"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 7/F",
+        "title": "Assistant Vice President, Government Relations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Assistant-Vice-President--Government-Relations_R004244"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Officer, Clearing Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Officer--Clearing-Operations_R004236"
+      },
+      {
+        "company": "HKEX",
+        "location": "",
+        "title": "Assistant Vice President (Team Manager), IPO Vetting, Listing",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/Assistant-Vice-President--Team-Manager---IPO-Vetting--Listing_R002521"
+      },
+      {
+        "company": "HKEX",
+        "location": "",
+        "title": "Associate / Assistant Vice President (Team Member) – IPO Vetting",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/Assistant-Vice-President--Team-Member----IPO-Vetting_R002633"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Vice President, Settlement and Collateral Services",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Vice-President--Settlement-and-Collateral-Services_R004228"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "title": "Senior Vice President - Regulatory Engagement & Advisory",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Senior-Vice-President---Regulatory-Engagement---Advisory_R004198"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Vice President-LME Devops",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Vice-President-LME-Devops_R004152"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "title": "Assistant Vice President, Market Risk Management",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Assistant-Vice-President--Market-Risk-Management_R004183"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "AVP / Associate (Systems Development) – Post-Trade Systems – IT (Permanent/12 months Contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/AVP---Associate--Systems-Development----Post-Trade-Systems---IT--Permanent-12-months-Contract-_R004194"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "R004193 Vice President – Post-Trade Systems – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/R004193-Vice-President---Post-Trade-Systems---IT_R004193"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Associate (12 months contract) – Post Trade Business Implementation and Analytics",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Associate--12-months-contract----Post-Trade-Business-Implementation-and-Analytics_R004192-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Associate - Risk Data Engineer (12-month contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Associate---Risk-Data-Engineer--12-month-contract-_R004187"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Vice President – Post-Trade Systems – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Vice-President---Post-Trade-Systems---IT_R004181"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Senior Systems Development Manager - Assistant Vice President - LME Engineering",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Senior-Systems-Development-Manager---Assistant-Vice-President---LME-Engineering_R003366"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Assistant Assistant Vice President - LME Engineering - Devops",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Assistant-Assistant-Vice-President---LME-Engineering---Devops_R004154"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Vice President - Trading Development, Operations Division",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Vice-President---Trading-Development--Operations-Division_R004159"
+      },
+      {
+        "company": "HKEX",
+        "location": "UK-London",
+        "title": "Network Security Specialist",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/UK-London/Senior-Network-Security-Specialist_R003658"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 50/F",
+        "title": "Group Strategy, Vice President",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-50F/Group-Strategy--Vice-President_R004139-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Assistant Vice President, Depository Services",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Assistant-Vice-President--Depository-Services_R004073"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Officer, Nominee Services",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Officer--Nominee-Services_R003930"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Associate, Infrastructure Reliability Engineer, LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Associate--Sr-Systems-Engineer--LME-Engineering_R003358"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 11/F",
+        "title": "Assistant Vice President (Policy and Secretariat Services, Listing) (full-time)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-11F/Assistant-Vice-President--Policy-and-Secretariat-Services--Listing---full-time-_R003943"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "AVP - Senior Technical Project Manager - Cloud Platform Services - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/AVP---Senior-Technical-Project-Manager---Cloud-Platform-Services---IT_R004110-2"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Associate - Systems Engineer - Java - Data Platform - LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Systems-Engineer---Associate---LME_R003367"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "Vice President - IT Service Operation Management Lead – Technology Service Management",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/IT-Service-Operation-Management-Lead---VP---Technology-Service-Managment---IT_R004064"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 23/F",
+        "title": "Assistant Vice President, Security Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-23F/Assistant-Vice-President--Security-Operations_R003955"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-CMP 6/F",
+        "title": "Officer - Depository & Participant Services - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-CMP-6F/Officer---Depository---Participant-Services---Operations_R003972"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Vice President - Network Management and Participant Services",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Vice-President---Network-Management-and-Participant-Services_R003923-2"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Vice President – Post-Trade Systems - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Vice-President---Post-Trade-Systems---IT_R003940"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "Systems Analyst - Associate - Post-trade Systems",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Systems-Analyst---Associate---Post-trade-Systems_R003919"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Officer, Application Security, LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Officer--Junior-Systems-Engineer--LME-Engineering_R003359"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Associate - InfoSec - Sr. Systems Engineer - LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Sr-Systems-Engineer---Associate---LME_R003375"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Associate - IT Service Management Analyst - Technology Service Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Associate---IT-Service-Management-Analyst---Technology-Service-Operations_R003879"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Systems Analyst - Associate - LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Systems-Analyst---Associate---LME_R003873-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-CMP 6/F",
+        "title": "Officer, ETF Services",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-CMP-6F/Officer--ETF-Services_R003834"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "title": "Vice President - Quantitative Risk Management",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Vice-President---Quantitative-Risk-Management_R003833"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Vice President, Microstructure, Trading Development",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Vice-President--Microstructure--Trading-Development_R003602"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "VP - Trading Development - Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/VP---Trading-Development---Operations_R003825"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Associate, Derivatives Trading, Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Associate--Derivatives-Trading--Operations_R003773-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Associate, Platforms & Analytics, Trading Development",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Associate--Platforms---Analytics--Trading-Development_R003606"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Officer, Derivatives Trading Operations (Evening Shift)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Officer--Derivatives-Trading-Operations--Evening-Shift-_R003556-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Assistant Vice President, Market Surveillance & Monitoring (Enforcement)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Assistant-Vice-President--Market-Surveillance---Monitoring--Enforcement-_R003372"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "title": "Assistant Vice President",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/Assistant-Vice-President_R003489"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 49/F",
+        "title": "Vice President - Credit Product Development",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-49F/Vice-President---Credit-Product-Development_R003288"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Sr. Systems Development Manager - VP - Group Risk Management Systems - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Sr-Systems-Development-Manager---VP---Group-Risk-Management-Systems---IT_R002847-7"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "System Architect  - VP - Group Risk Management Systems - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/System-Architect----VP---Group-Risk-Management-Systems---IT_R002848-12"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-PCCWT 24/F",
+        "title": "IT Service Management Analyst - Information Technology (TSO)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-PCCWT-24F/Associate--Technology-Service-Operations---IT_R003108"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Officer, Junior Systems Engineer, LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Officer--Junior-Systems-Engineer--LME_R003361"
+      },
+      {
+        "company": "HKEX",
+        "location": "CN-Shenzhen-HyQ",
+        "title": "Sr. Systems Engineer - Associate - LME",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/CN-Shenzhen-HyQ/Sr-Systems-Engineer---Associate---LME_R003378"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "Workplace Technology L2 Operation Manager - Assistant Vice President - Workplace Technology – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Workplace-Technology-L2-Operation-Manager---Assistant-Vice-President---Workplace-Technology---IT_R003207"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "IT Specialist - Officer - Post-trade Application - 12 months contract",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/IT-Specialist---Officer---Post-trade-Application---12-months-contract_R003157"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 21/F",
+        "title": "Data Analytics - Officer - Post Trade (12months contract)",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-21F/Officer--Data-Analytics_R002380"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 30/F",
+        "title": "Officer, Clearing Operations",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-30F/Officer--Clearing-Operations_R002810"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-ONE ES 24/F",
+        "title": "AVP, Quantitative Risk Methodology & Governance",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-ONE-ES-24F/AVP--Quantitative-Risk-Methodology---Governance_R002771"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 6/F",
+        "title": "Assistant Vice President, Market Maker Monitoring Projects",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-6F/Assistant-Vice-President--Market-Maker-Monitoring-Projects_R002454-1"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TWO ES 8/F",
+        "title": "2025 HKEX Summer Internship - Singapore Office",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-8F/XMLNAME-2025-HKEX-Summer-Internship---Singapore-Office_R002311"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "Senior Systems Engineer - Associate - Infrastructure Critical Services - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Senior-Systems-Engineer---Associate---Infrastructure-Critical-Services---IT_R002358"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "Senior Systems Manager - AVP - Infrastructure Critical Services (Database) - IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Senior-Systems-Manager---AVP---Infrastructure-Critical-Services--Database----IT_R002023"
+      },
+      {
+        "company": "HKEX",
+        "location": "HK-TKO 5/F",
+        "title": "Associate, Cloud Services Engineer",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TKO-5F/Associate--Cloud-Services-Engineer_R002119"
+      },
+      {
+        "company": "HKEX",
+        "location": "2 Locations",
+        "title": "Technical Project Manager – Assistant Vice President –  Program Delivery – IT",
+        "url": "https://hkex.wd3.myworkdayjobs.com/HKEXCareerPage/job/HK-TWO-ES-7F/Technical-Project-Manager---Assistant-Vice-President---IT_R001909"
+      }
+    ],
+    "provider": "workday",
+    "status": "fetched",
+    "truncated": false,
+    "truncation_kind": null,
+    "warning": null
+  },
+  "target": "HKEX"
+}

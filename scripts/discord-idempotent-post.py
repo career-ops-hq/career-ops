@@ -25,11 +25,14 @@ def token():
 
 def request(path, value):
     return json.loads(urllib.request.urlopen(urllib.request.Request(
-        f'{API}{path}', headers={'Authorization': f'Bot {value}'}), timeout=20).read() or '{}')
+        f'{API}{path}', headers={'Authorization': f'Bot {value}',
+                                 'User-Agent': 'curl/8.0'}), timeout=20).read() or '{}')
 
 
 def exists(channel, title, value):
-    return any(thread.get('name') == title for thread in request(f'/channels/{channel}/threads/active', value).get('threads', []))
+    guild = request(f'/channels/{channel}', value).get('guild_id')
+    threads = request(f'/guilds/{guild}/threads/active', value).get('threads', [])
+    return any(t.get('name') == title and t.get('parent_id') == channel for t in threads)
 
 
 def main():
@@ -43,7 +46,7 @@ def main():
     if exists(args.channel, args.title, value):
         print(json.dumps({'success': True, 'duplicate': True}))
         return
-    raise SystemExit(subprocess.run(['python3', POSTER, '--channel', args.channel, '--title', args.title, *rest]).returncode)
+    raise SystemExit(subprocess.run([sys.executable, POSTER, '--channel', args.channel, '--title', args.title, *rest]).returncode)
 
 
 if __name__ == '__main__':

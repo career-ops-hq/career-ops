@@ -56,7 +56,7 @@ function trackerPathFor(options = {}) {
     : resolveTrackerPath(options.rootDir || ROOT);
 }
 
-// A bare date file is not a report. `scan-ats-full.mjs --md-out reports/` writes
+// A bare date file is not a report. `global --md-out reports/` writes
 // its digest as `reports/YYYY-MM-DD.md`, which matches `/^(\d+)-/` and is read
 // as report #2026 — pushing every later reservation to 2027+, silently and
 // permanently.

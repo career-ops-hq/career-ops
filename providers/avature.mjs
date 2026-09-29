@@ -55,7 +55,7 @@ function resolveConfig(entry) {
   // Honour an explicit SearchJobs path (branded tenants may prefix a locale,
   // e.g. /en_US/searchjobs/SearchJobs); otherwise default to the classic path.
   const searchPath = /\/SearchJobs\b/i.test(u.pathname) ? u.pathname.replace(/\/+$/, '') : '/careers/SearchJobs';
-  return { searchUrl: `${u.origin}${searchPath}`, origin: u.origin };
+  return { searchUrl: `${u.origin}${searchPath}${u.search}`, origin: u.origin };
 }
 
 /** @param {string} s */
@@ -156,7 +156,9 @@ export default {
     const seen = new Set();
 
     const getPage = async (param, page) => {
-      const htmlText = await ctx.fetchText(`${cfg.searchUrl}?${param}=${page * PAGE_SIZE}`, {
+      const url = new URL(cfg.searchUrl);
+      url.searchParams.set(param, String(page * PAGE_SIZE));
+      const htmlText = await ctx.fetchText(url.href, {
         redirect: 'error',
         headers: { accept: 'text/html' },
       });
@@ -207,6 +209,7 @@ export default {
 
       if (fresh === 0) break; // empty page / looped / offset ignored / last page
       if (articles.length < PAGE_SIZE) break; // last page
+      if (page === maxPages - 1) jobs.collectionTruncated = true;
     }
     return jobs;
   },

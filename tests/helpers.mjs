@@ -57,7 +57,7 @@ export function pass(msg) { console.log(`  ✅ ${msg}`); passed++; }
  * @param {string} msg - Human-readable failure message for the terminal log.
  * @returns {void}
  */
-export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
+export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; process.exitCode = 1; }
 
 /**
  * Record and print one non-fatal warning.

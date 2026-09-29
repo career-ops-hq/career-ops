@@ -11,5 +11,7 @@ const required = ['discovery', 'liveness check', 'eligibility check', 'evaluatio
 for (const term of required) (contract.includes(term) ? pass : fail)(term, `contract includes ${term}`);
 for (const domain of ['evaluation', 'applications', 'interviews', 'cv', 'insights']) (manifest.includes(domain) ? pass : fail)(domain, `manifest declares ${domain}`);
 for (const path of ['article-digest.md', 'modes/_custom.md', 'interview-prep/story-bank.md', 'markets/{cn,hk,remote}/employment.md']) (manifest.includes(path) ? pass : fail)(path, `manifest names ${path}`);
-for (const command of ['batch', 'ofertas', 'deep', 'eu-swe', 'eu-fintech', 'evaluate', 'agent-inbox', 'inbox', 'update']) (router.includes(`\`${command}\``) ? pass : fail)(command, `router preserves ${command}`);
+for (const command of ['evaluation', 'applications', 'interviews', 'cv', 'insights']) (router.includes(`\`${command}\``) ? pass : fail)(command, `router selects ${command}`);
+(router.includes('workflow/career_ops.py') ? pass : fail)('workflow', 'router enters the Python workflow');
+(router.includes('Hermes may run') && router.includes('never decides or advances workflow state') ? pass : fail)('Hermes', 'router keeps scheduling separate from decisions');
 (!/Stage [012]|modes\/_shared|modes\/_writing/.test(router) ? pass : fail)('router', 'canonical router has no retired prompt references');

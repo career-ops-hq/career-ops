@@ -102,8 +102,8 @@
 #   - `exclusionary` phrase matched but an `inclusive` phrase is also
 #     present, or your own country is separately named in the text → pass
 #   - `exclusionary` phrase matched, no `inclusive` phrase, your country
-#     not named → rejected, counted in scan-runs.tsv's
-#     filtered_country_eligibility column
+#     not named → rejected, counted in the configured discovery run's
+#     country-eligibility filter summary
 #
 # If this entire block is absent, behavior is unchanged (no country
 # filtering — same as before this feature existed).

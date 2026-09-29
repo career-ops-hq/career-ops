@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-28",
+  "scope": "Read-only Python versus old Node company-to-ATS resolution against live public boards",
+  "python_capture": "data/acceptance/oii-338-resolver-vendor-samples/result.json",
+  "python_sha256": "92070711c637321e9f081d94788d267fc9d41c856394fd4e48d721b50e839485",
+  "node_capture": "data/acceptance/oii-338-resolver-vendor-samples/node-result.json",
+  "node_sha256": "06193012bae8ae2867c161f12ae029597ccf29d461b02d18b70dac8390579915",
+  "remaining_python_capture": "data/acceptance/oii-338-resolver-vendor-samples/result-remaining.json",
+  "remaining_python_sha256": "cbd05d4766f393b728f3eb20682281a651b933abd637470a4f07d9814a8c618f",
+  "lever_python_capture": "data/acceptance/oii-338-resolver-vendor-samples/result-lever.json",
+  "lever_python_sha256": "eaa3d2369fca4f83635379b7a62134fce995b290fdbcdb68581b9397e33ab732",
+  "remaining_node_capture": "data/acceptance/oii-338-resolver-vendor-samples/node-result-remaining.json",
+  "remaining_node_sha256": "131390a62298cae2bd45f515026c00c17edee4254a60fdbb20a1625244e6b7d6",
+  "exact_matches": [
+    {"vendor": "workable", "company": "VirtuHire", "careers_url": "https://apply.workable.com/virtuhire", "job_count": 101},
+    {"vendor": "smartrecruiters", "company": "Bosch Group", "careers_url": "https://careers.smartrecruiters.com/BoschGroup", "job_count": 4788},
+    {"vendor": "recruitee", "company": "Decoded", "careers_url": "https://decoded.recruitee.com", "job_count": 8},
+    {"vendor": "breezy", "company": "Subscribe", "careers_url": "https://subscribe.breezy.hr", "job_count": 6},
+    {"vendor": "pinpoint", "company": "Pinpoint", "careers_url": "https://workwithus.pinpointhq.com", "job_count": 2},
+    {"vendor": "ashby", "company": "Linear", "careers_url": "https://jobs.ashbyhq.com/linear", "job_count": 30},
+    {"vendor": "rippling", "company": "Utility", "careers_url": "https://ats.rippling.com/utility/jobs", "job_count": 10},
+    {"vendor": "join", "company": "JOIN", "careers_url": "https://join.com/companies/join", "job_count": 4},
+    {"vendor": "bamboohr", "company": "Fly.io", "careers_url": "https://flyio.bamboohr.com", "job_count": 10},
+    {"vendor": "lever", "company": "Until", "careers_url": "https://jobs.lever.co/until", "job_count": 17}
+  ],
+  "python_empty_board": {"vendor": "lever", "company": "Mistral", "careers_url": "https://jobs.lever.co/mistral", "job_count": 0},
+  "acceptance_limit": "A point-in-time sample of ten live boards, not exhaustive vendor availability. Greenhouse and Workday have separate live samples in the acceptance ledger. The preview did not modify portals.yml."
+}

@@ -6,8 +6,7 @@
 // portals.yml, hitting every configured ATS, and appending to
 // pipeline.md/scan-history.tsv — the exact "unrecognized/mistyped flag
 // silently falls through to live behavior" failure class already fixed
-// (identically) in scan-ats-full.mjs (#1633/#1635) and
-// dedup-tracker.mjs (#2744/#2746), now shared via
+// (identically) in dedup-tracker.mjs (#2744/#2746), now shared via
 // lib/cli-flags.mjs's validateFlags() (#2775).
 //
 // HERMETIC: every run pins CAREER_OPS_PORTALS at a path that does not exist.
@@ -25,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NO_PORTALS = join(tmpdir(), 'career-ops-no-such-portals.yml');
-const PORTALS_NOT_FOUND = /portals\.yml not found/i;
+const PORTALS_NOT_FOUND = /Portal configuration is missing/i;
 
 function runScan(...args) {
   const r = spawnSync(process.execPath, [join(ROOT, 'scan.mjs'), ...args], {

@@ -21,7 +21,7 @@ import { pass, fail } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadDedupSnapshot, buildCompanyCanonicalizer } from '../scan.mjs';
+import { loadDedupSnapshot, buildCompanyCanonicalizer } from './fixtures/legacy-scan-helpers.mjs';
 
 console.log('\nscan.mjs — dedup snapshot: one read per source, golden outputs (#2382)');
 

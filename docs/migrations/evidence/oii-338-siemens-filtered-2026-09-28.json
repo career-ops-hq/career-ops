@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-28",
+  "company": "Siemens",
+  "provider": "avature",
+  "configured_search_url": "https://jobs.siemens.com/en_US/externaljobs/SearchJobs/?42386=%5B812054%5D&42386_format=17546&folderRecordsPerPage=6&listFilterMode=1",
+  "first_page_comparison": {
+    "with_filters": ["524002", "523991", "523856", "523738", "523692", "523587"],
+    "without_filters": ["524002", "524001", "523991", "523990", "523989", "523988"]
+  },
+  "provider_result": {
+    "jobs": 209,
+    "truncated": false,
+    "raw_output": "data/acceptance/oii-338-cap-recheck-2026-09-28/siemens-filtered-output.json",
+    "raw_output_sha256": "65578521c33ed38aa6d94c37c42e1540052341d1333d7cb1a091973f0a675306"
+  },
+  "python_discovery": {
+    "status": "completed",
+    "checked": 209,
+    "added": 2,
+    "errors": 0,
+    "isolated_database": "data/acceptance/oii-338-siemens-filtered-retained/opportunities.db",
+    "opportunities": [
+      {
+        "url": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/521548",
+        "role": "西门子数字化工业集团 物理AI平台 全栈开发",
+        "source_evidence_sha256": "e49f4795a60ae923ba0d6cd2e2a9227a213bff091e9d4d70106e0176506f2e4f"
+      },
+      {
+        "url": "https://jobs.siemens.com/en_US/externaljobs/JobDetail/521546",
+        "role": "西门子数字化工业集团 物理AI平台 AI算法开发",
+        "source_evidence_sha256": "2eaf91790d683ec8c51c9cbab2fc7657c45f96c96d38cb66ad5d11b106b28b93"
+      }
+    ]
+  },
+  "personal_data_sent": false
+}

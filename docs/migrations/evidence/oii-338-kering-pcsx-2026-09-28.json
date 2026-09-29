@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://careers.kering.com/api/pcsx/search?domain=kering.com",
+  "local_raw_capture": "data/acceptance/kering-pcsx-2026-09-28/output.json",
+  "raw_capture_sha256": "523aedd8bb196fddf5d0e279ad5b6943a01a605fc42fbb854ce984be9aab0718",
+  "provider": "pcsx",
+  "scope": "Kering group careers, including its houses; the configured legacy Kering Workday endpoint returned zero",
+  "advertised_and_fetched_jobs": 1047,
+  "unique_job_urls": 1047,
+  "truncated": false,
+  "isolated_python_run": {
+    "directory": "data/acceptance/kering-pcsx-2026-09-28/python-verified",
+    "status": "completed",
+    "checked": 1047,
+    "added": 0,
+    "errors": 0,
+    "handoff": 0,
+    "filtered": {"title": 1044, "location": 2, "posting_age": 1},
+    "opportunities": 0,
+    "source_evidence_rows": 0
+  },
+  "acceptance_limit": "Complete current group provider collection and Python rejection path; no retained role or downstream scan/score/apply sample"
+}

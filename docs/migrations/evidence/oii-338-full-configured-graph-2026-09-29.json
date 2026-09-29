@@ -1,0 +1,140 @@
+{
+  "date": "2026-09-29",
+  "scope": "34 enabled configured sources through LangGraph discovery, followed by isolated Qualcomm budget recheck",
+  "network": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 for local transparent proxy; other DNS guards remained active",
+  "full_run": {
+    "directory": "data/acceptance/oii-338-full-configured-graph-2026-09-29",
+    "run_id": "0d83dbeed8ef43698896f9bc05a9b9dc",
+    "status": "partial",
+    "checked": 36084,
+    "added": 96,
+    "errors": 8,
+    "failures": [
+      {
+        "company": "provider-collector",
+        "error": "⚠️  workday: NVIDIA truncated at max_pages=100 (1998 of 2000 jobs) — raise max_pages on this entry for more",
+        "kind": "coverage_warning"
+      },
+      {
+        "company": "provider-collector",
+        "error": "⚠️  workday: Walmart China truncated at max_pages=100 (1998 of 2000 jobs) — raise max_pages on this entry for more",
+        "kind": "coverage_warning"
+      },
+      {
+        "company": "Microsoft",
+        "error": "Provider collection stopped before all pages were fetched",
+        "kind": "coverage_warning",
+        "reason": "network"
+      },
+      {
+        "company": "NVIDIA",
+        "error": "Provider collection stopped before all pages were fetched",
+        "kind": "coverage_warning",
+        "reason": "page_cap"
+      },
+      {
+        "company": "Qualcomm",
+        "error": "pcsx/Qualcomm: timed out after 300s",
+        "kind": "unknown"
+      },
+      {
+        "company": "Kering",
+        "error": "Provider collection stopped before all pages were fetched",
+        "kind": "coverage_warning",
+        "reason": "coverage_gap"
+      },
+      {
+        "company": "Walmart China",
+        "error": "Provider collection stopped before all pages were fetched",
+        "kind": "coverage_warning",
+        "reason": "page_cap"
+      },
+      {
+        "company": "IKEA China",
+        "error": "Provider collection stopped before all pages were fetched",
+        "kind": "coverage_warning",
+        "reason": "coverage_gap"
+      }
+    ],
+    "source_count": 34,
+    "counts": {
+      "opportunities": 96,
+      "source_evidence": 96,
+      "scan_runs": 1,
+      "source_health": 34
+    },
+    "incomplete_health": [
+      [
+        "IKEA China",
+        "incomplete"
+      ],
+      [
+        "Kering",
+        "incomplete"
+      ],
+      [
+        "Microsoft",
+        "network"
+      ],
+      [
+        "NVIDIA",
+        "incomplete"
+      ],
+      [
+        "Qualcomm",
+        "unknown"
+      ],
+      [
+        "Walmart China",
+        "incomplete"
+      ]
+    ],
+    "collected_targets": 34,
+    "decision_result_status": "partial",
+    "graph_has_references": true,
+    "graph_checkpoint_bytes": 28672,
+    "isolated_database_sha256": "24757548868451251f4385668161b90c1e414d01cad928a40f0fb17d337d0cd9",
+    "result_sha256": "a3d34279f5cef92d46c0a76297b49d5ceec751878dada3fc608b1cb92e7cba91",
+    "collected_sha256": "fbd21d56a7f6aadb22dc15f7ab8b29569c55d4c826a534c5fbbc8f1fbf1ef112",
+    "decision_sha256": "7460c4d5de47fd532ce6cdbc7a6083da620bd3d0f893ae729072d9d78ac4ed0d"
+  },
+  "qualcomm_recheck": {
+    "directory": "data/acceptance/oii-338-qualcomm-configured-budget-2026-09-29",
+    "run_id": "761acb4dbc9b45e9b3df99b06a2feacf",
+    "status": "partial",
+    "checked": 2021,
+    "added": 6,
+    "errors": 1,
+    "failures": [
+      {
+        "company": "Qualcomm",
+        "error": "Provider collection stopped before all pages were fetched",
+        "kind": "coverage_warning",
+        "reason": "coverage_gap"
+      }
+    ],
+    "source_count": 1,
+    "counts": {
+      "opportunities": 6,
+      "source_evidence": 6,
+      "scan_runs": 1,
+      "source_health": 1
+    },
+    "incomplete_health": [
+      [
+        "Qualcomm",
+        "incomplete"
+      ]
+    ],
+    "collected_targets": 1,
+    "decision_result_status": "partial",
+    "graph_has_references": true,
+    "graph_checkpoint_bytes": 28672,
+    "isolated_database_sha256": "f077227f74034bf62ecaeb2b88e132a475bb5e98b25422a1e71feab5db67a0b8",
+    "result_sha256": "5f0937b8841c097f5f88418b8600c05e489a4f0bddb27e72efae7107d3f45589",
+    "collected_sha256": "22f3fe6dfcfb440ef5c877adbe1e87d3ebb609f4f434d6ed1c81dbda17611b57",
+    "decision_sha256": "416bb282a2b2a19f192d3c1969f2a40db75b217ca9af33c3ddb306460f09728b"
+  },
+  "canonical_database_sha256": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "acceptance_limit": "Full run is partial due Workday page caps, changing paginated feeds and a 300-second Qualcomm collector timeout. The Qualcomm recheck after the configured 600-second budget retained jobs but still reports an upstream coverage gap. Neither run proves complete source coverage."
+}

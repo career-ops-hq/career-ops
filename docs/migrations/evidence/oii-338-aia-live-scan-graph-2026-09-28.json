@@ -1,0 +1,35 @@
+{
+  "scope": "OII-338 real AIA scan through the checkpointed LangGraph scan subgraph",
+  "source_database": "data/acceptance/oii-338-aia-current-budget-2026-09-28/opportunities.db",
+  "isolated_database": "data/acceptance/oii-338-aia-live-scan-graph-2026-09-28/opportunities.db",
+  "source_url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+  "first_attempt": {
+    "command": "workflow/.venv/bin/python -B -m workflow.career_ops --directory data/acceptance/oii-338-aia-live-scan-graph-2026-09-28 scan-discovered 1",
+    "status": "waiting",
+    "reason": "The default model subprocess used the Hermes Python environment, which lacked LangGraph; no model call was sent."
+  },
+  "resumed_attempt": {
+    "command": "workflow/.venv/bin/python -B -m workflow.career_ops --directory data/acceptance/oii-338-aia-live-scan-graph-2026-09-28 resume 17996ea5-3d7a-4ebc-b1e4-1d22ed04e849",
+    "exit_code": 0,
+    "task_id": "17996ea5-3d7a-4ebc-b1e4-1d22ed04e849",
+    "status": "completed",
+    "outcome": "jd_report",
+    "model_calls": 1,
+    "graph_checkpoints": 5,
+    "jd_chars": 5873,
+    "jd_sha256": "4566c049bcb9f47f524e144118d07ea14f952614a59bb9e37bde986972c913ab",
+    "liveness": "active",
+    "prescreen": "uncertain",
+    "result_path": "data/acceptance/oii-338-aia-live-scan-graph-2026-09-28/scan-resume-result.json",
+    "result_sha256": "a5c96fb9f20e45b71c9e4ee5e5f60ccb4edaa005696728b4c7c03f469ea60588"
+  },
+  "business_state_after_scan_before_score": {
+    "tasks": 1,
+    "results": 1,
+    "evaluations": 0,
+    "deliveries": 0,
+    "application_state": "none"
+  },
+  "canonical_db_sha256_after": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "limitation": "This proves a real AIA scan and same-task resume after an interpreter failure. The model used the already retained official JD capture; no fresh provider collection, score, apply, delivery, or application submission occurred in this lane."
+}

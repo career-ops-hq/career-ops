@@ -4,7 +4,7 @@ A complementary discovery path for startup job-seekers: pull a **public VC portf
 
 ## What this does
 
-`scan-ats-full.mjs` normally discovers companies by walking public ATS directories (Greenhouse, Lever, Ashby, Workday). The `seeds/` layer adds a **high-signal starting point for startup roles**: rather than waiting for companies to appear in ATS directories, we seed the universe from well-known VC portfolios — giving you instant coverage of hundreds of YC/a16z-backed companies.
+`python -m workflow.career_ops global` discovers companies by walking public ATS directories (Greenhouse, Lever, Ashby, Workday, iCIMS). The `seeds/` layer adds a **high-signal starting point for startup roles** by reading public YC and a16z portfolio lists.
 
 Flow:
 ```
@@ -71,7 +71,7 @@ for (const [id, source] of Object.entries(SEED_SOURCES)) {
 
 ## Security
 
-- All slugs are validated against `SLUG_RE = /^[A-Za-z0-9._-]+$/` before any URL interpolation — consistent with the guard in `scan-ats-full.mjs`.
+- All slugs are validated against `SLUG_RE = /^[A-Za-z0-9._-]+$/` before any URL interpolation — consistent with the Python reverse-discovery guard.
 - Constructed ATS URLs go through the existing `entryOnHost()` SSRF guard before reaching any provider.
 - No authentication tokens, no headless browser, no LLM API calls.
 

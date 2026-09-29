@@ -1,0 +1,11 @@
+{
+  "captured_at": "2026-09-28",
+  "source_url": "https://careers.sap.com/",
+  "local_raw_capture": "data/acceptance/sap-recheck-2026-09-28/output.json",
+  "raw_capture_sha256": "00bd70d588a0df9ef3e9edad3e8774d8254d0a956ebed0c940fe4d61444b418b",
+  "provider": "successfactors",
+  "fetched_jobs": 817,
+  "truncated": false,
+  "prior_failure": "The 34-source concurrent collector reported a network abort for SAP; this isolated retry completed without truncation.",
+  "acceptance_limit": "Raw public collection recheck only; earlier isolated Python discovery and remaining workflow acceptance are separate evidence"
+}

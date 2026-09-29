@@ -122,7 +122,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
-  // Optional per-scanner override consumed only by scan-ats-full.mjs. Same
+  // Optional reverse-discovery override. Same
   // shape as title_filter, so it gets the same structural checks — an
   // unvalidated key would let a typo ("positve") silently resolve to a
   // profile with no positive keywords, which matches every posting.

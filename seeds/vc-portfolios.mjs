@@ -30,7 +30,7 @@ import { DEFAULT_USER_AGENT } from '../user-agent.mjs';
 
 /**
  * Safe charset for slug values that will be interpolated into ATS URLs.
- * Consistent with the SLUG_RE guard in scan-ats-full.mjs.
+ * Consistent with the Python reverse-discovery slug guard.
  */
 export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -190,6 +190,26 @@ export function parseA16zPayload(html) {
   /** @type {Map<string, SeedCompany>} */
   const seen = new Map();
 
+  // The current public page embeds its full portfolio in a script assignment.
+  const embedded = html.match(/window\.a16z_portfolio_companies\s*=\s*(\[[\s\S]*?\]);\s*<\/script>/);
+  if (embedded) {
+    try {
+      const companies = JSON.parse(embedded[1]);
+      if (Array.isArray(companies)) {
+        for (const item of companies) {
+          const name = typeof item?.title === 'string' ? item.title.trim() : '';
+          const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          if (!slug || !SLUG_RE.test(slug) || seen.has(slug)) continue;
+          const url = typeof item.web === 'string' && /^https?:\/\//.test(item.web) ? item.web.trim() : '';
+          seen.set(slug, { name, slug, url, source: 'a16z' });
+        }
+      }
+    } catch {
+      // Fall through to older public page shapes.
+    }
+  }
+  if (seen.size) return [...seen.values()];
+
   // Strategy 1: JSON-LD embedded in the page (structured data block).
   // a16z sometimes embeds schema.org/Organization blocks — extract if present.
   const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
@@ -331,6 +351,7 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
   /** @type {SeedCompany[]} */
   const all = [];
   const seen = new Set();
+  let partial = false;
 
   // YC_MAX_PAGES is a hard ceiling: clamp here so an explicit maxPages (or a
   // stray Infinity) can never spin the walk past the runaway guard.
@@ -345,7 +366,8 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
       payload = await res.json();
     } catch (err) {
       if (page === 1) throw new Error(`vc-portfolios: YC API fetch failed — ${err.message}`);
-      break; // Partial data is fine after page 1.
+      partial = true;
+      break;
     }
 
     const entries = parseYCPayload(payload);
@@ -363,6 +385,7 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
     const raw = /** @type {any} */ (payload);
     if (Number.isInteger(raw?.totalPages) && raw.totalPages > 0) {
       if (page >= raw.totalPages) break;
+      if (fetched + 1 >= limit) partial = true;
       page += 1;
       continue;
     }
@@ -372,9 +395,11 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
     // case that bites the day YC changes the response shape again.
     const next = parseYCNextPage(raw?.nextPage);
     if (next == null || next <= page) break;
+    if (fetched + 1 >= limit) partial = true;
     page = next;
   }
 
+  Object.defineProperty(all, 'partial', { value: partial });
   return all;
 }
 
@@ -425,7 +450,7 @@ export async function fetchA16zCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS } = {}
 
 /**
  * Registry mapping seed source names to their fetch functions.
- * Consumed by scan-ats-full.mjs --seeds flag and CLI tooling.
+ * Consumed by the Python global `--seeds` source reader.
  *
  * To add a new VC portfolio:
  *  1. Add a fetchXyzCompanies() function above.

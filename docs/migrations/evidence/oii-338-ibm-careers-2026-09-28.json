@@ -1,0 +1,30 @@
+{
+  "captured_at": "2026-09-28",
+  "source_page": "https://www.ibm.com/careers/search",
+  "source_api": "https://www-api.ibm.com/search/api/v2",
+  "local_raw_capture": "data/acceptance/ibm-careers-2026-09-28/output-country.json",
+  "raw_capture_sha256": "6ec27eb15925f59834ad69c00f23b6b7ba5679447ffa455d723061dd7fbc650f",
+  "provider": "ibm-careers",
+  "advertised_and_fetched_jobs": 1885,
+  "unique_job_urls": 1885,
+  "truncated": false,
+  "isolated_python_run": {
+    "directory": "data/acceptance/ibm-careers-2026-09-28/python-country-verified",
+    "status": "completed",
+    "checked": 1885,
+    "added": 0,
+    "errors": 0,
+    "handoff": 0,
+    "filtered": {"title": 1782, "tier": 3, "location": 100},
+    "opportunities": 0,
+    "source_evidence_rows": 0
+  },
+  "prior_failures": "The site's default relevance/pageview order yielded only 1,600 unique URLs from 1,885 advertised jobs; the API's stable document-ID order yielded all 1,885. An initial run omitted the country field and retained one US-only Multiple Cities role; the official search field_keyword_05=United States and its substantive public JD established that it must be rejected.",
+  "rejection_evidence": {
+    "url": "https://careers.ibm.com/careers/JobDetail?jobId=131606",
+    "local_jd_capture": "data/acceptance/ibm-careers-2026-09-28/jd-extract.json",
+    "jd_text_length": 11913,
+    "jd_text_sha256": "ed3c600e3f9236290b6f34302a1ae5dfdcc9eb87b676ee306219fcd7f3d2b371"
+  },
+  "acceptance_limit": "Complete current public collection and Python rejection path; no accepted IBM role or downstream scan/score/apply quality sample"
+}

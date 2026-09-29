@@ -1,0 +1,41 @@
+{
+  "date": "2026-09-28",
+  "scope": "Real public a16z seed source, Python reverse discovery positive path in an isolated database",
+  "source_capture": "data/acceptance/oii-338-a16z-seed/source-captures/a16z-portfolio-2026-09-28.html.gz",
+  "source_capture_sha256": "fa8e396e73e5a3720c89cb3ee85c4f946e21dbb8f39c80c9a65610799fcb09dd",
+  "parsed_companies": "data/acceptance/oii-338-a16z-seed/parsed-companies.json",
+  "parsed_companies_sha256": "159ea14e02eb50eddca615bf7ee017f2ae49f58c3833be3ef85d76268b85ad86",
+  "source_companies": 860,
+  "python_run": {
+    "selected_company": "Flexport",
+    "selection": "Flexport moved first in the saved official a16z catalogue for an isolated --limit 1 sample",
+    "directory": "data/acceptance/oii-338-a16z-flexport-positive",
+    "summary_sha256": "0bf799b685a1fbabdab6068b67ba6fa2281b699217461ec048dbdf025c558225",
+    "status": "partial",
+    "cap_hit": true,
+    "companies_available": 860,
+    "companies_scanned": 1,
+    "postings_kept": 1,
+    "unreachable_boards": 0,
+    "source_health": "incomplete",
+    "opportunities": 1,
+    "source_evidence_rows": 1,
+    "scan_runs": 1,
+    "role": "Senior Software Engineer",
+    "location": "Shanghai, China",
+    "url": "https://job-boards.greenhouse.io/flexport/jobs/8131941",
+    "digest_sha256": "c7342ddb91b56bee69e8be9a8e91205b043773703e1364f3fdf2b099646a8fe7"
+  },
+  "liveness_recheck": {
+    "capture": "data/acceptance/oii-338-a16z-flexport-positive/liveness-recheck.json",
+    "sha256": "9886aabe2e20abf53637258e3375a1741f9cc936b921c011f206cd2f3458ae09",
+    "result": "active",
+    "code": "apply_control_visible"
+  },
+  "canonical_database_counts": {
+    "opportunities": 87,
+    "tasks": 5,
+    "results": 4
+  },
+  "acceptance_limit": "This proves a selected real a16z seed positive path, not a full 860-company portfolio sweep or scan/score/apply assessment. No CV, model call, submission or message was involved."
+}

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 import json
+import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -12,6 +15,21 @@ from pathlib import Path
 from workflow.model_config import create_agent
 
 STOPPING = False
+
+
+def record_call():
+    """Persist a dispatched call before execution so process failure cannot erase usage."""
+    database = os.environ.get('CAREER_OPS_USAGE_DB')
+    if not database:
+        return
+    with closing(sqlite3.connect(database, timeout=30)) as connection, connection:
+        updated = connection.execute(
+            "UPDATE tasks SET tool_calls=tool_calls+1,attempt_tool_calls=attempt_tool_calls+1 "
+            "WHERE task_id=? AND status='running' AND attempt_tool_calls<?",
+            (os.environ['CAREER_OPS_USAGE_TASK_ID'], int(os.environ['CAREER_OPS_TOOL_LIMIT'])),
+        )
+    if updated.rowcount != 1:
+        raise TimeoutError('tool_budget_exhausted')
 
 
 def save(path, value):
@@ -75,6 +93,7 @@ advertised_comp:null OR {amount:"exact annual numeric amount or range",currency:
 sections:{overview,capabilities,compensation,questions,legitimacy,risks,checklist}}.
 Candidate source IDs are cv/profile/targeting/articles/voice and writing1, writing2, ...; JD is jd. Research source IDs are supplied web1, web2,...
 Every quote must be a contiguous EXACT substring of the supplied source, no edits or ellipses.
+"research" is never a citation source ID. Cite only its frozen web1, web2, ... sources; if research.sources is empty, search summaries cannot support a company, team or compensation rating.
 The jd_report also carries official structured location_evidence and employment_evidence. Use those fields for location and employment claims even when JD prose omits them; never claim location or employment is absent when these fields supply it.
 Compensation and team may receive a non-null integer score from convergent same-direction signals: for example, market salary benchmark plus company size plus role level/city; company culture as a clue; verifiable same-team practice supporting team; or financials supporting company. Use score:null only when there is no convergent signal, such as a genuinely anonymous employer with no data. For every non-null score, the rationale must write out the fact -> scope -> inference -> rating chain, and at least one real quoted evidence source is required.
 Sections are concise Markdown strings, no level-two headings. Capabilities map EVERY material responsibility AND required/preferred qualification
@@ -97,7 +116,7 @@ def parse_object(text):
     return value
 
 
-def limit_research(agent):
+def limit_research(agent, usage=None):
     """Enforce the research budget before native tool dispatch, including parallel calls."""
     invoke = agent._invoke_tool
     counts = {'web_search': 0, 'web_extract': 0}
@@ -106,7 +125,10 @@ def limit_research(agent):
         with lock:
             if STOPPING or counts.get(name, 0) >= {'web_search': 5, 'web_extract': 1}.get(name, 0):
                 return json.dumps({'error': 'Research budget reached. This call did NOT execute. Finish JSON using completed results; missing evidence remains unknown.'})
+            record_call()
             counts[name] += 1
+            if usage is not None:
+                usage['tool_calls'] = usage.get('tool_calls', 0) + 1
         arguments = dict(arguments)
         if name == 'web_extract':
             arguments['urls'] = arguments.get('urls', [])[:3]
@@ -169,7 +191,7 @@ def attach_evidence(value, snapshot):
             'prescreen': screen, 'jd': snapshot['text']}
 
 
-def call_agent(phase, prompt, tools, directory):
+def call_agent(phase, prompt, tools, directory, usage=None):
     """Run the configured workflow model in a fresh role-specific context."""
     if STOPPING:
         raise TimeoutError('Soft deadline reached')
@@ -178,11 +200,12 @@ def call_agent(phase, prompt, tools, directory):
         session = f'score-{phase}-{uuid.uuid4().hex[:12]}'
         agent = create_agent(system_prompt=BASE, tools=tools, session_id=session)
         if tools:
-            limit_research(agent)
+            limit_research(agent, usage)
         else:
             agent.request_overrides = {**(agent.request_overrides or {}), 'response_format': {'type': 'json_object'}}
         agent._api_max_retries = 2
         try:
+            record_call()
             result = agent.run_conversation(prompt)
             metrics = {'phase': phase, 'seconds': round(time.monotonic() - started, 3),
                        'prompt_chars': len(BASE) + len(prompt), 'api_calls': result.get('api_calls'), 'session': session}
@@ -205,6 +228,12 @@ def call_agent(phase, prompt, tools, directory):
                 if attempt == 0:
                     continue
                 raise ValueError(f'{phase} response is incomplete')
+            if phase == 'research' and not all(key in value for key in (
+                'searched_at', 'queries', 'findings', 'compensation', 'team', 'company'
+            )):
+                if attempt == 0:
+                    continue
+                raise ValueError('research response is incomplete')
         finally:
             agent.close()
         break

@@ -39,7 +39,7 @@ import { decodeEntities } from './_html-entities.mjs';
 
 const PAGE_SIZE = 100; // verified: the endpoint happily serves 100+/page
 const MAX_PAGES = 40; // safety cap on request count (40*100 = 4000 postings)
-const MAX_JOBS = 1000; // cap total postings pulled (newest-first sort)
+const MAX_JOBS = 4000; // bounded by the 40-page request cap
 const PAGE_DELAY_MS = 150; // polite pacing between page requests
 
 const DESCRIPTOR = [
@@ -179,8 +179,12 @@ export default {
         if (jobs.length >= MAX_JOBS) break;
       }
       if (fresh === 0) break; // server ignored FirstItem (or we've looped)
-      if (jobs.length >= MAX_JOBS) break;
+      if (jobs.length >= MAX_JOBS) {
+        jobs.collectionTruncated = total === null || total > jobs.length;
+        break;
+      }
       if (total !== null && (page + 1) * PAGE_SIZE >= total) break;
+      if (page === maxPages - 1) jobs.collectionTruncated = true;
     }
     return jobs;
   },

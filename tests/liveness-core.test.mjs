@@ -113,6 +113,17 @@ for (const status of [404, 410]) {
     : fail(`HTTP ${status} classified ${gone.result}/${gone.code}, expected expired/http_gone`);
 }
 
+const emptyShell = classifyLiveness({
+  status: 200,
+  requestedUrl: 'https://careers.example.com/job/123',
+  finalUrl: 'https://careers.example.com/job/123',
+  bodyText: 'Careers',
+  applyControls: [],
+});
+emptyShell.result === 'uncertain' && emptyShell.code === 'insufficient_content'
+  ? pass('short browser shell cannot prove a posting expired')
+  : fail(`short browser shell classified ${emptyShell.result}/${emptyShell.code}`);
+
 console.log('\nliveness-core — Chinese application controls classify active postings');
 
 const chineseApply = classifyLiveness({

@@ -9,8 +9,10 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 import shlex
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -19,11 +21,15 @@ import time
 import uuid
 from pathlib import Path
 from typing import Literal, TypedDict
+from urllib.parse import parse_qs, urlsplit
 
+from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 try:
+    from workflow.board_resolution import VENDOR_ORDER, format_summary, resolve_boards
+    from workflow.reverse_runner import discover_global
     from workflow.discovery import capture_jd, discover
     from workflow.application_lifecycle import ApplicationStore, mutate as mutate_application
     from workflow.resume_renderer import render_resume
@@ -36,6 +42,8 @@ try:
     from workflow.insights.upskill import targeted_skill_gap, upskill_view
     from workflow.insights.preparation import build_preparation_plan
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
+    from board_resolution import VENDOR_ORDER, format_summary, resolve_boards
+    from reverse_runner import discover_global
     from discovery import capture_jd, discover
     from application_lifecycle import ApplicationStore, mutate as mutate_application
     from resume_renderer import render_resume
@@ -51,6 +59,17 @@ except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_project_environment(root: Path) -> None:
+    """Load the same project .env that the former Node scan entrypoint used."""
+    load_dotenv(root / ".env", override=False)
+
+
+if __name__ == "__main__":
+    load_project_environment(ROOT)
+
+
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
 ATTEMPT_SECONDS = 900
@@ -379,6 +398,18 @@ class BusinessStore:
                 "INSERT INTO tasks(task_id,opportunity_id,module,status,input_hash,workflow_version,input_payload) VALUES(?,?,?,'running',?,?,?)",
                 (task_id, opportunity_id, module, input_hash, WORKFLOW_VERSION, input_text),
             )
+            if module == "score" and self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='opportunities'"
+            ).fetchone():
+                claimed = self.db.execute(
+                    "UPDATE opportunities SET state='evaluating',claimed_by=?,attempts=attempts+1 "
+                    "WHERE id=? AND state='discovered'", (task_id, opportunity_id),
+                ).rowcount
+                if claimed:
+                    self.db.execute(
+                        "INSERT INTO opportunity_events(opportunity_id,type,payload) VALUES(?,'claimed',?)",
+                        (opportunity_id, json.dumps({"worker": task_id})),
+                    )
             self.db.execute("COMMIT")
             return {"task_id": task_id, "status": "running", "reused": False}
         except Exception:
@@ -665,6 +696,70 @@ class BusinessStore:
                 "INSERT INTO events(task_id,type,payload) VALUES(?, 'published', ?)",
                 (state["task_id"], json.dumps({"input_hash": state["input_hash"]})),
             )
+            opportunity = self.db.execute(
+                "SELECT id FROM opportunities WHERE id=?", (task["opportunity_id"],)
+            ).fetchone() if self.db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='opportunities'"
+            ).fetchone() else None
+            if opportunity and task["module"] in {"scan", "score"}:
+                opportunity_id = opportunity["id"]
+                if state["outcome"] == "exclude":
+                    self.db.execute("UPDATE opportunities SET state='evaluating' WHERE id=?", (opportunity_id,))
+                    self.db.execute(
+                        "INSERT INTO eligibility(opportunity_id,status,evidence) VALUES(?,'fail',?) "
+                        "ON CONFLICT(opportunity_id) DO UPDATE SET status='fail',evidence=excluded.evidence",
+                        (opportunity_id, json.dumps(artifact, ensure_ascii=False)),
+                    )
+                    self.db.execute("UPDATE opportunities SET state='ineligible' WHERE id=?", (opportunity_id,))
+                    self.db.execute(
+                        "INSERT INTO checkpoints(opportunity_id,phase,input_hash,output_hash) VALUES(?,'discard',?,?) "
+                        "ON CONFLICT(opportunity_id,phase) DO UPDATE SET input_hash=excluded.input_hash,output_hash=excluded.output_hash",
+                        (opportunity_id, state["input_hash"], state["material_hash"]),
+                    )
+                    self.db.execute(
+                        "INSERT INTO opportunity_events(opportunity_id,type,payload) VALUES(?,'discarded',?)",
+                        (opportunity_id, json.dumps(artifact, ensure_ascii=False)),
+                    )
+                elif task["module"] == "score" and state["outcome"] == "score":
+                    prescreen = json.loads(task["input_payload"])["jd_report"]["prescreen"]
+                    eligibility = "pass" if prescreen["status"] == "pass" else "unknown"
+                    self.db.execute("UPDATE opportunities SET state='evaluating' WHERE id=?", (opportunity_id,))
+                    self.db.execute(
+                        "INSERT INTO eligibility(opportunity_id,status,evidence) VALUES(?,?,?) "
+                        "ON CONFLICT(opportunity_id) DO UPDATE SET status=excluded.status,evidence=excluded.evidence",
+                        (opportunity_id, eligibility, json.dumps(prescreen, ensure_ascii=False)),
+                    )
+                    self.db.execute("UPDATE opportunities SET state='eligible' WHERE id=?", (opportunity_id,))
+                    self.db.execute(
+                        "INSERT INTO opportunity_events(opportunity_id,type,payload) VALUES(?,'eligibility_recorded',?)",
+                        (opportunity_id, json.dumps({"status": eligibility})),
+                    )
+                    self.db.execute(
+                        "INSERT INTO evaluations(opportunity_id,lower_score,upper_score,coverage,report_hash) "
+                        "VALUES(?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET "
+                        "lower_score=excluded.lower_score,upper_score=excluded.upper_score,"
+                        "coverage=excluded.coverage,report_hash=excluded.report_hash,created_at=CURRENT_TIMESTAMP",
+                        (opportunity_id, artifact["score"]["lower"], artifact["score"]["upper"],
+                         artifact["score"]["coverage"], artifact["report_sha256"]),
+                    )
+                    self.db.execute("UPDATE opportunities SET state='evaluated' WHERE id=?", (opportunity_id,))
+                    self.db.execute(
+                        "INSERT INTO opportunity_events(opportunity_id,type,payload) VALUES(?,'evaluation_recorded',?)",
+                        (opportunity_id, json.dumps({"reportHash": artifact["report_sha256"]})),
+                    )
+                    self.db.execute(
+                        "INSERT OR IGNORE INTO artifacts(opportunity_id,kind,path,sha256) VALUES(?,'report',?,?)",
+                        (opportunity_id, artifact["path"], artifact["report_sha256"]),
+                    )
+                    self.db.execute(
+                        "INSERT INTO checkpoints(opportunity_id,phase,input_hash,output_hash) VALUES(?,'publish',?,?) "
+                        "ON CONFLICT(opportunity_id,phase) DO UPDATE SET input_hash=excluded.input_hash,output_hash=excluded.output_hash",
+                        (opportunity_id, state["input_hash"], artifact["report_sha256"]),
+                    )
+                    self.db.execute(
+                        "INSERT INTO opportunity_events(opportunity_id,type,payload) VALUES(?,'published',?)",
+                        (opportunity_id, json.dumps({"reportHash": artifact["report_sha256"]})),
+                    )
             self.db.execute("COMMIT")
         except Exception:
             self.db.execute("ROLLBACK")
@@ -793,35 +888,55 @@ class Runtime:
     def run_model(self, phase: str, payload: dict, state: WorkflowState) -> dict:
         """Call one fresh model process while enforcing the module budget."""
         task = self.store.task(state["task_id"])
+        calls_before = task["attempt_tool_calls"]
         if task["attempt_tool_calls"] >= ATTEMPT_CALLS:
             raise TimeoutError("tool_budget_exhausted")
         configured = os.environ.get("CAREER_OPS_MODEL_RUNNER")
-        command = shlex.split(configured) if configured else [
-            str(Path.home() / ".hermes" / "hermes-agent" / "venv" / "bin" / "python"),
-            "-m",
-            MODEL_RUNNER,
-        ]
+        command = shlex.split(configured) if configured else [sys.executable, "-m", MODEL_RUNNER]
         try:
             remaining = ATTEMPT_SECONDS - task["attempt_elapsed_seconds"] - (time.monotonic() - self.started_at)
             if remaining <= 0:
                 raise TimeoutError("time_budget_exhausted")
-            result = subprocess.run(
-                [*command, phase], input=json.dumps(payload, ensure_ascii=False), text=True,
-                capture_output=True, timeout=max(1, remaining), cwd=ROOT,
+            with subprocess.Popen(
+                [*command, phase], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, start_new_session=True, cwd=ROOT,
                 env={**os.environ, "CAREER_OPS_DRAFT_ROOT": os.environ.get(
                     "CAREER_OPS_DRAFT_ROOT", str(self.store.path.parent / "workflow-drafts")
-                )},
-            )
+                ), "CAREER_OPS_USAGE_DB": str(self.store.path),
+                    "CAREER_OPS_USAGE_TASK_ID": state["task_id"],
+                    "CAREER_OPS_TOOL_LIMIT": str(ATTEMPT_CALLS)},
+            ) as process:
+                try:
+                    stdout, stderr = process.communicate(json.dumps(payload, ensure_ascii=False), timeout=max(1, remaining))
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate()
+                    raise
+                result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
         except subprocess.TimeoutExpired as error:
             self.store.add_usage(state["task_id"], time.monotonic() - self.started_at, 0)
             self.started_at = time.monotonic()
             raise TimeoutError("time_budget_exhausted") from error
         if result.returncode:
+            task = self.store.add_usage(state["task_id"], time.monotonic() - self.started_at, 0)
+            self.started_at = time.monotonic()
+            if task["attempt_tool_calls"] >= ATTEMPT_CALLS:
+                raise TimeoutError("tool_budget_exhausted")
+            raise RuntimeError(result.stderr.strip() or f"model runner exited {result.returncode}")
+        try:
+            value = json.loads(result.stdout)
+            if not isinstance(value, dict):
+                raise ValueError("Model runner response must be an object")
+            reported_calls = int(value.pop("tool_calls", 0))
+        except (ValueError, TypeError, OverflowError):
             self.store.add_usage(state["task_id"], time.monotonic() - self.started_at, 0)
             self.started_at = time.monotonic()
-            raise RuntimeError(result.stderr.strip() or f"model runner exited {result.returncode}")
-        value = json.loads(result.stdout)
-        calls = int(value.pop("tool_calls", 0))
+            raise
+        durable_calls = self.store.task(state["task_id"])["attempt_tool_calls"] - calls_before
+        calls = reported_calls if configured and not durable_calls else 0
         task = self.store.add_usage(state["task_id"], time.monotonic() - self.started_at, calls)
         self.started_at = time.monotonic()
         if task["attempt_tool_calls"] >= ATTEMPT_CALLS:
@@ -1018,6 +1133,8 @@ def _run_task(
             return {"task_id": task_id, "status": "completed", "result": existing, "reconciled": True}
         if task["status"] == "cancelled":
             return {"task_id": task_id, "status": "cancelled", "reconciled": True}
+        if task["status"] == "waiting" and not str(task["waiting_reason"] or "").startswith("failure:"):
+            return {"task_id": task_id, "status": "waiting", "reason": task["waiting_reason"]}
         if task["workflow_version"] != WORKFLOW_VERSION:
             store.wait(task_id, "workflow_version_incompatible")
             return {"task_id": task_id, "status": "waiting", "reason": "workflow_version_incompatible"}
@@ -1028,6 +1145,8 @@ def _run_task(
             if start_state is None and task["status"] == "waiting" and (task["waiting_reason"] or "").startswith("failure:"):
                 if graph.get_state(config).next:
                     store.resume_failed_checkpoint(task_id)
+            if start_state is None and not graph.get_state(config).next:
+                start_state = initial_state(task)
             value = graph.invoke(start_state, config)
         if value.get("waiting_reason"):
             store.wait(task_id, value["waiting_reason"])
@@ -1116,6 +1235,27 @@ def discovery_query(store: BusinessStore) -> tuple[str, str]:
     return capture_select, page_join
 
 
+def same_posting_url(requested: str, final: str) -> bool:
+    """Accept IBM's locale redirect only when the public job ID is unchanged."""
+    if requested == final:
+        return True
+    try:
+        source, target = urlsplit(requested), urlsplit(final)
+        source_query = parse_qs(source.query, keep_blank_values=True)
+        target_query = parse_qs(target.query, keep_blank_values=True)
+        return (source.scheme == target.scheme == "https"
+                and source.netloc == target.netloc == "careers.ibm.com"
+                and source.path == "/careers/JobDetail"
+                and re.fullmatch(r"/[a-z]{2}_[A-Z]{2}/careers/JobDetail", target.path) is not None
+                and not source.fragment and not target.fragment
+                and len(source_query) == len(target_query) == 1
+                and len(source_query.get("jobId", [])) == len(target_query.get("jobId", [])) == 1
+                and re.fullmatch(r"\d+", source_query.get("jobId", [""])[0]) is not None
+                and source_query == target_query)
+    except (TypeError, ValueError):
+        return False
+
+
 def discovered_scan_source(opportunity: sqlite3.Row, refreshed: dict | None = None) -> dict:
     """Build one scan input only from a current, identity-bound source capture."""
     opportunity_id = str(opportunity["id"])
@@ -1135,7 +1275,7 @@ def discovered_scan_source(opportunity: sqlite3.Row, refreshed: dict | None = No
         capture_age = float("inf")
     current_snapshot = (
         (refreshed is not None or (capture.get("url") or metadata.get("url")) == opportunity["url"])
-        and snapshot.get("final_url") == opportunity["url"]
+        and same_posting_url(opportunity["url"], snapshot.get("final_url"))
         and isinstance(snapshot.get("text"), str)
         and snapshot.get("content_hash") == digest(snapshot["text"])
         and 0 <= capture_age < 86400
@@ -1371,6 +1511,10 @@ def resume_task(
                     has_prior_package=True,
                 )
             return run_task(directory, task_id, start_state=state, crash_at=crash_at)
+        if task["status"] == "waiting" and str(task["waiting_reason"] or "").startswith("failure:"):
+            store.resume_failed_checkpoint(task_id)
+            store.close()
+            return run_task(directory, task_id, crash_at=crash_at)
         store.close()
         raise ValueError("apply resume requires --feedback, --input, or --decision")
     if task["status"] in ("completed", "cancelled"):
@@ -1402,9 +1546,40 @@ def parser() -> argparse.ArgumentParser:
     run.add_argument("task_id")
     run.add_argument("--state", help=argparse.SUPPRESS)
     run.add_argument("--crash-at", choices=("before_publish", "publish"), help=argparse.SUPPRESS)
-    commands.add_parser("cron-score")
+    cron = commands.add_parser("cron-score")
     discover_command = commands.add_parser("discover")
     discover_command.add_argument("--company")
+    discover_command.add_argument("--verify", action="store_true")
+    discover_command.add_argument("--headed-fallback", action="store_true")
+    discover_command.add_argument("--throttle", nargs="?", type=int, const=5000)
+    discover_command.add_argument("--rediscover-404", action="store_true")
+    discover_command.add_argument("--posted-after")
+    discover_command.add_argument("--posted-before")
+    discover_command.add_argument("--since", type=float)
+    discover_command.add_argument("--include-blacklisted", action="store_true")
+    discover_command.add_argument("--dry-run", action="store_true")
+    discover_command.add_argument("--resume", action="store_true")
+    global_command = commands.add_parser("global")
+    global_command.add_argument("--ats")
+    global_command.add_argument("--seeds")
+    global_command.add_argument("--liveness", action="store_true")
+    global_command.add_argument("--md-out")
+    global_command.add_argument("--verbose", action="store_true")
+    global_command.add_argument("--since", type=float, default=3)
+    global_command.add_argument("--limit", type=int)
+    global_command.add_argument("--include-undated", action="store_true")
+    global_command.add_argument("--include-blacklisted", action="store_true")
+    global_command.add_argument("--shuffle", action="store_true")
+    global_command.add_argument("--resume", action="store_true")
+    global_command.add_argument("--dry-run", action="store_true")
+    global_command.add_argument("--json", action="store_true")
+    resolve_command = commands.add_parser("resolve-company", aliases=["resolve"])
+    resolve_command.add_argument("names", nargs="*")
+    resolve_command.add_argument("--in", dest="input_path", type=Path)
+    resolve_command.add_argument("--vendors")
+    resolve_command.add_argument("--write", action="store_true")
+    resolve_command.add_argument("--dry-run", action="store_true")
+    resolve_command.add_argument("--summary", action="store_true")
     scan_discovered_command = commands.add_parser("scan-discovered")
     scan_discovered_command.add_argument("opportunity")
     scan_discovered_command.add_argument("--re-evaluate", action="store_true")
@@ -1458,7 +1633,12 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = parser().parse_args()
+    cli = parser()
+    argv = sys.argv[1:]
+    since_count = sum(arg == "--since" or arg.startswith("--since=") for arg in argv)
+    if since_count > 1:
+        cli.error(f"--since given {since_count} times; pass it once")
+    args = cli.parse_args(argv)
     try:
         if args.command == "start":
             args.directory.mkdir(parents=True, exist_ok=True)
@@ -1470,9 +1650,35 @@ def main() -> None:
         elif args.command == "cron-score":
             result = cron_score(args.directory)
         elif args.command == "discover":
-            result = discover(args.directory, INPUT_ROOT / "portals.yml", company_filter=args.company)
+            if args.company == "":
+                raise ValueError("--company requires a value")
+            result = discover(args.directory, Path(os.environ.get("CAREER_OPS_PORTALS") or INPUT_ROOT / "portals.yml"),
+                              company_filter=args.company,
+                              verify=args.verify, headed_fallback=args.headed_fallback,
+                              throttle_ms=5000 if args.throttle == 0 else args.throttle or 0,
+                              rediscover_404=args.rediscover_404,
+                              posted_after=args.posted_after, posted_before=args.posted_before,
+                              since_days=args.since, include_blacklisted=args.include_blacklisted,
+                              dry_run=args.dry_run, resume=args.resume, input_root=INPUT_ROOT,
+                              profile_path=Path(os.environ.get("CAREER_OPS_PROFILE") or INPUT_ROOT / "config" / "profile.yml"))
             if result["status"] == "failed":
                 raise RuntimeError(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        elif args.command == "global":
+            result = discover_global(args.directory, Path(os.environ.get("CAREER_OPS_PORTALS") or INPUT_ROOT / "portals.yml"),
+                                     ats=[part.strip().lower() for part in args.ats.split(",") if part.strip()] if args.ats else None,
+                                     seeds=[part.strip().lower() for part in args.seeds.split(",") if part.strip()] if args.seeds else None,
+                                     liveness=args.liveness, md_out=Path(args.md_out) if args.md_out else None, verbose=args.verbose,
+                                     since_days=args.since, limit=args.limit or None,
+                                     include_undated=args.include_undated,
+                                     include_blacklisted=args.include_blacklisted,
+                                     shuffle=args.shuffle, resume=args.resume, dry_run=args.dry_run,
+                                     input_root=INPUT_ROOT)
+        elif args.command in {"resolve", "resolve-company"}:
+            requested = tuple(part.strip().lower() for part in args.vendors.split(",") if part.strip()) if args.vendors else (*VENDOR_ORDER, "workday")
+            result = resolve_boards(Path(os.environ.get("CAREER_OPS_PORTALS") or INPUT_ROOT / "portals.yml"),
+                                    input_path=args.input_path, names=args.names,
+                                    vendors=tuple(vendor for vendor in requested if vendor != "workday"),
+                                    include_workday="workday" in requested, write=args.write)
         elif args.command == "scan-discovered":
             started = scan_discovered(args.directory, args.opportunity, args.re_evaluate)
             result = view(args.directory, started["task_id"])
@@ -1602,7 +1808,10 @@ def main() -> None:
             finally:
                 if store:
                     store.close()
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        if args.command in {"resolve", "resolve-company"} and args.summary:
+            print(format_summary(result))
+        else:
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     except Exception as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)
         raise SystemExit(1)

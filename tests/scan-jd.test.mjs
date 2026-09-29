@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureScanJds, readScanJd, JD_MAX_AGE_MS } from '../lib/scan-jd.mjs';
+import { captureScanJds, readScanJd, samePostingUrl, JD_MAX_AGE_MS } from '../lib/scan-jd.mjs';
 const root = mkdtempSync(join(tmpdir(), 'scan-jd-'));
 try {
   const offer = { url: 'https://example.com/jobs/123' };
@@ -26,5 +26,11 @@ try {
   const redirected = { url: 'https://example.com/jobs/redirected' };
   assert.equal((await captureScanJds([redirected], root, async () => ({ url: 'https://example.com/', text: 'Other page' }))).failed, 1);
   assert.equal(readScanJd(redirected.url, root), null);
+  const ibm = { url: 'https://careers.ibm.com/careers/JobDetail?jobId=131606' };
+  const localized = 'https://careers.ibm.com/en_US/careers/JobDetail?jobId=131606';
+  assert.equal(samePostingUrl(ibm.url, localized), true);
+  assert.equal(samePostingUrl(ibm.url, localized.replace('131606', '131607')), false);
+  assert.equal((await captureScanJds([ibm], root, async () => ({ url: localized, text: 'IBM job description' }))).captured, 1);
+  assert.equal(readScanJd(ibm.url, root).url, localized);
   console.log('scan-jd: capture, dedup, reuse, expiry and failure retry passed');
 } finally { rmSync(root, { recursive: true, force: true }); }

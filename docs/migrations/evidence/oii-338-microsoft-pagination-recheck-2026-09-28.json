@@ -1,0 +1,30 @@
+{
+  "scope": "OII-338 Microsoft official PCSX isolated dry-run and pagination probe",
+  "command": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 workflow/.venv/bin/python -B -m workflow.career_ops --directory data/acceptance/oii-338-microsoft-isolated-recheck-2026-09-28 discover --company Microsoft --dry-run",
+  "result_path": "data/acceptance/oii-338-microsoft-isolated-recheck-2026-09-28/result.json",
+  "result_sha256": "ff834e91ff714468ea30bb1a086d487e14d3947530c362168ae551be9cf734db",
+  "result": {
+    "status": "partial",
+    "sources": 1,
+    "checked": 2309,
+    "added": 14,
+    "errors": 1,
+    "failure": {"company": "Microsoft", "kind": "coverage_warning", "reason": "coverage_gap"}
+  },
+  "pagination_probe_path": "data/acceptance/oii-338-microsoft-isolated-recheck-2026-09-28/pagination-probe.json",
+  "pagination_probe_sha256": "96a98ec5eba4a06c69a5974d6f377ac5281ca57a468f66678427328a7b6b5490",
+  "pagination_probe": {
+    "pages": 233,
+    "raw_rows": 2321,
+    "unique_rows": 2306,
+    "duplicates": 15,
+    "first_advertised_count": 2320,
+    "last_advertised_count": 2321,
+    "first_duplicate_offset": 20,
+    "last_offset": 2320,
+    "truncation_kind": "coverage_gap"
+  },
+  "provider_sha256": "5b7bbfff0a0e581776742ba294de3f12ac720cb0ce79e9b50a12cf483aab6ce9",
+  "canonical_db_sha256_after": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "limitation": "The public feed changed its count and repeated rows during offset pagination. The provider retained observed unique postings and correctly reported partial coverage. Neither this probe nor the isolated dry-run proves a complete Microsoft snapshot."
+}

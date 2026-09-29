@@ -1,0 +1,30 @@
+{
+  "scope": "OII-338 all enabled configured sources, current Python dry-run recheck",
+  "command": "CAREER_OPS_ALLOW_FAKE_IP_RANGE=1 workflow/.venv/bin/python -B -m workflow.career_ops --directory data/acceptance/oii-338-full-enabled-recheck-2026-09-28 discover --dry-run",
+  "exit_code": 0,
+  "result_path": "data/acceptance/oii-338-full-enabled-recheck-2026-09-28/result.json",
+  "result_sha256": "9c4fabe61f9c05671a1c34ab50890084e8a3403501aeaba9c3162664efeff7d3",
+  "portals_sha256": "987edd24f03ef7e111f680a0a1100976f810a02efee64c681d33f95746171558",
+  "workflow_discovery_sha256": "c865f132e2856ae33bc6204244e2a9303c37f936faf53ac0aba42b466ebe015f",
+  "provider_collector_sha256": "46fd719487858f1344c89c771639cea523e7c8c7ecde68bca4aa42f193faa86f",
+  "canonical_db_sha256_after": "c7a8d44e408b842cd5d8d4a0a133bb19885490476d7d6c4ae129ad8ca15e97ac",
+  "result": {
+    "status": "partial",
+    "dry_run": true,
+    "sources": 34,
+    "checked": 36983,
+    "added": 102,
+    "errors": 9,
+    "dupes": 20,
+    "failures_by_source": {
+      "NVIDIA": "page_cap",
+      "Walmart China": "page_cap",
+      "Microsoft": "coverage_gap",
+      "Qualcomm": "auth after partial collection",
+      "HSBC": "HTTP 403",
+      "Kering": "auth after partial collection",
+      "IKEA China": "coverage_gap"
+    }
+  },
+  "limitations": "This is a read-only dry-run, not retained candidate ingestion. Partial sources remain unaccepted; the exact failure records are in result.json. The canonical database hash matches the prior read-only snapshot."
+}

@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-28",
+  "scope": "Authorized real AIA LangGraph scan and score through current durable model-call budgeting and research recovery",
+  "database": "data/acceptance/oii-338-aia-current-budget-2026-09-28/opportunities.db",
+  "source_url": "https://aia.wd3.myworkdayjobs.com/External/job/Shanghai-CN-AIA-China/Sr-System-Analyst--GenAI-Application_JR-70003",
+  "model": "deepseek-v4.1-flash",
+  "model_host": "llm.goaichat.top",
+  "scan": {
+    "status": "completed",
+    "task_id": "f75754c8-c82c-4368-8ff2-d7f334ab2a05",
+    "jd_sha256": "4566c049bcb9f47f524e144118d07ea14f952614a59bb9e37bde986972c913ab",
+    "jd_chars": 5873,
+    "liveness": "active",
+    "prescreen": "uncertain",
+    "durable_model_calls": 1
+  },
+  "score": {
+    "status": "completed",
+    "task_id": "4cae6fed-eabe-4a3a-97d6-d0a9d0d29d18",
+    "attempts": 2,
+    "durable_calls_total": 7,
+    "recovery_attempt_calls": 1,
+    "first_attempt_failure": "The model labelled a company-page quote as JD evidence; deterministic quote validation refused publication after its first repair.",
+    "recovery": "The same task reused the input- and output-hashed frozen research result and repaired the quote without another search or assessment call.",
+    "call_phases": ["research", "assessment", "repair", "repair"],
+    "research_findings_retrieved": 1,
+    "research_findings_failed": 1,
+    "eligibility": "unknown",
+    "opportunity_state": "evaluated",
+    "lower": 3.0,
+    "upper": 4.0,
+    "coverage": 0.75,
+    "report": "data/acceptance/oii-338-aia-current-budget-2026-09-28/artifacts/4cae6fed-eabe-4a3a-97d6-d0a9d0d29d18/6295aac9121a787ab26f2ff400500026ae32ba1f18e0fac6cb3682ebb637e8a0/report.md",
+    "report_sha256": "11d18ba3155462f63a72d2b5498ef03ef93093c378497b8adedcbea61e5f8e78",
+    "research_result_sha256": "39c0e7d9ffd91406d8aa71d10c8064bbd61e04ae2a220737cd595414b3067574",
+    "research_checkpoint_sha256": "c514be121042d44b18da799b1c427fdfe6776675b9a9ca483b9e6408eabf9aac",
+    "call_log_sha256": "ef6ae30b64b8f9fb10a52ad41cefc9baccf2961f74b51af1d3f94c2a8cbe249d",
+    "publish_checkpoint_matches_report": true,
+    "all_dimension_quotes_match_frozen_sources": true,
+    "user_review": "accepted as OII-338 real score acceptance sample on 2026-09-28"
+  },
+  "business": {
+    "source_evidence_rows": 4,
+    "scan_results": 1,
+    "score_results": 1,
+    "evaluations": 1,
+    "application_state": "none",
+    "deliveries": 0
+  },
+  "acceptance_limit": "One real current-code AIA score with evidence-bounded citation repair. The new compensation rating relies on a broader analyst market benchmark and a role-level inference, not verified AIA pay. No application or message was sent and the canonical database was untouched."
+}

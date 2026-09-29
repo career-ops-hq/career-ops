@@ -16,7 +16,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import * as yaml from 'js-yaml';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { buildTitleFilter } from '../scan.mjs';
+import { buildTitleFilter } from '../title-keywords.mjs';
 
 console.log('\nexample config — support negatives name the role, not the domain');
 

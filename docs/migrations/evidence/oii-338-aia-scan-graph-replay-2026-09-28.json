@@ -1,0 +1,12 @@
+{
+  "scope": "OII-338 checkpointed LangGraph scan subgraph replay against the user-accepted AIA scan",
+  "source_store": "data/acceptance/oii-338-aia-current-code-2026-09-28/opportunities.db",
+  "isolated_replay": "data/acceptance/oii-338-aia-scan-graph-replay/workflow-drafts",
+  "input_fingerprint": "dcdcc5b3b58e8394d795ad12b803f6d0df46c502918223694a3907298ae584bb",
+  "frozen_model_trace_sha256": "f6cfcdff186213e61c7b96320d42ccd7baccde552c9d016f22b076324b6ba143",
+  "jd_sha256": "4566c049bcb9f47f524e144118d07ea14f952614a59bb9e37bde986972c913ab",
+  "report_fields_compared": 13,
+  "report_match_except_generated_at": true,
+  "external_model_calls": 0,
+  "limitations": "Replays frozen real AIA model extraction through the new scan graph. Prescreen generated_at is a new execution timestamp. It does not repeat a live model call, provider collection, or business publish. The original acceptance store was opened read-only."
+}

@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-28",
+  "company": "MTR Corporation",
+  "provider": "mtr-taleo",
+  "official_listing_total": 28,
+  "collected_unique": 25,
+  "truncated": true,
+  "truncation_kind": "coverage_gap",
+  "python_discovery": {
+    "status": "partial",
+    "checked": 25,
+    "added": 0,
+    "errors": 1
+  },
+  "raw_output_path": "/Users/oii/dev/career-ops/data/acceptance/oii-338-mtr-2026-09-28/recheck-output.json",
+  "raw_output_sha256": "2966e2639ac79c04c0e84da68c4f20e351f428f097d6ae133a26b266c7b4f4ac",
+  "personal_data_sent": false
+}

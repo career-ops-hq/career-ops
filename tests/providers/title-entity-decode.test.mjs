@@ -19,7 +19,7 @@ const load = (f) => import(pathToFileURL(join(ROOT, `providers/${f}`)).href);
 
 console.log('\nProviders — title entity decoding (#2921)');
 try {
-  const { buildTitleFilter } = await load('../scan.mjs');
+  const { buildTitleFilter } = await load('../title-keywords.mjs');
 
   // The end-to-end claim: the decoded title survives the user's own filter.
   const keepsRnD = buildTitleFilter({ positive: ['r&d'], negative: [] });

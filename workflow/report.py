@@ -108,13 +108,15 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         for name in DIMENSIONS
     )
     findings = "\n".join(f"- {item['id']} {item['url']} {item['entity']}" for item in assessment["research"]["findings"]) or "- 无外部研究发现"
+    research_status = ("已留存可引用网页来源" if any(item.get("status") == "retrieved" for item in assessment["research"]["findings"])
+                       else "已检索，但未取得可引用网页；外部事项保持未知")
     sections = assessment["sections"]
     bodies = {
         "A. 岗位概览": sections["overview"], "B. 能力竞争力": sections["capabilities"],
         "C. 入职吸引力": f"**入职吸引力：** {score['lower']:.2f}–{score['upper']:.2f}/5；证据覆盖率：{score['coverage'] * 100:g}%\n\n{table}",
         "D. 薪酬与需求": sections["compensation"], "E. 补证问题": f"{sections['questions']}\n\n### 外部研究记录\n\n{findings}",
         "G. 岗位真实性": sections["legitimacy"], "Risk Summary": sections["risks"],
-        "Evaluation Checklist": f"{sections['checklist']}\n\n联网研究：完成；记录见 E. 补证问题。",
+        "Evaluation Checklist": f"{sections['checklist']}\n\n联网研究：{research_status}；记录见 E. 补证问题。",
         "Machine Summary": f"```yaml\n{yaml.safe_dump(summary, allow_unicode=True, sort_keys=False, width=10_000).strip()}\n```",
     }
     if any(not isinstance(body, str) or len(body.strip()) < 20 or re.search(r"^## ", body, re.MULTILINE) for body in bodies.values()):
