@@ -62,6 +62,7 @@ Each location/employment/compensation/company_size gate is {status:"pass|fail|un
 years is {required:number,verified:number_or_null,evidence:string}.
 core_capabilities is [{name,core:boolean,mandatory:boolean,match:"proven|adjacent|gap|unverified",evidence:string}].
 credentials is [{name,mandatory:boolean,status:"present|absent|unknown",evidence:string}].
+Credentials contain degrees, certifications and licenses only. Put every experience-duration requirement in years, never again in credentials.
 Years required=0 only if the JD states no minimum. Missing verified years must stay null, not guessed.
 Absence of proof for the full requested tenure does NOT mean zero years. Count supported relevant periods; otherwise return null.
 Prescreen: a >=3-year proven shortfall or >=2 genuinely missing core mandatory capabilities fails; adjacent/unverified does not.
@@ -187,6 +188,18 @@ def attach_evidence(value, snapshot):
     years = screen['years']
     if type(years.get('verified')) in (int, float) and years['verified'] == 0:
         years['verified'] = None
+    if isinstance(screen['credentials'], list):
+        credentials = []
+        for item in screen['credentials']:
+            name = item.get('name') if isinstance(item, dict) else None
+            tenure = (isinstance(name, str) and
+                      re.search(r'[0-9]+(?:\.[0-9]+)?\s*\+?\s*(?:年|years?|yrs?)', name, re.I) and
+                      re.search(r'经验|experience', name, re.I))
+            if tenure and re.search(r'degree|学位|学历|学士|硕士|博士|证书|认证|licen[cs]e', name, re.I):
+                credentials.append({**item, 'status': 'unknown'})
+            elif not tenure:
+                credentials.append(item)
+        screen['credentials'] = credentials
     return {**{k: value[k] for k in ('company', 'role', 'complete_jd', 'liveness', 'liveness_reason')},
             'prescreen': screen, 'jd': snapshot['text']}
 

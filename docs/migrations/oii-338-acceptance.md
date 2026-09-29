@@ -529,3 +529,17 @@ The task was not retriggered. See
 `evidence/oii-338-recurring-score-2026-09-29.json` for the exact IDs and
 statuses. This proves another built-in scheduled score business result while
 retaining the Hermes execution-metadata ambiguity.
+
+The natural 19:00 score tick (`b633d043d73744a8bdeb4a203433e0e3`)
+completed its LangGraph scan stage for opportunity `8`, but exposed a
+cross-field prescreen defect. The model supplied 4 required years and 3.3
+verified years, correctly a borderline gap under the Node 3-year terminal
+rule, then repeated the same tenure requirement as an absent `credential`.
+That duplicate incorrectly published a `prescreen_failed` exclusion. The
+model contract now assigns tenure only to `years`, and the adapter drops a
+pure tenure credential or marks a mixed degree-and-tenure item unknown.
+Replaying the real saved extraction through the corrected adapter returns
+`uncertain` with no discard reasons; isolated graph regression cases cover
+Chinese pure-tenure and English mixed requirements. The existing business
+exclusion still requires a fresh workflow re-evaluation before this sample
+can count as corrected live acceptance. No notification was sent.

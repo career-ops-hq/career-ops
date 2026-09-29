@@ -36,12 +36,26 @@ def extracted(*, liveness: str = "active", complete: bool = True, location: str 
 
 with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
     root = Path(temporary)
+    borderline = extracted()
+    borderline["years"] = {"required": 4, "verified": 3.3, "evidence": "CV supports 3.3 years"}
+    borderline["credentials"] = [
+        {"name": "Software Engineering bachelor's degree", "mandatory": True,
+         "status": "present", "evidence": "CV degree"},
+        {"name": "4+年技术编码工程经验(Bachelor路径)", "mandatory": True,
+         "status": "absent", "evidence": "CV supports 3.3 years"},
+    ]
+    combined = extracted()
+    combined["years"] = borderline["years"]
+    combined["credentials"] = [{"name": "Bachelor's degree and 4+ years coding experience",
+                                "mandatory": True, "status": "absent", "evidence": "CV supports 3.3 years"}]
     for name, response, expected in (
         ("active", extracted(), "jd_report"),
         ("unknown", extracted(liveness="uncertain"), "source_access_unknown"),
         ("incomplete", extracted(complete=False), "core_evidence_missing"),
         ("expired", extracted(liveness="expired"), "expired"),
         ("failed", extracted(location="fail"), "prescreen_failed"),
+        ("borderline", borderline, "jd_report"),
+        ("combined", combined, "jd_report"),
     ):
         with patch.object(scan_graph.model_adapter, "call_agent", return_value=(response, "fixture")):
             result = scan_graph.run_scan(inputs(name), root)
@@ -53,6 +67,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
         else:
             assert result["outcome"] == expected
             assert result["artifact"]["jd"] == inputs(name)["source"]["jd"]
+            if name in {"borderline", "combined"}:
+                assert result["artifact"]["prescreen"]["status"] == "uncertain"
         assert result["tool_calls"] == 1
         with patch.object(scan_graph.model_adapter, "call_agent", side_effect=AssertionError("Completed scan repeated")):
             assert scan_graph.run_scan(inputs(name), root) == result
