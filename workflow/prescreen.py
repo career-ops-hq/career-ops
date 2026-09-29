@@ -47,29 +47,34 @@ def evaluate(value: dict) -> dict:
     if not isinstance(capabilities, list):
         missing.append("core_capabilities")
     else:
-        if any(not isinstance(item, dict) or not item.get("name") or not isinstance(item.get("core"), bool)
-               or not isinstance(item.get("mandatory"), bool)
-               or item.get("match") not in ("proven", "adjacent", "gap", "unverified") for item in capabilities):
+        valid = [item for item in capabilities if isinstance(item, dict)
+                 and isinstance(item.get("name"), str) and item["name"].strip()
+                 and isinstance(item.get("core"), bool) and isinstance(item.get("mandatory"), bool)
+                 and item.get("match") in ("proven", "adjacent", "gap", "unverified")]
+        if len(valid) != len(capabilities):
             missing.append("core_capabilities.items")
-        gaps = [item for item in capabilities if isinstance(item, dict) and item.get("core") is True and item.get("mandatory") is True and item.get("match") == "gap"]
+        gaps = [item for item in valid if item["core"] and item["mandatory"] and item["match"] == "gap"]
         if len(gaps) >= 2:
             failures.append(reason("multiple_core_capability_gaps", "core_capabilities", f"Missing {len(gaps)} core mandatory capabilities: " + ", ".join(item["name"] for item in gaps), [item.get("evidence") for item in gaps]))
-        for item in capabilities:
-            if isinstance(item, dict) and item.get("core") is True and item.get("mandatory") is True and item.get("match") in ("adjacent", "unverified"):
+        for item in valid:
+            if item["core"] and item["mandatory"] and item["match"] in ("adjacent", "unverified"):
                 unknowns.append(reason(f"core_capability_{item['match']}", "core_capabilities", f"{item['name']} is {item['match']}", item.get("evidence")))
     credentials = value.get("credentials")
     if not isinstance(credentials, list):
         missing.append("credentials")
     else:
-        if any(not isinstance(item, dict) or not item.get("name") or not isinstance(item.get("mandatory"), bool)
-               or item.get("status") not in ("present", "absent", "unknown") for item in credentials):
+        valid = [item for item in credentials if isinstance(item, dict)
+                 and isinstance(item.get("name"), str) and item["name"].strip()
+                 and isinstance(item.get("mandatory"), bool)
+                 and item.get("status") in ("present", "absent", "unknown")]
+        if len(valid) != len(credentials):
             missing.append("credentials.items")
-        for item in credentials:
-            if not isinstance(item, dict) or item.get("mandatory") is not True:
+        for item in valid:
+            if not item["mandatory"]:
                 continue
-            if item.get("status") == "absent":
+            if item["status"] == "absent":
                 failures.append(reason("mandatory_credential_absent", "credentials", f"Mandatory credential absent: {item['name']}", item.get("evidence")))
-            elif item.get("status") != "present":
+            elif item["status"] != "present":
                 unknowns.append(reason("mandatory_credential_unverified", "credentials", f"Mandatory credential unverified: {item['name']}", item.get("evidence")))
     status = "fail" if failures else "incomplete" if missing else "uncertain" if unknowns else "pass"
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

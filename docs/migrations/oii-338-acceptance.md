@@ -550,3 +550,7 @@ selector now considers only the latest scan result; scan inputs carry policy
 version `2` so a deliberate re-evaluation uses a new fingerprint and a fresh
 LangGraph checkpoint. An isolated exclusion-to-report-to-score-selection case
 passes. Opportunity `8` still needs its business re-evaluation.
+The same scan boundary now treats nameless or malformed capability and
+credential items as missing evidence. Such rows no longer crash the graph or
+create an unnamed hard failure; valid mandatory license failures still exclude.
+Isolated graph cases cover both malformed lists and the valid license gate.

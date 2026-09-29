@@ -48,6 +48,16 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
     combined["years"] = borderline["years"]
     combined["credentials"] = [{"name": "Bachelor's degree and 4+ years coding experience",
                                 "mandatory": True, "status": "absent", "evidence": "CV supports 3.3 years"}]
+    invalid_capabilities = extracted()
+    invalid_capabilities["core_capabilities"] = [
+        {"core": True, "mandatory": True, "match": "gap", "evidence": "No named capability"},
+        {"core": True, "mandatory": True, "match": "gap", "evidence": "No named capability"},
+    ]
+    invalid_credentials = extracted()
+    invalid_credentials["credentials"] = [{"mandatory": True, "status": "absent", "evidence": "Unnamed requirement"}]
+    absent_license = extracted()
+    absent_license["credentials"] = [{"name": "Required professional license", "mandatory": True,
+                                      "status": "absent", "evidence": "No license in CV"}]
     for name, response, expected in (
         ("active", extracted(), "jd_report"),
         ("unknown", extracted(liveness="uncertain"), "source_access_unknown"),
@@ -56,12 +66,15 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-graph-") as temporary:
         ("failed", extracted(location="fail"), "prescreen_failed"),
         ("borderline", borderline, "jd_report"),
         ("combined", combined, "jd_report"),
+        ("invalid-capabilities", invalid_capabilities, "core_evidence_missing"),
+        ("invalid-credentials", invalid_credentials, "core_evidence_missing"),
+        ("absent-license", absent_license, "prescreen_failed"),
     ):
         with patch.object(scan_graph.model_adapter, "call_agent", return_value=(response, "fixture")):
             result = scan_graph.run_scan(inputs(name), root)
-        if name in {"unknown", "incomplete"}:
+        if name in {"unknown", "incomplete", "invalid-capabilities", "invalid-credentials"}:
             assert result["waiting_reason"] == expected
-        elif name in {"expired", "failed"}:
+        elif name in {"expired", "failed", "absent-license"}:
             assert result["outcome"] == "exclude"
             assert result["artifact"]["reason_code"] == expected
         else:
