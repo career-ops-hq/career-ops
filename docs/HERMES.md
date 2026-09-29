@@ -97,9 +97,17 @@ node openai-eval.mjs --url <endpoint> --model <model> --file jds/<posting>.txt
 
 - Keeping an interactive session to about ten evaluations is a practical ceiling. Past that, output quality degrades before your quota does.
 
-### Interactive only
+### Headless workers
 
-Nothing in this repository drives a `hermes` binary headlessly, so there is no Hermes worker path and `batch/batch-runner.sh` stays Claude Code-specific. Everything else, including the full evaluation pipeline, works interactively.
+The web UI and batch ranker can run Hermes in one-shot mode:
+
+```bash
+hermes chat -q "<prompt>" --oneshot -Q --no-restore-cwd
+```
+
+This returns one plain-text answer without resuming an unrelated session. The worker inherits Hermes's configured tools, approvals, memory, and project-context rules. It is suitable for evaluation, research, PDF drafting, and ranking. It is not permission-fenced by career-ops, so the web UI reports that limitation and should not be used for unattended mutation workflows until a verified Hermes sandbox adapter exists.
+
+The interactive workflow remains available for tasks that benefit from session continuity.
 
 ## If something looks wrong
 

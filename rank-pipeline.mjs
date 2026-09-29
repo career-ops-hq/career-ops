@@ -56,6 +56,7 @@ const REASON_MAX = 140;
 // that reference, it does not invent commands.
 export const CLI_CANDIDATES = [
   { bin: 'claude', args: p => ['-p', p] },
+  { bin: 'hermes', args: p => ['chat', '-q', p, '--oneshot', '-Q', '--no-restore-cwd'] },
   { bin: 'opencode', args: p => ['run', p] },
   { bin: 'codex', args: p => ['exec', p] },
   { bin: 'copilot', args: p => ['-p', p] },
