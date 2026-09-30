@@ -6,6 +6,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  // Missing baselines require an explicit, reviewed Linux update.
+  updateSnapshots: 'none',
   timeout: 60_000,
   expect: { timeout: 10_000 },
   outputDir: 'test-results/cv-visual-results',
