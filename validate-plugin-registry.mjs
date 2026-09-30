@@ -53,12 +53,13 @@ function repoSlug(repoUrl) {
   return m[1];
 }
 
-async function ghJson(url) {
+/** GET a GitHub API URL. null on 404 (the caller decides what an absence means), throws otherwise. */
+async function ghJson(url, fetchImpl = fetch) {
   const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'career-ops-registry-freshness' };
   // A token only raises the rate limit; the check works unauthenticated, which
-  // is what the no-secret registry-validate job runs as.
+  // is what a local run gets. The scheduled workflow passes github.token.
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  const res = await fetch(url, { headers });
+  const res = await fetchImpl(url, { headers });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   return res.json();
@@ -73,12 +74,35 @@ async function ghJson(url) {
  * bumps, CI edits) that no user of the plugin has ever run. Resolved via
  * /commits/<tag> so an ANNOTATED tag yields the commit it wraps rather than
  * the tag object's own SHA.
+ *
+ * A 404 from the releases endpoint is AMBIGUOUS and must not be taken at face
+ * value: it is returned both by a repo that has published nothing and by a repo
+ * that is deleted or private. (A repo that was merely RENAMED or transferred
+ * still answers, with a 301 that fetch follows, so it is not part of this case
+ * — one registry entry reaches its plugin that way today.) Only the second
+ * request below tells the two apart, and only a SUCCESSFUL one proves the
+ * absence is real: anything else means "could not tell", which is an error
+ * rather than an absence. The cost is one extra request on the 404 path only,
+ * so a repo that has a release never pays it.
+ *
+ * Note this reports no-release for a repo whose only releases are drafts or
+ * prereleases, since /releases/latest excludes both. That is the wanted answer:
+ * there is no published release for a pin to track.
  */
-export async function fetchLatestRelease(repoUrl) {
+export async function fetchLatestRelease(repoUrl, { fetchImpl = fetch } = {}) {
   const slug = repoSlug(repoUrl);
-  const rel = await ghJson(`${GITHUB_API}/repos/${slug}/releases/latest`);
-  if (!rel || !rel.tag_name) return null;
-  const commit = await ghJson(`${GITHUB_API}/repos/${slug}/commits/${encodeURIComponent(rel.tag_name)}`);
+  const rel = await ghJson(`${GITHUB_API}/repos/${slug}/releases/latest`, fetchImpl);
+  // Only a genuine 404 (null) is ambiguous. A 200 that somehow carries no
+  // tag_name is a malformed answer, not an absence, and gets its own error
+  // rather than a reachability probe it would always pass.
+  if (rel === null) {
+    if (!(await ghJson(`${GITHUB_API}/repos/${slug}`, fetchImpl))) {
+      throw new Error(`repo not reachable (404): ${slug} — deleted or private`);
+    }
+    return null;
+  }
+  if (!rel.tag_name) throw new Error(`malformed release response for ${slug}: no tag_name`);
+  const commit = await ghJson(`${GITHUB_API}/repos/${slug}/commits/${encodeURIComponent(rel.tag_name)}`, fetchImpl);
   if (!commit || !commit.sha) throw new Error(`release ${rel.tag_name} resolves to no commit`);
   return { tag: rel.tag_name, sha: commit.sha };
 }
