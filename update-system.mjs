@@ -314,6 +314,7 @@ const SYSTEM_PATHS = [
   'career-profile.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'evaluation-cache.mjs',
   'batch-evaluate-gemini.mjs',
   'providers/',
   'data-static/',
