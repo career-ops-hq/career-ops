@@ -96,15 +96,18 @@ func buildMoneySpanRegex(currencies []string) *regexp.Regexp {
 			suffixParts = append(suffixParts, q)
 		}
 	}
-	// Left boundary guard (RE2 has no lookbehind): stops "G18 EUR" / "IC4
-	// EUR" level codes from being read as tiny money spans that shadow the
-	// real amount later in the string (#4600). Real span is in group 1.
+	// Left boundary guard (RE2 has no lookbehind) on the amount-first branch
+	// only: stops "G18 EUR" / "IC4 EUR" level codes from being read as tiny
+	// money spans that shadow the real amount later in the string (#4600).
+	// A currency-first span is anchored by its token, so it still matches
+	// right after a letter ("US$120K", "年収¥8M"). Real span: group 1
+	// (currency first) or group 2 (amount first).
 	pattern := fmt.Sprintf(
-		`(?:^|[^\p{L}\p{N}])(~?(?:(?:%s)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
-			`(?:\s*[-–]\s*(?:%s)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?`+
-			`|\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
+		`(~?(?:%s)\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
+			`(?:\s*[-–]\s*(?:%s)?\d[\d,]*(?:\.\d+)?[KkMmBb]?)?)`+
+			`|(?:^|[^\p{L}\p{N}])(~?\d[\d,]*(?:\.\d+)?[KkMmBb]?`+
 			`(?:\s*[-–]\s*\d[\d,]*(?:\.\d+)?[KkMmBb]?)?`+
-			`\s+(?:%s)))`,
+			`\s+(?:%s))`,
 		strings.Join(prefixParts, "|"),
 		strings.Join(rangePrefixParts, "|"),
 		strings.Join(suffixParts, "|"),
@@ -199,10 +202,13 @@ func deriveNoteFields(app *model.CareerApplication) {
 	// (e.g. "$170K min floor") only when no range exists. Skip money spans
 	// that are actually funding/valuation figures ("$600M valuation", "$70M
 	// Series C") — they describe the company, not compensation.
-	// Submatch group 1: the real span, without reMoneySpan's boundary guard.
+	// Submatch group 1 or 2: the real span, without reMoneySpan's boundary guard.
 	var matches []string
 	for _, m := range reMoneySpan.FindAllStringSubmatchIndex(app.Notes, -1) {
 		start, end := m[2], m[3]
+		if start < 0 {
+			start, end = m[4], m[5]
+		}
 		if reFundingContext.MatchString(app.Notes[end:]) {
 			continue
 		}
