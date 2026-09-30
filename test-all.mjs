@@ -18896,12 +18896,36 @@ try {
     const descriptions = [
       ['entity', entity.description || ''],
       ...projects.map((pr) => [`project ${pr.guid}`, pr.description || '']),
+      // Plans are read by funders too: a six-month plan quoting "72,400+ stars"
+      // with no date went stale the same way an entity description would.
+      ...plans.map((pl) => [`plan ${pl.guid}`, pl.description || '']),
     ];
     const undated = descriptions.filter(([, text]) => METRIC_RE.test(text) && !COUNTED_RE.test(text));
     if (undated.length === 0) {
       pass('every funding.json description that quotes a count also states when it was counted');
     } else {
       fail(`funding.json ${undated.map(([w]) => w).join(', ')}: quotes a metric with no "counted <date>"`);
+    }
+
+    // A repository wellKnown is the proof the directory asks for: it fetches that
+    // file and looks for the manifest URL in it. The repo moved to the org on
+    // 31-Aug and the listing kept flagging it as unproven until this file existed,
+    // so the check is that the file ships AND names the manifest's own URL.
+    const repoProofs = projects.filter((pr) => pr.repositoryUrl?.wellKnown);
+    if (repoProofs.length > 0) {
+      const WELL_KNOWN = '.well-known/funding-manifest-urls';
+      const MANIFEST_URL = 'https://github.com/career-ops-hq/career-ops/raw/main/funding.json';
+      let proof = null;
+      try { proof = readFile(WELL_KNOWN); } catch { proof = null; }
+      const listed = proof ? proof.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+      const pointsHere = repoProofs.every((pr) => pr.repositoryUrl.wellKnown.endsWith(`/${WELL_KNOWN}`));
+      if (proof !== null && listed.includes(MANIFEST_URL) && pointsHere) {
+        pass(`${WELL_KNOWN} ships and lists ${MANIFEST_URL}, and repositoryUrl.wellKnown points at it`);
+      } else {
+        fail(proof === null ? `repositoryUrl.wellKnown is set but ${WELL_KNOWN} is missing`
+          : !pointsHere ? `repositoryUrl.wellKnown does not point at ${WELL_KNOWN}`
+          : `${WELL_KNOWN} does not list ${MANIFEST_URL}`);
+      }
     }
   }
 } catch (e) {
