@@ -78,22 +78,27 @@ function existsInRepo(rel) {
   }
 }
 
+test('no path is registered twice in SYSTEM_PATHS or BOOTSTRAP_PATHS', () => {
+  for (const name of ['SYSTEM_PATHS', 'BOOTSTRAP_PATHS']) {
+    const entries = extractArray(name);
+    const seen = new Map();
+    const dupes = [];
+    for (const entry of entries) {
+      if (seen.has(entry)) dupes.push(entry);
+      seen.set(entry, true);
+    }
+    assert.deepEqual(
+      [...new Set(dupes)],
+      [],
+      `${name} registers the same path more than once: ${[...new Set(dupes)].join(', ')}`,
+    );
+  }
+});
+
 test('the two new system scripts are registered exactly once', () => {
   const system = extractArray('SYSTEM_PATHS');
   assert.ok(system.includes('jev-post-linter.mjs'), 'Gate 3 wrapper must ship with the system');
   assert.ok(system.includes('scripts/jev-calibrate.mjs'), 'the calibration script must ship with the system');
   assert.ok(system.includes('scripts/jev_gatekeeper.py'), 'the gatekeeper itself must remain registered');
-
-  // Scoped to the Jev entries on purpose. SYSTEM_PATHS carries a pre-existing
-  // duplicate ('.editorconfig') that predates this work; a blanket dupe assert
-  // would make this test fail for a condition it did not introduce. Worth
-  // cleaning up separately.
-  const jevEntries = ['jev-post-linter.mjs', 'scripts/jev-calibrate.mjs', 'scripts/jev_gatekeeper.py'];
-  for (const entry of jevEntries) {
-    assert.equal(
-      system.filter((e) => e === entry).length,
-      1,
-      `${entry} must appear exactly once in SYSTEM_PATHS`,
-    );
-  }
+  assert.ok(system.includes('.editorconfig'), '.editorconfig must stay registered exactly once');
 });

@@ -100,6 +100,12 @@ data/model-blacklist.json
 .claude/memory/
 .opencode/settings.local.json
 .opencode/memory/
+# Locally generated agent definitions and knowledge-graph output. These are
+# per-machine scratch artifacts, not shipped system layer: a stray `git add .`
+# otherwise commits someone's generated graph and validate-system-paths-coverage
+# then demands they be registered for upgrade.
+.opencode/agents/
+graphify-out/
 # OpenCode project config (often holds personal MCP/model/per-machine prefs).
 opencode.json
 career-dashboard

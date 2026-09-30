@@ -461,7 +461,6 @@ export const SYSTEM_PATHS = [
   'LICENSE',
   'CITATION.cff',
   'funding.json',
-  '.editorconfig',
   '.github/',
   'package.json',
   'build-cv-latex.mjs',
