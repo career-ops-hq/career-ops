@@ -33,6 +33,43 @@ try {
     fail(`greenhouse.detect(eu) returned ${JSON.stringify(hitEu)}`);
   }
 
+  // detect() — embed boards carry the token in ?for= (the path is "embed")
+  const hitEmbed = greenhouse.detect({
+    name: 'Stripe',
+    careers_url: 'https://job-boards.greenhouse.io/embed/job_board?for=stripe',
+  });
+  if (hitEmbed && hitEmbed.url === 'https://boards-api.greenhouse.io/v1/boards/stripe/jobs') {
+    pass('greenhouse.detect() reads the slug from ?for= on an embed board URL');
+  } else {
+    fail(`greenhouse.detect(embed) returned ${JSON.stringify(hitEmbed)}`);
+  }
+
+  const hitEmbedFiltered = greenhouse.detect({
+    name: 'Databricks',
+    careers_url: 'https://job-boards.greenhouse.io/embed/job_board?for=databricks&offices%5B%5D=4002841002',
+  });
+  if (hitEmbedFiltered && hitEmbedFiltered.url === 'https://boards-api.greenhouse.io/v1/boards/databricks/jobs') {
+    pass('greenhouse.detect() ignores extra query params on an embed board URL');
+  } else {
+    fail(`greenhouse.detect(embed+filter) returned ${JSON.stringify(hitEmbedFiltered)}`);
+  }
+
+  const hitEmbedClassic = greenhouse.detect({ name: 'Stripe', careers_url: 'https://boards.greenhouse.io/embed/job_board?for=stripe' });
+  if (hitEmbedClassic && hitEmbedClassic.url === 'https://boards-api.greenhouse.io/v1/boards/stripe/jobs') {
+    pass('greenhouse.detect() reads ?for= on the boards.greenhouse.io embed host too');
+  } else {
+    fail(`greenhouse.detect(boards embed) returned ${JSON.stringify(hitEmbedClassic)}`);
+  }
+
+  // ?for= names a board only on a Greenhouse host: elsewhere it is an unrelated
+  // param and must not select another company's board.
+  if (greenhouse.detect({ name: 'X', careers_url: 'https://example.com/jobs?for=stripe' }) === null
+      && greenhouse.detect({ name: 'X', careers_url: 'https://example.com/job-boards.greenhouse.io/embed/job_board?for=stripe' }) === null) {
+    pass('greenhouse.detect() ignores ?for= on a non-Greenhouse host');
+  } else {
+    fail('greenhouse.detect() must not read ?for= from a non-Greenhouse URL');
+  }
+
   // detect() — api: takes precedence over careers_url and is used verbatim
   // when its host is on the allowlist.
   const hitApi = greenhouse.detect({
