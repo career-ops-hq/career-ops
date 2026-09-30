@@ -13,8 +13,7 @@
     "workflow": "workflow/.venv/bin/python -B -m workflow.career_ops",
     "application:lifecycle": "workflow/.venv/bin/python -B -m workflow.career_ops application",
     "interview:context": "workflow/.venv/bin/python -B -m workflow.interview_tools context",
-    "cv:maintain": "workflow/.venv/bin/python -B workflow/cv_maintenance.py",
-    "migrate": "node scripts/migrate/opportunities.mjs"
+    "cv:maintain": "workflow/.venv/bin/python -B workflow/cv_maintenance.py"
   },
   "keywords": [
     "ai",

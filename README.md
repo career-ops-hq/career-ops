@@ -23,21 +23,6 @@ node scripts/check-syntax.mjs
 workflow/.venv/bin/python -B tests/workflow-scan-test.py
 ```
 
-## Historical cutover
-
-`scripts/migrate/opportunities.mjs` inventories historical scans, reports, and
-applications without writing by default. It refuses unresolved mappings and
-only applies after an explicit flag:
-
-```bash
-node scripts/migrate/opportunities.mjs
-node scripts/migrate/opportunities.mjs --apply --discard-unmapped
-```
-
-The apply command creates and verifies a timestamped backup before modifying a
-pre-existing SQLite database. Historical Markdown reports remain immutable
-artifacts linked from SQLite.
-
 ## Data boundaries
 
 Keep user-authored career facts in `cv.md`, `config/profile.yml`, and

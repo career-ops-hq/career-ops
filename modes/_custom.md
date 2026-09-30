@@ -62,8 +62,8 @@ reason and evidence; it does not produce a score or application package.
 Incomplete core evidence waits for a new capture. Unknown nonterminal facts
 remain Unknown and follow the JD report into the score checklist. A completed
 scan JD report is the normal score input; a changed JD or candidate/rule input
-requires explicit re-evaluation. A cache or historical report is reusable only
-when its content and input fingerprints still match.
+requires explicit re-evaluation. A cache is reusable only when its content and
+input fingerprints still match.
 
 ### Score and action queue
 
@@ -133,11 +133,11 @@ record “I don't know”; never promote a guess to a verified fact.
 
 新评分和主动重评继续执行每岗位最多五次搜索；查询 compensation 与 company，并在 company 中调查公司级工时、周末工作、加班补偿和企业文化。官方来源用于核对职位和经营事实；公司工作制度难从官方口径查到时，主动查询论坛和员工反馈。记录来源实体、日期、地区、岗位适用性、冲突及访问失败；搜索摘要不能当作已读取正文，未找到负面材料也不是正面证据。
 
-冻结 research JSON：searched_at、实际 queries、dimensions 中的 compensation/company 结论与下一步，以及 findings 的 URL、实体、范围、访问状态、日期、局限与可引用摘录。检索完成但证据不足时保留 Unknown 和补证问题。报告及来源通过校验后才发布；旧报告保留原格式。
+冻结 research JSON：searched_at、实际 queries、dimensions 中的 compensation/company 结论与下一步，以及 findings 的 URL、实体、范围、访问状态、日期、局限与可引用摘录。检索完成但证据不足时保留 Unknown 和补证问题。报告及来源通过校验后才发布。
 
 ### Scored 发布与重评
 
-完整 JD、校验和业务提交通过后，SQLite 保存三个维度分数、报告路径及哈希。当前输入改变时重新评估；旧报告作为历史证据保留，不能把旧总分换算成新维度分。scores 展示分项与过期原因，decisions 使用上述“值得关注”规则，通知也使用同一规则。申请始终由用户选择，不自动提交。
+完整 JD、校验和业务提交通过后，SQLite 保存三个维度分数、报告路径及哈希。当前输入改变时重新评估；旧总分不能换算成新维度分。scores 展示分项与过期原因，decisions 使用上述“值得关注”规则，通知也使用同一规则。申请始终由用户选择，不自动提交。
 
 ### Hermes 定时评分
 
