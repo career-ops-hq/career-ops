@@ -342,6 +342,7 @@ const SYSTEM_PATHS = [
   'check-table-freshness.mjs',
   'check-jd-archive.mjs',
   'fingerprint-core.mjs',
+  'listing-fingerprint.mjs',
   'process-quality.mjs',
   'company-history.mjs',
   'rejection-latency.mjs',
