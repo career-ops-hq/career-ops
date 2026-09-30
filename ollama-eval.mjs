@@ -252,6 +252,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileYml,
   profileContent,
   jdText,
+  jdInContext: false, // Sent once in the user message, still included in the budget.
   maxTokens: numCtx, // matches options.num_ctx below
 });
 
