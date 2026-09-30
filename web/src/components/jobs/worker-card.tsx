@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle, RotateCcw } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
@@ -74,6 +75,57 @@ export function pillTone(j: Job): keyof typeof TONE {
   if (j.status === "error") return "bad";
   if (j.status === "done") return j.result?.tone ?? "muted";
   return "muted";
+}
+
+/**
+ * Gate 3 telemetry badge — SHARED by WorkerCard and /jobs/[id].
+ *
+ * Why one exported helper rather than the badge being inlined twice: WorkerCard
+ * is deliberately the single card so the sidebar and the assistant chat cannot
+ * drift apart (see the note above), and the /jobs/[id] timeline does its own
+ * markup. Routing both through here is what keeps the third surface honest.
+ *
+ * halt is `warn`, NOT `bad`: `bad` already means job.status === "error" — a run
+ * that produced nothing. A halt is an audit finding on a run that SUCCEEDED, and
+ * painting it the same red as a crash teaches people to ignore it. `unavailable`
+ * is `muted`, which is also the honest read: the gate could not answer, so we say
+ * so rather than implying either outcome.
+ */
+export function gate3Badge(job: Job, size: "sm" | "xs" = "sm") {
+  const g = job.gate3;
+  if (!g || !g.decision) return null;
+
+  const tone = g.decision === "pass" ? "good" : g.decision === "halt" ? "warn" : "muted";
+  const detail = (g.reasons?.length ? g.reasons.join("; ") : g.reason || "").trim();
+
+  // The gate reports machine tokens (EMPTY_OR_BLOCKED_JD_CAPTURE, …). Internal
+  // identifiers don't belong on a card, so the visible string is humanized and
+  // the raw value is kept in the tooltip for anyone who needs to grep the log.
+  const REASON_LABELS: Record<string, string> = {
+    EMPTY_OR_BLOCKED_JD_CAPTURE: "no JD captured",
+    BROWSER_EXTRACT_SUBPROCESS_FAILURE: "capture failed",
+    NO_LOCAL_JD: "no local JD",
+    NO_TAILORED_PAYLOAD: "no tailored CV",
+    LINTER_SUBPROCESS_FALLBACK: "gate unavailable",
+    LINTER_REPORTED_UNAVAILABLE: "gate unavailable",
+    UNPARSEABLE_LINTER_OUTPUT: "gate unavailable",
+  };
+  const human = REASON_LABELS[detail] || detail.replace(/_/g, " ").toLowerCase();
+
+  const label =
+    g.decision === "pass"
+      ? "Gate 3: Pass"
+      : g.decision === "halt"
+        ? `Gate 3: Halt${human ? ` — ${human}` : ""}`
+        : `Gate 3: Unaudited${human ? ` (${human})` : ""}`;
+
+  return (
+    <span className={cn("mt-1 block truncate", size === "sm" ? "text-xs" : "text-[10px]")}>
+      <Badge tone={tone} className="font-medium" title={detail || undefined}>
+        {label}
+      </Badge>
+    </span>
+  );
 }
 
 export function WorkerCard({
@@ -168,6 +220,10 @@ export function WorkerCard({
           {fmtTokens(tokens)} tokens{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
         </div>
       )}
+      {/* Footer, not the header row: line ~125 pushes the trailing affordance
+          right with an unconditional ml-auto, so a badge in the header flex
+          would displace the score chip. */}
+      {gate3Badge(job, inline ? "sm" : "xs")}
     </div>
   );
 }

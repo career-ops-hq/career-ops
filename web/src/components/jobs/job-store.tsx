@@ -19,6 +19,15 @@ export type Job = {
   text: string;
   result?: JobResult;
   cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
+  // Gate 3 post-tailoring compliance audit (pdf lane only). Advisory: every
+  // failure mode reports `unavailable` rather than blocking the run, so this is
+  // "the gate could not answer" — never "the CV is fine" by default.
+  gate3?: {
+    decision: "pass" | "halt" | "unavailable";
+    reason?: string;
+    reasons?: string[];
+    source?: string;
+  };
   startedAt: number;
   endedAt?: number;
 };
@@ -138,6 +147,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
         let doneCostUsd: number | null = null;
+        let doneGate3: Job["gate3"] = undefined; // Gate 3 telemetry, forwarded on the done event
         const steps: JobStep[] = [];
         const finish = (status: "done" | "error", lastLabel?: string) => {
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
@@ -147,6 +157,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             status,
             result,
             cost,
+            gate3: doneGate3,
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
@@ -159,7 +170,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           fetch("/api/runs/save", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id, kind: opts.kind, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, status, lastLabel, output: text }),
+            body: JSON.stringify({ id, kind: opts.kind, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, gate3: doneGate3, steps, status, lastLabel, output: text }),
           }).catch(() => {});
           // Only a run that actually landed its artifacts should invalidate the
           // server-snapshot surfaces (Today, pipeline) — a failed one wrote nothing.
@@ -223,6 +234,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                 } else if (ev.type === "done") {
                   if (typeof ev.tokens === "number") doneTokens = ev.tokens;
                   if (typeof ev.costUsd === "number") doneCostUsd = ev.costUsd;
+                  // Gate 3 telemetry rides the same event. Guarded on `decision`
+                  // so a malformed object can never overwrite the type-narrowed
+                  // field with something the card would choke on.
+                  if (ev.gate3 && typeof ev.gate3.decision === "string") doneGate3 = ev.gate3;
                   settle("done", "Done");
                   return;
                 } else if (ev.type === "error") {

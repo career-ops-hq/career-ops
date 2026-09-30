@@ -15,6 +15,10 @@ type Body = {
   input?: string;
   kind?: string;
   result?: { score: number | null; summary: string };
+  // Gate 3 post-tailoring compliance audit. Sent by the client on every run and
+  // only ever present on a pdf-lane run; `unavailable` is the gate's own
+  // fail-open answer, so an absent decision and an unavailable one differ.
+  gate3?: { decision?: string; reason?: string; reasons?: string[]; source?: string };
   steps?: { kind: string; label: string }[];
   output?: string;
   status?: string;
@@ -41,6 +45,13 @@ export async function POST(req: Request) {
   const safeId = String(b.id).replace(/[^a-z0-9_-]/gi, "");
   const steps = (b.steps ?? []).map((s) => `- ${s.kind === "tool" ? `🔧 ${s.label}` : s.label}`).join("\n");
   const verdict = b.result?.score != null ? `${b.result.score}/5 — ${b.result.summary || ""}` : "—";
+  // Gate 3 summary line. Kept verbatim (machine reason + raw reasons) so the log
+  // stays greppable — the UI humanizes these tokens, but a log read by the CLI
+  // assistant is exactly where the raw value is useful. Collapses to one line.
+  const gate3Reasons = (b.gate3?.reasons ?? []).filter(Boolean).join("; ");
+  const gate3 = b.gate3?.decision
+    ? `${b.gate3.decision}${gate3Reasons ? ` — ${gate3Reasons}` : b.gate3.reason ? ` — ${b.gate3.reason}` : ""}`
+    : "—";
   // A failed run is saved too, so name the failure in the header. Without this the
   // log of a killed worker is indistinguishable from one that never started.
   const failed = b.status === "error";
@@ -49,7 +60,8 @@ export async function POST(req: Request) {
 - id: ${b.id}
 - page: ${b.page || "-"}
 - input: ${b.input || "-"}
-- verdict: ${verdict}${failed ? `\n- outcome: FAILED — ${(b.lastLabel || "no reason recorded").replace(/\s+/g, " ")}` : ""}
+- verdict: ${verdict}
+- gate3: ${gate3}${failed ? `\n- outcome: FAILED — ${(b.lastLabel || "no reason recorded").replace(/\s+/g, " ")}` : ""}
 
 ## Steps
 ${steps}

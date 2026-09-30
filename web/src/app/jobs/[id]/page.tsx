@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, RotateCcw } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
+import { gate3Badge } from "@/components/jobs/worker-card";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,9 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
               {job.result.summary && <span className="text-sm text-muted">{job.result.summary}</span>}
             </div>
           )}
+          {/* Same helper the cards use, so this surface cannot disagree with the
+              sidebar about what Gate 3 said. */}
+          {gate3Badge(job, "sm")}
           {job.status === "error" && job.kind && job.input && (
             <div className="mt-4">
               <Button type="button" size="sm" variant="outline" onClick={() => retryJob(job.id)}>
