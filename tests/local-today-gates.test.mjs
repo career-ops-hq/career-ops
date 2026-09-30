@@ -22,7 +22,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
@@ -652,12 +653,27 @@ test('two dates for one posting is all detect-reposts needs to call it a repost'
 test('stats.mjs and analyze-patterns.mjs stamp the local day in report headers, not UTC', () => {
   // At INSTANT (01:30 UTC), UTC_DAY is 2026-08-18 but NY_DAY is 2026-08-17.
   // Both report headers must reflect the local day (NY_DAY).
- const statsOut = inFrozenTz('America/New_York',
-    `const { computeAllStats } = await import('${spec('stats.mjs')}');` +
-    `const s = computeAllStats({ apps: '', scanHist: '', cadence: '', patterns: '', rejected: '' });` +
-    `process.stdout.write(s.metadata.generatedAt);`
-  );
-  assert.equal(statsOut, NY_DAY, `stats.mjs stamped ${statsOut}, expected local day ${NY_DAY}`);
+  //
+  // stats.mjs resolves its data files from the data root when it is imported,
+  // and followup-cadence.mjs, which it imports, reads config/profile.yml there.
+  // So the child gets an empty data root, with the two overrides that outrank
+  // it cleared, and the sources check shows it never read the user's files.
+  const dataRoot = mkdtempSync(join(tmpdir(), 'career-ops-localtoday-stats-'));
+  try {
+    const statsOut = inFrozenTz('America/New_York',
+      `process.env.CAREER_OPS_ROOT = ${JSON.stringify(dataRoot)};` +
+      `delete process.env.CAREER_OPS_TRACKER;` +
+      `delete process.env.CAREER_OPS_PROFILE;` +
+      `const { computeAllStats } = await import('${spec('stats.mjs')}');` +
+      `const s = computeAllStats();` +
+      `process.stdout.write(JSON.stringify(s.metadata));`
+    );
+    const { generatedAt, sources } = JSON.parse(statsOut);
+    assert.deepEqual(Object.keys(sources).filter((k) => sources[k]), [], 'stats.mjs read data files outside its empty data root');
+    assert.equal(generatedAt, NY_DAY, `stats.mjs stamped ${generatedAt}, expected local day ${NY_DAY}`);
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10 });
+  }
 
   const mockEntries = JSON.stringify(
     Array(5).fill({ date: '2026-08-01', status: 'Applied', report: '', score: '85', notes: '' })

@@ -1283,8 +1283,6 @@ function buildPatternSignals(enriched) {
 
 // --- Main analysis ---
 export function analyze(entries = parseTracker()) {
- 
-
   if (entries.length === 0) {
     // noData marks this as the empty-tracker case rather than a failure, so the
     // exit status below does not have to match on the message text.

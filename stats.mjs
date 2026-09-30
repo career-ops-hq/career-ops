@@ -693,7 +693,7 @@ export function computeAllStats({
 
   return {
     metadata: {
-            generatedAt: localToday(),
+      generatedAt: localToday(),
       sources: {
         tracker: !!apps,
         scanHistory: !!scanHist,
