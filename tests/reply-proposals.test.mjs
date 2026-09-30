@@ -169,7 +169,7 @@ function duringReview(t, f, mutate) {
 for (const answer of ['n\n', 'N\n', 'no\n', '', '\n', 'sure\n', '7,999\n']) {
   test(`proposal review preserves tracker and drop without explicit valid consent: ${JSON.stringify(answer)}`, t => {
     const f = fixture(t);
-    const p = proposal(f, ROWS[0], { evidence: 'The recruiter said "interview"; this remains quoted evidence.' });
+    const p = proposal(f, ROWS[0], { evidence: 'The recruiter said "interview"; reference C:\\fictional\\invite.' });
     const file = drop(f, p);
     const before = readFileSync(file, 'utf8');
     const result = run(f, answer);
@@ -411,14 +411,14 @@ for (const [name, setup, selectedRoot] of ROOT_CONFIGS) {
       drop(f, proposal(f, ROWS[0], { tracker_path: join(root, 'data', 'applications.md'), evidence: `Evidence from ${root}` }), 'proposal.json', root);
     }
     const result = run(f, 'y\n', env);
-    assert.ok(result.stdout.includes(`Evidence from ${f[selectedRoot]}`));
+    assert.ok(result.stdout.includes(JSON.stringify(`Evidence from ${f[selectedRoot]}`)));
     for (const root of [f.code, f.data, f.other, f.cwd]) {
       const content = readFileSync(join(root, 'data', 'applications.md'), 'utf8');
       if (root === f[selectedRoot]) assert.match(content, /\| Interview \|/);
       else {
         assert.equal(content, tracker(), `stray write under ${root}`);
         assert.equal(existsSync(join(root, 'data', 'status-log.tsv')), false);
-        assert.ok(!result.stdout.includes(`Evidence from ${root}`), 'foreign proposal must not be displayed');
+        assert.ok(!result.stdout.includes(JSON.stringify(`Evidence from ${root}`)), 'foreign proposal must not be displayed');
       }
     }
   });
