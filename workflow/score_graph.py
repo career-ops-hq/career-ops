@@ -257,7 +257,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
             "artifact": {
                 "type": "score", "report": result["report"], "report_sha256": result["report_sha256"],
                 "draft_directory": str(directory), "liveness_reason": state["evidence"]["liveness_reason"],
-                "score": result["attractiveness"],
+                "score": result["scores"],
             },
         }
 

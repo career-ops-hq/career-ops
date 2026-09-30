@@ -3,13 +3,7 @@
 # This is the single source of truth for your personal data across all modes.
 
 attractiveness:
-  model: attractiveness-v2
-  acceptable_line: 3.5  # Minimum acceptable attractiveness for action decisions.
-  alert_line: 3.5       # Independent threshold for user notifications.
-  weights:
-    direction: 0.333333333333
-    compensation: 0.333333333333
-    company: 0.333333333334
+  model: attractiveness-v3
 
 candidate:
   full_name: "Jane Smith"

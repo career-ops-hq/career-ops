@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     directory.mkdir()
     sources = {
         "cv": "Primary candidate evidence.",
-        "profile": "attractiveness:\n  model: attractiveness-v2\n  weights:\n    direction: 0.333333333333\n    compensation: 0.333333333333\n    company: 0.333333333334\n",
+        "profile": "attractiveness:\n  model: attractiveness-v3\n",
         "targeting": "Primary targeting evidence.",
         "rules": "Current scoring rules.",
     }
@@ -36,6 +36,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     }
     rendered = render_report(packet, evidence, assessment)
     assert "已留存可引用网页来源" in rendered["report"]
+    assert rendered["scores"] == {"direction": None, "compensation": None, "company": None}
+    assert "| 维度 | 分数 |" in rendered["report"] and "覆盖率" not in rendered["report"]
     sourced = {**evidence, "location_evidence": "China, Shanghai, Shanghai",
                "liveness_reason": "browser_snapshot at official job URL returned captured"}
     for section, claim in (("overview", "岗位办公城市未披露。"),

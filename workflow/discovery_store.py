@@ -58,8 +58,8 @@ CREATE TABLE IF NOT EXISTS eligibility (
   evidence TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS evaluations (
-  opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), lower_score REAL NOT NULL,
-  upper_score REAL NOT NULL, coverage REAL NOT NULL, report_hash TEXT NOT NULL,
+  opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id), lower_score REAL,
+  upper_score REAL, coverage REAL, dimension_scores TEXT, report_hash TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS artifacts (

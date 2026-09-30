@@ -81,13 +81,20 @@ def load_context(
                     (str(opportunity_id), module),
                 ).fetchone()
                 results[module] = json.loads(result["payload"]) if result else None
-        legacy_evaluation = None
+        evaluation = None
         if _table(db, "evaluations"):
-            evaluation = db.execute(
-                "SELECT lower_score AS lower,upper_score AS upper,coverage,report_hash AS reportHash "
+            has_dimensions = any(column["name"] == "dimension_scores" for column in db.execute("PRAGMA table_info(evaluations)"))
+            stored = db.execute(
+                "SELECT lower_score,upper_score,coverage,report_hash"
+                + (",dimension_scores" if has_dimensions else "") + " "
                 "FROM evaluations WHERE opportunity_id=?", (row["id"],)
             ).fetchone()
-            legacy_evaluation = dict(evaluation) if evaluation else None
+            if stored:
+                if has_dimensions and stored["dimension_scores"]:
+                    evaluation = {"scores": json.loads(stored["dimension_scores"]), "reportHash": stored["report_hash"]}
+                else:
+                    evaluation = {"lower": stored["lower_score"], "upper": stored["upper_score"],
+                                  "coverage": stored["coverage"], "reportHash": stored["report_hash"]}
         artifacts = [dict(item) for item in db.execute(
             "SELECT kind,path,sha256 FROM artifacts WHERE opportunity_id=? ORDER BY id", (row["id"],)
         )] if _table(db, "artifacts") else []
@@ -110,7 +117,7 @@ def load_context(
         count = sum(len(items) for items in provenance.values())
         return {
             "opportunity": opportunity, "results": results,
-            "evaluation": legacy_evaluation, "artifacts": artifacts,
+            "evaluation": evaluation, "artifacts": artifacts,
             "application": application, "candidate_sources": candidate,
             "rules": (input_root / "modes" / "_custom.md").read_text() if (input_root / "modes" / "_custom.md").is_file() else "",
             "market_rules": {name: (ROOT / "markets" / name / "employment.md").read_text()

@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     (inputs / "modes").mkdir()
     (inputs / "cv.md").write_text("Verified candidate facts v1")
     (inputs / "config" / "profile.yml").write_text(
-        "language:\n  output: zh-CN\nattractiveness:\n  acceptable_line: 3.5\n"
+        "language:\n  output: zh-CN\nattractiveness:\n  model: attractiveness-v3\n"
     )
     (inputs / "modes" / "_profile.md").write_text("Verified targeting")
     (inputs / "modes" / "_custom.md").write_text("Current evaluation rules")
@@ -126,7 +126,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
 
     scores = run(directory, "scores", env=model_env)
     assert {item["opportunity_id"] for item in scores if item["valid"]} == {"job-1", "job-2", "job-real", "job-uncertain"}
-    assert all(set(item) == {"opportunity_id", "lower", "upper", "coverage", "valid", "stale_reason"} for item in scores)
+    assert all(set(item) == {"opportunity_id", "scores", "valid", "stale_reason"} for item in scores)
     decisions = run(directory, "decisions", env=model_env)
     assert {item["opportunity_id"] for item in decisions["decisions"] if item["action"] == "focus"} == {
         "job-1", "job-2", "job-real", "job-uncertain"

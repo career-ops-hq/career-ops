@@ -120,6 +120,22 @@ try {
   assert.throws(() => validateReport(text.replace('## D. 薪酬与需求', '| team | 1 | conflict |\n\n## D. 薪酬与需求'), { root }));
   assert.throws(() => validateReport(text + '\n' + scoreLabel(summary.attractiveness), { root }));
   assert.throws(() => validateReport(text.replace('| company | 4 | 20%', '| company | 4 | 50%'), { root }));
+  const currentProfile = dump({ attractiveness: { model: 'attractiveness-v3' } });
+  writeFileSync(join(root, 'profile.yml'), currentProfile);
+  const currentSummary = structuredClone(summary);
+  currentSummary.scoring_model = 'attractiveness-v3';
+  delete currentSummary.score;
+  currentSummary.sources.find(source => source.id === 'profile').sha256 = createHash('sha256').update(currentProfile).digest('hex');
+  delete currentSummary.attractiveness;
+  const currentReport = SCORING_HEADINGS.map(heading => `## ${heading}\n\n${heading === 'Machine Summary'
+    ? `\`\`\`yaml\n${dump(currentSummary)}\`\`\``
+    : heading === 'C. 入职吸引力'
+      ? '**入职吸引力分项：**\n\n| 维度 | 分数 |\n|---|---|\n| direction | 4 |\n| compensation | Unknown |\n| company | 4 |'
+      : 'Manually reviewed content, evidence, limitations and next action.'}`).join('\n\n');
+  assert.deepEqual(validateReport(currentReport, { root }).scores, { direction: 4, compensation: null, company: 4 });
+  assert.throws(() => validateReport(currentReport.replace('| company | 4 |', '| company | 5 |'), { root }));
+  assert.throws(() => validateReport(currentReport.replace('| 维度 | 分数 |', '| 维度 | 分数 | 权重 |'), { root }));
+  writeFileSync(join(root, 'profile.yml'), files['profile.yml']);
   writeFileSync(join(root, 'jd.md'), readFileSync(join(root, 'jd.md'), 'utf8') + ' changed');
   assert.throws(() => validateReport(text, { root }), /hash mismatch/);
 } finally {

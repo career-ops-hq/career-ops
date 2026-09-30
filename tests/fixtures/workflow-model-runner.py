@@ -84,7 +84,7 @@ elif phase == "evaluate":
         "type": "score",
         "company": report["company"],
         "role": report["role"],
-        "score": {"lower": 3.5, "upper": 4.5, "coverage": 0.75},
+        "score": {"direction": 4, "compensation": 4, "company": None},
         "report": "# Verified score report",
         "report_sha256": hashlib.sha256(b"# Verified score report").hexdigest(),
     }

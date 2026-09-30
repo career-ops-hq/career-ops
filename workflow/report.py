@@ -42,12 +42,10 @@ def digest(value: bytes | str) -> str:
     return hashlib.sha256(value if isinstance(value, bytes) else value.encode()).hexdigest()
 
 
-def attractiveness(dimensions: dict, weights: dict) -> dict:
-    if set(dimensions) != set(DIMENSIONS) or set(weights) != set(DIMENSIONS):
-        raise ValueError("Score dimensions and weights must match")
-    if any(not isinstance(weight, (int, float)) or weight <= 0 for weight in weights.values()) or abs(sum(weights.values()) - 1) >= 1e-9:
-        raise ValueError("Weights must be positive and sum to one")
-    lower = upper = coverage = 0.0
+def dimension_scores(dimensions: dict) -> dict:
+    if set(dimensions) != set(DIMENSIONS):
+        raise ValueError("Score dimensions must match")
+    scores = {}
     for name in DIMENSIONS:
         dimension = dimensions[name]
         if (not isinstance(dimension, dict) or set(dimension) != {"score", "rationale", "evidence"}
@@ -59,10 +57,8 @@ def attractiveness(dimensions: dict, weights: dict) -> dict:
             raise ValueError(f"{name}: score must be null or an integer from 1 to 5")
         if score is not None and not dimension["evidence"]:
             raise ValueError(f"{name}: known score requires evidence")
-        lower += weights[name] * (score if score is not None else 1)
-        upper += weights[name] * (score if score is not None else 5)
-        coverage += weights[name] if score is not None else 0
-    return {"lower": round(lower, 2), "upper": round(upper, 2), "coverage": round(coverage, 6)}
+        scores[name] = score
+    return scores
 
 
 def validate_research(research: dict, sources: dict[str, Path]) -> None:
@@ -128,8 +124,7 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         files[source["id"]] = directory / f"{source['id']}.txt"
         files[source["id"]].write_text(source["text"])
     validate_research(assessment.get("research"), files)
-    profile = yaml.safe_load(packet["sources"]["profile"])
-    score = attractiveness(assessment["dimensions"], profile["attractiveness"]["weights"])
+    score = dimension_scores(assessment["dimensions"])
     dimension_citations = [item for dimension in assessment["dimensions"].values() for item in dimension["evidence"]]
     if any(not isinstance(item, dict) or set(item) != {"source", "quote"} for item in dimension_citations):
         raise ValueError("Citation requires a quote from a frozen source")
@@ -169,14 +164,14 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
     files["research"] = directory / "research.json"
     files["research"].write_text(json.dumps(assessment["research"], ensure_ascii=False, indent=2) + "\n")
     summary = {
-        "report_format": "scoring-v2", "scoring_model": "attractiveness-v2", "score": None,
+        "report_format": "scoring-v2", "scoring_model": "attractiveness-v3",
         "company": evidence["company"], "role": evidence["role"], "complete_jd": True, "jd_source": "jd",
         "captured_at": evidence.get("captured_at"), "advertised_comp": advertised,
         "sources": [{"id": name, "path": str(path.relative_to(root)), "sha256": digest(path.read_bytes())} for name, path in files.items()],
-        "dimensions": assessment["dimensions"], "attractiveness": score,
+        "dimensions": assessment["dimensions"],
     }
-    table = "| 维度 | 分数 | 权重 |\n|---|---|---|\n" + "\n".join(
-        f"| {name} | {assessment['dimensions'][name]['score'] if assessment['dimensions'][name]['score'] is not None else 'Unknown'} | {format(profile['attractiveness']['weights'][name] * 100, '.6f').rstrip('0').rstrip('.')}% |"
+    table = "| 维度 | 分数 |\n|---|---|\n" + "\n".join(
+        f"| {name} | {score[name] if score[name] is not None else 'Unknown'} |"
         for name in DIMENSIONS
     )
     findings = "\n".join(f"- {item['id']} {item['url']} {item['entity']}" for item in assessment["research"]["findings"]) or "- 无外部研究发现"
@@ -184,7 +179,7 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
                        else "已检索，但未取得可引用网页；外部事项保持未知")
     bodies = {
         "A. 岗位概览": sections["overview"], "B. 能力竞争力": sections["capabilities"],
-        "C. 入职吸引力": f"**入职吸引力：** {score['lower']:.2f}–{score['upper']:.2f}/5；证据覆盖率：{score['coverage'] * 100:g}%\n\n{table}",
+        "C. 入职吸引力": f"**入职吸引力分项：**\n\n{table}",
         "D. 薪酬与需求": sections["compensation"], "E. 补证问题": f"{sections['questions']}\n\n### 外部研究记录\n\n{findings}",
         "G. 岗位真实性": sections["legitimacy"], "Risk Summary": sections["risks"],
         "Evaluation Checklist": f"{sections['checklist']}\n\n联网研究：{research_status}；记录见 E. 补证问题。",
@@ -194,4 +189,4 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
         raise ValueError("Report section missing or contains extra level-two headings")
     report = "\n\n".join(f"## {heading}\n\n{bodies[heading]}" for heading in HEADINGS) + "\n"
     (directory / "report.md").write_text(report)
-    return {"report": report, "report_sha256": digest(report), "attractiveness": score}
+    return {"report": report, "report_sha256": digest(report), "scores": score}

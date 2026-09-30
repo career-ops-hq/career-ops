@@ -22,8 +22,8 @@ from workflow.career_ops import BusinessStore, canonical_scan_input, cron_score,
 
 BUSINESS_RESULTS = """
 CREATE TABLE eligibility (opportunity_id INTEGER PRIMARY KEY,status TEXT NOT NULL,evidence TEXT NOT NULL);
-CREATE TABLE evaluations (opportunity_id INTEGER PRIMARY KEY,lower_score REAL NOT NULL,
-  upper_score REAL NOT NULL,coverage REAL NOT NULL,report_hash TEXT NOT NULL,
+CREATE TABLE evaluations (opportunity_id INTEGER PRIMARY KEY,lower_score REAL,
+  upper_score REAL,coverage REAL,dimension_scores TEXT,report_hash TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE artifacts (opportunity_id INTEGER NOT NULL,kind TEXT NOT NULL,path TEXT NOT NULL,
   sha256 TEXT NOT NULL,UNIQUE(opportunity_id,kind,path));
@@ -204,6 +204,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-") as temporary:
     database = sqlite3.connect(directory / "opportunities.db")
     assert database.execute("SELECT state FROM opportunities WHERE id=1").fetchone()[0] == "evaluated"
     assert database.execute("SELECT count(*) FROM evaluations WHERE opportunity_id=1").fetchone()[0] == 1
+    assert json.loads(database.execute("SELECT dimension_scores FROM evaluations WHERE opportunity_id=1").fetchone()[0]) == {
+        "direction": 4, "compensation": 4, "company": None,
+    }
     assert database.execute("SELECT count(*) FROM artifacts WHERE opportunity_id=1 AND kind='report'").fetchone()[0] == 1
     assert database.execute("SELECT count(*) FROM checkpoints WHERE opportunity_id=1 AND phase='publish'").fetchone()[0] == 1
     assert database.execute("SELECT count(*) FROM opportunity_events WHERE opportunity_id=1 AND type='published'").fetchone()[0] == 1
@@ -323,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-stale-") as temporary:
     store.db.execute("UPDATE tasks SET status='completed' WHERE task_id=?", (scored["task_id"],))
     store.db.execute("INSERT INTO results(result_key,task_id,opportunity_id,module,input_hash,payload) VALUES(?,?,?,?,?,?)",
                      (scored["task_id"], scored["task_id"], "1", "score", store.task(scored["task_id"])["input_hash"],
-                      json.dumps({"outcome": "score", "artifact": {"score": {"lower": 2, "upper": 4, "coverage": 0.5}}})))
+                      json.dumps({"outcome": "score", "artifact": {"score": {"direction": 4, "compensation": None, "company": 4}}})))
     store.close()
     with patch("workflow.career_ops.capture_jd", return_value=None), \
          patch("workflow.career_ops.start_and_run", return_value={"status": "waiting"}) as start:

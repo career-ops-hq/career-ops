@@ -86,13 +86,13 @@ arrives. Scan produces the validated
 apply consume completed upstream results by opportunity ID. The module fingerprint
 binds those results to the current CV, profile, targeting, and rules. Existing
 valid results are reused; changed inputs require `--re-evaluate`.
-`scores` shows range, coverage and input validity. `decisions` groups only
-current scores by the profile's `acceptable_line`, using
-`lower + (upper - lower) * coverage`: focus or deprioritize. A confirmed failed
+`scores` shows the three dimension scores and input validity. `decisions` groups
+current scores as focus when at least two dimensions are scored and every scored
+dimension is at least 4; otherwise they are deprioritized. A confirmed failed
 hard gate is discarded; uncertain prescreen evidence does not block attention.
 Stale scores are listed separately and receive no action. The current
 JD report does not retain a verified deadline or work estimate, so those
-ordering fields remain null. The notification `alert_line` is independent.
+ordering fields remain null. Notifications use the same attention rule.
 
 Tasks use `running`, `waiting`, `completed`, and `cancelled`. Business tables in
 `opportunities.db` are authoritative; `workflow-checkpoints.db` records outer task

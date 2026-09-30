@@ -258,7 +258,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
             "prescreen": {"status": "uncertain", "unknowns": ["compensation"]},
         },
         "cv": "Verified candidate facts.",
-        "profile": "attractiveness:\n  model: attractiveness-v2\n  weights:\n    direction: 0.4\n    compensation: 0.3\n    company: 0.3\n",
+        "profile": "attractiveness:\n  model: attractiveness-v3\n",
         "targeting": "Verified targeting.", "rules": "Current rules.",
     }
     sections = {name: "Grounded analysis with explicit unknowns and next actions." for name in (

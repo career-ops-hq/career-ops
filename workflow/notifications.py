@@ -11,11 +11,11 @@ import subprocess
 import sys
 from typing import Callable, TypedDict
 
-import yaml
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from workflow.career_ops import BusinessStore, INPUT_ROOT, digest, score_inputs
+from workflow.career_ops import BusinessStore, digest, score_inputs
+from workflow.decisions import worth_attention
 
 
 class DeliveryState(TypedDict):
@@ -27,7 +27,7 @@ class DeliveryState(TypedDict):
 def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
     """Read the current formal result, not a draft, historical score or shortlist row."""
     row = store.db.execute(
-        "SELECT r.input_hash,r.payload,t.input_payload,e.report_hash,l.status AS eligibility "
+        "SELECT r.input_hash,r.payload,t.input_payload,e.report_hash,e.dimension_scores,l.status AS eligibility "
         "FROM results r "
         "JOIN tasks t ON t.task_id=r.task_id "
         "JOIN evaluations e ON e.opportunity_id=CAST(r.opportunity_id AS INTEGER) "
@@ -50,24 +50,15 @@ def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
         report = artifact["report"]
         if artifact["type"] != "score" or artifact["report_sha256"] != digest(report):
             return None
-        if row["report_hash"] != artifact["report_sha256"]:
+        if row["report_hash"] != artifact["report_sha256"] or json.loads(row["dimension_scores"] or "null") != score:
             return None
         report_path = Path(artifact["path"])
         if not report_path.is_file() or report_path.read_text() != report:
             return None
-        lower, upper, coverage = (score[key] for key in ("lower", "upper", "coverage"))
-        if any(isinstance(value, bool) or not isinstance(value, (float, int)) for value in (lower, upper, coverage)):
-            return None
-        if not (1 <= lower <= upper <= 5 and 0 <= coverage <= 1):
-            return None
-        profile = yaml.safe_load((INPUT_ROOT / "config" / "profile.yml").read_text())
-        alert_line = profile["attractiveness"]["alert_line"]
-        if isinstance(alert_line, bool) or not isinstance(alert_line, (float, int)) or not 1 <= alert_line <= 5:
-            return None
-        if lower + (upper - lower) * coverage < alert_line:
+        if not worth_attention(score):
             return None
         posting = scan["artifact"]
-        suffix = f" · 吸引力 {lower:g}–{upper:g}/5（覆盖率{coverage * 100:g}%）"
+        suffix = " · " + " / ".join(f"{name} {value}/5" for name, value in score.items() if value is not None)
         company = " ".join(posting["company"].split())[:35]
         prefix = f"[{opportunity_id}:{artifact['report_sha256'][:12]}] 高分岗位 · {company} · "
         role = " ".join(posting["role"].split())
@@ -77,11 +68,9 @@ def eligible_report(store: BusinessStore, opportunity_id: str) -> dict | None:
             "title": prefix + role[:max(0, 100 - len(prefix) - len(suffix))] + suffix,
             "report": report,
             "path": str(report_path),
-            "lower": lower,
-            "upper": upper,
-            "coverage": coverage,
+            "scores": score,
         }
-    except (AttributeError, KeyError, TypeError, ValueError, OSError, yaml.YAMLError):
+    except (AttributeError, KeyError, TypeError, ValueError, OSError):
         return None
 
 

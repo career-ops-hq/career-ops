@@ -10,6 +10,7 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const MODEL_DIMENSIONS = {
   'attractiveness-v1': ['direction', 'compensation', 'team', 'company'],
   'attractiveness-v2': ['direction', 'compensation', 'company'],
+  'attractiveness-v3': ['direction', 'compensation', 'company'],
 };
 export const GATES = ['location', 'employment', 'size', 'compensation', 'eligibility', 'liveness'];
 export const HEADINGS = [
@@ -110,7 +111,8 @@ export function validateReport(text, { root = ROOT } = {}) {
   }
   const dimensions = MODEL_DIMENSIONS[summary?.scoring_model];
   requireValue(dimensions, 'unknown attractiveness model');
-  requireValue(summary.score === null, 'attractiveness must not publish a scalar score');
+  requireValue(summary.scoring_model === 'attractiveness-v3' ? !Object.hasOwn(summary, 'score') : summary.score === null,
+    'attractiveness must not publish a scalar score');
   requireValue(summary.complete_jd === true, 'complete JD required; record incomplete without a scored report');
   requireValue(typeof summary.company === 'string' && summary.company.trim()
     && typeof summary.role === 'string' && summary.role.trim(), 'company and role required');
@@ -134,10 +136,15 @@ export function validateReport(text, { root = ROOT } = {}) {
   validateResearch(JSON.parse(sources.get('research')), sources, dimensions);
   const profile = load(sources.get('profile'));
   requireValue(profile?.attractiveness?.model === summary.scoring_model, 'profile model mismatch');
-  const result = calculateAttractiveness(summary.dimensions, profile.attractiveness.weights);
+  const current = summary.scoring_model === 'attractiveness-v3';
+  if (current) exactKeys(profile.attractiveness, ['model'], 'current profile');
+  const result = current
+    ? Object.fromEntries(dimensions.map(key => [key, summary.dimensions[key]?.score]))
+    : calculateAttractiveness(summary.dimensions, profile.attractiveness.weights);
   for (const key of dimensions) {
     const dimension = summary.dimensions[key];
     exactKeys(dimension, ['score', 'rationale', 'evidence'], key);
+    requireValue(dimension.score === null || (Number.isInteger(dimension.score) && dimension.score >= 1 && dimension.score <= 5), `${key}: invalid score`);
     requireValue(typeof dimension.rationale === 'string' && dimension.rationale.trim().length > 0, `${key}: rationale required`);
     requireValue(Array.isArray(dimension.evidence), `${key}: evidence must be an array`);
     requireValue(dimension.score === null || dimension.evidence.length > 0, `${key}: known score requires evidence`);
@@ -146,24 +153,31 @@ export function validateReport(text, { root = ROOT } = {}) {
         && sources.get(citation.source)?.includes(citation.quote), `${key}: quote not found in cited frozen source`);
     }
   }
-  exactKeys(summary.attractiveness, ['lower', 'upper', 'coverage'], 'attractiveness');
-  for (const key of Object.keys(result)) {
-    requireValue(summary.attractiveness[key] === result[key], `${key}: expected ${result[key]}`);
+  if (current) {
+    requireValue(!Object.hasOwn(summary, 'attractiveness'), 'current report must contain only dimension scores');
+    requireValue(!/覆盖率|权重/.test(bodies.get('C. 入职吸引力')), 'current score table must not contain weights or coverage');
+    requireValue(text.split('\n').filter(line => line === '**入职吸引力分项：**').length === 1, 'dimension score heading required');
+  } else {
+    exactKeys(summary.attractiveness, ['lower', 'upper', 'coverage'], 'attractiveness');
+    for (const key of Object.keys(result)) {
+      requireValue(summary.attractiveness[key] === result[key], `${key}: expected ${result[key]}`);
+    }
+    const labels = text.split('\n').filter(line => line.includes('入职吸引力：'));
+    requireValue(labels.length === 1 && labels[0] === scoreLabel(result), 'body must contain exactly one matching score/range');
   }
-  const labels = text.split('\n').filter(line => line.includes('入职吸引力：'));
-  requireValue(labels.length === 1 && labels[0] === scoreLabel(result), 'body must contain exactly one matching score/range');
   const scoreSection = bodies.get('C. 入职吸引力');
   const rows = scoreSection.split('\n').filter(line => /^\s*\|/.test(line))
     .map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
   requireValue(rows.every(cells => dimensions.includes(cells[0]) || cells[0] === '维度' || /^[-: ]+$/.test(cells[0])), 'unexpected score table row');
   for (const key of dimensions) {
     const matching = rows.filter(cells => cells[0] === key);
-    const weight = `${Number((profile.attractiveness.weights[key] * 100).toFixed(6))}%`;
     requireValue(matching.length === 1 && matching[0][1] === String(summary.dimensions[key].score ?? 'Unknown')
-      && matching[0][2] === weight, `${key}: missing, duplicate or inconsistent score/weight row`);
+      && (current ? matching[0].length === 2 : matching[0][2] === `${Number((profile.attractiveness.weights[key] * 100).toFixed(6))}%`), `${key}: missing, duplicate or inconsistent score row`);
   }
-  return { company: summary.company, role: summary.role, scoring_model: summary.scoring_model,
-    weights: profile.attractiveness.weights, ...result };
+  return current
+    ? { company: summary.company, role: summary.role, scoring_model: summary.scoring_model, scores: result }
+    : { company: summary.company, role: summary.role, scoring_model: summary.scoring_model,
+      weights: profile.attractiveness.weights, ...result };
 }
 
 /** Bind a separate semantic review to the exact report; a literal quote alone is not approval. */

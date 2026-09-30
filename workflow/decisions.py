@@ -9,23 +9,31 @@ from datetime import date
 ORDER = {"focus": 0, "deprioritize": 1, "discard": 2}
 
 
-def classify(score: dict, prescreen: dict, acceptable_line: float) -> str:
-    """Use the existing attractiveness rank while honoring confirmed hard failures."""
-    if isinstance(acceptable_line, bool) or not isinstance(acceptable_line, (int, float)) or not math.isfinite(acceptable_line) or not 1 <= acceptable_line <= 5:
-        raise ValueError("acceptable_line must be between 1 and 5")
-    lower, upper, coverage = (score.get(key) for key in ("lower", "upper", "coverage"))
-    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
-           for value in (lower, upper, coverage)) or not (1 <= lower <= upper <= 5 and 0 <= coverage <= 1):
-        raise ValueError("invalid attractiveness range")
+def valid_scores(score: dict) -> bool:
+    return isinstance(score, dict) and set(score) == {"direction", "compensation", "company"} and all(
+        value is None or type(value) is int and 1 <= value <= 5 for value in score.values()
+    )
+
+
+def worth_attention(score: dict) -> bool:
+    if not valid_scores(score):
+        raise ValueError("invalid dimension scores")
+    known = [value for value in score.values() if value is not None]
+    return len(known) >= 2 and all(value >= 4 for value in known)
+
+
+def classify(score: dict, prescreen: dict) -> str:
+    """Apply the dimension threshold while honoring confirmed hard failures."""
+    attention = worth_attention(score)
     if not isinstance(prescreen, dict) or prescreen.get("status") not in {"pass", "fail", "uncertain"}:
         raise ValueError("complete prescreen decision required")
     if prescreen["status"] == "fail":
         return "discard"
-    return "focus" if lower + (upper - lower) * coverage >= acceptable_line else "deprioritize"
+    return "focus" if attention else "deprioritize"
 
 
 def order(rows: list[dict]) -> list[dict]:
-    """Order actions by deadline, effort and attractiveness."""
+    """Order actions by deadline, effort and stable opportunity ID."""
     ids = set()
     for row in rows:
         opportunity_id = row.get("opportunity_id")
@@ -48,6 +56,5 @@ def order(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (
         ORDER[row["action"]], row.get("deadline") or "9999-12-31",
         row.get("effort_days") if row.get("effort_days") is not None else math.inf,
-        -(row["lower"] + (row["upper"] - row["lower"]) * row["coverage"]), -row["coverage"],
         row["opportunity_id"],
     ))

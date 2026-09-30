@@ -7,23 +7,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workflow.decisions import classify, order
 
 
-score = {"lower": 3, "upper": 5, "coverage": 0.5}
-assert classify(score, {"status": "pass"}, 4) == "focus"
-assert classify(score, {"status": "uncertain"}, 4) == "focus"
-assert classify({**score, "coverage": 0.25}, {"status": "pass"}, 4) == "deprioritize"
-assert classify({**score, "lower": 4, "coverage": 0}, {"status": "pass"}, 4) == "focus"
-assert classify(score, {"status": "fail"}, 4) == "discard"
+score = {"direction": 4, "compensation": 4, "company": None}
+assert classify(score, {"status": "pass"}) == "focus"
+assert classify(score, {"status": "uncertain"}) == "focus"
+assert classify({**score, "company": 3}, {"status": "pass"}) == "deprioritize"
+assert classify({**score, "compensation": None}, {"status": "pass"}) == "deprioritize"
+assert classify({**score, "company": 5}, {"status": "pass"}) == "focus"
+assert classify(score, {"status": "fail"}) == "discard"
 
 rows = [
-    {"opportunity_id": "later", "action": "focus", "deadline": None, "effort_days": 1, "coverage": 0.8, "lower": 4, "upper": 5},
-    {"opportunity_id": "urgent", "action": "focus", "deadline": "2026-10-01", "effort_days": None, "coverage": 0.6, "lower": 4, "upper": 5},
-    {"opportunity_id": "low", "action": "deprioritize", "deadline": "2026-09-30", "effort_days": 0, "coverage": 1, "lower": 2, "upper": 3},
+    {"opportunity_id": "later", "action": "focus", "deadline": None, "effort_days": 1, "scores": score},
+    {"opportunity_id": "urgent", "action": "focus", "deadline": "2026-10-01", "effort_days": None, "scores": score},
+    {"opportunity_id": "low", "action": "deprioritize", "deadline": "2026-09-30", "effort_days": 0, "scores": {**score, "company": 3}},
 ]
 assert [row["opportunity_id"] for row in order(rows)] == ["urgent", "later", "low"]
 assert [row["opportunity_id"] for row in order([
-    {**rows[0], "opportunity_id": "high-coverage", "coverage": 0.6, "lower": 3, "upper": 5},
-    {**rows[0], "opportunity_id": "higher-score", "coverage": 0.5, "lower": 4, "upper": 5},
-])] == ["higher-score", "high-coverage"]
+    {**rows[0], "opportunity_id": "z", "scores": {**score, "company": 5}},
+    {**rows[0], "opportunity_id": "a", "scores": score},
+])] == ["a", "z"]
 for invalid in ("2026-02-30", "2026-9-30"):
     try:
         order([{**rows[0], "deadline": invalid}])

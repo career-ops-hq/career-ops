@@ -42,7 +42,7 @@ try:
     from workflow.salary_observations import record_salary
     from workflow.insights.upskill import targeted_skill_gap, upskill_view
     from workflow.insights.preparation import build_preparation_plan
-    from workflow.decisions import classify as classify_decision, order as order_decisions
+    from workflow.decisions import classify as classify_decision, order as order_decisions, valid_scores
 except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on sys.path.
     from board_resolution import VENDOR_ORDER, format_summary, resolve_boards
     from reverse_runner import discover_global
@@ -57,7 +57,7 @@ except ModuleNotFoundError:  # Direct script invocation keeps only workflow/ on 
     from salary_observations import record_salary
     from insights.upskill import targeted_skill_gap, upskill_view
     from insights.preparation import build_preparation_plan
-    from decisions import classify as classify_decision, order as order_decisions
+    from decisions import classify as classify_decision, order as order_decisions, valid_scores
 
 os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
 
@@ -76,7 +76,7 @@ if __name__ == "__main__":
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
 SCAN_POLICY_VERSION = 2
-SCORE_POLICY_VERSION = 2
+SCORE_POLICY_VERSION = 3
 ATTEMPT_SECONDS = 900
 ATTEMPT_CALLS = 20
 MODEL_RUNNER = "workflow.model_runner"
@@ -340,6 +340,23 @@ class BusinessStore:
             );
             """
         )
+        evaluation = self.db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='evaluations'").fetchone()
+        if evaluation and ("dimension_scores" not in evaluation["sql"] or "lower_score REAL NOT NULL" in evaluation["sql"]):
+            self.db.executescript("""
+                PRAGMA foreign_keys=OFF;
+                BEGIN IMMEDIATE;
+                CREATE TABLE evaluations_new (
+                  opportunity_id INTEGER PRIMARY KEY REFERENCES opportunities(id),
+                  lower_score REAL, upper_score REAL, coverage REAL, dimension_scores TEXT,
+                  report_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO evaluations_new(opportunity_id,lower_score,upper_score,coverage,report_hash,created_at)
+                  SELECT opportunity_id,lower_score,upper_score,coverage,report_hash,created_at FROM evaluations;
+                DROP TABLE evaluations;
+                ALTER TABLE evaluations_new RENAME TO evaluations;
+                COMMIT;
+                PRAGMA foreign_keys=ON;
+            """)
         draft_columns = {row[1] for row in self.db.execute("PRAGMA table_info(drafts)")}
         for obsolete in ("review", "approved"):
             if obsolete in draft_columns:
@@ -662,10 +679,7 @@ class BusinessStore:
                 or not artifact.get("report")
                 or artifact.get("report_sha256") != digest(artifact["report"])
                 or not isinstance(score, dict)
-                or set(score) != {"lower", "upper", "coverage"}
-                or any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in score.values())
-                or not (1 <= score["lower"] <= score["upper"] <= 5)
-                or not (0 <= score["coverage"] <= 1)
+                or not valid_scores(score)
             ):
                 raise ValueError("Score artifact or report hash is invalid")
         if state["outcome"] == "exclude" and (
@@ -742,12 +756,11 @@ class BusinessStore:
                         (opportunity_id, json.dumps({"status": eligibility})),
                     )
                     self.db.execute(
-                        "INSERT INTO evaluations(opportunity_id,lower_score,upper_score,coverage,report_hash) "
-                        "VALUES(?,?,?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET "
-                        "lower_score=excluded.lower_score,upper_score=excluded.upper_score,"
-                        "coverage=excluded.coverage,report_hash=excluded.report_hash,created_at=CURRENT_TIMESTAMP",
-                        (opportunity_id, artifact["score"]["lower"], artifact["score"]["upper"],
-                         artifact["score"]["coverage"], artifact["report_sha256"]),
+                        "INSERT INTO evaluations(opportunity_id,dimension_scores,report_hash) "
+                        "VALUES(?,?,?) ON CONFLICT(opportunity_id) DO UPDATE SET "
+                        "lower_score=NULL,upper_score=NULL,coverage=NULL,"
+                        "dimension_scores=excluded.dimension_scores,report_hash=excluded.report_hash,created_at=CURRENT_TIMESTAMP",
+                        (opportunity_id, json.dumps(artifact["score"], sort_keys=True), artifact["report_sha256"]),
                     )
                     self.db.execute("UPDATE opportunities SET state='evaluated' WHERE id=?", (opportunity_id,))
                     self.db.execute(
@@ -782,6 +795,9 @@ class BusinessStore:
             latest.setdefault(row["opportunity_id"], row)
         values = []
         for opportunity_id, row in latest.items():
+            scan = self.module_result(opportunity_id, "scan")
+            if scan and scan["outcome"] != "jd_report":
+                continue
             payload = json.loads(row["payload"])
             artifact = payload.get("artifact", {})
             score = artifact.get("score")
@@ -793,28 +809,23 @@ class BusinessStore:
             ).fetchone()
             if score and source_task:
                 try:
-                    scan = self.module_result(opportunity_id, "scan")
-                    if scan and scan["outcome"] != "jd_report":
-                        raise ValueError("Current scan excludes this opportunity")
                     report = scan["artifact"] if scan else json.loads(source_task["input_payload"])["jd_report"]
                     current = score_inputs(report)
                     valid = digest(current) == row["input_hash"]
                     reason = None if valid else "candidate_or_policy_inputs_changed"
                 except (KeyError, OSError, ValueError):
                     reason = "stored_input_invalid"
-            if score:
+            if valid_scores(score) or isinstance(score, dict) and set(score) == {"lower", "upper", "coverage"}:
                 values.append({
-                    "opportunity_id": opportunity_id, "lower": score["lower"], "upper": score["upper"],
-                    "coverage": score["coverage"], "valid": valid, "stale_reason": reason,
-                    "_rank": score["lower"] + (score["upper"] - score["lower"]) * score["coverage"],
+                    "opportunity_id": opportunity_id, "scores": score if valid_scores(score) else None,
+                    "valid": valid and valid_scores(score),
+                    "stale_reason": reason if valid_scores(score) else "candidate_or_policy_inputs_changed",
                 })
-        values.sort(key=lambda item: (-item["_rank"], -item["coverage"], item["opportunity_id"]))
-        return [{key: value for key, value in item.items() if key != "_rank"} for item in values]
+        values.sort(key=lambda item: item["opportunity_id"])
+        return values
 
     def decision_views(self) -> dict:
         """Derive the current action queue only from valid formal score inputs."""
-        profile = yaml.safe_load((INPUT_ROOT / "config" / "profile.yml").read_text())
-        acceptable_line = profile["attractiveness"]["acceptable_line"]
         ready, stale = [], []
         for item in self.score_views():
             if not item["valid"]:
@@ -831,7 +842,7 @@ class BusinessStore:
                 ).fetchone()
                 report = json.loads(source["input_payload"])["jd_report"]
             ready.append({
-                **item, "action": classify_decision(item, report["prescreen"], acceptable_line),
+                **item, "action": classify_decision(item["scores"], report["prescreen"]),
                 "deadline": None, "effort_days": None,
             })
         return {"decisions": order_decisions(ready), "stale": stale}
