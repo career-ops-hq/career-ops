@@ -101,18 +101,32 @@ test('markdown-formatted canonical tracker status retains snapshot achievements'
   assert.deepEqual(await cumulativeTilesWithHistory(applications, '', coreRoot), { interviews: 1, offers: 1 });
 });
 
+test('date-suffixed tracker statuses retain snapshot achievements without a ledger', async () => {
+  const tracker = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-09-01 | Acme | Engineer | 4 | Interview 2026-09-15 | - | - | |
+| 2 | 2026-09-01 | Beta | Engineer | 4 | **Offer 2026-09-22** | - | - | |`;
+  const applications = parseApplications(tracker, coreRoot)
+    .map((app) => ({ ...app, status: canonStatus(app.status) }));
+  assert.deepEqual(await cumulativeTilesWithHistory(applications, '', coreRoot), { interviews: 2, offers: 1 });
+});
+
 test('canonicalized SKIP rows do not recover interview or offer achievements', async () => {
   const tracker = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
 |---|---|---|---|---|---|---|---|---|
 | 1 | 2026-09-01 | Acme | Engineer | 4 | **SKIP** | - | - | |
 | 2 | 2026-09-01 | Beta | Engineer | 4 | No Aplicar | - | - | |
-| 3 | 2026-09-01 | Gama | Engineer | 4 | Rejected | - | - | |`;
+| 3 | 2026-09-01 | Gama | Engineer | 4 | Rejected | - | - | |
+| 4 | 2026-09-01 | Delta | Engineer | 4 | SKIP 2026-09-15 | - | - | |
+| 5 | 2026-09-01 | Epsilon | Engineer | 4 | No Aplicar 2026-09-22 | - | - | |`;
   const applications = parseApplications(tracker, coreRoot)
     .map((app) => ({ ...app, status: canonStatus(app.status) }));
   const ledger = [
     '1\t2026-09-01\tInterview\tSKIP',
     '2\t2026-09-01\tOffer\tSKIP',
     '3\t2026-09-01\tInterview\tRejected',
+    '4\t2026-09-01\tInterview\tSKIP',
+    '5\t2026-09-01\tOffer\tSKIP',
   ].join('\n');
   assert.deepEqual(await cumulativeTilesWithHistory(applications, ledger, coreRoot), { interviews: 1, offers: 0 });
 });

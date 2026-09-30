@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveCodeRoot } from './core/code-root.mjs';
+import { statusToken } from './pipeline-sankey.mjs';
 
 // Cumulative "how far has this search actually got?" counters for the analytics
 // headline tiles. Pure JS (no TS types) so it can be imported by the analytics
@@ -64,7 +65,7 @@ export async function cumulativeTilesWithHistory(applications, content, coreRoot
   for (const app of applications) {
     // Non-numeric backfill IDs retain snapshot counts but cannot join history.
     const id = /^\d+$/.test(app.n) ? Number(app.n) : Symbol();
-    statuses.set(id, app.status);
+    statuses.set(id, statusToken(app.status));
   }
   const values = [...recoverFunnelStages(statuses, parseStatusLogStages(content)).values()];
   return { interviews: values.filter(n => n >= 3).length, offers: values.filter(n => n >= 4).length };
