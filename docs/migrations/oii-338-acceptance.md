@@ -632,7 +632,7 @@ failed; later score ticks completed independently.
 All 61 `tests/workflow-*-test.py` files passed again after this query-reference
 recovery change (zero failures).
 
-## Current open gate (2026-09-30 08:45 +08:00)
+## Scheduler follow-up (2026-09-30 08:45 +08:00)
 
 The user explicitly authorized sending the CV, career profile and opportunity
 `8` JD to `https://llm.goaichat.top/v1` for this re-evaluation. The formal
@@ -657,5 +657,31 @@ next natural scan at 18:00 remains the check for a durable terminal record.
 The score schedule has clean built-in completions, including 08:40, and
 notification deliveries remain zero.
 
-OII-338 and parent OII-333 remain open only for that scheduler record check.
-The 61-file regression gate and live samples prove their recorded scopes.
+The following manual check resolved this scheduler record question.
+
+## Final scheduler diagnosis (2026-09-30 09:00 +08:00)
+
+A user-authorized manual trigger reproduced the ledger mismatch. Hermes direct
+execution `423c72771fd640d0bc830d3e05989736` was marked `unknown` at
+08:55:11 while its recorded owner PID `89135` was still running with the same
+recorded process start time. The command then exited zero (`Ran now: succeeded`)
+and committed configured scan run `fa522399f0b843c99b6e36797ac094fb` at
+09:00:11: 34 companies, 37,907 postings found, no new opportunities and six
+provider errors or coverage warnings. The store has 121 opportunities, 121
+source-evidence rows, four scan runs and zero notification deliveries;
+`PRAGMA quick_check=ok`. Hermes' job list records that direct run as `ok` while
+its execution detail remains `unknown`.
+
+Inspection of the installed Hermes execution ledger showed that its recovery
+rewrites a running attempt to `unknown` when the owner's recorded process
+start time differs from a fresh read. The 06:00 built-in execution recorded
+gateway PID `48025` with start time `178943112876`, while the same still-live
+PID currently reads `178943112676`; the two-second difference makes Hermes'
+exact comparison return false. The manual execution was also rewritten while
+its owner was demonstrably alive. The durable `unknown` rows therefore reflect
+a false owner-death classification in Hermes, not an unverified Career Ops
+business commit. No Hermes installation files were changed. The two scheduled
+jobs remain active; the provider gaps remain accurately recorded as partial
+source coverage. This resolves the last OII-338 migration gate with an explicit
+external scheduler limitation rather than waiting for another scan with the
+same faulty owner check.
