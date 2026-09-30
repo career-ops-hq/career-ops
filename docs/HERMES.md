@@ -99,13 +99,13 @@ node openai-eval.mjs --url <endpoint> --model <model> --file jds/<posting>.txt
 
 ### Headless workers
 
-The web UI and batch ranker can run Hermes in one-shot mode:
+The web UI can run Hermes in one-shot mode for explicitly non-writing workers:
 
 ```bash
 hermes chat -q "<prompt>" --oneshot -Q --no-restore-cwd
 ```
 
-This returns one plain-text answer without resuming an unrelated session. The worker inherits Hermes's configured tools, approvals, memory, and project-context rules. In the web UI, Hermes is allowed only for non-writing workers such as research and PDF drafting; career-ops rejects Hermes for evaluation and portal-repair workers because no verified Hermes permission adapter exists. Batch ranking remains a separate workflow and writes only its own guarded annotations. Do not use Hermes for unattended mutation workflows.
+This returns one plain-text answer without resuming an unrelated session. The worker inherits Hermes's configured tools, approvals, memory, and project-context rules. In the web UI, Hermes is supported only for explicitly non-writing workers such as research and PDF drafting; career-ops rejects Hermes for evaluation and portal-repair workers because no verified Hermes permission adapter exists. Hermes is not supported by batch ranking until its child permissions are restricted; batch ranking remains a separate workflow and writes only its own guarded annotations. Do not use Hermes for unattended mutation workflows.
 
 The interactive workflow remains available for tasks that benefit from session continuity.
 
