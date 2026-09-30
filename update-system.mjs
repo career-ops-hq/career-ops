@@ -244,6 +244,14 @@ export const SYSTEM_PATHS = [
   'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
   'lib/cv-payload-schema.mjs',
+  // Defensive pre-pass over a model-generated CV payload (#3523): repairs a
+  // string `bullets` field that build-cv-html.mjs would otherwise render as an
+  // empty <ul> with zero validation errors, and normalizes education keys
+  // between the html and tex dialects. SYSTEM layer, not user layer: it is a
+  // generic shape repair with no candidate data, and the schema it complements
+  // (lib/cv-payload-schema.mjs above) is already here. Its test needs no entry —
+  // the tests directory entry further down already covers and prunes it (#3766).
+  'lib/payload-normalizer.mjs',
   'scan-hn.mjs',
   'scripts/check-syntax.mjs',
   'scripts/export-ats-text.mjs',
