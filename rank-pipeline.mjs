@@ -258,7 +258,7 @@ async function main(args) {
   const forced = flagValue(args, '--cli') ?? process.env.CAREER_OPS_RANK_CLI;
 
   if (forced === 'hermes') {
-    console.error('Hermes is not supported for batch ranking until its child permissions are restricted.');
+    console.error('Hermes is not supported for batch ranking.');
     return 1;
   }
 
