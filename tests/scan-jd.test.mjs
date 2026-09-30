@@ -18,6 +18,8 @@ try {
   assert.equal(JSON.parse(cli.stdout).snapshot.text, 'Responsibilities and qualifications');
   assert.equal((await captureScanJds([offer], root, extract)).reused, 1);
   assert.equal(calls, 1);
+  assert.equal((await captureScanJds([offer], root, extract, true)).captured, 1);
+  assert.equal(calls, 2);
   assert.equal(readScanJd(offer.url, root, Date.now() + JD_MAX_AGE_MS), null);
   const bad = { url: 'https://example.com/jobs/empty' };
   assert.equal((await captureScanJds([bad], root, async () => ({ text: '' }))).failed, 1);

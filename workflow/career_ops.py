@@ -76,6 +76,7 @@ if __name__ == "__main__":
 INPUT_ROOT = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
 WORKFLOW_VERSION = "oii-333-v1"
 SCAN_POLICY_VERSION = 2
+SCORE_POLICY_VERSION = 2
 ATTEMPT_SECONDS = 900
 ATTEMPT_CALLS = 20
 MODEL_RUNNER = "workflow.model_runner"
@@ -100,6 +101,7 @@ def score_inputs(report: dict) -> str:
     if not isinstance(report["prescreen"], dict) or report["prescreen"].get("status") not in {"pass", "fail", "incomplete", "uncertain"}:
         raise ValueError("JD report prescreen status is invalid")
     inputs = {
+        "score_policy_version": SCORE_POLICY_VERSION,
         "jd_report": report,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
         "profile": (INPUT_ROOT / "config" / "profile.yml").read_text(),
@@ -1361,7 +1363,13 @@ def scan_discovered(directory: Path, opportunity_id: str, re_evaluate: bool = Fa
         ).fetchone()
         if not row:
             raise ValueError(f"Discovered opportunity not found: {opportunity_id}")
-        source = current_discovered_scan_source(row, directory)
+        if re_evaluate:
+            refreshed = capture_jd(directory, row["url"], fresh=True)
+            source = discovered_scan_source(row, refreshed)
+            if not refreshed or source["liveness"] != "active" or source["captured_at"] != refreshed["retrieved_at"]:
+                source = {**source, "liveness": "uncertain", "liveness_evidence": {"reason": "Fresh posting capture unavailable"}}
+        else:
+            source = current_discovered_scan_source(row, directory)
         waiting = store.db.execute(
             "SELECT task_id,input_hash FROM tasks WHERE opportunity_id=? AND module='scan' "
             "AND status='waiting' AND waiting_reason='source_access_unknown' ORDER BY rowid DESC LIMIT 1",

@@ -325,6 +325,18 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-stale-") as temporary:
                      (scored["task_id"], scored["task_id"], "1", "score", store.task(scored["task_id"])["input_hash"],
                       json.dumps({"outcome": "score", "artifact": {"score": {"lower": 2, "upper": 4, "coverage": 0.5}}})))
     store.close()
+    with patch("workflow.career_ops.capture_jd", return_value=None), \
+         patch("workflow.career_ops.start_and_run", return_value={"status": "waiting"}) as start:
+        scan_discovered(directory, "1", True)
+        assert json.loads(start.call_args.args[3])["liveness"] == "uncertain"
+    fresh = {"status": "captured", "url": report["url"], "text": "Current official JD.",
+             "retrieved_at": datetime.now(timezone.utc).isoformat()}
+    with patch("workflow.career_ops.capture_jd", return_value=fresh), \
+         patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+        scan_discovered(directory, "1", True)
+        source = json.loads(start.call_args.args[3])
+        assert source["liveness"] == "active" and source["jd"] == fresh["text"]
+        assert source["captured_at"] == fresh["retrieved_at"]
     with patch("workflow.career_ops.scan_discovered", return_value={"status": "waiting"}), \
          patch("workflow.career_ops.start_and_run") as start:
         assert cron_score(directory)["status"] == "waiting"

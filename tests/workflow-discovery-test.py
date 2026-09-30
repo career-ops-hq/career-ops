@@ -47,6 +47,9 @@ with patch("workflow.career_ops.capture_jd", return_value=None):
 with patch("workflow.discovery.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"snapshot": fresh}))) as browser:
     assert capture_jd(Path("/tmp/scan"), url) == fresh
 assert browser.call_args.args[0][1].endswith("lib/scan-jd.mjs")
+with patch("workflow.discovery.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"snapshot": fresh}))) as browser:
+    assert capture_jd(Path("/tmp/scan"), url, fresh=True) == fresh
+assert browser.call_args.args[0][-1] == "--fresh"
 ibm = "https://careers.ibm.com/careers/JobDetail?jobId=131606"
 localized = "https://careers.ibm.com/en_US/careers/JobDetail?jobId=131606"
 assert same_posting_url(ibm, localized)

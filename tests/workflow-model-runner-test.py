@@ -247,7 +247,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-dimension-completion-") as t
     assert seen[0][0] == "score_dimension" and "Official JD" in seen[0][1]
 
 with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / "data") as temporary:
-    runner.DRAFT_ROOT = Path(temporary)
+    runner.DRAFT_ROOT = Path(temporary).relative_to(ROOT)
     jd = "Build developer tools and reviewed AI workflows."
     repair_inputs = {
         "jd_report": {

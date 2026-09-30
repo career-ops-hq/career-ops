@@ -46,6 +46,9 @@ assert [item["id"] for item in adapter.normalize_research(missing_url)["research
 invalid_citable_url = json.loads(json.dumps(frozen))
 invalid_citable_url["research"]["findings"][0]["url"] = None
 assert adapter.normalize_research(invalid_citable_url)["research"]["findings"][0]["id"] == "f1"
+missing_limit = json.loads(json.dumps(frozen))
+missing_limit["research"]["findings"][0]["limitation"] = None
+assert adapter.normalize_research(missing_limit)["research"]["findings"][0]["limitation"] == "Source applicability remains unverified."
 invalid_query = json.loads(json.dumps(frozen))
 invalid_query["research"]["queries"] = ["pay", "company"]
 invalid_query["research"]["dimensions"] = {

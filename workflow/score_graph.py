@@ -106,6 +106,7 @@ def _complete_dimensions(assessment: dict, jd: dict, sources: dict, research: di
 
 def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
     """Resume an interrupted score stage before starting a fresh evaluation."""
+    draft_root = draft_root.resolve()
     key = hashlib.sha256(json.dumps(inputs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     directory = draft_root / key
     directory.mkdir(parents=True, exist_ok=True)

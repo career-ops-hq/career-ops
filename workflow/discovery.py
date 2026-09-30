@@ -38,11 +38,11 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def capture_jd(directory: Path, url: str) -> dict | None:
+def capture_jd(directory: Path, url: str, *, fresh: bool = False) -> dict | None:
     """Refresh one discovered posting with the existing guarded browser reader."""
     try:
         result = subprocess.run(
-            ["node", str(ROOT / "lib" / "scan-jd.mjs"), url, str(directory)],
+            ["node", str(ROOT / "lib" / "scan-jd.mjs"), url, str(directory), *(["--fresh"] if fresh else [])],
             cwd=ROOT, text=True, capture_output=True, timeout=45,
         )
     except (OSError, subprocess.TimeoutExpired):

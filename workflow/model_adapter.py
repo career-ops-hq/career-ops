@@ -190,6 +190,8 @@ def normalize_research(research):
             finding['source'] = None
             finding['quote'] = None
             finding['limitation'] = f"{finding.get('limitation') or 'Access status unavailable'}; unrecognized access status: {previous}"
+        if not isinstance(finding.get('limitation'), str) or not finding['limitation'].strip():
+            finding['limitation'] = 'Source applicability remains unverified.'
         findings.append(finding)
     dimensions = {}
     queries = record['queries']
