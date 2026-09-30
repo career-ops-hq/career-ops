@@ -20,6 +20,7 @@ export function AddInternshipModal({ onClose, onAdded }: Props) {
     status: "wishlist" as const,
   });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const set = (key: string, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -28,13 +29,21 @@ export function AddInternshipModal({ onClose, onAdded }: Props) {
     e.preventDefault();
     if (!form.company || !form.role) return;
     setSaving(true);
+    setError(null);
     try {
       const res = await fetch("/api/internships", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      if (res.ok) onAdded();
+      if (res.ok) {
+        onAdded();
+      } else {
+        const body = await res.json().catch(() => null);
+        setError(body?.error ?? "Failed to add internship.");
+      }
+    } catch {
+      setError("Network error — please try again.");
     } finally {
       setSaving(false);
     }
@@ -73,6 +82,10 @@ export function AddInternshipModal({ onClose, onAdded }: Props) {
               placeholder="Referral contact, team info, etc."
             />
           </div>
+
+          {error && (
+            <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
