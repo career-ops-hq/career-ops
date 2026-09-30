@@ -10,7 +10,7 @@
  * next.config.mjs) and refuses modules outside it, so the shared source is a
  * JSON file read with fs, like every other career-ops file this app consumes.
  *
- * Plain .mjs (same pattern as clean-chips.mjs) so tracker-columns-tests.mjs can
+ * Plain .mjs (same pattern as clean-chips.mjs) so tests/tracker-columns.test.mjs can
  * import it directly under Node and regression-test the REAL alias chain.
  */
 import fs from "node:fs";

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * agent-inbox-tests.mjs — regression tests for agent-inbox.mjs.
+ * tests/agent-inbox.test.mjs — regression tests for agent-inbox.mjs.
  *
  * Locks in the queue's behaviour:
  *   1. A first `add` seeds the header + agent protocol and one pending item.
@@ -32,20 +32,20 @@
 
 import { execFileSync, spawn } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
-import { acquirePipelineLock } from './pipeline-lock.mjs';
+import { pathToFileURL } from 'url';
+import { acquirePipelineLock } from '../pipeline-lock.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+import { pass, fail, ROOT } from './helpers.mjs';
+
+console.log('\nagent-inbox.mjs — queued requests, locking and resolve');
 const NODE = process.execPath;
 const CLI = join(ROOT, 'agent-inbox.mjs');
 
-let passed = 0;
-let failed = 0;
 function check(name, cond, detail = '') {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else { failed++; console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ''}`); }
+  if (cond) pass(name);
+  else fail(`${name}${detail ? ` — ${detail}` : ''}`);
 }
 
 function tmp(prefix) {
@@ -550,5 +550,3 @@ try {
   );
 }
 
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
