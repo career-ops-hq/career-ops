@@ -118,20 +118,21 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.PipelineUpdateStatusMsg:
 		err := data.UpdateApplicationStatus(msg.CareerOpsPath, msg.App, msg.NewStatus)
-		if err != nil {
-			// Log the error but still reload data to keep UI consistent
-			fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
-		}
 		m.reloadPipelineData()
+		if err != nil {
+			m.pipeline, _ = m.pipeline.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+		} else if data.NormalizeStatus(msg.NewStatus) == "hired" {
+			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
+		}
 		return m, nil
 
 	case screens.PipelineUpdateStatusAndNotesMsg:
 		// Issue 1380: atomic status + notes write from the discard reason picker.
 		err := data.UpdateApplicationStatusAndNotes(msg.CareerOpsPath, msg.App, msg.NewStatus, msg.NotesAppend)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: status+notes update failed: %v\n", err)
-		}
 		m.reloadPipelineData()
+		if err != nil {
+			m.pipeline, _ = m.pipeline.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+		}
 		return m, nil
 
 	case screens.PipelineRefreshMsg:
@@ -164,18 +165,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.ViewerUpdateStatusMsg:
 		normalized := data.NormalizeStatus(msg.NewStatus)
-		if normalized == "hired" {
-			err := data.UpdateApplicationStatus(m.careerOpsPath, msg.App, msg.NewStatus)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
-				m.reloadPipelineData()
-				return m, nil
-			}
-			m.state = viewPipeline
-			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
-			m.reloadPipelineData()
-			return m, nil
-		}
 		if normalized == "discarded" || normalized == "skip" {
 			m.state = viewPipeline
 			m.pipeline, _ = m.pipeline.StartDiscardReasonFlow(msg.App, msg.NewStatus)
@@ -184,11 +173,31 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		err := data.UpdateApplicationStatus(m.careerOpsPath, msg.App, msg.NewStatus)
+		m.reloadPipelineData()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
+			// A sidecar failure can follow a successful tracker write. Reflect
+			// the persisted status, retaining the old one if it cannot be read
+			// or the report identity is no longer unique.
+			if msg.App.ReportNumber != "" {
+				savedStatus, matches := "", 0
+				for _, app := range data.ParseApplications(m.careerOpsPath) {
+					if app.ReportNumber == msg.App.ReportNumber {
+						savedStatus = app.Status
+						matches++
+					}
+				}
+				if matches == 1 {
+					m.viewer.UpdateAppStatus(savedStatus)
+				}
+			}
+			m.viewer, _ = m.viewer.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+			return m, nil
 		}
 		m.viewer.UpdateAppStatus(msg.NewStatus)
-		m.reloadPipelineData()
+		if normalized == "hired" {
+			m.state = viewPipeline
+			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
+		}
 		return m, nil
 
 	case screens.PipelineOpenProgressMsg:
@@ -397,7 +406,7 @@ func main() {
 		theme:           t,
 		progressMetrics: progressMetrics,
 		statsMetrics:    statsMetrics,
-		evaluatedCount:  func() int {
+		evaluatedCount: func() int {
 			n := 0
 			for _, a := range apps {
 				if a.Score > 0 {

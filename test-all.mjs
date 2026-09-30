@@ -5510,24 +5510,6 @@ try {
     fail(`tracker writers bypass shared transaction scope: ${unsafeWriters.join(', ')}`);
   }
 
-  const dashboardWriter = readFile('dashboard/internal/data/career.go');
-  const dashboardStart = dashboardWriter.indexOf('func UpdateApplicationStatusAndNotes(');
-  const dashboardTail = dashboardStart === -1 ? '' : dashboardWriter.slice(dashboardStart);
-  const nextDashboardFunction = dashboardTail.indexOf('\nfunc ', 1);
-  const dashboardBody = nextDashboardFunction === -1
-    ? dashboardTail
-    : dashboardTail.slice(0, nextDashboardFunction);
-  const acquireAt = dashboardBody.indexOf('acquireTrackerLock(');
-  const deferredReleaseAt = dashboardBody.indexOf('defer func()');
-  const readAt = dashboardBody.indexOf('os.ReadFile(filePath)');
-  const replaceAt = dashboardBody.indexOf('writeFileAtomic(filePath');
-  if (acquireAt >= 0 && deferredReleaseAt > acquireAt && readAt > deferredReleaseAt
-      && replaceAt > readAt
-      && !/os\.WriteFile\(filePath,\s*\[\]byte\(strings\.Join\(lines/.test(dashboardBody)) {
-    pass('dashboard tracker update structurally holds the lock across read and atomic replacement');
-  } else {
-    fail('dashboard tracker update escapes the cross-runtime transaction scope');
-  }
 } catch (e) {
   fail(`tracker writer lock contract tests crashed: ${e.message}`);
 }

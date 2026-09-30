@@ -240,6 +240,24 @@ export function resolveTsvColumns(cells) {
   return { map, missing, duplicates, unknown };
 }
 
+// The dashboard also reads legacy rows with a leading pipe and tab-separated
+// cells. Opt in only where readers/writers handle that format: other writers
+// still rebuild pipe rows and must not silently start accepting tab rows. A tab
+// inside a normal pipe table is ordinary whitespace, not a column delimiter.
+export function trackerRowSeparator(line) {
+  return line.includes('\t') && line.split('|').length <= 3 ? '\t' : '|';
+}
+
+/** Return raw cells in the same index space as line.split('|'). */
+export function splitTrackerCells(line) {
+  if (trackerRowSeparator(line) === '|') return line.split('|');
+  const opening = line.indexOf('|');
+  if (opening < 0) return line.split('|');
+  const closing = line.trimEnd().endsWith('|') ? line.lastIndexOf('|') : -1;
+  const body = line.slice(opening + 1, closing > opening ? closing : undefined);
+  return [line.slice(0, opening), ...body.split('\t'), ...(closing > opening ? [line.slice(closing + 1)] : [])];
+}
+
 /**
  * Scan the table for a header row and build a field-name → column-index map.
  * Indexing matches `line.split('|')`. Returns null — caller should fall back to
@@ -247,12 +265,14 @@ export function resolveTsvColumns(cells) {
  * line can't yield a bogus mapping.
  *
  * @param {string[]} lines - All lines of applications.md.
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options] - Explicit legacy-layout support.
  * @returns {Object<string,number>|null}
  */
-export function detectColumns(lines) {
+export function detectColumns(lines, { allowTabs = false, allowIndentation = false } = {}) {
   for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const map = headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase()));
+    if (!(allowIndentation ? line.trimStart() : line).startsWith('|')) continue;
+    const cells = allowTabs ? splitTrackerCells(line) : line.split('|');
+    const map = headerSchemaMap(cells.map(s => s.trim().toLowerCase()));
     if (map) return map;
   }
   return null;
@@ -261,10 +281,11 @@ export function detectColumns(lines) {
 /**
  * Convenience: detect the header layout, falling back to the legacy fixed one.
  * @param {string[]} lines
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options]
  * @returns {Object<string,number>}
  */
-export function resolveColumns(lines) {
-  return detectColumns(lines) || LEGACY_COLMAP;
+export function resolveColumns(lines, options) {
+  return detectColumns(lines, options) || LEGACY_COLMAP;
 }
 
 /**
@@ -275,11 +296,12 @@ export function resolveColumns(lines) {
  *
  * @param {string} line - One line from applications.md.
  * @param {Object<string,number>} [colmap] - From resolveColumns(); defaults to legacy.
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options] - Opt in only when writes preserve this layout.
  * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,raw}`.
  */
-export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
-  if (typeof line !== 'string' || !line.startsWith('|')) return null;
-  const parts = line.split('|').map(s => s.trim());
+export function parseTrackerRow(line, colmap = LEGACY_COLMAP, { allowTabs = false, allowIndentation = false } = {}) {
+  if (typeof line !== 'string' || !(allowIndentation ? line.trimStart() : line).startsWith('|')) return null;
+  const parts = (allowTabs ? splitTrackerCells(line) : line.split('|')).map(s => s.trim());
   // Dynamic width guard: a complete row splits into leading '' + one cell per
   // column (+ trailing '' when the row ends with a pipe). Anything shorter is
   // missing a cell, and a missing INTERIOR cell shifts every later column one
