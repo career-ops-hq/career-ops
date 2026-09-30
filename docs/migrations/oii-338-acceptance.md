@@ -632,19 +632,30 @@ failed; later score ticks completed independently.
 All 61 `tests/workflow-*-test.py` files passed again after this query-reference
 recovery change (zero failures).
 
-## Current open gates (2026-09-29 22:06 +08:00)
+## Current open gate (2026-09-30 08:45 +08:00)
 
-- Opportunity `8` still has its historical `prescreen_failed` business result.
-  The corrected saved-extraction LangGraph replay produced `jd_report` with
-  `uncertain` prescreen and no discard reasons. Auto-review rejected a manual
-  formal-store `scan-discovered 8 --re-evaluate` because the prior consent did
-  not clearly cover that additional CV/profile/JD transfer to
-  `https://llm.goaichat.top/v1`; a targeted authorization request is pending.
-- The restored scan job has completed one direct run, but its next natural
-  06:00 tick has not occurred. The restored score job has clean completed
-  built-in ticks at 19:00, 19:20, 20:00 and later; the 19:40 and 20:20 ticks
-  failed but their original score tasks recovered to validated business
-  commits. Both jobs are active and notifications remain disabled.
+The user explicitly authorized sending the CV, career profile and opportunity
+`8` JD to `https://llm.goaichat.top/v1` for this re-evaluation. The formal
+`scan-discovered 8 --re-evaluate` completed as task
+`6fac9911-6dc6-4a60-863f-bbb40ed07c8b` with one model call. Its latest scan
+business result is `jd_report`, prescreen `uncertain`, and no discard reasons;
+the historical `prescreen_failed` result remains as history but is no longer
+the latest result. No application or message was sent.
 
-OII-338 and parent OII-333 therefore remain open. The 61-file regression gate
-and live samples prove their recorded scopes, not these outstanding checks.
+The restored scan job fired on its natural 06:00 schedule. At 06:07:23 it
+committed configured run `92493529e8574e60ae47e67d43591a18`: 34 companies,
+31,256 postings found, one new opportunity, 10 provider errors or coverage
+warnings, and source health written to the canonical business store. The
+business store now has 121 opportunities, 3 configured scan runs and 121
+source-evidence rows; `PRAGMA quick_check=ok`. `hermes cron list --all` reports
+the 06:07:23 run as `ok`, and both original schedules are active. Its durable
+execution `ae3de159c2d74955adb72b17f6edcea4` nevertheless says `unknown`
+because the scheduler owner exited before recording a terminal state. The
+business commit proves the natural scan's side effects, but the Hermes
+execution ledger does not independently prove a clean terminal state. The
+next natural scan at 18:00 remains the check for a durable terminal record.
+The score schedule has clean built-in completions, including 08:40, and
+notification deliveries remain zero.
+
+OII-338 and parent OII-333 remain open only for that scheduler record check.
+The 61-file regression gate and live samples prove their recorded scopes.
