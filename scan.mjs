@@ -24,9 +24,9 @@
  *   node scan.mjs                  # scan all enabled companies
  *   node scan.mjs --dry-run        # preview without writing files
  *   node scan.mjs --company Cohere # scan a single company
- *   node scan.mjs --verify         # Playwright-check each new URL; drop expired postings
+ *   node scan.mjs --verify         # API-first liveness check; use Playwright when inconclusive
  *   node scan.mjs --verify --headed-fallback  # retry anti-bot-blocked URLs in a headed browser (needs a display)
- *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
+ *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between browser checks
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
  *   node scan.mjs --since 7                    # postings from the last 7 days
@@ -78,6 +78,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { checkLivenessViaApi } from './liveness-api.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -3439,34 +3440,70 @@ async function parallelFetch(tasks, limit) {
 
 // ── Main ────────────────────────────────────────────────────────────
 
-async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}) {
-  // Dynamic imports keep the default zero-token path free of Playwright startup
-  let chromium;
-  let checkUrlLiveness;
-  let checkUrlLivenessWithFallback;
-  let createHeadedPageProvider;
-  let newLivenessPage;
-  let jitteredDelayMs;
-  let sleep;
-  try {
-    ({ chromium } = await import('playwright'));
-    ({ checkUrlLiveness, checkUrlLivenessWithFallback, createHeadedPageProvider, newLivenessPage, jitteredDelayMs, sleep } = await import('./liveness-browser.mjs'));
-  } catch (err) {
-    throw new Error(
-      `--verify requires Playwright with Chromium (run "npx playwright install chromium"): ${err.message}`,
-      { cause: err },
-    );
-  }
+export async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}, {
+  checkApi = checkLivenessViaApi,
+  loadPlaywright = () => import('playwright'),
+} = {}) {
+  // These helpers do not import Playwright. In particular, apply the same URL
+  // guard before the API rung: an embedded ATS id must not bless a private URL.
+  const {
+    rejectPrivateOrInvalid, checkUrlLiveness, checkUrlLivenessWithFallback,
+    createHeadedPageProvider, newLivenessPage, installLivenessRouteGuard, jitteredDelayMs, sleep,
+  } = await import('./liveness-browser.mjs');
 
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: true });
-  } catch (err) {
-    throw new Error(
-      `--verify could not launch Chromium (run "npx playwright install chromium" or re-run without --verify): ${err.message}`,
-      { cause: err },
-    );
+  // The HTTP rung can run concurrently; each provider retains its own rate
+  // limit inside checkLivenessViaApi. Index results so completion order never
+  // reorders the output or the subsequent sequential browser checks.
+  const verdicts = new Array(offers.length);
+  await parallelFetch(offers.map((offer, i) => async () => {
+    const guard = rejectPrivateOrInvalid(offer.url);
+    if (guard) {
+      verdicts[i] = { result: 'uncertain', ...guard };
+      return;
+    }
+    try {
+      verdicts[i] = await checkApi(offer.url);
+    } catch (err) {
+      console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
+      verdicts[i] = null;
+    }
+  }), CONCURRENCY);
+
+  let browser = null, page = null, headed = null;
+  let hadBrowserOffer = false;
+  async function browserForOffer() {
+    if (!browser) {
+      let chromium;
+      try {
+        ({ chromium } = await loadPlaywright());
+      } catch (err) {
+        throw new Error(
+          `--verify requires Playwright with Chromium (run "npx playwright install chromium"): ${err.message}`,
+          { cause: err },
+        );
+      }
+      try {
+        browser = await chromium.launch({ headless: true });
+      } catch (err) {
+        throw new Error(
+          `--verify could not launch Chromium (run "npx playwright install chromium" or re-run without --verify): ${err.message}`,
+          { cause: err },
+        );
+      }
+      page = await newLivenessPage(browser);
+      await installLivenessRouteGuard(page);
+      headed = headedFallback ? createHeadedPageProvider(chromium) : null;
+    }
+    // Space only browser work, including a search after an API 404 and the
+    // offer after a successful migration. API-only verdicts need no WAF delay.
+    const wait = hadBrowserOffer ? jitteredDelayMs(throttleBaseMs) : 0;
+    if (wait) await sleep(wait);
+    hadBrowserOffer = true;
+    return page;
   }
+  const checkPage = (page, url) => headed
+    ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get() })
+    : checkUrlLiveness(page, url);
 
   // Three permanent buckets + one transient passthrough:
   //   verified  → active pages and transient nav errors (retry next scan)
@@ -3481,31 +3518,33 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
   const invalid = [];
   const migrated = [];
 
-  const headed = headedFallback ? createHeadedPageProvider(chromium) : null;
-  const getHeadedPage = headed ? () => headed.get() : undefined;
-
   try {
-    const page = await newLivenessPage(browser);
     // Sequential — project rule: never Playwright in parallel
     for (let i = 0; i < offers.length; i++) {
       const offer = offers[i];
-      const { result, code, reason } = headed
-        ? await checkUrlLivenessWithFallback(page, offer.url, { getHeadedPage })
-        : await checkUrlLiveness(page, offer.url);
+      let offerPage = null;
+      let verdict = verdicts[i];
+      // Non-null API `uncertain` is an explicit conservative conclusion, just
+      // as in check-liveness.mjs. Only an inconclusive null needs the browser.
+      if (!verdict) {
+        offerPage = await browserForOffer();
+        verdict = await checkPage(offerPage, offer.url);
+      }
+      const { result, code, reason } = verdict;
       if (result === 'expired') {
         // 404/410 on a tracked company may just be a moved role — run one
         // search + re-verify before giving up (opt-in via --rediscover-404).
-        // Only http_gone (HTTP 404/410) qualifies; soft-expiry signals
+        // Only HTTP 404/410 qualifies, from either rung; soft-expiry signals
         // (redirect/body/listing) are real closures, not URL moves.
-        if (rediscover && code === 'http_gone' && offer.tracked && offer.careersUrlDomain) {
-          const newUrl = await searchForNewUrl(page, offer);
+        const httpGone = code === 'http_gone' || /^[a-z][a-z0-9-]*_api_gone$/.test(code);
+        if (rediscover && httpGone && offer.tracked && offer.careersUrlDomain) {
+          offerPage ??= await browserForOffer();
+          const newUrl = await searchForNewUrl(offerPage, offer);
           if (newUrl) {
             // Mirror the primary check: without the headed fallback, a
             // challenge-prone domain would flag the rediscovered URL as
             // expired just because the recheck hit the same anti-bot wall.
-            const recheck = headed
-              ? await checkUrlLivenessWithFallback(page, newUrl, { getHeadedPage })
-              : await checkUrlLiveness(page, newUrl);
+            const recheck = await checkPage(offerPage, newUrl);
             // Require a *confirmed* live page before migrating. A transient
             // 'uncertain' (timeout/DNS/5xx) must not commit an unverified URL —
             // fall through to expired (the original 404/410 is a real closure).
@@ -3536,13 +3575,13 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
         const icon = result === 'active' ? '✅' : '⚠️';
         console.log(`  ${icon} ${result.padEnd(9)} ${offer.company} | ${offer.title}`);
       }
-
-      const wait = i < offers.length - 1 ? jitteredDelayMs(throttleBaseMs) : 0;
-      if (wait) await sleep(wait);
     }
   } finally {
-    if (headed) await headed.close();
-    await browser.close();
+    try {
+      if (headed) await headed.close();
+    } finally {
+      if (browser) await browser.close();
+    }
   }
 
   return { verified, expired, dropped, invalid, migrated };
@@ -3582,9 +3621,9 @@ const USAGE = `Usage:
   node scan.mjs                              # scan all enabled companies
   node scan.mjs --dry-run                    # preview without writing files
   node scan.mjs --company Cohere             # scan a single company
-  node scan.mjs --verify                     # Playwright-check each new URL; drop expired postings
+  node scan.mjs --verify                     # API-first liveness check; use Playwright when inconclusive
   node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
-  node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
+  node scan.mjs --verify --throttle          # jittered ~5-10s gap between browser checks
   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
@@ -4181,7 +4220,7 @@ async function main() {
   let invalidOffers = [];
   let migratedOffers = [];
   if (verify && newOffers.length > 0) {
-    console.log(`\nVerifying liveness of ${newOffers.length} new offer(s) with Playwright (sequential)...`);
+    console.log(`\nVerifying liveness of ${newOffers.length} new offer(s) via API, with sequential Playwright fallback...`);
     const result = await verifyOffers(newOffers, { headedFallback, throttleBaseMs, rediscover });
     verifiedOffers = result.verified;
     expiredOffers = result.expired;

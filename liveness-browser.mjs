@@ -260,14 +260,9 @@ export async function validateUrlSecurity(urlString) {
   }
 }
 
-export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
-  const guardError = rejectPrivateOrInvalid(url);
-  if (guardError) {
-    return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
-  }
-  if (page) {
-    page._blockedByGuard = null;
-  }
+// Rediscovery can navigate a newly created page before its first liveness
+// check. Install the same URL/DNS guards before that search as well.
+export async function installLivenessRouteGuard(page) {
   if (page && typeof page.route === 'function' && !page._routeInterceptorRegistered) {
     page._routeInterceptorRegistered = true;
     await page.route('**/*', async (route) => {
@@ -317,6 +312,17 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       }
     });
   }
+}
+
+export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
+  const guardError = rejectPrivateOrInvalid(url);
+  if (guardError) {
+    return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
+  }
+  if (page) {
+    page._blockedByGuard = null;
+  }
+  await installLivenessRouteGuard(page);
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
     const status = response?.status() ?? 0;
