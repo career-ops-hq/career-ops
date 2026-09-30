@@ -248,7 +248,14 @@ export const SYSTEM_PATHS = [
   'scripts/check-syntax.mjs',
   'scripts/export-ats-text.mjs',
   'scripts/followup-sweep.sh',
+  // The Jev pre-screen is SYSTEM layer, not user layer, even though its bands
+  // are calibrated per-CV. The script itself is generic (provider, prompt, JSON
+  // contract); the calibration lives in the USER-owned config/profile.yml
+  // `jev_gate` block, which a system update never touches. Putting the script
+  // in the system layer is what makes a fix to its provider handling reachable
+  // by `apply` — the thing it is for.
   'scripts/jev_gatekeeper.py',
+  'scripts/jev-calibrate.mjs',
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
@@ -322,6 +329,12 @@ export const SYSTEM_PATHS = [
   'jsonc-parse.mjs',
   'check-liveness.mjs',
   'liveness-core.mjs',
+  // Gate 3 wrapper around scripts/jev_gatekeeper.py. System layer: the audit
+  // contract and its fail-open rule are shared behaviour, while the JD content it
+  // reads stays in user-layer data/. NOTE: keep this comment free of apostrophes
+  // and quotes -- updater-migration-tests.mjs extracts the array with a regex over
+  // quoted spans, so a stray apostrophe here parses as a bogus path entry.
+  'jev-post-linter.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'browser-extract.mjs',

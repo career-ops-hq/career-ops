@@ -1,8 +1,20 @@
 import type { CliSpec } from "@/lib/clis";
 import { opencodePermissionBlock } from "@/lib/opencode-permission.mjs";
+import { opencodeStreamMeta, opencodeStreamText, opencodeWorkerArgs, usesOpencodeNdjson } from "@/lib/opencode-stream.mjs";
 
-export function usesStreamJson(cliId: string): boolean {
-  return cliId === "claude" || cliId === "cursor";
+/**
+ * Which surface is asking. opencode's NDJSON is opt-in for the WORKER card only:
+ * the chat assistant and the CV-ingest route keep their existing raw-stdout
+ * behaviour. Flipping the default would silently change two other surfaces, and
+ * cv/ingest uses `!usesStreamJson(cliId)` as its "can this CLI read a PDF from
+ * /tmp?" capability gate — which opencode cannot do, because its headless
+ * permission block (see buildCliEnv) rejects any path outside the workspace.
+ */
+export type StreamSurface = "default" | "worker";
+
+export function usesStreamJson(cliId: string, surface: StreamSurface = "default"): boolean {
+  if (cliId === "claude" || cliId === "cursor") return true;
+  return usesOpencodeNdjson(cliId, surface);
 }
 
 export type CliSpawnOptions = {
@@ -61,6 +73,11 @@ export function buildCliArgs(cliId: string, spec: CliSpec, opts: CliSpawnOptions
   if (cliId === "codex") {
     return ["exec", prompt, "--sandbox", needsShell ? "workspace-write" : "read-only"];
   }
+  if (cliId === "opencode") {
+    // Only the worker route reaches here for opencode (usesStreamJson is
+    // surface-gated), so the assistant and cv/ingest keep spec.args() unchanged.
+    return opencodeWorkerArgs(prompt);
+  }
   return spec.args(prompt);
 }
 
@@ -108,6 +125,7 @@ export function extractStreamText(cliId: string, obj: Record<string, unknown>): 
     }
     return text || null;
   }
+  if (cliId === "opencode") return opencodeStreamText(obj);
   return null;
 }
 
@@ -128,6 +146,13 @@ export function detectCliPlaintextError(text: string): string | null {
 
 export type StreamMeta = {
   tokens?: number;
+  /**
+   * How `tokens` combines with the run so far. claude/cursor emit ONE final
+   * result event carrying the whole run ("replace"); opencode emits a
+   * `step_finish` per model step, each carrying that step's delta ("delta").
+   * Overwriting instead of accumulating under-reports every multi-step run.
+   */
+  tokensMode?: "replace" | "delta";
   costUsd?: number | null;
   toolName?: string;
   status?: string;
@@ -172,6 +197,7 @@ export function extractStreamMeta(cliId: string, obj: Record<string, unknown>): 
     }
     return null;
   }
+  if (cliId === "opencode") return opencodeStreamMeta(obj);
   return null;
 }
 

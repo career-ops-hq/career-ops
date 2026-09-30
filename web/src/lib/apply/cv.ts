@@ -28,6 +28,25 @@ function filenameMatchesCompany(filename: string, slug: string): boolean {
   return re.test(filename.toLowerCase());
 }
 
+/**
+ * Cover-letter-specific company match. Cover files are named
+ * `{company-slug}-{role-slug}-cover.pdf` from the letter's own company field
+ * (LLM-resolved off the report, e.g. "dariohealth"), which can differ from the
+ * tracker's display name ("Dario"). An exact token-boundary match alone misses
+ * that, so a bounded one-way prefix match on the filename's leading company
+ * token is also accepted ("dario" → "dariohealth"). Short slugs (<4 chars)
+ * never prefix-match, so "air" can't grab "airbnb".
+ */
+function coverLetterFilenameMatchesCompany(filename: string, slug: string): boolean {
+  if (filenameMatchesCompany(filename, slug)) return true;
+  if (!slug || slug.length < 4) return false;
+  const head = filename.toLowerCase().replace(/\.pdf$/, "").split(/[^a-z0-9]+/)[0] ?? "";
+  if (!head) return false;
+  if (head.length >= slug.length && head.startsWith(slug)) return true;
+  if (slug.length > head.length && slug.startsWith(head)) return true;
+  return false;
+}
+
 function normReportNum(s: string): string {
   return String(s ?? "").trim().replace(/^0+(?=\d)/, "");
 }
@@ -54,10 +73,15 @@ export function resolveTailoredCvByReport(report?: string): string | null {
   return null;
 }
 
-function newestMatchingPdf(dir: string, filter: (name: string) => boolean, slug: string): string | null {
+function newestMatchingPdf(
+  dir: string,
+  filter: (name: string) => boolean,
+  slug: string,
+  matcher: (name: string, slug: string) => boolean = filenameMatchesCompany,
+): string | null {
   let files: string[];
   try {
-    files = fs.readdirSync(dir).filter((f) => filter(f) && filenameMatchesCompany(f, slug));
+    files = fs.readdirSync(dir).filter((f) => filter(f) && matcher(f, slug));
   } catch {
     return null;
   }
@@ -82,11 +106,14 @@ export function resolveTailoredCv(company?: string, report?: string): string | n
 
 /**
  * Locate the cover letter PDF for a company (newest `*-cover.pdf` match).
+ * Uses the tolerant prefix matcher: the letter filename is keyed by the
+ * letter's own company slug, which may be a fuller variant of the tracker's
+ * display name (e.g. "dariohealth" vs "dario").
  */
 export function resolveCoverLetter(company?: string): string | null {
   const c = (company ?? "").trim();
   if (!c) return null;
-  return newestMatchingPdf(OUTPUT_DIR(), isCoverLetterFilename, companySlug(c));
+  return newestMatchingPdf(OUTPUT_DIR(), isCoverLetterFilename, companySlug(c), coverLetterFilenameMatchesCompany);
 }
 
 /**

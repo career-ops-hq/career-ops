@@ -8,10 +8,20 @@
 import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 
 /**
- * @param {{kind: string, input: string, memory?: string, today?: string, reportNum?: string}} opts
+ * @param {{kind: string, input: string, memory?: string, today?: string, reportNum?: string,
+ *          cliId?: string, hasPlaywright?: boolean, jevPrior?: object|null}} opts
  * @returns {string}
  */
-export function buildPrompt({ kind = "evaluate", input, memory = "", today = "", reportNum = input }) {
+export function buildPrompt({
+  kind = "evaluate",
+  input,
+  memory = "",
+  today = "",
+  reportNum = input,
+  cliId = "",
+  hasPlaywright = false,
+  jevPrior = null,
+}) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   const todayStr = today || new Date().toISOString().slice(0, 10);
   const report = reportNum ?? input;
@@ -63,12 +73,30 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 
   // evaluate (default) — run the REAL oferta mode + persist canonically
   const isLocal = input.startsWith("local:");
+  // Playwright availability is per-CLI (doctor.mjs is the source of truth) and the
+  // old text hardcoded "unavailable" for every CLI. That was backwards for
+  // opencode, which DOES ship @playwright/mcp: the worker was told to skip
+  // verification on the one CLI that can do it, and 42 reports carry the
+  // unconfirmed header as a result. A closed posting is also the ONLY genuinely
+  // free discard available here — a Playwright-confirmed-dead role costs nothing
+  // and carries no false-negative risk (unlike a score-based cut-off).
   const sourceLine = isLocal
     ? `Read the JD from the local file \`${input.slice("local:".length)}\` (the \`local:\` prefix means: read that file directly, per modes/pipeline.md's convention — do NOT WebFetch it, it is not a URL).`
-    : `Use WebFetch to read the posting (you are headless — Playwright is unavailable, so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").`;
-  return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${todayStr}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.
+    : hasPlaywright
+      ? `Verify the posting with Playwright BEFORE scoring it (this CLI has @playwright/mcp): \`browser_navigate\` the URL, then \`browser_snapshot\` it. Apply modes/_shared.md's rule — title + description + Apply = live; footer/navbar only, or an explicit closed/expired notice = DEAD. If DEAD: stop immediately, write NO report, and say so in one line (a closed posting costs no tokens and must not become a phantom evaluation). If LIVE: mark the report header "Verification: verified via Playwright".`
+      : `Use WebFetch to read the posting (you are headless and this CLI${cliId ? ` (\`${cliId}\`)` : ""} has no Playwright MCP — doctor.mjs reports it absent — so use WebFetch and mark the report header "Verification: unconfirmed (batch mode)").`;
 
-1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: read cv.md, config/profile.yml and modes/_profile.md. ${sourceLine}
+  // Cheap Jev prior (web/src/lib/jev-pre-screen.mjs). Advisory ONLY: the gate
+  // cannot discard (0/69 real postings ever scored >= 4.0, and at a 2.6 cut-off it
+  // would drop roles the user applied to), so it is injected as a weak prior that
+  // the evidence must confirm or overturn — never as a score or a verdict.
+  const priorLine = jevPrior && jevPrior.decision === "available"
+    ? `\n\nA cheap deterministic ATS-screen pre-pass (TypeSafe Jev, no text generation) scored this posting ${jevPrior.score?.toFixed(2)}/5, band "${jevPrior.band}", core-skills ${jevPrior.hasCoreSkills ? "present" : "not established"} — correlating r=0.743 with the candidate's own prior evaluations. Treat it ONLY as a weak prior to confirm or overturn from the JD and the primary files. It is NOT a score, NOT a verdict, and must NEVER lower a block score on its own.`
+    : "";
+
+  return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${todayStr}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.${priorLine}
+
+1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: oferta.md names cv.md, config/profile.yml and modes/_profile.md as the primary sources and directs you to read them at the point of use (13/18/4 explicit references) — do not bulk-pre-read them here. ${sourceLine}
 
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).

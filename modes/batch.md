@@ -21,15 +21,39 @@ Conductor (headed browser mode)
 
 Each worker is a headless child process with a clean 200K token context. The conductor only orchestrates. See the **Headless / Batch Mode** table in `AGENTS.md` for the correct command per CLI.
 
-## Pre-screen gate (standard / premium tiers only)
+## Pre-screen gate
 
-Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tier section; defaults to `standard` if absent).
+Two distinct signals run before a worker, and only one of them can remove a posting from the run. Keeping them apart is the whole point: a cheap score is a *ranking* signal, and a page that says "no longer accepting applications" is a *fact*.
 
-- **`standard` or `premium` tier:** Before a worker runs the full A-F evaluation on a JD, run a cheap pre-screen pass using the tier's economy-equivalent model (see the mapping table in `modes/_shared.md`) against the candidate's North Star archetypes (`modes/_profile.md`). If the JD is an obvious mismatch (wrong domain, wrong seniority band, disqualifying location/visa conflict), skip the full evaluation: mark the job `skipped` in `batch-state.tsv` with a one-line reason, and move to the next job.
-- **`economy` tier:** No gate. The tier is already the cheapest available -- running a pre-screen on top of it adds latency without saving spend. Every job goes straight to the full evaluation.
-- This gate only applies to batch/pipeline processing. It never applies to a single interactive evaluation (the user already decided the JD is worth a look by pasting/sharing it).
+### 1. Liveness (the only automatic discard)
 
-**Discard log (auditable):** Every posting the gate filters out MUST be logged with a one-line reason so pre-filtering is never a silent black box. Append one line to `batch/logs/discard.log` (create the file/dir if absent) in the format `{ISO8601 timestamp}\t{job id}\t{url}\t{reason}`, in addition to the `skipped` row already written to `batch-state.tsv`. This log is the visible, auditable record of what the gate discarded and why -- review it periodically to tune the North Star archetypes if the gate is too aggressive or too lax.
+Before any worker is launched, `batch-runner.sh` runs `check-liveness.mjs` once, sequentially, over every pending URL. Postings confirmed `expired` are marked `skipped` in `batch-state.tsv`, logged to `batch/logs/discard.log`, and never evaluated. Everything else proceeds.
+
+- Sequential by design: one shared browser, never concurrent Playwright, even under `--parallel`.
+- **Only a conclusive `expired` discards.** `uncertain` (a Cloudflare wall, a timeout, a JS-only board) proceeds to the full evaluation. A false discard loses a real opportunity; a wasted evaluation costs a fraction of a cent. Fail open.
+- Suppress with `--skip-liveness` when running where there is no browser or no network.
+
+### 2. Jev ATS prior (advisory, never a gate)
+
+`scripts/jev_gatekeeper.py` scores the prefetched JD text against the CV and returns `ats_pass_probability` plus `has_core_skills`. The result is recorded in `batch/logs/prescreen.log` and shown on the worker line. **It never skips a posting.**
+
+This is a measured decision, not caution. Over the 69 real postings in `jds/`: scores ran `1.59`–`3.82`, median `2.98`, and **0 of 69 reached 4.0** — so the old `>= 4.0` rule would have discarded the entire pipeline. Correlation against the candidate's own A-F scores is `r = 0.743` (28 fuzzy-matched pairs), which is good enough to rank and useless as a cut-off: a `2.6` threshold still drops 6 roles the user actually applied to. Treat it as a prior to confirm or overturn, never as a verdict.
+
+Fails open everywhere: no key, no `requests`, a provider error, a PDF capture, or no prefetched text all log a `skip:*` reason and the job proceeds.
+
+**Spend tier is not consulted by either step.** The gate does not branch on `spend_tier`; it is cheap and deterministic enough that gating it by tier only produced a rule nobody implemented. (`--skip-liveness` is the manual override.)
+
+## Logs (auditable)
+
+Two files, deliberately separate, so an advisory signal is never mistaken for a decision that removed a posting:
+
+| File | Contains | Format |
+|------|----------|--------|
+| `batch/logs/discard.log` | Postings **removed** from the run, and why | `{ISO8601}\t{job id}\t{url}\t{reason}` |
+| `batch/logs/prescreen.log` | Signals **noted** but not acted on (Jev scores, `skip:*` reasons, liveness verdicts) | `{ISO8601}\t{job id}\t{url}\t{verdict}\t{detail}` |
+
+Review `prescreen.log` periodically to see how the Jev prior is distributed against real outcomes; if it starts separating outcomes cleanly enough to trust as a cut-off, that is a re-measurable claim, not an assumption to build in now.
+
 
 ## Files
 
@@ -40,6 +64,8 @@ batch/
   batch-runner.sh               # Standalone orchestrator script
   batch-prompt.md               # Prompt template for workers
   logs/                         # One log per job (gitignored)
+    discard.log                 # Postings removed from the run, and why
+    prescreen.log               # Advisory signals noted but not acted on
   tracker-additions/            # Tracker lines (gitignored)
 ```
 

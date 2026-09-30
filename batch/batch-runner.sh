@@ -23,6 +23,10 @@ PROMPT_FILE="$BATCH_DIR/batch-prompt.md"
 PROFILE_FILE="$PROJECT_DIR/config/profile.yml"
 LOGS_DIR="$BATCH_DIR/logs"
 DISCARD_LOG="$LOGS_DIR/discard.log"
+# Advisory pre-screen results live in their own file. discard.log is the record of
+# decisions that removed a posting from the run; prescreen.log is the record of
+# signals that were only noted. Keeping them apart is what makes the log honest.
+PRESCREEN_LOG="$LOGS_DIR/prescreen.log"
 TRACKER_DIR="$BATCH_DIR/tracker-additions"
 REPORTS_DIR="$PROJECT_DIR/reports"
 APPLICATIONS_FILE="$PROJECT_DIR/data/applications.md"
@@ -42,6 +46,7 @@ START_FROM=0
 MAX_RETRIES=2
 MIN_SCORE=0
 SKIP_PDF=false
+SKIP_LIVENESS=false
 MODEL=""  # explicit override; otherwise resolved from config/profile.yml spend_tier
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
@@ -80,6 +85,8 @@ Options:
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
+  --skip-liveness      Skip the liveness pre-pass (no browser/network needed; every
+                       posting then goes straight to a full evaluation)
   --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
                        (default: 300; claude only)
   --status             Show batch progress and a per-job table, then exit
@@ -124,6 +131,7 @@ while [[ $# -gt 0 ]]; do
     --max-retries) MAX_RETRIES="$2"; shift 2 ;;
     --min-score) MIN_SCORE="$2"; shift 2 ;;
     --skip-pdf) SKIP_PDF=true; shift ;;
+    --skip-liveness) SKIP_LIVENESS=true; shift ;;
     --rate-limit-sleep)
       [[ $# -ge 2 ]] || { echo "ERROR: --rate-limit-sleep requires an argument"; exit 1; }
       RATE_LIMIT_SLEEP="$2"
@@ -176,7 +184,13 @@ release_lock() {
   rm -f "$LOCK_FILE"
 }
 
-trap release_lock EXIT
+# On any exit — clean, error, or Ctrl-C — drain the advisory pre-screens first so
+# a backgrounded gate call cannot outlive the run that started it and write into
+# the NEXT run's prescreen.log.
+# declare -f guard: the trap can fire from an early prerequisite failure that
+# happens before jev_drain is defined, and "command not found" in an EXIT trap
+# would mask the real exit status.
+trap 'declare -f jev_drain >/dev/null 2>&1 && jev_drain; release_lock' EXIT
 
 # Validate prerequisites
 check_prerequisites() {
@@ -207,6 +221,24 @@ check_prerequisites() {
       echo "       Install opencode (https://opencode.ai) or Ollama (https://ollama.ai) with an opencode model."
     fi
     exit 1
+  fi
+
+  # Calibrated Jev bands, read once here so the concurrent prescreen subshells
+  # and the log formatter share one source of truth (config/profile.yml).
+  read_gate_bands
+
+  # opencode's headless scope, derived ONCE per run (not per worker) and
+  # exported for every opencode launch below. See opencode_permission_env for
+  # why the worker needs it and why the mapping is not spelled out inline.
+  if [[ "$CLI" == "opencode" ]]; then
+    local oc_perm
+    oc_perm="$(opencode_permission_env)"
+    if [[ -n "$oc_perm" ]]; then
+      export OPENCODE_CONFIG_CONTENT="$oc_perm"
+    else
+      echo "WARNING: could not derive the opencode permission scope (node or the lib missing)." >&2
+      echo "         Workers will likely die on the first /tmp read with no report written." >&2
+    fi
   fi
 
   # Parallelism, the rate-limit retry loop, and --strict-mcp-config are
@@ -443,6 +475,18 @@ resolve_worker_model() {
   if [[ "$CLI" != "claude" ]]; then
     RESOLVED_MODEL=""
     RESOLVED_SPEND_TIER="cli-default"
+    # The tier table above is Claude model names, so it cannot be applied to
+    # another CLI -- but silently dropping it means a stated cost preference
+    # is honoured for --cli claude and ignored everywhere else, with no sign
+    # the budget changed. Surface it instead. "standard" is the default, so it
+    # is only worth a warning when the user actually moved off it.
+    local cfg_tier
+    cfg_tier="$(read_spend_tier)"
+    if [[ "$cfg_tier" != "standard" ]]; then
+      echo "WARN: spend_tier '$cfg_tier' only maps to Claude model names, so it is" >&2
+      echo "      NOT applied to --cli $CLI; the worker runs on this CLI's default model." >&2
+      echo "      Pass --model <name> to pin one, or run with --cli claude to honor the tier." >&2
+    fi
     return 0
   fi
 
@@ -459,6 +503,299 @@ log_discard() {
   local ts
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$reason" >> "$DISCARD_LOG"
+}
+
+# Append a one-line record of an ADVISORY pre-screen result to
+# batch/logs/prescreen.log. Format (tab-separated):
+#   {ISO8601}\t{job id}\t{url}\t{verdict}\t{detail}
+# where verdict is one of: jev, liveness, or skip:<reason>.
+# This log is deliberately SEPARATE from discard.log: a Jev score is a weak prior
+# that never discards anything, and mixing it into the discard log would make an
+# advisory signal indistinguishable from a real filtering decision.
+log_prescreen() {
+  local id="$1" url="$2" verdict="$3" detail="$4"
+  mkdir -p "$LOGS_DIR"
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$id" "$url" "$verdict" "$detail" >> "$PRESCREEN_LOG"
+}
+
+# opencode's headless `run` auto-rejects ANY tool touching a path outside the
+# workspace (permission `external_directory`, ask -> auto-reject with no TTY).
+# This runner's worker contract reads its prefetched JD from a mktemp path under
+# ${TMPDIR:-/tmp} (see prefetch_jd), so without a scope granting /tmp the worker
+# dies on the very first Read and produces no report. The web run route has
+# always supplied this via OPENCODE_CONFIG_CONTENT (see
+# web/src/lib/opencode-permission.mjs); the batch path did not, which is why a
+# --cli opencode batch reported "completed" with no report on disk.
+#
+# The block is DERIVED from that same module rather than spelled out here, so the
+# two launch paths cannot drift: claude-invocation.mjs owns the tool scope per
+# run kind, opencode-permission.mjs owns the claude->opencode permission
+# vocabulary. A batch worker evaluates and persists a report, so its scope is
+# the "evaluate" kind -- Write+Edit+Bash plus read, matching the web worker.
+opencode_permission_env() {
+  command -v node >/dev/null 2>&1 || return 0
+  # Absolute path: the runner is invoked from any cwd, and a relative import
+  # would resolve against the caller's directory, not the repo root.
+  PROJECT_DIR="$PROJECT_DIR" node -e '
+    const { pathToFileURL } = await import("node:url");
+    const { toolScopeFor } = await import(pathToFileURL(process.env.PROJECT_DIR + "/web/src/lib/claude-invocation.mjs"));
+    const { opencodePermissionBlock } = await import(pathToFileURL(process.env.PROJECT_DIR + "/web/src/lib/opencode-permission.mjs"));
+    const scope = toolScopeFor("evaluate");
+    process.stdout.write(opencodePermissionBlock({ allowed: scope.allowed, disallowed: scope.disallowed }));
+  ' 2>/dev/null
+}
+
+# Cheap deterministic ATS pre-screen (Jev) for ONE posting whose JD text is
+# already on disk at $2. Purely advisory: it records a prior and never discards.
+#
+# Why advisory and not a gate: measured over 69 real postings in jds/, Jev's
+# ats_pass_probability never reached 4.0 (max 3.82, median 2.98) while the
+# mode's own rule demanded >= 4.0 -- a hard gate there would discard 100% of the
+# pipeline. It correlates r=0.743 with the candidate's own A-F scores, which is
+# useful for ranking and worthless as a cut-off. A 2.6 cut-off still drops 6
+# roles the user actually applied to. So this returns text for the worker prompt
+# and appends to prescreen.log; it does not gate.
+#
+# Fails open everywhere: a missing script, a missing key, a provider error, an
+# unreadable resume, or an empty JD all return 0 and leave the job alone.
+# Calibrated band thresholds, read once at startup and exported so the background
+# prescreen subshells inherit them. Defaults are the measured cut points; the
+# profile is authoritative when present.
+JEV_BAND_LOW="2.26"
+JEV_BAND_GUARDED="2.6"
+JEV_BAND_MID="3.2"
+read_gate_bands() {
+  local profile="$PROJECT_DIR/config/profile.yml"
+  [[ -f "$profile" ]] || return 0
+  local block
+  block="$(awk '/^jev_gate:[[:space:]]*$/{f=1;next} f&&/^[^[:space:]]/{f=0} f' "$profile" 2>/dev/null)" || return 0
+  local v
+  v="$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*band_low:[[:space:]]*\([0-9.]\+\).*/\1/p' | head -1)"
+  [[ -n "$v" ]] && JEV_BAND_LOW="$v"
+  v="$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*band_guarded:[[:space:]]*\([0-9.]\+\).*/\1/p' | head -1)"
+  [[ -n "$v" ]] && JEV_BAND_GUARDED="$v"
+  v="$(printf '%s\n' "$block" | sed -n 's/^[[:space:]]*band_mid:[[:space:]]*\([0-9.]\+\).*/\1/p' | head -1)"
+  [[ -n "$v" ]] && JEV_BAND_MID="$v"
+  # Explicit success. A bare `[[ -n "$v" ]] && X="$v"` evaluates to FALSE when the
+  # key is absent, and under `set -e` that is a non-zero status at the end of a
+  # function — which aborted the whole runner for any profile without a jev_gate
+  # block, before a single worker launched. Missing bands must fall back to the
+  # measured defaults, never end the run.
+  return 0
+}
+export JEV_BAND_LOW JEV_BAND_GUARDED JEV_BAND_MID
+
+prescreen_jev() {
+  local id="$1" jd_file="$2" url="$3"
+  local gatekeeper="$PROJECT_DIR/scripts/jev_gatekeeper.py"
+  local resume="$PROJECT_DIR/cv.md"
+  local py="${JEV_PYTHON:-python3}"
+
+  [[ -f "$gatekeeper" && -f "$resume" ]] || {
+    log_prescreen "$id" "$url" "skip:unavailable" "gatekeeper or cv.md missing"
+    return 0
+  }
+  [[ -s "$jd_file" ]] || {
+    log_prescreen "$id" "$url" "skip:no-jd-text" "JD prefetch produced no text (JS shell or curl absent)"
+    return 0
+  }
+  command -v "$py" >/dev/null 2>&1 || {
+    log_prescreen "$id" "$url" "skip:no-python" "$py not found"
+    return 0
+  }
+
+  local out err rc errtext
+  err="$(mktemp "${TMPDIR:-/tmp}/jev-err-${id}.XXXXXX")"
+  out="$("$py" "$gatekeeper" "$resume" "$jd_file" triage 2>"$err")" && rc=0 || rc=$?
+  # Read stderr BEFORE unlinking it: it carries provider/model/timing/usage, so
+  # deleting the temp file first silently reported every call as metadata-free.
+  errtext="$(cat "$err" 2>/dev/null)"
+  rm -f "$err"
+  if [[ $rc -ne 0 ]]; then
+    local reason
+    # jev_gatekeeper.py's fail() prints {"error": "..."} to STDOUT, not stderr,
+    # so stdout is the only place the reason exists. Prefer it, fall back to
+    # stderr for a traceback, and never let an empty reason hide the failure.
+    reason="$(printf '%s' "$out" | tr '\n\t' '  ' | cut -c1-200 | sed 's/[[:space:]]*$//')"
+    [[ "$reason" == "{"* || -n "$reason" ]] || reason="$(printf '%s' "$errtext" | tr '\n\t' '  ' | cut -c1-200 | sed 's/[[:space:]]*$//')"
+    log_prescreen "$id" "$url" "skip:unavailable" "jev failed (rc=$rc): ${reason:-unknown}"
+    return 0
+  fi
+
+  # stdout is {"ats_pass_probability": N, "has_core_skills": bool}. Parse both
+  # streams in one node call; a malformed payload degrades to a logged skip
+  # rather than a bash arithmetic error. This must NOT run in a pipeline: the
+  # body of a pipeline is a subshell, so anything it assigns is discarded and the
+  # caller would never see the result.
+  # Pass the calibrated bands in as argv so the parser reads the same thresholds
+  # as config/profile.yml (read above via read_gate_bands) instead of literals.
+  local detail
+  detail="$(node -e '
+    const [out, err, bLow, bGuarded, bMid] = process.argv.slice(1);
+    let d = {};
+    try { d = JSON.parse(out); } catch (e) {
+      process.stdout.write("skip:bad-json"); process.exit(0);
+    }
+    const score = Number(d.ats_pass_probability);
+    if (!Number.isFinite(score)) { process.stdout.write("skip:no-score"); process.exit(0); }
+    const core = d.has_core_skills === true ? "core-skills present" : "core-skills not established";
+    const meta = {};
+    for (const k of ["provider", "model", "http_ms", "total_ms"]) {
+      const m = new RegExp("\\b" + k + "=(\\S+)").exec(err || "");
+      if (m) meta[k] = m[1];
+    }
+    const u = /usage=(\{.+?\})/.exec(err || "");
+    if (u) { try { const j = JSON.parse(u[1]); if (j.input_tokens != null) meta.in = j.input_tokens; if (j.output_tokens != null) meta.out = j.output_tokens; } catch (e) {} }
+    // Bands come from the profile, never from literals here. A copy of the
+    // thresholds in this file drifts the moment the calibration moves: the log
+    // would keep calling a 2.26 "low" while every dashboard run called it
+    // "guarded", with nothing to notice. Falls back to the measured defaults.
+    const lo = Number(meta.band_low) || 2.26, gu = Number(meta.band_guarded) || 2.6, mi = Number(meta.band_mid) || 3.2;
+    process.stdout.write(
+      "score " + score.toFixed(2) + "/5, band " + (score < lo ? "low" : score < gu ? "guarded" : score < mi ? "mid" : "high") +
+      ", " + core + (meta.provider ? ", via " + meta.provider : "") +
+      (meta.total_ms ? ", " + meta.total_ms + "ms" : "") +
+      (meta.in ? ", " + meta.in + "in/" + (meta.out || 0) + "out tokens" : "")
+    );
+  ' "$out" "$errtext" "$JEV_BAND_LOW" "$JEV_BAND_GUARDED" "$JEV_BAND_MID" 2>/dev/null)" || detail=""
+  [[ -n "$detail" ]] || detail="skip:no-output"
+
+  # The verdict column distinguishes a real score from a gate that could not
+  # answer, so a reviewer scanning prescreen.log can tell "we scored this 1.6"
+  # apart from "we never got a score". Both still proceed to full evaluation.
+  case "$detail" in
+    skip:*)
+      log_prescreen "$id" "$url" "skip:unavailable" "${detail#skip:} (advisory gate produced no usable score)"
+      ;;
+    *)
+      log_prescreen "$id" "$url" "jev" "$detail"
+      echo "    🧪 Jev prior: $detail"
+      ;;
+  esac
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Concurrent advisory pre-screen
+#
+# prescreen_jev is ~1s and ~2.7k input tokens per job and NOTHING reads its
+# answer: the prior goes to prescreen.log for the audit trail and to the
+# operator's screen. So it is run in the background and the worker continues
+# immediately, instead of adding a second of latency per posting.
+#
+# Bounded by JEV_MAX_BG (default 4). Unbounded backgrounding would fire every
+# gate call at once — with a few hundred pending postings that is hundreds of
+# concurrent HTTPS requests for a gate whose only consumer is a log file.
+#
+# Bash 3.2 compatible: no `wait -n` (4.3+), no associative arrays (4.0+), no
+# negative array indices (4.2+). The drain below polls `kill -0`, which is what
+# `wait -n` would abstract over.
+# ---------------------------------------------------------------------------
+JEV_MAX_BG="${JEV_MAX_BG:-4}"
+JEV_BG_PIDS=""
+JEV_BG_COUNT=0
+
+# Block until a slot frees. Spins rather than sleeps one fixed interval so an
+# idle runner does not pay that interval per call.
+jev_await_slot() {
+  local spins=0
+  while [ "$JEV_BG_COUNT" -ge "$JEV_MAX_BG" ]; do
+    jev_reap
+    if [ "$JEV_BG_COUNT" -lt "$JEV_MAX_BG" ]; then
+      return 0
+    fi
+    sleep 0.2 2>/dev/null || sleep 1
+    spins=$((spins + 1))
+  done
+  return 0
+}
+
+# Drop finished PIDs from the live set. Rebuilding the list rather than splicing
+# in place keeps this correct on bash 3.2, where "${arr[@]:i}" wrap-around and
+# array slicing behave differently than in 4.x.
+jev_reap() {
+  [ -n "$JEV_BG_PIDS" ] || return 0
+  local kept="" pid
+  for pid in $JEV_BG_PIDS; do
+    if kill -0 "$pid" 2>/dev/null; then
+      kept="$kept $pid"
+    fi
+  done
+  JEV_BG_PIDS="${kept# }"
+  JEV_BG_COUNT="$(printf '%s\n' $JEV_BG_PIDS | wc -w | tr -d ' ')"
+  JEV_BG_PIDS="${JEV_BG_PIDS# }"
+  return 0
+}
+
+jev_track() {
+  JEV_BG_PIDS="$JEV_BG_PIDS $1"
+  JEV_BG_COUNT=$((JEV_BG_COUNT + 1))
+}
+
+# Wait for every tracked gate call. Called before the tracker merge, before the
+# summary, and on the exit path, so no prescreen.log line can land after the run
+# reports "done" — a log that keeps growing after the summary is the exact shape
+# of a truncated audit trail.
+jev_drain() {
+  [ -n "$JEV_BG_PIDS" ] || return 0
+  local pid guard=0
+  for pid in $JEV_BG_PIDS; do
+    wait "$pid" 2>/dev/null
+  done
+  jev_reap
+  # Belt-and-braces: if a PID was somehow not ours to wait on, poll it out rather
+  # than let the shell reap it later at an arbitrary point.
+  guard=0
+  while [ -n "$JEV_BG_PIDS" ] && [ "$guard" -lt 600 ]; do
+    jev_reap
+    [ -n "$JEV_BG_PIDS" ] || break
+    sleep 0.2 2>/dev/null || sleep 1
+    guard=$((guard + 1))
+  done
+  JEV_BG_PIDS=""
+  JEV_BG_COUNT=0
+  return 0
+}
+
+# Sequential liveness pre-pass over the whole pending list, run ONCE before any
+# worker is launched. This is the only automatic discard in the pipeline.
+#
+# Sequential by design: check-liveness.mjs must never run concurrently with
+# itself (project rule -- a single shared browser), and the batch runner may be
+# launched with --parallel > 1. Doing this up front keeps exactly one browser.
+#
+# Only a CONCLUSIVE "expired" discards. "uncertain" (a Cloudflare wall, a
+# timeout, a JS-only board) proceeds to the full evaluation: a false discard
+# costs a real opportunity, a wasted evaluation costs a few cents.
+#
+# Echoes one URL per line, tab-prefixed with "expired\t", for confirmed-dead
+# postings only. A Jev score is never consulted here.
+prescreen_liveness() {
+  local -a urls=("$@")
+  [[ ${#urls[@]} -gt 0 ]] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  [[ -f "$PROJECT_DIR/check-liveness.mjs" ]] || return 0
+
+  local out
+  # --no-fallback: a batch run is headless with no display, and a headed retry
+  # would stall the whole queue. That reads as "uncertain", which is fail-open.
+  out="$(node "$PROJECT_DIR/check-liveness.mjs" --no-fallback --throttle "${urls[@]}" 2>&1)" || true
+
+  # Parse the report lines. The status is anchored to the leading icon so a URL
+  # containing the literal word "expired" cannot be mistaken for a verdict.
+  printf '%s\n' "$out" | node -e '
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (c) => { data += c; });
+    process.stdin.on("end", () => {
+      for (const raw of data.split("\n")) {
+        const m = /^(?:\u274c|\u26a0\ufe0f|\u2705)\s+(active|expired|uncertain)\s+(?:\(api\)\s+)?(\S+)/.exec(raw.trim());
+        if (m && m[1] === "expired") process.stdout.write("expired\t" + m[2] + "\n");
+      }
+    });
+  '
 }
 
 
@@ -903,6 +1240,25 @@ process_offer() {
       else
         echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
       fi
+  fi
+
+  # Advisory ATS pre-screen on the JD text the prefetch above just materialized.
+  # Records a prior for the audit trail and echoes it; it never gates. Costs
+  # ~1s and ~2.7k input tokens per job, which is why it is not on the critical
+  # path for anything that depends on the answer.
+  #
+  # Backgrounded ONLY when this worker is the main shell (PARALLEL=1). Under
+  # --parallel N, process_offer runs as a subshell, so a jev call started here is
+  # a child of THAT subshell: the parent's `wait` cannot reach it, and its
+  # prescreen.log line could land after merge_tracker and print_summary have
+  # already reported the run finished. And there is nothing to win there anyway
+  # — N concurrent workers already mean N concurrent gate calls.
+  if [[ "$PARALLEL" -le 1 ]]; then
+    jev_await_slot
+    prescreen_jev "$id" "$jd_file" "$url" &
+    jev_track $!
+  else
+    prescreen_jev "$id" "$jd_file" "$url" || true
   fi
 
   echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
@@ -1499,6 +1855,84 @@ main() {
     exit 0
   fi
 
+  # ---- Liveness pre-pass: the only automatic discard in the pipeline. --------
+  # Runs once, sequentially, before any worker is launched. A confirmed-dead
+  # posting would otherwise consume a full A-F evaluation (the most expensive
+  # thing this runner does) to produce a report nobody should act on. A posting
+  # that is merely UNCERTAIN is kept: a false discard loses a real opportunity,
+  # while a wasted evaluation costs a fraction of a cent.
+  #
+  # Suppressed by --skip-liveness, which exists because a liveness pass needs
+  # network and a browser and some users batch from an environment without either.
+  if [[ "${SKIP_LIVENESS:-false}" != "true" ]]; then
+    local -a alive_ids=() alive_urls=() alive_sources=() alive_notes=()
+    local -a dead_ids=() dead_urls=()
+    local -a liveness_urls=()
+    for i in "${!pending_ids[@]}"; do
+      liveness_urls+=("${pending_urls[$i]}")
+    done
+
+    echo "=== Liveness pre-pass (${#liveness_urls[@]} posting(s), sequential) ==="
+    local liveness_report
+    liveness_report="$(prescreen_liveness ${liveness_urls[@]+"${liveness_urls[@]}"})" || liveness_report=""
+    local dead_count=0
+    if [[ -n "$liveness_report" ]]; then
+      while IFS=$'\t' read -r _verdict dead_url; do
+        [[ -n "$dead_url" ]] || continue
+        dead_count=$((dead_count + 1))
+      done <<< "$liveness_report"
+    fi
+    echo "    confirmed dead: $dead_count (uncertain postings are kept)"
+
+    for i in "${!pending_ids[@]}"; do
+      local pid="${pending_ids[$i]}" purl="${pending_urls[$i]}"
+      local is_dead="false"
+      if [[ -n "$liveness_report" ]]; then
+        while IFS=$'\t' read -r _verdict dead_url; do
+          [[ -n "$dead_url" ]] || continue
+          if [[ "$dead_url" == "$purl" ]]; then
+            is_dead="true"
+            break
+          fi
+        done <<< "$liveness_report"
+      fi
+      if [[ "$is_dead" == "true" ]]; then
+        dead_ids+=("$pid")
+        dead_urls+=("$purl")
+        log_discard "$pid" "$purl" "confirmed dead posting (liveness pre-pass)"
+        log_prescreen "$pid" "$purl" "liveness" "expired — discarded before worker launch"
+        # Mark the row skipped so --resume and the summary agree with the discard.
+        # update_state_unlocked reads all 9 positionals, and `set -u` turns a
+        # short call into an unbound-variable abort. The posting never got a
+        # report number or a score, so both stay "-".
+        update_state "$pid" "$purl" "skipped" "-" "-" "-" "-" "liveness: posting confirmed expired" "0" 2>/dev/null \
+          || log_prescreen "$pid" "$purl" "skip:state-write-failed" "discarded, but batch-state was not updated"
+        echo "    ❌ #$pid $purl — dead, skipped (logged to logs/discard.log)"
+      else
+        alive_ids+=("$pid")
+        alive_urls+=("$purl")
+        alive_sources+=("${pending_sources[$i]}")
+        alive_notes+=("${pending_notes[$i]}")
+      fi
+    done
+
+    # ${arr[@]+"${arr[@]}"} rather than "${arr[@]}": under `set -u`, bash 3.2
+    # (macOS /bin/bash) treats an empty array expansion as an unbound variable and
+    # aborts -- which is exactly the all-dead case this block exists to handle.
+    pending_ids=(${alive_ids[@]+"${alive_ids[@]}"})
+    pending_urls=(${alive_urls[@]+"${alive_urls[@]}"})
+    pending_sources=(${alive_sources[@]+"${alive_sources[@]}"})
+    pending_notes=(${alive_notes[@]+"${alive_notes[@]}"})
+    pending_count=${#pending_ids[@]}
+    echo ""
+
+    if (( pending_count == 0 )); then
+      echo "All $dead_count pending posting(s) are closed — nothing left to evaluate."
+      print_summary
+      exit 0
+    fi
+  fi
+
   # Process offers
   if (( PARALLEL <= 1 )); then
     # Sequential processing
@@ -1558,6 +1992,10 @@ main() {
       wait "$pid" 2>/dev/null || true
     done
   fi
+
+  # Drain advisory pre-screens BEFORE the tracker merge and the summary, so every
+  # prescreen.log line for this run is on disk by the time the run reports done.
+  jev_drain
 
   # Merge tracker additions
   merge_tracker

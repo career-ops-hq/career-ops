@@ -7,6 +7,9 @@ import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLi
 import { careerOpsRoot, findApplication, primaryReportNum, readMemory } from "@/lib/career-ops";
 import { acquireEvalGate, acquirePdfGate, isTrackerWriting } from "@/lib/core/run-registry";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
+import { jevPreScreen } from "@/lib/jev-pre-screen.mjs";
+import { livenessPreScreen, isCheckableUrl } from "@/lib/liveness-pre-screen.mjs";
+import { playwrightAvailable } from "@/lib/cli-capabilities.mjs";
 import { claudeCliArgs, toolScopeFor } from "@/lib/claude-invocation.mjs";
 
 export const runtime = "nodejs";
@@ -103,15 +106,69 @@ export async function POST(req: Request) {
     }
   }
 
+  // Is this posting still open? Checked before an expensive worker launches,
+  // because a closed posting is the one signal that is both certain and worth
+  // acting on: 33% of this user's real report URLs were dead, and a full
+  // evaluation of one can only describe a page nobody can apply to.
+  //
+  // Deliberately narrow, matching the batch pre-pass: only a CONFIRMED "expired"
+  // stops the run, and forceRun overrides it. "uncertain" (DNS failure, timeout,
+  // bot-blocked) proceeds — wrongly blocking a live role is far more expensive
+  // than evaluating a dead one, especially when the user is watching one run.
+  // The preflight is API-only (--no-fallback), so it costs no tokens and no
+  // browser, and it cannot block a JS-rendered page into a false "expired".
+  if (kind === "evaluate" && isCheckableUrl(input) && !forceRun) {
+    const live = livenessPreScreen({ url: input, root: careerOpsRoot() });
+    if (live.decision === "expired") {
+      const encDead = new TextEncoder();
+      const why = live.reason ? ` (${live.reason})` : "";
+      const deadStream = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(encDead.encode(JSON.stringify({ type: "status", label: `Posting confirmed closed${why} — no run started, no tokens spent. (re-run anyway: force=1)` }) + "\n"));
+          c.enqueue(encDead.encode(JSON.stringify({ type: "done", tokens: 0 }) + "\n"));
+          c.close();
+        },
+      });
+      return new Response(deadStream, { headers: STREAM_HEADERS });
+    }
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   // Web job inputs are tracker ROW ids; report filenames / pdf-index keys are
   // REPORT numbers, which diverge after a re-eval renumbers the Report cell
   // (row 135 ↔ report 144). Resolve the real report # for pdf/cover prompts.
   const reportNum =
     kind === "pdf" || kind === "cover" ? primaryReportNum(findApplication(input), input) : input;
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, reportNum });
 
-  const streamJson = usesStreamJson(cliId);
+  // Playwright is per-CLI (doctor.mjs owns the truth). The prompt used to claim it
+  // was unavailable for every CLI, which told the one CLI that HAS it — opencode —
+  // to skip verification; 42 reports carry the unconfirmed header because of it.
+  const hasPlaywright = playwrightAvailable(cliId, careerOpsRoot());
+
+  // Cheap deterministic ATS prior, advisory only. It can never discard: measured
+  // over 69 real postings it never scored >= 4.0 (0/69), and at a 2.6 cut-off it
+  // would have dropped 6 roles the user actually applied to. Fail-open by design
+  // — a provider outage must not stop someone's job search, so every failure path
+  // returns decision "unavailable" and the full evaluation proceeds unchanged.
+  // Only runs on a local text capture; a URL would need the JD fetched first, and
+  // duplicating that fetch here would race the worker's own read of the same page.
+  let jevPrior: ReturnType<typeof jevPreScreen> | null = null;
+  if (kind === "evaluate" && input.startsWith("local:") && !forceRun) {
+    try {
+      jevPrior = jevPreScreen({
+        jobPath: path.join(careerOpsRoot(), input.slice("local:".length)),
+        root: careerOpsRoot(),
+      });
+    } catch {
+      jevPrior = null;
+    }
+  }
+
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, reportNum, cliId, hasPlaywright, jevPrior });
+
+  // "worker" surface: opencode opts into NDJSON here only. The assistant and
+  // cv/ingest routes call usesStreamJson() with the default and are unaffected.
+  const streamJson = usesStreamJson(cliId, "worker");
   // Tool/sandbox scope comes from claude-invocation (values asserted at #2185).
   // research is read-only; evaluate/fix-portal/pdf/cover may shell out to core
   // scripts. NEVER auto-submits — that is a prompt-level guarantee.
@@ -247,6 +304,15 @@ export async function POST(req: Request) {
         }
       }
 
+      // Surface the cheap pre-pass on the card so the number is never invisible —
+      // it is advisory, and a silent advisory prior reads like a verdict.
+      if (jevPrior && jevPrior.decision === "available") {
+        send({
+          type: "status",
+          label: `Jev ATS pre-pass: ${jevPrior.score.toFixed(2)}/5 (${jevPrior.band}) · ${jevPrior.wallMs}ms · advisory, not a score`,
+        });
+      }
+
       // opencode's headless scope rides in OPENCODE_CONFIG_CONTENT (no per-tool
       // argv); everything else gets an empty env and stays CLI-agnostic. The env
       // only DELETES or re-scopes tool permissions — the no-auto-submit guarantee
@@ -312,7 +378,12 @@ export async function POST(req: Request) {
           }
           if (meta.toolName) send({ type: "tool", name: meta.toolName });
           if (meta.status) send({ type: "status", label: meta.status });
-          if (meta.tokens != null) lastTokens = meta.tokens;
+          // "delta" (opencode) reports PER-STEP tokens that must be summed; the
+          // last step alone is not the run total. "replace" (claude/cursor) is a
+          // single final result event carrying the whole run.
+          if (meta.tokens != null) {
+            lastTokens = meta.tokensMode === "delta" ? lastTokens + meta.tokens : meta.tokens;
+          }
           if (meta.costUsd != null) lastCostUsd = meta.costUsd;
         });
       });
@@ -384,7 +455,12 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
           }
         } else if (persists && !wroteReport) {
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
+          send({
+            type: "error",
+            msg: hasPlaywright
+              ? "This evaluation didn't save a report, so it's not in your tracker — check the worker log above for where it stopped."
+              : "This evaluation didn't save a report, so it's not in your tracker. This CLI has no Playwright headless, so posting verification is weaker here.",
+          });
         } else if (needsArtifact && !artifactOk) {
           send({
             type: "error",

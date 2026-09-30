@@ -10,7 +10,7 @@
  *   cv.json, cv.md, cv.html, cv.pdf, keywords.tsv
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'node:child_process';
 import { humanizeCvPayload } from './cv-humanize.mjs';
@@ -19,6 +19,11 @@ import { styleTokensFrom, injectThemeStyle } from './theme-style.mjs';
 
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { loadCandidateIdentity, missingFields } from './lib/candidate-identity.mjs';
+import { lintTailoredResume, describe } from './jev-post-linter.mjs';
+
+// Gate 3 target job description. A master lane set is not tailored to one
+// posting, so this is opt-in — see gate3() below.
+let GATE3_JOB = process.env.GATE3_JOB || null;
 
 const DATA_ROOT = getCareerOpsRoot();
 const REPORTS = join(DATA_ROOT, 'reports');
@@ -486,6 +491,39 @@ function writeKeywordsTsv(path, mined, arch) {
   writeFileSync(path, lines.join('\n') + '\n');
 }
 
+/**
+ * Gate 3 — defensive compliance audit, run on the written cv.md BEFORE the HTML
+ * and PDF are built (modes/_custom.md).
+ *
+ * The audit is advisory-then-fatal: a real finding (is_ai_sibling true, or
+ * has_measurable_metrics false) skips compilation for that lane and says why;
+ * anything else — provider error, timeout, malformed JSON — proceeds, because a
+ * gate outage must never silently stop every lane from producing a CV.
+ *
+ * A master lane set is NOT tailored to one posting, so there is no target job
+ * description to compare it against and the audit genuinely cannot run. That is
+ * reported rather than papered over. Supply one to get real coverage:
+ *
+ *   node generate-master-cvs.mjs --gate3-job path/to/job_description.txt
+ *   GATE3_JOB=path/to/job_description.txt node generate-master-cvs.mjs
+ *
+ * @returns {'pass'|'halt'|'unavailable'}
+ */
+function gate3(mdPath, slug) {
+  const jobPath = GATE3_JOB || null;
+  const result = lintTailoredResume({ resumePath: mdPath, jobPath, root: DATA_ROOT });
+
+  const icon = result.decision === 'pass' ? '✅' : result.decision === 'halt' ? '⛔' : 'ℹ️ ';
+  console.log(`   ${icon} ${describe(result)}${result.decision === 'unavailable' ? '' : ` (${slug})`}`);
+
+  if (result.decision === 'halt') {
+    // One bad lane must not abort the remaining four, so this returns rather
+    // than throwing; renderSet skips only its own HTML/PDF steps.
+    console.log(`      → skipping cv.html/cv.pdf for ${slug}. The cv.md is still written.`);
+  }
+  return result.decision;
+}
+
 async function renderSet(slug, payload, mined) {
   const dir = join(OUT_BASE, slug);
   mkdirSync(dir, { recursive: true });
@@ -504,6 +542,21 @@ async function renderSet(slug, payload, mined) {
   writeFileSync(jsonPath, JSON.stringify(final, null, 2) + '\n');
   writeFileSync(mdPath, payloadToMarkdown(final));
   writeKeywordsTsv(kwPath, mined, slug);
+
+  // Gate 3 runs on the markdown, before anything is compiled from it.
+  const gate3Decision = gate3(mdPath, slug);
+
+  if (gate3Decision === 'halt') {
+    // Remove stale artifacts first: this lane HAS just written a new cv.md, and a
+    // cv.pdf left over from a previous run would then ship next to it — so the
+    // "halted" lane would still be handing someone the exact PDF the gate just
+    // refused to approve. Deleting is the only way "no PDF" is actually true.
+    for (const stale of [htmlPath, pdfPath]) {
+      if (existsSync(stale)) rmSync(stale);
+    }
+    console.log(`⚠️  ${slug}: Gate 3 halted compilation (cv.html/cv.pdf removed). cv.md is at ${mdPath}`);
+    return dir;
+  }
 
   const html = spawnSync(process.execPath, ['build-cv-html.mjs', jsonPath, htmlPath], { cwd: DATA_ROOT, encoding: 'utf-8' });
   if (html.status !== 0) throw new Error(`build-cv-html failed for ${slug}: ${html.stderr || html.stdout}`);
@@ -537,14 +590,29 @@ async function renderSet(slug, payload, mined) {
 }
 
 async function main() {
+  const jobArgIndex = process.argv.indexOf('--gate3-job');
+  if (jobArgIndex !== -1) {
+    GATE3_JOB = process.argv[jobArgIndex + 1] || null;
+    if (!GATE3_JOB) {
+      console.error('ERROR: --gate3-job needs a path to a job description.');
+      process.exit(1);
+    }
+  }
+
   const mined = mineKeywordsFromReports();
   const sets = [...LANES, 'general'];
   console.log(`Mining: ${[...mined.general.keys()].length} unique keywords from reports`);
+  if (!GATE3_JOB) {
+    console.log('Gate 3: no --gate3-job given, so the audit reports "unavailable" per lane (a lane set has no single target JD)');
+  }
+  let halted = 0;
   for (const slug of sets) {
     const payload = buildPayload(slug, mined);
-    await renderSet(slug, payload, mined);
+    const dir = await renderSet(slug, payload, mined);
+    if (!existsSync(join(dir, 'cv.pdf'))) halted += 1;
   }
-  console.log(`\nDone — ${sets.length} master CV lane sets in ${OUT_BASE}`);
+  console.log(`\nDone — ${sets.length - halted}/${sets.length} master CV lane sets in ${OUT_BASE}`);
+  if (halted) console.log(`${halted} lane(s) skipped PDF generation on a Gate 3 halt.`);
 }
 
 main().catch((err) => {
