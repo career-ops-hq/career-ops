@@ -40,6 +40,20 @@ const CODEX_READ_ONLY = "read-only";
 const CODEX_WORKSPACE_WRITE = "workspace-write";
 
 /**
+ * Runtimes without a verified permission adapter may not run workers that write.
+ * Hermes stays available for read-only workers until career-ops can translate the
+ * worker capability record into Hermes's own approval/sandbox controls.
+ *
+ * @param {string} cliId
+ * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
+ * @returns {boolean}
+ */
+export function isCliAllowedForCapabilities(cliId, { writes }) {
+  return cliId !== "hermes" || !writes;
+}
+
+
+/**
  * Pick the Codex sandbox policy for a capability record.
  *
  * Note it is `network: "fetch"` — not web access as such — that forces

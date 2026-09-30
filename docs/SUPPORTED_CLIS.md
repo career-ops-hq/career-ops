@@ -18,7 +18,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
 ## Hermes Agent
 
-Hermes runs the same pipeline as every other CLI here. Trust the checkout once with `hermes skills trust` before interactive use. The web UI and batch ranker use Hermes's one-shot mode (`hermes chat -q ... --oneshot -Q --no-restore-cwd`), which returns plain text and does not resume an unrelated session. Hermes project-context scanning still applies; see [`docs/HERMES.md`](HERMES.md) for its rules and limitations.
+Hermes runs the same pipeline as every other CLI here. Trust the checkout once with `hermes skills trust` before interactive use. The web UI and batch ranker use Hermes's one-shot mode (`hermes chat -q ... --oneshot -Q --no-restore-cwd`), which returns plain text and does not resume an unrelated session. The web UI allows Hermes only for non-writing workers; evaluation and portal-repair workers reject it until a verified permission adapter exists. Hermes project-context scanning still applies; see [`docs/HERMES.md`](HERMES.md) for its rules and limitations.
 
 ## Pi
 
