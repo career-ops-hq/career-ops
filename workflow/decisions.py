@@ -1,4 +1,4 @@
-"""Classify current scored opportunities into evidence-aware next actions."""
+"""Classify current scores into opportunities worth attention."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import math
 from datetime import date
 
 
-ORDER = {"apply": 0, "verify": 1, "deprioritize": 2, "discard": 3}
+ORDER = {"focus": 0, "deprioritize": 1, "discard": 2}
 
 
 def classify(score: dict, prescreen: dict, acceptable_line: float) -> str:
-    """Apply the current action policy without treating unknown gates as passes."""
+    """Use the existing attractiveness rank while honoring confirmed hard failures."""
     if isinstance(acceptable_line, bool) or not isinstance(acceptable_line, (int, float)) or not math.isfinite(acceptable_line) or not 1 <= acceptable_line <= 5:
         raise ValueError("acceptable_line must be between 1 and 5")
     lower, upper, coverage = (score.get(key) for key in ("lower", "upper", "coverage"))
@@ -21,15 +21,11 @@ def classify(score: dict, prescreen: dict, acceptable_line: float) -> str:
         raise ValueError("complete prescreen decision required")
     if prescreen["status"] == "fail":
         return "discard"
-    if upper < acceptable_line:
-        return "deprioritize"
-    if prescreen["status"] == "uncertain" or lower < acceptable_line:
-        return "verify"
-    return "apply"
+    return "focus" if lower + (upper - lower) * coverage >= acceptable_line else "deprioritize"
 
 
 def order(rows: list[dict]) -> list[dict]:
-    """Order actions by deadline, effort, coverage and the apply lower bound."""
+    """Order actions by deadline, effort and attractiveness."""
     ids = set()
     for row in rows:
         opportunity_id = row.get("opportunity_id")
@@ -52,6 +48,6 @@ def order(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: (
         ORDER[row["action"]], row.get("deadline") or "9999-12-31",
         row.get("effort_days") if row.get("effort_days") is not None else math.inf,
-        -row["coverage"], -row["lower"] if row["action"] == "apply" else 0,
+        -(row["lower"] + (row["upper"] - row["lower"]) * row["coverage"]), -row["coverage"],
         row["opportunity_id"],
     ))

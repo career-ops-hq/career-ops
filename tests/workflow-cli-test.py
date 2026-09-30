@@ -128,12 +128,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     assert {item["opportunity_id"] for item in scores if item["valid"]} == {"job-1", "job-2", "job-real", "job-uncertain"}
     assert all(set(item) == {"opportunity_id", "lower", "upper", "coverage", "valid", "stale_reason"} for item in scores)
     decisions = run(directory, "decisions", env=model_env)
-    assert {item["opportunity_id"] for item in decisions["decisions"] if item["action"] == "apply"} == {
-        "job-1", "job-2", "job-real"
+    assert {item["opportunity_id"] for item in decisions["decisions"] if item["action"] == "focus"} == {
+        "job-1", "job-2", "job-real", "job-uncertain"
     }
-    assert [(item["opportunity_id"], item["action"]) for item in decisions["decisions"]][-1] == (
-        "job-uncertain", "verify"
-    )
     assert decisions["stale"] == []
     reevaluated = run(
         directory, "start", "score", "job-2", str(report("job-2")), "--re-evaluate", env=model_env

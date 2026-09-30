@@ -87,9 +87,10 @@ apply consume completed upstream results by opportunity ID. The module fingerpri
 binds those results to the current CV, profile, targeting, and rules. Existing
 valid results are reused; changed inputs require `--re-evaluate`.
 `scores` shows range, coverage and input validity. `decisions` groups only
-current scores by the profile's `acceptable_line` and the frozen prescreen
-status: apply, verify or deprioritize; a failed hard gate is excluded before
-scoring. Stale scores are listed separately and receive no action. The current
+current scores by the profile's `acceptable_line`, using
+`lower + (upper - lower) * coverage`: focus or deprioritize. A confirmed failed
+hard gate is discarded; uncertain prescreen evidence does not block attention.
+Stale scores are listed separately and receive no action. The current
 JD report does not retain a verified deadline or work estimate, so those
 ordering fields remain null. The notification `alert_line` is independent.
 
