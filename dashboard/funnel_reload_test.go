@@ -45,7 +45,9 @@ func TestRefreshPreservesMetricsWhenFunnelHistoryCannotBeRead(t *testing.T) {
 	if !reflect.DeepEqual(m.progressMetrics, want) {
 		t.Fatalf("failed refresh replaced historical metrics: offers = %d, want %d", m.progressMetrics.TotalOffers, want.TotalOffers)
 	}
-	if view := m.pipeline.View(); !strings.Contains(view, "Status history unavailable") || !strings.Contains(view, "status-log.tsv") {
+	// Long Windows temp paths wrap the ledger filename across display lines.
+	// Check the rendered path without layout whitespace, not the host's path length.
+	if view := m.pipeline.View(); !strings.Contains(view, "Status history unavailable") || !strings.Contains(strings.Join(strings.Fields(view), ""), "status-log.tsv") {
 		t.Fatalf("failed refresh did not display the ledger error: %s", view)
 	}
 	if app, ok := m.pipeline.CurrentApp(); !ok || app.Status != "Responded" || m.evaluatedCount != 1 {
