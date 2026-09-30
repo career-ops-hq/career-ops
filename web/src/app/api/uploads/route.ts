@@ -48,15 +48,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "category must be resume or project" }, { status: 400 });
   }
 
+  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+  const ALLOWED_EXTENSIONS = new Set([".pdf", ".docx", ".doc", ".md", ".txt", ".zip", ".tar.gz"]);
+
+  const ext = path.extname(file.name).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    return NextResponse.json({ error: `file type ${ext} not allowed` }, { status: 400 });
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length > MAX_SIZE) {
+    return NextResponse.json({ error: "file exceeds 10 MB limit" }, { status: 400 });
+  }
+
   const dir = category === "resume" ? RESUME_DIR() : PROJECT_DIR();
   fs.mkdirSync(dir, { recursive: true });
 
   const id = crypto.randomUUID();
-  const ext = path.extname(file.name);
   const safeBase = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
   const filename = `${id.slice(0, 8)}-${safeBase}`;
-
-  const buffer = Buffer.from(await file.arrayBuffer());
   fs.writeFileSync(path.join(dir, filename), buffer);
 
   const meta: UploadMeta = {
