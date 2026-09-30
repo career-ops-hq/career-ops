@@ -172,8 +172,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-runner-") as temporary:
         "overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist"
     )}
     responses = iter((
-        {"direction": {}, "compensation": {}, "team": {}, "company": {}},
-        {"direction": {}, "compensation": {}, "team": {}, "company": {}, "sections": complete_sections},
+        {"direction": {}, "compensation": {}, "company": {}},
+        {"direction": {}, "compensation": {}, "company": {}, "sections": complete_sections},
     ))
 
     class Agent:
@@ -228,7 +228,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-section-completion-") as tem
 
 with tempfile.TemporaryDirectory(prefix="career-ops-dimension-completion-") as temporary:
     good = {"score": None, "rationale": "Evidence is insufficient for a rating.", "evidence": []}
-    original = {name: dict(good) for name in ("direction", "team", "company")}
+    original = {name: dict(good) for name in ("direction", "company")}
     original["compensation"] = "Market benchmark does not prove this job's pay."
     original_call_agent = model_adapter.call_agent
     seen = []
@@ -258,7 +258,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
             "prescreen": {"status": "uncertain", "unknowns": ["compensation"]},
         },
         "cv": "Verified candidate facts.",
-        "profile": "attractiveness:\n  weights:\n    direction: 0.25\n    compensation: 0.25\n    team: 0.25\n    company: 0.25\n",
+        "profile": "attractiveness:\n  model: attractiveness-v2\n  weights:\n    direction: 0.4\n    compensation: 0.3\n    company: 0.3\n",
         "targeting": "Verified targeting.", "rules": "Current rules.",
     }
     sections = {name: "Grounded analysis with explicit unknowns and next actions." for name in (
@@ -267,7 +267,6 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     valid_dimensions = {
         "direction": {"score": 4, "rationale": "Direct evidence.", "evidence": [{"source": "jd", "quote": jd}]},
         "compensation": {"score": None, "rationale": "Unknown.", "evidence": []},
-        "team": {"score": None, "rationale": "Unknown.", "evidence": []},
         "company": {"score": None, "rationale": "Unknown.", "evidence": []},
     }
     invalid_dimensions = json.loads(json.dumps(valid_dimensions))
@@ -278,9 +277,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-render-repair-", dir=ROOT / 
     research = {
         "sources": [],
         "research": {
-            "searched_at": "2026-09-24", "queries": ["compensation", "team", "company"],
+            "searched_at": "2026-09-24", "queries": ["compensation", "company"],
             "dimensions": {name: {"queries": [index], "conclusion": "Unknown.", "next_step": "Confirm."}
-                           for index, name in enumerate(("compensation", "team", "company"))},
+                           for index, name in enumerate(("compensation", "company"))},
             "findings": [],
         },
     }

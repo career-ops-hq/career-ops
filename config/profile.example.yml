@@ -3,14 +3,13 @@
 # This is the single source of truth for your personal data across all modes.
 
 attractiveness:
-  model: attractiveness-v1
+  model: attractiveness-v2
   acceptable_line: 3.5  # Minimum acceptable attractiveness for action decisions.
   alert_line: 3.5       # Independent threshold for user notifications.
   weights:
-    direction: 0.25
-    compensation: 0.25
-    team: 0.25
-    company: 0.25
+    direction: 0.333333333333
+    compensation: 0.333333333333
+    company: 0.333333333334
 
 candidate:
   full_name: "Jane Smith"
@@ -171,20 +170,6 @@ cv:
   # cv.md stays the source of truth: the section-order guard still compares the
   # rendered CV against it, and still fails if they disagree.
   # sections: [skills, education, certifications, awards]
-
-# ── Culture Screen ───────────────────────────────────────────────────────────
-#
-# Enforces structural capping on the "Cultural signals" dimension during evaluation.
-#
-# culture_screen:
-#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first).
-#   # If absent/commented, the dimension is scored qualitatively without a hard cap.
-#   require:
-#     - "Small, flat teams (under 15 engineers)"
-#     - "Async-first communication, low meeting overhead"
-#   # If true, the dimension is capped at 2/5 if the JD lacks any evidence for the required criteria.
-#   # If false (or absent), lack of evidence defaults to a neutral 3/5.
-#   deprioritize_if_absent: true
 
 # Optional user-owned LaTeX CV for `/career-ops latex-tex` (opt-in tailoring in place).
 # cv.md remains the default source of truth for evaluations and auto-pipeline.

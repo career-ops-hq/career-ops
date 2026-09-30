@@ -77,7 +77,7 @@ def _complete_sections(assessment: dict, jd: dict, sources: dict, research: dict
 def _complete_dimensions(assessment: dict, jd: dict, sources: dict, research: dict, directory: Path) -> tuple[dict, int]:
     dimensions = dict(assessment["dimensions"])
     calls = 0
-    for name in ("direction", "compensation", "team", "company"):
+    for name in ("direction", "compensation", "company"):
         value = dimensions.get(name)
         if (isinstance(value, dict) and set(value) == {"score", "rationale", "evidence"}
                 and isinstance(value["rationale"], str) and value["rationale"].strip()
@@ -223,7 +223,7 @@ def run_score(inputs: dict, draft_root: Path, root: Path) -> dict:
             frozen_sources.update({source["id"]: source["text"] for source in research["sources"]})
             prompt = (
                 "Repair this assessment using only the supplied frozen sources. Do not research or invent evidence. "
-                "Return a bare JSON object with top-level direction, compensation, team, company, "
+                "Return a bare JSON object with top-level direction, compensation, company, "
                 "advertised_comp, and sections; never wrap it in assessment. "
                 "Each dimension must contain exactly score, rationale, and evidence. "
                 "Only IDs in frozen_sources are citation sources; research is not a source ID. "

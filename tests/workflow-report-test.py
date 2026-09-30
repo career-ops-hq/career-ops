@@ -16,7 +16,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     directory.mkdir()
     sources = {
         "cv": "Primary candidate evidence.",
-        "profile": "attractiveness:\n  model: attractiveness-v1\n  weights:\n    direction: 0.4\n    compensation: 0.3\n    team: 0.2\n    company: 0.1\n",
+        "profile": "attractiveness:\n  model: attractiveness-v2\n  weights:\n    direction: 0.333333333333\n    compensation: 0.333333333333\n    company: 0.333333333334\n",
         "targeting": "Primary targeting evidence.",
         "rules": "Current scoring rules.",
     }
@@ -27,11 +27,11 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     assessment = {
         "sources": [{"id": "web1", "text": "Primary market research excerpt."}],
         "research": {
-            "searched_at": "2026-09-20", "queries": ["pay", "team", "company"],
-            "dimensions": {name: {"queries": [index], "conclusion": "Applicable evidence remains unavailable.", "next_step": "Confirm exact employer terms."} for index, name in enumerate(("compensation", "team", "company"))},
+            "searched_at": "2026-09-20", "queries": ["pay", "company"],
+            "dimensions": {name: {"queries": [index], "conclusion": "Applicable evidence remains unavailable.", "next_step": "Confirm exact employer terms."} for index, name in enumerate(("compensation", "company"))},
             "findings": [{"id": "f1", "url": "https://example.com/pay", "entity": "Example", "scope": "market", "status": "retrieved", "published_at": None, "limitation": "Market only, not an offer.", "source": "web1", "quote": "Primary market research excerpt."}],
         },
-        "dimensions": {name: {"score": None, "rationale": "Insufficient applicable evidence.", "evidence": []} for name in ("direction", "compensation", "team", "company")},
+        "dimensions": {name: {"score": None, "rationale": "Insufficient applicable evidence.", "evidence": []} for name in ("direction", "compensation", "company")},
         "sections": {name: "Complete evidence mapping, unknowns and specific next actions." for name in ("overview", "capabilities", "compensation", "questions", "legitimacy", "risks", "checklist")},
     }
     rendered = render_report(packet, evidence, assessment)

@@ -1444,6 +1444,9 @@ def cron_score(directory: Path) -> dict:
     finally:
         store.close()
     if stale_opportunity_id:
+        refreshed = scan_discovered(directory, stale_opportunity_id, True)
+        if refreshed["status"] != "completed" or refreshed["artifact"]["outcome"] != "jd_report":
+            return {"status": refreshed["status"], "opportunity_id": stale_opportunity_id, "task": refreshed}
         result = start_and_run(directory, stale_opportunity_id, "score", f"scan:{stale_opportunity_id}", None, True)
         return {"status": "advanced", "opportunity_id": stale_opportunity_id, "task": result}
     if active:

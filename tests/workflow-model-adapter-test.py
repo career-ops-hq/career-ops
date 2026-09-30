@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
 research = {
     "searched_at": "2026-09-20", "queries": ["q"],
-    "compensation": {}, "team": {}, "company": {},
+    "compensation": {}, "company": {},
     "findings": [
         {"id": "f1", "url": "https://example.com", "status": "retrieved", "quote": "exact source"},
         {"id": "f2", "url": "https://other.com", "status": "search_only", "quote": "snippet"},
@@ -47,15 +47,15 @@ invalid_citable_url = json.loads(json.dumps(frozen))
 invalid_citable_url["research"]["findings"][0]["url"] = None
 assert adapter.normalize_research(invalid_citable_url)["research"]["findings"][0]["id"] == "f1"
 invalid_query = json.loads(json.dumps(frozen))
-invalid_query["research"]["queries"] = ["pay", "team", "company"]
+invalid_query["research"]["queries"] = ["pay", "company"]
 invalid_query["research"]["dimensions"] = {
     name: {"queries": [index], "conclusion": "Original conclusion", "next_step": "Verify"}
-    for index, name in enumerate(("compensation", "team", "company"))
+    for index, name in enumerate(("compensation", "company"))
 }
-invalid_query["research"]["dimensions"]["company"]["queries"] = [3]
+invalid_query["research"]["dimensions"]["company"]["queries"] = [2]
 normalized_query = adapter.normalize_research(invalid_query)["research"]["dimensions"]["company"]
-assert normalized_query["queries"] == [2] and normalized_query["conclusion"].startswith("Unknown")
-assert invalid_query["research"]["dimensions"]["company"]["queries"] == [3]
+assert normalized_query["queries"] == [1] and normalized_query["conclusion"].startswith("Unknown")
+assert invalid_query["research"]["dimensions"]["company"]["queries"] == [2]
 
 responses = iter(({key: value for key, value in research.items() if key != "findings"},
                   {**research, "findings": []}))

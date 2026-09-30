@@ -325,8 +325,14 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-stale-") as temporary:
                      (scored["task_id"], scored["task_id"], "1", "score", store.task(scored["task_id"])["input_hash"],
                       json.dumps({"outcome": "score", "artifact": {"score": {"lower": 2, "upper": 4, "coverage": 0.5}}})))
     store.close()
-    with patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+    with patch("workflow.career_ops.scan_discovered", return_value={"status": "waiting"}), \
+         patch("workflow.career_ops.start_and_run") as start:
+        assert cron_score(directory)["status"] == "waiting"
+        start.assert_not_called()
+    with patch("workflow.career_ops.scan_discovered", return_value={"status": "completed", "artifact": {"outcome": "jd_report"}}) as scan, \
+         patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
         assert cron_score(directory)["opportunity_id"] == "1"
+        assert scan.call_args.args == (directory, "1", True)
         assert start.call_args.args == (directory, "1", "score", "scan:1", None, True)
     store = BusinessStore(directory / "opportunities.db")
     current_input = score_inputs(report)

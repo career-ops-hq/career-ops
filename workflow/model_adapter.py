@@ -72,35 +72,35 @@ This is a compact gate check, not the report: keep each reason/evidence under 10
 Only list mandatory core capabilities here; preferred qualifications belong to the later report. No prose outside JSON.
 '''
 
-RESEARCH = '''Perform one research round covering compensation, team and company. Run three targeted searches together;
+RESEARCH = '''Perform one research round covering compensation, company business and company culture/work practices. Run three targeted searches together, including forums or employee reviews for culture;
 use up to two additional queries only if needed. Then web_extract ONCE with at most three relevant URLs and char_limit=4000.
-Prefer official annual reports, official employer/team pages and applicable salary sources; avoid duplicate JD aggregators.
+Prefer official annual reports and applicable salary sources for business and pay; use dated employee accounts, forums, review sites and company policies for culture. Avoid duplicate JD aggregators.
 Do not open the JD again. Failed or irrelevant sources remain unknown; do not start fallback browsing loops.
 Return {searched_at:"YYYY-MM-DD",queries:["actual queries"],
- compensation:{queries:[0],conclusion,next_step},team:{queries:[1],conclusion,next_step},company:{queries:[2],conclusion,next_step},
+ compensation:{queries:[0],conclusion,next_step},company:{queries:[1,2],conclusion,next_step},
  findings:[{id:"f1",url,entity,scope:"role|team|company|adjacent_role|market|unresolved",status:"retrieved|search_only|failed|excluded",
  published_at:null,limitation,quote:"one contiguous literal excerpt"}]}.
 Every retrieved quote MUST be an EXACT substring of the retrieved page. Never join separate fragments with semicolons or ellipses.
 Use one short contiguous quote per finding. Search snippets are search_only, never retrieved.
-Unretrieved findings have quote:null. The program freezes sources and assigns source IDs. Distinguish the exact role/team from other countries, levels or teams.
+Unretrieved findings have quote:null. The program freezes sources and assigns source IDs. State the date, location and scope of each culture account; one anonymous or conflicting account is uncertain, and company evidence does not prove this role's schedule.
 Next steps are missing evidence to obtain, never interview preparation or coaching.
 If search tools cannot execute research, return {blocked:"reason"}; do not manufacture a log.
 '''
 
 ASSESS = '''Use the supplied frozen research; do not research again. Return ONLY
 {direction:{score:integer_or_null,rationale,evidence:[{source:"jd",quote:"exact quote"}]},
-compensation:{score,rationale,evidence:[]},team:{score,rationale,evidence:[]},company:{score,rationale,evidence:[]},
+compensation:{score,rationale,evidence:[]},company:{score,rationale,evidence:[]},
 advertised_comp:null OR {amount:"exact annual numeric amount or range",currency:"ISO 3-letter code or UNKNOWN",quote:"exact JD quote proving the amount and annual period"},
 sections:{overview,capabilities,compensation,questions,legitimacy,risks,checklist}}.
 Candidate source IDs are cv/profile/targeting/articles/voice and writing1, writing2, ...; JD is jd. Research source IDs are supplied web1, web2,...
 Every quote must be a contiguous EXACT substring of the supplied source, no edits or ellipses.
-"research" is never a citation source ID. Cite only its frozen web1, web2, ... sources; if research.sources is empty, search summaries cannot support a company, team or compensation rating.
+"research" is never a citation source ID. Cite only its frozen web1, web2, ... sources; if research.sources is empty, search summaries cannot support a company or compensation rating.
 The jd_report also carries official structured location_evidence and employment_evidence. Use those fields for location and employment claims even when JD prose omits them; never claim location or employment is absent when these fields supply it.
-Compensation and team may receive a non-null integer score from convergent same-direction signals: for example, market salary benchmark plus company size plus role level/city; company culture as a clue; verifiable same-team practice supporting team; or financials supporting company. Use score:null only when there is no convergent signal, such as a genuinely anonymous employer with no data. For every non-null score, the rationale must write out the fact -> scope -> inference -> rating chain, and at least one real quoted evidence source is required.
+Compensation and company may receive a non-null integer score from applicable, convergent evidence: for example, a market salary benchmark plus role level/city, or company financials and current culture/work-practice evidence. Evaluate company culture using the date, location, source independence and consistency of employee accounts, forums, reviews or policies. One anonymous account, conflicting accounts or the absence of complaints cannot establish good or bad culture. Do not infer this role's actual hours or overtime compensation from company-wide reports. Use score:null when applicable company evidence is insufficient. For every non-null score, the rationale must write out the fact -> scope -> inference -> rating chain, and at least one real quoted evidence source is required.
 Sections are concise Markdown strings, no level-two headings. Capabilities map EVERY material responsibility AND required/preferred qualification
 to Proven/Adjacent/Gap/Unverified, exact candidate evidence, hiring impact and response. Use one compact row per qualification.
 Checklist covers all gates and unresolved capabilities. Questions are evidence gaps only, no interview coaching.
-Keep project rollout in direction; use independent company-wide business evidence for company, not the same project signal twice.
+Keep project rollout in direction; use independent company-wide business and culture evidence for company, not the same project signal twice. Record unknown hours, weekend work and overtime compensation for recruiter confirmation before recommending an application.
 Never state all hard gates pass when employment, compensation or eligibility remain unresolved.
 Set advertised_comp only when the JD explicitly gives an annual amount or range; do not turn monthly/hourly pay or a market benchmark into advertised annual pay. Use UNKNOWN currency unless the same JD quote states an ISO code.
 Do not repeat the research object, write YAML, calculate scores, hashes or source paths.
@@ -170,7 +170,7 @@ def freeze_research(value, messages):
     value['findings'] = findings
     return {'sources': sources, 'research': {
         **{k: value[k] for k in ('searched_at', 'queries', 'findings')},
-        'dimensions': {k: value[k] for k in ('compensation', 'team', 'company')}}}
+        'dimensions': {k: value[k] for k in ('compensation', 'company')}}}
 
 
 def normalize_research(research):
@@ -193,7 +193,7 @@ def normalize_research(research):
         findings.append(finding)
     dimensions = {}
     queries = record['queries']
-    for index, name in enumerate(('compensation', 'team', 'company')):
+    for index, name in enumerate(('compensation', 'company')):
         dimension = dict(record['dimensions'][name])
         refs = dimension.get('queries')
         if (isinstance(refs, list) and
@@ -260,7 +260,7 @@ def call_agent(phase, prompt, tools, directory, usage=None):
                     continue
                 raise
             if phase in ('assessment', 'repair') and not all(key in value for key in (
-                'direction', 'compensation', 'team', 'company', 'sections'
+                'direction', 'compensation', 'company', 'sections'
             )):
                 if attempt == 0:
                     continue
@@ -274,7 +274,7 @@ def call_agent(phase, prompt, tools, directory, usage=None):
                     continue
                 raise ValueError('scan_evidence response is incomplete')
             if phase == 'research' and not all(key in value for key in (
-                'searched_at', 'queries', 'findings', 'compensation', 'team', 'company'
+                'searched_at', 'queries', 'findings', 'compensation', 'company'
             )):
                 if attempt == 0:
                     continue
@@ -287,6 +287,6 @@ def call_agent(phase, prompt, tools, directory, usage=None):
     if phase == 'research':
         value = freeze_research(value, result.get('messages', []))
     elif phase in ('assessment', 'repair'):
-        value = {'dimensions': {k: value[k] for k in ('direction', 'compensation', 'team', 'company')},
+        value = {'dimensions': {k: value[k] for k in ('direction', 'compensation', 'company')},
                  'sections': value['sections'], 'advertised_comp': value.get('advertised_comp')}
     return value, session

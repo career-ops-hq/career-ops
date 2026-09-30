@@ -16,7 +16,7 @@ HEADINGS = (
     "A. 岗位概览", "B. 能力竞争力", "C. 入职吸引力", "D. 薪酬与需求",
     "E. 补证问题", "G. 岗位真实性", "Risk Summary", "Evaluation Checklist", "Machine Summary",
 )
-DIMENSIONS = ("direction", "compensation", "team", "company")
+DIMENSIONS = ("direction", "compensation", "company")
 
 
 def conflicting_sections(sections: dict, evidence: dict) -> list[str]:
@@ -73,7 +73,7 @@ def validate_research(research: dict, sources: dict[str, Path]) -> None:
     if not isinstance(queries, list) or not 1 <= len(queries) <= 5 or any(not isinstance(query, str) or not query.strip() for query in queries):
         raise ValueError("research requires 1–5 executed queries")
     dimensions = research.get("dimensions")
-    if not isinstance(dimensions, dict) or set(dimensions) != {"compensation", "team", "company"}:
+    if not isinstance(dimensions, dict) or set(dimensions) != {"compensation", "company"}:
         raise ValueError("research dimensions are incomplete")
     for name, dimension in dimensions.items():
         refs = dimension.get("queries") if isinstance(dimension, dict) else None
@@ -169,14 +169,14 @@ def render_report(packet: dict, evidence: dict, assessment: dict) -> dict:
     files["research"] = directory / "research.json"
     files["research"].write_text(json.dumps(assessment["research"], ensure_ascii=False, indent=2) + "\n")
     summary = {
-        "report_format": "scoring-v2", "scoring_model": "attractiveness-v1", "score": None,
+        "report_format": "scoring-v2", "scoring_model": "attractiveness-v2", "score": None,
         "company": evidence["company"], "role": evidence["role"], "complete_jd": True, "jd_source": "jd",
         "captured_at": evidence.get("captured_at"), "advertised_comp": advertised,
         "sources": [{"id": name, "path": str(path.relative_to(root)), "sha256": digest(path.read_bytes())} for name, path in files.items()],
         "dimensions": assessment["dimensions"], "attractiveness": score,
     }
     table = "| 维度 | 分数 | 权重 |\n|---|---|---|\n" + "\n".join(
-        f"| {name} | {assessment['dimensions'][name]['score'] if assessment['dimensions'][name]['score'] is not None else 'Unknown'} | {profile['attractiveness']['weights'][name] * 100:g}% |"
+        f"| {name} | {assessment['dimensions'][name]['score'] if assessment['dimensions'][name]['score'] is not None else 'Unknown'} | {format(profile['attractiveness']['weights'][name] * 100, '.6f').rstrip('0').rstrip('.')}% |"
         for name in DIMENSIONS
     )
     findings = "\n".join(f"- {item['id']} {item['url']} {item['entity']}" for item in assessment["research"]["findings"]) or "- 无外部研究发现"

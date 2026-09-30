@@ -7,7 +7,10 @@ import { createHash } from 'node:crypto';
 import { load } from 'js-yaml';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const DIMENSIONS = ['direction', 'compensation', 'team', 'company'];
+const MODEL_DIMENSIONS = {
+  'attractiveness-v1': ['direction', 'compensation', 'team', 'company'],
+  'attractiveness-v2': ['direction', 'compensation', 'company'],
+};
 export const GATES = ['location', 'employment', 'size', 'compensation', 'eligibility', 'liveness'];
 export const HEADINGS = [
   'Machine Summary', 'A. 岗位概览', 'B. 能力竞争力', 'C. 入职吸引力',
@@ -30,12 +33,13 @@ function exactKeys(value, keys, label) {
 
 /** Unknown dimensions contribute their full [1, 5] range and no evidence coverage. */
 export function calculateAttractiveness(dimensions, weights) {
-  exactKeys(weights, DIMENSIONS, 'weights');
-  exactKeys(dimensions, DIMENSIONS, 'dimensions');
+  const names = Object.values(MODEL_DIMENSIONS).find(keys => Object.keys(weights).sort().join(',') === [...keys].sort().join(','));
+  requireValue(names, 'weights: unexpected or missing keys');
+  exactKeys(dimensions, names, 'dimensions');
   requireValue(Object.values(weights).every(w => Number.isFinite(w) && w > 0)
     && Math.abs(Object.values(weights).reduce((a, b) => a + b, 0) - 1) < 1e-9, 'weights must be positive and sum to 1');
   let lower = 0, upper = 0, coverage = 0;
-  for (const key of DIMENSIONS) {
+  for (const key of names) {
     const score = dimensions[key]?.score;
     requireValue(score === null || (Number.isInteger(score) && score >= 1 && score <= 5), `${key}: score must be null or an integer from 1 to 5`);
     lower += weights[key] * (score ?? 1);
@@ -50,11 +54,11 @@ export function scoreLabel({ lower, upper, coverage }) {
 }
 
 /** Validate the research audit trail; scope and sufficiency still require semantic review. */
-export function validateResearch(research, sources) {
+export function validateResearch(research, sources, dimensions = MODEL_DIMENSIONS['attractiveness-v2']) {
   requireValue(research && /^\d{4}-\d{2}-\d{2}$/.test(research.searched_at), 'research date required');
   requireValue(Array.isArray(research.queries) && research.queries.length > 0 && research.queries.length <= 5
     && research.queries.every(q => typeof q === 'string' && q.trim()), 'research requires 1–5 executed queries');
-  exactKeys(research.dimensions, DIMENSIONS.slice(1), 'research dimensions');
+  exactKeys(research.dimensions, dimensions.slice(1), 'research dimensions');
   for (const [key, dimension] of Object.entries(research.dimensions)) {
     requireValue(Array.isArray(dimension.queries) && dimension.queries.length > 0
       && dimension.queries.every(i => Number.isInteger(i) && i >= 0 && i < research.queries.length), `${key}: executed query reference required`);
@@ -104,7 +108,8 @@ export function validateReport(text, { root = ROOT } = {}) {
   for (const [name, body] of bodies) {
     requireValue(body.length >= 20, `empty section: ${name}`);
   }
-  requireValue(summary?.scoring_model === 'attractiveness-v1', 'not an attractiveness-v1 report');
+  const dimensions = MODEL_DIMENSIONS[summary?.scoring_model];
+  requireValue(dimensions, 'unknown attractiveness model');
   requireValue(summary.score === null, 'attractiveness must not publish a scalar score');
   requireValue(summary.complete_jd === true, 'complete JD required; record incomplete without a scored report');
   requireValue(typeof summary.company === 'string' && summary.company.trim()
@@ -126,11 +131,11 @@ export function validateReport(text, { root = ROOT } = {}) {
   requireValue(sources.has('profile'), 'frozen profile required');
   requireValue(sources.has('cv') && sources.has('rules'), 'frozen candidate CV and scoring rules required');
   requireValue(sources.has('research'), 'frozen web research required by scoring rules');
-  validateResearch(JSON.parse(sources.get('research')), sources);
+  validateResearch(JSON.parse(sources.get('research')), sources, dimensions);
   const profile = load(sources.get('profile'));
   requireValue(profile?.attractiveness?.model === summary.scoring_model, 'profile model mismatch');
   const result = calculateAttractiveness(summary.dimensions, profile.attractiveness.weights);
-  for (const key of DIMENSIONS) {
+  for (const key of dimensions) {
     const dimension = summary.dimensions[key];
     exactKeys(dimension, ['score', 'rationale', 'evidence'], key);
     requireValue(typeof dimension.rationale === 'string' && dimension.rationale.trim().length > 0, `${key}: rationale required`);
@@ -150,8 +155,8 @@ export function validateReport(text, { root = ROOT } = {}) {
   const scoreSection = bodies.get('C. 入职吸引力');
   const rows = scoreSection.split('\n').filter(line => /^\s*\|/.test(line))
     .map(line => line.split('|').slice(1, -1).map(cell => cell.trim()));
-  requireValue(rows.every(cells => DIMENSIONS.includes(cells[0]) || cells[0] === '维度' || /^[-: ]+$/.test(cells[0])), 'unexpected score table row');
-  for (const key of DIMENSIONS) {
+  requireValue(rows.every(cells => dimensions.includes(cells[0]) || cells[0] === '维度' || /^[-: ]+$/.test(cells[0])), 'unexpected score table row');
+  for (const key of dimensions) {
     const matching = rows.filter(cells => cells[0] === key);
     const weight = `${Number((profile.attractiveness.weights[key] * 100).toFixed(6))}%`;
     requireValue(matching.length === 1 && matching[0][1] === String(summary.dimensions[key].score ?? 'Unknown')
