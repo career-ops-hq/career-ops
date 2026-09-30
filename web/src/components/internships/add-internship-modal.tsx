@@ -28,13 +28,16 @@ export function AddInternshipModal({ onClose, onAdded }: Props) {
     e.preventDefault();
     if (!form.company || !form.role) return;
     setSaving(true);
-    const res = await fetch("/api/internships", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    if (res.ok) onAdded();
-    setSaving(false);
+    try {
+      const res = await fetch("/api/internships", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) onAdded();
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

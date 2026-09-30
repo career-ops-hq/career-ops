@@ -20,36 +20,58 @@ type Props = {
 
 export function ResumeViewer({ internship, onClose, onUpdated }: Props) {
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const uploadResume = async (file: File) => {
     setUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("category", "resume");
-    formData.append("description", `Tailored resume for ${internship.company} - ${internship.role}`);
+    setError(null);
+    try {
+      // If replacing, delete the old upload first
+      if (internship.resumeFile) {
+        await fetch(`/api/uploads?id=${internship.resumeFile}`, { method: "DELETE" }).catch(() => {});
+      }
 
-    const uploadRes = await fetch("/api/uploads", { method: "POST", body: formData });
-    if (uploadRes.ok) {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("category", "resume");
+      formData.append("description", `Tailored resume for ${internship.company} - ${internship.role}`);
+
+      const uploadRes = await fetch("/api/uploads", { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        setError("Upload failed — check file type and size (max 10 MB).");
+        return;
+      }
       const meta = await uploadRes.json();
-      await fetch("/api/internships", {
+      const linkRes = await fetch("/api/internships", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: internship.id, resumeFile: meta.filename }),
       });
+      if (!linkRes.ok) {
+        setError("File uploaded but failed to link to internship.");
+        return;
+      }
       onUpdated();
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const removeResume = async () => {
-    await fetch("/api/internships", {
+    setError(null);
+    // Delete the file from uploads
+    if (internship.resumeFile) {
+      await fetch(`/api/uploads?id=${internship.resumeFile}`, { method: "DELETE" }).catch(() => {});
+    }
+    const res = await fetch("/api/internships", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: internship.id, resumeFile: "" }),
     });
-    onUpdated();
+    if (res.ok) onUpdated();
+    else setError("Failed to remove resume link.");
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -71,6 +93,10 @@ export function ResumeViewer({ internship, onClose, onUpdated }: Props) {
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {error && (
+          <p className="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+        )}
 
         {internship.resumeFile ? (
           <div className="space-y-4">

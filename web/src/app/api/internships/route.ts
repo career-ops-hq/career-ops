@@ -22,12 +22,25 @@ export type Internship = {
   score?: string;
 };
 
-function readInternships(): Internship[] {
+const VALID_STATUSES = new Set<Internship["status"]>(["wishlist", "applied", "interviewing", "offered", "rejected", "accepted"]);
+
+const WRITABLE_FIELDS = new Set([
+  "company", "role", "location", "status", "dateApplied",
+  "deadline", "url", "notes", "resumeFile", "score",
+]);
+
+function readInternships(): { data: Internship[]; error?: string } {
+  const file = INTERNSHIPS_FILE();
   try {
-    const raw = fs.readFileSync(INTERNSHIPS_FILE(), "utf8");
-    return JSON.parse(raw);
+    fs.accessSync(file);
   } catch {
-    return [];
+    return { data: [] }; // file doesn't exist yet — valid empty state
+  }
+  try {
+    const raw = fs.readFileSync(file, "utf8");
+    return { data: JSON.parse(raw) };
+  } catch {
+    return { data: [], error: "corrupt" };
   }
 }
 
@@ -38,19 +51,27 @@ function writeInternships(data: Internship[]): void {
 }
 
 export async function GET() {
-  return NextResponse.json(readInternships());
+  const { data, error } = readInternships();
+  if (error) return NextResponse.json({ error: "data file is corrupt, please fix or delete data/internships.json" }, { status: 500 });
+  return NextResponse.json(data);
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const internships = readInternships();
+  const { data: internships, error } = readInternships();
+  if (error) return NextResponse.json({ error: "data file is corrupt" }, { status: 500 });
+
+  const status = body.status ?? "wishlist";
+  if (!VALID_STATUSES.has(status)) {
+    return NextResponse.json({ error: `invalid status: ${status}` }, { status: 400 });
+  }
 
   const newEntry: Internship = {
     id: crypto.randomUUID(),
     company: body.company ?? "",
     role: body.role ?? "",
     location: body.location ?? "",
-    status: body.status ?? "wishlist",
+    status,
     dateAdded: new Date().toISOString().slice(0, 10),
     dateApplied: body.dateApplied,
     deadline: body.deadline,
@@ -69,11 +90,23 @@ export async function PUT(req: NextRequest) {
   const body = await req.json();
   if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const internships = readInternships();
+  if (body.status && !VALID_STATUSES.has(body.status)) {
+    return NextResponse.json({ error: `invalid status: ${body.status}` }, { status: 400 });
+  }
+
+  const { data: internships, error } = readInternships();
+  if (error) return NextResponse.json({ error: "data file is corrupt" }, { status: 500 });
+
   const idx = internships.findIndex((i) => i.id === body.id);
   if (idx === -1) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-  internships[idx] = { ...internships[idx], ...body };
+  // Only allow known fields to be updated, never overwrite id or dateAdded
+  const updates: Record<string, unknown> = {};
+  for (const key of Object.keys(body)) {
+    if (WRITABLE_FIELDS.has(key)) updates[key] = body[key];
+  }
+
+  internships[idx] = { ...internships[idx], ...updates };
   writeInternships(internships);
   return NextResponse.json(internships[idx]);
 }
@@ -83,8 +116,9 @@ export async function DELETE(req: NextRequest) {
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  let internships = readInternships();
-  internships = internships.filter((i) => i.id !== id);
-  writeInternships(internships);
+  const { data: internships, error } = readInternships();
+  if (error) return NextResponse.json({ error: "data file is corrupt" }, { status: 500 });
+
+  writeInternships(internships.filter((i) => i.id !== id));
   return NextResponse.json({ ok: true });
 }
