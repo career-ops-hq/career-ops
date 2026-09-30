@@ -226,30 +226,54 @@ test('recapture after a tombstone also requires an active check after that tombs
   assert.equal((await lookupJobFacts(f.args)).status, 'hit');
 });
 
-test('explicit expired invalidation changes only newest matching report cache metadata', integration, async (t) => {
+test('explicit expired invalidation stamps all matching reports and preserves unrelated bytes and permissions', integration, async (t) => {
   const f = fixture(t);
   const oldPath = f.write('999-old.md', { captured_at: iso(NOW - 2 * HOUR) });
   const newPath = f.write('001-new.md');
-  const oldBytes = readFileSync(oldPath, 'utf8');
+  const otherFingerprint = identity.computeListingFingerprint({
+    url: 'https://boards.greenhouse.io/example/jobs/99999',
+    strong: { ...f.fingerprint.strong, posting_id: '99999' },
+  });
+  const otherPath = f.write('002-other.md', { listing_fingerprint: otherFingerprint });
+  const otherBytes = readFileSync(otherPath, 'utf8');
   const privateTail = `# private comments stay byte-identical\nprivate_notes: |\n  ${PRIVATE}\n  Preserve punctuation: [x], # and spaces.\n`;
-  writeFileSync(newPath, readFileSync(newPath, 'utf8').replace('\n```\n', `\n${privateTail}\n\`\`\`\n`));
-  if (process.platform !== 'win32') chmodSync(newPath, 0o600);
-  const before = readFileSync(newPath, 'utf8');
+  const originals = new Map();
+  for (const path of [oldPath, newPath]) {
+    writeFileSync(path, readFileSync(path, 'utf8').replace('\n```\n', `\n${privateTail}\n\`\`\`\n`));
+    if (process.platform !== 'win32') chmodSync(path, 0o600);
+    originals.set(path, readFileSync(path, 'utf8'));
+  }
   await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } });
-  const after = readFileSync(newPath, 'utf8');
-  if (process.platform !== 'win32') assert.equal(statSync(newPath).mode & 0o777, 0o600, 'invalidation must preserve private report permissions');
-  assert.equal(readFileSync(oldPath, 'utf8'), oldBytes);
-  const beforeCache = before.indexOf('job_facts_cache:');
-  const afterCache = after.indexOf('job_facts_cache:');
-  assert.ok(beforeCache > 0 && afterCache > 0);
-  assert.equal(after.slice(0, afterCache), before.slice(0, beforeCache));
-  assert.equal(after.slice(after.indexOf('# private comments')), before.slice(before.indexOf('# private comments')));
-  assert.equal(after.slice(after.indexOf('\n```', afterCache)), before.slice(before.indexOf('\n```', beforeCache)));
-  const parsed = yamlLoad(after.match(/```yaml\n([\s\S]*?)\n```/)[1]);
-  assert.equal(parsed.job_facts_cache.invalidated_at, iso(NOW));
-  assert.equal(parsed.job_facts_cache.captured_at, iso(NOW - HOUR));
-  assert.deepEqual(extractJobFacts(after), FACTS);
+  assert.equal(readFileSync(otherPath, 'utf8'), otherBytes, 'a different listing must remain untouched');
+  for (const [path, before] of originals) {
+    const after = readFileSync(path, 'utf8');
+    if (process.platform !== 'win32') assert.equal(statSync(path).mode & 0o777, 0o600, 'invalidation must preserve private report permissions');
+    const beforeCache = before.indexOf('job_facts_cache:');
+    const afterCache = after.indexOf('job_facts_cache:');
+    assert.ok(beforeCache > 0 && afterCache > 0);
+    assert.equal(after.slice(0, afterCache), before.slice(0, beforeCache));
+    assert.equal(after.slice(after.indexOf('# private comments')), before.slice(before.indexOf('# private comments')));
+    assert.equal(after.slice(after.indexOf('\n```', afterCache)), before.slice(before.indexOf('\n```', beforeCache)));
+    const parsed = yamlLoad(after.match(/```yaml\n([\s\S]*?)\n```/)[1]);
+    assert.equal(parsed.job_facts_cache.invalidated_at, iso(NOW));
+    assert.equal(parsed.job_facts_cache.captured_at, iso(NOW - (path === oldPath ? 2 : 1) * HOUR));
+    assert.deepEqual(extractJobFacts(after), FACTS);
+  }
   assertMiss(await lookupJobFacts(f.args));
+});
+
+test('deleting the newest invalidated report cannot revive an older duplicate', integration, async (t) => {
+  const f = fixture(t);
+  f.write('999-old.md', { captured_at: iso(NOW - 2 * HOUR) });
+  const newest = f.write('001-new.md');
+  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } });
+  rmSync(newest);
+  const after = { ...f.args, now: NOW + 2000, liveness: { ...f.liveness, checked_at: iso(NOW + 2000) } };
+  assertMiss(await lookupJobFacts(after));
+  f.write('003-recaptured.md', { captured_at: iso(NOW + 1000) });
+  const result = await lookupJobFacts(after);
+  assert.equal(result.status, 'hit');
+  assert.equal(result.payload.captured_at, iso(NOW + 1000));
 });
 
 test('uncertain or stale liveness never writes durable invalidation', integration, async (t) => {

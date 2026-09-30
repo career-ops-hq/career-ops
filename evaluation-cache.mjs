@@ -157,7 +157,7 @@ export async function lookupJobFacts({ reportsDir = join(getCareerOpsRoot(), 're
   } };
 }
 
-/** Persist a tombstone in an existing report, never create a second cache store. */
+/** Persist tombstones in all matching reports; no separate cache store. */
 export async function invalidateJobFacts({ reportsDir = join(getCareerOpsRoot(), 'reports'), fingerprint, liveness, now = Date.now() } = {}) {
   const { identity, key, failure } = await contextFor({ fingerprint, liveness, now });
   if (failure) return failure;
@@ -166,34 +166,36 @@ export async function invalidateJobFacts({ reportsDir = join(getCareerOpsRoot(),
   if (!files.length) return miss('no-cached-facts');
   const lock = await acquireTrackerLock(trackerLockDirFor(join(realpathSync(reportsDir), '.job-facts-cache')), { timeoutMs: 5000 });
   try {
-    const records = reportFiles(reportsDir).map(path => reportRecord(path, identity, key)).filter(Boolean)
-      .sort((a, b) => (Number.isFinite(b.captured) ? b.captured : 0) - (Number.isFinite(a.captured) ? a.captured : 0));
+    const records = reportFiles(reportsDir).map(path => reportRecord(path, identity, key)).filter(Boolean);
     if (!records.length) return miss('no-cached-facts');
-    const record = records[0];
     const invalidatedAt = new Date(now).toISOString();
-    const meta = { schema_version: 1, listing_fingerprint: record.meta.listing_fingerprint,
-      captured_at: record.meta.captured_at, invalidated_at: invalidatedAt };
-    // Replace only this top-level cache block. The rest of the YAML and the
-    // report stay byte-identical, including private comments and formatting.
-    const block = /^job_facts_cache:[^\r\n]*(?:\r?\n(?:[ \t]+[^\r\n]*|[ \t]*))*/m;
-    const raw = record.parsed.raw;
-    const matching = raw.match(block);
-    if (!matching) throw new Error('cache metadata must use an unquoted top-level job_facts_cache key');
-    const replacement = `job_facts_cache: ${JSON.stringify(meta)}\n`;
-    const updated = raw.replace(block, () => replacement);
-    // Reject YAML aliases or unusual layout instead of risking a broader rewrite.
-    const reparsed = load(updated, { schema: JSON_SCHEMA });
-    const expected = { ...record.parsed.summary, job_facts_cache: meta };
-    if (JSON.stringify(reparsed) !== JSON.stringify(expected)) throw new Error('cache metadata cannot be updated safely');
-    const start = record.parsed.rawStart;
-    const temp = `${record.path}.${randomUUID()}.tmp`;
-    try {
-      const mode = lstatSync(record.path).mode & 0o777;
-      writeFileSync(temp, record.markdown.slice(0, start) + updated + record.markdown.slice(start + raw.length), { flag: 'wx', mode: 0o600 });
-      // Reports contain private fit: an atomic rewrite must not widen access.
-      chmodSync(temp, mode);
-      renameSyncWithRetry(temp, record.path);
-    } finally { rmSync(temp, { force: true }); }
+    // Stamp every duplicate so deleting/archiving one report cannot remove
+    // the only closure marker and revive another still-fresh copy.
+    for (const record of records) {
+      const meta = { schema_version: 1, listing_fingerprint: record.meta.listing_fingerprint,
+        captured_at: record.meta.captured_at, invalidated_at: invalidatedAt };
+      // Replace only this top-level cache block. The rest of the YAML and the
+      // report stay byte-identical, including private comments and formatting.
+      const block = /^job_facts_cache:[^\r\n]*(?:\r?\n(?:[ \t]+[^\r\n]*|[ \t]*))*/m;
+      const raw = record.parsed.raw;
+      const matching = raw.match(block);
+      if (!matching) throw new Error('cache metadata must use an unquoted top-level job_facts_cache key');
+      const replacement = `job_facts_cache: ${JSON.stringify(meta)}\n`;
+      const updated = raw.replace(block, () => replacement);
+      // Reject YAML aliases or unusual layout instead of risking a broader rewrite.
+      const reparsed = load(updated, { schema: JSON_SCHEMA });
+      const expected = { ...record.parsed.summary, job_facts_cache: meta };
+      if (JSON.stringify(reparsed) !== JSON.stringify(expected)) throw new Error('cache metadata cannot be updated safely');
+      const start = record.parsed.rawStart;
+      const temp = `${record.path}.${randomUUID()}.tmp`;
+      try {
+        const mode = lstatSync(record.path).mode & 0o777;
+        writeFileSync(temp, record.markdown.slice(0, start) + updated + record.markdown.slice(start + raw.length), { flag: 'wx', mode: 0o600 });
+        // Reports contain private fit: an atomic rewrite must not widen access.
+        chmodSync(temp, mode);
+        renameSyncWithRetry(temp, record.path);
+      } finally { rmSync(temp, { force: true }); }
+    }
     return { status: 'invalidated', invalidated_at: invalidatedAt };
   } finally { lock.release(); }
 }
