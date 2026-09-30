@@ -251,7 +251,7 @@ export function formatReport(results, { summary = false } = {}) {
     lines.push(`\n${lang}: ${stats.sectionsCovered}/${stats.sectionsTotal} sections; ${stats.filesChecked} files checked, ${stats.filesSkipped} skipped`);
     if (summary) continue;
     lines.push('| Translation | Canonical | Covered / total | Structural difference |', '| --- | --- | --- | --- |');
-    const cell = value => value.replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
+    const cell = value => value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
     for (const file of files) {
       const label = `modes/${lang}/${file.translated}`;
       if (file.skipped) {

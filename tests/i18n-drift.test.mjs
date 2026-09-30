@@ -288,6 +288,14 @@ test('JSON summaries retain actionable file details and aggregate drift', (t) =>
   assert.match(formatReport(results, { summary: true }), /zh/);
 });
 
+test('table cells escape existing backslashes before Markdown separators', () => {
+  const report = formatReport([{ lang: 'zh', files: [{
+    translated: 'local.md', canonical: null, result: null,
+    skipped: true, skipReason: 'unmapped \\| name\nnext line',
+  }] }]);
+  assert.ok(report.includes('skipped: unmapped ' + '\\'.repeat(3) + '| name next line |'));
+});
+
 test('CLI is advisory, accepts repeated language selection, and resolves modes outside the current directory', (t) => {
   const root = fixture(t, {
     'modes/oferta.md': '# Evaluate\n## Context\n### Evidence',
