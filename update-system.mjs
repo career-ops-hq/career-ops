@@ -266,6 +266,7 @@ const SYSTEM_PATHS = [
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/local-today.mjs',
+  'lib/reply-proposals.mjs',
   'lib/placeholder-cell.mjs',
   'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
