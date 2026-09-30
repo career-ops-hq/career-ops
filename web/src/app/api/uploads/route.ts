@@ -51,7 +51,8 @@ export async function POST(req: NextRequest) {
   const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
   const ALLOWED_EXTENSIONS = new Set([".pdf", ".docx", ".doc", ".md", ".txt", ".zip", ".tar.gz"]);
 
-  const ext = path.extname(file.name).toLowerCase();
+  const nameLower = file.name.toLowerCase();
+  const ext = nameLower.endsWith(".tar.gz") ? ".tar.gz" : path.extname(nameLower);
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     return NextResponse.json({ error: `file type ${ext} not allowed` }, { status: 400 });
   }

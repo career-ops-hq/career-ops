@@ -54,6 +54,8 @@ export function ResumeViewer({ internship, onClose, onUpdated }: Props) {
         return;
       }
       onUpdated();
+    } catch {
+      setError("Network error — please try again.");
     } finally {
       setUploading(false);
     }
@@ -61,17 +63,21 @@ export function ResumeViewer({ internship, onClose, onUpdated }: Props) {
 
   const removeResume = async () => {
     setError(null);
-    // Delete the file from uploads
-    if (internship.resumeFile) {
-      await fetch(`/api/uploads?id=${internship.resumeFile}`, { method: "DELETE" }).catch(() => {});
+    try {
+      // Delete the file from uploads
+      if (internship.resumeFile) {
+        await fetch(`/api/uploads?id=${internship.resumeFile}`, { method: "DELETE" }).catch(() => {});
+      }
+      const res = await fetch("/api/internships", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: internship.id, resumeFile: "" }),
+      });
+      if (res.ok) onUpdated();
+      else setError("Failed to remove resume link.");
+    } catch {
+      setError("Network error — please try again.");
     }
-    const res = await fetch("/api/internships", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: internship.id, resumeFile: "" }),
-    });
-    if (res.ok) onUpdated();
-    else setError("Failed to remove resume link.");
   };
 
   const handleDrop = (e: React.DragEvent) => {
