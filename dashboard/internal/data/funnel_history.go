@@ -1,6 +1,8 @@
 package data
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,13 +24,17 @@ func funnelRank(status string) int {
 }
 
 // ReadFunnelHistory reads only the ledger beside the active tracker, including
-// tracker overrides and the legacy root layout. Missing history is harmless.
-func ReadFunnelHistory(root string) map[int]int {
+// tracker overrides and the legacy root layout. Missing history is harmless;
+// other read failures must not silently erase previously reached stages.
+func ReadFunnelHistory(root string) (map[int]int, error) {
 	content, err := os.ReadFile(filepath.Join(filepath.Dir(resolveTrackerPath(root)), "status-log.tsv"))
-	if err != nil {
-		return nil
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
 	}
-	return parseFunnelHistory(string(content))
+	if err != nil {
+		return nil, fmt.Errorf("read funnel history: %w", err)
+	}
+	return parseFunnelHistory(string(content)), nil
 }
 
 func parseFunnelHistory(content string) map[int]int {

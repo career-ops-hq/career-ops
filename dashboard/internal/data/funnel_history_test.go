@@ -1,11 +1,13 @@
 package data
 
 import (
+	"errors"
 	"fmt"
-	"github.com/santifer/career-ops/dashboard/internal/model"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/santifer/career-ops/dashboard/internal/model"
 )
 
 func TestFunnelHistoryTerminalAchievements(t *testing.T) {
@@ -40,9 +42,44 @@ func TestFunnelHistoryTrackerOverride(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "status-log.tsv"), []byte("1\t2026-09-01\tOffer\tDiscarded\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	pm := ComputeProgressMetrics([]model.CareerApplication{{Number: 1, Status: "Discarded"}}, ReadFunnelHistory(root))
+	history, err := ReadFunnelHistory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm := ComputeProgressMetrics([]model.CareerApplication{{Number: 1, Status: "Discarded"}}, history)
 	if pm.FunnelStages[4].Count != 1 || pm.TotalOffers != 1 {
 		t.Fatal("discarded offer lost from overridden tracker ledger")
+	}
+}
+
+func TestReadFunnelHistoryMissingLedger(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CAREER_OPS_TRACKER", filepath.Join(root, "applications.md"))
+	history, err := ReadFunnelHistory(root)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("missing ledger = %v, %v; want empty history without an error", history, err)
+	}
+	pm := ComputeProgressMetrics([]model.CareerApplication{{Number: 1, Status: "Offer"}}, history)
+	if pm.TotalOffers != 1 {
+		t.Fatal("missing ledger should still count current achievements")
+	}
+}
+
+func TestReadFunnelHistoryPropagatesReadFailure(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CAREER_OPS_TRACKER", filepath.Join(root, "applications.md"))
+	ledger := filepath.Join(root, "status-log.tsv")
+	// A directory reliably fails ReadFile, including when tests run as root.
+	if err := os.Mkdir(ledger, 0700); err != nil {
+		t.Fatal(err)
+	}
+	history, err := ReadFunnelHistory(root)
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) || pathErr.Path != ledger {
+		t.Fatalf("read failure = %v, want the ledger's underlying PathError", err)
+	}
+	if history != nil {
+		t.Fatalf("failed read returned history: %v", history)
 	}
 }
 

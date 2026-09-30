@@ -98,6 +98,11 @@ type PipelineDiscardReasonsLoadedMsg struct {
 // PipelineRefreshMsg requests a full tracker reload from disk.
 type PipelineRefreshMsg struct{}
 
+// PipelineHistoryFailedMsg reports that progress still uses the previous data.
+type PipelineHistoryFailedMsg struct {
+	Err string
+}
+
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
@@ -491,6 +496,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		return m, nil
 	case PipelineOpenFailedMsg:
 		m.flash = "Could not open " + msg.Target + ": " + msg.Err
+		return m, nil
+	case PipelineHistoryFailedMsg:
+		m.flash = "Status history unavailable; progress uses previous data: " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
