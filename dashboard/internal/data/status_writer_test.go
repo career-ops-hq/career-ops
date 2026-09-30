@@ -174,3 +174,31 @@ func TestDashboardStatusPreservesFlagLikeNotes(t *testing.T) {
 		})
 	}
 }
+
+func TestDashboardStatusDoesNotExecuteDataOnlyScripts(t *testing.T) {
+	for _, location := range []string{"cwd", "data-root"} {
+		t.Run(location, func(t *testing.T) {
+			root, cwd := t.TempDir(), t.TempDir()
+			if location == "cwd" {
+				cwd = root
+			}
+			writeStatusTarget(t, filepath.Join(root, "set-status.mjs"), "throw new Error('untrusted script ran')")
+			previous, err := os.Getwd()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chdir(cwd); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.Chdir(previous); err != nil {
+					t.Error(err)
+				}
+			})
+			err = UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Interview")
+			if err == nil || !strings.Contains(err.Error(), "need set-status.mjs in the career-ops checkout") {
+				t.Fatalf("data-only script must not run: %v", err)
+			}
+		})
+	}
+}

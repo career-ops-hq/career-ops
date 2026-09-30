@@ -137,6 +137,33 @@ test('tab whitespace inside a pipe cell does not become a column separator', t =
   assert.equal(readFileSync(f.tracker, 'utf8'), before.replace('Evaluated', 'Interview'));
 });
 
+for (const format of ['tabs', 'pipe']) {
+  test(`${format}: note tabs cannot shift the final Status cell`, t => {
+    const header = '| # | Date | Company | Role | Score | PDF | Report | Notes | Status |\n';
+    let row = '| 42 | 2026-02-01 | Example Co | Engineer | 4.2/5 | ❌ | [7](reports/007.md) | original | Evaluated |\n';
+    if (format === 'tabs') row = row.replaceAll(' | ', '\t');
+    const f = fixture(t, header + row);
+    const note = 'first\tsecond\t\tthird';
+    const storedNote = format === 'tabs' ? 'first second  third' : note;
+    const args = ['--row', '42', 'Applied', '--note', note];
+    const result = run(f, args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.json.note, storedNote);
+    assert.equal(result.json.statusLogged, true);
+    assert.equal(result.json.followupSeeded.seeded, true, result.stderr);
+    const expected = header + row.replace('Evaluated', 'Applied').replace('original', `original; ${storedNote}`);
+    assert.equal(readFileSync(f.tracker, 'utf8'), expected);
+    const followups = readFileSync(join(f.data, 'follow-ups.md'), 'utf8');
+    assert.equal(followups.split('\n').filter(line => line.includes('next #42 ')).length, 1);
+    assert.ok(analyzeFromContent(expected, followups).entries.some(entry => entry.num === 42));
+    const retry = run(f, args);
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(retry.json.changed, false);
+    assert.equal(readFileSync(f.tracker, 'utf8'), expected);
+    assert.equal(readFileSync(join(f.data, 'follow-ups.md'), 'utf8'), followups);
+  });
+}
+
 test('tab headers use the same column map as tab data rows', () => {
   const header = HEADER.trimEnd().replaceAll(' | ', '\t');
   const row = ROW.trimEnd().replaceAll(' | ', '\t');

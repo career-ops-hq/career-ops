@@ -15,7 +15,7 @@ import (
 
 // Scripts belong to the checkout, even when --path points at a data-only root.
 // The executable fallback also supports launching the built TUI from elsewhere.
-func statusWriterScript(dataRoot string) (string, error) {
+func statusWriterScript() (string, error) {
 	roots := []string{getRepoRoot()}
 	if executable, err := os.Executable(); err == nil {
 		if resolved, err := filepath.EvalSymlinks(executable); err == nil {
@@ -23,8 +23,10 @@ func statusWriterScript(dataRoot string) (string, error) {
 		}
 		roots = append(roots, filepath.Dir(executable), filepath.Dir(filepath.Dir(executable)))
 	}
-	roots = append(roots, dataRoot)
 	for _, root := range roots {
+		if info, err := os.Stat(filepath.Join(root, "path-resolver.mjs")); err != nil || info.IsDir() {
+			continue
+		}
 		script := filepath.Join(root, "set-status.mjs")
 		if info, err := os.Stat(script); err == nil && !info.IsDir() {
 			return filepath.Abs(script)
@@ -34,7 +36,7 @@ func statusWriterScript(dataRoot string) (string, error) {
 }
 
 func runStatusWriter(dataRoot, report, status, note string) error {
-	script, err := statusWriterScript(dataRoot)
+	script, err := statusWriterScript()
 	if err != nil {
 		return err
 	}

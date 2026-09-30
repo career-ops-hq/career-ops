@@ -604,12 +604,16 @@ const oldStatus = target.status;
 if (flags.reportLink !== null && !resolveCanonicalState(oldStatus, states)) {
   failWith(EXIT_USAGE, 'invalid-current-state', `Tracker #${target.num} has an unrecognized current status: "${oldStatus}"`);
 }
-const note = flags.note != null ? cell(flags.note) : null;
-
 // Change only the selected cells, preserving the row's delimiter, whitespace
 // and every unrelated cell. Legacy tab rows must remain readable by the same
 // parser when followup-seed reopens the tracker after this write.
 const rawLine = lines[target.lineIdx];
+const separator = trackerRowSeparator(rawLine);
+// cell() preserves tabs as ordinary whitespace in pipe tables. In a legacy
+// tab row they delimit columns, so neutralize them before appending a note.
+const note = flags.note != null
+  ? cell(separator === '\t' ? flags.note.replace(/\t/g, ' ') : flags.note)
+  : null;
 const parts = splitTrackerCells(rawLine);
 function replaceCellValue(index, value) {
   const original = parts[index];
@@ -649,7 +653,7 @@ if (note) {
 const changed = statusChanged || noteChanged;
 
 if (changed && !flags.dryRun) {
-  if (trackerRowSeparator(rawLine) === '\t') {
+  if (separator === '\t') {
     const closing = rawLine.trimEnd().endsWith('|');
     lines[target.lineIdx] = parts[0] + '|' + parts.slice(1, closing ? -1 : undefined).join('\t')
       + (closing ? '|' + parts.at(-1) : '');

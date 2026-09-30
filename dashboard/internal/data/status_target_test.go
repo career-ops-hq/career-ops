@@ -40,11 +40,15 @@ func TestStatusTargetUsesReaderPath(t *testing.T) {
 				// Windows runners can put the checkout and system temp on
 				// different drives; a relative override needs the same drive.
 				var err error
-				root, err = os.MkdirTemp(getRepoRoot(), ".status-target-")
+				root, err = os.MkdirTemp(getRepoRoot(), ".tmp-script-test-status-")
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { os.RemoveAll(root) })
+				t.Cleanup(func() {
+					if err := os.RemoveAll(root); err != nil {
+						t.Errorf("remove status fixture: %v", err)
+					}
+				})
 			}
 			canonical := filepath.Join(root, "data", "applications.md")
 			legacy := filepath.Join(root, "applications.md")
