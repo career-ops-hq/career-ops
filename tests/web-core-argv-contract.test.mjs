@@ -68,6 +68,36 @@ const CALL_SITES = [
     script: 'jev-post-linter.mjs',
     args: ['<tailored-payload.json>', '<target-jd.txt>'],
     probe: 'none',
+    // The static half scans by SOURCE, so every --flag literal anywhere in
+    // route.ts is checked against THIS entry too. --mode / --max-chars belong to
+    // the browser-extract call in the same file and are declared there; they are
+    // repeated here because the guard cannot tell two call sites in one file
+    // apart. See the browser-extract entry for why they are runtime-only.
+    runtimeFlags: ['--mode', '--max-chars'],
+  },
+  {
+    // Gate 3's URL-input JD capture: captureUrlJdText() calls
+    // runCoreScript("browser-extract", [url, "--mode", "jd", "--max-chars", "30000"]).
+    //
+    // probe 'none', like the jev-post-linter entry above and for the same two
+    // reasons: this script has no validateFlags() and no --help handling, so an
+    // appended flag is ignored positionally and the real thing runs — which here
+    // means launching a headless browser and hitting the network. The argv is
+    // covered by the static half of this file plus the observed-output matrix in
+    // web/tests/lib/gate3-telemetry-parser.test.mjs.
+    source: 'web/src/app/api/run/route.ts',
+    script: 'browser-extract.mjs',
+    args: ['<url>', '--mode', 'jd', '--max-chars', '30000'],
+    probe: 'none',
+    // --mode / --max-chars appear as inline literals in route.ts, so the static
+    // half of this file wants them in `args` — but the only probe that could
+    // exercise them would launch a headless browser and hit the network. They
+    // are validated by the script itself instead: browser-extract.mjs declares
+    // them in KNOWN_FLAGS (line 656) and runs validateFlags() before any
+    // browser launch (line 807), so a typo exits 1 with "unrecognized flag(s)".
+    // Declaring them here records that deliberate choice rather than silently
+    // leaving the guard unsatisfied.
+    runtimeFlags: ['--mode', '--max-chars'],
   },
   {
     source: 'web/src/lib/core/status-update.ts',

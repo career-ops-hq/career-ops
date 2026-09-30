@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { killCliTree, spawnCli } from "@/lib/cli-spawn";
@@ -68,6 +69,15 @@ const GATE3_FALLBACK: Gate3Telemetry = {
 
 const GATE3_TIMEOUT_MS = 45_000;
 
+/**
+ * URL-input JD capture. Deliberately short: browser-extract.mjs short-circuits
+ * to the ATS JSON API (Greenhouse/Lever/Ashby/Workday — the large majority) and
+ * never launches a browser there; only a cold headless Chromium launch on some
+ * other board can hit this, and that is the case worth abandoning rather than
+ * holding a finished request open for.
+ */
+const GATE3_EXTRACT_TIMEOUT_MS = 20_000;
+
 /** Trim to a bounded string; a subprocess can emit anything. */
 function gate3Text(value: unknown, max = 300): string {
   return String(value ?? "").trim().slice(0, max);
@@ -126,31 +136,118 @@ function gate3TailoredPayloadPath(): string | null {
 }
 
 /**
+ * Isolate the JSON payload from a mixed stdout+stderr stream.
+ *
+ * `runCoreScript` concatenates both channels into `.output`
+ * (run-core-script.ts:28), and browser-extract.mjs writes its JSON to stdout
+ * while every error path writes to stderr. On a clean success stderr is empty,
+ * but a stray warning line ahead of the JSON would make a bare JSON.parse()
+ * throw and lose a perfectly good capture — so slice from the first `{` to the
+ * last `}` and parse only that.
+ *
+ * Exported for web/tests/lib/gate3-telemetry-parser.test.mjs.
+ */
+export function extractJsonPayload(output: string): { text: string } | null {
+  const raw = String(output ?? "").trim();
+  if (!raw) return null;
+  // A `--mode listing` response is a JSON ARRAY ({ url, jobs }). Slicing the first
+  // `{`…last `}` out of an array would carve its first job entry loose and hand
+  // back a plausible-looking { text } that was never a JD. So the slice is only
+  // allowed when the FIRST JSON VALUE in the stream is an object: find the first
+  // '{' or '[' outside of any already-consumed JSON, and require '{'. Keyed on
+  // the first structural character rather than raw.startsWith, so a stderr line
+  // ahead of the JSON does not smuggle an array through.
+  const firstStructural = raw.search(/[[{]/);
+  if (firstStructural === -1 || raw[firstStructural] !== "{") return null;
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const text = (parsed as { text?: unknown }).text;
+  // A non-string or blank .text is not a usable JD: the linter would be handed
+  // nothing to audit and could only report `unavailable` anyway.
+  return typeof text === "string" && text.trim() !== "" ? { text } : null;
+}
+
+/**
+ * Capture the JD text for a URL input via browser-extract.mjs and stage it in a
+ * private temp dir. Returns a cleanup thunk the caller MUST run in a finally.
+ *
+ * Throws on every failure path — collectGate3Telemetry() owns the fail-open
+ * translation, so there is exactly one place that decides what an extraction
+ * failure means.
+ */
+function captureUrlJdText(url: string): { jobPath: string; cleanup: () => void } {
+  const { output, error } = runCoreScript(
+    "browser-extract",
+    [url, "--mode", "jd", "--max-chars", "30000"],
+    GATE3_EXTRACT_TIMEOUT_MS,
+  );
+  if (error) throw new Error(gate3Text(error, 120) || "browser-extract could not run");
+
+  const payload = extractJsonPayload(output);
+  if (!payload) {
+    const err = new Error("EMPTY_OR_BLOCKED_JD_CAPTURE");
+    err.name = "EMPTY_OR_BLOCKED_JD_CAPTURE";
+    throw err;
+  }
+
+  // 0700: this holds third-party web content on disk, readable only by this
+  // process for the lifetime of the audit.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gate3-jd-"));
+  fs.chmodSync(dir, 0o700);
+  const jobPath = path.join(dir, "job.txt");
+  fs.writeFileSync(jobPath, payload.text, "utf-8");
+  return { jobPath, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+/**
  * Run Gate 3 for a finished pdf run. Never throws — every path returns
  * telemetry, and every failure is `unavailable`.
  */
 function collectGate3Telemetry(input: string): Gate3Telemetry {
+  let cleanup: (() => void) | null = null;
   try {
     const resumePath = gate3TailoredPayloadPath();
     if (!resumePath) return { ...GATE3_FALLBACK, reason: "NO_TAILORED_PAYLOAD" };
+    const source = path.basename(resumePath);
 
-    const jobPath = gate3JobPath(input);
+    let jobPath = gate3JobPath(input);
     if (!jobPath) {
-      return {
-        decision: "unavailable",
-        reason: "NO_LOCAL_JD",
-        source: path.basename(resumePath),
-      };
+      // URL input: no local capture, so scrape one. This is the whole point of
+      // the bridge — without it, every URL-pasted application (the most common
+      // way to use the dashboard) reported NO_LOCAL_JD and was never audited.
+      if (!isCheckableUrl(input)) return { decision: "unavailable", reason: "NO_LOCAL_JD", source };
+      try {
+        const captured = captureUrlJdText(input);
+        jobPath = captured.jobPath;
+        cleanup = captured.cleanup;
+      } catch (err) {
+        const reason = err instanceof Error && err.name === "EMPTY_OR_BLOCKED_JD_CAPTURE"
+          ? "EMPTY_OR_BLOCKED_JD_CAPTURE"
+          : "BROWSER_EXTRACT_SUBPROCESS_FAILURE";
+        return { decision: "unavailable", reason, source };
+      }
     }
 
     const { output, error } = runCoreScript("jev-post-linter", [resumePath, jobPath], GATE3_TIMEOUT_MS);
-    if (error) return { ...GATE3_FALLBACK, reason: gate3Text(error, 120) || "LINTER_SUBPROCESS_FALLBACK" };
+    if (error) return { ...GATE3_FALLBACK, reason: gate3Text(error, 120) || "LINTER_SUBPROCESS_FALLBACK", source };
 
-    return { ...parseGate3Output(output), source: path.basename(resumePath) };
+    return { ...parseGate3Output(output), source };
   } catch (err) {
     // Belt-and-braces: the helpers above already guard their own I/O, but a
     // telemetry failure must never be able to take down a finished run.
     return { ...GATE3_FALLBACK, reason: gate3Text(err instanceof Error ? err.message : err, 120) || "LINTER_SUBPROCESS_FALLBACK" };
+  } finally {
+    // Always reclaim the staged JD text — it is third-party content and must not
+    // outlive the audit, including when the linter throws.
+    try { cleanup?.(); } catch { /* nothing left to do */ }
   }
 }
 
