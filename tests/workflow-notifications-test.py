@@ -1,6 +1,8 @@
 """Check notification at-most-once business state across graph replays and failures."""
 
 from pathlib import Path
+import os
+import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
@@ -48,4 +50,19 @@ check("success")
 check("failure")
 check("timeout")
 check("crash")
-print("notification graph: success and uncertain attempts are never repeated")
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    python = root / "workflow/.venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_text('#!/bin/sh\nprintf "%s|%s\\n" "${CAREER_OPS_NOTIFICATIONS_ENABLED:-}" "$*" >> "$CALLS"\n')
+    python.chmod(0o755)
+    calls = root / "calls"
+    environment = {key: value for key, value in os.environ.items() if key != "CAREER_OPS_NOTIFICATIONS_ENABLED"}
+    subprocess.run(["sh", str(Path(__file__).resolve().parents[1] / "scripts/career-ops-score.sh")],
+                   cwd=root, env={**environment, "CALLS": str(calls)}, check=True)
+    assert calls.read_text().splitlines() == [
+        "|-B -m workflow.career_ops cron-score",
+        "1|-B -m workflow.notifications cron",
+    ]
+print("notification graph and scheduled wrapper: delivery and replay checks passed")
