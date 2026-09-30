@@ -6,6 +6,7 @@ import { findExistingEvaluation, markInboxDone } from "@/lib/core/eval-dedupe";
 import { buildCliArgs, buildCliEnv, detectCliPlaintextError, processStreamJsonLines, usesStreamJson } from "@/lib/cli-stream";
 import { careerOpsRoot, findApplication, primaryReportNum, readMemory } from "@/lib/career-ops";
 import { acquireEvalGate, acquirePdfGate, isTrackerWriting } from "@/lib/core/run-registry";
+import { runCoreScript } from "@/lib/core/run-core-script";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
 import { jevPreScreen } from "@/lib/jev-pre-screen.mjs";
 import { livenessPreScreen, isCheckableUrl } from "@/lib/liveness-pre-screen.mjs";
@@ -27,6 +28,131 @@ const STREAM_HEADERS: Record<string, string> = {
 // artifacts (A–F report + tracker row) via the SAME scripts the CLI uses.
 // Prompts live in run-prompts.mjs; Claude tool/sandbox argv is built ONLY by
 // claudeCliArgs (route may not spell tool flags — #2185). Streams NDJSON.
+
+/**
+ * Gate 3 telemetry — the post-tailoring compliance audit, reported alongside
+ * `done` so the card can show it without polling.
+ *
+ * WHY A SUBPROCESS AND NOT AN IMPORT
+ *   `jev-post-linter.mjs` is a root-level asset and web/src/ is the dashboard's
+ *   import boundary: Turbopack pins its module graph to web/ and statically
+ *   traces path literals, so importing across it fails the production build
+ *   (see the rootScript() note in @/lib/career-ops and modes/_custom.md §Jev).
+ *   `runCoreScript` is the sanctioned way to reach a root .mjs: a bounded
+ *   subprocess over an assembled path. The linter's own decision logic is pure,
+ *   but the CLI is its supported entry point, so that is what we call.
+ *
+ * FAIL-OPEN, WITHOUT EXCEPTIONS
+ *   Gate 3 is an audit. If it cannot answer, the run still produced a PDF, and
+ *   silently withholding it would be worse than no audit — it would look like a
+ *   working safety net while removing the user's output. So every failure mode
+ *   (no artifact, no local JD, spawn error, timeout, unparseable stdout, thrown
+ *   exception) returns `unavailable` and the run completes normally. `halt` is
+ *   reserved for a real finding reported by the linter itself, and even then it
+ *   is telemetry only: it never blocks the stream.
+ */
+type Gate3Decision = "pass" | "halt" | "unavailable";
+type Gate3Telemetry = {
+  decision: Gate3Decision;
+  reason?: string;
+  reasons?: string[];
+  /** What was actually audited — surfaces the payload-vs-markdown caveat. */
+  source?: string;
+};
+
+/** The single fail-open default, per the Gate 3 contract. */
+const GATE3_FALLBACK: Gate3Telemetry = {
+  decision: "unavailable",
+  reason: "LINTER_SUBPROCESS_FALLBACK",
+};
+
+const GATE3_TIMEOUT_MS = 45_000;
+
+/** Trim to a bounded string; a subprocess can emit anything. */
+function gate3Text(value: unknown, max = 300): string {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+/**
+ * Turn jev-post-linter's stdout into telemetry. Its CLI prints exactly one line:
+ *   "Gate 3 pass: clean" | "Gate 3 halt: <reasons>" | "Gate 3 unavailable: <reason>"
+ *
+ * Anything else means we could not read a verdict, which is `unavailable` —
+ * never `halt`, because a garbled stream is a transport failure and not a
+ * finding about the CV.
+ */
+function parseGate3Output(output: string): Gate3Telemetry {
+  const line = output
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith("Gate 3 "));
+  if (!line) return { ...GATE3_FALLBACK, reason: "UNPARSEABLE_LINTER_OUTPUT" };
+
+  const match = /^Gate 3 (pass|halt|unavailable)\s*:?\s*([\s\S]*)$/.exec(line);
+  if (!match) return { ...GATE3_FALLBACK, reason: "UNPARSEABLE_LINTER_OUTPUT" };
+
+  const [, decision, detail] = match;
+  const body = gate3Text(detail);
+  // The body is NOT split on ";": the linter's own reason prose contains
+  // semicolons ("weak experience lines; insert structured metrics"), so
+  // splitting corrupts it. Keep it verbatim as a single reason and let the card
+  // render it as written.
+  if (decision === "halt") return { decision: "halt", reasons: body ? [body] : ["linter reported a finding"] };
+  if (decision === "unavailable") return { decision: "unavailable", reason: body || "LINTER_REPORTED_UNAVAILABLE" };
+  return { decision: "pass", reasons: [] };
+}
+
+/** The local JD path for a `local:jds/...` input, else null (URL/remote inputs). */
+function gate3JobPath(input: string): string | null {
+  if (!input.startsWith("local:")) return null;
+  const rel = input.slice("local:".length);
+  const abs = path.join(careerOpsRoot(), rel);
+  return fs.existsSync(abs) ? abs : null;
+}
+
+/** Most recent `cv-*.payload.json` in output/ — the tailored CV this run wrote. */
+function gate3TailoredPayloadPath(): string | null {
+  try {
+    const outDir = path.join(careerOpsRoot(), "output");
+    const candidates = fs
+      .readdirSync(outDir)
+      .filter((f) => f.startsWith("cv-") && f.endsWith(".payload.json"))
+      .map((f) => ({ f, mtime: fs.statSync(path.join(outDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    return candidates.length ? path.join(outDir, candidates[0].f) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run Gate 3 for a finished pdf run. Never throws — every path returns
+ * telemetry, and every failure is `unavailable`.
+ */
+function collectGate3Telemetry(input: string): Gate3Telemetry {
+  try {
+    const resumePath = gate3TailoredPayloadPath();
+    if (!resumePath) return { ...GATE3_FALLBACK, reason: "NO_TAILORED_PAYLOAD" };
+
+    const jobPath = gate3JobPath(input);
+    if (!jobPath) {
+      return {
+        decision: "unavailable",
+        reason: "NO_LOCAL_JD",
+        source: path.basename(resumePath),
+      };
+    }
+
+    const { output, error } = runCoreScript("jev-post-linter", [resumePath, jobPath], GATE3_TIMEOUT_MS);
+    if (error) return { ...GATE3_FALLBACK, reason: gate3Text(error, 120) || "LINTER_SUBPROCESS_FALLBACK" };
+
+    return { ...parseGate3Output(output), source: path.basename(resumePath) };
+  } catch (err) {
+    // Belt-and-braces: the helpers above already guard their own I/O, but a
+    // telemetry failure must never be able to take down a finished run.
+    return { ...GATE3_FALLBACK, reason: gate3Text(err instanceof Error ? err.message : err, 120) || "LINTER_SUBPROCESS_FALLBACK" };
+  }
+}
 
 export async function POST(req: Request) {
   let body: { kind?: string; input?: string; cliId?: string; force?: boolean | string };
@@ -470,7 +596,11 @@ export async function POST(req: Request) {
                 : "This run finished without writing a CV PDF under output/ — nothing to view. Re-run Generate CV.",
           });
         } else if (cleanExit && !sawError) {
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          // Gate 3 rides on the same payload as the tokens. Advisory telemetry:
+          // `unavailable` and `halt` both complete normally, and only a real pdf
+          // lane has a tailored artifact to audit.
+          const gate3Telemetry = kind === "pdf" ? collectGate3Telemetry(input) : GATE3_FALLBACK;
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd, gate3: gate3Telemetry });
         } else if ((persists && wroteReport) || (needsArtifact && artifactOk)) {
           // Report/PDF landed despite stderr noise / non-zero exit — bank it as
           // done with a visible warning so the card is honest without lying red.

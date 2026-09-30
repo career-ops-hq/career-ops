@@ -50,6 +50,26 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
+    // Gate 3 telemetry in the pdf done lane: collectGate3Telemetry() passes the
+    // tailored payload path and the target JD path as two POSITIONAL args, no
+    // flags.
+    //
+    // probe 'none', NOT 'run'/'flags-only': this script has no validateFlags()
+    // and no --help handling — argv is positional, so any appended flag is
+    // simply ignored and the real linter runs, spending a provider call. Worse,
+    // it exits 3 on a real `halt` finding (and 0 on unavailable), so an argv
+    // probe that required exit 0 would fail on a CV that merely has weak
+    // metrics. The argv is therefore left to the static half of this file.
+    // TODO(#gate3): the stdout parser in route.ts has no automated test yet —
+    // it was verified by hand against observed CLI output (pass / halt /
+    // unavailable / usage-text / empty / provider-error shapes). Extracting it
+    // into web/src/lib/core/ with a parity test would close that gap.
+    source: 'web/src/app/api/run/route.ts',
+    script: 'jev-post-linter.mjs',
+    args: ['<tailored-payload.json>', '<target-jd.txt>'],
+    probe: 'none',
+  },
+  {
     source: 'web/src/lib/core/status-update.ts',
     script: 'set-status.mjs',
     // runStatusUpdate builds ['--row', n, status, '--source', 'web', '--json',
