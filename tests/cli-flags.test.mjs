@@ -2,9 +2,7 @@
 //
 // The defect it exists to prevent is silent: `args.indexOf('--flag')` returns
 // -1 for `--flag=value`, so the script runs with its default and reports a
-// result for inputs nobody asked for. Verified on main before the fix:
-// `process-quality --file=X` read the default tracker, `validate-portals
-// --file=X` validated portals.yml, `detect-reposts --window=5` used 90 days.
+// result for inputs nobody asked for.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';

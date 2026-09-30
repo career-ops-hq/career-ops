@@ -1,13 +1,4 @@
-// tests/cli-flag-validation.test.mjs — CLIs must reject a mistyped flag
-// instead of answering from their defaults (#2980).
-//
-// The failure class lib/cli-flags.mjs exists to end: an unrecognized flag is
-// ignored, the value flag it was meant to be falls back to its default, and
-// the script reports a result for inputs nobody asked for at exit 0. Already
-// fixed in dedup-tracker.mjs (#2744/#2746), scan.mjs (#2270),
-// and doctor.mjs (#2874).
-//
-// HERMETIC: nothing reads or writes the real data.
+// Check the retained doctor CLI rejects missing flag values without accessing data.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -42,10 +33,4 @@ test('doctor: --target --json does not diagnose a directory named "--json"', () 
   const r = runScript('doctor.mjs', '--target', '--json');
   assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
   assert.match(r.all, /--target requires a value/);
-});
-
-test('detect-reposts: --window --summary does not silently fall back to the default window', () => {
-  const r = runScript('detect-reposts.mjs', '--window', '--summary');
-  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
-  assert.match(r.all, /--window requires a value/);
 });
