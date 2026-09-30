@@ -343,6 +343,13 @@ export const SYSTEM_PATHS = [
   // and quotes -- updater-migration-tests.mjs extracts the array with a regex over
   // quoted spans, so a stray apostrophe here parses as a bogus path entry.
   'jev-post-linter.mjs',
+  // Gate 3 on-disk ledger writer, called by the web pdf lane through
+  // runCoreScript() so the metric survives the session for the Go TUI. Root
+  // level because rootScript() resolves <careerOpsRoot>/<name>.mjs only. NOTE:
+  // keep this comment free of apostrophes and quotes -- updater-migration-tests.mjs
+  // extracts the array with a regex over quoted spans, so a stray apostrophe here
+  // parses as a bogus path entry.
+  'append-gate3-log.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'browser-extract.mjs',

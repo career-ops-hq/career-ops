@@ -78,6 +78,9 @@ const GATE3_TIMEOUT_MS = 45_000;
  */
 const GATE3_EXTRACT_TIMEOUT_MS = 20_000;
 
+/** The ledger append is advisory — never let it hold a finished run open long. */
+const GATE3_LEDGER_TIMEOUT_MS = 15_000;
+
 /** Trim to a bounded string; a subprocess can emit anything. */
 function gate3Text(value: unknown, max = 300): string {
   return String(value ?? "").trim().slice(0, max);
@@ -183,6 +186,32 @@ export function extractJsonPayload(output: string): { text: string } | null {
  * translation, so there is exactly one place that decides what an extraction
  * failure means.
  */
+/**
+ * Ledger row id. A `local:jds/…` run is tied to a report number, and the best
+ * available tracker key for it is that number — but a URL paste has no tracker
+ * row yet, so the posting URL is used and the TUI sees "" for the numeric join.
+ * Reported rather than guessed: a wrong number would attach a Gate 3 verdict to
+ * a DIFFERENT application, which is worse than a blank the consumer can filter.
+ */
+function gate3LedgerId(input: string): string {
+  if (input.startsWith("local:")) {
+    const m = input.match(/(\d{3})-/);
+    if (m) return m[1];
+    return path.basename(input).replace(/\.[^.]+$/, "").slice(0, 40);
+  }
+  return input.slice(0, 40);
+}
+
+/** Best-effort company/role for the ledger's human-readable columns. */
+function gate3LedgerRoleHints(input: string): [string, string] {
+  if (input.startsWith("local:")) {
+    const base = path.basename(input).replace(/\.[^.]+$/, "");
+    const m = base.match(/^\d+-([a-z0-9-]+)-/);
+    return m ? [m[1].replace(/-/g, " "), base] : ["", base];
+  }
+  return ["", input];
+}
+
 function captureUrlJdText(url: string): { jobPath: string; cleanup: () => void } {
   const { output, error } = runCoreScript(
     "browser-extract",
@@ -239,7 +268,28 @@ function collectGate3Telemetry(input: string): Gate3Telemetry {
     const { output, error } = runCoreScript("jev-post-linter", [resumePath, jobPath], GATE3_TIMEOUT_MS);
     if (error) return { ...GATE3_FALLBACK, reason: gate3Text(error, 120) || "LINTER_SUBPROCESS_FALLBACK", source };
 
-    return { ...parseGate3Output(output), source };
+    const verdict = parseGate3Output(output);
+
+    // Append to the on-disk Gate 3 ledger (data/gate3-log.tsv) so the metric
+    // survives the session for the Go TUI, which has no access to this stream.
+    // The row is keyed by the tracker id, which `input` already carries for a
+    // `local:` run; a URL input has no tracker number yet, so the ledger row is
+    // keyed on the posting URL instead and reports "" — a gap the TUI can filter,
+    // which beats guessing a number that would join to the wrong application.
+    const rowId = gate3LedgerId(input);
+    try {
+      const [company, role] = gate3LedgerRoleHints(input);
+      runCoreScript(
+        "append-gate3-log",
+        [rowId, company, role, verdict.decision, gate3Text(verdict.reasons?.join("; ") || verdict.reason, 200)],
+        GATE3_LEDGER_TIMEOUT_MS,
+      );
+    } catch {
+      // Advisory ledger: the CV is written and the run already reported done.
+      // A failed append must never change what the card shows.
+    }
+
+    return { ...verdict, source };
   } catch (err) {
     // Belt-and-braces: the helpers above already guard their own I/O, but a
     // telemetry failure must never be able to take down a finished run.

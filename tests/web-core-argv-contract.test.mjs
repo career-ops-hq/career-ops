@@ -100,6 +100,27 @@ const CALL_SITES = [
     runtimeFlags: ['--mode', '--max-chars'],
   },
   {
+    // Gate 3's on-disk ledger append, fired from collectGate3Telemetry after a
+    // verdict resolves: runCoreScript("append-gate3-log", [id, company, role,
+    // decision, reason]).
+    //
+    // probe 'none': positional argv, no flags, and the one thing a probe could
+    // usefully assert — that it accepts its operands — is already covered by the
+    // script's own argument check (exit 2 with usage when any are missing).
+    // Probing for real would WRITE A ROW to the user's gate3-log.tsv, which is
+    // exactly the side effect this suite must not have.
+    source: 'web/src/app/api/run/route.ts',
+    script: 'append-gate3-log.mjs',
+    args: ['<id>', '<company>', '<role>', '<decision>', '<reason>'],
+    probe: 'none',
+    // The static half scans by SOURCE, so every --flag literal anywhere in
+    // route.ts is checked against each of this file's three entries. --mode /
+    // --max-chars belong to the browser-extract call and are declared on that
+    // entry; repeated here because the guard cannot tell call sites in one file
+    // apart.
+    runtimeFlags: ['--mode', '--max-chars'],
+  },
+  {
     source: 'web/src/lib/core/status-update.ts',
     script: 'set-status.mjs',
     // runStatusUpdate builds ['--row', n, status, '--source', 'web', '--json',
