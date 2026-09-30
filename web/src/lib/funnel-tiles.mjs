@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveCodeRoot } from './core/code-root.mjs';
 
 // Cumulative "how far has this search actually got?" counters for the analytics
 // headline tiles. Pure JS (no TS types) so it can be imported by the analytics
@@ -53,7 +54,7 @@ export function cumulativeTiles(canonStatuses) {
  * @param {string|null} content
  * @param {string} [coreRoot] Code checkout, never the separate user data root.
  */
-export async function cumulativeTilesWithHistory(applications, content, coreRoot = path.resolve(process.cwd(), '..')) {
+export async function cumulativeTilesWithHistory(applications, content, coreRoot = resolveCodeRoot(process.cwd())) {
   // Turbopack is intentionally confined to web/ for Windows stability. Load
   // the core at runtime, as the other core accessors do; do not widen its root
   // or silently substitute a second engine if the installation is incomplete.

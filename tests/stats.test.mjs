@@ -23,6 +23,24 @@ try {
   assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'offer',to:'discarded'}]).everOffer, 1);
   pass('rejections count as replies and distinct ledger history retains reached stages');
 
+  const skipTracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-09-01 | Acme | Eng | 4/5 | **SKIP** | - | - | |',
+    '| 2 | 2026-09-01 | Beta | Eng | 4/5 | No Aplicar | - | - | |',
+    '| 3 | 2026-09-01 | Gama | Eng | 4/5 | Rejected | - | - | |',
+  ].join('\n');
+  const skipLedger = stats.parseStatusLogStages([
+    '1\t2026-09-01\tInterview\tSKIP',
+    '2\t2026-09-01\tOffer\tSKIP',
+    '3\t2026-09-01\tInterview\tRejected',
+  ].join('\n'));
+  assert.deepEqual(stats.computeFunnelWithHistory(stats.trackerStatusByNum(skipTracker), skipLedger), {
+    everApplied: 1, everResponded: 1, everInterview: 1, everOffer: 0,
+    responseRate: 100, interviewRate: 100, offerRate: 0, smallSample: true, basis: 'ledger',
+  });
+  pass('canonicalized SKIP rows cannot recover prior interview or offer stages');
+
   // Tracker roll-up — CRLF input on purpose (Windows checkouts).
   const trackerMd = [
     '# Applications Tracker',

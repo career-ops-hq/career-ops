@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { pipelineSummary, readApplicationStatusLog } from "@/lib/career-ops";
+import { pipelineSummary, readApplicationStatusLog, readStatusLog } from "@/lib/career-ops";
+import { PipelineSankey } from "@/components/analytics/pipeline-sankey";
 import { canonStatus, scoreNum } from "@/lib/format";
 import { cumulativeTilesWithHistory } from "@/lib/funnel-tiles.mjs";
 
@@ -18,6 +19,7 @@ const STAGES: { key: string; label: string }[] = [
 
 export default async function Analytics() {
   const { applications } = pipelineSummary();
+  const statusLog = readStatusLog();
   const total = applications.length;
 
   const stageCounts = STAGES.map((s) => ({
@@ -52,7 +54,7 @@ export default async function Analytics() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="mx-auto max-w-5xl px-6 py-10">
       <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
       <p className="mt-1 text-sm text-muted">Across {total} tracked evaluation{total === 1 ? "" : "s"}.</p>
 
@@ -71,6 +73,8 @@ export default async function Analytics() {
           hint={offers === 0 ? "Offers follow interviews — keep the conversations going →" : undefined}
         />
       </div>
+
+      <PipelineSankey applications={applications} statusLog={statusLog} />
 
       <Section title="Pipeline by stage">
         {stageCounts.map((s) => (

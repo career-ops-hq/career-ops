@@ -964,6 +964,7 @@ search_queries:
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
 #   pinpoint        <slug>.pinpointhq.com
+#   prevueaps       <tenant>.prevueaps.ca  (or api: field; domainId resolved from the tenant's /jobs/ page)
 #   rippling        ats.rippling.com/<slug>/jobs
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   jobvite         jobs.jobvite.com/<slug>  (add company_eid: to skip the board lookup — see the stanza below)
@@ -993,6 +994,14 @@ search_queries:
 #   icims           careers-<tenant>.icims.com / *.icims.com
 #   pythonorg       python.org/jobs
 #   generalist-world generalist.world/jobs/  (curated generalist / operator roles board; SSR HTML, one fetch; or provider: generalist-world)
+#   applitrack      www.applitrack.com/<district>/onlineapp/  (Frontline AppliTrack K-12 board; optional default_location: "City, ST" is appended to site names that name no place)
+#   schoolspring    <district>.schoolspring.com  (K-12 board; public JSON API)
+#   neogov          www.schooljobs.com/careers/<agency>[/<folder>] or www.governmentjobs.com/careers/<agency>[/<folder>]
+#                   (community colleges, school districts, public agencies; a <folder> scopes to one custom careers page)
+#   redrover        jobs.redroverk12.com/org/<orgId>  (K-12 board; public postings only)
+#   peoplesoft      /psc/<site>/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL  (PeopleSoft Fluid Candidate
+#                   Gateway — the URL PATH is the signature, not the host: every tenant runs on its own
+#                   branded institution domain, e.g. recruit.uwo.ca, careers.torontomu.ca, hr.mcmaster.ca, wsib.ca)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1006,12 +1015,18 @@ search_queries:
 # origin (the /widgets endpoint lives on that same origin, so no separate
 # `api:` is needed).
 #
+# Eploy is also explicit-only: standard tenants use unrelated branded domains,
+# so a URL cannot be distinguished safely from a non-Eploy careers site. Set
+# `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
+# origin. A custom frontend merely handing applications to Eploy (for example,
+# Specsavers' Attrax jobs page) is not the same protocol and is not supported.
+#
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
-# himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
-# telegram-channel. Examples for every built-in provider are below.
+# field. Those are the provider modules that omit detect(); the commented
+# stanzas below are the authoritative list of them — each one carries its
+# own `provider:` line. (A provider with a URL-pattern detect() is
+# auto-claimed from its host instead, per the table above.)
 
 # ── Built-in provider examples ────────────────────────────────────
 # One commented stanza per provider in providers/. Uncomment one and adjust.
@@ -1040,6 +1055,10 @@ search_queries:
 #
 # - name: Example Pinpoint Co
 #   careers_url: https://exampleco.pinpointhq.com         # any *.pinpointhq.com host
+#   enabled: true
+#
+# - name: Example PrevueAPS Co
+#   careers_url: https://exampleco.prevueaps.ca/jobs/     # any *.prevueaps.ca host
 #   enabled: true
 #
 # - name: Example Rippling Co
@@ -1145,6 +1164,16 @@ search_queries:
 #                          # (default 200, max 1000). Raise it for a huge board.
 #   enabled: true
 #
+# - name: Example Eploy Co
+#   # Standard Eploy career site on a branded domain. The provider reads the
+#   # complete public /live-jobs.xml inventory in one anonymous request.
+#   careers_url: https://careers.exampleco.com/vacancies/
+#   provider: eploy              # required — branded domains cannot auto-detect
+#   eploy:                       # optional detail-page enrichment
+#     fetchDetails: false        # default false; sitemap-only is one request
+#     detailLimit: 25            # 1..100; ignored unless fetchDetails is true
+#   enabled: true
+#
 # - name: Example Phenom Co
 #   # Phenom People "CareerConnect" career site — the branded per-company
 #   # domain many large enterprises run. No auto-detection (no reliable
@@ -1183,6 +1212,25 @@ search_queries:
 #   # iCIMS hosted-portal board. Auto-detects any *.icims.com host from
 #   # careers_url/api.
 #   careers_url: https://careers-exampleco.icims.com/jobs/search?ss=1
+#   enabled: true
+#
+# - name: Example PeopleSoft Co
+#   # PeopleSoft Fluid Candidate Gateway. No vendor-owned host to pattern-match
+#   # (every tenant runs on its own branded institution domain) — detect() keys
+#   # on the Fluid job-search URL PATH instead, so any host works as long as the
+#   # path is exactly this shape.
+#   careers_url: https://careers.exampleu.edu/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
+#   max_pages: 20          # optional cap on "load more" POST replays (default 20, max 100) —
+#                          # PeopleSoft's own anonymous-session cap is ~100 results regardless
+#   peoplesoft:
+#     fetchDetails: false  # opt-in per-posting detail fetch for the full JD (off by default,
+#                          # zero-token); sequential and paced, capped by detailLimit (default 25)
+#     detailLimit: 25
+#   enabled: true
+#
+# - name: Western University                  # worked example — real, smoke-tested live 2026-09
+#                                                # (fetched 97/97 real postings incl. full JD text)
+#   careers_url: https://recruit.uwo.ca/psc/hrprdwebER/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
 #   enabled: true
 #
 # - name: Example SuccessFactors Co
@@ -1252,6 +1300,26 @@ search_queries:
 #   provider: beesite
 #   enabled: true
 #
+# - name: Example AppliTrack District
+#   careers_url: https://www.applitrack.com/exampledistrict/onlineapp/default.aspx   # any www.applitrack.com/<district>/... URL
+#   default_location: "Exampleville, WA"   # optional: appended to site names that name no place
+#   enabled: true
+#
+# - name: Example NEOGOV College
+#   careers_url: https://www.schooljobs.com/careers/examplecollege/facultypositions   # /careers/<agency>[/<folder>]; schooljobs.com or governmentjobs.com
+#   max_pages: 30          # optional page cap (10 postings/page, default 30, max 200) —
+#                          # a warning is logged if the cap truncates real results
+#   enabled: true
+#
+# - name: Example Red Rover District
+#   careers_url: https://jobs.redroverk12.com/org/1234   # the numeric org id from the district's board URL
+#   enabled: true
+#
+# - name: Example SchoolSpring District
+#   careers_url: https://exampledistrict.schoolspring.com/   # any <district>.schoolspring.com host
+#   max_pages: 20          # optional page cap (100 postings/page, default 20, max 100)
+#   enabled: true
+#
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
@@ -1283,6 +1351,16 @@ search_queries:
 #     scope: remote                       # optional; restricts to /jobs/remote
 #     max_pages: 3                        # optional page cap (25 jobs/page, default 3)
 #   enabled: true
+#
+# - name: OCC Mundial                     # Mexico's dominant general job board
+#   provider: occ                         # no detect() — only reachable via provider:
+#   queries: ["automatizacion", "robotica"]  # REQUIRED: OCC is a keyword-search board
+#                                         # with no browsable listing, so there is no
+#                                         # default — a built-in list would be one
+#                                         # user's search profile, not a board default.
+#   states: ["nuevo-leon", "jalisco"]     # optional; omit to scan nationwide
+#   max_pages: 3                          # optional page cap (20 jobs/page, default 3, max 10)
+#   enabled: true                         # 750ms pacing between pages
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
@@ -1492,6 +1570,24 @@ search_queries:
 #
 # - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
 #   provider: agentic-jobs
+#   enabled: true
+#
+# - name: Torre                           # pan-LatAm talent marketplace (torre.ai)
+#   provider: torre
+#   search: engineering manager           # optional but strongly recommended — an
+#                                         # unfiltered query returns the whole ~300k board
+#   experience: 1-plus-year               # required companion to search; one of
+#                                         # potential-to-develop / 1-plus-year / 2-plus-years /
+#                                         # 3-plus-years / 5-plus-years
+#   remote_only: true                     # optional
+#   enabled: true
+#   # Capped at 20 results/query, no paging — use several entries with
+#   # different search terms for breadth.
+#
+# - name: Yourator                        # Taiwanese startup/digital-roles board
+#   provider: yourator
+#   careers_url: https://www.yourator.co/jobs
+#   max_pages: 120                        # optional page cap (default 120, max 500)
 #   enabled: true
 #
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
@@ -2555,6 +2651,31 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/andela
     api: https://api.ashbyhq.com/posting-api/job-board/andela
     notes: "African-founded talent marketplace. Verified 2026-08-17: 19 postings, but mostly North America and the UK with a single Kenya role — enable it for the company, not for African coverage."
+    enabled: false
+
+  # -- US K-12 school districts & community colleges (single-employer boards) --
+  # Examples of the applitrack / neogov / redrover / schoolspring providers.
+  # Disabled: these are one region's boards — copy the pattern for your own
+  # district or college. Verified 2026-09-21 (postings when checked).
+  - name: Clark College (Faculty)
+    careers_url: https://www.schooljobs.com/careers/clarkcollege/facultypositions
+    notes: "NEOGOV, scoped to the faculty careers page. 28 postings when checked."
+    enabled: false
+
+  - name: Vancouver Public Schools
+    careers_url: https://vansd.schoolspring.com/
+    notes: "SchoolSpring. 65 postings when checked."
+    enabled: false
+
+  - name: Ridgefield School District
+    careers_url: https://jobs.redroverk12.com/org/1651
+    notes: "Red Rover K12. 4 public postings (5 more are internal-only) when checked."
+    enabled: false
+
+  - name: Camas School District
+    careers_url: https://www.applitrack.com/camas/onlineapp/default.aspx?all=1
+    default_location: "Camas, WA"
+    notes: "Frontline AppliTrack. 25 postings when checked."
     enabled: false
 
 # ── Job Boards ────────────────────────────────────────────────────────

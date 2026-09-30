@@ -4,8 +4,8 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check]
- *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]
  *
  * --batch renders every document in a JSON manifest (an array of
  * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
@@ -24,6 +24,12 @@
  * role) rather than accidentally scrambled by an agent. Without this flag,
  * any divergence from cv.md's section order still fails generation.
  *
+ * --allow-nonchronological downgrades the work-experience ordering guard from
+ * a thrown error to a console warning. By default a CV whose experience entries
+ * are not newest-first fails generation: promoting "the most relevant role" to
+ * the top is a functional-resume technique that buries the candidate's most
+ * recent senior title and reads as concealment to ATS parsers and recruiters.
+ *
  * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
  * The actual page count is checked after Chromium writes the PDF; overflow
  * warns with trimming guidance by default. --strict-pages turns that warning
@@ -41,8 +47,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
+import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -66,15 +74,28 @@ const PDF_PAGE_MARGIN = '0.6in';
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
-  if (__rootCache.key !== key) {
-    // Always re-derive: falling back to the import-time const when the variable
-    // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
-    __rootCache = { key, root, canonical: realpathSync(root) };
+  // Derive the root on EVERY call and key the cache on the resolved value.
+  //
+  // The root can move three ways: CAREER_OPS_TRACKER, CAREER_OPS_ROOT /
+  // CAREER_OPS_DATA_DIR, and the .career-ops-data marker file. Keying on the
+  // environment alone misses the marker, which is a file on disk and can change
+  // while the environment does not, so the cache would keep serving a stale
+  // workspace. The resolved root is the one value that captures all three, and
+  // what is memoised is only realpathSync(), the syscall worth avoiding.
+  //
+  // getCareerOpsRoot(), not __dirname: the data root is the env vars, then a
+  // .career-ops-data marker, then the repo, and only the last of those is the
+  // script's own directory. With the user layer outside the checkout this
+  // derived the workspace from the CODE directory, so every path under the
+  // real data root read as an escape and the PDF was refused (#4389). Line 49
+  // already used getCareerOpsRoot(), so the two disagreed inside one module.
+  const root = resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
+  if (__rootCache.key !== root) {
+    __rootCache = { key: root, root, canonical: realpathSync(root) };
   }
   return __rootCache;
 }
+
 // Two accessors on purpose, so each call site keeps the exact semantics it had:
 // the containment guard compares canonical forms (a symlinked ancestor must not
 // read as an escape), while the manifest/output helpers work in the lexical form
@@ -1255,7 +1276,7 @@ async function generatePDF() {
   // Parse arguments
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
-  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false;
+  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false, allowNonChronological = false;
   let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
@@ -1270,6 +1291,8 @@ async function generatePDF() {
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
       allowReorder = true;
+    } else if (arg === '--allow-nonchronological') {
+      allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
     } else if (arg === '--skip-fact-check') {
@@ -1301,9 +1324,10 @@ async function generatePDF() {
   format = resolvePageFormat(format, { profilePath: resolve(workspaceRoot, 'config', 'profile.yml') });
 
   // Batch mode (#2384): render every document in the manifest through one
-  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
-  // all entries; each entry supplies its own input/output and may override
-  // format/reportNum. Takes no positional input/output.
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
+  // --allow-nonchronological to all entries; each entry supplies its own
+  // input/output and may override format/reportNum. Takes no positional
+  // input/output.
   if (batchManifestPath) {
     // --report keys a single PDF to one tracker row; a batch renders N distinct
     // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
@@ -1313,12 +1337,12 @@ async function generatePDF() {
       console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
+    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder, allowNonChronological });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
-    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
     console.error('{input, output, format?, reportNum?}) through one shared Chromium and writes');
@@ -1368,6 +1392,15 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Drop the optional sections that came in as a bare header — a title with
+  // nothing under it (#3986). The builders already strip these from the payload
+  // side, but neither builder is on every path here: the web pdf flow has the
+  // agent emit finished HTML, which reaches this script with the empty wrappers
+  // still in place. Deciding from the rendered content covers both, and running
+  // it before the reorder and the guard means they judge the document that will
+  // actually be printed. A CV with nothing empty comes through unchanged.
+  html = stripEmptyRenderedSections(html);
+
   // Apply the user's declared section order (config/profile.yml `cv.sections`)
   // before the guard runs, so the guard judges the document that will be
   // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
@@ -1378,6 +1411,7 @@ async function generatePDF() {
   html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
+  validateCvExperienceOrder(html, { allowNonChronological });
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
@@ -1446,7 +1480,7 @@ async function generatePDF() {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean}} globals
+ * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean, allowNonChronological: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -1537,11 +1571,14 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
-      // Same order as the single render: reorder first so the guard judges the
-      // document that will actually be printed. Without this the batch path
-      // rendered N CVs with cv.sections silently inert.
+      // Same order as the single render: strip the bare-header sections, then
+      // reorder, so the guard judges the document that will actually be
+      // printed. Without this the batch path rendered N CVs with cv.sections
+      // silently inert.
+      html = stripEmptyRenderedSections(html);
       html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       html = normalizeTextForATS(html).html;
 
       entries.push({

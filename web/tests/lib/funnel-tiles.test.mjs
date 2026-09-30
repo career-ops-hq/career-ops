@@ -6,12 +6,35 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { cumulativeTiles, cumulativeTilesWithHistory } from "../../src/lib/funnel-tiles.mjs";
 import { canonStatus } from "../../src/lib/status-alias.mjs";
 import { parseApplications } from "../../src/lib/tracker-table.mjs";
 import { recoverFunnelStages, parseStatusLogStages } from '../../../funnel-stages.mjs';
 import { fileURLToPath } from 'node:url';
 const coreRoot = fileURLToPath(new URL('../../../', import.meta.url));
+
+test('history tiles resolve the configured checkout from an isolated runtime', async () => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'funnel-tiles-runtime-'));
+  const previousCwd = process.cwd();
+  const previousCodeRoot = process.env.CAREER_OPS_CODE_ROOT;
+  try {
+    process.chdir(runtime);
+    const apps = [{ n: '1', status: 'REJECTED' }];
+    const ledger = '1\t2026-09-01\tOffer\tRejected';
+    for (const override of [coreRoot, path.relative(process.cwd(), coreRoot)]) {
+      process.env.CAREER_OPS_CODE_ROOT = override;
+      assert.deepEqual(await cumulativeTilesWithHistory(apps, ledger), { interviews: 1, offers: 1 });
+    }
+  } finally {
+    process.chdir(previousCwd);
+    if (previousCodeRoot === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = previousCodeRoot;
+    fs.rmSync(runtime, { recursive: true, force: true });
+  }
+});
 
 test("an offer-holder has already interviewed", () => {
   // The bug: a snapshot count reported interviews=0 here, so the tile showed
@@ -76,6 +99,22 @@ test('markdown-formatted canonical tracker status retains snapshot achievements'
     .map((app) => ({ ...app, status: canonStatus(app.status) }));
   assert.equal(applications[0].status, 'OFFER');
   assert.deepEqual(await cumulativeTilesWithHistory(applications, '', coreRoot), { interviews: 1, offers: 1 });
+});
+
+test('canonicalized SKIP rows do not recover interview or offer achievements', async () => {
+  const tracker = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 2026-09-01 | Acme | Engineer | 4 | **SKIP** | - | - | |
+| 2 | 2026-09-01 | Beta | Engineer | 4 | No Aplicar | - | - | |
+| 3 | 2026-09-01 | Gama | Engineer | 4 | Rejected | - | - | |`;
+  const applications = parseApplications(tracker, coreRoot)
+    .map((app) => ({ ...app, status: canonStatus(app.status) }));
+  const ledger = [
+    '1\t2026-09-01\tInterview\tSKIP',
+    '2\t2026-09-01\tOffer\tSKIP',
+    '3\t2026-09-01\tInterview\tRejected',
+  ].join('\n');
+  assert.deepEqual(await cumulativeTilesWithHistory(applications, ledger, coreRoot), { interviews: 1, offers: 0 });
 });
 
 test('web tiles consume the core recovered-stage contract, including case normalization', async () => {

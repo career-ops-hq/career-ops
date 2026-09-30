@@ -87,6 +87,15 @@ version: 1.0.0
     line-height: 1.02;
   }
 
+  .header-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--accent-color, #0d0f13);
+    margin-top: 3px;
+    line-height: 1.15;
+  }
+
   /* Short accent rule under the name, not a full-width gradient. */
   .header-gradient {
     width: 46px;
@@ -192,6 +201,14 @@ version: 1.0.0
     font-size: 9px;
     color: #7b8391;
     margin-top: 0.5px;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 9.5px;
+    line-height: 1.5;
+    color: #55606d;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -307,6 +324,7 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .job-context,
   .edu-location,
   .project-title {
     break-after: avoid;
@@ -369,6 +387,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>

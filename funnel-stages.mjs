@@ -22,13 +22,16 @@ export function parseStatusLogStages(content) {
 
 /** Highest observed stage per distinct current tracker identity.
  * Non-numeric identities can retain snapshot counts but never join the ledger.
+ * Current SKIP rows remain outside the funnel regardless of their history.
  */
 export function recoverFunnelStages(statusByNum, ledger) {
   const reached = new Map();
   const bump = (num, status) => reached.set(num, Math.max(reached.get(num) || 0, funnelStageRank(status)));
-  for (const [num, status] of statusByNum) bump(num, status);
+  for (const [num, status] of statusByNum) {
+    if (String(status ?? '').trim().toUpperCase() !== 'SKIP') bump(num, status);
+  }
   for (const { num, from, to } of ledger) {
-    if (!statusByNum.has(num)) continue;
+    if (!reached.has(num)) continue;
     bump(num, from);
     bump(num, to);
   }

@@ -264,6 +264,30 @@ try {
     fail(`workday.detect(no-locale) returned ${JSON.stringify(hitNoLocale)}`);
   }
 
+  // myworkdaysite.com — same product, tenant in the path (/recruiting/{tenant}/{site}).
+  const hitSite = workday.detect({ name: 'Guidewire', careers_url: 'https://wd5.myworkdaysite.com/recruiting/guidewire/external' });
+  if (hitSite && hitSite.url === 'https://wd5.myworkdaysite.com/wday/cxs/guidewire/external/jobs') {
+    pass('workday.detect() resolves a myworkdaysite.com board to its CXS endpoint');
+  } else {
+    fail(`workday.detect(myworkdaysite) returned ${JSON.stringify(hitSite)}`);
+  }
+
+  // One myworkdaysite host serves many tenants, so the dedup key carries the
+  // path tenant: two tenants sharing a requisition ID stay apart, while one
+  // tenant's cross-site reposts still collapse.
+  {
+    const posting = { jobPostings: [{ title: 'SRE', externalPath: '/job/Remote/SRE_R100' }] };
+    const keyFor = (careers_url) => workday.dedupKey(parseWorkdayResponse(posting, { name: 'X', careers_url })[0]);
+    const [acme, other, acmeOtherSite] = ['acme/careers', 'other/careers', 'acme/indeed']
+      .map((path) => keyFor(`https://wd1.myworkdaysite.com/recruiting/${path}`));
+    if (acme === 'workday:wd1.myworkdaysite.com/recruiting/acme:r100'
+        && other === 'workday:wd1.myworkdaysite.com/recruiting/other:r100' && acmeOtherSite === acme) {
+      pass('workdayDedupKey() scopes myworkdaysite.com by path tenant: two tenants on one host stay apart, one tenant\'s sites collapse');
+    } else {
+      fail(`workdayDedupKey() myworkdaysite tenant scope: ${JSON.stringify({ acme, other, acmeOtherSite })}`);
+    }
+  }
+
   // detect() — null cases
   if (workday.detect({ name: 'X', careers_url: 'https://example.com/careers' }) === null) {
     pass('workday.detect() returns null for non-Workday URL');

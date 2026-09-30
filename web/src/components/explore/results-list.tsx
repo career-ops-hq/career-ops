@@ -11,7 +11,7 @@ import { useExplore } from "./explore-provider";
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode, running } = useExplore();
+  const { companiesScanned, partial, error, addToPipeline, added, mode, running } = useExplore();
   const isAi = mode === "ai";
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
@@ -41,6 +41,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
               ? "found by AI on the open web · unverified until you evaluate"
               : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
           </p>
+          {!isAi && error && <p className="text-[12px] text-amber-700 dark:text-amber-300">{error}</p>}
         </div>
 
         <div className="ml-auto flex items-center gap-2">

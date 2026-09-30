@@ -13,3 +13,14 @@ test('history recovery ignores malformed and orphan rows and retains highest sta
   assert.equal(ledger.length, 3);
   assert.deepEqual([...recoverFunnelStages(new Map([[1,'Discarded']]), ledger)], [[1,4]]);
 });
+
+test('current SKIP rows remain outside the funnel despite prior stages', () => {
+  const statuses = new Map([[1, 'SKIP'], [2, ' skip '], [3, 'Rejected']]);
+  const ledger = parseStatusLogStages([
+    '1\t2026-09-01\tInterview\tSKIP',
+    '2\t2026-09-01\tOffer\tSKIP',
+    '3\t2026-09-01\tInterview\tRejected',
+  ].join('\n'));
+  assert.deepEqual([...recoverFunnelStages(statuses, ledger)], [[3, 3]]);
+  assert.deepEqual([...recoverFunnelStages(statuses, [])], [[3, 2]]);
+});
