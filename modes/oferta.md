@@ -332,7 +332,24 @@ Top 5 changes to CV + Top 5 changes to LinkedIn to maximize match.
 
 The **Reflection** column captures what was learned or what would be done differently. This signals seniority — junior candidates describe what happened, senior candidates extract lessons.
 
-**Story Bank:** If `interview-prep/story-bank.md` exists, check if any of these stories are already there. If not, append new ones. Over time this builds a reusable bank of 5-10 master stories that can be adapted to any interview question.
+**Story Bank:** The table above is for the report. The bank at `{DATA_ROOT}/interview-prep/story-bank.md` takes the same stories in a different shape, because `npm run star`, `negotiation-roi.mjs` and `story-provenance-check.mjs` read only that shape:
+
+1. If the file is missing, create it by copying `templates/story-bank.template.md`.
+2. Skip any story whose title is already in the bank.
+3. Append each new story as a `### ` block in the template's format, one field per line:
+
+```markdown
+### [Theme] Story Title
+**Source:** Report #NNN — Company — Role
+**S (Situation):** …
+**T (Task):** …
+**A (Action):** …
+**R (Result):** …
+**Reflection:** …
+**Best for questions about:** …
+```
+
+Never paste table rows into the bank. Always fill in `**A (Action):**`: a block without it is invisible to the readers. Keep the `### ` heading and the field labels in English whatever the output language. Do not add a `**Provenance:**` line: the evaluation does not get to vouch for its own figures, so the entry counts as `derived-unverified` until the user confirms them. Over time this builds a reusable bank of 5-10 master stories that can be adapted to any interview question.
 
 **Selected and framed according to the archetype:**
 - FDE → emphasize delivery speed and client-facing

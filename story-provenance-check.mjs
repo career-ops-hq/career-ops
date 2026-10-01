@@ -158,6 +158,7 @@ import { join } from 'path';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -224,38 +225,63 @@ const STOPWORDS = new Set([
 ]);
 
 // ── Story-bank parsing ──────────────────────────────────────────────
-// Same block shape match-star.mjs's parseStories() already relies on
-// (`### [Theme] Title` headers, `**Label:** value` lines) — reimplemented
-// narrowly here rather than imported, so this checker doesn't take on a
-// dependency on match-star.mjs's STAR-specific fields it doesn't need.
+// Splitting and validity come from lib/story-bank.mjs, the same definition
+// match-star.mjs and negotiation-roi.mjs use (#4514). What this checker adds
+// is coverage: it keeps EVERY block and every table row outside a block, not
+// only the valid stories, because a figure in a malformed entry is still a
+// figure in story-bank.md. Hiding it from the checker would hide exactly the
+// unverified numbers #2947 exists to surface. Invalid entries are flagged,
+// never dropped.
 
 /**
- * Parse story-bank.md into blocks with title, provenance marker, and body.
+ * Parse story-bank.md into checkable entries: every `### ` block, valid or
+ * not, then every table row outside a block, each attributed to itself.
  * @param {string} content
- * @returns {Array<{title: string, provenance: string|null, body: string}>}
+ * @returns {Array<{kind: 'story'|'table-row', title: string, provenance: string|null, body: string, valid: boolean, line: number}>}
  */
 function parseStoryBlocks(content) {
-  const blocks = content.split(/^### /m).slice(1);
-  const stories = [];
+  const { blocks, tableRows } = splitStoryBlocks(content);
 
-  for (const block of blocks) {
-    const lines = block.trim().split('\n');
-    const header = lines[0].trim();
-    if (!header) continue;
-
-    const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
-    const title = themeMatch ? themeMatch[2].trim() : header;
-
+  const stories = blocks.map((b) => {
     // The marker must open its own line (optional indent, at most one list or
     // quote marker). A `**Provenance:**` quoted inside another field's value is
     // story text, not the story's marker (issue #4819).
-    const provMatch = block.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
-    const provenance = provMatch ? provMatch[1].trim().toLowerCase() : null;
+    const provMatch = b.raw.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
+    return {
+      kind: 'story',
+      title: b.title || `(untitled, line ${b.line})`,
+      provenance: provMatch ? provMatch[1].trim().toLowerCase() : null,
+      body: b.raw,
+      valid: isValidStory(b),
+      line: b.line,
+    };
+  });
 
-    stories.push({ title, provenance, body: block });
-  }
+  const rows = tableRows.map((r) => ({
+    kind: 'table-row',
+    title: `(table row, line ${r.line}) ${r.label}`.trim(),
+    provenance: null,
+    body: r.text,
+    valid: false,
+    line: r.line,
+  }));
 
-  return stories;
+  return [...stories, ...rows];
+}
+
+/**
+ * Entries the other readers cannot see, with why.
+ * @param {ReturnType<typeof parseStoryBlocks>} entries
+ */
+function malformedEntries(entries) {
+  return entries.filter((e) => !e.valid).map((e) => ({
+    title: e.title,
+    kind: e.kind,
+    line: e.line,
+    reason: e.kind === 'table-row'
+      ? 'table row: not a ### block'
+      : 'no **A (Action):** line',
+  }));
 }
 
 // ── Claim extraction ─────────────────────────────────────────────────
@@ -552,7 +578,7 @@ function diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPa
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStoryBlocks, extractClaims, extractNumbers, classifyStoryBank, diagnose };
+export { parseStoryBlocks, malformedEntries, extractClaims, extractNumbers, classifyStoryBank, diagnose };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
@@ -805,7 +831,13 @@ if (isMainModule(import.meta.url)) {
     const cvText = cvExists ? readFileSync(cvPath, 'utf-8') : '';
 
     const result = classifyStoryBank(storyBankText, cvText);
-    const storyCount = storyBankExists ? parseStoryBlocks(storyBankText).length : 0;
+    const entries = storyBankExists ? parseStoryBlocks(storyBankText) : [];
+    // Every `### ` block counts, valid or not: this checker did parse them and
+    // did check their figures. A missing Action is reported in `malformed`,
+    // not as "no stories parsed". Table rows don't count, so a bank of nothing
+    // but table rows is still a low-confidence result.
+    const storyCount = entries.filter((e) => e.kind === 'story').length;
+    const malformed = malformedEntries(entries);
     const claimCount = result.existing.length + result.supportedByResume.length
       + result.derivedUnverified.length + result.userCannotConfirm.length;
     const diagnosis = diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPath, cvPath);
@@ -828,6 +860,13 @@ if (isMainModule(import.meta.url)) {
       printBucket('derived-unverified (only in story-bank.md, unconfirmed)', '⚠️', result.derivedUnverified);
       printBucket('user-cannot-confirm (explicitly marked, durable)', '🔒', result.userCannotConfirm);
 
+      if (malformed.length) {
+        console.log('');
+        console.log(`  🧩 malformed — invisible to npm run star / negotiation-roi (${malformed.length})`);
+        for (const m of malformed) console.log(`     - ${m.title} — ${m.reason}`);
+        console.log('     Convert to the format in templates/story-bank.template.md.');
+      }
+
       if (diagnosis) {
         console.log('');
         console.log('  🚨 LOW CONFIDENCE: this is not a clean result.');
@@ -835,7 +874,7 @@ if (isMainModule(import.meta.url)) {
         console.log(`     (reason: ${diagnosis.reason})`);
       }
     } else {
-      console.log(JSON.stringify({ ...result, lowConfidence: diagnosis }, null, 2));
+      console.log(JSON.stringify({ ...result, malformed, lowConfidence: diagnosis }, null, 2));
     }
   }
 }

@@ -122,7 +122,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `templates/cv-template.html` | HTML template for CVs |
 | `templates/cv-template.tex` | LaTeX/Overleaf template for CVs |
 | `article-digest.md` | Compact proof points from portfolio (optional) |
-| `interview-prep/story-bank.md` | Accumulated STAR+R stories |
+| `interview-prep/story-bank.md` | Accumulated STAR+R stories — entry format: `templates/story-bank.template.md` (one definition, read through `lib/story-bank.mjs`) |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel |
 | `generate-pdf.mjs` | Playwright: HTML to PDF |
 | `verify-cv-structure.mjs` | Non-blocking warning on the tailored-CV JSON payload (`modes/pdf.md` step 17b), before HTML/PDF rendering — flags structure silently lost or reordered vs. `cv.md` (a dropped `"· {descriptor}"` suffix, an experience entry out of cv.md's chronological order) that fact-checking alone can't see, since the surviving content is still true; reports `UNVERIFIED` rather than a false pass when `cv.md` doesn't use a supported Experience header convention |
