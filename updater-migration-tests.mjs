@@ -442,6 +442,14 @@ const twoPassManifestChecks = [
     pattern: /rejectUserLayerPaths\([\s\S]{0,300}?manifestProbes\(\{\s*trackedOutput:\s*git\('ls-files',\s*'-z'\),\s*upstreamOutput:\s*git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*targetCommit\),\s*\}\),/,
   },
   {
+    name: 'configured template variants are listed from the pinned target',
+    pattern: /configuredVariantRemoteFiles = git\('ls-tree',\s*'-r',\s*'--name-only',\s*targetCommit,\s*'--',\s*'templates'\)/,
+  },
+  {
+    name: 'configured template variant contents are read from the pinned target',
+    pattern: /readRemoteContent:\s*\(file\) => gitShowRaw\(\x60\$\{targetCommit\}:\$\{file\}\x60\)/,
+  },
+  {
     // A refused entry was never checked out, so verifying it would report a gap
     // this run created on purpose, exit 1, and advise a re-run that refuses the
     // same entry and fails identically — a manifest mistake turned into a
