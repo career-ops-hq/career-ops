@@ -89,6 +89,21 @@ const OLD_944_TEMPLATE = `# Story Bank — Master STAR+R Stories
 
 const IN_FENCE = '```markdown\n' + LONG_LABELS + '\n```';
 
+// CommonMark fences (§4.5): a fence closes only on the SAME character, a run
+// at least as long as the opening, and nothing but whitespace after it. The
+// first version closed any fence on any ``` line, so a ``` inside a ````
+// fence ended it early, the outer ```` then opened a new fence, and every
+// story after it vanished (FENCE_UNBALANCED_INNER). With a balanced inner
+// pair the miscount cancelled out, but a ### inside the fence leaked out as a
+// phantom story (FENCE_HIDDEN_HEADING).
+const FENCE_UNBALANCED_INNER = '````markdown\nTo open a code block, type:\n```js\n````\n\n' + SHORT_LABELS;
+const FENCE_HIDDEN_HEADING = '````\n```\n' + NO_ACTION.replace('### [Gap] Story with no action', '### [Fake] Inside the fence') + '\n**A (Action):** hidden\n```\n````\n\n' + SHORT_LABELS;
+const FENCE_TRAILING_TEXT = '```\n``` is not a closing fence\n' + LONG_LABELS + '\n```\n\n' + SHORT_LABELS;
+const FENCE_INDENTED_FOUR = '    ```\n' + SHORT_LABELS;
+// A backtick run whose info string contains a backtick is inline code, not a
+// fence (```a`b``` at the start of a line), so the story after it is visible.
+const FENCE_INLINE_CODE = '```a`b```\n' + SHORT_LABELS;
+
 const FIXTURES = {
   'long labels': LONG_LABELS,
   'short labels': SHORT_LABELS,
@@ -102,6 +117,11 @@ const FIXTURES = {
   'CRLF line endings': LONG_LABELS.replace(/\n/g, '\r\n'),
   'example in HTML comment': `<!--\n${LONG_LABELS}\n-->`,
   'example in code fence': IN_FENCE,
+  '4-backtick fence with an unbalanced ``` inside': FENCE_UNBALANCED_INNER,
+  '### inside a 4-backtick fence': FENCE_HIDDEN_HEADING,
+  'fence line with trailing text does not close': FENCE_TRAILING_TEXT,
+  'backticks indented 4 spaces are not a fence': FENCE_INDENTED_FOUR,
+  'inline code at line start is not a fence': FENCE_INLINE_CODE,
   '#944 template': OLD_944_TEMPLATE,
   'current template': TEMPLATE,
 };
@@ -160,6 +180,25 @@ test('expected verdicts for the edge fixtures', () => {
   assert.equal(count('example in HTML comment'), 0);
   assert.equal(count('example in code fence'), 0);
   assert.equal(count('#944 template'), 0, 'the #944 template example still parses as a phantom story');
+});
+
+test('a ``` line inside a ```` fence does not close it (CommonMark §4.5)', () => {
+  const titles = (name) => parseStories(FIXTURES[name]).map((s) => s.title);
+  // The story after the fence must survive in both readers…
+  assert.deepEqual(titles('4-backtick fence with an unbalanced ``` inside'), ['Plain title, no theme']);
+  assert.deepEqual(
+    parseStoryBlocks(FIXTURES['4-backtick fence with an unbalanced ``` inside']).filter((e) => e.valid).map((e) => e.title),
+    ['Plain title, no theme'],
+  );
+  // …and a ### inside the fence must stay hidden.
+  assert.deepEqual(titles('### inside a 4-backtick fence'), ['Plain title, no theme']);
+  // A fence line with text after it is content, so the real closing fence
+  // still hides the block inside and the story after it stays visible.
+  assert.deepEqual(titles('fence line with trailing text does not close'), ['Plain title, no theme']);
+  // Four spaces of indentation is an indented code block, not a fence.
+  assert.deepEqual(titles('backticks indented 4 spaces are not a fence'), ['Plain title, no theme']);
+  // A backtick in a backtick fence's info string makes it inline code.
+  assert.deepEqual(titles('inline code at line start is not a fence'), ['Plain title, no theme']);
 });
 
 // ── 2. The template is the contract ───────────────────────────────────
