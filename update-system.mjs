@@ -235,6 +235,11 @@ export const SYSTEM_PATHS = [
   'lib/ascii-fold.mjs',
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
+  // Append-only JSONL ledger for ingest-plugin history. System layer: the
+  // engine owns the write, so the module ships with update-system.mjs apply.
+  // verify-repo-hygiene.mjs flags any unregistered system file — it would be
+  // invisible on a fresh update, and the archive would silently stop working.
+  'lib/ingest-archive.mjs',
   'lib/local-today.mjs',
   'lib/placeholder-cell.mjs',
   'lib/scan-summary-marker.mjs',
@@ -264,6 +269,11 @@ export const SYSTEM_PATHS = [
   // by `apply` — the thing it is for.
   'scripts/jev_gatekeeper.py',
   'scripts/jev-calibrate.mjs',
+  // Budget-aware resume loop around the streaming feed processor. System layer:
+  // the batch agent shells out to it via its allowlist.
+  'scripts/run-stream-orchestrator.sh',
+  // Row-by-row NDJSON streaming engine (bounded memory, checkpoint/resume).
+  'scripts/stream-feed-processor.mjs',
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',

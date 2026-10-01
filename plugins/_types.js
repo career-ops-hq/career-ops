@@ -37,6 +37,21 @@
  * @property {string[]} [optionalEnv] Optional extra env var names (same denylist applies).
  * @property {string[]} [allowedHosts] Optional egress allowlist. REQUIRED (loader-enforced) when requiredEnv is non-empty. ADVISORY: it catches an honest plugin's own SSRF/redirect bugs when it routes through ctx — it is NOT a containment boundary against malicious code (see the trust note in README.md).
  * @property {boolean}  humanInTheLoop REQUIRED true. The loader hard-rejects false. A plugin may read/ingest/search/notify/export — never auto-submit a job application.
+ * @property {string}   [archive]    Optional. Path (relative to the career-ops
+ * root) of an append-only JSON Lines ledger the ENGINE writes for this plugin's
+ * parsed ingest rows. Opt-in durable history for alerts whose arrival matters
+ * beyond what pipeline.md retains.
+ *
+ * NOT an `export` hook. `export` receives a frozen snapshot of the TRACKER —
+ * never the ingest hook's Job[] — and its contract is "No file handle", so it
+ * cannot observe or record what an ingest produced. This is the sanctioned path:
+ * the plugin names the ledger, the engine appends to it, and the plugin still
+ * never touches a file itself.
+ *
+ * Append-only and never rewritten, which is what makes it safe for rows that
+ * must outlive a cache reset — `data/linkedin-job-meta.tsv` is fully rewritten by
+ * linkedin-job-enrich.mjs on every run and cannot hold a durable record.
+ *
  * @property {string}   [homepage]   Optional URL.
  */
 

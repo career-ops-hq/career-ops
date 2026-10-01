@@ -29,7 +29,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
 import { readLock, writeLockEntry, diffPlugin, hashPluginTree, consentSurface } from './_lock.mjs';
-import { loadRegistry } from './_registry.mjs';
+import { loadRegistry, findInRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
 export const HOOK_KINDS = ['provider', 'ingest', 'search', 'notify', 'export'];
@@ -148,7 +148,15 @@ export async function loadPluginConfig(root) {
  * @property {string} [homepage]
  * @property {string} dir
  */
-export function validateManifest(m, dir, dirName) {
+/**
+ * @param {object} m - The raw parsed manifest.
+ * @param {string} dir - Absolute path to the plugin directory.
+ * @param {string} dirName - Directory name (for warnings).
+ * @param {string} [root] - Career-ops root, used to resolve the registry when the
+ *   manifest omits `archive`. Optional so existing callers and tests are
+ *   unaffected; without it the fallback simply does not apply.
+ */
+export function validateManifest(m, dir, dirName, root) {
   const label = dirName;
   if (!m || typeof m !== 'object') { warnSkip(label, 'manifest.json is not an object'); return null; }
 
@@ -175,6 +183,49 @@ export function validateManifest(m, dir, dirName) {
   if (!Array.isArray(allowedHosts) || allowedHosts.some(x => typeof x !== 'string')) { warnSkip(label, 'allowedHosts must be an array of strings'); return null; }
   // A keyed plugin (reads a secret) MUST declare an egress allowlist.
   if (requiredEnv.length > 0 && allowedHosts.length === 0) { warnSkip(label, 'a plugin with requiredEnv must declare a non-empty allowedHosts egress allowlist'); return null; }
+
+  // Opt-in append-only archive the ENGINE writes. Validated here rather than
+  // trusted: the loader is the boundary, and a plugin that could name an
+  // arbitrary path would be able to append to any file in the repo — the one
+  // capability the plugin contract withholds from plugin code entirely.
+  // Relative, under data/, no traversal, .jsonl only.
+  // The archive path, with a registry fallback.
+  //
+  // A plugin's OWN manifest is authoritative. When it omits `archive`, the
+  // registry entry for the same id may supply one — the registry is the
+  // maintainer-reviewed, CI-validated distribution descriptor for that plugin
+  // (validate-plugin-registry.mjs plus a clone-and-audit job), so it is a
+  // defensible place to declare a path the upstream repo has not yet shipped.
+  //
+  // This is a genuine trust decision, so it is bounded three ways:
+  //   - the fallback only ever ADDS a capability the manifest did not ask for,
+  //     and it can never widen hooks, allowedHosts or requiredEnv;
+  //   - the value is validated by the SAME rules as a manifest-supplied one, so a
+  //     registry cannot point outside data/ or at a non-.jsonl file;
+  //   - it is resolved per id from our own registry, never from anything the
+  //     plugin's directory supplies.
+  // A plugin with no manifest `archive` and no registry entry is unaffected.
+  let archive;
+  let archiveSource = 'manifest';
+  if (m.archive === undefined && root) {
+    try {
+      const reg = findInRegistry(root, m.id);
+      if (reg && reg.archive !== undefined) { archive = reg.archive; archiveSource = 'registry'; }
+    } catch {
+      // An unreadable registry must never take down plugin discovery — the
+      // plugin simply has no archive, which is the pre-existing behaviour.
+      archive = undefined;
+    }
+  }
+  if (archive !== undefined) {
+    const a = archive;
+    if (typeof a !== 'string' || !a.trim()) { warnSkip(label, 'archive must be a non-empty string path'); return null; }
+    if (a.startsWith('/') || /^[A-Za-z]:/.test(a)) { warnSkip(label, `archive must be relative to the career-ops root: ${a}`); return null; }
+    if (a.split(/[\\/]/).includes('..')) { warnSkip(label, `archive must not traverse outside the career-ops root: ${a}`); return null; }
+    if (!a.replace(/\\/g, '/').startsWith('data/')) { warnSkip(label, `archive must live under data/: ${a}`); return null; }
+    if (!/\.jsonl$/i.test(a)) { warnSkip(label, `archive must be a .jsonl file: ${a}`); return null; }
+    archive = a.trim();
+  }
 
   const allowsLocalhost = m.allowsLocalhost === true;
   if (allowsLocalhost && allowedHosts.length === 0) { warnSkip(label, 'allowsLocalhost requires a non-empty allowedHosts'); return null; }
@@ -214,6 +265,8 @@ export function validateManifest(m, dir, dirName) {
     optionalEnv,
     allowedHosts,
     allowsLocalhost,
+    archive,
+    archiveSource,
     entry,
     skill,
     humanInTheLoop: true,
@@ -285,7 +338,7 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
         warnSkip(name, `manifest.json is invalid JSON — ${err.message}`);
         continue;
       }
-      const manifest = validateManifest(parsed, dir, name);
+      const manifest = validateManifest(parsed, dir, name, path.dirname(root));
       if (!manifest) continue;
       if (found.has(manifest.id)) {
         // earlier root wins (bundled > local) — EXCEPT an approved successor.

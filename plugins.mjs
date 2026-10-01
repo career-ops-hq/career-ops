@@ -28,7 +28,8 @@ import {
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
-import { appendToPipeline, appendToScanHistory, filterOffersForPipeline } from './scan.mjs';
+import { appendToPipeline, appendToScanHistory, filterOffersForPipeline, formatPipelineOffer } from './scan.mjs';
+import { appendToIngestArchive, toJsonl, archiveRecord } from './lib/ingest-archive.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 
@@ -119,6 +120,11 @@ async function cmdRun(args) {
 
   const cfg = await loadPluginConfig(ROOT);
   const manifest = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id);
+  // Opt-in durable history. A plugin NAMES the ledger; the engine writes it.
+  // Keeping the path in the manifest (rather than hardcoding a plugin id here)
+  // is what stops this becoming a third `id === '<plugin>'` special case, and it
+  // means the same mechanism serves any ingest plugin that wants a trail.
+  const archivePath = typeof manifest.archive === 'string' ? manifest.archive : null;
   if (!manifest) { console.error(`Unknown plugin "${id}". Run \`node plugins.mjs list\`.`); process.exit(1); }
 
   // Provider hooks ride scan, never this CLI.
@@ -159,7 +165,14 @@ async function cmdRun(args) {
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const seen = new Set();
     const unique = found.filter(j => j.url && !seen.has(j.url) && seen.add(j.url));
-    const { toAdd: jobs, skipped } = filterOffersForPipeline(unique, { pipelinePath: PIPELINE_PATH });
+    // `let`, not `const`: the LinkedIn title-verify step below REASSIGNS `jobs`
+    // with the enriched copy from enrichJobList(). Bound with `const` it threw
+    // "Assignment to constant variable" at runtime, and because the call is
+    // wrapped in a try/catch that only warns, the whole title-verification pass
+    // was being SKIPPED on every single run — silently, with a one-line stderr
+    // note that reads like a transient hiccup. Nothing else in the file
+    // reassigns it, so this is the only binding that has to be mutable.
+    let { toAdd: jobs, skipped } = filterOffersForPipeline(unique, { pipelinePath: PIPELINE_PATH });
     if (id === 'linkedin-alerts' && jobs.length && hook === 'ingest') {
       try {
         const { enrichJobList } = await import('./linkedin-job-enrich.mjs');
@@ -171,7 +184,24 @@ async function cmdRun(args) {
       }
     }
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new${skipped ? ` (${skipped} skipped — already in tracker/pipeline)` : ''}.`);
-    if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
+    if (dryRun) {
+      jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`));
+      // Show BOTH destinations rendered from the SAME rows. A preview that only
+      // echoes the pipeline line leaves the archive route unverified — and the
+      // two renderings disagree on purpose: pipeline.md puts compensation in
+      // column 5, the ledger keeps it as a nested object. Seeing both is what
+      // proves one parsed job reaches both sinks.
+      if (archivePath && unique.length) {
+        const preview = appendToIngestArchive(unique, { path: archivePath, pluginId: id, dryRun: true });
+        console.log(`  → ${preview.path} (would append ${preview.written} row(s), ${preview.bytes} bytes)`);
+        toJsonl(unique.slice(0, 3).map(j => archiveRecord(j, { pluginId: id })))
+          .split('\n').filter(Boolean)
+          .forEach(line => console.log(`      ${line}`));
+        if (unique.length > 3) console.log(`      … ${unique.length - 3} more row(s)`);
+      }
+      console.log(`(--dry-run: ${jobs.length ? 'pipeline.md and the archive ledger not written' : 'nothing to write'})`);
+      return;
+    }
     if (jobs.length) {
       await appendToPipeline(jobs);
       // Record provenance the same way scan.mjs does for provider-hook scans
@@ -193,6 +223,18 @@ async function cmdRun(args) {
           console.error(`⚠️  Pipeline title fix skipped: ${err.message}`);
         }
       }
+    }
+
+    // Durable event log. Deliberately OUTSIDE `if (jobs.length)`: that block is
+    // only entered when an alert is new to the pipeline, so an archive written
+    // there records first-sightings and nothing else — no re-listings, no repeat
+    // alerts, no history at all, which is the one thing an alert archive is for.
+    //
+    // Source is `unique` (everything this run's alerts surfaced, deduped by URL
+    // within the run), not `jobs` (only what is new to the pipeline).
+    if (archivePath && unique.length) {
+      const a = appendToIngestArchive(unique, { path: archivePath, pluginId: id });
+      if (a.written) console.log(`→ Archived ${a.written} parsed alert(s) to ${a.path}.`);
     }
     return;
   }
