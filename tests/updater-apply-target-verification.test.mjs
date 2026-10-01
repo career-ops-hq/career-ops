@@ -32,7 +32,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { pass, fail } from './helpers.mjs';
 import {
-  gitIn, pinRefToCommit, versionAtRef, downgradeRefusal,
+  gitIn, pinRefToCommit, pinInheritedTarget, versionAtRef, downgradeRefusal,
   isComparableVersion, targetIdentityRefusal, refusalMessage,
   authoritativeShaFromRefBody, refspecForTarget,
 } from '../update-system.mjs';
@@ -121,6 +121,36 @@ console.log('\n🧪 Testing that apply() verifies its update target (#3052)...')
     pass('an unresolvable ref throws instead of yielding an unusable "pin"');
   } else {
     fail('pinRefToCommit accepted a ref that resolves to nothing');
+  }
+
+  // An inherited target skips the identity check, so it must be the parent's
+  // exact SHA. rev-parse alone resolves any commit-ish: `HEAD~1` pins cleanly
+  // (the control below), which is exactly what the inherited pin must refuse.
+  if (pinRefToCommit('HEAD~1', ctx) === older) {
+    pass('control: pinRefToCommit resolves a relative commit-ish, so it cannot vet an inherited SHA');
+  } else {
+    fail('control failed: pinRefToCommit did not resolve HEAD~1');
+  }
+  for (const value of ['HEAD~1', 'refs/heads/main', older.slice(0, 12), older.toUpperCase()]) {
+    let refused = false;
+    try { pinInheritedTarget(value, ctx); } catch (e) { refused = /not a commit SHA/.test(e.message); }
+    if (refused) {
+      pass(`pinInheritedTarget refuses ${JSON.stringify(value.length > 20 ? `${value.slice(0, 12)}…` : value)} instead of resolving it`);
+    } else {
+      fail(`pinInheritedTarget accepted a non-SHA inherited target: ${JSON.stringify(value)}`);
+    }
+  }
+  if (pinInheritedTarget(older, ctx) === older) {
+    pass('pinInheritedTarget returns a full SHA that exists locally unchanged');
+  } else {
+    fail('pinInheritedTarget did not return the inherited SHA');
+  }
+  let missing = false;
+  try { pinInheritedTarget('0'.repeat(40), quietCtx); } catch { missing = true; }
+  if (missing) {
+    pass('pinInheritedTarget still throws for a well-formed SHA the object store does not have');
+  } else {
+    fail('pinInheritedTarget accepted a SHA that does not exist locally');
   }
 
   // versionAtRef reads VERSION from the pinned commit, not from disk.
@@ -558,6 +588,12 @@ console.log('\n🧪 Testing that apply() verifies its update target (#3052)...')
       pass('the inherited target SHA is read only under the same trust gate as the inherited ref');
     } else {
       fail('CAREER_OPS_UPDATE_TARGET_SHA is read under a weaker gate than CAREER_OPS_UPDATE_TARGET_REF');
+    }
+
+    if (/inheritedTarget\s*\n?\s*\? pinInheritedTarget\(inheritedTarget\)/.test(body)) {
+      pass('apply() pins an inherited target through the SHA-only pin');
+    } else {
+      fail('apply() resolves CAREER_OPS_UPDATE_TARGET_SHA with a pin that accepts any commit-ish');
     }
 
     // The pin must have no fallback. A child that cannot resolve the SHA its

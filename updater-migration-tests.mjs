@@ -351,7 +351,7 @@ const twoPassManifestChecks = [
     // parent's SHA must abort, not silently re-pin its own FETCH_HEAD while
     // running bootstrap files the parent checked out from the parent's target.
     name: 'apply pins the fetched target to an immutable SHA, with no fallback (#3052)',
-    pattern: /const targetCommit = inheritedTarget\s*\n?\s*\? pinRefToCommit\(inheritedTarget\)\s*\n?\s*: pinRefToCommit\('FETCH_HEAD'\);/,
+    pattern: /const targetCommit = inheritedTarget\s*\n?\s*\? pinInheritedTarget\(inheritedTarget\)\s*\n?\s*: pinRefToCommit\('FETCH_HEAD'\);/,
   },
   {
     // Verifying the version direction is not verifying the target's identity:

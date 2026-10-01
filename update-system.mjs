@@ -1013,6 +1013,24 @@ export function pinRefToCommit(ref = 'FETCH_HEAD', ctx = {}) {
 }
 
 /**
+ * Pin the SHA a re-exec'd child inherited from its parent. Unlike
+ * pinRefToCommit, the INPUT must already be a full commit SHA: rev-parse
+ * resolves any commit-ish (`HEAD~5`, `refs/heads/side`), and an inherited
+ * value skips the identity check, so anything but the parent's exact SHA is
+ * refused rather than resolved.
+ *
+ * @param {string} sha - The inherited CAREER_OPS_UPDATE_TARGET_SHA value.
+ * @param {{git?: Function}} [ctx] - Test seam; defaults to the ROOT-bound runner.
+ * @returns {string} The same 40-hex SHA, confirmed to exist locally as a commit.
+ */
+export function pinInheritedTarget(sha, ctx = {}) {
+  if (!/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error(`CAREER_OPS_UPDATE_TARGET_SHA is not a commit SHA: ${JSON.stringify(sha)}.`);
+  }
+  return pinRefToCommit(sha, ctx);
+}
+
+/**
  * The VERSION a ref ships, or '' when the ref carries none.
  *
  * @param {string} ref - Any commit-ish.
@@ -3638,8 +3656,8 @@ async function apply() {
     // authorization (#2866): it is read under the same trustsEnvTargetRef()
     // gate as CAREER_OPS_UPDATE_TARGET_REF, never on isReexec's bare
     // CAREER_OPS_UPDATE_REEXEC=1 disjunct, since an inherited SHA also skips
-    // the identity check below; rev-parse validates it against the local
-    // object store.
+    // the identity check below. pinInheritedTarget() accepts only a full SHA
+    // and then confirms the local object store has it as a commit.
     const inheritedTarget = trustsEnvTargetRef(authenticatedReexec, legacyReexec)
       ? (process.env.CAREER_OPS_UPDATE_TARGET_SHA || '')
       : '';
@@ -3679,7 +3697,7 @@ async function apply() {
     // FETCH_HEAD would assemble an install from two different trees — the mixed
     // state #3052 describes. An unresolvable target ends the run instead.
     const targetCommit = inheritedTarget
-      ? pinRefToCommit(inheritedTarget)
+      ? pinInheritedTarget(inheritedTarget)
       : pinRefToCommit('FETCH_HEAD');
 
     // 2b. Verify the target before touching a single file, on both axes.
