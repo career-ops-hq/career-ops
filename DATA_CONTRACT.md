@@ -41,6 +41,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/active-interviews.md` | Your active interview processes, incl. inline `[process-friction]` notes (read by `process-quality.mjs`) |
 | `data/agent-inbox.md` | Your append-only request queue drained at session start (written by `agent-inbox.mjs`) |
 | `data/reply-candidates.json` | Your normalized employer-reply candidates (subject, body, sender, signal — read by `reply-watch.mjs`) |
+| `data/reply-proposals/*.json` | Local integration status proposals with quoted evidence; read-only until explicit review in `reply-watch.mjs`. Acceptance writes status plus a `[reply-proposal:<digest>]` Notes receipt atomically through `set-status.mjs`; keep receipts to prevent replay. See `docs/REPLY_PROPOSALS.md` for the draft v1 contract. |
 | `data/pdf-index.tsv` | PDF↔report linkage manifest (written by `generate-pdf.mjs`, read by `find.mjs`, the dashboard, and the `email` mode) |
 | `data/offers/*` | Your received offers/contracts, promise notes, prep reports, and reply drafts (PII — gitignored, written by the `offer-prep` mode) |
 | `data/outcomes/*` | Your application outcome logs and archived application artifacts (written by the `outcome` mode) |
