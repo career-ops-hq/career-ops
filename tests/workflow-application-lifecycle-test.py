@@ -1,4 +1,4 @@
-"""Verify the Python lifecycle preserves Node behavior and adds durable idempotency."""
+"""Verify confirmed application facts, optional material links, and durable replay."""
 
 import json
 import sqlite3
@@ -108,8 +108,8 @@ with tempfile.TemporaryDirectory() as temporary:
     assert view["status"] == "hired"
     assert view["opportunity"]["company"] == "Example"
     assert view["artifacts"][0]["path"] == "/review/resume.pdf"
-    assert view["confirmedPackage"]["packageHash"] == "package-42"
-    assert view["events"][0]["packageResultKey"] == "apply-1"
+    assert view["confirmedPackage"] is None
+    assert view["events"][0]["packageResultKey"] is None
     assert [item["kind"] for item in view["followupDirectives"]] == ["schedule", "retire", "reopen"]
     offer_activity = next(item for item in view["activities"] if item["type"] == "offer_prepared")
     assert offer_activity["payload"]["evidence"]["sha256"] == "offer-sha"
@@ -133,12 +133,29 @@ with tempfile.TemporaryDirectory() as temporary:
         """
     )
     database.close()
-    ambiguous = call(directory, "submit", "43", "--confirmed", "--idempotency-key", "submit-43", ok=False)
-    assert "Multiple confirmed packages" in ambiguous["error"]
+    for key in ("apply-1", "missing", 42):
+        invalid_link = call(directory, "submit", "43", "--confirmed", "--payload", json.dumps({"package_result_key": key}), "--idempotency-key", f"invalid-link-{key}", ok=False)
+        assert "package_result_key must identify" in invalid_link["error"]
+    assert call(directory, "view", "43") is None
     selected = call(directory, "submit", "43", "--confirmed", "--payload", '{"package_result_key":"apply-43a"}', "--idempotency-key", "submit-43a")
     assert selected["status"] == "applied"
     assert call(directory, "view", "43")["events"][0]["packageResultKey"] == "apply-43a"
     assert call(directory, "view", "43")["confirmedPackage"]["packageHash"] == "package-43a"
+
+    database = sqlite3.connect(directory / "opportunities.db")
+    database.execute("INSERT INTO opportunities(id,url,company,role,source,state,application_state) VALUES(44,'https://example.com/job/44','Example','Engineer','provider','evaluated','none')")
+    database.commit()
+    database.close()
+    manual_args = ("submit", "44", "--confirmed", "--source", "user-confirmed", "--payload", '{"notes":"Applied using default resume"}', "--idempotency-key", "manual-44")
+    assert call(directory, *manual_args)["status"] == "applied"
+    assert call(directory, *manual_args)["reused"]
+    manual = call(directory, "view", "44")
+    assert manual["confirmedPackage"] is None
+    assert manual["opportunity"]["applicationState"] == "submitted"
+    assert len(manual["events"]) == 1
+    assert manual["events"][0]["payload"]["notes"] == "Applied using default resume"
+    assert manual["events"][0]["source"] == "user-confirmed"
+    assert manual["events"][0]["packageResultKey"] is None
 
     checkpoint = sqlite3.connect(directory / "workflow-checkpoints.db")
     assert checkpoint.execute("SELECT count(*) FROM checkpoints").fetchone()[0] >= 1

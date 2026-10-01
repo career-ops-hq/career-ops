@@ -142,8 +142,11 @@ notification runs from the scheduled score wrapper.
 `application submit` records only a user-confirmed actual submission, not an
 apply-package confirmation. Pass `--payload '{"submitted_at":"YYYY-MM-DD"}'`
 when the submission date is known; otherwise follow-up dates are explicitly
-labelled as proxies. If several confirmed packages exist, also provide the
-actual `package_result_key` in that payload; the CLI rejects ambiguous evidence.
+labelled as proxies. No generated application package is required: a candidate
+may submit independently using their default resume. Record material details
+in payload `notes`. Only provide `package_result_key` when that confirmed
+package was actually submitted; the CLI validates that it belongs to this
+opportunity and never selects a package automatically.
 `followup_sent` activity may similarly carry `sent_at`.
 Follow-up queries compute the retained cadence from business history and
 profile overrides; schedule/retire/reopen record manual decisions, not sends.

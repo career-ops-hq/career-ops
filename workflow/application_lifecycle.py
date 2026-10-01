@@ -125,22 +125,18 @@ class ApplicationStore:
         ).fetchone()
         return row["status"] if row else None
 
-    def submitted_package_key(self, state: ApplicationState) -> str:
-        rows = self.db.execute(
-            """SELECT result_key FROM results WHERE opportunity_id=? AND module='apply'
-               AND json_extract(payload,'$.outcome')='package_confirmed' ORDER BY rowid DESC""",
-            (state["opportunity_id"],),
-        ).fetchall()
-        if not rows:
-            raise ValueError("Submission requires a confirmed application package")
+    def submitted_package_key(self, state: ApplicationState) -> str | None:
+        """Validate an explicitly identified submitted package, if supplied."""
         requested = state["payload"].get("package_result_key")
-        if requested is not None:
-            if not isinstance(requested, str) or requested not in {row["result_key"] for row in rows}:
-                raise ValueError("package_result_key must identify a confirmed package for this opportunity")
-            return requested
-        if len(rows) > 1:
-            raise ValueError("Multiple confirmed packages exist; specify package_result_key")
-        return rows[0]["result_key"]
+        if requested is None:
+            return None
+        if not isinstance(requested, str) or not self.db.execute(
+            """SELECT 1 FROM results WHERE result_key=? AND opportunity_id=? AND module='apply'
+               AND json_extract(payload,'$.outcome')='package_confirmed'""",
+            (requested, state["opportunity_id"]),
+        ).fetchone():
+            raise ValueError("package_result_key must identify a confirmed package for this opportunity")
+        return requested
 
     def replay(self, state: ApplicationState) -> dict | None:
         key = state["idempotency_key"]
