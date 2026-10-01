@@ -34,10 +34,9 @@ import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerL
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl } from './url-key.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
-const MERGE_TRACKER_HELP_REQUESTED = process.argv.includes('--help') || process.argv.includes('-h');
-if (MERGE_TRACKER_HELP_REQUESTED) {
-  console.log(`Usage: node merge-tracker.mjs [options]
+const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
 Options:
   --dry-run        Preview the merge without writing files
@@ -45,9 +44,13 @@ Options:
   --migrate        Rewrite legacy report links relative to the tracker
   --migrate-via    Add the Via column to a legacy tracker
   --backfill-urls  Add the URL column and populate it from report metadata
-  -h, --help       Show this help and exit`);
-  process.exit(0);
-}
+  -h, --help       Show this help and exit`;
+// The flags below are read with process.argv.includes(), so a flag this script
+// does not know was dropped without a word: `--dryrun` ran the real merge,
+// rewrote applications.md and moved the TSVs into merged/ -- the one outcome
+// --dry-run exists to prevent. Reject it before anything is read or written.
+const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--backfill-urls', '--help', '-h'];
+validateFlags(process.argv.slice(2), MERGE_TRACKER_KNOWN_FLAGS, MERGE_TRACKER_USAGE);
 
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
