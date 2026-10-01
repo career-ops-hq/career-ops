@@ -55,7 +55,6 @@ Determine the mode from `$mode`:
 | `interview` | `interview` |
 | `master-profile` | `master-profile` |
 | `eu-swe` | `regional/eu-swe` |
-| `eu-fintech` | `regional/eu-fintech` |
 | `interview/plan` | `interview/plan` |
 | `interview/practice` | `interview/practice` |
 | `interview/debrief` | `interview/debrief` |
@@ -139,7 +138,6 @@ Available commands:
   /career-ops interview    → Interactive profile/CV onboarding interview
   /career-ops master-profile → Import, review, and validate your Master Career Profile
   /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
-  /career-ops eu-fintech → Scan 21 EU fintech portals for Product Manager roles (zero-token)
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round

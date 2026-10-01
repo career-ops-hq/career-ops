@@ -288,7 +288,6 @@ career-ops は共有のコマンドルーターを使います。スラッシュ
 /career-ops interview    → 対話形式のプロフィール／CV オンボーディング面談
 /career-ops master-profile → マスターキャリアプロフィールをインポート・確認・検証
 /career-ops eu-swe    → CV・応募・面接の前に欧州向け SWE 応募を調整
-/career-ops eu-fintech → 欧州フィンテック 21 ポータルで Product Manager 職をスキャン（トークン消費なし）
 /career-ops interview/plan → 今後の面接に向けた時間割型の準備プラン
 /career-ops interview/practice → 練習面接、フィードバック付きで 1 問ずつ
 /career-ops interview/debrief → 面接後の振り返り：ギャップを埋め、次のラウンドを予測
