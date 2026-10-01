@@ -5,7 +5,7 @@ import { config } from 'dotenv';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as yaml from 'js-yaml';
 
@@ -44,7 +44,7 @@ if (process.env.CAREER_OPS_GEMINI_GATE_CHILD !== '1') {
       delete env.CAREER_OPS_LIVE_GEMINI;
       delete env.NODE_TEST_CONTEXT;
 
-      const result = spawnSync(process.execPath, ['--import', preloadPath, '--test', '--test-reporter=tap', fileURLToPath(import.meta.url)], {
+      const result = spawnSync(process.execPath, ['--import', pathToFileURL(preloadPath).href, '--test', '--test-reporter=tap', fileURLToPath(import.meta.url)], {
         cwd: tempDir,
         encoding: 'utf8',
         env,
