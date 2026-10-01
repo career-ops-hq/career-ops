@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Check, Clock, FileText, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
+import { useT } from "@/components/i18n-provider";
 
 export type FollowUp = {
   num?: number;
@@ -23,6 +24,7 @@ export type FollowUp = {
 // table row to data/follow-ups.md (append-only) so the core cadence advances;
 // "Snooze" is a client dismiss. The cadence is the core's — we just surface + record.
 export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLogged?: () => void }) {
+  const t = useT();
   const [state, setState] = useState<"idle" | "logging" | "done" | "snoozed" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   if (state === "snoozed" || state === "done") return null;
@@ -69,7 +71,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
             {followup.role && <span className="text-muted"> · {followup.role}</span>}
           </p>
           <p className="flex items-center gap-1 text-[11px] text-faint">
-            <Clock className="size-3" /> {followup.appliedDate ? `applied ${followup.appliedDate}` : "follow-up due"}
+            <Clock className="size-3" /> {followup.appliedDate ? t("applied {date}", { date: followup.appliedDate }) : t("follow-up due")}
           </p>
         </div>
       </div>
@@ -85,16 +87,16 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           )}
         >
           {state === "logging" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}{" "}
-          <span className="hidden max-w-48 truncate sm:inline">{state === "error" ? `${errorMsg ?? "Failed"} — retry` : "Mark followed up"}</span>
-          <span className="sm:hidden">{state === "error" ? "Retry" : "Followed up"}</span>
+          <span className="hidden max-w-48 truncate sm:inline">{state === "error" ? t("{error} · retry", { error: errorMsg ?? t("Failed") }) : t("Mark followed up")}</span>
+          <span className="sm:hidden">{state === "error" ? t("Retry") : t("Followed up")}</span>
         </button>
         {followup.num != null && (
-          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
+          <a href={`/pipeline/${followup.num}`} title={t("Open report")} className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
             <FileText className="size-4" />
           </a>
         )}
         <button type="button" onClick={() => setState("snoozed")} className="inline-flex shrink-0 items-center justify-center text-[11px] text-faint transition hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">
-          Snooze
+          {t("Snooze")}
         </button>
       </div>
     </div>

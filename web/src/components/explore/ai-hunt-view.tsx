@@ -7,6 +7,7 @@ import { useCountUp } from "./discovering-state";
 import { AiHuntTrace } from "./ai-hunt-trace";
 import { DiscoveryCard } from "./discovery-card";
 import { useExplore } from "./explore-provider";
+import { useT } from "@/components/i18n-provider";
 
 // The AI hunt surface — apply-mode polish: an animated orb, a serif headline that
 // folds in the live count (no lonely giant "0"), a brand-orange effort ledger
@@ -27,6 +28,7 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
   const { phase, matchCount, aiTrace, aiCost, offers } = useExplore();
   const shown = useCountUp(matchCount);
   const revealing = phase === "revealing";
+  const t = useT();
 
   return (
     <>
@@ -42,18 +44,18 @@ export function AiHuntView({ cliName }: { cliName?: string }) {
 
         <div>
           <h2 className={`${instrumentSerif.className} text-3xl leading-tight text-foreground`}>
-            {matchCount > 0 ? `${shown} candidate${shown === 1 ? "" : "s"}` : "Hunting the open web"}
+            {matchCount > 0 ? t.n(shown, "{n} candidate", "{n} candidates") : t("Hunting the open web")}
           </h2>
           <p className="mt-1 text-sm text-muted">
-            {revealing ? "found — review them below" : matchCount > 0 ? "found so far · streaming in" : "casting across the public web…"}
+            {revealing ? t("found — review them below") : matchCount > 0 ? t("found so far · streaming in") : t("casting across the public web…")}
           </p>
         </div>
 
         <div className="co-ailedger">
           <Sparkles className="size-3.5" />
-          {cliName || "your CLI"} · searching the open web
-          {aiCost.searches > 0 && <span className="opacity-75">· {aiCost.searches} searches</span>}
-          {matchCount > 0 && <span className="opacity-75">· {matchCount} found</span>}
+          {cliName || t("your CLI")} · {t("searching the open web")}
+          {aiCost.searches > 0 && <span className="opacity-75">· {t("{n} searches", { n: aiCost.searches })}</span>}
+          {matchCount > 0 && <span className="opacity-75">· {t("{n} found", { n: matchCount })}</span>}
         </div>
 
         <AiHuntTrace trace={aiTrace} />

@@ -11,6 +11,8 @@ import {
   parsePipeTable,
   splitPipeTables,
 } from "@/lib/report-tables.mjs";
+import { getT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n";
 
 function nodeText(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
@@ -42,7 +44,7 @@ function markdownComponents(fitCol: number) {
   };
 }
 
-function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
+function StarCards({ header, rows, t }: { header: string[]; rows: string[][]; t: T }) {
   const iNum = colIndex(header, ["#"]);
   const iReq = colIndex(header, ["jd requirement", "requirement"]);
   const iStory = colIndex(header, ["story"]);
@@ -72,7 +74,7 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
               <summary className="flex min-h-[44px] cursor-pointer list-none items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
                 <span className="mt-0.5 shrink-0 font-mono text-xs tabular-nums text-faint">{num}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-foreground">{req || story || `Story ${num}`}</span>
+                  <span className="block text-sm font-medium text-foreground">{req || story || t("Story {n}", { n: num })}</span>
                   {req && story ? <span className="mt-0.5 block text-xs text-muted">{story}</span> : null}
                 </span>
                 <ChevronDown className="mt-0.5 size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
@@ -83,7 +85,7 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
                   if (!value) return null;
                   return (
                     <div key={f.label} className={f.label === "Reflection" ? "sm:col-span-2" : undefined}>
-                      <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">{f.label}</dt>
+                      <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">{t.ctx("star", f.label)}</dt>
                       <dd className="mt-1 text-sm text-foreground">{value}</dd>
                     </div>
                   );
@@ -98,7 +100,8 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
 }
 
 /** GFM report body: STAR+R grids become cards; Fit cells become tone badges. */
-export function ReportMarkdown({ children }: { children: string }) {
+export async function ReportMarkdown({ children }: { children: string }) {
+  const t = await getT();
   const chunks = splitPipeTables(children);
   return (
     <>
@@ -106,7 +109,7 @@ export function ReportMarkdown({ children }: { children: string }) {
         if (c.type === "table") {
           const parsed = parsePipeTable(c.text);
           if (parsed && isStarTableHeader(parsed.header)) {
-            return <StarCards key={i} header={parsed.header} rows={parsed.rows} />;
+            return <StarCards key={i} header={parsed.header} rows={parsed.rows} t={t} />;
           }
           const fitCol = parsed ? fitColumnIndex(parsed.header) : -1;
           return (

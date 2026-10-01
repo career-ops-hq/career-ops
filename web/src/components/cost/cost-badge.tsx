@@ -1,4 +1,7 @@
+"use client";
+
 import { Leaf, Coins, Sparkles } from "lucide-react";
+import { useT } from "@/components/i18n-provider";
 import { COST_META, type CostClass } from "@/lib/explore-cost";
 
 // One primitive, four variants — the app's cost color-semantics (career-ops-ux
@@ -13,10 +16,11 @@ export function CostBadge({ kind, size = "sm", className = "" }: { kind: CostCla
   const tone = kind === "spend" ? "spend" : "free";
   const Icon = kind === "spend" ? Coins : kind === "free-gemini" ? Sparkles : Leaf;
   const meta = COST_META[kind];
+  const t = useT();
   return (
-    <span className={`co-cost ${className}`} data-tone={tone} data-size={size} title={meta.tip}>
+    <span className={`co-cost ${className}`} data-tone={tone} data-size={size} title={t(meta.tip)}>
       <Icon aria-hidden />
-      {meta.label}
+      {t(meta.label)}
     </span>
   );
 }

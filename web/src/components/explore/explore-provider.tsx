@@ -18,6 +18,8 @@ import {
 import { makeAiStreamParser, type AiTraceChunk } from "@/lib/explore-ai";
 import { MAX_OFFER_LIMIT } from "@/lib/whats-new.mjs";
 import { isScannerMissing } from "@/lib/explore-error.mjs";
+import { useT } from "@/components/i18n-provider";
+import { intlLocale } from "@/lib/i18n";
 
 export type Phase =
   | "idle"
@@ -138,6 +140,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [aiTrace, setAiTrace] = useState<AiTraceChunk[]>([]);
   const [aiCost, setAiCost] = useState<AiCost>({ searches: 0, candidates: 0, fetches: 0 });
   const runningRef = useRef(false);
+  // Status/error copy is produced inside long-lived callbacks (declared with
+  // stable deps so consumers don't re-render); read the current language
+  // through a ref instead of re-creating them on every locale switch.
+  const t = useT();
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const aiIntentRef = useRef(aiIntent);
   aiIntentRef.current = aiIntent;
   const filtersRef = useRef(filters);
@@ -168,7 +178,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setPartial(false);
     setError("");
     setScannerMissing(false);
-    setStatus("Casting the net across the ATS network…");
+    setStatus(tRef.current("Casting the net across the ATS network…"));
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
     setSources(init);
@@ -197,9 +207,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         sawScannerMissing = isScannerMissing(d);
-        sawError = d.error || (sawScannerMissing ? "The scanner isn't available." : `Discovery failed (${r.status}).`);
+        sawError = d.error || (sawScannerMissing ? tRef.current("The scanner isn't available.") : tRef.current("Discovery failed ({status}).", { status: r.status }));
       } else if (!r.body) {
-        sawError = "No response stream.";
+        sawError = tRef.current("No response stream.");
       } else {
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -222,7 +232,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
             switch (ev.kind) {
               case "atsStart":
                 setPhase("scanning");
-                setStatus(`Walking ${ATS_LABEL[ev.ats as AtsSource] ?? ev.ats} — ${ev.companies.toLocaleString()} companies`);
+                setStatus(tRef.current("Walking {ats} — {n} companies", { ats: ATS_LABEL[ev.ats as AtsSource] ?? ev.ats, n: ev.companies.toLocaleString(intlLocale(tRef.current.locale)) }));
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
                 break;
               case "progress":
@@ -269,7 +279,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      sawError = e instanceof Error ? e.message : tRef.current("stream error");
     }
 
     // Mark any still-active sources as swept (stream ended).
@@ -290,7 +300,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       }
       setMatchCount(acc.length);
       setPhase("revealing");
-      setStatus(`${acc.length} fresh role${acc.length === 1 ? "" : "s"} found — free.`);
+      setStatus(tRef.current.n(acc.length, "{n} fresh role found — free.", "{n} fresh roles found — free."));
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
@@ -315,7 +325,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (runningRef.current) return;
     runningRef.current = true;
     setPhase("casting");
-    setStatus("Loading fresh matches…");
+    setStatus(tRef.current("Loading fresh matches…"));
     setOffers([]);
     setMatchCount(0);
     setCompaniesScanned(0);
@@ -331,13 +341,13 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       // complete total, which is what the header actually reports.
       const r = await fetch(`/api/whats-new?limit=${MAX_OFFER_LIMIT}`);
       if (!r.ok) {
-        setError(`Couldn't load fresh matches (${r.status}).`);
+        setError(tRef.current("Couldn't load fresh matches ({status}).", { status: r.status }));
         setPhase("failed");
         return;
       }
       const d = await r.json().catch(() => null);
       if (!d || !Array.isArray(d.offers)) {
-        setError("Couldn't load fresh matches — unexpected response.");
+        setError(tRef.current("Couldn't load fresh matches — unexpected response."));
         setPhase("failed");
         return;
       }
@@ -347,7 +357,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setMatchCount(Number.isFinite(count) ? Math.max(0, Math.trunc(count)) : list.length);
       setPhase(list.length > 0 ? "results" : "empty-current");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't load fresh matches.");
+      setError(e instanceof Error ? e.message : tRef.current("Couldn't load fresh matches."));
       setPhase("failed");
     } finally {
       runningRef.current = false;
@@ -438,7 +448,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     setError("");
     setScannerMissing(false);
-    setStatus("Casting across the open web…");
+    setStatus(tRef.current("Casting across the open web…"));
     if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
 
     let knownUrls = new Set<string>();
@@ -492,9 +502,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         sawScannerMissing = isScannerMissing(d);
-        sawError = d.error || (sawScannerMissing ? "AI search isn't available." : `AI search failed (${r.status}).`);
+        sawError = d.error || (sawScannerMissing ? tRef.current("AI search isn't available.") : tRef.current("AI search failed ({status}).", { status: r.status }));
       } else if (!r.body) {
-        sawError = "No response stream.";
+        sawError = tRef.current("No response stream.");
       } else {
         const reader = r.body.getReader();
         const dec = new TextDecoder();
@@ -506,14 +516,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         handle(parser.flush());
       }
     } catch (e) {
-      sawError = e instanceof Error ? e.message : "stream error";
+      sawError = e instanceof Error ? e.message : tRef.current("stream error");
     }
 
     runningRef.current = false;
     if (acc.length > 0) {
       setMatchCount(acc.length);
       setPhase("revealing");
-      setStatus(`${acc.length} candidate${acc.length === 1 ? "" : "s"} found.`);
+      setStatus(tRef.current.n(acc.length, "{n} candidate found.", "{n} candidates found."));
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);

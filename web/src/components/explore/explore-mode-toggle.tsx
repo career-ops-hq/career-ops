@@ -4,6 +4,7 @@ import { Compass, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CostBadge } from "@/components/cost/cost-badge";
 import type { ExploreMode } from "@/lib/explore";
+import { useT } from "@/components/i18n-provider";
 
 // Cost honesty rendered at the POINT OF CHOICE: free deterministic Scan (default)
 // vs token-spending AI search. The AI segment stays selectable even with no CLI —
@@ -17,6 +18,7 @@ export function ExploreModeToggle({
   onChange: (m: ExploreMode) => void;
   cliConfigured: boolean;
 }) {
+  const t = useT();
   return (
     <div className="flex w-full rounded-xl border border-border bg-surface/40 p-1 sm:inline-flex sm:w-auto">
       <button
@@ -29,7 +31,7 @@ export function ExploreModeToggle({
         )}
       >
         <Compass className="size-4" />
-        <span className="font-medium">Scan</span>
+        <span className="font-medium">{t("Scan")}</span>
         <span className="hidden sm:inline-flex">
           <CostBadge kind="free-network" size="xs" />
         </span>
@@ -44,11 +46,11 @@ export function ExploreModeToggle({
         )}
       >
         <Sparkles className="size-4" />
-        <span className="font-medium">AI search</span>
+        <span className="font-medium">{t("AI search")}</span>
         <span className="hidden sm:inline-flex">
           <CostBadge kind="spend" size="xs" />
         </span>
-        {!cliConfigured && <span className="text-[10px] text-faint">needs a CLI</span>}
+        {!cliConfigured && <span className="text-[10px] text-faint">{t("needs a CLI")}</span>}
       </button>
     </div>
   );

@@ -21,6 +21,24 @@ import {
   urgencyTone,
 } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
+import { rich } from "@/lib/i18n/rich";
+import { intlLocale, type T } from "@/lib/i18n";
+
+/** relativeDays() from lib/followups, in the viewer's language. */
+function relativeDaysLabel(t: T, daysUntil: number): string {
+  if (t.locale === "en") return relativeDays(daysUntil);
+  if (daysUntil === 0) return t("today");
+  if (daysUntil === 1) return t("tomorrow");
+  if (daysUntil > 1) return t.n(daysUntil, "in {n} day", "in {n} days");
+  return t.n(-daysUntil, "{n} day ago", "{n} days ago");
+}
+
+/** oxfordJoin() from lib/followups, in the viewer's language ("A, B ve C"). */
+function listJoin(t: T, parts: string[]): string {
+  if (t.locale === "en") return oxfordJoin(parts);
+  return new Intl.ListFormat(intlLocale(t.locale), { type: "conjunction" }).format(parts);
+}
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -82,6 +100,7 @@ export function FollowupsView() {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const t = useT();
 
   const [data, setData] = useState<CadenceResponse | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -162,10 +181,10 @@ export function FollowupsView() {
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        setActionError(typeof j.error === "string" ? `Couldn't remove the follow-up: ${j.error}` : "Couldn't remove the follow-up.");
+        setActionError(typeof j.error === "string" ? t("Couldn't remove the follow-up: {error}", { error: j.error }) : t("Couldn't remove the follow-up."));
       }
     } catch {
-      setActionError("Couldn't remove the follow-up.");
+      setActionError(t("Couldn't remove the follow-up."));
     }
     refetch();
   };
@@ -180,23 +199,23 @@ export function FollowupsView() {
 
   const subtitle = !data ? (
     <span className="inline-flex items-center gap-1.5">
-      <Loader2 className="size-3.5 animate-spin" /> Computing cadence…
+      <Loader2 className="size-3.5 animate-spin" /> {t("Computing cadence…")}
     </span>
   ) : !data.available || !meta ? (
-    "Cadence unavailable"
+    t("Cadence unavailable")
   ) : (
-    <>
-      <span className="tabular-nums">{meta.actionable}</span> active ·{" "}
-      <span className="tabular-nums">{meta.urgent}</span> urgent ·{" "}
-      <span className="tabular-nums">{meta.overdue}</span> overdue
-    </>
+    rich(t("{active} active · {urgent} urgent · {overdue} overdue"), {
+      active: <span className="tabular-nums">{meta.actionable}</span>,
+      urgent: <span className="tabular-nums">{meta.urgent}</span>,
+      overdue: <span className="tabular-nums">{meta.overdue}</span>,
+    })
   );
 
   return (
     <div className="mx-auto max-w-none px-6 py-8">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Follow-up Tracker</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">{t("Follow-up Tracker")}</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
         </div>
         <div className="relative w-56 max-w-[35vw]">
@@ -204,7 +223,7 @@ export function FollowupsView() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search company or role…"
+            placeholder={t("Search company or role…")}
             className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
           />
         </div>
@@ -214,18 +233,18 @@ export function FollowupsView() {
 
       {/* urgency filter */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
-        {URGENCY_TABS.map((t) => {
-          const count = t === "ALL" ? entries.length : entries.filter((e) => e.urgency.toUpperCase() === t).length;
+        {URGENCY_TABS.map((tabKey) => {
+          const count = tabKey === "ALL" ? entries.length : entries.filter((e) => e.urgency.toUpperCase() === tabKey).length;
           return (
             <button
-              key={t}
-              onClick={() => setParams({ urgency: t === "ALL" ? null : t })}
+              key={tabKey}
+              onClick={() => setParams({ urgency: tabKey === "ALL" ? null : tabKey })}
               className={cn(
                 "-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors",
-                tab === t ? "border-brand text-foreground" : "border-transparent text-muted hover:text-foreground",
+                tab === tabKey ? "border-brand text-foreground" : "border-transparent text-muted hover:text-foreground",
               )}
             >
-              {t} <span className="text-faint tabular-nums">{count}</span>
+              {t(tabKey)} <span className="text-faint tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -234,19 +253,19 @@ export function FollowupsView() {
       {actionError && <p className="mt-3 text-xs text-red-500">{actionError}</p>}
 
       {!data ? null : !data.available ? (
-        <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
+        <EmptyPanel title={t("Cadence unavailable")} body={t("The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present.")} />
       ) : filtered.length === 0 ? (
         filtering ? (
-          <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
+          <EmptyPanel title={t("No matches")} body={t("Try a different urgency filter or clear the search.")} />
         ) : (
-          <EmptyPanel title="Nothing to chase" body="No active applications need a follow-up. Apply to roles (or update statuses) and the cadence starts tracking them." />
+          <EmptyPanel title={t("Nothing to chase")} body={t("No active applications need a follow-up. Apply to roles (or update statuses) and the cadence starts tracking them.")} />
         )
       ) : (
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
           <table className="w-full min-w-[880px] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
-                <th className="w-8 px-2 py-2.5" aria-label="Expand" />
+                <th className="w-8 px-2 py-2.5" aria-label={t("Expand")} />
                 {COLUMNS.map((c) => {
                   const active = sortKey === c.key;
                   return (
@@ -260,7 +279,7 @@ export function FollowupsView() {
                           setParams({ sort: c.key, dir: active ? dir * -1 : c.key === "urgency" ? -1 : 1 })
                         }
                       >
-                        {c.label}
+                        {t(c.label)}
                         <span aria-hidden="true" className={cn(!active && "text-faint")}>
                           {active ? (dir === 1 ? "▲" : "▼") : "⇅"}
                         </span>
@@ -268,7 +287,7 @@ export function FollowupsView() {
                     </th>
                   );
                 })}
-                <th className="px-2.5 py-2.5 font-medium">Action</th>
+                <th className="px-2.5 py-2.5 font-medium">{t("Action")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -297,6 +316,7 @@ export function FollowupsView() {
 /** The one-sentence "what to do first" card — only when something is due and no
  *  filter narrows the view (spec: hidden while any filter/search is active). */
 function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: CadenceEntry[] }) {
+  const t = useT();
   const due = meta.overdue + meta.urgent;
   if (due <= 0) return null;
 
@@ -306,13 +326,13 @@ function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: Cade
     .slice(0, 4);
 
   const parts: string[] = [];
-  if (meta.overdue > 0) parts.push(`Overdue follow-ups: ${meta.overdue}`);
-  if (meta.urgent > 0) parts.push(`Urgent: ${meta.urgent}`);
+  if (meta.overdue > 0) parts.push(t("Overdue follow-ups: {n}", { n: meta.overdue }));
+  if (meta.urgent > 0) parts.push(t("Urgent: {n}", { n: meta.urgent }));
   if (pressing.length > 0) {
-    parts.push(`most pressing today: ${oxfordJoin(pressing.map((e) => `${e.company} (#${e.num})`))}`);
+    parts.push(t("most pressing today: {list}", { list: listJoin(t, pressing.map((e) => `${e.company} (#${e.num})`)) }));
     const days = pressing.map((e) => e.daysSinceApplication);
     const max = Math.max(...days);
-    parts.push(days.every((d) => d === max) ? `all ${max} days since applied` : `up to ${max} days since applied`);
+    parts.push(days.every((d) => d === max) ? t("all {n} days since applied", { n: max }) : t("up to {n} days since applied", { n: max }));
   }
 
   return (
@@ -322,7 +342,7 @@ function NarrativeCard({ meta, entries }: { meta: CadenceMetadata; entries: Cade
         meta.overdue > 0 ? "border-l-red-500" : "border-l-amber-500",
       )}
     >
-      {parts.join(" — ")}
+      {parts.join(" · ")}
     </div>
   );
 }
@@ -342,7 +362,8 @@ function FollowupRow({
   onPin: () => void;
   onRemove: (num: number) => void;
 }) {
-  const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
+  const t = useT();
+  const statusLabel = t(e.status.charAt(0).toUpperCase() + e.status.slice(1));
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
     <>
@@ -352,7 +373,7 @@ function FollowupRow({
             type="button"
             onClick={onToggle}
             aria-expanded={expanded}
-            aria-label={`${expanded ? "Hide" : "Show"} follow-up history for ${e.company}`}
+            aria-label={expanded ? t("Hide follow-up history for {company}", { company: e.company }) : t("Show follow-up history for {company}", { company: e.company })}
             className="rounded p-1 text-faint transition hover:text-foreground"
           >
             <Chevron className="size-4" />
@@ -379,7 +400,7 @@ function FollowupRow({
           <Badge tone={followupStatusTone(e.status)}>{statusLabel}</Badge>
         </td>
         <td className="px-2.5 py-3">
-          <Badge tone={urgencyTone(e.urgency)}>{e.urgency}</Badge>
+          <Badge tone={urgencyTone(e.urgency)}>{t(e.urgency)}</Badge>
         </td>
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceApplication))}>{e.daysSinceApplication}</td>
         <td className="whitespace-nowrap px-2.5 py-3">
@@ -387,14 +408,14 @@ function FollowupRow({
             <span className="text-faint">—</span>
           ) : (
             <span className={cn(e.daysUntilNext < 0 && "font-medium text-red-600 dark:text-red-400")} title={e.nextFollowupDate ?? undefined}>
-              {relativeDays(e.daysUntilNext)}
+              {relativeDaysLabel(t, e.daysUntilNext)}
             </span>
           )}
           {e.nextOverride && (
             <span
               className="ml-1.5 inline-flex align-[-1px]"
-              title={`Pinned to ${e.nextOverride} — cleared when you log a follow-up`}
-              aria-label="Pinned manually"
+              title={t("Pinned to {date} — cleared when you log a follow-up", { date: e.nextOverride })}
+              aria-label={t("Pinned manually")}
             >
               <Pin className="size-3 text-brand" />
             </span>
@@ -409,15 +430,15 @@ function FollowupRow({
             <button
               type="button"
               onClick={onLog}
-              title="Log a follow-up (date, channel, contact, notes)"
+              title={t("Log a follow-up (date, channel, contact, notes)")}
               className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
             >
-              Log
+              {t("Log")}
             </button>
             <button
               type="button"
               onClick={onPin}
-              title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
+              title={e.nextOverride ? t("Next date pinned to {date} — change or clear", { date: e.nextOverride }) : t("Pin a custom next follow-up date")}
               className={cn(
                 "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand",
                 e.nextOverride ? "text-brand" : "text-faint",
@@ -443,10 +464,11 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
   // Tolerate an older core engine (CAREER_OPS_ROOT can point at a separate
   // checkout whose followup-cadence.mjs predates the per-entry followups[]).
   const history = e.followups ?? [];
+  const t = useT();
   return (
     <div className="space-y-2 pl-7 text-sm">
       {history.length === 0 ? (
-        <p className="text-faint">No follow-ups logged yet.</p>
+        <p className="text-faint">{t("No follow-ups logged yet.")}</p>
       ) : (
         <ul className="space-y-1.5">
           {history.map((f, i) => (
@@ -458,8 +480,8 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
                   <button
                     type="button"
                     onClick={() => onRemove(f.num!)}
-                    title="Remove this logged follow-up (added by mistake?)"
-                    aria-label={`Remove follow-up logged ${f.date}`}
+                    title={t("Remove this logged follow-up (added by mistake?)")}
+                    aria-label={t("Remove follow-up logged {date}", { date: f.date })}
                     className="rounded p-0.5 text-faint opacity-0 transition group-hover/item:opacity-100 hover:text-red-500 focus-visible:opacity-100"
                   >
                     <Trash2 className="size-3.5" />
@@ -467,7 +489,7 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
                 )}
               </span>
               <span className="tabular-nums text-muted">{f.date}</span>
-              <Badge tone="muted">{f.channel}</Badge>
+              <Badge tone="muted">{t(f.channel)}</Badge>
               {f.contact && <span className="text-muted">{f.contact}</span>}
               {f.notes && <span className="text-faint">{f.notes}</span>}
             </li>
@@ -476,7 +498,7 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
       )}
       {e.contacts.length > 0 && (
         <p className="text-xs text-faint">
-          Suggested contacts:{" "}
+          {t("Suggested contacts:")}{" "}
           {e.contacts.map((c, i) => (
             <span key={c.email}>
               {i > 0 && ", "}

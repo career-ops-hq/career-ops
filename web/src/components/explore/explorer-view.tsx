@@ -15,6 +15,15 @@ import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+import { useT } from "@/components/i18n-provider";
+import { rich } from "@/lib/i18n/rich";
+import { intlLocale, type T } from "@/lib/i18n";
+
+/** "1,200" or "1,200 of 5,000", in the viewer's number format. */
+function companiesLabel(t: T, scanned: number, available: number): string {
+  const fmt = (n: number) => n.toLocaleString(intlLocale(t.locale));
+  return available > scanned ? t("{a} of {b}", { a: fmt(scanned), b: fmt(available) }) : fmt(scanned);
+}
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
@@ -40,9 +49,12 @@ export function ExplorerView({
   rootExists: boolean;
 }) {
   const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
+  const t = useT();
   const scanNote =
     companiesScanned > 0
-      ? `Scanned ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} compan${companiesScanned === 1 ? "y" : "ies"}${partial ? " · some sources were unreachable" : ""}.`
+      ? t.n(companiesScanned, "Scanned {count} company", "Scanned {count} companies", { count: companiesLabel(t, companiesScanned, companiesAvailable) }) +
+        (partial ? " · " + t("some sources were unreachable") : "") +
+        "."
       : undefined;
   const inited = useRef(false);
   const [refineOpen, setRefineOpen] = useState(false);
@@ -94,11 +106,11 @@ export function ExplorerView({
       offers.map((o) => {
         const inPipeline = inboxUrls.has(o.url);
         const c = norm(o.company);
-        const t = norm(o.title);
+        const title = norm(o.title);
         const ev = appsSnapshot.find((a) => {
           if (norm(a.company) !== c) return false;
           const ar = norm(a.role);
-          return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
+          return ar.length > 3 && (title.includes(ar) || ar.includes(title.split(" ").slice(0, 3).join(" ")));
         });
         return { ...o, inPipeline, evaluatedN: ev?.n };
       }),
@@ -124,8 +136,8 @@ export function ExplorerView({
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
             <Compass className="size-6 text-brand" />
-            <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Explore</h1>
-            <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-text">New</span>
+            <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>{t("Explore")}</h1>
+            <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-text">{t("New")}</span>
           </div>
           <div className="w-full sm:ml-auto sm:w-auto">
             <ExploreModeToggle mode={mode} onChange={setMode} cliConfigured={!!cli.id} />
@@ -134,15 +146,15 @@ export function ExplorerView({
         {!isResults && (
           <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted">
             {isAi
-              ? "Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate."
-              : "Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one."}
+              ? t("Describe the role in plain language — an AI hunts the open web for it, on your own AI. Candidates are unverified until you evaluate.")
+              : t("Scan the public ATS network — Greenhouse, Lever, Ashby, Workday. Fresh postings matched to you, zero tokens. You only spend when you choose to evaluate one.")}
           </p>
         )}
       </header>
 
       {!rootExists && (
         <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-          Your career-ops home isn’t set up yet — discovery needs a checkout with a profile to seed from.
+          {t("Your career-ops home isn’t set up yet — discovery needs a checkout with a profile to seed from.")}
         </div>
       )}
 
@@ -163,10 +175,10 @@ export function ExplorerView({
             {phase === "empty-loose" && (
               <EmptyState
                 tone="loose"
-                title="No public matches — yet."
-                body="AI search reads what's public. Try broader intent, or run the free Scan over the ATS network."
+                title={t("No public matches — yet.")}
+                body={t("AI search reads what's public. Try broader intent, or run the free Scan over the ATS network.")}
                 onRerun={() => setMode("scan")}
-                rerunLabel="Run the free Scan"
+                rerunLabel={t("Run the free Scan")}
               />
             )}
             {phase === "failed" && <FailedCard msg={error || status} scannerMissing={scannerMissing} onRetry={() => void discoverAI()} />}
@@ -177,13 +189,13 @@ export function ExplorerView({
           {isResults ? (
             <div className="mb-6 rounded-xl border border-border bg-surface/30">
               <button type="button" onClick={() => setRefineOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-sm font-medium text-foreground">
-                <Compass className="size-4 text-brand" /> Refine search
+                <Compass className="size-4 text-brand" /> {t("Refine search")}
                 <ChevronDown className={cn("ml-auto size-4 text-muted transition-transform", refineOpen && "rotate-180")} />
               </button>
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
                   <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" />
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label={t("Re-cast (free)")} />
                 </div>
               )}
             </div>
@@ -191,7 +203,7 @@ export function ExplorerView({
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
               <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
               <div className="mt-5">
-                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" />
+                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label={t("Discover (free)")} />
               </div>
             </div>
           )}
@@ -200,7 +212,10 @@ export function ExplorerView({
             <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
               <Sparkles className="mt-0.5 size-4 shrink-0 text-emerald-500" />
               <p className="text-[13px] leading-relaxed text-foreground">
-                These are live roles that match your CV. <span className="text-emerald-600 dark:text-emerald-400">Nothing here cost you a token.</span> Pick the one you&apos;re most curious about — Evaluate it and I&apos;ll tell you exactly how you score, and why.
+                {rich(
+                  t("These are live roles that match your CV. <b>Nothing here cost you a token.</b> Pick the one you're most curious about — Evaluate it and I'll tell you exactly how you score, and why."),
+                  { b: (c) => <span className="text-emerald-600 dark:text-emerald-400">{c}</span> },
+                )}
               </p>
             </div>
           )}
@@ -224,27 +239,27 @@ export function ExplorerView({
           {phase === "empty-current" && (
             <EmptyState
               tone="good"
-              title="You're all caught up."
-              body="Nothing new since your last scan. Your pipeline is current — that's the goal."
+              title={t("You're all caught up.")}
+              body={t("Nothing new since your last scan. Your pipeline is current — that's the goal.")}
               note={scanNote}
               onRerun={() => {
                 setFilters({ ...filters, sinceDays: Math.max(filters.sinceDays, 30) });
                 void discover();
               }}
-              rerunLabel="Look back 30 days"
+              rerunLabel={t("Look back 30 days")}
             />
           )}
           {phase === "empty-loose" && (
             <EmptyState
               tone="loose"
-              title="No fresh matches — yet."
-              body="Discovery is free — loosen and re-cast as often as you want."
+              title={t("No fresh matches — yet.")}
+              body={t("Discovery is free — loosen and re-cast as often as you want.")}
               note={scanNote}
               onRerun={() => {
                 setFilters({ ...filters, sinceDays: 30, block: [], allow: [] });
                 void discover();
               }}
-              rerunLabel="Widen to 30 days · clear location"
+              rerunLabel={t("Widen to 30 days · clear location")}
             />
           )}
           {phase === "degraded" && (
@@ -265,6 +280,7 @@ export function ExplorerView({
 }
 
 function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean; onDiscover: () => void; label: string }) {
+  const t = useT();
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button
@@ -277,7 +293,7 @@ function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean;
       </button>
       <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
         <span className="size-1.5 rounded-full bg-emerald-500" />
-        Evaluating a role later costs tokens. Discovering never does.
+        {t("Evaluating a role later costs tokens. Discovering never does.")}
       </span>
     </div>
   );
@@ -314,21 +330,35 @@ function DegradedCard({
   droppedNoDate: number;
   partial: boolean;
 }) {
+  const t = useT();
+  const fmt = (n: number) => n.toLocaleString(intlLocale(t.locale));
   // 0 results, but the scan was NOT a clean full search → never "all caught up".
   // Pick the most informative reason (authoritative when the scanner's --json mode
   // is available; otherwise the 0-companies fallback).
-  let title = "The scan ran, but couldn’t reach any sources.";
-  let body =
-    "The public ATS directories didn’t respond — usually a transient network hiccup or rate-limit, so nothing could be searched. This isn’t “all caught up”; a retry in a moment usually clears it.";
+  let title = t("The scan ran, but couldn’t reach any sources.");
+  let body = t(
+    "The public ATS directories didn’t respond — usually a transient network hiccup or rate-limit, so nothing could be searched. This isn’t “all caught up”; a retry in a moment usually clears it.",
+  );
   if (companiesScanned > 0 && capHit) {
-    title = "No matches in the slice we searched.";
-    body = `The scan is capped, so it only searched ${companiesScanned.toLocaleString()}${companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} companies — not the whole network. Raise scan depth (Refine search) or narrow your roles, then re-cast to look deeper.`;
+    title = t("No matches in the slice we searched.");
+    body = t(
+      "The scan is capped, so it only searched {count} companies — not the whole network. Raise scan depth (Refine search) or narrow your roles, then re-cast to look deeper.",
+      { count: companiesLabel(t, companiesScanned, companiesAvailable) },
+    );
   } else if (companiesScanned > 0 && droppedNoDate > 0) {
-    title = "Fresh-looking roles were skipped for missing dates.";
-    body = `${droppedNoDate.toLocaleString()} posting${droppedNoDate === 1 ? "" : "s"} matched but had no clear publish date, so the freshness filter dropped them. Widening the time window often brings dated equivalents back.`;
+    title = t("Fresh-looking roles were skipped for missing dates.");
+    body = t.n(
+      droppedNoDate,
+      "{count} posting matched but had no clear publish date, so the freshness filter dropped them. Widening the time window often brings dated equivalents back.",
+      "{count} postings matched but had no clear publish date, so the freshness filter dropped them. Widening the time window often brings dated equivalents back.",
+      { count: fmt(droppedNoDate) },
+    );
   } else if (companiesScanned > 0 && partial) {
-    title = "Some job boards were unreachable.";
-    body = `The scan searched ${companiesScanned.toLocaleString()} companies, but one or more sources didn’t respond — so this is a partial result, not “all caught up”. A retry usually clears it.`;
+    title = t("Some job boards were unreachable.");
+    body = t(
+      "The scan searched {count} companies, but one or more sources didn’t respond — so this is a partial result, not “all caught up”. A retry usually clears it.",
+      { count: fmt(companiesScanned) },
+    );
   }
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 text-center">
@@ -336,7 +366,7 @@ function DegradedCard({
       <p className="mt-2 text-sm font-medium text-foreground">{title}</p>
       <p className="mx-auto mt-1 max-w-md text-[13px] text-muted">{body}</p>
       <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand">
-        <RotateCcw className="size-4" /> Retry the scan
+        <RotateCcw className="size-4" /> {t("Retry the scan")}
       </button>
     </div>
   );
@@ -345,14 +375,14 @@ function DegradedCard({
 function CappedBanner({ companiesScanned, companiesAvailable, onRefine }: { companiesScanned: number; companiesAvailable: number; onRefine: () => void }) {
   // Results ARE present, but the scan was capped — tell the user there's more, so a
   // partial list never reads as "everything there is".
+  const t = useT();
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] px-4 py-2.5 text-[13px]">
       <span className="text-foreground">
-        Showing a capped slice — searched {companiesScanned.toLocaleString()}
-        {companiesAvailable > companiesScanned ? ` of ${companiesAvailable.toLocaleString()}` : ""} companies.
+        {t("Showing a capped slice — searched {count} companies.", { count: companiesLabel(t, companiesScanned, companiesAvailable) })}
       </span>
       <button onClick={onRefine} className="font-medium text-brand hover:underline">
-        Raise scan depth to search deeper
+        {t("Raise scan depth to search deeper")}
       </button>
     </div>
   );
@@ -366,23 +396,23 @@ function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMiss
   // scanner returned no readable output.") mentions the scanner too, and 400 is
   // a shared channel that also carries malformed-request and MODE_MISSING
   // failures. Neither may be misreported as a broken checkout.
+  const t = useT();
   if (scannerMissing) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
         <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
           <Compass className="size-6" />
         </div>
-        <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>Discovery needs the full toolkit</h2>
+        <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>{t("Discovery needs the full toolkit")}</h2>
         <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
-          Your career-ops home looks data-only or is on an older version. The free scanner ships with a complete checkout —
-          update career-ops, or paste a job URL on the pipeline to evaluate it directly.
+          {t("Your career-ops home looks data-only or is on an older version. The free scanner ships with a complete checkout — update career-ops, or paste a job URL on the pipeline to evaluate it directly.")}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
           <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
-            Open pipeline
+            {t("Open pipeline")}
           </Link>
           <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand">
-            Open Config
+            {t("Open Config")}
           </Link>
         </div>
       </div>
@@ -391,27 +421,28 @@ function FailedCard({ msg, scannerMissing, onRetry }: { msg: string; scannerMiss
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 text-center">
       <AlertTriangle className="mx-auto size-6 text-amber-500" />
-      <p className="mt-2 text-sm font-medium text-foreground">Couldn’t finish the search.</p>
-      <p className="mt-1 text-[13px] text-muted">{msg}</p>
+      <p className="mt-2 text-sm font-medium text-foreground">{t("Couldn’t finish the search.")}</p>
+      <p className="mt-1 text-[13px] text-muted">{t(msg)}</p>
       <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand">
-        <RotateCcw className="size-4" /> Try again
+        <RotateCcw className="size-4" /> {t("Try again")}
       </button>
     </div>
   );
 }
 
 function BlockedCard() {
+  const t = useT();
   return (
     <div className="rounded-2xl border border-border bg-surface/30 px-6 py-12 text-center">
       <div className="mx-auto grid size-12 place-items-center rounded-full bg-brand-soft text-brand">
         <Sparkles className="size-6" />
       </div>
-      <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>AI search needs a CLI</h2>
+      <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>{t("AI search needs a CLI")}</h2>
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
-        Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.
+        {t("Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.")}
       </p>
       <Link href="/config" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-brand-foreground transition hover:brightness-110">
-        <Settings className="size-4" /> Open Config
+        <Settings className="size-4" /> {t("Open Config")}
       </Link>
     </div>
   );

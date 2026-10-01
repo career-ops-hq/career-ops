@@ -6,6 +6,7 @@ import type { Job } from "@/components/jobs/job-store";
 import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
 import { isFencingNotice } from "@/lib/cli-fencing.mjs";
+import { useT } from "@/components/i18n-provider";
 
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
@@ -50,8 +51,8 @@ function useElapsed(running: boolean, startedAt: number): number {
   useEffect(() => {
     if (!running) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, [running, startedAt]);
   return Math.max(0, now - startedAt);
 }
@@ -84,11 +85,12 @@ export function WorkerCard({
   variant?: "tray" | "inline";
   trailing?: React.ReactNode;
 }) {
+  const t = useT();
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
   const elapsed = useElapsed(running, job.startedAt);
   const rawLast = job.steps[job.steps.length - 1]?.label;
-  const last = rawLast ? humanizeStep(rawLast) : undefined;
+  const last = rawLast ? t(humanizeStep(rawLast)) : undefined;
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
@@ -131,12 +133,12 @@ export function WorkerCard({
       </div>
       {(bottom || running) && (
         <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
-          {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
+          {running ? `${last ?? t("Working")} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
       {errorHint && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
-          {errorHint.text}
+          {t(errorHint.text)}
         </div>
       )}
       {fencing && (
@@ -146,7 +148,7 @@ export function WorkerCard({
       )}
       {tokens > 0 && (
         <div className={cn("mt-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}>
-          {fmtTokens(tokens)} tokens{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
+          {t("{n} tokens", { n: fmtTokens(tokens) })}{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
         </div>
       )}
     </div>

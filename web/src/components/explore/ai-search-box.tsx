@@ -3,6 +3,8 @@
 import { useRef } from "react";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { CostBadge } from "@/components/cost/cost-badge";
+import { useT } from "@/components/i18n-provider";
+import { rich } from "@/lib/i18n/rich";
 
 const EXAMPLES = [
   "AI infra roles at climate startups, remote EU",
@@ -38,12 +40,13 @@ export function AiSearchBox({
   cliName?: string;
   onRunScan: () => void;
 }) {
+  const t = useT();
   const ref = useRef<HTMLTextAreaElement>(null);
   const grow = () => {
-    const t = ref.current;
-    if (t) {
-      t.style.height = "auto";
-      t.style.height = `${Math.min(t.scrollHeight, 160)}px`;
+    const el = ref.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }
   };
 
@@ -52,7 +55,7 @@ export function AiSearchBox({
       <style>{STYLE}</style>
       <div className="co-aibox p-4">
         <div className="mb-2 flex items-center gap-2 text-[12px] font-medium text-brand">
-          <Sparkles className="size-3.5" /> Describe the role — an AI hunts the open web for it
+          <Sparkles className="size-3.5" /> {t("Describe the role — an AI hunts the open web for it")}
         </div>
         <textarea
           ref={ref}
@@ -68,16 +71,16 @@ export function AiSearchBox({
               if (intent.trim()) onSubmit();
             }
           }}
-          placeholder="“AI infra at climate startups, remote EU, not staff-level” — plain language, your words"
+          placeholder={t("“AI infra at climate startups, remote EU, not staff-level” — plain language, your words")}
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <span className="text-[12px] text-muted">
             {cliConfigured ? (
-              <>
-                Reads the public web with <span className="text-foreground">{cliName || "your CLI"}</span> — it costs your tokens.
-              </>
+              rich(t("Reads the public web with <cli>{name}</cli> — it costs your tokens."), {
+                cli: () => <span className="text-foreground">{cliName || t("your CLI")}</span>,
+              })
             ) : (
-              "Connect an AI CLI in Config to use AI search."
+              t("Connect an AI CLI in Config to use AI search.")
             )}
           </span>
           <button
@@ -86,7 +89,7 @@ export function AiSearchBox({
             onClick={onSubmit}
             className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50"
           >
-            Search the open web
+            {t("Search the open web")}
             <CostBadge kind="spend" size="xs" />
             <ArrowRight className="size-4" />
           </button>
@@ -98,14 +101,14 @@ export function AiSearchBox({
           <button
             key={ex}
             type="button"
-            onClick={() => onIntent(ex)}
+            onClick={() => onIntent(t(ex))}
             className="rounded-full border border-border bg-surface/40 px-3 py-1.5 text-[12px] text-muted transition hover:border-brand/40 hover:text-brand"
           >
-            {ex}
+            {t(ex)}
           </button>
         ))}
         <button type="button" onClick={onRunScan} className="ml-auto inline-flex items-center gap-1 text-[12px] text-faint transition hover:text-foreground">
-          or run the free Scan instead →
+          {t("or run the free Scan instead →")}
         </button>
       </div>
     </div>

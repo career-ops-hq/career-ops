@@ -12,6 +12,8 @@ import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
 import { compareTrackerNumbers } from "@/lib/pipeline-sort.mjs";
+import { useT } from "@/components/i18n-provider";
+import { rich } from "@/lib/i18n/rich";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -42,6 +44,7 @@ export function PipelineView({
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const t = useT();
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
@@ -125,10 +128,12 @@ export function PipelineView({
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">{t("Pipeline")}</h1>
           <p className="mt-1 text-sm text-muted">
-            <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
-            <span className="tabular-nums">{applications.length}</span> tracked
+            {rich(t("{inbox} in inbox · {tracked} tracked"), {
+              inbox: <span className="tabular-nums">{pendingInbox.length}</span>,
+              tracked: <span className="tabular-nums">{applications.length}</span>,
+            })}
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
@@ -138,7 +143,7 @@ export function PipelineView({
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search company or role…"
+              placeholder={t("Search company or role…")}
               className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
             />
           </div>
@@ -147,27 +152,27 @@ export function PipelineView({
 
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
-        {TABS.map((t) => {
+        {TABS.map((tabKey) => {
           const count =
-            t === "INBOX"
+            tabKey === "INBOX"
               ? pendingInbox.length
-              : t === "ALL"
+              : tabKey === "ALL"
                 ? applications.length
-                : applications.filter((r) => canonStatus(r.status).includes(t)).length;
+                : applications.filter((r) => canonStatus(r.status).includes(tabKey)).length;
           return (
             <button
-              key={t}
-              onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
+              key={tabKey}
+              onClick={() => setParams({ tab: tabKey === "INBOX" ? null : tabKey })}
               className={cn(
                 // gap-1, not a whitespace text node: flex containers drop
                 // whitespace-only anonymous items, which rendered "INBOX0".
                 "-mb-px inline-flex items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                tab === t
+                tab === tabKey
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
               )}
             >
-              {t} <span className="text-faint tabular-nums">{count}</span>
+              {t.ctx("tab", tabKey)} <span className="text-faint tabular-nums">{count}</span>
             </button>
           );
         })}
@@ -175,14 +180,14 @@ export function PipelineView({
 
       {tab !== "INBOX" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
-          <span className="text-xs text-faint">Filtered:</span>
+          <span className="text-xs text-faint">{t("Filtered:")}</span>
           <button
             type="button"
             onClick={() => setParams({ min: null })}
             className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
-            title="Clear score filter"
+            title={t("Clear score filter")}
           >
-            score ≥ {minFilter.toFixed(1)}
+            {t("score ≥ {n}", { n: minFilter.toFixed(1) })}
             <X className="size-3" />
           </button>
         </div>
@@ -219,7 +224,7 @@ export function PipelineView({
                       className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
                       onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                     >
-                      {k}
+                      {t(k)}
                       <ChevronsUpDown aria-hidden="true" className="size-3" />
                     </button>
                   </th>
@@ -251,7 +256,7 @@ export function PipelineView({
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {r.status}
+                      {t(r.status)}
                     </span>
                   </td>
                   <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
@@ -263,8 +268,8 @@ export function PipelineView({
         </div>
       ) : (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
+          <p className="font-display text-lg">{t("No matches")}</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{t("Try a different tab or clear the search.")}</p>
         </div>
       )}
     </div>
@@ -274,11 +279,12 @@ export function PipelineView({
 // Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),
 // honest for devs (the CLI/file path stays, demoted to progressive transparency).
 function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
+  const t = useT();
   if (filtered) {
     return (
       <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-        <p className="font-display text-lg">No matches</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Clear the search to see the full inbox.</p>
+        <p className="font-display text-lg">{t("No matches")}</p>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{t("Clear the search to see the full inbox.")}</p>
       </div>
     );
   }
@@ -288,26 +294,28 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
         <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="ml-3 font-mono text-xs tracking-wide text-muted">career-ops · inbox</span>
+        <span className="ml-3 font-mono text-xs tracking-wide text-muted">{t("career-ops · inbox")}</span>
       </div>
       <div className="px-6 py-10 text-center">
         <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
+          {rich(t("Your <b>inbox</b> is empty."), { b: (c) => <span className="text-brand">{c}</span> })}
         </p>
         {count > 0 ? (
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Nothing pending right now.</p>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">{t("Nothing pending right now.")}</p>
         ) : (
           <>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">{t("Find roles that match your CV — free, no tokens spent.")}</p>
             <Link
               href="/explore?run=1"
               className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
             >
-              <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
+              <Compass className="size-4" /> {t("Run your first free scan")} <ArrowRight className="size-4" />
             </Link>
             <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
-              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
-              <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
+              {rich(t("Prefer the terminal? Run <code>career-ops scan</code>, or add job URLs to <code2>data/pipeline.md</code2>."), {
+                code: (c) => <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">{c}</code>,
+                code2: (c) => <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">{c}</code>,
+              })}
             </p>
           </>
         )}

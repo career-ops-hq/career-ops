@@ -17,6 +17,8 @@ import { dispatch, type ActionCtx, type DoneInfo } from "@/app/actions/registry"
 import { scoreNum } from "@/lib/format";
 import { pendingActOpenerStart } from "@/lib/act-envelope.mjs";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
+import { LOCALES, makeT, type T } from "@/lib/i18n";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -47,6 +49,14 @@ const PANEL_CLASS: Record<PanelSize, string> = {
 // that scales with the panel, instead of staying a one-line box that scrolls.
 const INPUT_MAX_PX: Record<PanelSize, number> = { compact: 128, wide: 240, full: 360 };
 const SIZE_LABEL: Record<PanelSize, string> = { compact: "Wider", wide: "Full screen", full: "Compact" };
+// The greeting is UI chrome, never conversation history — recognise it in any
+// language, since a stored chat may predate a language switch.
+const isGreeting = (text: string) => LOCALES.some((l) => makeT(l)(GREETING) === text);
+
+/** Tell the model which language the viewer reads, so replies match the UI. */
+function languageHint(t: T): string {
+  return t.locale === "tr" ? "\n\nThe user's interface language is Turkish: reply in Turkish unless they write in another language." : "";
+}
 // back-compat shims — the old directives still work, mapped onto the registry
 const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
 const REMEMBER_RE = /<<\s*remember:\s*([^>]+?)\s*>>/gi;
@@ -157,6 +167,7 @@ export function AssistantConsole() {
   const [busy, setBusy] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
+  const t = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { jobs, startJob } = useJobs();
@@ -247,8 +258,8 @@ export function AssistantConsole() {
   }, [messages]);
 
   useEffect(() => {
-    if (open && messages.length === 0) setMessages([{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
-  }, [open, messages.length]);
+    if (open && messages.length === 0) setMessages([{ role: "assistant", parts: [{ type: "text", text: t(GREETING) }] }]);
+  }, [open, messages.length, t]);
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
@@ -331,6 +342,7 @@ export function AssistantConsole() {
       writePortals: (roles, location) => {
         fetch("/api/portals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roles, location }) }).catch(() => {});
       },
+      t,
     };
   }
 
@@ -393,7 +405,7 @@ export function AssistantConsole() {
     const text = (forced ?? input).trim();
     if (!text || busy || !cliId) return;
     if (forced === undefined) setInput("");
-    const history = messages.filter((m) => msgText(m) && msgText(m) !== GREETING).map((m) => ({ role: m.role, content: msgText(m) }));
+    const history = messages.filter((m) => msgText(m) && !isGreeting(msgText(m))).map((m) => ({ role: m.role, content: msgText(m) }));
     setMessages((m) => [...m, { role: "user", parts: [{ type: "text", text }] }, { role: "assistant", parts: [{ type: "text", text: "" }] }]);
     setBusy(true);
     handledRef.current = new Set();
@@ -402,11 +414,11 @@ export function AssistantConsole() {
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, cliId, history, pageContext: describePage(pathname) + pipelineContext() + applyContext() }),
+        body: JSON.stringify({ message: text, cliId, history, pageContext: describePage(pathname) + pipelineContext() + applyContext() + languageHint(t) }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
-        setStreamText(`⚠️ ${err.error || "Assistant unavailable."}`);
+        setStreamText(`⚠️ ${err.error || t("Assistant unavailable.")}`);
         return;
       }
       const reader = res.body.getReader();
@@ -462,9 +474,9 @@ export function AssistantConsole() {
           }
         }
       }
-      if (!acc.trim()) setStreamText("_(no output — is the CLI authenticated?)_");
+      if (!acc.trim()) setStreamText(t("_(no output — is the CLI authenticated?)_"));
     } catch {
-      setStreamText("⚠️ Connection error.");
+      setStreamText(`⚠️ ${t("Connection error.")}`);
     } finally {
       setBusy(false);
       router.refresh();
@@ -473,7 +485,7 @@ export function AssistantConsole() {
   }
 
   function resetChat() {
-    setMessages([{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
+    setMessages([{ role: "assistant", parts: [{ type: "text", text: t(GREETING) }] }]);
     confirmRuns.current.clear();
     try {
       localStorage.removeItem(CHAT_KEY);
@@ -501,30 +513,30 @@ export function AssistantConsole() {
     const chips: { label: string; send: string }[] = [];
     const rep = pathname.match(/^\/pipeline\/(.+)$/);
     if (rep) {
-      chips.push({ label: "Why this score?", send: "Walk me through why this offer scored the way it did — strengths and red flags." });
-      chips.push({ label: "Should I apply?", send: "Given my profile, should I apply to this one? Be honest." });
-      chips.push({ label: "Draft a cover letter", send: "Draft a short, sharp cover letter for this role." });
+      chips.push({ label: t("Why this score?"), send: t("Walk me through why this offer scored the way it did — strengths and red flags.") });
+      chips.push({ label: t("Should I apply?"), send: t("Given my profile, should I apply to this one? Be honest.") });
+      chips.push({ label: t("Draft a cover letter"), send: t("Draft a short, sharp cover letter for this role.") });
       return chips;
     }
     const pending = pipeline.inbox.filter((j) => !j.done);
     if (!pipeline.applications.length && !pending.length) {
       return [
-        { label: "Help me get set up", send: "Help me get started with career-ops — what do you need from me?" },
-        { label: "Improve my CV", send: "Look at my CV and suggest the highest-impact improvements." },
+        { label: t("Help me get set up"), send: t("Help me get started with career-ops — what do you need from me?") },
+        { label: t("Improve my CV"), send: t("Look at my CV and suggest the highest-impact improvements.") },
       ];
     }
     if (pending.length) {
       const counts = new Map<string, number>();
       for (const j of pending) counts.set(j.company, (counts.get(j.company) ?? 0) + 1);
       const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (top && top[1] > 1) chips.push({ label: `Evaluate all ${top[0]} (${top[1]})`, send: `Evaluate all the pending ${top[0]} postings in my inbox.` });
-      chips.push({ label: `Triage inbox (${pending.length})`, send: `I have ${pending.length} postings in my inbox — which should I evaluate first, and why?` });
+      if (top && top[1] > 1) chips.push({ label: t("Evaluate all {company} ({n})", { company: top[0], n: top[1] }), send: t("Evaluate all the pending {company} postings in my inbox.", { company: top[0] }) });
+      chips.push({ label: t("Triage inbox ({n})", { n: pending.length }), send: t("I have {n} postings in my inbox — which should I evaluate first, and why?", { n: pending.length }) });
     }
     const strong = pipeline.applications.filter((a) => scoreNum(a.score) >= 4.5).length;
-    if (strong) chips.push({ label: "Strong matches to act on", send: "Show me my strongest matches (4.5+) I haven't applied to yet, and tell me which to prioritise." });
-    chips.push({ label: "What should I do today?", send: "Look at my pipeline and tell me the 3 highest-leverage things I should do today." });
+    if (strong) chips.push({ label: t("Strong matches to act on"), send: t("Show me my strongest matches (4.5+) I haven't applied to yet, and tell me which to prioritise.") });
+    chips.push({ label: t("What should I do today?"), send: t("Look at my pipeline and tell me the 3 highest-leverage things I should do today.") });
     return chips.slice(0, 4);
-  }, [pathname, pipeline.inbox, pipeline.applications]);
+  }, [pathname, pipeline.inbox, pipeline.applications, t]);
 
   return (
     <>
@@ -532,10 +544,10 @@ export function AssistantConsole() {
         <button
           onClick={() => setOpen(true)}
           className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
-          aria-label="Open assistant"
+          aria-label={t("Open assistant")}
         >
           <CoMark size={26} />
-          <span className="text-sm font-medium">Ask</span>
+          <span className="text-sm font-medium">{t("Ask")}</span>
         </button>
       )}
 
@@ -544,16 +556,16 @@ export function AssistantConsole() {
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <CoMark size={26} />
             <div className="flex-1">
-              <div className="text-sm font-semibold tracking-tight">Assistant</div>
-              <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
+              <div className="text-sm font-semibold tracking-tight">{t("Assistant")}</div>
+              <div className="text-xs text-faint">{cliId ? t("via {cli}", { cli: cliId }) : t("no CLI configured")}</div>
             </div>
-            <Button variant="ghost" size="icon" onClick={cycleSize} className="text-muted" aria-label={SIZE_LABEL[size]} title={SIZE_LABEL[size]}>
+            <Button variant="ghost" size="icon" onClick={cycleSize} className="text-muted" aria-label={t(SIZE_LABEL[size])} title={t(SIZE_LABEL[size])}>
               {size === "full" ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label="New chat" title="New chat">
+            <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label={t("New chat")} title={t("New chat")}>
               <RotateCcw className="size-4" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="text-muted" aria-label="Close assistant">
+            <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="text-muted" aria-label={t("Close assistant")}>
               <X className="size-4" />
             </Button>
           </header>
@@ -609,7 +621,7 @@ export function AssistantConsole() {
               onClick={() => setOpen(false)}
               className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              <Settings className="size-3.5" /> Pick a CLI in Config to enable the assistant →
+              <Settings className="size-3.5" /> {t("Pick a CLI in Config to enable the assistant →")}
             </Link>
           )}
 
@@ -625,7 +637,7 @@ export function AssistantConsole() {
                     send();
                   }
                 }}
-                placeholder={cliId ? "Ask anything…" : "Configure a CLI first"}
+                placeholder={cliId ? t("Ask anything…") : t("Configure a CLI first")}
                 rows={1}
                 disabled={!cliId}
                 style={{ maxHeight: INPUT_MAX_PX[size] }}
@@ -635,7 +647,7 @@ export function AssistantConsole() {
                 onClick={() => send()}
                 disabled={busy || !input.trim() || !cliId}
                 className="rounded-xl bg-brand p-2 text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-40"
-                aria-label="Send"
+                aria-label={t("Send")}
               >
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>
@@ -658,6 +670,7 @@ function PartView({
   onConfirm: (cid: string, accept: boolean) => void;
   onOpen: () => void;
 }) {
+  const t = useT();
   if (part.type === "text") {
     if (!part.text.trim()) return null;
     return (
@@ -674,7 +687,7 @@ function PartView({
     if (!job)
       return (
         <Link href={`/jobs/${part.jobId}`} className="block rounded-xl border border-border bg-surface/40 p-2.5 text-xs text-faint hover:text-foreground">
-          Worker finished earlier — open log →
+          {t("Worker finished earlier — open log →")}
         </Link>
       );
     return (
@@ -682,7 +695,7 @@ function PartView({
         job={job}
         variant="inline"
         trailing={
-          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
+          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label={t("Open worker")}>
             <ArrowUpRight className="size-3.5" />
           </Link>
         }
@@ -696,9 +709,9 @@ function PartView({
       <div className="rounded-xl border border-border bg-surface/40 p-2.5">
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
           <Sparkles className="size-3.5 text-brand" />
-          {part.jobIds.length} evaluations
+          {t("{n} evaluations", { n: part.jobIds.length })}
           <span className="ml-auto tabular-nums text-faint">
-            {done}/{part.jobIds.length} done
+            {t("{done}/{total} done", { done, total: part.jobIds.length })}
           </span>
         </div>
         <div className="space-y-1.5">
@@ -708,7 +721,7 @@ function PartView({
               job={j!}
               variant="inline"
               trailing={
-                <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
+                <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label={t("Open worker")}>
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               }
@@ -728,17 +741,17 @@ function PartView({
               onClick={() => onConfirm(part.cid, true)}
               className="rounded-full bg-brand px-3 py-1 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
             >
-              Confirm
+              {t("Confirm")}
             </button>
             <button
               onClick={() => onConfirm(part.cid, false)}
               className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              Cancel
+              {t("Cancel")}
             </button>
           </div>
         ) : (
-          <div className="mt-1 text-xs text-faint">{part.state === "done" ? "✓ started" : "cancelled"}</div>
+          <div className="mt-1 text-xs text-faint">{part.state === "done" ? t("✓ started") : t("cancelled")}</div>
         )}
       </div>
     );

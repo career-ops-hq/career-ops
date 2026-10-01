@@ -6,6 +6,8 @@ import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, ATS_SOURCES, type AtsSource } from "@/lib/explore";
 import { useExplore, type SourceState } from "./explore-provider";
+import { useT } from "@/components/i18n-provider";
+import { intlLocale } from "@/lib/i18n";
 
 const STYLE = `
 .co-disc{position:relative;z-index:1;display:flex;min-height:0;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;gap:1rem;padding:1.5rem 1rem 0.5rem}
@@ -46,6 +48,7 @@ export function useCountUp(target: number): number {
 }
 
 function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
+  const t = useT();
   const state = s?.state ?? "queued";
   const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
   return (
@@ -59,7 +62,7 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
       )}
       <span className="text-[13px] font-medium text-foreground">{ATS_LABEL[ats]}</span>
       <div className="ml-auto flex flex-col items-end gap-1">
-        {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
+        {state === "noisy" && <span className="text-[10px] text-faint">{t("~{n} skipped", { n: s?.unreachable ?? 0 })}</span>}
         <div className="co-src__track">
           <div className="co-src__bar" style={{ width: `${pct}%` }} />
         </div>
@@ -72,6 +75,7 @@ export function DiscoveringState() {
   const { sources, matchCount, companiesScanned, status, phase } = useExplore();
   const shown = useCountUp(matchCount);
   const companies = useCountUp(companiesScanned);
+  const t = useT();
 
   return (
     <>
@@ -81,13 +85,13 @@ export function DiscoveringState() {
 
         <div className="co-ledger">
           <span className="size-1.5 rounded-full bg-emerald-500" />
-          0 tokens · $0.00 {companies > 0 && <span className="opacity-70">· {companies.toLocaleString()} companies</span>}
+          {t("0 tokens · $0.00")} {companies > 0 && <span className="opacity-70">· {t("{n} companies", { n: companies.toLocaleString(intlLocale(t.locale)) })}</span>}
         </div>
 
         <div>
           <div className={`${instrumentSerif.className} co-disc__counter text-foreground`}>{shown}</div>
           <p className="mt-1 text-sm text-muted">
-            {phase === "revealing" ? "fresh roles found — free" : matchCount > 0 ? "fresh roles and counting…" : "scanning the network…"}
+            {phase === "revealing" ? t("fresh roles found — free") : matchCount > 0 ? t("fresh roles and counting…") : t("scanning the network…")}
           </p>
         </div>
 
@@ -99,7 +103,7 @@ export function DiscoveringState() {
 
         <p className="flex items-center gap-2 text-[13px] text-faint">
           <Loader2 className="size-3.5 animate-spin" />
-          {status || "Casting the net across the ATS network…"}
+          {status || t("Casting the net across the ATS network…")}
         </p>
       </div>
     </>

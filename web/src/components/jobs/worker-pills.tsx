@@ -6,6 +6,7 @@ import { X, History } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { WorkerCard, pillTone, TONE } from "@/components/jobs/worker-card";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
 
 // Back-compat re-exports (app/jobs/page.tsx imports pillTone from here).
 export { pillTone, TONE };
@@ -15,6 +16,7 @@ export { pillTone, TONE };
 export function WorkerPills() {
   const { jobs, removeJob, clearFinished } = useJobs();
   const pathname = usePathname();
+  const t = useT();
   if (jobs.length === 0) return null;
   const running = jobs.filter((j) => j.status === "running").length;
   const finished = jobs.length - running;
@@ -22,14 +24,14 @@ export function WorkerPills() {
   return (
     <div className="mt-4 border-t border-border pt-3">
       <div className="mb-2 flex items-center gap-2 px-1">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Workers</span>
-        {running > 0 && <span className="text-[10px] tabular-nums text-brand">{running} running</span>}
-        <Link href="/jobs" className="ml-auto text-faint transition-colors hover:text-foreground" title="History" aria-label="Worker history">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">{t("Workers")}</span>
+        {running > 0 && <span className="text-[10px] tabular-nums text-brand">{t("{n} running", { n: running })}</span>}
+        <Link href="/jobs" className="ml-auto text-faint transition-colors hover:text-foreground" title={t("History")} aria-label={t("Worker history")}>
           <History className="size-3.5" />
         </Link>
         {finished > 0 && (
-          <button onClick={clearFinished} className="text-[10px] text-faint transition-colors hover:text-foreground" title="Clear finished">
-            clear
+          <button onClick={clearFinished} className="text-[10px] text-faint transition-colors hover:text-foreground" title={t("Clear finished")}>
+            {t("clear")}
           </button>
         )}
       </div>
@@ -55,7 +57,7 @@ export function WorkerPills() {
                         removeJob(j.id);
                       }}
                       className="text-faint opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-                      aria-label="Dismiss job"
+                      aria-label={t("Dismiss job")}
                     >
                       <X className="size-3" />
                     </button>

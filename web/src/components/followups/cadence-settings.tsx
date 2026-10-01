@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
+import { rich } from "@/lib/i18n/rich";
 
 // Follow-up cadence knobs → config/profile.yml (followup_cadence). Server-
 // persisted (unlike the localStorage engine prefs above) because the core
@@ -19,6 +21,7 @@ const FIELDS: { key: ProfileCadenceKey; label: string; hint: string }[] = [
 ];
 
 export function CadenceSettings() {
+  const t = useT();
   const [values, setValues] = useState<Record<ProfileCadenceKey, string> | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -57,7 +60,7 @@ export function CadenceSettings() {
       const raw = values[k].trim();
       const n = raw === "" ? Number.NaN : Number(raw);
       if (!Number.isInteger(n) || n < 0) {
-        setError(`"${FIELDS.find((f) => f.key === k)?.label}" must be a whole number ≥ 0.`);
+        setError(t("\"{field}\" must be a whole number ≥ 0.", { field: t(FIELDS.find((f) => f.key === k)?.label ?? k) }));
         return;
       }
       payload[k] = n;
@@ -72,13 +75,13 @@ export function CadenceSettings() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(typeof j.error === "string" ? j.error : "Could not save.");
+        setError(typeof j.error === "string" ? j.error : t("Could not save."));
       } else {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }
     } catch {
-      setError("Could not save.");
+      setError(t("Could not save."));
     }
     setSaving(false);
   };
@@ -86,38 +89,41 @@ export function CadenceSettings() {
   return (
     <div>
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        Follow-up cadence
+        {t("Follow-up cadence")}
       </label>
       <div className="rounded-xl border border-border bg-surface/50 p-4">
         <p className="text-xs leading-relaxed text-faint">
-          When the <span className="text-muted">Follow-ups</span> tracker nudges you. Saved to{" "}
-          <span className="font-mono text-muted">config/profile.yml</span> — the CLI uses the same values.
+          {rich(t("When the <b>Follow-ups</b> tracker nudges you. Saved to <code>config/profile.yml</code> — the CLI uses the same values."), {
+            b: (c) => <span className="text-muted">{c}</span>,
+            code: (c) => <span className="font-mono text-muted">{c}</span>,
+          })}
         </p>
         {loadError ? (
           <div className="mt-3 text-sm text-muted">
             <p className="text-red-500">
-              Couldn&apos;t read your current cadence settings — not showing defaults, to avoid overwriting real values in{" "}
-              <span className="font-mono">config/profile.yml</span>.
+              {rich(t("Couldn't read your current cadence settings — not showing defaults, to avoid overwriting real values in <code>config/profile.yml</code>."), {
+                code: (c) => <span className="font-mono">{c}</span>,
+              })}
             </p>
             <button
               type="button"
               onClick={load}
               className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
             >
-              Retry
+              {t("Retry")}
             </button>
           </div>
         ) : values === null ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> Loading…
+            <Loader2 className="size-4 animate-spin" /> {t("Loading…")}
           </div>
         ) : (
           <>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {FIELDS.map((f) => (
                 <label key={f.key} className="block">
-                  <span className="block text-sm font-medium text-foreground">{f.label}</span>
-                  <span className="mt-0.5 block text-xs text-faint">{f.hint}</span>
+                  <span className="block text-sm font-medium text-foreground">{t(f.label)}</span>
+                  <span className="mt-0.5 block text-xs text-faint">{t(f.hint)}</span>
                   <input
                     type="number"
                     min={0}
@@ -140,7 +146,7 @@ export function CadenceSettings() {
               )}
             >
               {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
-              {saved ? "Saved" : "Save cadence"}
+              {saved ? t("Saved") : t("Save cadence")}
             </button>
           </>
         )}

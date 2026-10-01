@@ -12,6 +12,7 @@ import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
@@ -24,6 +25,7 @@ const BATCH = 20;
 // role relevant — order is freshness with a single documented plug point.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const router = useRouter();
+  const t = useT();
   const { jobs, startJob } = useJobs();
   // Serialize skip/undo per URL so a fast Undo cannot lose the race to Skip.
   const skipChain = useRef(new Map<string, Promise<void>>());
@@ -81,8 +83,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // auto-dismiss the undo toast
   useEffect(() => {
     if (!undo) return;
-    const t = setTimeout(() => setUndo(null), 5000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setUndo(null), 5000);
+    return () => clearTimeout(timer);
   }, [undo]);
 
   // stable "now" for freshness (per mount)
@@ -180,7 +182,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const skip = (job: InboxJob) => {
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     setUndo({
-      label: `Skipped ${job.company}`,
+      label: t("Skipped {company}", { company: job.company }),
       fn: () => {
         setHidden((h) => h.filter((u) => u !== job.url));
         void persistSkip(job.url, false);
@@ -220,7 +222,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
-      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
+      startJob({ title: t("Score · {company}", { company: it.company }), subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
     }
     setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
@@ -253,11 +255,11 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* batch header: fresh slice by default, or the full filtered set */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
+          {capped ? t("Fresh — worth a look") : anyFacet ? t.n(filtered.length, "{n} match", "{n} matches") : t("All roles")}
         </p>
         {hiddenCount > 0 && (
           <button type="button" onClick={restoreHidden} className="text-xs text-faint transition-colors hover:text-foreground">
-            {hiddenCount} hidden · restore
+            {t("{n} hidden · restore", { n: hiddenCount })}
           </button>
         )}
       </div>
@@ -265,12 +267,12 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* multi-select action bar */}
       {selected.size > 0 && (
         <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
-          <span className="font-medium text-brand tabular-nums">{selected.size} selected</span>
+          <span className="font-medium text-brand tabular-nums">{t("{n} selected", { n: selected.size })}</span>
           <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
-            Save to shortlist
+            {t("Save to shortlist")}
           </button>
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-            Clear
+            {t("Clear")}
           </button>
         </div>
       )}
@@ -294,8 +296,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         </ul>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Loosen the filters to see more of your inbox.</p>
+          <p className="font-display text-lg">{t("No matches")}</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{t("Loosen the filters to see more of your inbox.")}</p>
         </div>
       )}
 
@@ -306,13 +308,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           onClick={() => setShowAll(true)}
           className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
         >
-          See all {ordered.length} in inbox →
+          {t("See all {n} in inbox →", { n: ordered.length })}
         </button>
       )}
 
       {/* empty-shortlist guidance (only once there's nothing saved) */}
       {shortlist.length === 0 && (
-        <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
+        <p className="mt-4 text-center text-xs text-faint">{t("Save roles worth a look, then score them together — one token spend.")}</p>
       )}
 
       {/* undo toast (sits above the tray) */}
@@ -321,7 +323,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           <div className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <span className="text-muted">{undo.label}</span>
             <button type="button" onClick={() => { undo.fn(); setUndo(null); }} className="inline-flex items-center gap-1 font-medium text-brand max-sm:min-h-[44px]">
-              <Undo2 className="size-3.5" /> Undo
+              <Undo2 className="size-3.5" /> {t("Undo")}
             </button>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Send, Lock } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { useApply } from "@/components/apply/apply-provider";
+import { useT } from "@/components/i18n-provider";
 
 // The "Apply" CTA. Brand fill only when the score is at/above the apply line
 // and legitimacy is not caution (#4206). Enabled ONLY when the tailored CV
@@ -26,6 +27,7 @@ export function ApplyButton({
   const router = useRouter();
   const { jobs } = useJobs();
   const apply = useApply();
+  const t = useT();
 
   const pdfJobDone = jobs.some((j) => j.kind === "pdf" && j.input === n && j.status === "done");
   const hasUrl = !!url && /^https?:\/\//i.test(url);
@@ -36,10 +38,10 @@ export function ApplyButton({
       <button
         type="button"
         disabled
-        title={!hasUrl ? "No application URL on this report" : "Generate the tailored CV (PDF) first to apply"}
+        title={!hasUrl ? t("No application URL on this report") : t("Generate the tailored CV (PDF) first to apply")}
         className="inline-flex cursor-not-allowed items-center justify-center gap-1.5 rounded-full border border-border bg-surface/40 px-3.5 py-1 text-xs font-medium text-faint max-sm:min-h-[44px]"
       >
-        <Lock className="size-3.5" /> Apply
+        <Lock className="size-3.5" /> {t("Apply")}
       </button>
     );
   }
@@ -63,11 +65,11 @@ export function ApplyButton({
       }
       title={
         quiet
-          ? "Apply — below the apply line or caution; opens the form pre-filled, you review and submit yourself"
-          : "Apply — opens the form pre-filled, you review and submit yourself"
+          ? t("Apply — below the apply line or caution; opens the form pre-filled, you review and submit yourself")
+          : t("Apply — opens the form pre-filled, you review and submit yourself")
       }
     >
-      <Send className="size-3.5" /> Apply
+      <Send className="size-3.5" /> {t("Apply")}
     </button>
   );
 }

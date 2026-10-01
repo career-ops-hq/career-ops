@@ -6,6 +6,7 @@ import { ATS_LABEL } from "@/lib/explore";
 import { FRESHNESS_WINDOWS, SENIORITY_LABEL, type Seniority } from "@/lib/inbox";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
 
 // Free, client-side facets over the raw firehose — 0 tokens, instant. Mirrors the
 // Explore chip language so the two surfaces read as one system. On mobile the chip
@@ -45,6 +46,7 @@ export function FacetChips({
   anyActive: boolean;
   onClear: () => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-2.5">
       {/* keyword search + live count */}
@@ -54,7 +56,7 @@ export function FacetChips({
           <input
             value={kw}
             onChange={(e) => setKw(e.target.value)}
-            placeholder="Filter by company or role…"
+            placeholder={t("Filter by company or role…")}
             className="w-full rounded-lg border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
           />
         </div>
@@ -78,7 +80,7 @@ export function FacetChips({
                 within === w.days ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
               )}
             >
-              {w.label}
+              {t(w.label)}
             </button>
           ))}
         </div>
@@ -91,7 +93,7 @@ export function FacetChips({
 
         {availSeniorities.map((s) => (
           <Pill key={s} on={seniorities.has(s)} onClick={() => toggleSeniority(s)}>
-            {SENIORITY_LABEL[s]}
+            {t(SENIORITY_LABEL[s])}
           </Pill>
         ))}
 
@@ -99,7 +101,7 @@ export function FacetChips({
         <input
           value={locQ}
           onChange={(e) => setLocQ(e.target.value)}
-          placeholder="location…"
+          placeholder={t("location…")}
           className="w-28 shrink-0 rounded-full border border-border bg-surface/40 px-3 text-xs outline-none transition-colors placeholder:text-faint focus:border-brand/40 max-sm:min-h-[44px] py-1"
         />
 
@@ -109,7 +111,7 @@ export function FacetChips({
             onClick={onClear}
             className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
           >
-            <X className="size-3" /> Clear
+            <X className="size-3" /> {t("Clear")}
           </button>
         )}
       </div>
@@ -118,7 +120,7 @@ export function FacetChips({
           as the tray's "spend" cue (mobile + desktop) — never desktop-only. */}
       <div className="flex items-center gap-1.5">
         <CostBadge kind="free" size="xs" />
-        <span className="text-[11px] text-faint">Filtering is free — only scoring uses tokens.</span>
+        <span className="text-[11px] text-faint">{t("Filtering is free — only scoring uses tokens.")}</span>
       </div>
     </div>
   );

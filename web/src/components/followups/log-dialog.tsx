@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { CHANNELS, localISODate, type CadenceEntry, type Channel } from "@/lib/followups";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
 
 // "Log" — the full-fidelity FollowUp entry (date, channel enum, contact,
 // notes). Appends one table row via /api/followups/log.
@@ -18,6 +19,7 @@ export function LogDialog({
 }) {
   // Local day, not UTC — east of UTC toISOString() defaults to "yesterday"
   // and its max would block picking the user's actual today.
+  const t = useT();
   const [date, setDate] = useState(() => localISODate());
   const [channel, setChannel] = useState<Channel>("Email");
   const [contact, setContact] = useState(entry.contacts[0]?.email ?? "");
@@ -59,14 +61,14 @@ export function LogDialog({
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(typeof j.error === "string" ? j.error : "Could not log the follow-up.");
+        setError(typeof j.error === "string" ? j.error : t("Could not log the follow-up."));
         setSaving(false);
         return;
       }
       onLogged();
       onClose();
     } catch {
-      setError("Could not log the follow-up.");
+      setError(t("Could not log the follow-up."));
       setSaving(false);
     }
   };
@@ -84,17 +86,17 @@ export function LogDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`Log follow-up for ${entry.company}`}
+        aria-label={t("Log follow-up for {company}", { company: entry.company })}
         className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-xl"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="font-display text-lg">Log follow-up</h2>
+            <h2 className="font-display text-lg">{t("Log follow-up")}</h2>
             <p className="mt-0.5 text-sm text-muted">
               {entry.company} · {entry.role} <span className="text-faint">(#{entry.num})</span>
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded p-1 text-faint transition hover:text-foreground">
+          <button type="button" onClick={onClose} aria-label={t("Close")} className="rounded p-1 text-faint transition hover:text-foreground">
             <X className="size-4" />
           </button>
         </div>
@@ -102,26 +104,26 @@ export function LogDialog({
         <form onSubmit={submit} className="mt-4 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs font-medium text-muted">
-              Date
+              {t("Date")}
               <input type="date" required value={date} max={localISODate()} onChange={(e) => setDate(e.target.value)} className={cn(inputCls, "mt-1")} />
             </label>
             <label className="block text-xs font-medium text-muted">
-              Channel
+              {t("Channel")}
               <select value={channel} onChange={(e) => setChannel(e.target.value as Channel)} className={cn(inputCls, "mt-1")}>
                 {CHANNELS.map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {t(c)}
                   </option>
                 ))}
               </select>
             </label>
           </div>
           <label className="block text-xs font-medium text-muted">
-            Contact <span className="font-normal text-faint">(optional)</span>
+            {t("Contact")} <span className="font-normal text-faint">{t("(optional)")}</span>
             <input
               value={contact}
               onChange={(e) => setContact(e.target.value)}
-              placeholder="who you reached out to"
+              placeholder={t("who you reached out to")}
               list={entry.contacts.length ? `co-contacts-${entry.num}` : undefined}
               className={cn(inputCls, "mt-1")}
             />
@@ -136,26 +138,26 @@ export function LogDialog({
             )}
           </label>
           <label className="block text-xs font-medium text-muted">
-            Notes <span className="font-normal text-faint">(optional)</span>
+            {t("Notes")} <span className="font-normal text-faint">{t("(optional)")}</span>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              placeholder="what you said, what you're waiting on…"
+              placeholder={t("what you said, what you're waiting on…")}
               className={cn(inputCls, "mt-1 resize-none")}
             />
           </label>
           {error && <p className="text-xs text-red-500">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm text-muted transition hover:text-foreground">
-              Cancel
+              {t("Cancel")}
             </button>
             <button
               type="submit"
               disabled={saving}
               className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:pointer-events-none disabled:opacity-60"
             >
-              {saving && <Loader2 className="size-3.5 animate-spin" />} Log follow-up
+              {saving && <Loader2 className="size-3.5 animate-spin" />} {t("Log follow-up")}
             </button>
           </div>
         </form>

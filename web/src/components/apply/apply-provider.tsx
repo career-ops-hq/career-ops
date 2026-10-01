@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useT } from "@/components/i18n-provider";
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
@@ -73,6 +74,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [issues, setIssues] = useState<ApplyIssue[]>([]);
   const [driveSteps, setDriveSteps] = useState<DriveStep[]>([]);
   const [error, setError] = useState("");
+  // Error copy is produced inside long-lived callbacks; read the current
+  // language through a ref so the callbacks keep their stable identities.
+  const t = useT();
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const sessionId = useRef<string | null>(null);
   const companyRef = useRef<string>("");
   // Mirrors `n` for the async fetch below, same reason as companyRef: the
@@ -102,7 +110,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
       if (generation.current !== gen) return; // left mid-drive
       if (!r.body) {
-        setError("The agent couldn't start.");
+        setError(tRef.current("The agent couldn't start."));
         setStatus("error");
         return;
       }
@@ -135,19 +143,19 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
             setStatus("ready"); // → the ready-effect auto-prefills if pending
           } else if (ev.t === "error") {
             finished = true;
-            setError(ev.message || "The agent couldn't reach a fillable form.");
+            setError(ev.message || tRef.current("The agent couldn't reach a fillable form."));
             setStatus("error");
           }
         }
       }
       if (generation.current !== gen) return; // left mid-drive
       if (!finished) {
-        setError("The agent stopped before reaching a form.");
+        setError(tRef.current("The agent stopped before reaching a form."));
         setStatus("error");
       }
     } catch (e) {
       if (generation.current !== gen) return; // left mid-drive
-      setError(`The agent couldn't reach the form: ${e instanceof Error ? e.message : "stream error"}.`);
+      setError(tRef.current("The agent couldn't reach the form: {error}.", { error: e instanceof Error ? e.message : tRef.current("stream error") }));
       setStatus("error");
     }
   }, []);
@@ -205,7 +213,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setStatus("ready");
     } catch {
       if (generation.current !== gen) return; // left while it was opening
-      setError("Could not open the form.");
+      setError(tRef.current("Could not open the form."));
       setStatus("error");
     }
   }, []);
@@ -214,7 +222,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     if (!sessionId.current) return;
     const gen = generation.current;
     if (!cliId()) {
-      setError("Configure a CLI in Config first, then pre-fill from your CV.");
+      setError(tRef.current("Configure a CLI in Config first, then pre-fill from your CV."));
       return;
     }
     setStatus("prefilling");
@@ -234,7 +242,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
       if (generation.current !== gen) return; // left mid-prefill
       if (!r.body) {
-        setError("Couldn't pre-fill — no response stream.");
+        setError(tRef.current("Couldn't pre-fill — no response stream."));
         setStatus("ready");
         return;
       }
@@ -264,21 +272,21 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           } else if (ev.t === "done") {
             got = true;
             applyAnswers(ev.answers ?? {});
-            if ((ev.count ?? 0) === 0) setError("The planner returned 0 answers — see the diagnostics log below.");
-            else if (ev.truncated) setError("The planner was cut off — some fields were recovered, others may be blank. See diagnostics.");
+            if ((ev.count ?? 0) === 0) setError(tRef.current("The planner returned 0 answers — see the diagnostics log below."));
+            else if (ev.truncated) setError(tRef.current("The planner was cut off — some fields were recovered, others may be blank. See diagnostics."));
           } else if (ev.t === "error") {
             sawError = true;
-            setError(ev.m ? `Couldn't pre-fill: ${ev.m}` : "Couldn't pre-fill from your CV.");
+            setError(ev.m ? tRef.current("Couldn't pre-fill: {error}", { error: ev.m }) : tRef.current("Couldn't pre-fill from your CV."));
             setPrefillLog((p) => [...p, `✗ ${ev.m ?? "error"}${ev.raw ? ` — raw tail: ${ev.raw.slice(0, 160)}` : ""}`]);
           }
         }
       }
       if (generation.current !== gen) return; // left mid-prefill
-      if (!got && !sawError) setError("Pre-fill ended without answers — see the diagnostics log below.");
+      if (!got && !sawError) setError(tRef.current("Pre-fill ended without answers — see the diagnostics log below."));
       setStatus("ready");
     } catch (e) {
       if (generation.current !== gen) return; // left mid-prefill
-      setError(`Couldn't pre-fill from your CV: ${e instanceof Error ? e.message : "stream error"}. See diagnostics.`);
+      setError(tRef.current("Couldn't pre-fill from your CV: {error}. See diagnostics.", { error: e instanceof Error ? e.message : tRef.current("stream error") }));
       setStatus("ready");
     }
   }, []);
@@ -325,7 +333,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           return [...prev, ...(d.issues as ApplyIssue[]).filter((i) => !seen.has(i.message))];
         });
       }
-      if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
+      if (d.navigated) setError(tRef.current("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you)."));
       setStatus("done");
       // ESCALATION ("si no va, full agente"): if deterministic fill clearly
       // didn't land (most fields failed / mismatched), let the agent fill it.
@@ -337,7 +345,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {
       if (generation.current !== gen) return; // left mid-fill
-      setError("Fill failed.");
+      setError(tRef.current("Fill failed."));
       setStatus("error");
     }
   }, [answers, fields]);
@@ -358,7 +366,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
       if (generation.current !== gen) return; // left mid-fill
       if (!r.body) {
-        setError("The agent couldn't start filling.");
+        setError(tRef.current("The agent couldn't start filling."));
         setStatus("error");
         return;
       }
@@ -386,14 +394,14 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
             setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: ev.filled ? "AI filled the form for you — review every answer on the real form, then submit it yourself." : "AI did its best but couldn't finish — check the real form before submitting." }]);
             setStatus("done");
           } else if (ev.t === "error") {
-            setError(ev.message || "The agent couldn't fill the form.");
+            setError(ev.message || tRef.current("The agent couldn't fill the form."));
             setStatus("error");
           }
         }
       }
     } catch (e) {
       if (generation.current !== gen) return; // left mid-fill
-      setError(`The agent couldn't fill the form: ${e instanceof Error ? e.message : "stream error"}.`);
+      setError(tRef.current("The agent couldn't fill the form: {error}.", { error: e instanceof Error ? e.message : tRef.current("stream error") }));
       setStatus("error");
     }
   }, []);

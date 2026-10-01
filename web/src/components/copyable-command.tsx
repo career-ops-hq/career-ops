@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { useT } from "@/components/i18n-provider";
 
 // Single-line monospace command + copy-to-clipboard — ported from the
 // career-ops-docs home. Truncates on narrow viewports (intent is "copy this").
@@ -15,6 +16,7 @@ export function CopyableCommand({
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const t = useT();
 
   async function handleCopy() {
     try {
@@ -43,15 +45,15 @@ export function CopyableCommand({
           copied ? "opacity-100" : "opacity-0",
         )}
       >
-        Copied
+        {t("Copied")}
       </span>
       <Button
         variant="ghost"
         size="icon"
         type="button"
         onClick={handleCopy}
-        aria-label={copied ? "Copied to clipboard" : "Copy command"}
-        title={copied ? "Copied" : "Copy"}
+        aria-label={copied ? t("Copied to clipboard") : t("Copy command")}
+        title={copied ? t("Copied") : t("Copy")}
         className="shrink-0 text-muted"
       >
         {copied ? (
