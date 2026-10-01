@@ -39,7 +39,8 @@ export const STYLE_VAR_MAP = {
   font_size:        '--font-size',
   margin:           '--page-margin',
   // #3242: whether a Work Experience entry may split across a page break.
-  // Each template supplies its OWN current behavior as the var() fallback, so
+  // Each template keeps its OWN current behavior as the default (its :root
+  // token default, or the .job var() fallback where it declares none), so
   // this is purely additive — no shipped template's default pagination
   // changes for anyone who doesn't set this. Raw CSS keyword (e.g. "avoid" or
   // "auto"), same contract as the other tokens. Trade-off worth knowing:

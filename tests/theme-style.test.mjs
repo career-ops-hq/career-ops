@@ -129,11 +129,20 @@ try {
     }
   }
 
-  // Template contract (#3242): every shipped template's .job rule reads
-  // --job-break-inside with ITS OWN current pagination behavior as the var()
-  // fallback, so the opt-in token changes nobody's default. resume-template.html
-  // and templates/ats/cv-template.ats.html have always kept a role whole
-  // (avoid); the rest let a role flow across a page break (auto, per #1145).
+  // Template contract (#3242): every shipped template keeps ITS OWN current
+  // pagination behavior as the effective --job-break-inside default, so the
+  // opt-in token changes nobody's layout. resume-template.html and
+  // templates/ats/cv-template.ats.html have always kept a role whole (avoid);
+  // the rest let a role flow across a page break (auto, per #1145).
+  //
+  // Both places that carry the default are pinned: the :root token default,
+  // which is what actually resolves in the templates that declare one, and the
+  // .job var() fallback, the only default in the templates that don't. The
+  // modern and legacy properties are checked separately with a property
+  // boundary, so `page-break-inside:` can never satisfy the `break-inside:`
+  // check. The token may be declared on :root only: a declaration on any
+  // other selector would beat the profile override, which arrives as a later
+  // :root block.
   {
     const expected = {
       'templates/cv-template.html': 'auto',
@@ -146,15 +155,30 @@ try {
       'templates/resume-template.html': 'avoid',
       'templates/ats/cv-template.ats.html': 'avoid',
     };
-    for (const [tpl, fallback] of Object.entries(expected)) {
-      const src = readFileSync(join(ROOT, tpl), 'utf-8');
-      const jobRule = src.match(/\.job\s*\{[^}]*break-inside:[^}]*\}/s)?.[0] || '';
-      const usesVar = new RegExp(`break-inside:\\s*var\\(--job-break-inside,\\s*${fallback}\\)`).test(jobRule);
-      const noHardcoded = !/break-inside:\s*(avoid|auto)\s*;/.test(jobRule.replace(/var\([^)]*\)/g, ''));
-      if (usesVar && noHardcoded) {
-        pass(`${tpl}: .job reads --job-break-inside with its own default (${fallback}) as the fallback`);
+    // Innermost `selector { body }` rules of every <style> block, comments
+    // stripped (they hold braces and token names). Enough for these
+    // hand-written templates: an @media wrapper yields its inner rules.
+    const cssRules = (src) => [...[...src.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
+      .map((m) => m[1]).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
+      .matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map(([, selector, body]) => ({ selector: selector.trim(), body }));
+    const declValues = (body, prop) => [...body.matchAll(new RegExp(`(?:^|[\\s;{])${prop}\\s*:\\s*([^;}]+)`, 'g'))]
+      .map((m) => m[1].replace(/\s+/g, ' ').trim());
+    const isJobSelector = (selector) => selector.split(',').some((s) => /(?:^|[\s>+~])\.job$/.test(s.trim()));
+
+    for (const [tpl, value] of Object.entries(expected)) {
+      const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
+      const jobRules = rules.filter((r) => isJobSelector(r.selector));
+      const want = `var(--job-break-inside, ${value})`;
+      const modern = jobRules.flatMap((r) => declValues(r.body, 'break-inside'));
+      const legacy = jobRules.flatMap((r) => declValues(r.body, 'page-break-inside'));
+      const tokenDecls = rules.flatMap((r) => declValues(r.body, '--job-break-inside').map((v) => `${r.selector} => ${v}`));
+      const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
+      const rootDefaultOk = tokenDecls.every((d) => d === `:root => ${value}`);
+      if (readsToken(modern) && readsToken(legacy) && rootDefaultOk) {
+        pass(`${tpl}: .job break-inside and page-break-inside read --job-break-inside with its own default (${value})${tokenDecls.length ? ', matching its :root default' : ''}`);
       } else {
-        fail(`${tpl}: .job break-inside contract broken => ${jobRule}`);
+        fail(`${tpl}: #3242 contract broken (want ${want}, token declared on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} token=${JSON.stringify(tokenDecls)}`);
       }
     }
   }
