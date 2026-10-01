@@ -231,7 +231,7 @@ etc.). A green `--only` run is **not** a green suite — always run the full
 Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),
 or omit `--lang` to check every locale. `--json` emits machine-readable results;
 `--summary` prints language totals. The checker runs offline with Node alone and
-reports drift without failing; CI warning wiring waits for a reviewed baseline.
+reports drift without failing.
 It checks existing mode files, including nested interview modes, and files
 promised in each locale's README. Languages shipping only the core subset are
 not penalized for modes they have not translated.
