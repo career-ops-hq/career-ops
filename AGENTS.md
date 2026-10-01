@@ -127,9 +127,10 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `generate-pdf.mjs` | Playwright: HTML to PDF |
 | `generate-latex.mjs` | LaTeX CV validator + pdflatex compiler |
 | `scan.mjs` | Zero-token portal scanner (Greenhouse/Ashby/Lever APIs, zero LLM cost) |
-| `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS), filtered by portals.yml `title_filter`/`location_filter` — no company list needed; checkpoints every 500 companies, `--resume` continues an interrupted sweep |
+| `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS) plus board seeds derived locally from tracker/scan-history URLs, filtered by portals.yml `title_filter`/`location_filter`; checkpoints every 500 companies, `--resume` continues an interrupted sweep |
 | `scan-interamt.mjs` | Playwright browser scanner for Interamt.de (German public sector portal — Apache Wicket, no REST API) |
 | `audit-portals.mjs` | Content audit of `portals.yml` — the companion to `verify-portals.mjs`, which answers "does this board answer?" but never "*whose* postings are these?". Fetches each enabled board through the same `providers/` modules `scan.mjs` uses and reports provider + posting count + sample titles/locations per entry, verdicts worst-first: `no-provider` (enabled but nothing claims it, so `scan.mjs` skips it silently — the highest-value check), `error`, `empty`, `small`, `ok`. `--baseline prev.json` compares against an earlier `--json` run and flags boards that lost ≥50% of their postings, the shape an ATS migration takes. **It cannot detect a well-formed board belonging to the wrong entity** — a parent company's board is full of real jobs — so it surfaces the evidence a reader needs instead of pretending to a verdict (JSON, `--summary`, `--strict`) |
+| `scan-dayforce.mjs` | Playwright browser scanner for Dayforce (Ceridian) Recruiting career sites (jobs.dayforcehcm.com — Cloudflare + NextAuth CSRF gated, no bare-HTTP-reachable API); reads `dayforce_boards` from `portals.yml` |
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text) |
 | `fetch-jd.mjs` | JD text from a known ATS API (Greenhouse/Lever/Ashby/Workday — `liveness-api.mjs`'s `JD_TEXT_API_ATS`), no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
@@ -153,6 +154,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `negotiation-roi.mjs` | Salary-negotiation talking-point generator — anchors an ask in a quantified `interview-prep/story-bank.md` achievement, kept only if the same number also appears verbatim in `cv.md` (v1 safety gate), converted to an estimated annualized dollar value from an explicit wage/frequency input (never guessed); read-only, draft-only (JSON or `--summary`) |
 | `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`) |
 | `jd-skill-gap.mjs` | Zero-LLM JD skill classifier vs `cv.md`: existing / supportedByResume / gap; never auto-adds claims to `cv.md` (JSON or `--summary`) |
+| `cv-title-check.mjs` | Zero-LLM job-title consistency checker — pairs each tailored-CV `{company, dates}` entry against `cv.md`'s canonical entry and flags an exact-string title mismatch (case/whitespace-normalized, never fuzzy); warn-only, never edits either file (JSON or `--summary`) |
 | `contacts.mjs` | Job-search phonebook → vCard 3.0 exporter — stable UIDs so re-imports update instead of duplicating on platforms that honor vCard UID (JSON, `--summary`, `--vcf`, `--caller-id`) |
 | `linkedin-join.mjs` | Warm-intro finder — joins a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?"; zero-token, offline, read-only. Operational only: never a scoring input, never a content source (JSON, `--summary`, `--company <name>`, `--tsv`) |
 | `data/contacts.tsv` | Job-search contact list — recruiters/hiring managers/peers saved from `contacto` (user layer, gitignored third-party PII) |
@@ -170,21 +172,40 @@ Some users enable plugins (external integrations). If an enabled plugin ships a 
 
 ### First Run — Onboarding (IMPORTANT)
 
-**Before doing ANYTHING else, check if the system is set up.** On the first message of each session, run the cold-start check (this doc and `doctor.mjs` share the same prerequisite list, so they can never drift):
+Before an evaluation, scan, application draft, tracker operation, or another
+career workflow that needs the user profile, check whether the system is set
+up. Read-only orientation, diagnosis, code review, and documentation work do
+not require this check and must not copy onboarding templates as a side effect
+(this doc and `doctor.mjs` share the same prerequisite list, so they can never drift):
 
 ```bash
 node doctor.mjs --json
 ```
 
-Output: `{"onboardingNeeded": <bool>, "missing": [...], "unpersonalized": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals; `autoCopied` lists personalization files doctor copied from their templates on this run — `modes/_profile.md`, `modes/_custom.md` or `modes/_brief.md`, from `modes/_profile.template.md` / `modes/_custom.template.md` / `modes/_brief.template.md`.
+Output: `{"onboardingNeeded": <bool>, "missing": [...], "unpersonalized": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals. This command is read-only: `autoCopied` is empty unless `--init-templates` is explicitly added during onboarding.
 
-**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content. Because doctor auto-copies `modes/_profile.md` and `modes/_brief.md`, they always exist — the existence check can never catch this. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. It is a warning, not a gate (career-ops works out of the box), but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
+**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content. After onboarding copies `modes/_profile.md` and `modes/_brief.md`, an existence check cannot catch their unedited content. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. It is a warning, not a gate (career-ops works out of the box), but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
 
 > "`modes/_profile.md` is still the shipped template, so evaluations would score against the template author's targeting rather than yours. Want me to personalize it from your CV first? (~1 min, and it changes every score.)"
 
 `modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
-**If `onboardingNeeded` is true, enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
+**If `onboardingNeeded` is true, enter onboarding mode for workflows that need
+those inputs.** Do not proceed with an evaluation, scan, or application draft
+until the basics are in place. For read-only diagnosis, use
+`node doctor.mjs --json` to report missing prerequisites without creating user-layer files.
+
+When entering onboarding for one of these workflows, or when the user explicitly
+asks to set up their profile, initialize missing personalization files:
+
+```bash
+node doctor.mjs --json --init-templates
+```
+
+This copies `modes/_profile.md`, `modes/_custom.md`, `modes/_brief.md`, and
+`voice-dna.md` from their corresponding `.template.md` files when absent;
+existing files are preserved. `autoCopied` lists files created on this run.
+Use the returned `missing` and `unpersonalized` fields to guide the user step by step:
 
 #### Step 0: Free Tier Check
 
@@ -258,9 +279,7 @@ Once all files exist, confirm:
 > - Run the scan entrypoint for your CLI to search portals: `/career-ops scan`, `/career-ops-scan`, or ask Codex to run `scan`
 > - Open the command menu for your CLI: `/career-ops`, the CLI-specific alias, or ask Codex to show the available career-ops modes
 >
-> Everything is customizable — just ask me to change anything.
->
-> Tip: Having a personal portfolio dramatically improves your job search. If you don't have one yet, the author's portfolio is also open source: github.com/santifer/cv-santiago — feel free to fork it and make it yours."
+> Everything is customizable — just ask me to change anything."
 
 Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
@@ -318,6 +337,23 @@ Two separate axes:
 3. You detect a JD written in that language → *suggest* switching
 
 **When NOT to switch market modes:** If the user applies to English-language roles, even at companies from those markets, use the default English market modes — *unless* the user has explicitly requested another market mode in this conversation, or `language.modes_dir` is set in `config/profile.yml` (the explicit user preference always wins over JD-language detection). This does not override `language.output`; prose still follows `language.output`.
+
+**Multiple simultaneous target markets (#3793).** `language.modes_dir` may also be a **list** of declared candidate markets, for a candidate genuinely running parallel campaigns — not switching sequentially — e.g. a candidate applying in both the DACH region and China at once:
+
+```yaml
+language:
+  output: en
+  modes_dir: [modes/de, modes/zh] # DACH and China
+```
+
+Declared, not inferred: the user states which markets they are actually running campaigns in. When two or more are declared:
+- The FIRST entry is the **primary** market and supplies the evaluation-mode file (`oferta.md`/`angebot.md`/...) — one JD can only be evaluated against one set of A-F rules at a time.
+- EVERY declared market's `_shared.md` is loaded into context, not just the primary one.
+- `modes` itself is a valid list entry: it represents the default/global rules for a target market that has no localized directory. It still counts as a declared candidate market; when first, it supplies `modes/oferta.md`, and `modes/_shared.md` is loaded once as the baseline rather than duplicated as an additional market include.
+- Per-JD, which declared market's concepts actually apply is determined from the JD's own **MARKET signals** — hiring-entity jurisdiction, currency, benefits/legal vocabulary — the same judgment Block G's posting-legitimacy signals already exercise (`modes/oferta.md`: "benefits/employment terminology country mismatch", "third-party platform location tag mismatch"). **Never infer the market from the JD's language alone.** A French-language Quebec/federal-Canada JD needs Canada's concepts (EI, CPP, ESA) — not `modes/fr`'s France/Belgium/Switzerland/Luxembourg concepts (CDI/CDD, SYNTEC, RTT) — because language and market are different axes.
+- When the market signal is genuinely ambiguous between two declared candidates, branch on whether anyone can answer: in an **interactive session**, ask the candidate and stop before writing or merging a report/tracker entry until they choose; in an **unattended run** (`<cli> -p`, `codex exec`, or a batch worker), continue with the first/primary market and state the ambiguity plus the primary-market fallback explicitly in the report header or Block G.
+
+A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as before — this is additive, not a breaking change.
 
 ### Skill Modes
 

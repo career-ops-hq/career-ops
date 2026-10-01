@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -42,7 +43,12 @@ function normalizeState(state) {
 }
 
 function normalizeDate(date) {
-  return inline(date || new Date().toISOString().slice(0, 10));
+  // The LOCAL calendar day when the caller supplies none. This date is written
+  // into the report's Application Answers section as the day the user answered
+  // the form, and it sits beside tracker rows dated with localToday() by
+  // set-status.mjs -- a UTC day put an evening answer a day ahead of the
+  // application it belongs to.
+  return inline(date || localToday());
 }
 
 function quoteBlock(value) {

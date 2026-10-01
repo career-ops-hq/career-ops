@@ -70,6 +70,7 @@ export const KNOWN: CliSpec[] = [
   // structured like the other two rather than falling through to raw stdout —
   // which displayed fine and recorded `tokens: 0` on every grok run.
   { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], streamArgs: (p) => ["-p", p, "--output-format", "streaming-json"], parseEvent: parseGrokEvent },
+  { id: "hermes", name: "Hermes Agent", bin: "hermes", run: "hermes chat", url: "https://github.com/NousResearch/hermes-agent", args: (p) => ["chat", "-q", p, "--oneshot", "-Q", "--no-restore-cwd"] },
 ];
 
 function searchDirs(): string[] {
