@@ -121,6 +121,26 @@ const CALL_SITES = [
     runtimeFlags: ['--mode', '--max-chars'],
   },
   {
+    // Jev System 1 triage ledger: fire-and-forget persistence of the calibrated
+    // ATS prior from the run route (runCoreScript("append-jev-log",
+    // [id, score, band, wallMs])).
+    //
+    // probe 'none': positional argv, no flags, and a real probe would WRITE a row
+    // to the user's data/jev-runs.tsv — the side effect this suite must not have.
+    // The script's own argument check (exit 2 with usage) is the only assertion
+    // that matters here, and the ledger shape is verified by its own unit tests.
+    source: 'web/src/app/api/run/route.ts',
+    script: 'append-jev-log.mjs',
+    args: ['<id>', '<score>', '<band>', '<wallMs>'],
+    probe: 'none',
+    // The static half scans by SOURCE, so every --flag literal anywhere in
+    // route.ts is checked against each of this file's entries. --mode /
+    // --max-chars belong to the browser-extract call and are declared on that
+    // entry; repeated here because the guard cannot tell call sites in one file
+    // apart.
+    runtimeFlags: ['--mode', '--max-chars'],
+  },
+  {
     source: 'web/src/lib/core/status-update.ts',
     script: 'set-status.mjs',
     // runStatusUpdate builds ['--row', n, status, '--source', 'web', '--json',

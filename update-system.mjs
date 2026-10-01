@@ -350,6 +350,14 @@ export const SYSTEM_PATHS = [
   // extracts the array with a regex over quoted spans, so a stray apostrophe here
   // parses as a bogus path entry.
   'append-gate3-log.mjs',
+  // Jev System 1 triage ledger writer, called from the run route the moment the
+  // ATS prior maps to a calibrated band. Root level because rootScript() resolves
+  // <careerOpsRoot>/<name>.mjs only. Mirrors append-gate3-log.mjs lock and
+  // fail-open contract so the two ledgers cannot drift. NOTE: keep this comment
+  // free of apostrophes and quotes - updater-migration-tests.mjs extracts the
+  // array with a regex over quoted spans, so a stray quote here parses as a
+  // bogus path entry.
+  'append-jev-log.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'browser-extract.mjs',

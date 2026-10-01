@@ -239,9 +239,21 @@ function captureUrlJdText(url: string): { jobPath: string; cleanup: () => void }
 /**
  * Run Gate 3 for a finished pdf run. Never throws — every path returns
  * telemetry, and every failure is `unavailable`.
+ *
+ * SINGLE-SINK FUNNEL: every checkpoint assigns `telemetry` and returns it; the
+ * ledger append happens exactly once, in `finally`. The earlier shape put the
+ * append inline on the success path only, so five of six exits — every
+ * fail-open branch — wrote nothing to data/gate3-log.tsv. That made the ledger
+ * structurally incapable of reporting the one thing worth measuring: how often
+ * the gate declines to answer. A funnel makes it impossible to add a seventh
+ * path that forgets to log.
  */
 function collectGate3Telemetry(input: string): Gate3Telemetry {
   let cleanup: (() => void) | null = null;
+  // NO_TAILORED_PAYLOAD is excluded from the ledger (see finally): it means the
+  // pdf lane produced no tailored artifact, so there is no CV to have audited
+  // and logging it would pollute the metric with non-attempts.
+  let telemetry: Gate3Telemetry = GATE3_FALLBACK;
   try {
     const resumePath = gate3TailoredPayloadPath();
     if (!resumePath) return { ...GATE3_FALLBACK, reason: "NO_TAILORED_PAYLOAD" };
@@ -252,7 +264,10 @@ function collectGate3Telemetry(input: string): Gate3Telemetry {
       // URL input: no local capture, so scrape one. This is the whole point of
       // the bridge — without it, every URL-pasted application (the most common
       // way to use the dashboard) reported NO_LOCAL_JD and was never audited.
-      if (!isCheckableUrl(input)) return { decision: "unavailable", reason: "NO_LOCAL_JD", source };
+      if (!isCheckableUrl(input)) {
+        telemetry = { decision: "unavailable", reason: "NO_LOCAL_JD", source };
+        return telemetry;
+      }
       try {
         const captured = captureUrlJdText(input);
         jobPath = captured.jobPath;
@@ -261,40 +276,48 @@ function collectGate3Telemetry(input: string): Gate3Telemetry {
         const reason = err instanceof Error && err.name === "EMPTY_OR_BLOCKED_JD_CAPTURE"
           ? "EMPTY_OR_BLOCKED_JD_CAPTURE"
           : "BROWSER_EXTRACT_SUBPROCESS_FAILURE";
-        return { decision: "unavailable", reason, source };
+        telemetry = { decision: "unavailable", reason, source };
+        return telemetry;
       }
     }
 
     const { output, error } = runCoreScript("jev-post-linter", [resumePath, jobPath], GATE3_TIMEOUT_MS);
-    if (error) return { ...GATE3_FALLBACK, reason: gate3Text(error, 120) || "LINTER_SUBPROCESS_FALLBACK", source };
-
-    const verdict = parseGate3Output(output);
-
-    // Append to the on-disk Gate 3 ledger (data/gate3-log.tsv) so the metric
-    // survives the session for the Go TUI, which has no access to this stream.
-    // The row is keyed by the tracker id, which `input` already carries for a
-    // `local:` run; a URL input has no tracker number yet, so the ledger row is
-    // keyed on the posting URL instead and reports "" — a gap the TUI can filter,
-    // which beats guessing a number that would join to the wrong application.
-    const rowId = gate3LedgerId(input);
-    try {
-      const [company, role] = gate3LedgerRoleHints(input);
-      runCoreScript(
-        "append-gate3-log",
-        [rowId, company, role, verdict.decision, gate3Text(verdict.reasons?.join("; ") || verdict.reason, 200)],
-        GATE3_LEDGER_TIMEOUT_MS,
-      );
-    } catch {
-      // Advisory ledger: the CV is written and the run already reported done.
-      // A failed append must never change what the card shows.
+    if (error) {
+      telemetry = { ...GATE3_FALLBACK, reason: gate3Text(error, 120) || "LINTER_SUBPROCESS_FALLBACK", source };
+      return telemetry;
     }
 
-    return { ...verdict, source };
+    telemetry = { ...parseGate3Output(output), source };
+    return telemetry;
   } catch (err) {
     // Belt-and-braces: the helpers above already guard their own I/O, but a
     // telemetry failure must never be able to take down a finished run.
-    return { ...GATE3_FALLBACK, reason: gate3Text(err instanceof Error ? err.message : err, 120) || "LINTER_SUBPROCESS_FALLBACK" };
+    telemetry = { ...GATE3_FALLBACK, reason: gate3Text(err instanceof Error ? err.message : err, 120) || "LINTER_SUBPROCESS_FALLBACK" };
+    return telemetry;
   } finally {
+    // Persist the outcome (pass, halt, or unavailable) to the on-disk ledger so
+    // the metric survives the session for the Go TUI, which has no access to
+    // this stream. Advisory by construction: the CV is already written and the
+    // run has already reported done, so a failed append must never change what
+    // the card shows.
+    if (telemetry.reason !== "NO_TAILORED_PAYLOAD") {
+      try {
+        const [company, role] = gate3LedgerRoleHints(input);
+        runCoreScript(
+          "append-gate3-log",
+          [
+            gate3LedgerId(input),
+            company,
+            role,
+            telemetry.decision,
+            gate3Text(telemetry.reason ?? telemetry.reasons?.join("; ") ?? "", 200),
+          ],
+          GATE3_LEDGER_TIMEOUT_MS,
+        );
+      } catch {
+        /* advisory ledger — never fatal */
+      }
+    }
     // Always reclaim the staged JD text — it is third-party content and must not
     // outlive the audit, including when the linter throws.
     try { cleanup?.(); } catch { /* nothing left to do */ }
@@ -584,6 +607,21 @@ export async function POST(req: Request) {
           type: "status",
           label: `Jev ATS pre-pass: ${jevPrior.score.toFixed(2)}/5 (${jevPrior.band}) · ${jevPrior.wallMs}ms · advisory, not a score`,
         });
+        // Persist the triage decision to data/jev-runs.tsv. Until now the score
+        // existed only in this request (the run prompt + this status event) and
+        // was gone with the response, so the calibrated bands could never be
+        // reviewed after the fact. `band` is whatever bandFor() already
+        // computed — deliberately NOT re-derived here, so the ledger records
+        // exactly what the run was told.
+        try {
+          runCoreScript(
+            "append-jev-log",
+            [gate3LedgerId(input), jevPrior.score.toFixed(2), jevPrior.band, String(jevPrior.wallMs ?? "")],
+            GATE3_LEDGER_TIMEOUT_MS,
+          );
+        } catch {
+          /* advisory ledger — never fatal, never delays the CLI spawn */
+        }
       }
 
       // opencode's headless scope rides in OPENCODE_CONFIG_CONTENT (no per-tool

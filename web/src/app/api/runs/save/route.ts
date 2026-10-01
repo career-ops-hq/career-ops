@@ -19,6 +19,9 @@ type Body = {
   // only ever present on a pdf-lane run; `unavailable` is the gate's own
   // fail-open answer, so an absent decision and an unavailable one differ.
   gate3?: { decision?: string; reason?: string; reasons?: string[]; source?: string };
+  // Per-run token/cost, forwarded from the `done` stream event. Absent whenever
+  // the CLI reported no usage, which renders as "—" rather than a fake zero.
+  cost?: { tokens?: number; usd?: number };
   steps?: { kind: string; label: string }[];
   output?: string;
   status?: string;
@@ -55,12 +58,18 @@ export async function POST(req: Request) {
   // A failed run is saved too, so name the failure in the header. Without this the
   // log of a killed worker is indistinguishable from one that never started.
   const failed = b.status === "error";
+  // Token/cost markers. `—` (the tracker's own "no data" convention) when the
+  // CLI reported no usage — never 0, which would read as a free run.
+  const tokens = typeof b.cost?.tokens === "number" ? b.cost.tokens.toLocaleString() : "—";
+  const usd = typeof b.cost?.usd === "number" ? `$${b.cost.usd.toFixed(2)}` : "—";
   const md = `# Web run · ${b.title || b.id}${failed ? " — FAILED" : ""}
 
 - id: ${b.id}
 - page: ${b.page || "-"}
 - input: ${b.input || "-"}
 - verdict: ${verdict}
+- tokens: ${tokens}
+- cost: ${usd}
 - gate3: ${gate3}${failed ? `\n- outcome: FAILED — ${(b.lastLabel || "no reason recorded").replace(/\s+/g, " ")}` : ""}
 
 ## Steps
