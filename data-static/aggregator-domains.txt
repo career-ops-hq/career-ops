@@ -25,16 +25,3 @@ jobg8.com # aggregator, job distribution network and aggregator
 geebo.com # aggregator, job aggregator scraping third-party postings
 careerbuilder.com # aggregator, aggregates third-party syndication listings
 monster.com # aggregator, aggregates third-party syndication listings
-
-# Boards this repository's own scanner reads (#3652). Each host is emitted by the
-# provider named beside it, so a row arriving through scan, pipeline and evaluate
-# carries one of these URLs rather than an employer-controlled one.
-remoteok.com # aggregator (RemoteOK), board-wide remote feed; providers/remoteok.mjs
-jobicy.com # aggregator (Jobicy), board-wide remote feed; providers/jobicy.mjs
-remotive.com # aggregator (Remotive), board-wide remote feed; providers/remotive.mjs
-workingnomads.com # aggregator (Working Nomads), board-wide remote feed; providers/workingnomads.mjs
-himalayas.app # multi-employer remote board, board-controlled URLs; providers/himalayas.mjs
-weworkremotely.com # multi-employer remote board, board-controlled URLs; providers/weworkremotely.mjs
-nodesk.co # multi-employer remote board, board-controlled URLs; providers/nodesk.mjs
-themuse.com # multi-employer board, board-controlled URLs; providers/themuse.mjs
-echojobs.io # multi-employer board; providers/echojobs.mjs is retired (#2976), so historical rows only

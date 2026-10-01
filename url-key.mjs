@@ -77,6 +77,27 @@ const AGGREGATOR_SUPPLEMENT = [
   'ziprecruiter.com', // primary board; employers post directly
   'dice.com',        // primary board for tech; employers post directly
   'wellfound.com',   // primary board for startups; employers post directly
+  // Boards this repository's own scanner reads (#3652). Each host is emitted by
+  // the provider named beside it, so a row arriving through scan, pipeline and
+  // evaluate carries one of these URLs rather than an employer-controlled one.
+  //
+  // They belong here rather than in the shared file for the same reason
+  // indeed.com does, and the cost of getting it wrong is concrete: the shared
+  // file also drives the "Possible aggregator reposts" warning in scan.mjs,
+  // which prints a line per offer whose host it lists. Listing a board the
+  // scanner itself reads there would flag EVERY offer that board returns as a
+  // suspected repost of itself, on every run. A warning that fires on its own
+  // input teaches people to skip reading it, and then it stops working for the
+  // scraped reposts it exists to catch.
+  'remoteok.com',       // board-wide remote feed; providers/remoteok.mjs
+  'jobicy.com',         // board-wide remote feed; providers/jobicy.mjs
+  'remotive.com',       // board-wide remote feed; providers/remotive.mjs
+  'workingnomads.com',  // board-wide remote feed; providers/workingnomads.mjs
+  'himalayas.app',      // multi-employer remote board, board-controlled URLs; providers/himalayas.mjs
+  'weworkremotely.com', // multi-employer remote board, board-controlled URLs; providers/weworkremotely.mjs
+  'nodesk.co',          // multi-employer remote board, board-controlled URLs; providers/nodesk.mjs
+  'themuse.com',        // multi-employer board, board-controlled URLs; providers/themuse.mjs
+  'echojobs.io',        // multi-employer board; providers/echojobs.mjs is retired (#2976), so historical rows only
 ];
 
 /** Path to the shared scraper list, overridable the same way scan.mjs allows. */
