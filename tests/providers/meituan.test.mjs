@@ -141,7 +141,7 @@ try {
         : Array.from({ length: 50 }, (_, i) => mkJob(2000 + i, `岗位B${i}`)),
     },
   }));
-  const pagedJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'] }, paged.ctx);
+  const pagedJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...paged.ctx, searchKeywords: ['AI'] });
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('meituan.fetch() paginates until totalCount is exhausted (150 posts → 2 requests)');
   } else {
@@ -164,7 +164,7 @@ try {
             : Array.from({ length: 20 }, (_, i) => mkJob(4000 + i, `岗位D${i}`)),
         },
       }));
-  const flakyJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'] }, flaky.ctx);
+  const flakyJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...flaky.ctx, searchKeywords: ['AI'] });
   if (flakyJobs.length === 120 && flaky.calls.length === 3) {
     pass('meituan.fetch() retries an empty mid-pagination page instead of truncating (flake → retry → 120 jobs)');
   } else {
@@ -174,7 +174,7 @@ try {
   const overlap = mkCtx(() => ({
     data: { page: { totalCount: 1 }, list: [mkJob(42, '重复岗位')] },
   }));
-  const overlapJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  const overlapJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...overlap.ctx, searchKeywords: ['AI', '大模型'] });
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('meituan.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -184,7 +184,7 @@ try {
   const capped = mkCtx(() => ({
     data: { page: { totalCount: 500 }, list: Array.from({ length: 100 }, (_, i) => mkJob(5000 + i, `岗位E${i}`)) },
   }));
-  await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, max_pages: 1 }, { ...capped.ctx, searchKeywords: ['AI'] });
   if (capped.calls.length === 1) {
     pass('meituan.fetch() honors entry.max_pages');
   } else {
@@ -195,9 +195,9 @@ try {
     data: { page: { totalCount: 500 }, list: Array.from({ length: 100 }, (_, i) => mkJob(6000 + i, `岗位F${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, probe.ctx);
-  if (probe.calls.length === 1 && probe.calls[0].keywords === '' && probeJobs.length === 100) {
-    pass('meituan.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (empty keyword) query');
+  const probeJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...probe.ctx, searchKeywords: ['AI'] });
+  if (probe.calls.length === 1 && probe.calls[0].keywords === 'AI' && probeJobs.length === 100) {
+    pass('meituan.fetch() honors the ctx.maxPages probe hint with the shared keyword');
   } else {
     fail(`meituan.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keywords=${JSON.stringify(probe.calls[0] && probe.calls[0].keywords)}`);
   }
@@ -206,7 +206,7 @@ try {
     if (keywords === '大模型') throw new Error('HTTP 503');
     return { data: { page: { totalCount: 1 }, list: [mkJob(7, '幸存岗位')] } };
   });
-  const blipJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  const blipJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...blip.ctx, searchKeywords: ['AI', '大模型'] });
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('meituan.fetch() keeps already-collected jobs when a later request fails');
   } else {
@@ -220,7 +220,7 @@ try {
   let zeroThenBlipJobs;
   let zeroThenBlipThrew = false;
   try {
-    zeroThenBlipJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型'] }, zeroThenBlip.ctx);
+    zeroThenBlipJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...zeroThenBlip.ctx, searchKeywords: ['AI', '大模型'] });
   } catch { zeroThenBlipThrew = true; }
   if (!zeroThenBlipThrew && Array.isArray(zeroThenBlipJobs) && zeroThenBlipJobs.length === 0) {
     pass('meituan.fetch() treats a later failure as a blip even when earlier keywords matched 0 jobs (board is alive)');
@@ -231,7 +231,7 @@ try {
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {
-    await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'] }, dead.ctx);
+    await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL }, { ...dead.ctx, searchKeywords: ['AI'] });
   } catch { firstFailThrew = true; }
   if (firstFailThrew) {
     pass('meituan.fetch() still throws when the very first request fails (dead board reads as failure)');

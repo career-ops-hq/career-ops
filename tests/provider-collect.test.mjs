@@ -42,12 +42,12 @@ const providers = new Map([
 const result = await collect({ since_ms: 123, targets: [
   { name: 'Acme', provider: 'fixture' },
   { name: 'Unknown', provider: 'missing' },
-  { name: 'Search', scan_method: 'websearch', search_query: 'Search jobs' },
+  { name: 'Unconfigured' },
   { name: '' },
   { name: 'Capped', provider: 'capfixture' },
   { name: 'Gap', provider: 'gapfixture' },
 ] }, providers);
-assert.deepEqual(result.results.map(row => row.status), ['fetched', 'error', 'handoff', 'invalid', 'fetched', 'fetched']);
+assert.deepEqual(result.results.map(row => row.status), ['fetched', 'error', 'error', 'invalid', 'fetched', 'fetched']);
 assert.equal(result.results[0].jobs[0].title, 'Engineer');
 assert.ok(result.results[0].deadline_ms > Date.now());
 assert.equal(result.results[0].truncated, true);
@@ -55,7 +55,7 @@ assert.equal(result.results[0].truncation_kind, 'network');
 assert.equal(result.results[4].truncation_kind, 'page_cap');
 assert.equal(result.results[5].truncation_kind, 'coverage_gap');
 assert.equal(result.results[1].kind, 'configuration');
-assert.equal(result.results[2].query, 'Search jobs');
+assert.match(result.results[2].error, /No provider matched/);
 const global = await collect({ targets: [{ name: 'Global', provider: 'globalfixture' }],
   include_undated: false, synthetic_entries: true, concurrency: 1 }, providers);
 assert.equal(global.results[0].no_date_skip, true);

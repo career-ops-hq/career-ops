@@ -63,6 +63,7 @@ try {
     { name: 'NoFluffJobs', careers_url: 'https://nofluffjobs.com/pl', max_pages: 1 },
     {
       transport: 'http',
+      searchKeywords: ['Engineer'],
       fetchJson: async (url, opts) => {
         capturedUrl = url;
         capturedOpts = opts;
@@ -82,6 +83,9 @@ try {
   } else {
     fail(`nofluffjobs.fetch() should use POST and redirect:"error", got ${JSON.stringify(capturedOpts)}`);
   }
+
+  if (JSON.parse(capturedOpts.body).criteriaSearch.keyword[0] === 'Engineer') pass('nofluffjobs uses the shared keyword');
+  else fail('nofluffjobs search keyword missing');
 
   let ssrfRejected = false;
   try {

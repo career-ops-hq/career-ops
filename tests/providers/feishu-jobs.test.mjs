@@ -169,7 +169,7 @@ try {
         : Array.from({ length: 50 }, (_, i) => mkJob(String(2000 + i), `岗位B${i}`)),
     },
   }));
-  const pagedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, paged.ctx);
+  const pagedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...paged.ctx, searchKeywords: ['AI'] });
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('feishu-jobs.fetch() paginates via offset until count is exhausted (150 posts → 2 requests)');
   } else {
@@ -199,7 +199,7 @@ try {
       ),
     },
   }));
-  const deepInventoryJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, deepInventory.ctx);
+  const deepInventoryJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...deepInventory.ctx, searchKeywords: ['AI'] });
   if (deepInventoryJobs.length === inventoryCount && deepInventory.calls.length === 22) {
     pass('feishu-jobs.fetch() default budget covers inventories larger than the old 20-page ceiling');
   } else {
@@ -223,7 +223,7 @@ try {
     code: 0,
     data: { count: 1, job_post_list: [mkJob('42', '重复岗位')] },
   }));
-  const overlapJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  const overlapJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...overlap.ctx, searchKeywords: ['AI', '大模型'] });
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('feishu-jobs.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -238,7 +238,7 @@ try {
   const originalConsoleError = console.error;
   console.error = (...args) => capWarnings.push(args.join(' '));
   try {
-    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, max_pages: 1 }, { ...capped.ctx, searchKeywords: ['AI'] });
   } finally {
     console.error = originalConsoleError;
   }
@@ -258,9 +258,9 @@ try {
     data: { count: 500, job_post_list: Array.from({ length: 100 }, (_, i) => mkJob(String(6000 + i), `岗位F${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, probe.ctx);
-  if (probe.calls.length === 1 && !probe.calls[0].keyword && probeJobs.length === 100) {
-    pass('feishu-jobs.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (no keyword) query');
+  const probeJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...probe.ctx, searchKeywords: ['AI'] });
+  if (probe.calls.length === 1 && probe.calls[0].keyword === 'AI' && probeJobs.length === 100) {
+    pass('feishu-jobs.fetch() honors the ctx.maxPages probe hint with the shared keyword');
   } else {
     fail(`feishu-jobs.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
   }
@@ -270,8 +270,7 @@ try {
     data: { count: 1, job_post_list: [mkJob('7001', '默认页数岗位')] },
   }));
   const fractionalEntryJobs = await feishu.fetch(
-    { name: 'Example Labs', careers_url: TENANT_URL, max_pages: 0.5 },
-    fractionalEntryLimit.ctx,
+    { name: 'Example Labs', careers_url: TENANT_URL, max_pages: 0.5 }, { ...fractionalEntryLimit.ctx, searchKeywords: ['AI'] },
   );
   if (fractionalEntryLimit.calls.length === 1 && fractionalEntryJobs.length === 1) {
     pass('feishu-jobs.fetch() ignores a fractional entry.max_pages instead of making zero requests');
@@ -285,8 +284,7 @@ try {
   }));
   fractionalProbeLimit.ctx.maxPages = 0.5;
   const fractionalProbeJobs = await feishu.fetch(
-    { name: 'Example Labs', careers_url: TENANT_URL },
-    fractionalProbeLimit.ctx,
+    { name: 'Example Labs', careers_url: TENANT_URL }, { ...fractionalProbeLimit.ctx, searchKeywords: ['AI'] },
   );
   if (fractionalProbeLimit.calls.length === 1 && fractionalProbeJobs.length === 1) {
     pass('feishu-jobs.fetch() ignores a fractional ctx.maxPages instead of making zero requests');
@@ -304,8 +302,7 @@ try {
     },
   }));
   const jobsAfterMalformedPage = await feishu.fetch(
-    { name: 'Example Labs', careers_url: TENANT_URL },
-    malformedFirstPage.ctx,
+    { name: 'Example Labs', careers_url: TENANT_URL }, { ...malformedFirstPage.ctx, searchKeywords: ['AI'] },
   );
   if (malformedFirstPage.calls.length === 2
       && jobsAfterMalformedPage.length === 1
@@ -322,8 +319,7 @@ try {
   let emptyThenFailThrew = false;
   try {
     await feishu.fetch(
-      { name: 'Example Labs', careers_url: TENANT_URL, keywords: ['空关键词', '失败关键词'] },
-      emptyThenFail.ctx,
+      { name: 'Example Labs', careers_url: TENANT_URL }, { ...emptyThenFail.ctx, searchKeywords: ['空关键词', '失败关键词'] },
     );
   } catch {
     emptyThenFailThrew = true;
@@ -338,7 +334,7 @@ try {
     if (keyword === '大模型') throw new Error('HTTP 503');
     return { code: 0, data: { count: 1, job_post_list: [mkJob('7', '幸存岗位')] } };
   });
-  const blipJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  const blipJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...blip.ctx, searchKeywords: ['AI', '大模型'] });
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('feishu-jobs.fetch() keeps already-collected jobs when a later request fails');
   } else {
@@ -348,7 +344,7 @@ try {
   const softFail = mkCtx(({ keyword }) => (keyword === '大模型'
     ? { code: 1, message: 'rate limited' }
     : { code: 0, data: { count: 1, job_post_list: [mkJob('8', '幸存岗位2')] } }));
-  const softFailJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, softFail.ctx);
+  const softFailJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...softFail.ctx, searchKeywords: ['AI', '大模型'] });
   if (softFailJobs.length === 1 && softFailJobs[0].title === '幸存岗位2') {
     pass('feishu-jobs.fetch() treats an in-band code!=0 as a blip once jobs are collected');
   } else {
@@ -358,7 +354,7 @@ try {
   const untrusted = mkCtx(() => ({ code: 0, data: { count: 0, job_post_list: [] } }));
   let untrustedThrew = false;
   try {
-    await feishu.fetch({ name: 'X', careers_url: 'https://127.0.0.1/internal', provider: 'feishu-jobs' }, untrusted.ctx);
+    await feishu.fetch({ name: 'X', careers_url: 'https://127.0.0.1/internal', provider: 'feishu-jobs' }, { ...untrusted.ctx, searchKeywords: ['AI'] });
   } catch { untrustedThrew = true; }
   if (untrustedThrew && untrusted.calls.length === 0) {
     pass('feishu-jobs.fetch() rejects an untrusted explicit-provider URL before any request');
@@ -369,7 +365,7 @@ try {
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {
-    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, dead.ctx);
+    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, { ...dead.ctx, searchKeywords: ['AI'] });
   } catch { firstFailThrew = true; }
   if (firstFailThrew) {
     pass('feishu-jobs.fetch() still throws when the very first request fails (dead board reads as failure)');

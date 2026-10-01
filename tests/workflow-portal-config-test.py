@@ -23,7 +23,7 @@ CASES = [
         "positive": [False], "by_title_keyword": {"Data": {"positive": ["ML", None]}, "AI": None}}},
     {"visa_filter": {"enabled": "yes", "require_mention": None,
                      "positive": ["sponsor"], "negative": [3]}},
-    {"search_queries": "not an array", "tracked_companies": "not an array"},
+    {"job_boards": "not an array", "tracked_companies": "not an array"},
     {"tracked_companies": [None, {"name": " "}, {"name": "Acme"}, {"name": " acme "},
                            {"name": "Disabled", "enabled": False, "provider": "not-real"}]},
     {"tracked_companies": [{"name": "Acme", "careers_url": "not a URL",
@@ -55,3 +55,9 @@ with TemporaryDirectory() as directory:
 assert validate_config({"title_filter_full": {"positve": ["AI"]}})["errors"][0]["path"] == \
     "title_filter_full.positve"
 print("workflow portal config: Node CLI decisions match across 11 cases")
+
+for section in ("tracked_companies", "job_boards"):
+    config = {section: [{"name": "Scoped search", "provider": "search", "search": {
+        "method": "linkedin", "sites": ["linkedin.com/jobs/view"], "locations": None}, "max_results": 0}]}
+    paths = {error["path"] for error in validate_config(config, provider_ids={"search"})["errors"]}
+    assert f"{section}[0].search.locations" in paths and f"{section}[0].max_results" in paths

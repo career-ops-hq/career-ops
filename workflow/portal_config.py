@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 from pathlib import Path
 import subprocess
 from urllib.parse import urlsplit
@@ -131,38 +132,58 @@ def validate_config(config: object, *, provider_ids: set[str] | None = None) -> 
                     for key in ("positive", "negative"):
                         _keywords(rule.get(key), f"{path}.{key}", errors)
 
-    if "search_queries" in config and not isinstance(config["search_queries"], list):
-        _issue(errors, "search_queries", "search_queries must be an array when set")
-    companies = config.get("tracked_companies")
-    if "tracked_companies" in config and not isinstance(companies, list):
-        _issue(errors, "tracked_companies", "tracked_companies must be an array when set")
-    seen: dict[str, str] = {}
-    if isinstance(companies, list):
-        for index, company in enumerate(companies):
-            base = f"tracked_companies[{index}]"
-            if not _object(company):
-                _issue(errors, base, "company entry must be an object")
-                continue
-            if company.get("enabled") is False:
-                continue
-            name = company.get("name")
-            if not isinstance(name, str) or not name.strip():
-                _issue(errors, f"{base}.name", "enabled company must have a non-empty string name")
-            else:
-                normalized = " ".join(name.lower().split())
-                if normalized in seen:
-                    _issue(warnings, f"{base}.name", f"duplicate enabled company name also seen at {seen[normalized]}")
+    for section in ("tracked_companies", "job_boards"):
+        companies = config.get(section)
+        if section in config and not isinstance(companies, list):
+            _issue(errors, section, f"{section} must be an array when set")
+        seen: dict[str, str] = {}
+        if isinstance(companies, list):
+            for index, company in enumerate(companies):
+                base = f"{section}[{index}]"
+                if not _object(company):
+                    _issue(errors, base, "company entry must be an object")
+                    continue
+                if company.get("enabled") is False:
+                    continue
+                name = company.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    _issue(errors, f"{base}.name", "enabled company must have a non-empty string name")
                 else:
-                    seen[normalized] = f"{base}.name"
-            _url(company.get("careers_url"), f"{base}.careers_url", errors)
-            _url(company.get("api"), f"{base}.api", errors)
-            if "provider" in company:
-                provider = company["provider"]
-                if not isinstance(provider, str) or not provider.strip():
-                    _issue(errors, f"{base}.provider", "provider must be a non-empty string when set")
-                elif provider not in provider_ids:
-                    _issue(errors, f"{base}.provider", f'unknown provider "{provider}"')
-            _parser(company.get("parser"), f"{base}.parser", errors)
+                    normalized = " ".join(name.lower().split())
+                    if normalized in seen:
+                        _issue(warnings, f"{base}.name", f"duplicate enabled company name also seen at {seen[normalized]}")
+                    else:
+                        seen[normalized] = f"{base}.name"
+                _url(company.get("careers_url"), f"{base}.careers_url", errors)
+                _url(company.get("api"), f"{base}.api", errors)
+                if "provider" in company:
+                    provider = company["provider"]
+                    if not isinstance(provider, str) or not provider.strip():
+                        _issue(errors, f"{base}.provider", "provider must be a non-empty string when set")
+                    elif provider not in provider_ids:
+                        _issue(errors, f"{base}.provider", f'unknown provider "{provider}"')
+                _parser(company.get("parser"), f"{base}.parser", errors)
+                if company.get("provider") == "search":
+                    search = company.get("search")
+                    if not isinstance(search, dict):
+                        _issue(errors, f"{base}.search", "search must be an object")
+                        continue
+                    if search.get("method") not in ("web", "linkedin"):
+                        _issue(errors, f"{base}.search.method", "must be web or linkedin")
+                    sites = search.get("sites")
+                    if not isinstance(sites, list) or not sites or any(
+                        not isinstance(site, str) or not re.fullmatch(r"[a-zA-Z0-9.-]+(?:/[a-zA-Z0-9_./-]*)?", site)
+                        for site in sites
+                    ):
+                        _issue(errors, f"{base}.search.sites", "must contain source domains or domain/path scopes")
+                    locations = search.get("locations", [])
+                    if not isinstance(locations, list) or any(not isinstance(x, str) or not x.strip() for x in locations):
+                        _issue(errors, f"{base}.search.locations", "must be an array of non-empty strings")
+                    if search.get("method") == "linkedin" and (sites != ["linkedin.com/jobs/view"] or not isinstance(locations, list) or len(locations) != 1):
+                        _issue(errors, f"{base}.search", "LinkedIn requires one location and linkedin.com/jobs/view")
+                    limit = company.get("max_results", 50)
+                    if type(limit) is not int or not 1 <= limit <= 500:
+                        _issue(errors, f"{base}.max_results", "must be an integer from 1 to 500")
     return {"errors": errors, "warnings": warnings}
 
 

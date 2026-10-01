@@ -2,8 +2,6 @@
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
 
 console.log('\nProvider — mycareersfuture');
 
@@ -26,20 +24,6 @@ try {
     pass('mycareersfuture.detect() ignores other provider ids');
   } else {
     fail('mycareersfuture.detect() should only claim provider: mycareersfuture');
-  }
-
-  // ── parseConfig ──
-  if (JSON.stringify(parseConfig({ mycareersfuture: { keywords: [' engineer ', 'nurse', '', 42] } }).keywords)
-    === JSON.stringify(['engineer', 'nurse'])) {
-    pass('parseConfig trims keywords and drops blank/non-string entries');
-  } else {
-    fail(`parseConfig returned ${JSON.stringify(parseConfig({ mycareersfuture: { keywords: [' engineer ', 'nurse', '', 42] } }))}`);
-  }
-
-  if (parseConfig({}).keywords.length === 0 && parseConfig({ mycareersfuture: {} }).keywords.length === 0) {
-    pass('parseConfig defaults to no keywords when the block or array is absent');
-  } else {
-    fail('parseConfig should default to an empty keywords array');
   }
 
   if (parseConfig({ mycareersfuture: { size: 500 } }).size === 100) {
@@ -200,56 +184,7 @@ try {
   // ── fetch(): keyword requirement + config/profile.yml fallback. Runs in an
   // isolated tmp cwd (never this checkout's own config/profile.yml, so the
   // test is hermetic regardless of whether the checkout is onboarded) —
-  // same pattern as tests/providers/jobbankca.test.mjs. ──
-  {
-    const withTmpCwd = async (setup, run) => {
-      const tmp = mkdtempSync(join(tmpdir(), 'career-ops-mycareersfuture-fallback-'));
-      const cwdBefore = process.cwd();
-      try {
-        setup(tmp);
-        process.chdir(tmp);
-        return await run();
-      } finally {
-        process.chdir(cwdBefore);
-      }
-    };
 
-    // No entry keywords, but a profile.yml with target_roles → falls back.
-    let sentSearch = null;
-    await withTmpCwd(
-      (tmp) => {
-        mkdirSync(join(tmp, 'config'));
-        writeFileSync(join(tmp, 'config', 'profile.yml'), 'target_roles:\n  primary:\n    - Data Engineer\n');
-      },
-      () => mycareersfuture.fetch(
-        { provider: 'mycareersfuture', name: 'No own keywords' },
-        { fetchJson: async (url, opts) => { sentSearch = JSON.parse(opts.body).search; return { results: [] }; } },
-      ),
-    );
-    if (sentSearch === 'Data Engineer') {
-      pass('mycareersfuture.fetch() falls back to config/profile.yml target_roles when mycareersfuture.keywords[] is empty');
-    } else {
-      fail(`mycareersfuture.fetch() fallback search = ${JSON.stringify(sentSearch)}`);
-    }
-
-    // No entry keywords AND no profile.yml at all → throws.
-    let threwNoKeywords = false;
-    let threwMessage = '';
-    try {
-      await withTmpCwd(
-        () => {}, // no config/ dir created — profile.yml genuinely absent
-        () => mycareersfuture.fetch({ provider: 'mycareersfuture', name: 'No Keywords' }, { fetchJson: async () => ({ results: [] }) }),
-      );
-    } catch (err) {
-      threwNoKeywords = true;
-      threwMessage = err.message;
-    }
-    if (threwNoKeywords && /no mycareersfuture\.keywords/.test(threwMessage)) {
-      pass('mycareersfuture.fetch() throws a clear error when no keywords and no profile.yml fallback are available');
-    } else {
-      fail(`mycareersfuture.fetch() should throw when no keywords are available from any source, got: threw=${threwNoKeywords} message=${JSON.stringify(threwMessage)}`);
-    }
-  }
 
   // ── fetch(): pagination stops on a short page, and advances via the QUERY
   // STRING page param — confirmed live that the JSON body's page field is
@@ -267,14 +202,12 @@ try {
 
     const requestedUrls = [];
     const fetched = await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Full page test', mycareersfuture: { keywords: ['developer'] } },
-      {
+      { provider: 'mycareersfuture', name: 'Full page test', mycareersfuture: { } }, { ...({
         fetchJson: async (url) => {
           requestedUrls.push(url);
           const page = new URL(url).searchParams.get('page');
           return { results: page === '1' ? shortPage : fullPage };
-        },
-      },
+        } }), searchKeywords: ['developer'] },
     );
 
     if (requestedUrls.length === 2) pass('mycareersfuture.fetch() paginates: a full (100-entry) page requests the next one');
@@ -300,11 +233,9 @@ try {
     }));
     let requestCount = 0;
     await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Capped', mycareersfuture: { keywords: ['x'] }, max_pages: 3 },
-      {
+      { provider: 'mycareersfuture', name: 'Capped', mycareersfuture: { }, max_pages: 3 }, { ...({
         maxPages: 1, // a health-probe-style cap
-        fetchJson: async () => ({ results: fullPage(requestCount++) }),
-      },
+        fetchJson: async () => ({ results: fullPage(requestCount++) }) }), searchKeywords: ['x'] },
     );
     if (requestCount === 1) pass('mycareersfuture.fetch(): ctx.maxPages caps entry.max_pages, not the other way around');
     else fail(`mycareersfuture.fetch() made ${requestCount} requests under ctx.maxPages=1 (expected 1)`);
@@ -323,8 +254,7 @@ try {
       // Every page returns a FULL (100-entry) page, so pagination would run
       // forever without the cap — this isolates the cap as the only thing
       // that can stop it.
-      { provider: 'mycareersfuture', name: 'Cap test', mycareersfuture: { keywords: ['x'] }, max_pages: 100 },
-      { fetchJson: async () => ({ results: fullPage(requestCount++) }) },
+      { provider: 'mycareersfuture', name: 'Cap test', mycareersfuture: { }, max_pages: 100 }, { ...({ fetchJson: async () => ({ results: fullPage(requestCount++) }) }), searchKeywords: ['x'] },
     );
     if (requestCount === 20) {
       pass('mycareersfuture.fetch() clamps entry.max_pages (100) down to MAX_PAGES_CAP (20)');
@@ -342,13 +272,11 @@ try {
       title: 'ok',
     };
     const fetched = await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Partial failure', mycareersfuture: { keywords: ['bad', 'good'] } },
-      {
+      { provider: 'mycareersfuture', name: 'Partial failure', mycareersfuture: { } }, { ...({
         fetchJson: async (url, opts) => {
           if (JSON.parse(opts.body).search === 'bad') throw new Error('network error');
           return { results: [record] };
-        },
-      },
+        } }), searchKeywords: ['bad', 'good'] },
     );
     if (fetched.length === 1 && fetched[0].title === 'ok') {
       pass('mycareersfuture.fetch(): a failed keyword does not abort keywords that still succeed');
@@ -360,8 +288,7 @@ try {
   // ── fetch(): total outage throws ──
   try {
     await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Outage', mycareersfuture: { keywords: ['a', 'b'] } },
-      { fetchJson: async () => { throw new Error('boom'); } },
+      { provider: 'mycareersfuture', name: 'Outage', mycareersfuture: { } }, { ...({ fetchJson: async () => { throw new Error('boom'); } }), searchKeywords: ['a', 'b'] },
     );
     fail('mycareersfuture.fetch() should throw when every keyword request fails');
   } catch (err) {
@@ -378,8 +305,7 @@ try {
       title: 'duplicate role',
     };
     const fetched = await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Dedup', mycareersfuture: { keywords: ['engineer', 'developer'] } },
-      { fetchJson: async () => ({ results: [shared] }) },
+      { provider: 'mycareersfuture', name: 'Dedup', mycareersfuture: { } }, { ...({ fetchJson: async () => ({ results: [shared] }) }), searchKeywords: ['engineer', 'developer'] },
     );
     if (fetched.length === 1) pass('mycareersfuture.fetch() dedups the same jobPostId returned by two different keywords');
     else fail(`mycareersfuture.fetch() with an overlapping keyword pair returned ${fetched.length} jobs (expected 1)`);
@@ -390,10 +316,8 @@ try {
     let capturedOpts = null;
     let capturedUrl = null;
     await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Hygiene', mycareersfuture: { keywords: ['x'] } },
-      {
-        fetchJson: async (url, opts) => { capturedUrl = url; capturedOpts = opts; return { results: [] }; },
-      },
+      { provider: 'mycareersfuture', name: 'Hygiene', mycareersfuture: { } }, { ...({
+        fetchJson: async (url, opts) => { capturedUrl = url; capturedOpts = opts; return { results: [] }; } }), searchKeywords: ['x'] },
     );
     if (capturedOpts && capturedOpts.redirect === 'error') {
       pass('mycareersfuture.fetch() passes redirect:"error" to fetchJson (SSRF-via-redirect guard)');
@@ -416,8 +340,7 @@ try {
   {
     let capturedUrl = null;
     await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Custom size', mycareersfuture: { keywords: ['x'], size: 25 } },
-      { fetchJson: async (url) => { capturedUrl = url; return { results: [] }; } },
+      { provider: 'mycareersfuture', name: 'Custom size', mycareersfuture: {  size: 25 } }, { ...({ fetchJson: async (url) => { capturedUrl = url; return { results: [] }; } }), searchKeywords: ['x'] },
     );
     if (new URL(capturedUrl).searchParams.get('limit') === '25') {
       pass('mycareersfuture.fetch() honors a custom mycareersfuture.size as the URL limit param');
@@ -431,8 +354,7 @@ try {
   // surface as zero jobs from that page, not an unhandled exception. ──
   {
     const malformed = await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Malformed', mycareersfuture: { keywords: ['x'] } },
-      { fetchJson: async () => ({ results: null }) },
+      { provider: 'mycareersfuture', name: 'Malformed', mycareersfuture: { } }, { ...({ fetchJson: async () => ({ results: null }) }), searchKeywords: ['x'] },
     );
     if (Array.isArray(malformed) && malformed.length === 0) {
       pass('mycareersfuture.fetch() tolerates a non-array results field, returning no jobs');
@@ -441,8 +363,7 @@ try {
     }
 
     const emptyBody = await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Empty body', mycareersfuture: { keywords: ['x'] } },
-      { fetchJson: async () => ({}) },
+      { provider: 'mycareersfuture', name: 'Empty body', mycareersfuture: { } }, { ...({ fetchJson: async () => ({}) }), searchKeywords: ['x'] },
     );
     if (Array.isArray(emptyBody) && emptyBody.length === 0) {
       pass('mycareersfuture.fetch() tolerates a response with no results key at all');
@@ -458,8 +379,7 @@ try {
   {
     let sentSearch = null;
     await mycareersfuture.fetch(
-      { provider: 'mycareersfuture', name: 'Unicode keyword', mycareersfuture: { keywords: ['软件工程师'] } },
-      { fetchJson: async (url, opts) => { sentSearch = JSON.parse(opts.body).search; return { results: [] }; } },
+      { provider: 'mycareersfuture', name: 'Unicode keyword', mycareersfuture: { } }, { ...({ fetchJson: async (url, opts) => { sentSearch = JSON.parse(opts.body).search; return { results: [] }; } }), searchKeywords: ['软件工程师'] },
     );
     if (sentSearch === '软件工程师') {
       pass('mycareersfuture.fetch() passes a non-ASCII (Mandarin) keyword through unmangled');

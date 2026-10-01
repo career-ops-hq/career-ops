@@ -2,15 +2,13 @@
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
 
 console.log('\nProvider — jobbankca');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/jobbankca.mjs')).href);
   const jobbankca = mod.default;
-  const { parseJobBankFeed, parseJobBankConfig, buildFeedUrl, assertJobBankUrl } = mod;
+  const { parseJobBankFeed, buildFeedUrl, assertJobBankUrl } = mod;
 
   if (jobbankca.id === 'jobbankca') pass('jobbankca.id is "jobbankca"');
   else fail(`jobbankca.id is ${JSON.stringify(jobbankca.id)}`);
@@ -26,20 +24,6 @@ try {
     pass('jobbankca.detect() ignores other provider ids');
   } else {
     fail('jobbankca.detect() should only claim provider: jobbankca');
-  }
-
-  // ── parseJobBankConfig ──
-  if (JSON.stringify(parseJobBankConfig({ jobbankca: { keywords: [' engineer ', 'nurse', '', 42] } }))
-    === JSON.stringify({ keywords: ['engineer', 'nurse'] })) {
-    pass('parseJobBankConfig trims keywords and drops blank/non-string entries');
-  } else {
-    fail(`parseJobBankConfig returned ${JSON.stringify(parseJobBankConfig({ jobbankca: { keywords: [' engineer ', 'nurse', '', 42] } }))}`);
-  }
-
-  if (parseJobBankConfig({}).keywords.length === 0 && parseJobBankConfig({ jobbankca: {} }).keywords.length === 0) {
-    pass('parseJobBankConfig defaults to no keywords when the block or array is absent');
-  } else {
-    fail('parseJobBankConfig should default to an empty keywords array');
   }
 
   // ── buildFeedUrl ──
@@ -316,59 +300,7 @@ try {
   // ── fetch(): keyword requirement + config/profile.yml fallback. Runs in an
   // isolated tmp cwd (never this checkout's own config/profile.yml, so the
   // test is hermetic regardless of whether the checkout is onboarded) —
-  // same pattern as tests/providers/vdab.test.mjs. ──
-  {
-    const withTmpCwd = async (setup, run) => {
-      const tmp = mkdtempSync(join(tmpdir(), 'career-ops-jobbankca-fallback-'));
-      const cwdBefore = process.cwd();
-      try {
-        setup(tmp);
-        process.chdir(tmp);
-        return await run();
-      } finally {
-        process.chdir(cwdBefore);
-      }
-    };
 
-    // No entry keywords, but a profile.yml with target_roles → falls back.
-    let sentSearchstring = null;
-    await withTmpCwd(
-      (tmp) => {
-        mkdirSync(join(tmp, 'config'));
-        writeFileSync(join(tmp, 'config', 'profile.yml'), 'target_roles:\n  primary:\n    - Data Engineer\n');
-      },
-      () => jobbankca.fetch(
-        { provider: 'jobbankca', name: 'No own keywords' },
-        {
-          sleep: async () => {},
-          fetchText: async (url) => { sentSearchstring = new URL(url).searchParams.get('searchstring'); return '<?xml version="1.0"?><feed></feed>'; },
-        },
-      ),
-    );
-    if (sentSearchstring === 'Data Engineer') {
-      pass('jobbankca.fetch() falls back to config/profile.yml target_roles when jobbankca.keywords[] is empty');
-    } else {
-      fail(`jobbankca.fetch() fallback searchstring = ${JSON.stringify(sentSearchstring)}`);
-    }
-
-    // No entry keywords AND no profile.yml at all → throws.
-    let threwNoKeywords = false;
-    let threwMessage = '';
-    try {
-      await withTmpCwd(
-        () => {}, // no config/ dir created — profile.yml genuinely absent
-        () => jobbankca.fetch({ provider: 'jobbankca', name: 'No Keywords' }, { fetchText: async () => '', sleep: async () => {} }),
-      );
-    } catch (err) {
-      threwNoKeywords = true;
-      threwMessage = err.message;
-    }
-    if (threwNoKeywords && /no jobbankca\.keywords/.test(threwMessage)) {
-      pass('jobbankca.fetch() throws a clear error when no keywords and no profile.yml fallback are available');
-    } else {
-      fail(`jobbankca.fetch() should throw when no keywords are available from any source, got: threw=${threwNoKeywords} message=${JSON.stringify(threwMessage)}`);
-    }
-  }
 
   // ── fetch(): pagination stops on a short page, dedups across keywords ──
   {
@@ -391,16 +323,14 @@ try {
     const requested = [];
     let slept = 0;
     const fetched = await jobbankca.fetch(
-      { provider: 'jobbankca', name: 'Full page test', jobbankca: { keywords: ['developer'] } },
-      {
+      { provider: 'jobbankca', name: 'Full page test', jobbankca: { } }, { ...({
         maxPages: undefined,
         sleep: async (ms) => { slept += ms; },
         fetchText: async (url) => {
           requested.push(url);
           const page = new URL(url).searchParams.get('page');
           return page === '1' ? feed(fullPage) : feed(shortPage);
-        },
-      },
+        } }), searchKeywords: ['developer'] },
     );
 
     if (requested.length === 2) pass('jobbankca.fetch() paginates: a full (100-entry) page requests the next one');
@@ -418,12 +348,10 @@ try {
     const feed = (n) => `<?xml version="1.0"?><feed>${Array.from({ length: n }, (_, i) => `<entry><title><![CDATA[r${i}]]></title><link rel="alternate" href="https://www.jobbank.gc.ca/jobsearch/jobposting/${i}"/><id>${i}</id><updated>2026-08-20T08:00:00Z</updated><summary><![CDATA[x]]></summary></entry>`).join('')}</feed>`;
     const requested = [];
     const capped = await jobbankca.fetch(
-      { provider: 'jobbankca', name: 'Capped', jobbankca: { keywords: ['x'] }, max_pages: 3 },
-      {
+      { provider: 'jobbankca', name: 'Capped', jobbankca: { }, max_pages: 3 }, { ...({
         maxPages: 1, // a health-probe-style cap
         sleep: async () => {},
-        fetchText: async (url) => { requested.push(url); return feed(100); },
-      },
+        fetchText: async (url) => { requested.push(url); return feed(100); } }), searchKeywords: ['x'] },
     );
     if (requested.length === 1) pass('jobbankca.fetch(): ctx.maxPages caps entry.max_pages, not the other way around');
     else fail(`jobbankca.fetch() made ${requested.length} requests under ctx.maxPages=1 (expected 1)`);
@@ -433,14 +361,12 @@ try {
   {
     const feed = `<?xml version="1.0"?><feed><entry><title><![CDATA[ok]]></title><link rel="alternate" href="https://www.jobbank.gc.ca/jobsearch/jobposting/1"/><id>1</id><updated>2026-08-20T08:00:00Z</updated><summary><![CDATA[x]]></summary></entry></feed>`;
     const fetched = await jobbankca.fetch(
-      { provider: 'jobbankca', name: 'Partial failure', jobbankca: { keywords: ['bad', 'good'] } },
-      {
+      { provider: 'jobbankca', name: 'Partial failure', jobbankca: { } }, { ...({
         sleep: async () => {},
         fetchText: async (url) => {
           if (url.includes('searchstring=bad')) throw new Error('network error');
           return feed;
-        },
-      },
+        } }), searchKeywords: ['bad', 'good'] },
     );
     if (fetched.length === 1 && fetched[0].title === 'ok') {
       pass('jobbankca.fetch(): a failed keyword does not abort keywords that still succeed');
@@ -452,8 +378,7 @@ try {
   // ── fetch(): total outage throws ──
   try {
     await jobbankca.fetch(
-      { provider: 'jobbankca', name: 'Outage', jobbankca: { keywords: ['a', 'b'] } },
-      { sleep: async () => {}, fetchText: async () => { throw new Error('boom'); } },
+      { provider: 'jobbankca', name: 'Outage', jobbankca: { } }, { ...({ sleep: async () => {}, fetchText: async () => { throw new Error('boom'); } }), searchKeywords: ['a', 'b'] },
     );
     fail('jobbankca.fetch() should throw when every keyword request fails');
   } catch (err) {
@@ -465,11 +390,9 @@ try {
   {
     let capturedOpts = null;
     await jobbankca.fetch(
-      { provider: 'jobbankca', name: 'Hygiene', jobbankca: { keywords: ['x'] } },
-      {
+      { provider: 'jobbankca', name: 'Hygiene', jobbankca: { } }, { ...({
         sleep: async () => {},
-        fetchText: async (url, opts) => { capturedOpts = opts; return '<?xml version="1.0"?><feed></feed>'; },
-      },
+        fetchText: async (url, opts) => { capturedOpts = opts; return '<?xml version="1.0"?><feed></feed>'; } }), searchKeywords: ['x'] },
     );
     if (capturedOpts && capturedOpts.redirect === 'error') {
       pass('jobbankca.fetch() passes redirect:"error" to fetchText (SSRF-via-redirect guard)');
@@ -513,8 +436,7 @@ try {
       // Every page returns a FULL (100-entry) page, so pagination would run
       // forever without the cap — this isolates the cap as the only thing
       // that can stop it.
-      { provider: 'jobbankca', name: 'Cap test', jobbankca: { keywords: ['x'] }, max_pages: 100 },
-      { sleep: async () => {}, fetchText: async () => fullPage(requestCount++) },
+      { provider: 'jobbankca', name: 'Cap test', jobbankca: { }, max_pages: 100 }, { ...({ sleep: async () => {}, fetchText: async () => fullPage(requestCount++) }), searchKeywords: ['x'] },
     );
     if (requestCount === 20) {
       pass('jobbankca.fetch() clamps entry.max_pages (100) down to MAX_PAGES_CAP (20)');

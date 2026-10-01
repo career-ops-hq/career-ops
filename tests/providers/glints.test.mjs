@@ -138,8 +138,7 @@ try {
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const jobs = await glints.fetch(
-    { name: 'Glints ID', provider: 'glints', searchKeywords: 'AI' },
-    mockCtx,
+    { name: 'Glints ID', provider: 'glints' }, { ...mockCtx, searchKeywords: ['AI'] },
   );
   if (jobs.length === 1 && jobs[0].title === 'AI PM') pass('glints.fetch() returns parsed jobs via searchJobsV3');
   else fail(`glints.fetch() returned ${JSON.stringify(jobs)}`);
@@ -151,8 +150,7 @@ try {
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const emptyJobs = await glints.fetch(
-    { name: 'Glints ID', provider: 'glints', searchKeywords: 'nonexistent' },
-    emptyCtx,
+    { name: 'Glints ID', provider: 'glints' }, { ...emptyCtx, searchKeywords: ['nonexistent'] },
   );
   if (emptyJobs.length === 0) pass('glints.fetch() handles empty results');
   else fail(`glints.fetch() should return empty array for no results, got ${emptyJobs.length}`);
@@ -164,8 +162,7 @@ try {
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const singleJobs = await glints.fetch(
-    { name: 'Glints ID', provider: 'glints', searchKeywords: 'dev' },
-    singlePageCtx,
+    { name: 'Glints ID', provider: 'glints' }, { ...singlePageCtx, searchKeywords: ['dev'] },
   );
   if (singleJobs.length === 1) pass('glints.fetch() stops when hasMore is false');
   else fail(`glints.fetch() single page: ${JSON.stringify(singleJobs)}`);
@@ -175,7 +172,7 @@ try {
   try {
     await glints.fetch(
       { name: 'Bad', provider: 'glints', api: 'https://evil.example.com/graphql' },
-      { transport: 'http', fetchJson: async () => ({}), fetchText: async () => '' },
+      { ...({ transport: 'http', fetchJson: async () => ({}), fetchText: async () => '' }), searchKeywords: ['AI'] },
     );
   } catch (e) {
     if (e.message.includes('untrusted hostname')) hostRejected = true;
@@ -188,12 +185,10 @@ try {
   let missingThrew = false;
   try {
     await glints.fetch(
-      { name: 'Glints ID', provider: 'glints', searchKeywords: 'test' },
-      {
+      { name: 'Glints ID', provider: 'glints' }, { ...({
         transport: 'http',
         fetchJson: async () => ({ data: { somethingElse: [] } }),
-        fetchText: async () => { throw new Error('should not be called'); },
-      },
+        fetchText: async () => { throw new Error('should not be called'); } }), searchKeywords: ['test'] },
     );
   } catch (e) {
     if (e.message.includes('unexpected API response')) missingThrew = true;

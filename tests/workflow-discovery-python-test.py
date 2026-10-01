@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import yaml
 from pathlib import Path
 from unittest.mock import patch
 
@@ -131,14 +132,11 @@ with tempfile.TemporaryDirectory() as temporary:
       script: tests/fixtures/three-city-board.mjs
   - name: Missing Provider
     provider: nonexistent-provider
-  - name: Manual Search
-    scan_method: websearch
-    scan_query: site:example.com jobs
+  - name: Unconfigured Source
 """)
     result = discover(root / "work", portals, capture=lambda directory, url: None)
     assert result["status"] == "partial" and result["added"] == 1
-    assert result["errors"] == 1 and result["handoff"] == 1
-    assert result["handoff_sources"][0]["query"] == "site:example.com jobs"
+    assert result["errors"] == 2
     assert discover(root / "filtered", portals, company_filter="Missing Provider",
                            capture=lambda directory, url: None)["status"] == "failed"
     second = discover(root / "work", portals, capture=lambda directory, url: None)
@@ -309,7 +307,7 @@ with tempfile.TemporaryDirectory() as temporary:
         f"  - name: Board {number}\n    provider: greenhouse\n" for number in range(11)))
     def observe_budget(command, **kwargs):
         assert kwargs["timeout"] == 1260
-        Path(command[-1]).write_text(json.dumps({"results": [{"status": "unmatched"}] * 11}))
+        Path(command[-1]).write_text(json.dumps({"results": [{"status": "fetched", "provider": "greenhouse", "jobs": []}] * 11}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
     with patch("workflow.discovery.subprocess.run", side_effect=observe_budget):
         assert discover(root / "work", portals)["status"] == "completed"
@@ -395,3 +393,33 @@ with tempfile.TemporaryDirectory() as temporary:
         with patch("workflow.discovery.database_snapshot", wraps=database_snapshot) as snapshot:
             discover(root / f"recheck-{index}", portals)
         assert snapshot.call_args.kwargs["recheck_after_days"] == expected
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    portals = root / "portals.yml"
+    portals.write_text("job_boards:\n  - name: Shared Search\n    provider: search\n")
+    profile = root / "selected-profile.yml"
+    observed = []
+    def collected_search(command, **kwargs):
+        request = json.loads(Path(command[-2]).read_text())
+        observed.append(request["search_keywords"])
+        word = request["search_keywords"][0]
+        address = "https://jobs.example.com/" + str(len(observed))
+        text = "Responsibilities and qualifications for " + word
+        Path(command[-1]).write_text(json.dumps({"results": [{"status": "fetched", "provider": "search",
+            "queries": ["site:jobs.example.com " + word], "jobs": [{"company": "Employer", "title": word,
+            "url": address, "description": text, "scan_jd": {"text": text, "final_url": address,
+            "retrieved_at": "2026-10-01T00:00:00Z"}}]}]}))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+    for word in ["AI Engineer", "智能体工程师"]:
+        profile.write_text(yaml.safe_dump({"target_roles": {"search_keywords": [word]}}))
+        with patch("workflow.discovery.subprocess.run", side_effect=collected_search):
+            result = discover(root / "work", portals, profile_path=profile,
+                              capture=lambda *_: (_ for _ in ()).throw(AssertionError("JD read repeated")))
+        assert result["status"] == "completed" and result["added"] == 1, result
+        assert result["searches"][0]["queries"] == ["site:jobs.example.com " + word]
+    assert observed == [["AI Engineer"], ["智能体工程师"]]
+    with sqlite3.connect(root / "work/opportunities.db") as db:
+        payload = json.loads(db.execute("SELECT payload FROM source_evidence ORDER BY id DESC LIMIT 1").fetchone()[0])
+        assert payload["scan_jd"]["content_hash"] and payload["description"] == payload["scan_jd"]["text"]
+    print("Configured search: selected profile refresh, query evidence and JD publication passed")

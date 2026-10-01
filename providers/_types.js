@@ -94,6 +94,8 @@
  * breaking the contract.
  *
  * @typedef {object} Context
+ * @property {string[]} [searchKeywords] Shared target_roles.search_keywords frozen for this scan.
+ * @property {number} [deadlineMs] Collector deadline; bounded providers must return before it.
  * @property {('http')} transport
  * @property {(url: string, opts?: FetchOptions) => Promise<string>}  fetchText
  * @property {(url: string, opts?: FetchOptions) => Promise<unknown>} fetchJson

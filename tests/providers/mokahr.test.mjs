@@ -250,7 +250,7 @@ try {
   const invalid = mkCtx(() => innerPayload);
   let invalidThrew = false;
   try {
-    await mokahr.fetch({ name: 'X', careers_url: 'https://example.com/not-a-tenant', provider: 'mokahr' }, invalid.ctx);
+    await mokahr.fetch({ name: 'X', careers_url: 'https://example.com/not-a-tenant', provider: 'mokahr' }, { ...invalid.ctx, searchKeywords: ['AI'] });
   } catch { invalidThrew = true; }
   if (invalidThrew && invalid.calls.length === 0) {
     pass('mokahr.fetch() rejects an invalid explicit-provider tenant before any request');
@@ -267,7 +267,7 @@ try {
         : Array.from({ length: 20 }, (_, i) => mkJob(`b${i}`, `岗位B${i}`)),
     },
   }));
-  const pagedJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI'] }, paged.ctx);
+  const pagedJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, { ...paged.ctx, searchKeywords: ['AI'] });
   if (pagedJobs.length === 70 && paged.calls.length === 2) {
     pass('mokahr.fetch() paginates via offset until a page returns fewer than 50 jobs (70 posts → 2 requests)');
   } else {
@@ -289,8 +289,7 @@ try {
     },
   }));
   const malformedFullPageJobs = await mokahr.fetch(
-    { name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI'] },
-    malformedFullPage.ctx,
+    { name: 'Example Labs', careers_url: MOKA_URL }, { ...malformedFullPage.ctx, searchKeywords: ['AI'] },
   );
   if (malformedFullPageJobs.length === 50 && malformedFullPage.calls.length === 2) {
     pass('mokahr.fetch() paginates by raw page length when normalization drops a malformed row');
@@ -317,7 +316,7 @@ try {
   }
 
   const overlap = mkCtx(() => ({ success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('dup', '重复岗位')] } }));
-  const overlapJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  const overlapJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, { ...overlap.ctx, searchKeywords: ['AI', '大模型'] });
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('mokahr.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -325,7 +324,7 @@ try {
   }
 
   const capped = mkCtx(() => ({ success: true, data: { jobStats: { total: 0 }, jobs: Array.from({ length: 50 }, (_, i) => mkJob(`c${i}`, `岗位C${i}`)) } }));
-  await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, max_pages: 1 }, { ...capped.ctx, searchKeywords: ['AI'] });
   if (capped.calls.length === 1) {
     pass('mokahr.fetch() honors entry.max_pages');
   } else {
@@ -334,9 +333,9 @@ try {
 
   const probe = mkCtx(() => ({ success: true, data: { jobStats: { total: 0 }, jobs: Array.from({ length: 50 }, (_, i) => mkJob(`d${i}`, `岗位D${i}`)) } }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, probe.ctx);
-  if (probe.calls.length === 1 && !probe.calls[0].keyword && probeJobs.length === 50) {
-    pass('mokahr.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (no keyword) query');
+  const probeJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, { ...probe.ctx, searchKeywords: ['AI'] });
+  if (probe.calls.length === 1 && probe.calls[0].keyword === 'AI' && probeJobs.length === 50) {
+    pass('mokahr.fetch() honors the ctx.maxPages probe hint with the shared keyword');
   } else {
     fail(`mokahr.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
   }
@@ -345,7 +344,7 @@ try {
     if (keyword === '大模型') throw new Error('HTTP 503');
     return { success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('e7', '幸存岗位')] } };
   });
-  const blipJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  const blipJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, { ...blip.ctx, searchKeywords: ['AI', '大模型'] });
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('mokahr.fetch() keeps already-collected jobs when a later request fails');
   } else {
@@ -355,7 +354,7 @@ try {
   const softFail = mkCtx(({ keyword }) => (keyword === '大模型'
     ? { success: false, code: 102, msg: '参数错误。{0}' }
     : { success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('e8', '幸存岗位2')] } }));
-  const softFailJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, softFail.ctx);
+  const softFailJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, { ...softFail.ctx, searchKeywords: ['AI', '大模型'] });
   if (softFailJobs.length === 1 && softFailJobs[0].title === '幸存岗位2') {
     pass('mokahr.fetch() treats an in-band success:false as a blip once jobs are collected');
   } else {
@@ -365,7 +364,7 @@ try {
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {
-    await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI'] }, dead.ctx);
+    await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL }, { ...dead.ctx, searchKeywords: ['AI'] });
   } catch { firstFailThrew = true; }
   if (firstFailThrew) {
     pass('mokahr.fetch() still throws when the very first request fails (dead board reads as failure)');

@@ -1,3 +1,4 @@
+/** Collect Amazon postings with shared search terms and configured location facets. */
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -10,7 +11,6 @@
 //     provider: amazon
 //     amazon:
 //       loc_query: Germany          # free-text location filter
-//       base_query: machine learning  # optional keyword filter
 //       category: software-development # optional facet (repeatable via array)
 //
 // The board is enormous (100k+ postings), so a location and/or keyword filter
@@ -18,12 +18,14 @@
 // recent slice. result_limit is fixed at 100 (the API's hard per-page max;
 // larger values return an empty `jobs`), and we page via `offset`.
 
+import { providerKeywords } from './_profile-keywords.mjs';
+
 const PAGE_SIZE = 100; // amazon.jobs caps result_limit at 100
 const MAX_PAGES = 20; // safety cap — at most 2000 postings per entry
 const ORIGIN = 'https://www.amazon.jobs';
 
 /** @param {import('./_types.js').PortalEntry & {amazon?: Record<string, unknown>}} entry */
-function buildQuery(entry, offset) {
+function buildQuery(entry, offset, keyword) {
   const cfg = entry.amazon && typeof entry.amazon === 'object' ? entry.amazon : {};
   const params = new URLSearchParams();
   // Pass config keys through verbatim (base_query, loc_query, category, …).
@@ -39,7 +41,7 @@ function buildQuery(entry, offset) {
       params.append(k, String(v));
     }
   }
-  if (!params.has('base_query')) params.set('base_query', '');
+  params.set('base_query', keyword);
   if (!params.has('loc_query')) params.set('loc_query', '');
   params.set('sort', cfg.sort ? String(cfg.sort) : 'recent');
   params.set('result_limit', String(PAGE_SIZE));
@@ -77,30 +79,35 @@ export default {
   async fetch(entry, ctx) {
     const jobs = [];
     const seen = new Set();
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const url = buildQuery(entry, page * PAGE_SIZE);
-      const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
-      const postings = Array.isArray(json?.jobs) ? json.jobs : [];
-      if (postings.length === 0) break;
+    for (const keyword of providerKeywords(ctx)) {
+      const keywordSeen = new Set();
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const url = buildQuery(entry, page * PAGE_SIZE, keyword);
+        const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
+        const postings = Array.isArray(json?.jobs) ? json.jobs : [];
+        if (postings.length === 0) break;
 
-      let fresh = 0;
-      for (const j of postings) {
-        const path = j.job_path;
-        if (!path || typeof path !== 'string') continue;
-        const url2 = /^https?:\/\//i.test(path) ? path : ORIGIN + (path.startsWith('/') ? path : '/' + path);
-        if (seen.has(url2)) continue;
-        seen.add(url2);
-        fresh++;
-        jobs.push({
-          title: (j.title || '').trim(),
-          url: url2,
-          company: j.company_name || entry.name,
-          location: (j.normalized_location || j.location || '').trim(),
-          postedAt: toEpochMs(j),
-        });
+        let fresh = 0;
+        for (const j of postings) {
+          const path = j.job_path;
+          if (!path || typeof path !== 'string') continue;
+          const url2 = /^https?:\/\//i.test(path) ? path : ORIGIN + (path.startsWith('/') ? path : '/' + path);
+          if (keywordSeen.has(url2)) continue;
+          keywordSeen.add(url2);
+          fresh++;
+          if (seen.has(url2)) continue;
+          seen.add(url2);
+          jobs.push({
+            title: (j.title || '').trim(),
+            url: url2,
+            company: j.company_name || entry.name,
+            location: (j.normalized_location || j.location || '').trim(),
+            postedAt: toEpochMs(j),
+          });
+        }
+        if (fresh === 0) break; // API ignored offset / looped
+        if (postings.length < PAGE_SIZE) break; // last page
       }
-      if (fresh === 0) break; // API ignored offset / looped
-      if (postings.length < PAGE_SIZE) break; // last page
     }
     return jobs;
   },

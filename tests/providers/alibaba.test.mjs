@@ -146,7 +146,7 @@ try {
         : Array.from({ length: 50 }, (_, i) => mkJob(2000 + i, `岗位B${i}`)),
     },
   }));
-  const pagedJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'] }, paged.ctx);
+  const pagedJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...paged.ctx, searchKeywords: ['AI'] });
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('alibaba.fetch() paginates until totalCount is exhausted (150 posts → 2 requests)');
   } else {
@@ -171,7 +171,7 @@ try {
     success: true,
     content: { totalCount: 1, datas: [mkJob(42, '重复岗位')] },
   }));
-  const overlapJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  const overlapJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...overlap.ctx, searchKeywords: ['AI', '大模型'] });
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('alibaba.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -182,7 +182,7 @@ try {
     success: true,
     content: { totalCount: 500, datas: Array.from({ length: 100 }, (_, i) => mkJob(5000 + i, `岗位E${i}`)) },
   }));
-  await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, max_pages: 1 }, { ...capped.ctx, searchKeywords: ['AI'] });
   if (capped.calls.length === 1) {
     pass('alibaba.fetch() honors entry.max_pages');
   } else {
@@ -194,9 +194,9 @@ try {
     content: { totalCount: 500, datas: Array.from({ length: 100 }, (_, i) => mkJob(6000 + i, `岗位F${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, probe.ctx);
-  if (probe.calls.length === 1 && probe.calls[0].key === '' && probeJobs.length === 100) {
-    pass('alibaba.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (empty keyword) query');
+  const probeJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...probe.ctx, searchKeywords: ['AI'] });
+  if (probe.calls.length === 1 && probe.calls[0].key === 'AI' && probeJobs.length === 100) {
+    pass('alibaba.fetch() honors the ctx.maxPages probe hint with the shared keyword');
   } else {
     fail(`alibaba.fetch() ctx.maxPages=1: ${probe.calls.length} requests, key=${JSON.stringify(probe.calls[0] && probe.calls[0].key)}`);
   }
@@ -205,7 +205,7 @@ try {
     if (key === '大模型') throw new Error('HTTP 503');
     return { success: true, content: { totalCount: 1, datas: [mkJob(7, '幸存岗位')] } };
   });
-  const blipJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  const blipJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...blip.ctx, searchKeywords: ['AI', '大模型'] });
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('alibaba.fetch() keeps already-collected jobs when a later request fails');
   } else {
@@ -215,7 +215,7 @@ try {
   const softFail = mkCtx(({ key }) => (key === '大模型'
     ? { success: false, errorMsg: 'rate limited' }
     : { success: true, content: { totalCount: 1, datas: [mkJob(8, '幸存岗位2')] } }));
-  const softFailJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型'] }, softFail.ctx);
+  const softFailJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...softFail.ctx, searchKeywords: ['AI', '大模型'] });
   if (softFailJobs.length === 1 && softFailJobs[0].title === '幸存岗位2') {
     pass('alibaba.fetch() treats an in-band success:false as a blip once jobs are collected');
   } else {
@@ -225,7 +225,7 @@ try {
   let softDeadThrew = false;
   const softDead = mkCtx(() => ({ success: false, errorCode: 'SYS_ERROR' }));
   try {
-    await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'] }, softDead.ctx);
+    await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...softDead.ctx, searchKeywords: ['AI'] });
   } catch { softDeadThrew = true; }
   if (softDeadThrew) {
     pass('alibaba.fetch() throws when the very first response reports success:false (dead board, not empty board)');
@@ -236,7 +236,7 @@ try {
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {
-    await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'] }, dead.ctx);
+    await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, { ...dead.ctx, searchKeywords: ['AI'] });
   } catch { firstFailThrew = true; }
   if (firstFailThrew) {
     pass('alibaba.fetch() still throws when the very first request fails (dead board reads as failure)');

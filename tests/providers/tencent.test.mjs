@@ -150,7 +150,7 @@ try {
         : Array.from({ length: 50 }, (_, i) => mkPost(2000 + i, `岗位B${i}`)),
     },
   }));
-  const pagedJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'] }, paged.ctx);
+  const pagedJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, { ...paged.ctx, searchKeywords: ['AI'] });
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('tencent.fetch() paginates until Data.Count is exhausted (150 posts → 2 requests)');
   } else {
@@ -167,7 +167,7 @@ try {
     Code: 200,
     Data: { Count: 1, Posts: [mkPost(42, '重复岗位')] },
   }));
-  const overlapJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  const overlapJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, { ...overlap.ctx, searchKeywords: ['AI', '大模型'] });
   if (overlapJobs.length === 1 && overlap.calls.length === 2) {
     pass('tencent.fetch() dedupes the same job URL across keywords');
   } else {
@@ -184,7 +184,7 @@ try {
     Code: 200,
     Data: { Count: 500, Posts: Array.from({ length: 100 }, (_, i) => mkPost(3000 + i, `岗位C${i}`)) },
   }));
-  await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, max_pages: 1 }, { ...capped.ctx, searchKeywords: ['AI'] });
   if (capped.calls.length === 1) {
     pass('tencent.fetch() honors entry.max_pages');
   } else {
@@ -196,9 +196,9 @@ try {
     Data: { Count: 500, Posts: Array.from({ length: 100 }, (_, i) => mkPost(4000 + i, `岗位D${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, probe.ctx);
-  if (probe.calls.length === 1 && probe.calls[0].keyword === '' && probeJobs.length === 100) {
-    pass('tencent.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (empty keyword) query');
+  const probeJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, { ...probe.ctx, searchKeywords: ['AI'] });
+  if (probe.calls.length === 1 && probe.calls[0].keyword === 'AI' && probeJobs.length === 100) {
+    pass('tencent.fetch() honors the ctx.maxPages probe hint with the shared keyword');
   } else {
     fail(`tencent.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
   }
@@ -207,7 +207,7 @@ try {
     if (keyword === '大模型') throw new Error('HTTP 503');
     return { Code: 200, Data: { Count: 1, Posts: [mkPost(7, '幸存岗位')] } };
   });
-  const blipJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  const blipJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, { ...blip.ctx, searchKeywords: ['AI', '大模型'] });
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('tencent.fetch() keeps already-collected jobs when a later request fails');
   } else {
@@ -221,7 +221,7 @@ try {
   let zeroThenBlipJobs;
   let zeroThenBlipThrew = false;
   try {
-    zeroThenBlipJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI', '大模型'] }, zeroThenBlip.ctx);
+    zeroThenBlipJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, { ...zeroThenBlip.ctx, searchKeywords: ['AI', '大模型'] });
   } catch { zeroThenBlipThrew = true; }
   if (!zeroThenBlipThrew && Array.isArray(zeroThenBlipJobs) && zeroThenBlipJobs.length === 0) {
     pass('tencent.fetch() treats a later failure as a blip even when earlier keywords matched 0 jobs (board is alive)');
@@ -232,7 +232,7 @@ try {
   let firstFailThrew = false;
   const dead = mkCtx(() => { throw new Error('HTTP 500'); });
   try {
-    await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'] }, dead.ctx);
+    await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, { ...dead.ctx, searchKeywords: ['AI'] });
   } catch { firstFailThrew = true; }
   if (firstFailThrew) {
     pass('tencent.fetch() still throws when the very first request fails (dead board reads as failure)');

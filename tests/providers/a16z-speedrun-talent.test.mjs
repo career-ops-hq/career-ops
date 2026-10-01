@@ -93,7 +93,7 @@ try {
       return page === '0' ? page0 : page1;
     },
   };
-  const jobs = await provider.fetch({ name: 'a16z speedrun talent network', max_pages: 5, q: 'engineer' }, ctx);
+  const jobs = await provider.fetch({ name: 'a16z speedrun talent network', max_pages: 5 }, { ...ctx, searchKeywords: ['engineer'] });
   const urlsOk = calls.length === 2
     && calls.every((u) => u.startsWith('https://speedrun-talent-network.com/api/v1/jobs?'))
     && calls.every((u) => new URL(u).searchParams.get('source') === 'career-ops')
@@ -108,8 +108,8 @@ try {
 
   // fetch(): max_pages caps ahead of total_pages.
   const capCalls = [];
-  const capCtx = { fetchJson: async (url) => { capCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total_pages: 50 }; } };
-  const capped = await provider.fetch({ max_pages: 2 }, capCtx);
+  const capCtx = { fetchJson: async (url) => { capCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i + (capCalls.length - 1) * 50)), total_pages: 50 }; } };
+  const capped = await provider.fetch({ max_pages: 2 }, { ...capCtx, searchKeywords: ['AI'] });
   if (capCalls.length === 2 && capped.length === 100) pass('fetch() honors max_pages ahead of total_pages');
   else fail(`fetch() cap = ${JSON.stringify({ calls: capCalls.length, jobs: capped.length })}`);
 
@@ -121,7 +121,7 @@ try {
   const liveShapeCtx = {
     fetchJson: async (url) => {
       liveShapeCalls.push(url);
-      return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 16830, page: liveShapeCalls.length - 1, page_size: 50, total_pages: 337 };
+      return { jobs: Array.from({ length: 50 }, (_, i) => mk(i + (liveShapeCalls.length - 1) * 50)), total: 16830, page: liveShapeCalls.length - 1, page_size: 50, total_pages: 337 };
     },
   };
   const liveWarnings = [];
@@ -129,7 +129,7 @@ try {
   let liveShape;
   try {
     console.error = (...args) => liveWarnings.push(args.join(' '));
-    liveShape = await provider.fetch({ max_pages: 2 }, liveShapeCtx);
+    liveShape = await provider.fetch({ max_pages: 2 }, { ...liveShapeCtx, searchKeywords: ['AI'] });
   } finally {
     console.error = liveRealConsoleError;
   }
@@ -148,25 +148,25 @@ try {
   const bareCtx = {
     fetchJson: async (url) => {
       bareCalls.push(url);
-      return { jobs: Array.from({ length: bareCalls.length === 1 ? 50 : 49 }, (_, i) => mk(i)) };
+      return { jobs: Array.from({ length: bareCalls.length === 1 ? 50 : 49 }, (_, i) => mk(i + (bareCalls.length - 1) * 50)) };
     },
   };
-  const bare = await provider.fetch({ max_pages: 5 }, bareCtx);
+  const bare = await provider.fetch({ max_pages: 5 }, { ...bareCtx, searchKeywords: ['AI'] });
   if (bareCalls.length === 2 && bare.length === 99) pass('fetch() stops on a short page via the PER_PAGE=50 fallback when page_size is absent');
   else fail(`bare fallback = ${JSON.stringify({ calls: bareCalls.length, jobs: bare.length })}`);
 
   // Empty feed (e.g. a q: with no matches) returns [] after one call.
   const emptyCalls = [];
   const emptyCtx = { fetchJson: async (url) => { emptyCalls.push(url); return { jobs: [], total: 0, page: 0, page_size: 50, total_pages: 0 }; } };
-  const empty = await provider.fetch({ max_pages: 3 }, emptyCtx);
+  const empty = await provider.fetch({ max_pages: 3 }, { ...emptyCtx, searchKeywords: ['AI'] });
   if (emptyCalls.length === 1 && empty.length === 0) pass('fetch() returns [] after one call on an empty feed');
   else fail(`empty feed = ${JSON.stringify({ calls: emptyCalls.length, jobs: empty.length })}`);
 
-  // resolveQuery: keywords[] fallback when q: is absent.
+  // The shared phrase reaches the native query unchanged.
   const kwCalls = [];
   const kwCtx = { fetchJson: async (url) => { kwCalls.push(url); return { jobs: [mk(0)], total_pages: 1 }; } };
-  await provider.fetch({ keywords: ['machine', '', 'learning'] }, kwCtx);
-  if (new URL(kwCalls[0]).searchParams.get('q') === 'machine learning') pass('fetch() falls back to joined keywords[] when q: is absent');
+  await provider.fetch({ }, { ...kwCtx, searchKeywords: ['machine learning'] });
+  if (new URL(kwCalls[0]).searchParams.get('q') === 'machine learning') pass('fetch() uses the shared keyword as the native query');
   else fail(`keywords fallback q = ${JSON.stringify(new URL(kwCalls[0]).searchParams.get('q'))}`);
 
   // DEFAULT_MAX_PAGES: with no max_pages on the entry, the default budget
@@ -187,7 +187,7 @@ try {
   let defJobs;
   try {
     console.error = (...args) => defWarnings.push(args.join(' '));
-    defJobs = await provider.fetch({ name: 'a16z speedrun talent network' }, defCtx);
+    defJobs = await provider.fetch({ name: 'a16z speedrun talent network' }, { ...defCtx, searchKeywords: ['AI'] });
   } finally {
     console.error = defRealConsoleError;
   }
@@ -215,7 +215,7 @@ try {
   let bigJobs;
   try {
     console.error = (...args) => warnings.push(args.join(' '));
-    bigJobs = await provider.fetch({ max_pages: 9999 }, mkCapCtx(bigCalls));
+    bigJobs = await provider.fetch({ max_pages: 9999 }, { ...(mkCapCtx(bigCalls)), searchKeywords: ['AI'] });
   } finally {
     console.error = realConsoleError;
   }
@@ -232,7 +232,7 @@ try {
   const atCapReal = console.error;
   try {
     console.error = () => {};
-    await provider.fetch({ max_pages: 1000 }, mkCapCtx(atCapCalls));
+    await provider.fetch({ max_pages: 1000 }, { ...(mkCapCtx(atCapCalls)), searchKeywords: ['AI'] });
   } finally {
     console.error = atCapReal;
   }
@@ -240,7 +240,7 @@ try {
   const overCapReal = console.error;
   try {
     console.error = () => {};
-    await provider.fetch({ max_pages: 1001 }, mkCapCtx(overCapCalls));
+    await provider.fetch({ max_pages: 1001 }, { ...(mkCapCtx(overCapCalls)), searchKeywords: ['AI'] });
   } finally {
     console.error = overCapReal;
   }
@@ -254,7 +254,7 @@ try {
     const badReal = console.error;
     try {
       console.error = () => {};
-      await provider.fetch({ max_pages: bad }, mkCapCtx(badCalls));
+      await provider.fetch({ max_pages: bad }, { ...(mkCapCtx(badCalls)), searchKeywords: ['AI'] });
     } finally {
       console.error = badReal;
     }
@@ -265,7 +265,7 @@ try {
   // fetch(): malformed payload throws with a useful message.
   let threw = false;
   try {
-    await provider.fetch({}, { fetchJson: async () => ({ nope: true }) });
+    await provider.fetch({}, { ...({ fetchJson: async () => ({ nope: true }) }), searchKeywords: ['AI'] });
   } catch (e) {
     threw = /unexpected API response/.test(String(e?.message));
   }
@@ -294,7 +294,7 @@ try {
         return okPage;
       },
     };
-    const jobs = await provider.fetch({}, flakyCtx);
+    const jobs = await provider.fetch({}, { ...flakyCtx, searchKeywords: ['AI'] });
     if (attempts === 2 && jobs.length === 1) pass('fetch() retries a transient 5xx and still returns the page (#2506)');
     else fail(`transient 5xx not retried: attempts=${attempts}, jobs=${jobs.length}`);
     if (slept.length === 1 && slept[0] > 0) pass('fetch() backs off between attempts via ctx.sleep (#2506)');
@@ -314,7 +314,7 @@ try {
       },
     };
     let persistentThrew = false;
-    try { await provider.fetch({}, deadCtx); } catch { persistentThrew = true; }
+    try { await provider.fetch({}, { ...deadCtx, searchKeywords: ['AI'] }); } catch { persistentThrew = true; }
     if (persistentThrew && attempts === 3) pass('fetch() gives up loudly after 3 bounded attempts, never a silent partial (#2506)');
     else fail(`persistent failure handling wrong: threw=${persistentThrew}, attempts=${attempts}`);
   }
@@ -383,7 +383,7 @@ try {
       },
     };
     let fastFailed = false;
-    try { await provider.fetch({}, badReqCtx); } catch { fastFailed = true; }
+    try { await provider.fetch({}, { ...badReqCtx, searchKeywords: ['AI'] }); } catch { fastFailed = true; }
     if (fastFailed && attempts === 1) pass('fetch() does not retry a non-retryable 4xx (#2506)');
     else fail(`4xx retry behaviour wrong: threw=${fastFailed}, attempts=${attempts}`);
   }

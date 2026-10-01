@@ -53,9 +53,7 @@ export async function collect(input, providers = null, onResult = null) {
       }
       let resolved = resolveProvider(target, providers);
       if (!resolved) {
-        record(index, target.scan_method === 'websearch'
-          ? { status: 'handoff', query: target.scan_query || target.search_query || target.careers_url || '' }
-          : { status: 'unmatched' });
+        record(index, { status: 'error', kind: 'configuration', error: `No provider matched source: ${target.name}` });
         continue;
       }
       if (resolved.error) {
@@ -67,6 +65,8 @@ export async function collect(input, providers = null, onResult = null) {
       const startedAt = Date.now();
       try {
         const context = { ...makeHttpCtx(), sinceMs: input.since_ms ?? null,
+          deadlineMs: startedAt + timeoutMs,
+          ...(Object.hasOwn(input, 'search_keywords') ? { searchKeywords: input.search_keywords } : {}),
           includeUndated: input.include_undated ?? true, syntheticEntries: input.synthetic_entries === true };
         let jobs;
         try {
@@ -81,7 +81,7 @@ export async function collect(input, providers = null, onResult = null) {
         }
         if (!Array.isArray(jobs)) throw new Error(`${provider.id}: fetch() did not return an array`);
         record(index, {
-          status: 'fetched', provider: provider.id, jobs, warning,
+          status: 'fetched', provider: provider.id, jobs, warning, queries: jobs.collectionQueries ?? [],
           deadline_ms: startedAt + timeoutMs,
           truncated: jobs.collectionTruncated === true || jobs.workdayTruncated === true || jobs.workdayCapReached === true,
           truncation_kind: jobs.collectionTruncated === true ? jobs.collectionTruncationKind || 'page_cap'

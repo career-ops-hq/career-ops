@@ -1,29 +1,8 @@
+/** Collect jobstreet postings using the shared profile search terms. */
 // @ts-check
-/** @typedef {import('./_types.js').Provider} Provider */
+import { providerKeywords } from './_profile-keywords.mjs';
 
-// Jobstreet / SEEK provider — hits the public SEEK v5 JobSearch REST API.
-//
-// Jobstreet (jobstreet.com, jobstreet.co.id, etc.) and SEEK (seek.com.au,
-// seek.co.nz) share the same SEEK infrastructure. The old chalice-search
-// v4 API (/api/chalice-search/v4/search) was deprecated; the v5 API at
-// /api/jobsearch/v5/search is the current replacement.
-//
-// This provider is designed for explicit `provider: jobstreet` in portals.yml.
-// Auto-detection from careers_url is not supported because Jobstreet is a
-// job board aggregator, not a company ATS.
-//
-// Portal entry fields (all optional except `provider`):
-//   api             — v5 search endpoint URL (default: https://id.jobstreet.com/api/jobsearch/v5/search)
-//   siteKey         — SEEK site key for regional filtering (default: "ID-Main")
-//   searchKeywords  — Search keywords, space-separated (default: "")
-//   searchLocation  — Location filter (default: "")
-//   pageSize        — Results per page (default: 30)
-//   maxPages        — Maximum pages to fetch (default: 3)
-//
-// Site keys by market:
-//   ID-Main  → id.jobstreet.com (Indonesia)
-//   SG-Main  → sg.jobstreet.com (Singapore)
-//   MY-Main  → my.jobstreet.com (Malaysia)
+/** @typedef {import('./_types.js').Provider} Provider */
 
 const DEFAULT_API = 'https://id.jobstreet.com/api/jobsearch/v5/search';
 const DEFAULT_SITE_KEY = 'ID-Main';
@@ -41,10 +20,6 @@ const ALLOWED_JOBSTREET_HOSTS = new Set([
   'www.seek.com.au',
   'www.seek.co.nz',
 ]);
-
-// v5 API paths (the client-side JS on jobstreet uses these relative paths
-// resolved against the current origin). We keep the allowlist for SSRF
-// protection on the base URL, then build the v5 search path from it.
 const V5_SEARCH_PATH = '/api/jobsearch/v5/search';
 
 /** @param {string} url */
@@ -75,8 +50,6 @@ function deriveOrigin(apiUrl) {
     return 'https://id.jobstreet.com';
   }
 }
-
-// NaN-safe Date.parse
 function toEpochMs(value) {
   if (!value) return undefined;
   const parsed = Date.parse(value);
@@ -115,22 +88,15 @@ export function parseJobstreetItem(item, origin, fallbackCompany) {
 
   const title = (item.title || '').trim();
   if (!title) return null;
-
-  // Build job URL from the job ID
   const jobId = (item.id || '').trim();
   if (!jobId) return null;
   const url = `${origin}/id/job/${jobId}`;
-
-  // Validate URL hostname belongs to allowed set
   try {
     const parsed = new URL(url);
     if (!ALLOWED_JOBSTREET_HOSTS.has(parsed.hostname)) return null;
   } catch {
     return null;
   }
-
-  // Prefer advertiser.description for the branded company name, fall back
-  // to companyName (which can be shorter/less specific), then entry name.
   const company = (item.advertiser?.description || item.companyName || fallbackCompany || '').trim();
   const location = (item.locations?.[0]?.label || '').trim();
   const postedAt = toEpochMs(item.listingDate);
@@ -160,9 +126,6 @@ export default {
   id: 'jobstreet',
 
   detect(_entry) {
-    // Jobstreet is a job board aggregator, not a company ATS.
-    // Auto-detection from careers_url is intentionally not supported —
-    // use `provider: jobstreet` explicitly in portals.yml.
     return null;
   },
 
@@ -172,7 +135,6 @@ export default {
     const origin = deriveOrigin(apiUrl);
 
     const siteKey = entry.siteKey || DEFAULT_SITE_KEY;
-    const keywords = entry.searchKeywords || '';
     const searchLocation = entry.searchLocation || '';
     const pageSize = Number(entry.pageSize) || DEFAULT_PAGE_SIZE;
     const maxPages = Number(entry.maxPages) || DEFAULT_MAX_PAGES;
@@ -180,41 +142,37 @@ export default {
 
     const allJobs = [];
 
-    for (let page = 1; page <= maxPages; page++) {
-      const searchUrl = buildSearchUrl(origin, {
-        siteKey,
-        keywords,
-        location: searchLocation,
-        pageSize,
-        page,
-      });
+    for (const keywords of providerKeywords(ctx)) {
+      for (let page = 1; page <= maxPages; page++) {
+        const searchUrl = buildSearchUrl(origin, {
+          siteKey,
+          keywords,
+          location: searchLocation,
+          pageSize,
+          page,
+        });
 
-      let json;
-      try {
-        json = /** @type {any} */ (await ctx.fetchJson(searchUrl, { redirect: 'error' }));
-      } catch (err) {
-        // If page 1 fails, surface the error. Later pages failing is non-fatal
-        // — we return whatever we've collected so far.
-        if (page === 1) throw err;
-        console.error(`jobstreet: page ${page} fetch failed — ${err.message}`);
-        break;
+        let json;
+        try {
+          json = /** @type {any} */ (await ctx.fetchJson(searchUrl, { redirect: 'error' }));
+        } catch (err) {
+          if (page === 1) throw err;
+          console.error(`jobstreet: page ${page} fetch failed — ${err.message}`);
+          break;
+        }
+
+        const data = Array.isArray(json?.data) ? json.data : [];
+        if (data.length === 0) break;
+
+        for (const item of data) {
+          const job = parseJobstreetItem(item, origin, fallbackCompany);
+          if (job) allJobs.push(job);
+        }
+        if (data.length < pageSize) break;
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
 
-      const data = Array.isArray(json?.data) ? json.data : [];
-      if (data.length === 0) break;
-
-      for (const item of data) {
-        const job = parseJobstreetItem(item, origin, fallbackCompany);
-        if (job) allJobs.push(job);
-      }
-
-      // Stop if we got fewer results than pageSize (last page)
-      if (data.length < pageSize) break;
-
-      // Respect rate limits — small delay between pages
-      await new Promise(resolve => setTimeout(resolve, 200));
     }
-
-    return allJobs;
+    return [...new Map(allJobs.map(job => [job.url, job])).values()];
   },
 };

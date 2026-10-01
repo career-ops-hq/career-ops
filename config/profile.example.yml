@@ -27,6 +27,7 @@ candidate:
   photo_style: rounded
 
 target_roles:
+  search_keywords: ["AI Engineer", "Full Stack Engineer"]
   # Your North Star roles — what you're optimizing for
   primary:
     - "Senior AI Engineer"

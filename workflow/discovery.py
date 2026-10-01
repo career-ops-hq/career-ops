@@ -88,12 +88,13 @@ def _config(path: Path) -> dict:
     return loaded
 
 
-def collect_provider_results(targets: list[tuple[dict, bool]], since_ms: float | None) -> tuple[list, list[str]]:
+def collect_provider_results(targets: list[tuple[dict, bool]], since_ms: float | None,
+                             search_keywords: object = None) -> tuple[list, list[str]]:
     """Call the Node provider adapters and return their complete batch and coverage warnings."""
     with tempfile.TemporaryDirectory(prefix="career-ops-provider-") as temporary:
         input_path, output_path = Path(temporary) / "input.json", Path(temporary) / "output.json"
         input_path.write_text(json.dumps({"targets": [entry for entry, _ in targets], "since_ms": since_ms,
-                                          "mode": "configured"}, ensure_ascii=False))
+                                          "mode": "configured", "search_keywords": search_keywords}, ensure_ascii=False))
         collector_timeout = max(900, math.ceil(len(targets) / 10) * 600 + 60)
         try:
             result = subprocess.run(["node", str(ROOT / "providers" / "_collect.mjs"), str(input_path), str(output_path)],
@@ -175,6 +176,8 @@ def discover(directory: Path, config_path: Path, company_filter: str | None = No
     except yaml.YAMLError:
         profile = {}
     profile = profile if isinstance(profile, dict) else {}
+    roles = profile.get("target_roles")
+    search_keywords = roles.get("search_keywords") if isinstance(roles, dict) else None
     targets = []
     for section, board in (("tracked_companies", False), ("job_boards", True)):
         values = config.get(section) if isinstance(config.get(section), list) else []
@@ -223,7 +226,8 @@ def discover(directory: Path, config_path: Path, company_filter: str | None = No
 
     return run_discovery_graph(
         directory, inputs_hash, {"effective_after": effective_after, "since_ms": since_ms}, resume=resume,
-        collect=lambda cutoffs: collect_provider_results(targets, cutoffs["since_ms"]),
+        collect=lambda cutoffs: collect_provider_results(targets, cutoffs["since_ms"],
+                                                        search_keywords),
         decide=decide, publish=lambda decision, run_id: _publish_decision(directory, decision, capture, run_id),
         collector_failure=collector_failure,
     )
@@ -259,18 +263,13 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
         windows = load_windows(profile)
         country = profile.get("location", {}).get("country", "") if isinstance(profile.get("location"), dict) else ""
         source_hash = candidate_source_hash(input_root, profile_path)
-        cooldown_offers, handoffs, health = [], [], []
+        cooldown_offers, health, searches = [], [], []
         failures.extend({"company": "provider-collector", "error": line, "kind": "coverage_warning"}
                         for line in collector_warnings)
         annotated_blacklisted = 0
         checked_at = datetime.now(timezone.utc).isoformat()
         for (entry, board), outcome in zip(targets, collected):
             status = outcome.get("status")
-            if status == "unmatched":
-                continue
-            if status == "handoff":
-                handoffs.append({"company": entry["name"], "method": "websearch", "query": outcome.get("query", "")})
-                continue
             if status == "error" and outcome.get("kind") == "configuration":
                 failures.append({"company": entry["name"], "error": outcome.get("error", "Unknown provider")})
                 continue
@@ -282,6 +281,8 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
                 failures.append({"company": entry["name"], "error": outcome.get("error", "Provider failure"),
                                  "kind": outcome.get("kind")})
             elif status == "fetched":
+                if outcome.get("queries"):
+                    searches.append({"source": entry["name"], "queries": outcome["queries"]})
                 jobs = outcome.get("jobs", [])
                 if not isinstance(jobs, list):
                     raise ValueError("Provider result jobs must be a list")
@@ -291,11 +292,11 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
                 if outcome.get("warning"):
                     failures.append({"company": entry["name"], "error": outcome["warning"]})
                 if outcome.get("truncated") or outcome.get("capped"):
-                    failures.append({"company": entry["name"], "error": "Provider collection stopped before all pages were fetched",
+                    failures.append({"company": entry["name"], "error": "Source collection has incomplete coverage",
                                      "kind": "coverage_warning", "reason": outcome.get("truncation_kind") or "page_cap"})
                     kind = outcome.get("truncation_kind")
                     health_status = kind if kind in {"network", "auth", "server"} else "incomplete"
-                source = "local-parser" if outcome["provider"] == "local-parser" else outcome["provider"] + "-api"
+                source = outcome["provider"] if outcome["provider"] in {"local-parser", "search"} else outcome["provider"] + "-api"
                 for job in jobs:
                     if not isinstance(job, dict):
                         failures.append({"company": entry["name"], "error": "Provider returned a non-object job"})
@@ -353,8 +354,8 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
             offer["fingerprint"] = fingerprint(offer.get("description"))
         crosslist = cross_listings(accepted, snapshot["fingerprint_history"], today=today)
         summary = {"companies": companies, "boards": boards, "found": found, "dupes": counts["dupes"],
-                   "newAdded": len(accepted), "errors": len(failures), "handoff": len(handoffs),
-                   "filtered": counts, "failures": failures, "handoff_sources": handoffs}
+                   "newAdded": len(accepted), "errors": len(failures), "searches": searches,
+                   "filtered": counts, "failures": failures}
         try:
             threshold = int(config.get("portal_health_threshold") or 3)
         except (TypeError, ValueError):
@@ -362,13 +363,13 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
         streaks = store.health_streaks(health)
         persistent_failures = sorted({item["company"] for item in health
                                       if streaks[item["company"]] >= threshold})
-        incomplete = bool(failures or handoffs or company_filter and not companies + boards)
+        incomplete = bool(failures or company_filter and not companies + boards)
         return {"accepted": accepted, "cooldown_offers": cooldown_offers,
                 "verification_outcomes": verification_outcomes, "source_hash": source_hash,
                 "today": today.isoformat(), "summary": summary, "health": health,
                 "result": {"status": "partial" if incomplete and found else "failed" if incomplete else "completed",
                            "sources": companies + boards, "checked": found, "added": len(accepted), "errors": len(failures),
-                           "handoff": len(handoffs), "failures": failures, "handoff_sources": handoffs,
+                           "failures": failures, "searches": searches,
                            "filtered": counts, "cross_listings": crosslist,
                            "recheck_eligible": snapshot["recheck_eligible"],
                            "persistent_failures": persistent_failures,
@@ -396,7 +397,9 @@ def _publish_decision(directory: Path, decision: dict, capture, run_id: str | No
         capture = capture or capture_jd
         for offer in decision["accepted"]:
             try:
-                snapshot_value = capture(directory, offer["url"])
+                retained = offer.get("scan_jd")
+                snapshot_value = {"text": retained["text"], "url": retained["final_url"],
+                                  "retrieved_at": retained["retrieved_at"]} if retained else capture(directory, offer["url"])
             except (OSError, TimeoutError, ValueError):
                 snapshot_value = None
             if snapshot_value:

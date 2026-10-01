@@ -132,8 +132,7 @@ try {
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const jobs = await jobstreet.fetch(
-    { name: 'Jobstreet ID', provider: 'jobstreet', searchKeywords: 'AI' },
-    mockCtx,
+    { name: 'Jobstreet ID', provider: 'jobstreet' }, { ...mockCtx, searchKeywords: ['AI'] },
   );
   if (jobs.length === 1 && jobs[0].title === 'AI Engineer') pass('jobstreet.fetch() returns parsed jobs via v5 API');
   else fail(`jobstreet.fetch() returned ${JSON.stringify(jobs)}`);
@@ -145,8 +144,7 @@ try {
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const emptyJobs = await jobstreet.fetch(
-    { name: 'Jobstreet ID', provider: 'jobstreet', searchKeywords: 'nonexistent' },
-    emptyCtx,
+    { name: 'Jobstreet ID', provider: 'jobstreet' }, { ...emptyCtx, searchKeywords: ['nonexistent'] },
   );
   if (emptyJobs.length === 0) pass('jobstreet.fetch() handles empty results');
   else fail(`jobstreet.fetch() should return empty array for no results, got ${emptyJobs.length}`);
@@ -156,7 +154,7 @@ try {
   try {
     await jobstreet.fetch(
       { name: 'Bad', provider: 'jobstreet', api: 'https://evil.example.com/api/jobsearch/v5/search' },
-      { transport: 'http', fetchJson: async () => ({}), fetchText: async () => '' },
+      { ...({ transport: 'http', fetchJson: async () => ({}), fetchText: async () => '' }), searchKeywords: ['AI'] },
     );
   } catch (e) {
     if (e.message.includes('untrusted hostname')) hostRejected = true;
@@ -172,8 +170,7 @@ try {
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const badDataJobs = await jobstreet.fetch(
-    { name: 'Jobstreet ID', provider: 'jobstreet', searchKeywords: 'test' },
-    badDataCtx,
+    { name: 'Jobstreet ID', provider: 'jobstreet' }, { ...badDataCtx, searchKeywords: ['test'] },
   );
   if (badDataJobs.length === 0) pass('jobstreet.fetch() handles null data field');
   else fail(`jobstreet.fetch() should return empty for null data`);

@@ -52,8 +52,8 @@
   {
     "ok": false,
     "messages": [
-      "error: search_queries: search_queries must be an array when set",
       "error: tracked_companies: tracked_companies must be an array when set",
+      "error: job_boards: job_boards must be an array when set",
       "2 errors, 0 warnings"
     ]
   },

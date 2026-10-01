@@ -236,7 +236,38 @@ async function readDom(page) {
       })
       .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
 
-    return { title, text, anchors };
+    const postings = [];
+    const visit = value => {
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      if (!value || typeof value !== 'object') return;
+      if ([value['@type']].flat().includes('JobPosting')) {
+        const description = document.createElement('div');
+        description.innerHTML = typeof value.description === 'string' ? value.description : '';
+        if (/<\/?(?:p|div|br|li|ul|strong|em)\b/i.test(description.textContent || '')) description.innerHTML = description.textContent;
+        description.querySelectorAll('p, div, li, br').forEach(element => element.append('\n'));
+        postings.push({ ...value, description: description.textContent || '' });
+      }
+      if (value['@graph']) visit(value['@graph']);
+      if (value.mainEntity) visit(value.mainEntity);
+    };
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try { visit(JSON.parse(script.textContent)); } catch {}
+    }
+    const efinancialId = /\.id(\d+)$/.exec(location.pathname)?.[1];
+    if (!postings.length && efinancialId && ['efinancialcareers.hk', 'www.efinancialcareers.hk'].includes(location.hostname)) {
+      try {
+        const state = JSON.parse(document.querySelector('script#ng-state')?.textContent || '{}');
+        const response = state[`https://job-branding-facade.efinancialcareers.com/job/${efinancialId}`];
+        const data = response?.body?.data;
+        if (response?.status === 200 && data?.title === title) visit({
+          '@type': 'JobPosting', url: location.href, title: data.title, description: data.description,
+          hiringOrganization: { name: data.brand?.name }, datePosted: data.posted_date, validThrough: data.expiration_date,
+          jobLocation: { address: { addressLocality: data.location?.city, addressRegion: data.location?.state,
+            addressCountry: data.location?.country } },
+        });
+      } catch {}
+    }
+    return { title, text, anchors, postings };
   });
 }
 
@@ -268,6 +299,20 @@ export async function readPage(page, { mode = 'jd', timeout = DEFAULT_TIMEOUT_MS
       && /IBM/.test(document.title), undefined, { timeout });
   } else await page.waitForTimeout(Math.min(HYDRATION_WAIT_MS, timeout));
   return readDom(page);
+}
+
+/** Open a reusable page whose navigation and subresources retain the reader's SSRF guard. */
+export async function newExtractionPage(browser) {
+  const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
+  await context.route('**/*', async route => {
+    const url = route.request().url();
+    if (rejectPrivateOrInvalid(url)) return route.abort('blockedbyclient');
+    try {
+      await validateUrlSecurity(url);
+      return route.continue();
+    } catch { return route.abort('blockedbyclient'); }
+  });
+  return context.newPage();
 }
 
 async function main() {
@@ -315,22 +360,7 @@ async function main() {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
-    // Block every request (main navigation, redirect hop, or subresource) to a
-    // private/loopback/link-local or non-http(s) host. Guarding only the initial
-    // URL isn't enough once we return page CONTENT: a server-side redirect could
-    // otherwise steer the browser at internal infrastructure (SSRF).
-    await context.route('**/*', async (route) => {
-      const requestUrl = route.request().url();
-      if (rejectPrivateOrInvalid(requestUrl)) return route.abort('blockedbyclient');
-      try {
-        await validateUrlSecurity(requestUrl);
-        return route.continue();
-      } catch {
-        return route.abort('blockedbyclient');
-      }
-    });
-    const page = await context.newPage();
+    const page = await newExtractionPage(browser);
     const started = Date.now();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
     const raw = await readPage(page, { mode, timeout: Math.max(1, timeout - (Date.now() - started)) });

@@ -31,10 +31,11 @@ try {
   };
   const mockCtx = {
     transport: 'http',
+    searchKeywords: ['engineer'],
     async fetchJson(url) { calls.push(url); return calls.length === 1 ? page1 : { jobs: [] }; },
     async fetchText() { return ''; },
   };
-  const jobs = await amazon.fetch({ name: 'Amazon', amazon: { normalized_country_code: ['DEU'], base_query: 'engineer' } }, mockCtx);
+  const jobs = await amazon.fetch({ name: 'Amazon', amazon: { normalized_country_code: ['DEU'] } }, mockCtx);
 
   if (jobs.length === 2) pass('amazon.fetch maps valid jobs, drops job_path-less entries');
   else fail(`amazon.fetch returned ${jobs.length} jobs, expected 2`);
@@ -42,6 +43,8 @@ try {
   else fail(`amazon.fetch facet encoding wrong: ${calls[0]}`);
   if (calls[0] && calls[0].includes('result_limit=100')) pass('amazon.fetch requests result_limit=100');
   else fail('amazon.fetch should set result_limit=100');
+  if (new URL(calls[0]).searchParams.get('base_query') === 'engineer') pass('amazon uses the shared search keyword');
+  else fail('amazon query did not use the shared keyword');
   const j1 = jobs.find((j) => j.url.includes('/111/'));
   if (j1 && j1.title === 'Automation Engineer') pass('amazon.fetch trims the title');
   else fail(`amazon.fetch title wrong: ${JSON.stringify(j1 && j1.title)}`);
@@ -52,6 +55,18 @@ try {
   const j2 = jobs.find((j) => j.url.includes('/222/'));
   if (j2 && j2.url === 'https://www.amazon.jobs/en/jobs/222/sde') pass('amazon.fetch keeps an already-absolute job_path');
   else fail(`amazon.fetch absolute url wrong: ${JSON.stringify(j2 && j2.url)}`);
+  const sharedPages = [];
+  const overlap = await amazon.fetch({ name: 'Amazon' }, {
+    searchKeywords: ['AI', 'Backend'],
+    async fetchJson(address) {
+      const params = new URL(address).searchParams;
+      sharedPages.push([params.get('base_query'), params.get('offset')]);
+      if (params.get('offset') === '0') return { jobs: Array.from({ length: 100 }, (_, i) => ({ title: 'Engineer', job_path: '/en/jobs/' + i })) };
+      return { jobs: params.get('base_query') === 'Backend' ? [{ title: 'Backend Engineer', job_path: '/en/jobs/999' }] : [] };
+    },
+  });
+  if (sharedPages.length === 4 && overlap.length === 101) pass('amazon continues past cross-keyword duplicates to later unique postings');
+  else fail('amazon lost a later keyword page after overlapping results');
 } catch (e) {
   fail(`amazon provider tests crashed: ${e.message}`);
 }

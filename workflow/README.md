@@ -73,8 +73,34 @@ local JSON files. `discover --resume` continues the last interrupted run with
 its original date cutoffs and refuses changed inputs. Node provider plugins
 fetch raw postings and the guarded browser reads JD pages; Python applies the
 configured filters, trust rules, deduplication, cooldowns, verification outcomes,
-and source health before writing to the same SQLite database. A WebSearch handoff
-or failed capture is not a completed scan. `scan-discovered` and `cron-score`
+and source health before writing to the same SQLite database.
+
+Sources belong to two lists in `portals.yml`: `tracked_companies` contains
+employer/ATS sources (including searches across ATS domains); `job_boards`
+contains multi-employer aggregators. Collection method is independent of this
+classification. Keyword-based providers use `target_roles.search_keywords` from
+the selected `config/profile.yml`, frozen once at the start of each discovery
+run. Changing this list takes effect on the next run and invalidates resume of
+an interrupted run. Source entries contain no role keyword overrides; title
+filters still decide which collected postings match. Full-feed providers keep
+their existing fetch-then-filter behavior.
+
+`provider: search` supports `search.method: linkedin` with one `locations` value
+and `sites: [linkedin.com/jobs/view]`, or `search.method: web` with explicit
+domain/path `sites` and optional `locations`. Web searches call the existing
+Hermes search tool directly using its configured backend and credentials; no
+model is invoked. Browser reads retain the existing public-network guard.
+Results must match the configured source scope, and an individual detail page
+must provide an employer, title and substantive JD through structured JobPosting
+markup, the page's own job payload (eFinancialCareers), or a supported labelled
+page (European Chamber). Search summaries never become JD evidence.
+Keywords take turns supplying results;
+`max_results` (default 50) counts unique postings for the whole source/location.
+Search result limits, repeated pages, time limits and failed detail reads are
+reported as incomplete coverage. Actual queries are retained with the run and
+the discovered postings. A failed capture is not a completed scan.
+
+`scan-discovered` and `cron-score`
 retry one stale or missing JD snapshot through the same guarded browser reader;
 redirects away from the posting and failed reads remain Unknown. A different
 module or changed input cannot silently reuse an active task. The scheduled

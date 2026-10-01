@@ -1,61 +1,14 @@
+/** Collect feishu-jobs postings using the shared profile search terms. */
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// Feishu Jobs (飞书招聘, internal codename "ATSX"/"atsx-throne") careers
-// provider — hits the public `/api/v1/search/job/posts` JSON endpoint that
-// every tenant's own careers-site frontend calls. No login, no CSRF token,
-// no signature. Verified 2026-08 by capturing live tenant sites:
-//   POST /api/v1/search/job/posts
-//   { "limit": N, "offset": N, "keyword": "AI" }
-//
-// Two tenants confirmed live: ByteDance's own site (jobs.bytedance.com) and
-// a third-party tenant on the platform's shared domain (MiniMax, at
-// vrfi1sk8a0.jobs.feishu.cn) — same API shape, same response schema. Any
-// other company running its careers site on Feishu Jobs should work with
-// the same provider; only the `careers_url` host changes per portals.yml entry.
-//
-// Quirks (both verified live):
-//   - ByteDance's own domain (jobs.bytedance.com) runs a lightweight
-//     UA-sniffing WAF rule: a macOS Chrome UA string passes (200), a Windows
-//     Chrome UA on the *same* endpoint gets rejected (405) — no cookie, no
-//     token involved, purely UA-string pattern matching. The third-party
-//     tenant subdomain (*.jobs.feishu.cn) has no such rule. This provider
-//     always sends a macOS Chrome UA + a same-origin Referer to satisfy the
-//     strictest case; it is a no-op on tenants without the rule.
-//   - The list payload already carries full `description` + `requirement`
-//     text — no per-job detail request needed (same idiom as
-//     alibaba/tencent/meituan).
-//   - Detail routes differ by host class: ByteDance uses
-//     `/experienced/position/{id}/detail`, while shared Feishu tenants use
-//     `/index/position/{id}/detail`. Both routes cold-load the selected job and
-//     expose its application control; the SPA root's `?position_id=` query does
-//     not reliably select the posting.
-//
-// portals.yml entry example:
-//   - name: 字节跳动
-//     careers_url: https://jobs.bytedance.com
-//     keywords: ["AI", "大模型", "Agent"]
-//     max_pages: 200               # optional safety bound; pageSize 100
-//
-//   - name: MiniMax
-//     careers_url: https://vrfi1sk8a0.jobs.feishu.cn
-//     keywords: ["AI", "大模型"]
-//     max_pages: 5
-
+import { providerKeywords } from './_profile-keywords.mjs';
 import { MACOS_BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 
 const PAGE_SIZE = 100;
-const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
+const DEFAULT_KEYWORDS = [''];
 const DEFAULT_MAX_PAGES = 200;
-// Every request after the first pays it — across pages and keyword switches
-// (same idiom as avature/workday/alibaba).
 const INTER_PAGE_DELAY_MS = 300;
-// Sent unconditionally: a no-op on tenants without ByteDance's own domain's
-// UA-sniffing rule, required on jobs.bytedance.com itself (see header).
-// NOT the shared Windows BROWSER_LIKE_USER_AGENT from _http.mjs — that one is a
-// Windows Chrome UA, and jobs.bytedance.com's rule rejects it (405, verified
-// live) while accepting the shared macOS variant. The distinction is
-// load-bearing, not cosmetic.
 
 /**
  * Keep host validation shared by detect() and fetch(): an explicit provider
@@ -129,9 +82,7 @@ export default {
     }
     const api = `${origin}/api/v1/search/job/posts`;
 
-    const keywords = Array.isArray(entry.keywords) && entry.keywords.length
-      ? entry.keywords
-      : DEFAULT_KEYWORDS;
+    const keywords = providerKeywords(ctx);
     const entryLimit = Number(entry.max_pages);
     const probeLimit = Number(ctx?.maxPages);
     const entryMaxPages = Number.isSafeInteger(entryLimit) && entryLimit > 0

@@ -1,4 +1,4 @@
-/** Exercise delayed Workday hydration through the production browser extraction path. */
+/** Exercise hydrated JD text and publisher metadata through the browser extraction path. */
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { readPage } from '../browser-extract.mjs';
@@ -20,5 +20,28 @@ try {
   await assert.rejects(readPage(page, { timeout: 100 }), /Timeout/);
   await page.setContent('<main>This job is no longer available.</main>');
   assert((await readPage(page, { timeout: 100 })).text.includes('no longer available'));
+  await page.setContent(`<main data-automation-id="jobPostingDescription">Job details</main>
+    <script type="application/ld+json">${JSON.stringify({ '@graph': [{ '@type': 'JobPosting',
+      title: 'Engineer', hiringOrganization: { name: 'Employer' }, description: '&lt;p&gt;Build software.&lt;/p&gt;&lt;p&gt;Maintain services.&lt;/p&gt;' }] })}</script>`);
+  const structured = await readPage(page, { timeout: 100 });
+  assert.equal(structured.postings[0].hiringOrganization.name, 'Employer');
+  assert.equal(structured.postings[0].description.trim(), 'Build software.\nMaintain services.');
+
+  const jobUrl = 'https://www.efinancialcareers.hk/jobs-Senior_Engineer.id123';
+  const state = { 'https://job-branding-facade.efinancialcareers.com/job/123': { status: 200, body: { data: {
+    title: 'Senior Engineer', description: '<p>Build software.</p><p>Maintain services.</p>',
+    brand: { name: 'Publisher employer' }, location: { city: 'Masonboro', state: 'NC', country: 'United States' },
+  } } } };
+  await page.route('https://www.efinancialcareers.hk/**', route => route.fulfill({ contentType: 'text/html',
+    body: `<h1>Senior Engineer</h1><script id="ng-state" type="application/json">${JSON.stringify(state)}</script>`,
+  }));
+  await page.goto(jobUrl);
+  const publisher = await readPage(page, { timeout: 100 });
+  assert.equal(publisher.postings[0].url, jobUrl);
+  assert.equal(publisher.postings[0].hiringOrganization.name, 'Publisher employer');
+  assert.equal(publisher.postings[0].jobLocation.address.addressCountry, 'United States');
+  assert.equal(publisher.postings[0].description.trim(), 'Build software.\nMaintain services.');
+  await page.goto(jobUrl.replace('id123', 'id456'));
+  assert.deepEqual((await readPage(page, { timeout: 100 })).postings, [], 'Metadata must belong to the current posting');
 } finally { await browser.close(); }
-console.log('browser-extract: delayed Workday JD is extracted');
+console.log('browser-extract: hydrated JD text and publisher metadata are extracted');

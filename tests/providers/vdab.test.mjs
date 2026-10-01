@@ -2,8 +2,6 @@
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
 
 console.log('\nProvider — vdab');
 
@@ -17,45 +15,34 @@ try {
 
   // parseVdabConfig — defaults when block is absent
   const def = parseVdabConfig({});
-  if (def.keywords.length === 0 && def.days === 30 && def.size === 100 && def.fetchDetails === false && def.detailLimit === 25) {
+  if (def.days === 30 && def.size === 100 && def.fetchDetails === false && def.detailLimit === 25) {
     pass('parseVdabConfig applies defaults (days 30, size 100, details off)');
   } else {
     fail(`parseVdabConfig defaults = ${JSON.stringify(def)}`);
   }
 
-  // parseVdabConfig — sanitizes keywords and clamps numbers
+  // parseVdabConfig — clamps numeric settings
   const cfg = parseVdabConfig({
-    vdab: { keywords: ['  python  ', '', 7, 'data engineer'], size: 0, days: -3 },
+    vdab: {  size: 0, days: -3 },
   });
-  if (cfg.keywords.length === 2 && cfg.keywords[0] === 'python' && cfg.keywords[1] === 'data engineer') {
-    pass('parseVdabConfig trims keywords and drops empty/non-string entries');
-  } else {
-    fail(`parseVdabConfig keywords = ${JSON.stringify(cfg.keywords)}`);
-  }
   if (cfg.size === 1 && cfg.days === 1) {
     pass('parseVdabConfig clamps size/days into range');
   } else {
     fail(`parseVdabConfig sanitized = ${JSON.stringify(cfg)}`);
   }
-  const clampedHigh = parseVdabConfig({ vdab: { keywords: ['x'], size: 999, days: 999999 } });
+  const clampedHigh = parseVdabConfig({ vdab: {  size: 999, days: 999999 } });
   if (clampedHigh.size === 100 && clampedHigh.days === 1000) {
     pass('parseVdabConfig clamps size/days at their upper bound');
   } else {
     fail(`parseVdabConfig upper clamp = ${JSON.stringify(clampedHigh)}`);
   }
-  const deduped = parseVdabConfig({ vdab: { keywords: ['Backend', 'Backend', '  Python  ', ''] } });
-  if (deduped.keywords.length === 2 && deduped.keywords[0] === 'Backend' && deduped.keywords[1] === 'Python') {
-    pass('parseVdabConfig reads vdab.keywords and dedups them');
-  } else {
-    fail(`parseVdabConfig vdab keywords = ${JSON.stringify(deduped.keywords)}`);
-  }
-  const detailsCfg = parseVdabConfig({ vdab: { keywords: ['x'], fetchDetails: true, detailLimit: 999 } });
+  const detailsCfg = parseVdabConfig({ vdab: {  fetchDetails: true, detailLimit: 999 } });
   if (detailsCfg.fetchDetails === true && detailsCfg.detailLimit === 100) {
     pass('parseVdabConfig supports opt-in detail fetching and clamps detailLimit');
   } else {
     fail(`parseVdabConfig detail options = ${JSON.stringify(detailsCfg)}`);
   }
-  const detailsLow = parseVdabConfig({ vdab: { keywords: ['x'], detailLimit: -5 } });
+  const detailsLow = parseVdabConfig({ vdab: {  detailLimit: -5 } });
   if (detailsLow.detailLimit === 1) {
     pass('parseVdabConfig clamps detailLimit at its lower bound');
   } else {
@@ -112,11 +99,10 @@ try {
   });
   const job = (id, naam) => ({ id: { id }, vacaturefunctie: { naam }, vacatureBedrijfsnaam: 'Co', tewerkstellingsLocatieRegioOfAdres: 'GENT' });
   const fetched = await vdab.fetch(
-    { name: 'VDAB', vdab: { keywords: ['python', 'data'], size: 1 } },
-    mkCtx({
+    { name: 'VDAB', vdab: {  size: 1 } }, { ...(mkCtx({
       python: [[job(1, 'Python Dev')], []], // one full page then an empty page → stop
       data: [[job(1, 'Python Dev')], []],   // dup id across keywords
-    }),
+    })), searchKeywords: ['python', 'data'] },
   );
   if (fetched.length === 1 && !('id' in fetched[0])) pass('vdab.fetch() dedups by id and strips id from output');
   else fail(`vdab.fetch() returned ${JSON.stringify(fetched)}`);
@@ -139,8 +125,7 @@ try {
       fetchText: async () => '',
     };
     const detailed = await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['python'], size: 100, fetchDetails: true, detailLimit: 2 } },
-      ctx,
+      { name: 'VDAB', vdab: {  size: 100, fetchDetails: true, detailLimit: 2 } }, { ...ctx, searchKeywords: ['python'] },
     );
     const detailCalls = jsonCalls.filter(u => u.includes('/vacatures/'));
     if (
@@ -165,8 +150,7 @@ try {
     const detailIds = [];
     const sevenJobs = [1, 2, 3, 4, 5, 6, 7].map(id => job(id, `Job ${id}`));
     const batched = await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['python'], size: 100, fetchDetails: true, detailLimit: 25 } },
-      {
+      { name: 'VDAB', vdab: {  size: 100, fetchDetails: true, detailLimit: 25 } }, { ...({
         fetchJson: async (url) => {
           if (url.includes('/vacatures/')) {
             const id = url.match(/\/vacatures\/(\d+)/)?.[1];
@@ -179,7 +163,7 @@ try {
           }
           return { resultaten: sevenJobs };
         },
-      },
+      }), searchKeywords: ['python'] },
     );
     if (peakInFlight > 0 && peakInFlight <= 5) {
       pass(`vdab.fetch() caps concurrent detail lookups at DETAIL_BATCH (peak ${peakInFlight})`);
@@ -196,8 +180,7 @@ try {
 
   // fetch() — pagination stops when a page is shorter than the requested size
   const paged = await vdab.fetch(
-    { name: 'VDAB', vdab: { keywords: ['python'], size: 2 } },
-    mkCtx({ python: [[job(1, 'A'), job(2, 'B')], [job(3, 'C')]] }), // page0 full (2), page1 short (1) → stop after page1
+    { name: 'VDAB', vdab: {  size: 2 } }, { ...(mkCtx({ python: [[job(1, 'A'), job(2, 'B')], [job(3, 'C')]] })), searchKeywords: ['python'] }, // page0 full (2), page1 short (1) → stop after page1
   );
   if (paged.length === 3) pass('vdab.fetch() paginates until a short page is returned');
   else fail(`vdab.fetch() pagination returned ${JSON.stringify(paged)}`);
@@ -209,8 +192,7 @@ try {
   {
     let pageRequests = 0;
     const neverEndingPage = await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['python'], size: 1 } },
-      { fetchJson: async () => { pageRequests++; return { resultaten: [job(pageRequests, `Job ${pageRequests}`)] }; } }, // always a "full" page (length === size)
+      { name: 'VDAB', vdab: {  size: 1 } }, { ...({ fetchJson: async () => { pageRequests++; return { resultaten: [job(pageRequests, `Job ${pageRequests}`)] }; } }), searchKeywords: ['python'] }, // always a "full" page (length === size)
     );
     if (pageRequests === 50 && neverEndingPage.length === 50) {
       pass('vdab.fetch() caps real-scan pagination at MAX_PAGES_PER_KEYWORD even when every page is full');
@@ -226,8 +208,7 @@ try {
     let malformedResult;
     try {
       malformedResult = await vdab.fetch(
-        { name: 'VDAB', vdab: { keywords: ['python'] } },
-        { fetchJson: async () => ({}) }, // no resultaten key at all
+        { name: 'VDAB', vdab: { } }, { ...({ fetchJson: async () => ({}) }), searchKeywords: ['python'] }, // no resultaten key at all
       );
     } catch { malformedThrew = true; }
     if (!malformedThrew && Array.isArray(malformedResult) && malformedResult.length === 0) {
@@ -238,11 +219,11 @@ try {
 
     let nullThrew = false;
     try {
-      await vdab.fetch({ name: 'VDAB', vdab: { keywords: ['python'] } }, { fetchJson: async () => ({ resultaten: null }) });
+      await vdab.fetch({ name: 'VDAB', vdab: { } }, { ...({ fetchJson: async () => ({ resultaten: null }) }), searchKeywords: ['python'] });
     } catch { nullThrew = true; }
     let nonArrayThrew = false;
     try {
-      await vdab.fetch({ name: 'VDAB', vdab: { keywords: ['python'] } }, { fetchJson: async () => ({ resultaten: 'oops' }) });
+      await vdab.fetch({ name: 'VDAB', vdab: { } }, { ...({ fetchJson: async () => ({ resultaten: 'oops' }) }), searchKeywords: ['python'] });
     } catch { nonArrayThrew = true; }
     if (!nullThrew && !nonArrayThrew) {
       pass('vdab.fetch() does not throw on a null or non-array resultaten value');
@@ -251,51 +232,7 @@ try {
     }
   }
 
-  // fetch() — keyword fallback to config/profile.yml's target_roles. Runs in
-  // an isolated tmp cwd (never the real project's own config/profile.yml, so
-  // the test is hermetic regardless of whether the checkout is onboarded).
-  {
-    const withTmpCwd = async (setup, run) => {
-      const tmp = mkdtempSync(join(tmpdir(), 'career-ops-vdab-fallback-'));
-      const cwdBefore = process.cwd();
-      try {
-        setup(tmp);
-        process.chdir(tmp);
-        return await run();
-      } finally {
-        process.chdir(cwdBefore);
-      }
-    };
 
-    // No entry keywords, but a profile.yml with target_roles → falls back.
-    let sentTrefwoord = null;
-    await withTmpCwd(
-      (tmp) => {
-        mkdirSync(join(tmp, 'config'));
-        writeFileSync(join(tmp, 'config', 'profile.yml'), 'target_roles:\n  primary:\n    - Data Engineer\n');
-      },
-      () => vdab.fetch(
-        { name: 'VDAB', vdab: {} },
-        { fetchJson: async (url, opts) => { sentTrefwoord = JSON.parse(opts.body).criteria.trefwoord; return { resultaten: [] }; } },
-      ),
-    );
-    if (sentTrefwoord === 'Data Engineer') {
-      pass('vdab.fetch() falls back to config/profile.yml target_roles when vdab.keywords[] is empty');
-    } else {
-      fail(`vdab.fetch() fallback trefwoord = ${JSON.stringify(sentTrefwoord)}`);
-    }
-
-    // No entry keywords AND no profile.yml at all → throws.
-    let threwNoKeywords = false;
-    try {
-      await withTmpCwd(
-        () => {}, // no config/ dir created — profile.yml genuinely absent
-        () => vdab.fetch({ name: 'VDAB empty', vdab: {} }, mkCtx({})),
-      );
-    } catch { threwNoKeywords = true; }
-    if (threwNoKeywords) pass('vdab.fetch() throws when vdab.keywords[] and the profile.yml fallback are both empty');
-    else fail('vdab.fetch() should throw when no keywords are available from any source');
-  }
 
   // fetch() — one keyword answers (empty) while another fails → NOT a total
   // outage; partial success must not throw.
@@ -303,12 +240,11 @@ try {
   let partial;
   try {
     partial = await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['ok', 'bad'] } },
-      { fetchJson: async (url, opts) => {
+      { name: 'VDAB', vdab: { } }, { ...({ fetchJson: async (url, opts) => {
           const trefwoord = JSON.parse(opts.body).criteria.trefwoord;
           if (trefwoord === 'bad') throw new Error('HTTP 503');
           return { resultaten: [] }; // ok answers, just empty
-        } },
+        } }), searchKeywords: ['ok', 'bad'] },
     );
   } catch { partialThrew = true; }
   if (!partialThrew && Array.isArray(partial) && partial.length === 0) {
@@ -321,8 +257,7 @@ try {
   let totalOutageThrew = false;
   try {
     await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['a', 'b'] } },
-      { fetchJson: async () => { throw new Error('HTTP 500'); } },
+      { name: 'VDAB', vdab: { } }, { ...({ fetchJson: async () => { throw new Error('HTTP 500'); } }), searchKeywords: ['a', 'b'] },
     );
   } catch { totalOutageThrew = true; }
   if (totalOutageThrew) pass('vdab.fetch() throws when every keyword request fails (total outage)');
@@ -338,11 +273,10 @@ try {
     // request when ctx.maxPages=1 (probe-cooperative pagination).
     let requests = 0;
     const paged = await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['python'], size: 1 } },
-      {
+      { name: 'VDAB', vdab: {  size: 1 } }, { ...({
         maxPages: 1,
         fetchJson: async () => { requests++; return { resultaten: [{ id: { id: 1 }, vacaturefunctie: { naam: 'A' } }] }; }, // always a "full" page (length===size) — would paginate forever without the cap
-      },
+      }), searchKeywords: ['python'] },
     );
     if (requests === 1 && paged.length === 1) {
       pass('vdab.fetch() caps pagination at ctx.maxPages during a probe');
@@ -358,8 +292,7 @@ try {
     let caught = null;
     try {
       await vdab.fetch(
-        { name: 'VDAB', vdab: { keywords: ['a', 'b'] } },
-        { maxPages: 1, fetchJson: async () => { throw new FakeSentinel(); } },
+        { name: 'VDAB', vdab: { } }, { ...({ maxPages: 1, fetchJson: async () => { throw new FakeSentinel(); } }), searchKeywords: ['a', 'b'] },
       );
     } catch (err) { caught = err; }
     if (caught instanceof FakeSentinel) {
@@ -374,8 +307,7 @@ try {
     let scanCaught = null;
     try {
       await vdab.fetch(
-        { name: 'VDAB', vdab: { keywords: ['a', 'b'] } },
-        { fetchJson: async () => { throw new FakeSentinel(); } },
+        { name: 'VDAB', vdab: { } }, { ...({ fetchJson: async () => { throw new FakeSentinel(); } }), searchKeywords: ['a', 'b'] },
       );
     } catch (err) { scanCaught = err; }
     if (scanCaught && !(scanCaught instanceof FakeSentinel) && /all 2 keyword/.test(scanCaught.message)) {
@@ -389,14 +321,12 @@ try {
     // not "is this endpoint alive", so it must never spend probe budget.
     let detailCalls = 0;
     const probedWithDetails = await vdab.fetch(
-      { name: 'VDAB', vdab: { keywords: ['python'], fetchDetails: true } },
-      {
+      { name: 'VDAB', vdab: {  fetchDetails: true } }, { ...({
         maxPages: 1,
         fetchJson: async (url) => {
           if (url.includes('/vacatures/')) { detailCalls++; return {}; }
           return { resultaten: [{ id: { id: 1 }, vacaturefunctie: { naam: 'A' } }] };
-        },
-      },
+        } }), searchKeywords: ['python'] },
     );
     if (detailCalls === 0 && probedWithDetails.length === 1 && !('description' in probedWithDetails[0])) {
       pass('vdab.fetch() skips detail enrichment entirely while probing');
@@ -427,7 +357,7 @@ try {
         return `foo.set("vej-key-monitor","${FRESH_KEY}")`;
       },
     };
-    const healed = await vdab.fetch({ name: 'VDAB', vdab: { keywords: ['python'] } }, ctx);
+    const healed = await vdab.fetch({ name: 'VDAB', vdab: { } }, { ...ctx, searchKeywords: ['python'] });
     if (Array.isArray(healed) && healed.length === 0 && fetchTextCalls === 2 && keysSent.length === 2 && keysSent[1] === FRESH_KEY) {
       pass('vdab.fetch() self-heals a rotated key: re-derives once from the live bundle and retries');
     } else {
@@ -449,11 +379,10 @@ try {
     let caughtNoBundleMatch;
     try {
       await vdab.fetch(
-        { name: 'VDAB', vdab: { keywords: ['python'] } },
-        {
+        { name: 'VDAB', vdab: { } }, { ...({
           fetchJson: async () => { const err = new Error('HTTP 403'); err.status = 403; throw err; },
           fetchText: async () => '<html><body>no script tag here</body></html>', // BUNDLE_RE never matches
-        },
+        }), searchKeywords: ['python'] },
       );
     } catch (err) { threwNoBundleMatch = true; caughtNoBundleMatch = err; }
     if (threwNoBundleMatch && /HTTP 403/.test(caughtNoBundleMatch.message) && !/network error/.test(caughtNoBundleMatch.message)) {
@@ -466,13 +395,12 @@ try {
     let caughtNoKeyMatch;
     try {
       await vdab.fetch(
-        { name: 'VDAB', vdab: { keywords: ['python'] } },
-        {
+        { name: 'VDAB', vdab: { } }, { ...({
           fetchJson: async () => { const err = new Error('HTTP 403'); err.status = 403; throw err; },
           fetchText: async (url) => (url === 'https://www.vdab.be/vindeenjob/vacatures'
             ? '<script src="https://www.vdab.be/webapps/vindeenjob/main-XYZ.js"></script>'
             : 'no key literal in this bundle'), // bundle found, but KEY_RE never matches
-        },
+        }), searchKeywords: ['python'] },
       );
     } catch (err) { threwNoKeyMatch = true; caughtNoKeyMatch = err; }
     if (threwNoKeyMatch && /HTTP 403/.test(caughtNoKeyMatch.message) && !/network error/.test(caughtNoKeyMatch.message)) {
@@ -485,11 +413,10 @@ try {
     let caughtFetchTextError;
     try {
       await vdab.fetch(
-        { name: 'VDAB', vdab: { keywords: ['python'] } },
-        {
+        { name: 'VDAB', vdab: { } }, { ...({
           fetchJson: async () => { const err = new Error('HTTP 403'); err.status = 403; throw err; },
           fetchText: async () => { throw new Error('network error'); }, // deriveKeyFromBundle itself rejects
-        },
+        }), searchKeywords: ['python'] },
       );
     } catch (err) { threwFetchTextError = true; caughtFetchTextError = err; }
     if (threwFetchTextError && /HTTP 403/.test(caughtFetchTextError.message) && !/network error/.test(caughtFetchTextError.message)) {
@@ -519,7 +446,7 @@ try {
     };
     let stillOutageThrew = false;
     try {
-      await vdab.fetch({ name: 'VDAB', vdab: { keywords: ['a', 'b'] } }, ctx);
+      await vdab.fetch({ name: 'VDAB', vdab: { } }, { ...ctx, searchKeywords: ['a', 'b'] });
     } catch { stillOutageThrew = true; }
     // Keyword 'a': 2 fetchJson calls (stale-key initial + fresh-key retry).
     // Keyword 'b': activeKey is already the fresh one from 'a's retry (shared
@@ -541,7 +468,7 @@ try {
       fetchText: async () => { fetchTextCalls++; return ''; },
     };
     let threw500 = false;
-    try { await vdab.fetch({ name: 'VDAB', vdab: { keywords: ['a'] } }, ctx); }
+    try { await vdab.fetch({ name: 'VDAB', vdab: { } }, { ...ctx, searchKeywords: ['a'] }); }
     catch { threw500 = true; }
     if (threw500 && fetchTextCalls === 0) pass('vdab.fetch() does not attempt self-heal on a non-403 error');
     else fail(`non-403 self-heal: threw=${threw500}, fetchTextCalls=${fetchTextCalls}`);

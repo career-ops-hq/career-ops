@@ -1,3 +1,4 @@
+/** Collect NoFluffJobs postings with the shared profile search terms. */
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -6,6 +7,8 @@
 // salary metadata can be added later if the provider contract is expanded.
 
 const ALLOWED_HOSTS = new Set(['nofluffjobs.com']);
+import { providerKeywords } from './_profile-keywords.mjs';
+
 const API_URL = 'https://nofluffjobs.com/api/search/posting';
 const JOB_BASE = 'https://nofluffjobs.com/pl/job/';
 const PAGE_SIZE = 20;
@@ -56,7 +59,7 @@ function postedAtMillis(value) {
   return Number.isFinite(number) ? number : undefined;
 }
 
-function buildRequest(entry, pageTo) {
+function buildRequest(entry, pageTo, keyword) {
   const apiUrl = assertNoFluffUrl(entry.api || API_URL);
   apiUrl.pathname = '/api/search/posting';
   apiUrl.search = '';
@@ -69,37 +72,28 @@ function buildRequest(entry, pageTo) {
   apiUrl.searchParams.set('region', String(entry.region || 'pl'));
   apiUrl.searchParams.set('language', String(entry.language || 'pl-PL'));
 
-  const rawSearch = String(entry.search || entry.raw_search || '').trim();
-  const body = rawSearch
-    ? {
-        criteria: '',
-        url: { searchParam: rawSearch },
-        rawSearch,
-        pageSize: Number(entry.page_size || PAGE_SIZE),
-        withSalaryMatch: true,
-      }
-    : {
-        criteriaSearch: {
-          country: [],
-          withSalaryMatch: [],
-          city: [],
-          more: [],
-          employment: [],
-          requirement: [],
-          salary: [],
-          jobPosition: [],
-          applicationStatus: [],
-          province: [],
-          company: [],
-          id: [],
-          category: [],
-          keyword: [],
-          jobLanguage: [],
-          seniority: [],
-        },
-        pageSize: Number(entry.page_size || PAGE_SIZE),
-        withSalaryMatch: true,
-      };
+  const body = {
+    criteriaSearch: {
+      country: [],
+      withSalaryMatch: [],
+      city: [],
+      more: [],
+      employment: [],
+      requirement: [],
+      salary: [],
+      jobPosition: [],
+      applicationStatus: [],
+      province: [],
+      company: [],
+      id: [],
+      category: [],
+      keyword: [keyword],
+      jobLanguage: [],
+      seniority: [],
+    },
+    pageSize: Number(entry.page_size || PAGE_SIZE),
+    withSalaryMatch: true,
+  };
 
   return { url: apiUrl.href, body };
 }
@@ -141,27 +135,29 @@ export default {
     const jobs = [];
     const seen = new Set();
 
-    for (let pageTo = 1; pageTo <= maxPages; pageTo++) {
-      const { url, body } = buildRequest(entry, pageTo);
-      const json = await ctx.fetchJson(url, {
-        method: 'POST',
-        body: JSON.stringify(body),
-        headers: {
-          accept: 'application/json, text/plain, */*',
-          'content-type': 'application/infiniteSearch+json',
-        },
-        redirect: 'error',
-      });
-      for (const job of parseNoFluffJobsResponse(json)) {
-        if (seen.has(job.url)) continue;
-        seen.add(job.url);
-        jobs.push(job);
+    for (const keyword of providerKeywords(ctx)) {
+      for (let pageTo = 1; pageTo <= maxPages; pageTo++) {
+        const { url, body } = buildRequest(entry, pageTo, keyword);
+        const json = await ctx.fetchJson(url, {
+          method: 'POST',
+          body: JSON.stringify(body),
+          headers: {
+            accept: 'application/json, text/plain, */*',
+            'content-type': 'application/infiniteSearch+json',
+          },
+          redirect: 'error',
+        });
+        for (const job of parseNoFluffJobsResponse(json)) {
+          if (seen.has(job.url)) continue;
+          seen.add(job.url);
+          jobs.push(job);
+        }
+        const totalPages = Number(json?.totalPages || 0);
+        if (totalPages && pageTo >= totalPages) break;
+        if (json.postings.length === 0) break;
       }
-      const totalPages = Number(json?.totalPages || 0);
-      if (totalPages && pageTo >= totalPages) break;
-      if (json.postings.length === 0) break;
-    }
 
+    }
     return jobs;
   },
 };

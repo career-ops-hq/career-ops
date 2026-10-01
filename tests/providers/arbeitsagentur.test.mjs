@@ -30,21 +30,16 @@ try {
 
   // parseArbeitsagenturConfig — defaults when block is absent
   const def = parseArbeitsagenturConfig({});
-  if (def.keywords.length === 0 && def.wo === '' && def.umkreis === 50 && def.days === 30 && def.size === 100 && def.remoteNationwide === false) {
+  if (def.wo === '' && def.umkreis === 50 && def.days === 30 && def.size === 100 && def.remoteNationwide === false) {
     pass('parseArbeitsagenturConfig applies defaults (umkreis 50, days 30, size 100)');
   } else {
     fail(`parseArbeitsagenturConfig defaults = ${JSON.stringify(def)}`);
   }
 
-  // parseArbeitsagenturConfig — sanitizes keywords and clamps numbers
+  // parseArbeitsagenturConfig — clamps numeric settings
   const cfg = parseArbeitsagenturConfig({
-    arbeitsagentur: { keywords: ['  ML Engineer  ', '', 7, 'NLP'], wo: ' Berlin ', umkreis: 999999, size: 0, days: -3, remoteNationwide: 'yes' },
+    arbeitsagentur: {  wo: ' Berlin ', umkreis: 999999, size: 0, days: -3, remoteNationwide: 'yes' },
   });
-  if (cfg.keywords.length === 2 && cfg.keywords[0] === 'ML Engineer' && cfg.keywords[1] === 'NLP') {
-    pass('parseArbeitsagenturConfig trims keywords and drops empty/non-string entries');
-  } else {
-    fail(`parseArbeitsagenturConfig keywords = ${JSON.stringify(cfg.keywords)}`);
-  }
   if (cfg.wo === 'Berlin' && cfg.umkreis === 1000 && cfg.size === 1 && cfg.days === 1 && cfg.remoteNationwide === false) {
     pass('parseArbeitsagenturConfig clamps umkreis/size/days and treats non-true remoteNationwide as false');
   } else {
@@ -104,14 +99,13 @@ try {
     },
   });
   const fetched = await aa.fetch(
-    { name: 'AA', arbeitsagentur: { keywords: ['ML', 'NLP'] } },
-    mkCtx({
+    { name: 'AA', arbeitsagentur: { } }, { ...(mkCtx({
       ML: [v6('A', 'ML Engineer', 'Berlin')],
       NLP: [
         v6('A', 'ML Engineer', 'Berlin'), // dup reference number
         v6('B', 'NLP Scientist', 'Köln'),
       ],
-    }),
+    })), searchKeywords: ['ML', 'NLP'] },
   );
   if (fetched.length === 2 && !('refnr' in fetched[0])) pass('aa.fetch() dedups by reference number and strips it from output');
   else fail(`aa.fetch() returned ${JSON.stringify(fetched)}`);
@@ -125,8 +119,7 @@ try {
   // fetch() — remoteNationwide pass keeps only remote-titled wide hits
   let calls = 0;
   const remoteFetched = await aa.fetch(
-    { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true } },
-    {
+    { name: 'AA', arbeitsagentur: {  wo: 'Berlin', remoteNationwide: true } }, { ...({
       fetchJson: async (url) => {
         calls++;
         const hasWo = new URL(url).searchParams.has('wo');
@@ -134,8 +127,7 @@ try {
         return hasWo
           ? page(v6('L', 'ML Engineer', 'Berlin'))
           : page(v6('R', 'ML Engineer (Remote)', 'Hamburg'), v6('X', 'Onsite ML Engineer', 'Hamburg'));
-      },
-    },
+      } }), searchKeywords: ['ML'] },
   );
   if (calls === 2 && remoteFetched.some(j => j.url.endsWith('R')) && !remoteFetched.some(j => j.url.endsWith('X'))) {
     pass('aa.fetch() remoteNationwide keeps remote-titled wide hits and drops onsite ones');
@@ -144,13 +136,13 @@ try {
   }
 
   // parseArbeitsagenturConfig — remoteMatch mode + remoteMaxPages (config-driven remote detection)
-  const rcfg = parseArbeitsagenturConfig({ arbeitsagentur: { keywords: ['ML'], remoteMatch: 'filter', remoteMaxPages: 50 } });
+  const rcfg = parseArbeitsagenturConfig({ arbeitsagentur: {  remoteMatch: 'filter', remoteMaxPages: 50 } });
   if (rcfg.remoteMatch === 'filter' && rcfg.remoteMaxPages === 20) {
     pass('parseArbeitsagenturConfig parses remoteMatch and clamps remoteMaxPages');
   } else {
     fail(`parseArbeitsagenturConfig remoteMatch/maxPages = ${JSON.stringify({ m: rcfg.remoteMatch, p: rcfg.remoteMaxPages })}`);
   }
-  const rdef = parseArbeitsagenturConfig({ arbeitsagentur: { keywords: ['ML'], remoteMatch: 'bogus' } });
+  const rdef = parseArbeitsagenturConfig({ arbeitsagentur: {  remoteMatch: 'bogus' } });
   if (rdef.remoteMatch === 'title' && rdef.remoteMaxPages === 1) {
     pass('parseArbeitsagenturConfig defaults remoteMatch to "title" and remoteMaxPages to 1');
   } else {
@@ -166,8 +158,7 @@ try {
   let usedHomeoffice = false;
   const pagesSeen = new Set();
   const filterFetched = await aa.fetch(
-    { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 2 } },
-    {
+    { name: 'AA', arbeitsagentur: {  wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 2 } }, { ...({
       fetchJson: async (url) => {
         const sp = new URL(url).searchParams;
         if (sp.has('wo')) return page(v6('L', 'ML Engineer', 'Berlin'));
@@ -179,8 +170,7 @@ try {
               v6('R2', 'ML Scientist', 'Stuttgart', { homeofficemoeglich: true }),
             )
           : page(v6('R3', 'NLP Engineer (Homeoffice)', 'Köln', { homeofficemoeglich: true })); // short → stop
-      },
-    },
+      } }), searchKeywords: ['ML'] },
   );
   const munich = filterFetched.find(j => j.url.endsWith('R1'));
   const stuttgart = filterFetched.find(j => j.url.endsWith('R2'));
@@ -212,8 +202,7 @@ try {
   // fetch() — a duplicate reference number across pagination pages is kept once.
   const wideRefs = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'];
   const batchFetched = await aa.fetch(
-    { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 7 } },
-    {
+    { name: 'AA', arbeitsagentur: {  wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 7 } }, { ...({
       fetchJson: async (url) => {
         const sp = new URL(url).searchParams;
         if (sp.has('wo')) return page();
@@ -222,7 +211,7 @@ try {
           ? page(...wideRefs.map(r => v6(r, 'ML Engineer (Remote)', 'München')))
           : page(v6('W1', 'ML Engineer (Remote)', 'München'));
       },
-    },
+    }), searchKeywords: ['ML'] },
   );
   if (batchFetched.length === wideRefs.length && batchFetched.every(j => TAG.test(j.location))) {
     pass('aa.fetch() keeps each duplicated reference number once and tags every proven candidate');
@@ -232,13 +221,13 @@ try {
 
   // fetch() — no keywords throws; total outage throws (not silent)
   let noKw = false;
-  try { await aa.fetch({ name: 'AA', arbeitsagentur: {} }, mkCtx({})); } catch { noKw = true; }
+  try { await aa.fetch({ name: 'AA', arbeitsagentur: {} }, { ...(mkCtx({})), searchKeywords: [] }); } catch { noKw = true; }
   if (noKw) pass('aa.fetch() throws when no keywords are configured');
   else fail('aa.fetch() should throw without keywords');
 
   let outage = false;
   try {
-    await aa.fetch({ name: 'AA', arbeitsagentur: { keywords: ['ML'] } }, { fetchJson: async () => { throw new Error('HTTP 503'); } });
+    await aa.fetch({ name: 'AA', arbeitsagentur: { } }, { ...({ fetchJson: async () => { throw new Error('HTTP 503'); } }), searchKeywords: ['ML'] });
   } catch { outage = true; }
   if (outage) pass('aa.fetch() throws when every keyword request fails (no silent empty)');
   else fail('aa.fetch() should throw on total outage');
@@ -249,11 +238,10 @@ try {
   let partial;
   try {
     partial = await aa.fetch(
-      { name: 'AA', arbeitsagentur: { keywords: ['OK', 'BAD'] } },
-      { fetchJson: async (url) => {
+      { name: 'AA', arbeitsagentur: { } }, { ...({ fetchJson: async (url) => {
           if (new URL(url).searchParams.get('was') === 'BAD') throw new Error('HTTP 503');
           return page(); // OK answers, just empty
-        } },
+        } }), searchKeywords: ['OK', 'BAD'] },
     );
   } catch { partialThrew = true; }
   if (!partialThrew && Array.isArray(partial) && partial.length === 0) {
@@ -264,12 +252,11 @@ try {
 
   // fetch() — Pass A succeeds with jobs, optional Pass B fails → Pass A jobs kept.
   const passBFail = await aa.fetch(
-    { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true } },
-    { fetchJson: async (url) => {
+    { name: 'AA', arbeitsagentur: {  wo: 'Berlin', remoteNationwide: true } }, { ...({ fetchJson: async (url) => {
         // Pass A (wo set) returns a job; Pass B (no wo) throws.
         if (new URL(url).searchParams.has('wo')) return page(v6('L', 'ML Engineer', 'Berlin'));
         throw new Error('HTTP 503');
-      } },
+      } }), searchKeywords: ['ML'] },
   );
   if (passBFail.length === 1 && passBFail[0].url.endsWith('L')) {
     pass('aa.fetch() preserves primary (Pass A) results when the remote pass (Pass B) fails');
