@@ -104,6 +104,8 @@ type PipelineOpenProgressMsg struct{}
 // PipelineOpenStatsMsg is emitted when the stats (dimension breakdown) screen should open.
 type PipelineOpenStatsMsg struct{}
 
+// Mirrors the ids in templates/discard-reasons.yml, in order.
+// tests/discard-reasons-vocabulary.test.mjs fails when the two drift.
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
