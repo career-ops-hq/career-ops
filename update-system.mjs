@@ -4386,6 +4386,14 @@ function rollback() {
           console.error(`Rollback warning: ${file} has symlinked parent ${symlink}; leaving it untouched.`);
           continue;
         }
+        // Same guard as the restore loop. With a regular file where a parent
+        // directory used to be, there is nothing to remove at this path, and
+        // recording it as removed would misreport what rollback did.
+        const nonDirectory = nonDirectoryAncestor(file);
+        if (nonDirectory) {
+          console.error(`Rollback warning: ${file} has non-directory parent ${nonDirectory}; leaving it untouched.`);
+          continue;
+        }
         if (existsSync(absolute) && lstatSync(absolute).isDirectory()) {
           console.error(`Rollback warning: ${file} became a directory; leaving it and its children untouched.`);
           continue;

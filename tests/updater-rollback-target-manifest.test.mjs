@@ -766,3 +766,50 @@ function readMaybe(path) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// ── 13. Real CLI: a target-only file whose parent became a regular file ──
+// The backup tree cannot see this: system/nested is a directory there, so
+// system/nested/target-only.txt is a genuine removal candidate. Only the
+// worktree knows the parent is now a file, and without the guard the path is
+// reported as removed although nothing at it was ever touched.
+{
+  const fixture = seedRollbackRepo('co-rollback-parent-became-file-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, g } = fixture;
+  try {
+    rmSync(join(dir, 'system/nested'), { recursive: true, force: true });
+    writeFileSync(join(dir, 'system/nested'), 'replacement file\n');
+
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status === 0 && !result.error,
+      'rollback degrades safely when a target-only file\'s parent became a regular file',
+      `parent-became-file rollback failed (status ${result.status}): ${output}`,
+    );
+    check(
+      readMaybe(join(dir, 'system/nested')) === 'replacement file\n',
+      'rollback leaves the regular file that replaced a parent directory untouched',
+      'rollback altered or removed the file that replaced a parent directory',
+    );
+    check(
+      /system\/nested\/target-only\.txt has non-directory parent system\/nested/.test(output),
+      'rollback visibly warns when a target-only file has a non-directory parent',
+      `non-directory-parent warning was absent for the removal candidate: ${JSON.stringify(output)}`,
+    );
+    check(
+      g('ls-files', '--', 'system/nested/target-only.txt') === 'system/nested/target-only.txt',
+      'a blocked target-only path is not recorded as removed',
+      'rollback staged the removal of a target-only path it could not reach',
+    );
+    check(
+      !existsSync(join(dir, 'target-only.mjs')),
+      'reachable target-only files are still removed alongside a blocked one',
+      'a blocked target-only path stopped rollback from removing the reachable ones',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
