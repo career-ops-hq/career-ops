@@ -482,6 +482,11 @@ export function linkRepoPackage(sandboxDir, pkgName) {
  * deleting it -- satisfies a raw grep and the check goes vacuous. Shared, so
  * every suite that pins a caller structurally strips the same way.
  *
+ * The line-comment pass cannot see strings, so `"a//b"` loses everything after
+ * the `//`, including any real call later on that line. Use this only where
+ * losing the rest of such a line is acceptable. A scan that must keep code next
+ * to a string holding comment-like text should use `codeMask` and `isCodeRange`.
+ *
  * @param {string} source - JavaScript source text.
  * @returns {string} The same source without block and line comments.
  */
