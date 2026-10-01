@@ -27,7 +27,7 @@ if ((help.stdout || '').includes('Usage:')) {
 } else {
   fail('--help prints usage');
 }
-for (const flag of ['--no-fallback', '--throttle', '--file', '--help']) {
+for (const flag of ['--no-fallback', '--throttle', '--no-record', '--file', '--help']) {
   if ((help.stdout || '').includes(flag)) pass(`--help documents ${flag}`);
   else fail(`--help documents ${flag}`);
 }
