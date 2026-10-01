@@ -49,7 +49,10 @@ function withLock(root, id, operation) {
   try { fd = openSync(`${file}.lock`, 'wx', 0o600); }
   catch (err) { if (err.code === 'EEXIST') throw new ChatError('Conversation is busy; retry saving', 409); throw err; }
   try { return operation(file); }
-  finally { closeSync(fd); unlinkSync(`${file}.lock`); }
+  finally {
+    try { closeSync(fd); } catch { /* best effort */ }
+    try { unlinkSync(`${file}.lock`); } catch (err) { if (err.code !== 'ENOENT') console.error('chat lock release failed', err); }
+  }
 }
 export function saveChat(root, id, input) {
   if (!input || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new ChatError('Conversation revision required');
@@ -65,7 +68,7 @@ export function saveChat(root, id, input) {
     const chat = { version: 1, id, revision: input.revision + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), messages };
     const temp = `${file}.${randomUUID()}.tmp`;
     try { writeFileSync(temp, JSON.stringify(chat), { mode: 0o600, flag: 'wx' }); renameSync(temp, file); }
-    finally { try { unlinkSync(temp); } catch (err) { if (err.code !== 'ENOENT') throw err; } }
+    finally { try { unlinkSync(temp); } catch (err) { if (err.code !== 'ENOENT') console.error('chat temp cleanup failed', err); } }
     return chat;
   });
 }

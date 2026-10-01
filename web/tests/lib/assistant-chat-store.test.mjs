@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -59,6 +61,45 @@ test('an in-progress writer is reported rather than bypassed', t => {
   writeFileSync(join(root, '.career-ops-web', 'chats', `${id}.json.lock`), '');
   assert.throws(() => saveChat(root, id, { revision: 1, messages }), /busy/);
   assert.equal(readChat(root, id).revision, 1);
+});
+
+test('lock and temp cleanup errors do not replace a saved conversation', t => {
+  const root = fixture(t), lockId = randomUUID(), tempId = randomUUID();
+  const lockPath = join(root, '.career-ops-web', 'chats', `${lockId}.json.lock`);
+  const originalOpenSync = fs.openSync, originalCloseSync = fs.closeSync, originalUnlinkSync = fs.unlinkSync, originalConsoleError = console.error;
+  const logged = [];
+  let lockFd;
+  fs.openSync = (path, ...args) => {
+    const fd = originalOpenSync(path, ...args);
+    if (String(path) === lockPath) lockFd = fd;
+    return fd;
+  };
+  fs.closeSync = fd => {
+    originalCloseSync(fd);
+    if (fd === lockFd) throw new Error('simulated close failure');
+  };
+  fs.unlinkSync = path => {
+    const target = String(path);
+    if (target === lockPath) throw Object.assign(new Error('simulated lock unlink failure'), { code: 'EACCES' });
+    if (target.endsWith('.tmp')) throw Object.assign(new Error('simulated temp unlink failure'), { code: 'EACCES' });
+    return originalUnlinkSync(path);
+  };
+  console.error = (...args) => logged.push(args);
+  syncBuiltinESMExports();
+  try {
+    assert.equal(saveChat(root, lockId, { revision: 0, messages }).revision, 1);
+    assert.equal(readChat(root, lockId).revision, 1);
+    assert.equal(saveChat(root, tempId, { revision: 0, messages }).revision, 1);
+    assert.equal(readChat(root, tempId).revision, 1);
+    assert.deepEqual(logged.map(([message]) => message), ['chat temp cleanup failed', 'chat lock release failed', 'chat temp cleanup failed']);
+  } finally {
+    fs.openSync = originalOpenSync;
+    fs.closeSync = originalCloseSync;
+    fs.unlinkSync = originalUnlinkSync;
+    console.error = originalConsoleError;
+    syncBuiltinESMExports();
+    try { originalUnlinkSync(lockPath); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  }
 });
 
 test('one damaged conversation does not hide healthy conversations or prevent new saves', t => {

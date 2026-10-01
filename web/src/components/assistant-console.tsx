@@ -302,10 +302,14 @@ export function AssistantConsole() {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
-    if (!chatReady || chatPending) return;
+    if (!chatReady || chatPending || busy) return;
     const timer = setTimeout(() => { void flushRef.current().catch(() => {}); }, 400);
     return () => clearTimeout(timer);
-  }, [messages, chatReady, chatPending]);
+  }, [messages, chatReady, chatPending, busy]);
+  useEffect(() => {
+    if (!chatReady || chatPending || busy) return;
+    void flushRef.current().catch(() => {});
+  }, [busy, chatReady, chatPending]);
   useEffect(() => {
     if (!chatReady || chatPending) return;
     const save = () => { if (document.visibilityState === "hidden") void flushRef.current().catch(() => {}); };
