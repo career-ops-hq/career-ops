@@ -152,6 +152,10 @@ const CLOSURE = {
   'set-status.mjs': [
     'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
     'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs', 'templates/states.yml',
+    // check-jd-archive.mjs / jd-capture.mjs: the transition into Interview
+    // triggers a JD-archive check via these two (#4523), which in turn need
+    // their own two lib/ helpers.
+    'check-jd-archive.mjs', 'jd-capture.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs',
     // Runtime assets, not imports: an import scan does not see these and each
     // one only announces itself by crashing the child.
     'tracker-aliases.json',

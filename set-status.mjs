@@ -60,6 +60,14 @@
  * `"followupSeedCandidate": true` — the hook point for seeding
  * data/follow-ups.md with the default cadence (#1430, not implemented here).
  *
+ * When the new status is Interview and no JD is archived yet for the row
+ * (no embedded `## Job Description` section, no jds/ capture), this also
+ * triggers `archive-posting.mjs --report=N <url>` — the last reliable moment
+ * the posting is still likely live, and the last moment before interview-prep
+ * would go looking for a JD that may no longer exist (#4506). The outcome
+ * travels in the JSON output as `jdArchiveTriggered`. Same never-fails-the-
+ * status-change policy as follow-up seeding.
+ *
  * Every real status change also appends one line to the transition ledger
  * (status-log.tsv, sibling of the tracker file):
  *   {tracker#}\t{date}\t{from}\t{to}\t{source}\t
@@ -92,16 +100,19 @@
  */
 
 import { readFileSync, existsSync, appendFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
-  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
+  normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli, resolveWorkspaceRoot,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { hasEmbeddedJdArchive } from './check-jd-archive.mjs';
+import { findCaptureForReport } from './jd-capture.mjs';
 
 // Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
 // DATA_ROOT is the user's, and getCareerOpsRoot() is the only thing that honours
@@ -729,6 +740,83 @@ if (statusChanged && newStatus === 'Applied') {
   }
 }
 
+// ── JD archive trigger on Interview (#4506-direction-2) ─────────────
+//
+// AGENTS.md requires every application to carry an archived JD, but that
+// requirement is only ever ENFORCED at `oferta`/`pdf` evaluation time — a row
+// entered through `add` (a referral, a recruiter reach-out, a posting that
+// skipped the pipeline) never gets one written, and nothing here notices
+// until much later. By the time `interview-prep` goes looking for the JD to
+// build prep material, the posting has often closed, and its fetch ladder's
+// last resort is "tell the user and ask them to paste the JD text instead" —
+// which fails silently if the user never saved a copy either.
+//
+// The transition into Interview is the last reliable moment the posting is
+// still likely to be live (an active interview loop implies the req hasn't
+// been pulled yet) AND the first moment prep material will actually be
+// wanted, so it is the right point to archive automatically rather than
+// leaving it to a human to remember. Detection reuses the same functions
+// check-jd-archive.mjs uses to decide "already covered" (#2789), so this
+// never re-archives a row that already has a `## Job Description` section
+// or a resolvable jds/ capture.
+//
+// Same policy as the follow-up seeding above: never fails the status change,
+// never re-archives on an idempotent re-run into an already-Interview row
+// (statusChanged gates that), and does nothing on a dry run (nothing was
+// written yet for archive-posting.mjs to attach a --report to).
+let jdArchiveTriggered = null;
+if (statusChanged && newStatus === 'Interview' && !flags.dryRun) {
+  try {
+    const reportNums = extractTrackerReportNumbers(target.report, target.notes);
+    const reportNum = reportNums[0] ?? null;
+    const workspaceRoot = resolveWorkspaceRoot(APPS_FILE);
+    const reportsDir = join(workspaceRoot, 'reports');
+    const jdsDir = join(workspaceRoot, 'jds');
+
+    // Resolve the report cell to a real file path under reportsDir, the same
+    // containment discipline merge-tracker.mjs's resolveReportPath uses for
+    // the same reason: the tracker is user-editable, and a report cell is
+    // untrusted input until it is proven to land inside reports/. The link is
+    // written relative to the TRACKER's own directory (docs: "../reports/..."
+    // at data/applications.md, "reports/..." at root), so the leading "../" is
+    // stripped and the remainder resolved against the WORKSPACE root, not
+    // reportsDir itself — resolving "../reports/x.md" against reportsDir would
+    // double the "reports" segment.
+    const linkMatch = String(target.report ?? '').match(/\]\(([^)]+)\)/);
+    let reportPath = null;
+    if (linkMatch) {
+      const candidate = resolve(workspaceRoot, linkMatch[1].trim().replace(/^(\.\.\/)+/, ''));
+      if (candidate.startsWith(reportsDir + sep) && existsSync(candidate)) reportPath = candidate;
+    }
+
+    const alreadyEmbedded = reportPath ? hasEmbeddedJdArchive(readFileSync(reportPath, 'utf-8')) : false;
+    const alreadyCaptured = !alreadyEmbedded && reportNum != null && existsSync(jdsDir)
+      ? findCaptureForReport(jdsDir, reportNum) !== null
+      : false;
+
+    if (!alreadyEmbedded && !alreadyCaptured) {
+      if (reportNum == null) {
+        jdArchiveTriggered = { attempted: false, reason: 'no-report-number' };
+      } else if (!target.url) {
+        jdArchiveTriggered = { attempted: false, reason: 'no-url' };
+      } else {
+        if (!flags.json) console.log(`📄 No JD archived for #${target.num} yet — archiving report ${reportNum} now, before the posting can close:`);
+        execFileSync(
+          process.execPath,
+          [join(CODE_ROOT, 'archive-posting.mjs'), `--report=${reportNum}`, target.url],
+          { stdio: 'inherit' },
+        );
+        jdArchiveTriggered = { attempted: true };
+      }
+    } else {
+      jdArchiveTriggered = { attempted: false, reason: alreadyEmbedded ? 'already-embedded' : 'already-captured' };
+    }
+  } catch (err) {
+    jdArchiveTriggered = { attempted: true, error: err.message };
+    console.warn(`⚠ JD archive trigger failed (status change itself succeeded): ${err.message}`);
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────
 
 const result = {
@@ -749,6 +837,7 @@ const result = {
   // travels beside it.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
   ...(followupSeeded ? { followupSeeded } : {}),
+  ...(jdArchiveTriggered ? { jdArchiveTriggered } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
