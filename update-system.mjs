@@ -3259,10 +3259,15 @@ function rollback() {
         // on-disk case (e.g. an apply() that crashed between checkout
         // and commit, leaving the path untracked locally).
         git('rm', '-r', '-f', '--ignore-unmatch', '--', pathspec);
-        try {
-          rmSync(join(ROOT, pathspec), { recursive: true, force: true });
-        } catch {
-          // Already gone, or not present on disk — fine.
+        // Directory pathspecs can contain ignored user files (for example
+        // web/.env.local or web/node_modules). The tracked checkout above
+        // removes shipped files; never recursively delete the whole directory.
+        if (!path.endsWith('/')) {
+          try {
+            rmSync(join(ROOT, pathspec), { recursive: true, force: true });
+          } catch {
+            // Already gone, or not present on disk — fine.
+          }
         }
         removed.push(pathspec);
       }

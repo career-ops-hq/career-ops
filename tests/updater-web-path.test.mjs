@@ -19,3 +19,10 @@ if (systemPaths.includes('web/')) {
 } else {
   fail('SYSTEM_PATHS omits web/ so apply() leaves a stale web UI behind');
 }
+
+const rollbackSource = source.slice(source.indexOf('function rollback()'));
+if (rollbackSource.includes("if (!path.endsWith('/'))")) {
+  pass('rollback does not recursively delete ignored files under a new directory path');
+} else {
+  fail('rollback can recursively delete ignored files under a new directory path');
+}
