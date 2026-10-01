@@ -4299,7 +4299,11 @@ async function apply() {
       process.exit(1);
     }
 
-    console.log(`\nUpdate complete: v${local} → v${remote}`);
+    if (preservedSet.has('VERSION')) {
+      console.log(`\nUpdate complete: target v${remote}; local VERSION preserved at v${localVersion()}`);
+    } else {
+      console.log(`\nUpdate complete: v${local} → v${remote}`);
+    }
     console.log(`Updated ${updated.length} system paths.`);
     console.log(`Rollback available: node update-system.mjs rollback`);
 

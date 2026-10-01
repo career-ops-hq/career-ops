@@ -34,7 +34,7 @@ import { pass, fail } from './helpers.mjs';
 import {
   gitIn, pinRefToCommit, pinInheritedTarget, versionAtRef, downgradeRefusal,
   isComparableVersion, targetIdentityRefusal, refusalMessage,
-  authoritativeShaFromRefBody, refspecForTarget,
+  authoritativeShaFromRefBody, refspecForTarget, locallyModifiedSystemFiles, pathFullyPreserved,
 } from '../update-system.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -607,6 +607,64 @@ console.log('\n🧪 Testing that apply() verifies its update target (#3052)...')
       pass('an unresolvable target ends the run instead of falling back to a second pin');
     } else {
       fail('the target pin still has a fallback path (a catch between the pin and the guard)');
+    }
+  }
+}
+
+// The banner statements are executed verbatim from apply(), after real local-edit
+// detection and checkout. This covers reporting without invoking apply()'s network,
+// dependency installation, or self-reexec side effects.
+{
+  const source = readFileSync(join(REPO_ROOT, 'update-system.mjs'), 'utf8');
+  const start = source.indexOf("    if (preservedSet.has('VERSION')) {");
+  const end = source.indexOf('    console.log(' + '\x60Updated ', start);
+  if (start < 0 || end < 0) {
+    fail('could not locate the preserved VERSION completion banner');
+  } else {
+    const render = new Function('preservedSet', 'local', 'remote', 'localVersion', 'console', source.slice(start, end));
+    for (const scenario of ['normal', 'force', 'preserved']) {
+      const { dir, g, ctx } = makeRepo('co-3052-banner-');
+      try {
+        writeFixture(dir, 'VERSION', '1.26.0\n');
+        writeFixture(dir, 'system.mjs', '// installed\n');
+        g('add', '-A');
+        g('commit', '-qm', 'installed version');
+        g('checkout', '-qb', 'upstream');
+        writeFixture(dir, 'VERSION', '1.27.0\n');
+        writeFixture(dir, 'system.mjs', '// target\n');
+        g('commit', '-qam', 'target version');
+        const targetCommit = pinRefToCommit('HEAD', ctx);
+        g('checkout', '-q', 'main');
+        if (scenario !== 'normal') writeFixture(dir, 'VERSION', '1.26.0 # local customization\n');
+        const atRisk = locallyModifiedSystemFiles(['VERSION', 'system.mjs'], targetCommit, { ...ctx, root: dir });
+        const preservedPaths = scenario === 'force' ? [] : atRisk;
+        const preservedSet = new Set(preservedPaths);
+        for (const path of ['VERSION', 'system.mjs']) {
+          if (!pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit, ctx)) {
+            g('checkout', targetCommit, '--', path);
+          }
+        }
+        const messages = [];
+        let localReads = 0;
+        render(preservedSet, '1.26.0', versionAtRef(targetCommit, ctx), () => {
+          localReads++;
+          return readFileSync(join(dir, 'VERSION'), 'utf8').trim().split(/\s+/)[0];
+        }, { log: (message) => messages.push(message) });
+        const preserved = scenario === 'preserved';
+        const expected = preserved
+          ? '\nUpdate complete: target v1.27.0; local VERSION preserved at v1.26.0'
+          : '\nUpdate complete: v1.26.0 → v1.27.0';
+        const expectedVersion = preserved ? '1.26.0 # local customization\n' : '1.27.0\n';
+        if (messages.length === 1 && messages[0] === expected && localReads === (preserved ? 1 : 0)
+          && readFileSync(join(dir, 'VERSION'), 'utf8') === expectedVersion
+          && readFileSync(join(dir, 'system.mjs'), 'utf8') === '// target\n') {
+          pass(scenario + ': completion banner reports the target and only reads local VERSION when preserved');
+        } else {
+          fail(scenario + ': completion banner or checked-out content mismatched: ' + JSON.stringify(messages));
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     }
   }
 }
