@@ -24,6 +24,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
+| `node update-system.mjs status` | `update-system.mjs status` | Print installed version + short SHA |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
 | `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD; Greenhouse, Lever, Ashby and Workday postings are read from their public JSON endpoints instead of the client-rendered page, and an empty jd extraction exits 1 with `code: empty_text` |
 | `node fetch-jd.mjs <url>` | `fetch-jd.mjs` | JD text on stdout from a known ATS API (Greenhouse/Lever/Ashby/Workday) — exit 1 with empty stdout when the host has no JD-bearing API, so a caller falls back to its browser/WebFetch path |
@@ -571,6 +572,32 @@ Possible JSON responses:
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
 
+The `local` field in the JSON output stays a bare semver string (e.g., `"1.32.0"`). A separate `local_sha` field is provided alongside it when the install is a git checkout — containing the short commit SHA (e.g., `"ae919b6f"`). For tarball installs without git metadata, `local_sha` will be omitted. This lets a bug report identify the exact tree under test, not just the release name (two installs pulled days apart can share a version string while running different code — see #3203).
+
+**Exit codes:** `0` always.
+
+---
+
+## status
+
+Prints the installed version to stdout — a quick human-readable alternative to parsing `check` JSON.
+
+```bash
+node update-system.mjs status
+```
+
+Example output:
+
+```
+career-ops v1.32.0 (ae919b6f)
+```
+
+On a tarball install with no git metadata the short SHA is omitted:
+
+```
+career-ops v1.32.0
+```
+
 **Exit codes:** `0` always.
 
 ---
@@ -636,11 +663,13 @@ For custom SSR pages, configure a tracked company with `scan_method: local_parse
 ```yaml
 parser:
   command: node
-  script: scripts/parsers/example-company-jobs.js
+  script: local/example-company-jobs.js
   format: jobs-json-v1
 ```
 
 Use `args` only for reusable parsers that intentionally accept runtime parameters such as `{careers_url}` or `{company}`.
+
+The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a parser you intend to upstream. See [local-parser-cookbook.md](local-parser-cookbook.md).
 
 If a parser writes full extraction artifacts for debugging or audit, store them under `data/parser-output/{company}/`. `scan.mjs` reads stdout and does not require those JSON files after parsing. Keep generated JSON artifacts out of git; `.gitkeep` placeholders are the only exception for preserving directory structure.
 

@@ -51,11 +51,14 @@ test('parses header columns when the data root does not contain system files', (
       company: 'Example',
       via: 'Agency',
       role: 'Frontend Engineer',
+      location: '',
       score: '4.0/5',
       status: 'Applied',
       pdf: '✅',
       report: '[001](../reports/001-example.md)',
       notes: 'fixture',
+      applyLink: '',
+      followUp: '',
     },
   ]);
 });
@@ -82,8 +85,9 @@ for (const [market, date, company, role] of markets) {
 |---|---|---|---|---|---|---|---|---|---|---|
 | Acme | Applied | 41 | 2026-01-02 | Berlin | Example Agency | Engineer | 4.2/5 | ✅ | [41](reports/041.md) | keep this note |`;
     assert.deepEqual(parseApplications(md, root), [{
-      n: '41', date: '2026-01-02', company: 'Acme', via: 'Example Agency', role: 'Engineer',
+      n: '41', date: '2026-01-02', company: 'Acme', via: 'Example Agency', role: 'Engineer', location: 'Berlin',
       score: '4.2/5', status: 'Applied', pdf: '✅', report: '[41](reports/041.md)', notes: 'keep this note',
+      applyLink: '', followUp: '',
     }]);
   });
 }
@@ -91,7 +95,8 @@ for (const [market, date, company, role] of markets) {
 test('headerless tracker keeps data whose cells contain localized header words', () => {
   const md = '| 41 | 2026-01-02 | Firma | Rolle | 4.2/5 | Applied | ✅ | [41](reports/041.md) | Status |';
   assert.deepEqual(parseApplications(md, root), [{
-    n: '41', date: '2026-01-02', company: 'Firma', via: '', role: 'Rolle', score: '4.2/5',
+    n: '41', date: '2026-01-02', company: 'Firma', via: '', role: 'Rolle', location: '', score: '4.2/5',
     status: 'Applied', pdf: '✅', report: '[41](reports/041.md)', notes: 'Status',
+    applyLink: '', followUp: '',
   }]);
 });

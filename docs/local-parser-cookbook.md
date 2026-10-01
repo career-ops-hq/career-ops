@@ -16,12 +16,23 @@ Most local parsers are company-specific: the script already knows the source URL
   scan_method: local_parser
   parser:
     command: node
-    script: scripts/parsers/example-company-jobs.js
+    script: local/example-company-jobs.js
     format: jobs-json-v1
   enabled: true
 ```
 
 `args` are optional. Use them in whatever way helps the parser author: to make one script reusable across multiple companies, pass `{careers_url}` or `{company}`, enable a debug flag, store a JSON snapshot, or control any other script-specific behavior. `scan.mjs` executes the parser without shell interpolation and expands `{careers_url}` and `{company}` in parser arguments before execution.
+
+## Where the script lives
+
+`providers/local-parser.mjs` only runs a script that resolves **inside the repository root** — a whitelisted interpreter (`node`, `python3`, …) must take an in-repo script as its first argument, and a path that escapes the root is rejected. This is a deliberate boundary: `portals.yml` is not fully trusted on a shared or template config, so the parser command cannot point at an arbitrary binary or a file outside the checkout.
+
+Because the script has to sit in the tree, put a parser you do not intend to contribute under a path that Git ignores, so it is never staged:
+
+- `local/` is gitignored by default. `local/acme-jobs.mjs` is the simplest home for a one-off, company-specific parser.
+- `portals.yml` is already a user-layer file (gitignored), so the `parser:` block that points at the script stays private too.
+
+Use `scripts/parsers/` only for a parser you plan to open a PR for. `career-ops` does not bundle company-specific parser scripts, so in practice that is rare.
 
 ## Token savings
 

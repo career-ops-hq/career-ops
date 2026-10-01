@@ -2008,9 +2008,25 @@ export function normalizeRoleForDedup(role) {
   // a key fix) and is deliberately out of scope here.
   let title = String(role ?? '').normalize('NFKC').toLowerCase();
   while (true) {
-    const match = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
-    if (!match || !isRoleLocationSuffix(match[1])) break;
-    title = title.slice(0, match.index).trimEnd();
+    // Bracketed: "Engineering Manager (Remote)", "… [US]".
+    const bracketed = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
+    if (bracketed && isRoleLocationSuffix(bracketed[1])) {
+      title = title.slice(0, bracketed.index).trimEnd();
+      continue;
+    }
+    // Pipe-delimited: "Senior Engineering Manager, Grafana Frontend | USA | Remote".
+    // Grafana Labs posts one requisition per country and packs the place into
+    // the TITLE rather than only the location field, so the same role arrives
+    // as six titles. Without this, the tracker's clean title never matches the
+    // scanned one and an already-evaluated role is re-added on the next scan.
+    // Only the trailing segment is considered, and only when it is a known
+    // location suffix, so "Engineering Manager | Payments" keeps its qualifier.
+    const piped = title.match(/\s*\|\s*([^|]+?)\s*$/);
+    if (piped && isRoleLocationSuffix(piped[1])) {
+      title = title.slice(0, piped.index).trimEnd();
+      continue;
+    }
+    break;
   }
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
   // every non-Latin title to '', so バックエンドエンジニア and フロントエンド

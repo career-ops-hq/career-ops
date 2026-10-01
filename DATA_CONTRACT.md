@@ -56,6 +56,7 @@ These files contain your personal data, customizations, and work product. Update
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
 | `templates/cv-{candidate}-{company-slug}.html`, `templates/cover-{candidate}-{company-slug}.html` | Your per-application generated CVs/cover letters, for installs that save the HTML twin under `templates/` instead of `output/` (#3636). `templates/` is otherwise system-owned (base CV/cover templates), so these are recognized by name rather than directory: anything under `templates/` starting with `cv-` or `cover-` that is NOT one of the shipped `cv-template*.html` / `cover-letter-template*.html` files is treated as your data — see `isGeneratedTemplateArtifact()` in `update-system.mjs` |
+| `templates/cv-template.{name}.html` / `.tex`, `templates/cover-letter-template.{name}.html` / `.tex` | Your own named CV/cover-letter template variant, when `{name}` matches `config/profile.yml`'s `cv.template` / `cover_letter.template` (the convention `cv-templates.mjs`'s `resolveTemplate()` reads — see its `KINDS`). `templates/` is otherwise system-owned, and a variant file this install created shares that directory and naming shape with the real shipped variants (`cv-template.zh-minimal.html`, ...), so it is recognized by cross-referencing the configured template name rather than by directory — see `isUserConfiguredTemplateVariant()` in `update-system.mjs`. An unconfigured or differently-named `cv-template.*.html` file is not covered by this carve-out and is still managed as a system file (updated or pruned normally). This is distinct from `templates/cv-{candidate}-{company-slug}.html` / `templates/cover-{candidate}-{company-slug}.html`, which is generated per-application *output*, not an authored template *variant*. |
 
 ### Fork-local paths
 
@@ -194,4 +195,3 @@ When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.y
 - **`CAREER_OPS_TRACKER`** can be set to override the applications tracker file path directly (relative paths are resolved relative to the repository root).
 - **Read Resolution:** If no tracker override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
 - **Write Resolution:** All writes (including merge operations and first-run creation) target the canonical location `{DATA_ROOT}/data/applications.md`.
-

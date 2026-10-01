@@ -33,7 +33,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -53,7 +53,8 @@ const RANK_LABEL = '| rank: ';
 const REASON_MAX = 140;
 
 // Headless invocations exactly as AGENTS.md documents them — this table applies
-// that reference, it does not invent commands.
+// that reference, it does not invent commands. Hermes stays out: rank prompts
+// contain untrusted posting text and Hermes has no verified child-permission boundary.
 export const CLI_CANDIDATES = [
   { bin: 'claude', args: p => ['-p', p] },
   { bin: 'opencode', args: p => ['run', p] },
@@ -76,7 +77,16 @@ const USAGE = `
     --dry-run     print the annotations, write nothing
     --self-test   run the in-memory suite (no subprocess, no network)
 `;
-
+const KNOWN_FLAGS = [
+  '--limit',
+  '--cli',
+  '--model',
+  '--dry-run',
+  '--self-test',
+  '--help',
+  '-h',
+];
+const VALUE_FLAGS = ['--limit', '--cli', '--model'];
 /**
  * Clamp to [0,5] at one decimal, and sanitize the reason so a model-generated
  * string can never break the row's pipe-delimited grammar or forge a new row.
@@ -250,15 +260,21 @@ async function main(args) {
     console.log(USAGE);
     return 0;
   }
-  if (!existsSync(PIPELINE_PATH)) {
-    console.log('No data/pipeline.md yet — run a scan first. Nothing to rank.');
-    return 0;
-  }
 
   const dryRun = hasFlag(args, '--dry-run');
   const limit = flagValue(args, '--limit') ?? DEFAULT_LIMIT;
   const model = flagValue(args, '--model');
   const forced = flagValue(args, '--cli') ?? process.env.CAREER_OPS_RANK_CLI;
+
+  if (forced === 'hermes') {
+    console.error('Hermes is not supported for batch ranking.');
+    return 1;
+  }
+
+  if (!existsSync(PIPELINE_PATH)) {
+    console.log('No data/pipeline.md yet — run a scan first. Nothing to rank.');
+    return 0;
+  }
 
   const cli = forced
     ? CLI_CANDIDATES.find(c => c.bin === forced) ?? { bin: forced, args: p => ['-p', p] }
@@ -414,6 +430,7 @@ function selfTest() {
 
   const probe = bin => bin === 'codex';
   check('detect picks the installed CLI', detectCli(CLI_CANDIDATES, probe).bin === 'codex');
+  check('Hermes is excluded from batch candidates', !CLI_CANDIDATES.some(c => c.bin === 'hermes'));
   check('detect returns null when none installed', detectCli(CLI_CANDIDATES, () => false) === null);
   check('detect respects priority order', detectCli(CLI_CANDIDATES, () => true).bin === 'claude');
 
@@ -467,6 +484,10 @@ function selfTest() {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
   if (args.includes('--self-test')) {
     process.exit(selfTest());
   } else {

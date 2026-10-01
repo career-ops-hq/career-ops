@@ -599,6 +599,31 @@ title_filter:
 # The scanner extracts title, URL, and company from results.
 
 search_queries:
+  # -- Other professions (examples, disabled by default) --
+  # career-ops works for any field, not just engineering. The AI/engineering
+  # queries further down are one worked example; the entries below show the same
+  # query shape adapted to other professions, so it is the PATTERN that teaches,
+  # not the specialty. To use one, copy it, swap the quoted role terms for your
+  # field, keep the `site:` filters and the location/remote token, then set
+  # enabled: true. Leave the rest disabled so they don't run.
+  # Results are also filtered by title: uncomment your profession under
+  # `title_filter.positive` above too, or its titles are dropped before you see them.
+  - name: Healthcare - Registered Nurse
+    query: 'site:boards.greenhouse.io OR site:jobs.lever.co "Registered Nurse" OR "RN" OR "Nurse Practitioner" ("remote" OR "telehealth")'
+    enabled: false
+
+  - name: Finance & Accounting
+    query: 'site:boards.greenhouse.io OR site:jobs.ashbyhq.com "Financial Analyst" OR "Accountant" OR "FP&A" OR "Controller" remote'
+    enabled: false
+
+  - name: Marketing & Sales
+    query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io "Marketing Manager" OR "Content Marketing" OR "Account Executive" OR "SDR" remote'
+    enabled: false
+
+  - name: Project & Program Management
+    query: 'site:boards.greenhouse.io OR site:jobs.lever.co "Project Manager" OR "Program Manager" OR "PMO" remote'
+    enabled: false
+
   # -- Visa sponsorship (US) --
   # Explicitly hunt for roles that sponsor a US work visa. Pair these with the
   # `visa_filter` block above (require_mention: true) so the scan-side filter
@@ -928,13 +953,19 @@ search_queries:
 # already know their target careers URL. `args` are optional and can help the
 # parser author (reuse across companies, debug flags, JSON snapshots, etc.).
 #
+# The script must resolve inside the repo root (security boundary in
+# providers/local-parser.mjs). Keep a private, non-contributed parser under a
+# gitignored path — `local/` is ignored by default — so it is never staged;
+# `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a
+# parser you intend to upstream. See docs/local-parser-cookbook.md.
+#
 # JavaScript parser:
 # - name: Example JS Company
 #   careers_url: https://example.com/careers
 #   scan_method: local_parser
 #   parser:
 #     command: node
-#     script: scripts/parsers/example-js-company-jobs.js
+#     script: local/example-js-company-jobs.js
 #     format: jobs-json-v1
 #   enabled: true
 #
@@ -944,7 +975,7 @@ search_queries:
 #   scan_method: local_parser
 #   parser:
 #     command: python3
-#     script: scripts/parsers/example_python_company_jobs.py
+#     script: local/example_python_company_jobs.py
 #     format: jobs-json-v1
 #   enabled: true
 
@@ -972,7 +1003,7 @@ search_queries:
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   feishu-jobs     jobs.bytedance.com or <tenant>.jobs.feishu.cn
-#   mokahr          app.mokahr.com/(social-recruitment|campus-recruitment|apply)/<org>/<siteId>
+#   mokahr          (app|hire-r1).mokahr.com/(social-recruitment|campus-recruitment|apply)/<org>/<siteId>
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
@@ -992,6 +1023,7 @@ search_queries:
 #                   do not guess it from the company name)
 #   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
 #   icims           careers-<tenant>.icims.com / *.icims.com
+#   jazzhr          <tenant>.applytojob.com or <tenant>.applytojob.com/apply
 #   pythonorg       python.org/jobs
 #   generalist-world generalist.world/jobs/  (curated generalist / operator roles board; SSR HTML, one fetch; or provider: generalist-world)
 #   applitrack      www.applitrack.com/<district>/onlineapp/  (Frontline AppliTrack K-12 board; optional default_location: "City, ST" is appended to site names that name no place)
@@ -1214,6 +1246,13 @@ search_queries:
 #   careers_url: https://careers-exampleco.icims.com/jobs/search?ss=1
 #   enabled: true
 #
+# - name: Example JazzHR Co
+#   careers_url: https://exampleco.applytojob.com/apply
+#   jazzhr:
+#     fetchDetails: false # optional: true fetches each posting's JSON-LD detail page (description, posted date)
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#   enabled: true
+#
 # - name: Example PeopleSoft Co
 #   # PeopleSoft Fluid Candidate Gateway. No vendor-owned host to pattern-match
 #   # (every tenant runs on its own branded institution domain) — detect() keys
@@ -1351,6 +1390,16 @@ search_queries:
 #     scope: remote                       # optional; restricts to /jobs/remote
 #     max_pages: 3                        # optional page cap (25 jobs/page, default 3)
 #   enabled: true
+#
+# - name: OCC Mundial                     # Mexico's dominant general job board
+#   provider: occ                         # no detect() — only reachable via provider:
+#   queries: ["automatizacion", "robotica"]  # REQUIRED: OCC is a keyword-search board
+#                                         # with no browsable listing, so there is no
+#                                         # default — a built-in list would be one
+#                                         # user's search profile, not a board default.
+#   states: ["nuevo-leon", "jalisco"]     # optional; omit to scan nationwide
+#   max_pages: 3                          # optional page cap (20 jobs/page, default 3, max 10)
+#   enabled: true                         # 750ms pacing between pages
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
@@ -2004,6 +2053,11 @@ tracked_companies:
     scan_method: websearch
     scan_query: 'site:apply.workable.com/semios'
     notes: "Vancouver. Agtech and crop intelligence platform."
+    enabled: true
+
+  - name: Ratehub
+    careers_url: https://ratehubinc.applytojob.com/apply
+    notes: "Toronto. Personal finance comparison platform (mortgages, credit cards, insurance)."
     enabled: true
 
   # -- European tech (EMEA-friendly) --

@@ -3,8 +3,8 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
- * Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, Together, Groq, DeepSeek, Zhipu GLM,
+ * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
  * Reads evaluation logic from modes/oferta.md + modes/_shared.md, reads the
@@ -108,6 +108,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
     Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
+    Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
@@ -260,7 +261,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileYml,
   jdText,
   noCompress,
-  maxTokens: 128_000, // gpt-4o-mini context window
+  modelName,
 });
 
 // Log token budget info

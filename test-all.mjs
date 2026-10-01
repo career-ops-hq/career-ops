@@ -58,6 +58,7 @@ import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
+import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -291,6 +292,38 @@ async function runDiscovered(filter = null) {
   }
 }
 
+// A scratch copy left by a killed run used to poison every walker that follows:
+// `.gitignore` hides it and the copy carries no `.git`, so neither `git status`
+// nor `isNestedCheckout()` could see it, and the layout guards read a second
+// copy of `tests/` as several hundred misplaced suites (#3940).
+//
+// What makes the run correct is `isScratchDir` in the walkers, not this sweep —
+// they skip a leftover whether it gets removed or not. This only reclaims the
+// disk, which is why it can afford the age gate that keeps it off a scratch a
+// concurrent run is still writing into.
+//
+// Placed before the `--only` exit below: the 264-failure run is exactly the one
+// a developer then re-runs with `--only core-test-layout` to look closer, and a
+// sweep they skip past would leave that second run behaving differently again.
+{
+  const { removed, failed } = sweepScratchDirs(ROOT);
+  // Only speak when there was something to say. A sweep is silent on the
+  // overwhelming majority of runs, and a line reporting that nothing happened
+  // would be noise at the top of every one of them. `kept` is deliberately not
+  // reported: a young scratch is somebody else's live run, and it is none of
+  // this run's business.
+  for (const name of removed) {
+    console.log(`  🧹 removed a stale scratch copy from an interrupted run: ${name}/`);
+  }
+  for (const { name, error } of failed) {
+    // Not fatal — the walkers skip it, so every guard below still grades the
+    // real tree — but not silent either: something is holding a directory this
+    // run tried to delete, and that is worth knowing before it becomes a
+    // disk-space question.
+    warn(`could not remove the stale scratch copy ${name}/ (${error}) — the guards skip it, so this run is unaffected`);
+  }
+}
+
 // `--only=providers/x` must not read as "no filter": the discovered-test
 // runner exits 1 when a filter matches nothing, precisely so a path typo can
 // never turn CI green — and a silently dropped filter runs the whole suite
@@ -509,8 +542,11 @@ const scripts = [
   { name: 'archive-posting.mjs --help', expectExit: 0 },
 ];
 
-const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
+const scriptTmp = mkdtempSync(join(ROOT, SCRATCH_PREFIX));
 try {
+  // Claim before copying or running scripts. If this fails, stop and let the
+  // finally below remove the unused directory rather than run without an owner.
+  markScratchOwner(scriptTmp);
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
   // real ROOT/node_modules, which is how the root-level exclusion already
@@ -526,6 +562,25 @@ try {
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
+    // A leftover from an earlier interrupted run is not repository source, and
+    // copying one nests it inside this run's scratch — which is how #3940's
+    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
+    // run's OWN scratch is already excluded by name just above; what this adds
+    // is the stale one the startup sweep could not remove, and — since that
+    // sweep deliberately leaves a live run's directory alone — the one a
+    // concurrent run is writing into right now.
+    //
+    // Directories only, which is why this reads `stat` rather than sitting with
+    // the name-based exclusions above: the prefix can name a FILE too, and
+    // dropping a source file from the copy would make a script check pass by
+    // not running it.
+    //
+    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
+    // level. The two are asymmetric because their costs are: skipping a
+    // directory that turns out to be someone's oddly-named fixture loses a copy
+    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
+    // expensive to over-delete.
+    if (stat.isDirectory() && isScratchDir(name)) return;
     if (stat.isDirectory()) {
       // A linked worktree is a whole second checkout of this repo and carries a
       // `.git` FILE, not a directory, so the name-based exclusion above never
@@ -5079,16 +5134,18 @@ if (!fileExists('scripts/parsers/cohere_jobs.py')) {
   fail('Cohere parser example is still bundled as a runtime script');
 }
 
+// templates/portals.example.yml is copied verbatim by new users — its local-parser
+// example must point the script at a gitignored path, not the Git-tracked
+// scripts/parsers/ (see docs/local-parser-cookbook.md).
 const portalExample = readFile('templates/portals.example.yml');
 if (
-  !portalExample.includes('cohere_jobs.py') &&
-  portalExample.includes('scripts/parsers/example-js-company-jobs.js') &&
-  portalExample.includes('scripts/parsers/example_python_company_jobs.py') &&
-  portalExample.includes('already know their target careers URL')
+  portalExample.includes('script: local/example-js-company-jobs.js') &&
+  portalExample.includes('script: local/example_python_company_jobs.py') &&
+  !/^\s*#?\s*script:\s*['"]?scripts\/parsers\//m.test(portalExample)
 ) {
-  pass('portals example documents a generic local parser contract');
+  pass('portals example points the local-parser script at a gitignored path');
 } else {
-  fail('portals example still points at a bundled Cohere parser');
+  fail('portals example local-parser script is under the Git-tracked scripts/parsers/');
 }
 
 // Security hardening: command allowlist, in-repo script containment, careers_url/company validation.
@@ -16591,10 +16648,15 @@ try {
       // next, and this section previously covered 4 of the 6 files present.
       let webUnits = [];
       try {
-        webUnits = readdirSync(join(ROOT, 'web', 'tests', 'lib'))
+        const webLibRoot = join(ROOT, 'web', 'tests', 'lib');
+        webUnits = readdirSync(webLibRoot, { recursive: true })
           .filter((f) => f.endsWith('.test.mjs'))
+          // A checkout under web/tests/lib holds another tree's suites; the
+          // parity walk below skips those the same way (#3762), so the gate
+          // must not run them.
+          .filter((f) => !isUnderNestedCheckout(webLibRoot, f))
           .sort()
-          .map((f) => `web/tests/lib/${f}`);
+          .map((f) => join('web', 'tests', 'lib', f));
       } catch (err) {
         // Fail rather than throw to the outer catch, which would skip every value
         // assertion below while reporting only "freeze section crashed".
@@ -18896,12 +18958,36 @@ try {
     const descriptions = [
       ['entity', entity.description || ''],
       ...projects.map((pr) => [`project ${pr.guid}`, pr.description || '']),
+      // Plans are read by funders too: a six-month plan quoting "72,400+ stars"
+      // with no date went stale the same way an entity description would.
+      ...plans.map((pl) => [`plan ${pl.guid}`, pl.description || '']),
     ];
     const undated = descriptions.filter(([, text]) => METRIC_RE.test(text) && !COUNTED_RE.test(text));
     if (undated.length === 0) {
       pass('every funding.json description that quotes a count also states when it was counted');
     } else {
       fail(`funding.json ${undated.map(([w]) => w).join(', ')}: quotes a metric with no "counted <date>"`);
+    }
+
+    // A repository wellKnown is the proof the directory asks for: it fetches that
+    // file and looks for the manifest URL in it. The repo moved to the org on
+    // 31-Aug and the listing kept flagging it as unproven until this file existed,
+    // so the check is that the file ships AND names the manifest's own URL.
+    const repoProofs = projects.filter((pr) => pr.repositoryUrl?.wellKnown);
+    if (repoProofs.length > 0) {
+      const WELL_KNOWN = '.well-known/funding-manifest-urls';
+      const MANIFEST_URL = 'https://github.com/career-ops-hq/career-ops/raw/main/funding.json';
+      let proof = null;
+      try { proof = readFile(WELL_KNOWN); } catch { proof = null; }
+      const listed = proof ? proof.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+      const pointsHere = repoProofs.every((pr) => pr.repositoryUrl.wellKnown.endsWith(`/${WELL_KNOWN}`));
+      if (proof !== null && listed.includes(MANIFEST_URL) && pointsHere) {
+        pass(`${WELL_KNOWN} ships and lists ${MANIFEST_URL}, and repositoryUrl.wellKnown points at it`);
+      } else {
+        fail(proof === null ? `repositoryUrl.wellKnown is set but ${WELL_KNOWN} is missing`
+          : !pointsHere ? `repositoryUrl.wellKnown does not point at ${WELL_KNOWN}`
+          : `${WELL_KNOWN} does not list ${MANIFEST_URL}`);
+      }
     }
   }
 } catch (e) {
