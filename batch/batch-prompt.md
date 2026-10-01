@@ -72,13 +72,22 @@ Conflict rule: `modes/_profile.md` wins over default system guidance because it 
 
 ## Orchestrator Placeholders
 
-| Placeholder | Meaning |
-|-------------|---------|
-| `{{URL}}` | Job URL |
-| `{{JD_FILE}}` | Local file containing the JD text |
-| `{{REPORT_NUM}}` | 3-digit report number, zero-padded |
-| `{{DATE}}` | Current date, YYYY-MM-DD |
-| `{{ID}}` | Unique offer ID from `batch-input.tsv` |
+The orchestrator (`batch-runner.sh`) resolves each placeholder below to a
+fixed, stable label, the same text for every offer, not the concrete value.
+This keeps the resolved system prompt byte-identical across offers so prompt
+caching can reuse it in full. The concrete value for each one arrives instead
+in the per-job user message the orchestrator sends alongside this prompt
+(`URL: ...`, `JD file: ...`, `Report number: ...`, `Date: ...`, `Batch ID:
+...`). Wherever you see one of these placeholders below, read the actual
+value from that job message.
+
+| Placeholder | Resolves to | Concrete value comes from |
+|-------------|-------------|----------------------------|
+| `{{URL}}` | `<URL from the job message>` | the job message's `URL:` line |
+| `{{JD_FILE}}` | `<JD file from the job message>` | the job message's `JD file:` line |
+| `{{REPORT_NUM}}` | `<report number from the job message>` | the job message's `Report number:` line |
+| `{{DATE}}` | `<date from the job message>` | the job message's `Date:` line |
+| `{{ID}}` | `<batch ID from the job message>` | the job message's `Batch ID:` line |
 
 ---
 

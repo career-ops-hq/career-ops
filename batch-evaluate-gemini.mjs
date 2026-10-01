@@ -20,6 +20,7 @@ import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import {
   normalizedTrackerScore, slugifyCompany, tsvSafe,
@@ -39,10 +40,29 @@ export const PATHS = {
   shared:      join(ROOT, 'modes', '_shared.md'),
   oferta:      join(ROOT, 'modes', 'oferta.md'),
   cv:          join(DATA_ROOT, 'cv.md'),
-  profile:     join(ROOT, 'modes', '_profile.md'),
+  // DATA_ROOT, not ROOT. modes/_profile.md is USER LAYER in the Data Contract
+  // — doctor.mjs auto-copies it into the user's root from
+  // modes/_profile.template.md — and it carries the archetypes and North Star
+  // every A-F evaluation scores against.
+  //
+  // Read from the CODE root it resolves to the shipped template, which is the
+  // exact failure AGENTS.md's `unpersonalized` warning exists to prevent:
+  // "offers get scored against the template author's targeting rather than
+  // yours". Silently, and for every offer in the batch.
+  //
+  // gemini-eval.mjs:89 and ollama-eval.mjs:56 both already use DATA_ROOT here.
+  profile:     join(DATA_ROOT, 'modes', '_profile.md'),
   profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
   reports:     join(DATA_ROOT, 'reports'),
-  trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
+  // DATA_ROOT, matching gemini-eval.mjs:93. These TSVs are the batch's OUTPUT —
+  // one per evaluated offer, for merge-tracker.mjs to fold into the tracker —
+  // so they are user data living under a system-layer directory name.
+  //
+  // Written to the CODE root they land in the checkout while merge-tracker,
+  // run normally, looks under the data root and finds nothing. The batch
+  // reports success, the tracker gains no rows, and the evidence sits in a
+  // directory the user has no reason to open.
+  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
   pipeline:    join(DATA_ROOT, 'data', 'pipeline.md')
 };
 
@@ -263,7 +283,17 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     mkdirSync(PATHS.trackerAdditions, { recursive: true });
 
     const num = await nextReportNumber();
-    const today = new Date().toISOString().split('T')[0];
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today = localToday();
     const companySlug = slugifyCompany(company);
     const filename = `${num}-${companySlug}-${today}.md`;
     const reportPath = join(PATHS.reports, filename);

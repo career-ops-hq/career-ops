@@ -5,9 +5,9 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday, iCIMS) and surfaces fresh postings that match
- * your portals.yml `title_filter` / `location_filter` — no manual company
- * curation needed.
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR) and surfaces fresh
+ * postings that match your portals.yml `title_filter` / `location_filter` —
+ * no manual company curation needed.
  *
  * Optional `title_filter_full` in portals.yml overrides `title_filter` for
  * THIS scanner only, so the keywords tuned for scan.mjs's curated company
@@ -52,8 +52,9 @@ import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
-import workday from './providers/workday.mjs';
+import workday, { WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
+import bamboohr from './providers/bamboohr.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
@@ -190,6 +191,15 @@ export function datasetFingerprint(list) {
 // anything outside a conservative slug charset.
 const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
+// ~47% of workday_companies.json is a data-quality defect in the upstream
+// job-board-aggregator dataset: the tenant field holds an instance-name
+// lookalike (wd1, wd5, wd12, ...) instead of a real company, with the site
+// field copied from the corresponding real entry — every one of these hosts
+// is unresolvable. Confirmed against the full dataset (2026-09): exactly 15
+// distinct values match this pattern, every matching row sits inside one
+// contiguous corrupted block, and none corresponds to a real company (#4454).
+const WORKDAY_JUNK_TENANT_RE = /^wd\d+$/i;
+
 // SSRF guard / defense in depth: confirm a constructed careers_url actually
 // resolves to the expected ATS host before it reaches provider.fetch. Returns
 // the synthetic entry, or null if the URL won't parse or the host isn't canonical.
@@ -258,6 +268,7 @@ export const SOURCES = {
     toEntry: (line) => {
       const [tenant, instance, site] = String(line).split('|');
       if (![tenant, instance, site].every(p => p && SLUG_RE.test(p))) return null;
+      if (WORKDAY_JUNK_TENANT_RE.test(tenant)) return null;
       return entryOnHost(
         tenant,
         `https://${tenant}.${instance}.myworkdayjobs.com/${site}`,
@@ -277,6 +288,15 @@ export const SOURCES = {
       if (entry && fallbacks.length) entry.fallback_urls = fallbacks;
       return entry;
     },
+  },
+  bamboohr: {
+    provider: bamboohr,
+    // Per-tenant own host (<slug>.bamboohr.com), like workday/icims — default
+    // CONCURRENCY is correct here, not SINGLE_HOST_CONCURRENCY.
+    dataset: `${DATASET_BASE}/bamboohr_companies.json`,
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://${slug}.bamboohr.com/careers`, h => h === `${slug}.bamboohr.com`)
+      : null,
   },
 };
 
@@ -529,6 +549,53 @@ export function sampleCompanies(list, limit, shuffle = false) {
   return copy.slice(0, limit);
 }
 
+/** One stderr JSON line per kept offer in `--json` mode so Explore can paint
+ *  cards while the walk continues. Stdout stays the single summary object (#1199). */
+export function formatLiveOfferLine(job, source) {
+  let postedAt = null;
+  if (job?.postedAt) {
+    const d = new Date(job.postedAt);
+    if (!Number.isNaN(d.getTime())) postedAt = d.toISOString().slice(0, 10);
+  }
+  return JSON.stringify({
+    kind: 'offer',
+    company: job.company,
+    title: job.title,
+    url: job.url,
+    location: job.location || null,
+    postedAt,
+    source: source || job.source || '',
+  });
+}
+
+export function parseLiveOfferLine(line) {
+  const raw = String(line || '');
+  const start = raw.indexOf('{');
+  if (start < 0) return null;
+  let ev;
+  try {
+    ev = JSON.parse(raw.slice(start));
+  } catch {
+    return null;
+  }
+  if (!ev || ev.kind !== 'offer') return null;
+  const url = typeof ev.url === 'string' ? ev.url.trim() : '';
+  if (!url || !ev.company || !ev.title) return null;
+  return ev;
+}
+
+export function emitLiveOffer(job, source, { json } = {}) {
+  if (!json || !job?.url || !job.company || !job.title) return;
+  console.error(formatLiveOfferLine(job, source));
+}
+
+export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
+  const kept = { ...job, source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
+  sink.push(kept);
+  const live = filterBlacklistedOffers([kept], blacklist, { includeBlacklisted: opts.includeBlacklisted });
+  if (live.offers.length) emitLiveOffer(live.offers[0], source, { json: opts.json });
+}
+
 // ── VC portfolio seed scan ──────────────────────────────────────────
 
 // ATS providers that can auto-detect from a careers_url, in probe order.
@@ -615,7 +682,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
       const dedupToken = dedupTokenFor(job, provider);
       if (seenUrls.has(dedupToken)) continue;
       seenUrls.add(dedupToken);
-      offers.push({ ...job, source: sourceName, dateStatus: job.postedAt ? 'dated' : 'unknown' });
+      keepAndMaybeEmit(job, sourceName, offers, opts.blacklist, opts);
     }
   });
 
@@ -734,7 +801,13 @@ async function main() {
   // either stream, and `--dry-run --json` has no checkpoint to fall back on
   // (dry runs write no state), so a long run was indistinguishable from a hung
   // one.
-  const progress = (s) => { if (opts.json) process.stderr.write(s); else process.stdout.write(s); };
+  // `--json` consumers parse stderr as newline-delimited lines. The human
+  // path overwrites one TTY row with `\r`; converting that to `\n` on stderr
+  // keeps progress ticks and live-offer JSON from gluing onto the same line.
+  const progress = (s) => {
+    if (opts.json) process.stderr.write(String(s).replace(/\r$/, '\n'));
+    else process.stdout.write(s);
+  };
 
   if (!existsSync(PORTALS_PATH)) {
     console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
@@ -780,6 +853,7 @@ async function main() {
     extraTokensFor: (url, portal) => providerForSource(portal)?.dedupKey?.({ url }),
   });
   const blacklist = loadBlacklist();
+  opts.blacklist = blacklist;
   // sinceMs and includeUndated let providers (currently only workday.mjs)
   // stop paginating a tenant early instead of always walking to max_pages:
   // sinceMs once postings are confidently past the --since window, and
@@ -951,7 +1025,7 @@ async function main() {
       const dedupToken = dedupTokenFor(job, provider);
       if (seenUrls.has(dedupToken)) continue;
       seenUrls.add(dedupToken); // intra-scan dedup
-      newOffers.push({ ...job, source: `${sourceName}-full`, dateStatus: job.postedAt ? 'dated' : 'unknown' });
+      keepAndMaybeEmit(job, `${sourceName}-full`, newOffers, blacklist, opts);
     }
   };
 
@@ -1022,7 +1096,11 @@ async function main() {
           const jobs = await source.provider.fetch(entry, ctx);
           recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
-          if (jobs.workdayTruncated) truncated.push(entry);
+          // Only 'transient' is worth a sequential retry — 'structural' means
+          // the board hit a fixed bound (facet-split slice/depth/page budget)
+          // that a repeat run reaches again, paying the same expensive split
+          // for the same result.
+          if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) truncated.push(entry);
           if (jobs.icimsTruncated) {
             cappedBoards++;
             if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
@@ -1095,8 +1173,16 @@ async function main() {
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
             await processJobs(jobs, name, source.provider, entry.name);
             if (jobs.workdayTruncated) {
-              errors++; // still truncated on a quiet line — genuine board problem, move on
-              if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
+              errors++; // still not fully covered — move on
+              // A board pushed here as 'transient' can legitimately come back
+              // 'structural': the retry's root crawl succeeded, the clamp got
+              // detected for the first time, and the split then hit its own
+              // bound — that's a real first split, not a repeat.
+              if (opts.verbose) {
+                const why = jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.STRUCTURAL
+                  ? 'facet split hit its bound' : 'still truncated';
+                console.error(`  ✗ ${name}/${entry.name}: ${why} after sequential retry`);
+              }
             }
           })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
         } catch (err) {

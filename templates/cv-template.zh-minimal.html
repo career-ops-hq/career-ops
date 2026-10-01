@@ -78,6 +78,21 @@ version: 1.0.0
     line-height: 1.1;
   }
 
+  .header-title {
+    /* No own font-family: inherits from .header/body, so every locale
+       override below (ar, ja, AND zh/zh-CN/zh-TW, which only override body
+       and never declare an explicit .header h1 rule) reaches it for free.
+       Default value is identical to the stack this replaced, so unlocalized
+       output is unchanged (CodeRabbit, #3763). */
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-color, #1a1a2e);
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
   .header-gradient {
     height: 2px;
     background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color, hsl(270, 70%, 45%)));
@@ -180,10 +195,9 @@ version: 1.0.0
   }
 
   .job-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
+    /* Normal flow preserves company -> period -> role order in ATS extraction.
+       Flex can group several headers before their role and bullet text. */
+    display: block;
     margin-bottom: 4px;
   }
 
@@ -198,6 +212,7 @@ version: 1.0.0
     font-size: var(--font-size, 10.5px);
     color: #777;
     white-space: nowrap;
+    margin-left: 10px;
   }
 
   .job-role {
@@ -210,6 +225,14 @@ version: 1.0.0
   .job-location {
     font-size: 10px;
     color: #888;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: #555;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -269,13 +292,11 @@ version: 1.0.0
   }
 
   .edu-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
+    display: block;
   }
 
   .edu-title {
+    display: inline;
     font-weight: 600;
     font-size: var(--font-size, 11px);
     color: #333;
@@ -287,9 +308,11 @@ version: 1.0.0
   }
 
   .edu-year {
+    display: inline;
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+    margin-left: 10px;
   }
 
   .edu-location {
@@ -431,6 +454,7 @@ version: 1.0.0
   .job-company,
   .job-role,
   .job-location,
+  .job-context,
   .edu-location,
   .project-title {
     break-after: avoid;
@@ -527,9 +551,14 @@ version: 1.0.0
   body,
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'PingFang SC',
-      'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
-      'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+    /* Keep Chinese and Latin text in one font run where possible. Splitting
+       mixed-language lines across Liberation Sans plus a CJK fallback makes
+       Chromium PDFs look correct while text extractors reorder Latin tokens.
+       A profile font replaces only the var() default: PingFang SC is repeated
+       so the Simplified Chinese fallback chain stays intact behind it. */
+    font-family: var(--font-family, 'PingFang SC'), 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC',
+      'Arial Unicode MS', sans-serif;
     color: var(--zhm-text);
     line-break: strict;
     word-break: normal;
@@ -701,6 +730,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>

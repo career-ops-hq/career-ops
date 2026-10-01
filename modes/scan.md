@@ -50,10 +50,12 @@ Recommended Contract:
   scan_method: local_parser
   parser:
     command: node
-    script: scripts/parsers/example-company-jobs.js
+    script: local/example-company-jobs.js
     format: jobs-json-v1
   enabled: true
 ```
+
+The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `scripts/parsers/` is for a parser you intend to upstream. See `docs/local-parser-cookbook.md`.
 
 Typically, the parser is company-specific and already knows the URL, selectors, and pagination. `args` is optional: use it however it helps the script author, for example, to reuse it across companies, pass `{careers_url}` or `{company}`, activate a debug flag, save a JSON snapshot, or control any parser-specific behavior.
 
@@ -88,6 +90,14 @@ Object format with `results`:
 ```
 
 `company` is optional; if not provided, `scan.mjs` uses the name from `tracked_companies`.
+
+A posting date is optional too, and worth emitting when the source exposes one: without it the offer has no `postedAt`, so `max_posting_age_days`, `--posted-after`/`--posted-before` and `--since` all pass it through (the same "don't penalize missing data" convention the filters use everywhere else). Epoch milliseconds or any string `Date.parse` accepts, under `postedAt`, `posted_at`, `publishedAt`, `published_at`, `published_date`, `datePosted` or `date_posted` — the last spelling is what a page's JSON-LD `JobPosting` block already calls it:
+
+```json
+[
+  { "title": "Senior AI Engineer", "url": "https://example.com/jobs/123", "location": "Remote", "postedAt": "2026-02-08" }
+]
+```
 
 The scanner does not need to persist the full JSON after reading stdout. If a parser also generates an artifact for auditing or debugging, save it under `data/parser-output/{company}/` and keep it out of git (JSON files in `.gitignore`; `.gitkeep` files are kept in git to preserve the directory structure).
 

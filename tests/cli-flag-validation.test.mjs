@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +39,7 @@ const SCRIPTS = [
   ['application-artifacts.mjs', '--reprot'],
   ['clean-markers.mjs', '--dryrun'],
   ['cv-sync-check.mjs', '--hlep'],
+  ['scan-interamt.mjs', '--dryrun'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -289,6 +290,48 @@ test('weekly-digest: --dir --summary does not scan a directory named "--summary"
   assert.match(r.all, /--dir requires a value/);
 });
 
+test('upskill: --min-reports --summary does not silently fall back to 5 reports', () => {
+  const r = runScript('upskill.mjs', '--min-reports', '--summary');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--min-reports requires a value/);
+});
+
+test('upskill: --url-text --help reports the missing operand instead of printing usage at exit 0', () => {
+  const r = runScript('upskill.mjs', '--url-text', '--help');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--url-text requires a value/);
+});
+
+test('audit-portals: --help --bogus still reports the unrecognized flag', () => {
+  const r = runScript('audit-portals.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /unrecognized flag\(s\): --bogus/);
+});
+
+test('audit-portals: --file --help reports the missing operand, not usage at exit 0', () => {
+  const r = runScript('audit-portals.mjs', '--file', '--help');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--file requires a value/);
+});
+
+test('audit-portals: --company --strict does not audit every board instead of one', () => {
+  const r = runScript('audit-portals.mjs', '--company', '--strict');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--company requires a value/);
+});
+
+test('audit-portals: a trailing --baseline does not silently skip the comparison', () => {
+  const r = runScript('audit-portals.mjs', '--baseline');
+  assert.equal(r.status, 1, `want exit 1, got ${r.status}`);
+  assert.match(r.all, /--baseline requires a value/);
+});
+
+test('audit-portals: --help alone still prints usage and exits 0', () => {
+  const r = runScript('audit-portals.mjs', '--help');
+  assert.equal(r.status, 0, `want exit 0, got ${r.status}`);
+  assert.match(r.all, /Usage:/i);
+});
+
 // archive-posting.mjs hand-rolls its own argv loop rather than going through
 // validateFlags, so its --company/--role handling needed its own adjacency
 // check (the same class of bug through a different door — see archive-posting.mjs).
@@ -357,6 +400,54 @@ test('linkedin-join.mjs --help --bogus still errors', () => {
   assert.match(r.all, /unrecognized flag/i);
 });
 
+// rank-pipeline.mjs read its flags with hasFlag/flagValue and never looked for
+// one it did not know, so `--dryrun` did a live run and wrote annotations into
+// data/pipeline.md, the one outcome --dry-run exists to prevent (#4600). These
+// cases are not SCRIPTS rows: runScript inherits the real environment and
+// checkout, and a regression here would re-rank the real pipeline through
+// whatever agent CLI is installed. Each case gets a throwaway CAREER_OPS_ROOT,
+// and CAREER_OPS_RANK_CLI names a binary that does not exist, so even a
+// regressed run reaches no user data, no model and no network.
+function runRankPipeline(root, ...args) {
+  const r = spawnSync(process.execPath, [join(ROOT, 'rank-pipeline.mjs'), ...args], {
+    cwd: root,
+    encoding: 'utf-8',
+    timeout: 30_000,
+    env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_RANK_CLI: 'career-ops-no-such-cli' },
+  });
+  assert.equal(r.error, undefined, `rank-pipeline.mjs failed to spawn: ${r.error?.message}`);
+  assert.equal(r.signal, null, `rank-pipeline.mjs was killed by ${r.signal} (timeout?)`);
+  return { ...r, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+test('rank-pipeline.mjs rejects --dryrun instead of writing data/pipeline.md', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-rank-pipeline-'));
+  try {
+    mkdirSync(join(root, 'data'));
+    const pipeline = join(root, 'data', 'pipeline.md');
+    const before = '## Pending\n- [ ] https://x.test/1 | Acme | Backend Engineer\n';
+    writeFileSync(pipeline, before);
+    const r = runRankPipeline(root, '--dryrun');
+    assert.equal(r.status, 1, `rank-pipeline.mjs --dryrun exited ${r.status}, want 1`);
+    assert.match(r.all, /unrecognized flag\(s\): --dryrun/, 'rank-pipeline.mjs did not name --dryrun');
+    assert.equal(readFileSync(pipeline, 'utf-8'), before, '--dryrun changed data/pipeline.md');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Its usage block has no `Usage:` header, so the synopsis line identifies it.
+test('rank-pipeline.mjs --help exits 0 and prints usage', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-rank-pipeline-'));
+  try {
+    const r = runRankPipeline(root, '--help');
+    assert.equal(r.status, 0, `rank-pipeline.mjs --help exited ${r.status}, want 0`);
+    assert.match(r.all, /node rank-pipeline\.mjs \[--limit N\]/, 'rank-pipeline.mjs --help printed no usage block');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // cv-sync-check.mjs parsed no arguments before #3565, so a mistyped flag ran
 // the whole check suite and the caller had no way to discover the right
 // spelling. Its exit code is data-dependent (1 when cv.md is missing, which is
@@ -380,3 +471,41 @@ test('cv-sync-check.mjs --help --bogus still errors', () => {
   assert.equal(r.status, 1, `cv-sync-check.mjs --help --bogus exited ${r.status}, want 1`);
   assert.match(r.all, /unrecognized flag/i);
 });
+
+// scan-interamt.mjs matched its flags with args.includes() before #4599, so
+// --help, or --dryrun for --dry-run, started a live Playwright scan of
+// interamt.de and appended the offers to data/pipeline.md. Every case here has
+// to exit before main() launches a browser, which is what keeps them hermetic.
+test('scan-interamt.mjs --help exits 0 and prints usage without scanning', () => {
+  const r = runScript('scan-interamt.mjs', '--help');
+  assert.equal(r.status, 0, `scan-interamt.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'scan-interamt.mjs --help printed no usage block');
+  assert.match(r.all, /--debug/, 'scan-interamt.mjs --help does not list --debug');
+  assert.doesNotMatch(r.all, /Searching "|Fatal:/, '--help still started a scan');
+});
+
+test('scan-interamt.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('scan-interamt.mjs', '-h');
+  assert.equal(r.status, 0, `scan-interamt.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'scan-interamt.mjs -h printed no usage block');
+});
+
+test('scan-interamt.mjs --help --bogus still errors', () => {
+  const r = runScript('scan-interamt.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `scan-interamt.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// The missing-operand check predates #4599 and keeps its own wording.
+for (const [form, args] of [
+  ['a trailing --keyword', ['--keyword']],
+  ['--keyword --help', ['--keyword', '--help']],
+  ['--keyword --dry-run', ['--keyword', '--dry-run']],
+  ['an empty --keyword=', ['--keyword=']],
+]) {
+  test(`scan-interamt.mjs rejects ${form} instead of scanning`, () => {
+    const r = runScript('scan-interamt.mjs', ...args);
+    assert.equal(r.status, 1, `scan-interamt.mjs ${args.join(' ')} exited ${r.status}, want 1`);
+    assert.match(r.all, /--keyword requires a value/);
+  });
+}
