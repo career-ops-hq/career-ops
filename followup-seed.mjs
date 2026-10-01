@@ -226,10 +226,11 @@ function envInt(name, fallback) {
 function readTrackerRows(trackerPath) {
   const content = readFileSync(trackerPath, 'utf-8');
   const lines = content.split('\n');
-  const colmap = resolveColumns(lines);
+  const parseOptions = { allowTabs: true, allowIndentation: true };
+  const colmap = resolveColumns(lines, parseOptions);
   const rows = [];
   for (const line of lines) {
-    const row = parseTrackerRow(line, colmap);
+    const row = parseTrackerRow(line, colmap, parseOptions);
     if (row) rows.push(row);
   }
   return rows;
