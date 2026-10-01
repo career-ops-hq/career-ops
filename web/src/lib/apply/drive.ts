@@ -1,5 +1,5 @@
 import type { Page, Frame } from "playwright-core";
-import { resolveCli } from "@/lib/clis";
+import { resolveCli, type CliSpec } from "@/lib/clis";
 import { spawnCli } from "@/lib/cli-spawn";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
@@ -45,7 +45,23 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
       const ref = `e${n}`;
       el.setAttribute("data-co-ref", ref);
       const role = el.getAttribute("role") || (tag === "a" ? "link" : tag);
-      const label = clean(el.getAttribute("aria-label") || (el as HTMLInputElement).placeholder || el.textContent || (el as HTMLInputElement).value || (el as HTMLInputElement).name);
+      const base = clean(el.getAttribute("aria-label") || (el as HTMLInputElement).placeholder || el.textContent || (el as HTMLInputElement).value || (el as HTMLInputElement).name);
+      // Disambiguate twin controls. Multi-step forms routinely repeat a visible
+      // label ("Full Name" on both step 1 and step 2, or a repeated "Email"
+      // inside a confirmation block) and a snapshot line carries no page context,
+      // so the planner could type an answer into the wrong ref. The live `name`/
+      // `id` attributes are stable, unique per control, and already on the
+      // element we tagged — surfacing them lets the planner tell two identical
+      // labels apart without any selector guessing. Execution is unchanged: the
+      // model still picks a ref, and we still resolve it via [data-co-ref].
+      const nm = clean(el.getAttribute("name")).slice(0, 40);
+      const idAttr = clean(el.id).slice(0, 40);
+      // Skip a suffix that would only repeat the visible label back at the model.
+      const extra = [
+        nm && nm !== base ? `name: ${nm}` : "",
+        idAttr && idAttr !== base ? `id: ${idAttr}` : "",
+      ].filter(Boolean);
+      const label = extra.length ? `${base} [${extra.join(", ")}]` : base;
       const kind = tag === "input" ? itype || "text" : tag === "a" ? "link" : tag === "select" ? "select" : tag === "textarea" ? "textarea" : role;
       lines.push(`[${ref}] ${kind} "${label}"`);
       n++;
@@ -54,10 +70,16 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
   });
 }
 
-/** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
-function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
-  const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+/**
+ * One planner turn.
+ *
+ * CLI-agnostic: the argv and the stdout envelope both come from the resolved
+ * CLI's `drive` capability (web/src/lib/clis.ts), so supporting a new planner —
+ * a proxy, a local model — is a registry edit, not a branch here. `resumeId` is
+ * passed through opaquely; a CLI without continuation ignores it.
+ */
+function plannerTurn(spec: CliSpec, binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
+  const args = spec.drive!.args(prompt, resumeId);
   return new Promise((resolve) => {
     const child = spawnCli(binPath, args, { cwd: careerOpsRoot() });
     let buf = "";
@@ -72,20 +94,11 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
     }, 90_000);
     child.on("close", () => {
       clearTimeout(killer);
-      let out = buf;
-      let sessionId: string | null = null;
-      try {
-        const j = JSON.parse(buf);
-        out = j.result ?? buf;
-        sessionId = j.session_id ?? null;
-      } catch {
-        /* non-json (other CLI) → use raw */
-      }
-      resolve({ out, sessionId });
+      resolve(spec.drive!.parse(buf));
     });
     child.on("error", () => {
       clearTimeout(killer);
-      resolve({ out: buf, sessionId: null });
+      resolve(spec.drive!.parse(buf));
     });
   });
 }
@@ -116,8 +129,16 @@ export async function driveSession(
 ): Promise<DriveResult> {
   const resolved = resolveCli(cliId);
   const steps: DriveStep[] = [];
-  if (!resolved || cliId !== "claude") {
-    return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code (browser-driving CLI).", steps };
+  // Capability gate, not an id allowlist: a CLI drives forms when its spec
+  // declares a `drive` transport (argv + stdout envelope). Adding a proxy or a
+  // local model is then a registry edit in clis.ts, not a branch here.
+  if (!resolved || !resolved.spec?.drive) {
+    return {
+      reached: false,
+      turns: 0,
+      reason: `${resolved?.spec?.name || cliId || "This CLI"} cannot drive forms yet — agentic drive needs a CLI with a browser-driving transport (Claude Code, OpenCode).`,
+      steps,
+    };
   }
   const shot = async () => {
     try {
@@ -164,7 +185,7 @@ ${snap.text}
 
 Reply ONE action JSON.`;
 
-    const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
+    const { out, sessionId } = await plannerTurn(resolved.spec, resolved.binPath, prompt, resumeId);
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {

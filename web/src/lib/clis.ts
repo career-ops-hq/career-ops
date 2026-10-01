@@ -4,6 +4,31 @@ import path from "node:path";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
+
+/**
+ * How one CLI is invoked as the PLANNER for the agentic browser-drive loop
+ * (web/src/lib/apply/drive.ts).
+ *
+ * Why this is per-CLI metadata rather than a `cliId !== "claude"` check: the
+ * drive loop itself is provider-neutral — snapshot -> parseAction -> execute on
+ * OUR page. What actually differed was the TRANSPORT (CLI flags + the stdout
+ * envelope), so that is the only thing a capability needs to describe. The
+ * never-submit guarantee does NOT live here: it is enforced by SUBMIT_RX in
+ * drive.ts against the element's own text, so it holds for every driver.
+ */
+export type DriveCapability = {
+  /**
+   * argv for one planner turn.
+   * @param prompt   the observation + action-vocabulary prompt
+   * @param resumeId a prior turn's session id, or null. CLIs with no
+   *   continuation flag should ignore it (the loop then re-sends full context
+   *   every turn, which costs tokens but stays correct).
+   */
+  args: (prompt: string, resumeId: string | null) => string[];
+  /** Unwrap this CLI's stdout envelope into reply text + a resumable id. */
+  parse: (stdout: string) => { out: string; sessionId: string | null };
+};
+
 export type CliSpec = {
   id: string;
   name: string;
@@ -14,19 +39,79 @@ export type CliSpec = {
   url: string;
   /** headless invocation args for a single prompt */
   args: (prompt: string) => string[];
+  /**
+   * Set when this CLI can plan form-driving actions. Read by drive.ts as
+   * `spec.drive` — a capability flag on the spec, not an id allowlist, so
+   * adding a proxy or a local model is a one-line registry edit.
+   */
+  drive?: DriveCapability;
 };
 
 export const KNOWN: CliSpec[] = [
   // Prefer fcc-claude (Free Claude Code proxy) over stock claude when both exist —
   // many setups route Claude Code through a local FCC proxy instead of OAuth.
-  { id: "claude", name: "Claude Code", bin: "fcc-claude", altBins: ["claude"], run: "fcc-claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p] },
+  // Same id, same drive capability: the proxy is a transport swap, which is
+  // exactly the seam `drive` encodes.
+  {
+    id: "claude",
+    name: "Claude Code",
+    bin: "fcc-claude",
+    altBins: ["claude"],
+    run: "fcc-claude -p",
+    url: "https://claude.ai/code",
+    args: (p) => ["-p", p],
+    drive: {
+      // `--resume` is what keeps a multi-step loop cheap; without it every turn
+      // re-sends the full observation. The tool denylist is belt-and-braces —
+      // drive.ts executes actions itself and the vocabulary has no "submit".
+      args: (prompt, resumeId) => [
+        ...(resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt]),
+        "--output-format",
+        "json",
+        "--strict-mcp-config",
+        "--disallowedTools",
+        "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep",
+      ],
+      parse: (stdout) => {
+        try {
+          const j = JSON.parse(stdout);
+          return { out: j.result ?? stdout, sessionId: j.session_id ?? null };
+        } catch {
+          return { out: stdout, sessionId: null };
+        }
+      },
+    },
+  },
   // Prefer `cursor-agent` — a generic `agent` on PATH often belongs to Grok or
   // another CLI and breaks headless runs when mistaken for Cursor.
   { id: "cursor", name: "Cursor CLI", bin: "cursor-agent", altBins: ["agent"], run: "cursor-agent -p", url: "https://cursor.com/docs/cli/overview", args: (p) => ["-p", p, "--trust"] },
   { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p] },
   { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
-  { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p] },
-  { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
+  {
+    id: "opencode",
+    name: "OpenCode",
+    bin: "opencode",
+    run: "opencode run",
+    url: "https://opencode.ai",
+    args: (p) => ["run", p],
+    drive: {
+      // No `--resume` equivalent, so resumeId is deliberately ignored: the loop
+      // stays correct (each turn re-sends the current page snapshot) but costs
+      // more tokens per turn than the Claude path. That trade is why this is
+      // opt-in per CLI rather than "whichever CLI is installed".
+      args: (prompt) => ["run", "--print-logs", prompt],
+      // opencode prints the reply as plain text; tolerate a JSON envelope too.
+      parse: (stdout) => {
+        try {
+          const j = JSON.parse(stdout);
+          return { out: j.result ?? stdout, sessionId: null };
+        } catch {
+          return { out: stdout, sessionId: null };
+        }
+      },
+    },
+  },
+  { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-cli", args: (p) => ["-p", p] },
   { id: "qwen", name: "Qwen CLI", bin: "qwen", run: "qwen -p", url: "https://qwen.ai/qwencode", args: (p) => ["-p", p] },
   { id: "antigravity", name: "Antigravity CLI", bin: "agy", run: "agy -p", url: "https://antigravity.google", args: (p) => ["-p", p] },
 ];
