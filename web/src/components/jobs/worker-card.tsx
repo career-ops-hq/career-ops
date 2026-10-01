@@ -45,6 +45,14 @@ const fmtElapsed = (ms: number): string => {
 };
 const fmtTokens = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
 
+// Engineering ceiling for "this was a large agent loop". PRESENTATIONAL ONLY:
+// the number is computed upstream in route.ts (opencode's per-step token deltas
+// summed, which the CLI's own `finish-step` -> `o.usage` vs `finish` ->
+// `totalUsage` split confirms is correct) and is never altered or re-derived
+// here. A 40+ step agentic evaluation genuinely spends this much, so crossing
+// the line says "large", not "broken" — hence amber, never red.
+const HIGH_COMPUTE_TOKENS = 500_000;
+
 // Tick once a second WHILE running so a long evaluation visibly counts up (never
 // looks frozen). Stops re-rendering as soon as the job settles.
 function useElapsed(running: boolean, startedAt: number): number {
@@ -218,6 +226,14 @@ export function WorkerCard({
       {tokens > 0 && (
         <div className={cn("mt-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}>
           {fmtTokens(tokens)} tokens{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
+          {tokens > HIGH_COMPUTE_TOKENS && (
+            <span
+              className={cn("ml-1 font-medium text-amber-700 dark:text-amber-400")}
+              title={`${tokens.toLocaleString()} tokens — high-compute agent loop (ceiling ${HIGH_COMPUTE_TOKENS.toLocaleString()})`}
+            >
+              (High Compute Agent Loop)
+            </span>
+          )}
         </div>
       )}
       {/* Footer, not the header row: line ~125 pushes the trailing affordance
