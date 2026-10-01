@@ -255,6 +255,7 @@ const SYSTEM_PATHS = [
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/scratch-dirs.mjs',
+  'lib/story-bank.mjs',
   'lib/outcome-dir.mjs',
   'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',

@@ -1058,6 +1058,12 @@ ATS paste length (250-500 words).
 npm run star -- "Tell me about a time you disagreed with a decision"
 ```
 
+Only `### ` blocks in the format of `templates/story-bank.template.md`, with
+an `**A (Action):**` line, count as stories. Table rows and blocks without an
+Action are listed on stderr as unreadable rather than silently dropped;
+`story-provenance-check.mjs` reports the same entries under `malformed`
+while still checking their figures.
+
 ---
 
 ## archive
