@@ -320,6 +320,7 @@ const SYSTEM_PATHS = [
   'data-static/',
   'seeds/',
   'tests/',
+  'web/',
   'user-agent.mjs',
   'doctor.mjs',
   'jsonc-parse.mjs',
