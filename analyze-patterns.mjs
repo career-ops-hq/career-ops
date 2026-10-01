@@ -59,6 +59,8 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Reporting line stated by the JD, verbatim (report + Machine Summary only).
   // Allowlisted so it round-trips; no consumer logic yet.
   'reports_to',
+  // Optional local cache metadata; never an input to candidate pattern analysis.
+  'job_facts_cache',
   // Block B's requirement -> importance table, mirrored row by row (evidence
   // tier, importance band, match). Allowlisted so it round-trips; no consumer
   // logic yet, deliberately: importance is score-neutral, so nothing that folds
