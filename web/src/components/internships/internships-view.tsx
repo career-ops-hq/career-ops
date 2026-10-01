@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown } from "lucide-react";
+import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +77,20 @@ export function InternshipsView() {
     {} as Record<string, number>,
   );
 
+  // Diversity tracking: flag companies with multiple active applications
+  const activeStatuses = new Set<string>(["wishlist", "applied", "interviewing", "offered"]);
+  const companyCounts = new Map<string, number>();
+  for (const i of internships) {
+    if (!activeStatuses.has(i.status)) continue;
+    const key = i.company.trim().toLowerCase();
+    companyCounts.set(key, (companyCounts.get(key) ?? 0) + 1);
+  }
+  const duplicateCompanies = [...companyCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name, count]) => ({ name, count }));
+  const uniqueCompanies = companyCounts.size;
+  const totalActive = [...companyCounts.values()].reduce((a, b) => a + b, 0);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20 text-muted">
@@ -129,6 +143,37 @@ export function InternshipsView() {
         ))}
       </div>
 
+      {/* Diversity indicator */}
+      {totalActive > 0 && (
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 px-4 py-3">
+          <div className="text-sm">
+            <span className="font-semibold">{uniqueCompanies}</span>
+            <span className="text-muted"> unique {uniqueCompanies === 1 ? "company" : "companies"} across </span>
+            <span className="font-semibold">{totalActive}</span>
+            <span className="text-muted"> active applications</span>
+          </div>
+          {totalActive > 0 && uniqueCompanies > 0 && (
+            <Badge tone={uniqueCompanies / totalActive >= 0.8 ? "good" : uniqueCompanies / totalActive >= 0.5 ? "warn" : "bad"}>
+              {Math.round((uniqueCompanies / totalActive) * 100)}% diverse
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {/* Duplicate company warning */}
+      {duplicateCompanies.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            Multiple applications at the same company
+          </div>
+          <p className="mt-1 text-xs text-muted">
+            Spreading applications across different companies increases your chances.
+            {" "}Duplicates: {duplicateCompanies.map((d) => `${d.name} (${d.count})`).join(", ")}.
+          </p>
+        </div>
+      )}
+
       {internships.length === 0 ? (
         <Card className="py-16 text-center">
           <GraduationCap className="mx-auto h-10 w-10 text-muted" />
@@ -141,6 +186,7 @@ export function InternshipsView() {
           onStatusChange={updateStatus}
           onDelete={deleteInternship}
           onViewResume={setViewResume}
+          duplicateCompanies={new Set(duplicateCompanies.map((d) => d.name))}
         />
       ) : (
         <TableView
@@ -148,6 +194,7 @@ export function InternshipsView() {
           onStatusChange={updateStatus}
           onDelete={deleteInternship}
           onViewResume={setViewResume}
+          duplicateCompanies={new Set(duplicateCompanies.map((d) => d.name))}
         />
       )}
 
@@ -155,6 +202,7 @@ export function InternshipsView() {
         <AddInternshipModal
           onClose={() => setShowAdd(false)}
           onAdded={() => { setShowAdd(false); fetchData(); }}
+          existingCompanies={internships.filter((i) => activeStatuses.has(i.status)).map((i) => i.company)}
         />
       )}
 
@@ -174,11 +222,13 @@ function BoardView({
   onStatusChange,
   onDelete,
   onViewResume,
+  duplicateCompanies,
 }: {
   internships: Internship[];
   onStatusChange: (id: string, status: Internship["status"]) => void;
   onDelete: (id: string) => void;
   onViewResume: (i: Internship) => void;
+  duplicateCompanies: Set<string>;
 }) {
   const columns: Internship["status"][] = ["wishlist", "applied", "interviewing", "offered", "accepted", "rejected"];
 
@@ -204,6 +254,7 @@ function BoardView({
                   onStatusChange={onStatusChange}
                   onDelete={onDelete}
                   onViewResume={onViewResume}
+                  isDuplicate={duplicateCompanies.has(item.company.trim().toLowerCase())}
                 />
               ))}
             </div>
@@ -219,17 +270,25 @@ function InternshipCard({
   onStatusChange,
   onDelete,
   onViewResume,
+  isDuplicate,
 }: {
   item: Internship;
   onStatusChange: (id: string, status: Internship["status"]) => void;
   onDelete: (id: string) => void;
   onViewResume: (i: Internship) => void;
+  isDuplicate?: boolean;
 }) {
   const [showActions, setShowActions] = useState(false);
   const cfg = STATUS_CONFIG[item.status];
 
   return (
-    <Card className="group relative p-3 text-sm hover:shadow-md transition-shadow">
+    <Card className={cn("group relative p-3 text-sm hover:shadow-md transition-shadow", isDuplicate && "ring-1 ring-amber-500/30")}>
+      {isDuplicate && (
+        <div className="mb-2 flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+          <AlertTriangle className="h-3 w-3" />
+          Duplicate company — consider diversifying
+        </div>
+      )}
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0 flex-1">
           <p className="font-medium truncate">{item.company}</p>
@@ -313,11 +372,13 @@ function TableView({
   onStatusChange,
   onDelete,
   onViewResume,
+  duplicateCompanies,
 }: {
   internships: Internship[];
   onStatusChange: (id: string, status: Internship["status"]) => void;
   onDelete: (id: string) => void;
   onViewResume: (i: Internship) => void;
+  duplicateCompanies: Set<string>;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
@@ -340,12 +401,17 @@ function TableView({
             return (
               <tr key={item.id} className="border-b border-border last:border-0 hover:bg-surface/30 transition-colors">
                 <td className="px-4 py-3 font-medium">
-                  {item.url ? (
-                    <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="hover:text-brand transition-colors">
-                      {item.company}
-                    </a>
-                  ) : item.company}
+                  <div className="flex items-center gap-1.5">
+                    {duplicateCompanies.has(item.company.trim().toLowerCase()) && (
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                    )}
+                    {item.url ? (
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        className="hover:text-brand transition-colors">
+                        {item.company}
+                      </a>
+                    ) : item.company}
+                  </div>
                 </td>
                 <td className="px-4 py-3">{item.role}</td>
                 <td className="px-4 py-3 text-muted">{item.location || "—"}</td>

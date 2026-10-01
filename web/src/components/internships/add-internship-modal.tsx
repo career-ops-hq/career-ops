@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { X } from "lucide-react";
+import { useState, useMemo } from "react";
+import { X, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 type Props = {
   onClose: () => void;
   onAdded: () => void;
+  existingCompanies?: string[];
 };
 
-export function AddInternshipModal({ onClose, onAdded }: Props) {
+export function AddInternshipModal({ onClose, onAdded, existingCompanies = [] }: Props) {
   const [form, setForm] = useState({
     company: "",
     role: "",
@@ -24,6 +25,12 @@ export function AddInternshipModal({ onClose, onAdded }: Props) {
 
   const set = (key: string, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  const isDuplicateCompany = useMemo(() => {
+    if (!form.company.trim()) return false;
+    const normalized = form.company.trim().toLowerCase();
+    return existingCompanies.some((c) => c.trim().toLowerCase() === normalized);
+  }, [form.company, existingCompanies]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +89,13 @@ export function AddInternshipModal({ onClose, onAdded }: Props) {
               placeholder="Referral contact, team info, etc."
             />
           </div>
+
+          {isDuplicateCompany && (
+            <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              You already have an active application at {form.company}. Spreading across different companies increases your chances.
+            </div>
+          )}
 
           {error && (
             <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">{error}</p>
