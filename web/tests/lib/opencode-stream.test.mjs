@@ -31,6 +31,18 @@ const finish = (total, cost) => ({
   part: { type: "step-finish", reason: "stop", tokens: { total, input: total, output: 1, reasoning: 0, cache: { write: 0, read: 0 } }, cost },
 });
 
+// Real capture: `opencode run --format json --model opencode/does-not-exist-xyz`.
+// This is the event that used to vanish — opencodeStreamMeta had no `error`
+// branch, so it parsed to null, the run emitted no text, exited non-zero, and
+// the card reported "The CLI exited with an error — is it installed and
+// authenticated?" for what was actually an upstream failure.
+const providerError = {
+  type: "error",
+  timestamp: 1790824437943,
+  sessionID: "ses_1",
+  error: { name: "UnknownError", data: { message: "Unexpected server error. Check server logs for details.", ref: "err_b5affe17" } },
+};
+
 test("NDJSON is opt-in for the worker surface only", () => {
   assert.equal(usesOpencodeNdjson("opencode", "worker"), true);
   assert.equal(usesOpencodeNdjson("opencode", "default"), false, "assistant + cv/ingest must stay on raw stdout");
@@ -122,4 +134,52 @@ test("a truncated stream loses tokens but never corrupts them", () => {
     if (meta?.tokens != null) lastTokens += meta.tokens;
   }
   assert.equal(lastTokens, 0);
+});
+
+// --- provider/transport failure -------------------------------------------------
+
+test("a provider error surfaces its message instead of being discarded", () => {
+  const meta = opencodeStreamMeta(providerError);
+  assert.ok(meta, "the event must not parse to null — that is the bug this fixes");
+  assert.equal(meta.fatalError, "Unexpected server error. Check server logs for details.");
+  assert.equal("tokens" in meta, false, "an error event carries no usage to misreport");
+  assert.equal("toolName" in meta, false);
+});
+
+test("the error event carries no text — emittedText must stay false", () => {
+  // This is what made the route reach its `!emittedText` branch and print the
+  // generic guess. The fix reports cliFatalError there instead.
+  assert.equal(opencodeStreamText(providerError), null);
+});
+
+test("an error message is read from .message, .data.message, or .name, in that order", () => {
+  assert.equal(
+    opencodeStreamMeta({ type: "error", error: { name: "N", data: { message: "from data" }, message: "from message" } }).fatalError,
+    "from message",
+  );
+  assert.equal(opencodeStreamMeta({ type: "error", error: { name: "N", data: { message: "from data" } } }).fatalError, "from data");
+  assert.equal(opencodeStreamMeta({ type: "error", error: { name: "AuthError" } }).fatalError, "AuthError");
+});
+
+test("a shaped-but-empty error still says something rather than reporting blank", () => {
+  assert.equal(opencodeStreamMeta({ type: "error" }).fatalError, "opencode reported an error");
+  assert.equal(opencodeStreamMeta({ type: "error", error: {} }).fatalError, "opencode reported an error");
+  assert.equal(opencodeStreamMeta({ type: "error", error: { name: "", message: "  " } }).fatalError, "opencode reported an error");
+});
+
+test("a long provider message is bounded before it reaches a card or the run log", () => {
+  const meta = opencodeStreamMeta({ type: "error", error: { message: "x".repeat(5000) } });
+  assert.equal(meta.fatalError.length, 300);
+});
+
+test("a mid-run error does not retroactively change token accounting", () => {
+  // tokensMode/tokens are absent, so the route's accumulation is untouched and a
+  // failure after real work still reports the tokens that work cost. opencode
+  // emits PER-STEP deltas, so two steps sum rather than overwrite.
+  let lastTokens = 0;
+  for (const ev of [finish(10000, 0), providerError, finish(21630, 0)]) {
+    const meta = opencodeStreamMeta(ev);
+    if (meta?.tokens != null) lastTokens = meta.tokensMode === "delta" ? lastTokens + meta.tokens : meta.tokens;
+  }
+  assert.equal(lastTokens, 31630);
 });

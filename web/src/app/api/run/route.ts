@@ -10,6 +10,12 @@ import { acquireEvalGate, acquirePdfGate, isTrackerWriting } from "@/lib/core/ru
 import { runCoreScript } from "@/lib/core/run-core-script";
 import { buildPrompt } from "@/lib/run-prompts.mjs";
 import { jevPreScreen } from "@/lib/jev-pre-screen.mjs";
+import {
+  manifestPayloadForReport,
+  resolveFreshTempPayload,
+  snapshotTempPayloads,
+  type PayloadSnapshot,
+} from "@/lib/core/gate3-artifacts";
 import { livenessPreScreen, isCheckableUrl } from "@/lib/liveness-pre-screen.mjs";
 import { playwrightAvailable } from "@/lib/cli-capabilities.mjs";
 import { claudeCliArgs, toolScopeFor } from "@/lib/claude-invocation.mjs";
@@ -123,19 +129,26 @@ function gate3JobPath(input: string): string | null {
   return fs.existsSync(abs) ? abs : null;
 }
 
-/** Most recent `cv-*.payload.json` in output/ — the tailored CV this run wrote. */
-function gate3TailoredPayloadPath(): string | null {
-  try {
-    const outDir = path.join(careerOpsRoot(), "output");
-    const candidates = fs
-      .readdirSync(outDir)
-      .filter((f) => f.startsWith("cv-") && f.endsWith(".payload.json"))
-      .map((f) => ({ f, mtime: fs.statSync(path.join(outDir, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    return candidates.length ? path.join(outDir, candidates[0].f) : null;
-  } catch {
-    return null;
-  }
+/**
+ * The tailored CV THIS run produced — the thing Gate 3 must audit.
+ *
+ * Resolution is by OBSERVATION, not by guessing a filename. The previous
+ * implementation globbed `output/cv-*.payload.json` for the newest hit, but the
+ * pdf lane writes its payload to `/tmp/cv-*.json` (modes/pdf.md Step 18), so the
+ * glob only ever matched a stale artifact from openai-tailor.mjs — a different
+ * tool — and Gate 3 reported a weeks-old CV's verdict against the current
+ * posting. See web/src/lib/core/gate3-artifacts.ts for the full account.
+ *
+ * Order: the payload that appeared/changed during this run (diffed against the
+ * pre-run snapshot), then the pdf-index manifest pointer, which only the bundle
+ * flow populates. Null means "no artifact to audit" and the caller stays
+ * fail-open with NO_TAILORED_PAYLOAD.
+ */
+function gate3TailoredPayloadPath(
+  before: PayloadSnapshot | null,
+  report: string | null,
+): string | null {
+  return resolveFreshTempPayload(before) ?? manifestPayloadForReport(careerOpsRoot(), report ?? "");
 }
 
 /**
@@ -248,14 +261,18 @@ function captureUrlJdText(url: string): { jobPath: string; cleanup: () => void }
  * the gate declines to answer. A funnel makes it impossible to add a seventh
  * path that forgets to log.
  */
-function collectGate3Telemetry(input: string): Gate3Telemetry {
+function collectGate3Telemetry(
+  input: string,
+  before: PayloadSnapshot | null,
+  report: string | null,
+): Gate3Telemetry {
   let cleanup: (() => void) | null = null;
   // NO_TAILORED_PAYLOAD is excluded from the ledger (see finally): it means the
   // pdf lane produced no tailored artifact, so there is no CV to have audited
   // and logging it would pollute the metric with non-attempts.
   let telemetry: Gate3Telemetry = GATE3_FALLBACK;
   try {
-    const resumePath = gate3TailoredPayloadPath();
+    const resumePath = gate3TailoredPayloadPath(before, report);
     if (!resumePath) return { ...GATE3_FALLBACK, reason: "NO_TAILORED_PAYLOAD" };
     const source = path.basename(resumePath);
 
@@ -520,6 +537,11 @@ export async function POST(req: Request) {
   };
   const needsArtifact = kind === "pdf" || kind === "cover";
   const artifactsBefore = needsArtifact ? listArtifacts() : null;
+  // The "before" side of the Gate 3 diff, taken here — before the CLI spawns —
+  // so the audit subject is the payload THIS run wrote rather than the newest
+  // payload on disk. Only the pdf lane writes one, so only it pays the scan.
+  // See web/src/lib/core/gate3-artifacts.ts for why newest-by-mtime was wrong.
+  const tempPayloadsBefore = kind === "pdf" ? snapshotTempPayloads() : null;
   const wroteArtifact = (): boolean => {
     if (!artifactsBefore) return true;
     try {
@@ -558,6 +580,10 @@ export async function POST(req: Request) {
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false; // heuristic noise (stderr / non-zero exit) — not a verdict by itself
+      // The CLI's OWN reported failure message, when it emitted one. Preferred
+      // over the generic "exited with an error" guess at the close gate, because
+      // only the CLI knows whether this was a login problem or a provider 500.
+      let cliFatalError: string | null = null;
       let warnedStderr = false; // at most one ⚠ step for the whole run
       let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
       let lastCostUsd: number | null = null;
@@ -687,6 +713,17 @@ export async function POST(req: Request) {
             sawError = true;
             send({ type: "error", msg: meta.authError });
           }
+          // Same for an explicit provider/transport failure (opencode's
+          // `{"type":"error"}`). Recorded, not sent immediately: the close gate
+          // below owns the terminal message, and sending here too would double
+          // the error on the card. Without this the run produced no text, exited
+          // non-zero, and reported the generic "is it installed and
+          // authenticated?" — which is wrong for a 500/quota error and hid the
+          // actual cause across every opencode failure in the run log.
+          if (meta.fatalError) {
+            sawError = true;
+            cliFatalError = meta.fatalError;
+          }
           if (meta.toolName) send({ type: "tool", name: meta.toolName });
           if (meta.status) send({ type: "status", label: meta.status });
           // "delta" (opencode) reports PER-STEP tokens that must be summed; the
@@ -760,7 +797,12 @@ export async function POST(req: Request) {
         // useful (no output, evaluate with no new report, or pdf/cover with no
         // file — a "done" job whose View would 404 is worse than a red card).
         if (!emittedText) {
-          if (!cleanExit) {
+          if (cliFatalError) {
+            // The CLI told us why. Report that instead of guessing — the generic
+            // text below ("is it installed and authenticated?") is actively
+            // misleading for a provider 500, a quota wall, or an upstream fault.
+            send({ type: "error", msg: cliFatalError });
+          } else if (!cleanExit) {
             send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
           } else {
             send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
@@ -784,8 +826,21 @@ export async function POST(req: Request) {
           // Gate 3 rides on the same payload as the tokens. Advisory telemetry:
           // `unavailable` and `halt` both complete normally, and only a real pdf
           // lane has a tailored artifact to audit.
-          const gate3Telemetry = kind === "pdf" ? collectGate3Telemetry(input) : GATE3_FALLBACK;
-          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd, gate3: gate3Telemetry });
+          //
+          // Non-pdf kinds omit `gate3` entirely rather than sending the fallback.
+          // GATE3_FALLBACK's reason is the literal string
+          // "LINTER_SUBPROCESS_FALLBACK" — on an evaluate run that describes a
+          // subprocess which was never spawned, so every Score card rendered
+          // "Gate 3: Unaudited (gate unavailable)": an audit failure that did
+          // not happen. The save route already documents gate3 as "only ever
+          // present on a pdf-lane run"; omitting it here makes the two agree,
+          // and an absent decision is distinguishable from an unavailable one.
+          if (kind === "pdf") {
+            const gate3Telemetry = collectGate3Telemetry(input, tempPayloadsBefore, reportNum);
+            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd, gate3: gate3Telemetry });
+          } else {
+            send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
+          }
         } else if ((persists && wroteReport) || (needsArtifact && artifactOk)) {
           // Report/PDF landed despite stderr noise / non-zero exit — bank it as
           // done with a visible warning so the card is honest without lying red.

@@ -158,6 +158,14 @@ export type StreamMeta = {
   status?: string;
   /** Set when the CLI reports an auth/login failure in stream-json output. */
   authError?: string;
+  /**
+   * Set when the CLI reports a provider/transport failure in stream-json output
+   * (opencode's `{"type":"error"}`). Distinct from `authError` because the cause
+   * and the fix differ — a 500/quota/upstream error is not a login problem — but
+   * terminal in the same way: the CLI cannot continue, so the route reports the
+   * real message instead of the generic "exited with an error" guess.
+   */
+  fatalError?: string;
 };
 
 export function extractStreamMeta(cliId: string, obj: Record<string, unknown>): StreamMeta | null {

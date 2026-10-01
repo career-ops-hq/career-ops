@@ -56,7 +56,7 @@ export function opencodeStreamText(obj) {
 
 /**
  * @param {Record<string, unknown>} obj
- * @returns {{tokens?: number, tokensMode?: "replace"|"delta", costUsd?: number, toolName?: string}|null}
+ * @returns {{tokens?: number, tokensMode?: "replace"|"delta", costUsd?: number, toolName?: string, fatalError?: string}|null}
  */
 export function opencodeStreamMeta(obj) {
   // Raw tool name ("read", "bash") for chip parity with claude. The friendlier
@@ -65,6 +65,40 @@ export function opencodeStreamMeta(obj) {
   if (obj.type === "tool_use") {
     const part = /** @type {{tool?: string}|undefined} */ (obj.part);
     return part?.tool ? { toolName: part.tool } : null;
+  }
+  // A provider/transport failure arrives as its own top-level event. Real
+  // capture (`opencode run --format json --model opencode/does-not-exist-xyz`):
+  //   {"type":"error","error":{"name":"UnknownError",
+  //    "data":{"message":"Unexpected server error. Check server logs for
+  //    details.","ref":"err_b5affe17"}}}
+  //
+  // Before this branch the event parsed to null and was discarded, so the run
+  // produced no text, exited non-zero, and the card reported "The CLI exited
+  // with an error — is it installed and authenticated?" — a guess that is
+  // actively wrong for a quota/500/upstream error and hid the real cause
+  // entirely. This is the opencode counterpart to claude's `meta.authError`
+  // branch in cli-stream.ts; the route treats both as terminal.
+  //
+  // `message` is the useful field when present; `name` is the fallback so a
+  // shaped-but-message-less error still says something. Bounded because it is
+  // rendered on a card and written into the run log.
+  if (obj.type === "error") {
+    const err = /** @type {{name?: unknown, message?: unknown, data?: {message?: unknown}}|undefined} */ (
+      obj.error
+    );
+    // Precedence: `.message` is the canonical field when a provider sets it;
+    // `.data.message` is where the observed UnknownError shape carries it. Each
+    // candidate is trimmed BEFORE the fallback chain, so a whitespace-only field
+    // falls through instead of winning with "" and leaving the card blank. A
+    // reported failure must always say something.
+    const candidates = [
+      typeof err?.message === "string" ? err.message : "",
+      typeof err?.data?.message === "string" ? err.data.message : "",
+      typeof err?.name === "string" ? err.name : "",
+    ];
+    const detail =
+      candidates.find((c) => c.trim().length > 0)?.trim() || "opencode reported an error";
+    return { fatalError: detail.slice(0, 300) };
   }
   if (obj.type === "step_finish") {
     const part = /** @type {{tokens?: {total?: number}, cost?: number}|undefined} */ (obj.part);
