@@ -8388,6 +8388,46 @@ try {
     fail('visa_filter should honor custom positive keyword lists');
   }
 
+  // ── visa_filter international vocabulary ──
+  // Strict mode must recognize Singapore (Employment Pass / S Pass / ONE Pass /
+  // Work Pass), EU Blue Card, and UK Skilled Worker sponsorship wording —
+  // not just US visas.
+  const intlVisa = buildVisaFilter({ enabled: true, require_mention: true });
+  if (
+    intlVisa('We will sponsor your Employment Pass application via MOM') === true &&
+    intlVisa('S Pass sponsorship available for foreign candidates') === true &&
+    intlVisa('We assist with your ONE Pass application') === true &&
+    intlVisa('Work Pass sponsorship provided for this role') === true &&
+    intlVisa('We support EU Blue Card applications for non-EU hires') === true &&
+    intlVisa('Skilled Worker visa sponsorship available') === true
+  ) {
+    pass('visa_filter strict recognizes international sponsorship vocabulary');
+  } else {
+    fail('visa_filter strict should recognize SG/EU/UK sponsorship wording');
+  }
+
+  // Hazardous short forms are deliberately absent from the defaults: bare
+  // 's pass' would fire on "Class Pass", bare 'one pass' on ordinary English.
+  if (
+    intlVisa('Free Class Pass to the downtown yoga studio each month') === false &&
+    intlVisa('The compiler makes one pass over the syntax tree') === false
+  ) {
+    pass('visa_filter strict has no false positives on pass-adjacent wording');
+  } else {
+    fail('visa_filter strict must not treat Class Pass / one pass as sponsorship');
+  }
+
+  // Default mode must reject unambiguous international no-sponsorship phrasing.
+  const intlNegVisa = buildVisaFilter({ enabled: true });
+  if (
+    intlNegVisa('Singapore citizens and permanent residents only') === false &&
+    intlNegVisa('Local candidates only - no relocation provided') === false
+  ) {
+    pass('visa_filter rejects international no-sponsorship phrasing');
+  } else {
+    fail('visa_filter should reject citizens/PR-only and local-only postings');
+  }
+
   // ── country_eligibility_filter (#2093) ──
   // Absent config → all jobs pass, regardless of candidate country.
   const noCountryFilter = buildCountryEligibilityFilter(null, 'Canada');

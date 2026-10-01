@@ -861,12 +861,13 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 
 // ── Visa / work-authorization filter ────────────────────────────────
 // Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
-// Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
-// the generic "visa sponsorship" wording) and drops roles that explicitly
-// refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
-// it only has signal for providers that populate job.description (see the
-// content_filter header above); jobs without one fall back to the
-// require_mention rule below.
+// Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1),
+// Singapore (Employment Pass / S Pass / ONE Pass / Work Pass), EU (Blue Card),
+// UK (Skilled Worker), plus the generic "visa sponsorship" wording — and drops
+// roles that explicitly refuse sponsorship. Like content_filter it reads the job
+// DESCRIPTION text, so it only has signal for providers that populate
+// job.description (see the content_filter header above); jobs without one fall
+// back to the require_mention rule below.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
@@ -877,9 +878,10 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 //     one `positive` keyword; a missing/empty description is rejected. Use this
 //     to surface *only* postings that actively advertise sponsorship.
 //
-// `positive` / `negative` default to a curated US-sponsorship vocabulary when
-// omitted, so `visa_filter: { enabled: true }` works out of the box; supplying
-// either list overrides that default.
+// `positive` / `negative` default to a curated sponsorship vocabulary (US,
+// Singapore, EU, UK work-visa wording) when omitted, so
+// `visa_filter: { enabled: true }` works out of the box; supplying either list
+// overrides that default.
 
 export const DEFAULT_VISA_POSITIVE = [
   'visa sponsorship',
@@ -897,6 +899,25 @@ export const DEFAULT_VISA_POSITIVE = [
   'h-1b1',
   'h1b1',
   'o-1 visa',
+  // Singapore (Ministry of Manpower work passes). Multi-word forms only:
+  // bare 's pass' / 'one pass' false-positive on ordinary English
+  // ("Class Pass", "makes one pass"), so they are deliberately absent.
+  'employment pass',
+  's pass sponsorship',
+  's pass application',
+  's pass holder',
+  'one pass scheme',
+  'one pass application',
+  'one pass holder',
+  'work pass sponsorship',
+  'work pass application',
+  // EU Blue Card. Bare 'blue card' is kept: in employment text it is the EU
+  // permit far more often than anything else.
+  'eu blue card',
+  'blue card',
+  // UK Skilled Worker route.
+  'skilled worker visa',
+  'skilled worker sponsorship',
 ];
 
 export const DEFAULT_VISA_NEGATIVE = [
@@ -913,6 +934,11 @@ export const DEFAULT_VISA_NEGATIVE = [
   'sponsorship is not available',
   'sponsorship not available',
   'not offer visa sponsorship',
+  // Unambiguous sponsorship refusals phrased for non-US postings.
+  // (Relocation wording is deliberately excluded: relocation != sponsorship.)
+  'citizens and permanent residents only',
+  'permanent residents only',
+  'local candidates only',
 ];
 
 export function buildVisaFilter(visaFilter) {

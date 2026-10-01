@@ -321,18 +321,20 @@
 #         - "claude"
 
 # -- Visa / work-authorization filter (optional) --
-# Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
-# the generic "visa sponsorship" wording) and drops roles that explicitly refuse
-# it. Like content_filter it reads the job DESCRIPTION text, so it only has
-# signal for providers that populate job.description (see the content_filter
-# provider-support note above).
+# Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1), Singapore
+# (Employment Pass / S Pass / ONE Pass / Work Pass), EU (Blue Card), UK (Skilled
+# Worker), plus the generic "visa sponsorship" wording — and drops roles that
+# explicitly refuse it. Like content_filter it reads the job DESCRIPTION text, so
+# it only has signal for providers that populate job.description (see the
+# content_filter provider-support note above).
 # Semantics (case-insensitive substring):
 #   - Any `negative` keyword present → reject (an explicit "no sponsorship")
 #   - require_mention: false (default) → after clearing negatives, pass — jobs
 #     with no description included. Use this to only weed out explicit rejections.
 #   - require_mention: true → keep only jobs whose description advertises
 #     sponsorship (contains a `positive` keyword); missing description → reject.
-#   - `positive`/`negative` default to a curated US-sponsorship vocabulary when
+#   - `positive`/`negative` default to a curated sponsorship vocabulary (US,
+#     Singapore, EU, UK work-visa wording) when
 #     omitted, so `visa_filter: { enabled: true }` works out of the box.
 #   - If this entire block is absent, jobs are not filtered on sponsorship.
 #
@@ -340,7 +342,7 @@
 # visa_filter:
 #   enabled: true
 #
-# Strict: only surface postings that explicitly advertise US sponsorship
+# Strict: only surface postings that explicitly advertise sponsorship
 # visa_filter:
 #   enabled: true
 #   require_mention: true
@@ -348,6 +350,9 @@
 #     - "visa sponsorship"
 #     - "h-1b"
 #     - "h1b1"
+#     - "employment pass"
+#     - "eu blue card"
+#     - "skilled worker visa"
 #     - "will sponsor"
 #   negative:
 #     - "no sponsorship"
