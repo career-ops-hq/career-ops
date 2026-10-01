@@ -156,6 +156,95 @@ function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
 
+// A scraped page's closure banner states expiration as a bare fact — it
+// never hedges or denies it. LLM prose can do both ("I cannot determine
+// whether this job has expired", "this is not a case where the job has
+// expired"), which HARD_EXPIRED_PATTERNS's substring matching cannot tell
+// apart from an affirmative report on its own (CodeRabbit review on #4364).
+// Scoped to the SAME SENTENCE as the match, not the whole text: a hedge or
+// negation elsewhere in a long response must not suppress a genuine,
+// separately-stated expiration elsewhere in it. "Same sentence" is decided
+// per LINE first, then by terminal punctuation within that line — a hedge on
+// one line ("I cannot determine whether the URL is valid") and an affirmative
+// report on the very next ("This job has expired") are two separate
+// statements with no sentence-ending punctuation between them, and
+// normalizeForMatch() collapses that newline to a space before
+// SENTENCE_SPLIT_RE ever sees it — so splitting on `\s+` after normalizing
+// would merge them into one "sentence" and let the unrelated hedge suppress a
+// real signal (CodeRabbit follow-up review on #4459).
+//
+// Deliberately a fixed phrase list, not general negation/uncertainty
+// detection (out of reach for a regex, and not needed here): a model
+// narrating "the job has expired, no longer accepting applications" does
+// not also, in the same breath, say it cannot tell — the two are
+// contradictory prose that practice does not produce. Kept narrow enough to
+// avoid the mirror failure: bare "not" is deliberately excluded, since
+// "no longer accepting applications" — one of the phrases this is meant to
+// let through — contains it as ordinary description of the closure itself,
+// not a hedge against reporting one.
+const HEDGE_OR_UNCERTAINTY_RE = /\b(?:cannot|can'?t|couldn'?t|unable to|not\s+(?:really\s+)?(?:sure|clear|certain)|unsure|unclear|uncertain|don'?t know|do not know|no way to (?:tell|know|determine|confirm)|(?:hard|difficult) to (?:tell|know|determine|confirm)|whether or not|may or may not|not\s+a\s+case\s+where)\b/i;
+
+const SENTENCE_SPLIT_RE = /(?<=[.!?])\s+/;
+
+/**
+ * Whether `text` contains an unambiguous "this posting is gone" phrase —
+ * standalone access to the HARD_EXPIRED_PATTERNS half of classifyLiveness(),
+ * for a caller whose input isn't a scraped page at all (#4364: an LLM's own
+ * prose narrating that it hit a liveness gate, with no HTTP status, no apply
+ * controls, no URL to check).
+ *
+ * Deliberately HARD-only, never SOFT_EXPIRED_PATTERNS or MIN_CONTENT_CHARS:
+ * classifyLiveness() places SOFT_EXPIRED_PATTERNS and its content-length
+ * heuristic AFTER the apply-control check specifically because they are
+ * ambiguous without it (see their own comments above) — "job expired" alone,
+ * or a short body alone, both need "and no visible Apply control" to mean
+ * anything. A short, genuinely malformed LLM response is exactly as short as
+ * a genuine liveness-gate exit, so nothing here can safely stand in for that
+ * missing corroboration.
+ *
+ * One caveat HARD_EXPIRED_PATTERNS's other callers don't need: a sentence
+ * that also hedges or denies the match (HEDGE_OR_UNCERTAINTY_RE above) is
+ * not counted — see that constant's comment for why prose, unlike a scraped
+ * banner, needs this at all.
+ *
+ * @param {string} text - arbitrary prose, not necessarily a scraped page.
+ * @returns {boolean}
+ */
+export function hasHardExpiredSignal(text = '') {
+  // Split on real line breaks BEFORE normalizing: normalizeForMatch()
+  // collapses every run of whitespace, newlines included, to a single space,
+  // which would silently merge two separate lines into one sentence-scan
+  // unit. Splitting first, then normalizing and sentence-splitting each line
+  // on its own, keeps a hedge on one line from ever sharing a "sentence"
+  // with an affirmative statement on another.
+  const rawLines = (typeof text === 'string' ? text : '').split(/\r\n?|\n/);
+  // ...except a SOFT line wrap, which is the opposite case: "I cannot
+  // determine whether\nthis job has expired" is ONE hedge sentence broken
+  // mid-clause by word-wrapping, not two statements — splitting there would
+  // strand "this job has expired" on its own line with no hedge in sight and
+  // misread the wrap as an affirmative report (CodeRabbit follow-up review on
+  // #4459). The distinguishing signal already present in both of the
+  // review's own examples: a genuine new statement starts with a capital
+  // letter ("This job has expired"); the tail of a wrapped sentence
+  // continues in lowercase ("this job has expired"). So a line starting with
+  // a lowercase letter is merged back into the previous line before any
+  // sentence-splitting happens, rather than treated as its own unit.
+  // English-only, like every HARD_EXPIRED_PATTERNS phrase this feeds into —
+  // not a general prose-boundary detector.
+  const lines = [];
+  for (const raw of rawLines) {
+    if (lines.length > 0 && /^[a-z]/.test(raw.trimStart())) {
+      lines[lines.length - 1] += ` ${raw.trimStart()}`;
+    } else {
+      lines.push(raw);
+    }
+  }
+  const sentences = lines.flatMap((line) => normalizeForMatch(line).split(SENTENCE_SPLIT_RE));
+  return sentences.some(
+    (sentence) => firstMatch(HARD_EXPIRED_PATTERNS, sentence) && !HEDGE_OR_UNCERTAINTY_RE.test(sentence),
+  );
+}
+
 export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [] } = {}) {
   const bodyText = normalizeForMatch(rawBodyText);
   const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map(normalizeForMatch);

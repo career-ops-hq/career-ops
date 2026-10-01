@@ -19,6 +19,7 @@ import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { hasHardExpiredSignal } from './liveness-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
@@ -262,6 +263,29 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     // Parse output
     const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
     if (!summaryMatch) {
+      // modes/oferta.md's liveness gate (the systemPromptTemplate this model
+      // was given) tells it to stop before Block A and emit no score at all
+      // for a dead posting — a legitimate exit this parser used to treat as
+      // an error (#4364), so a dead posting never got its pipeline.md line
+      // resolved and was retried, and re-billed, every run.
+      //
+      // hasHardExpiredSignal() checks for the same unambiguous "this posting
+      // is gone" phrases the rest of the pipeline already trusts
+      // (liveness-core.mjs), not classifyLiveness() itself: that function's
+      // other heuristics (MIN_CONTENT_CHARS chief among them) are built for a
+      // scraped PAGE's body text, where "short" is real evidence of a dead
+      // listing. A short response here is not evidence of anything — a
+      // genuinely malformed model reply is exactly as short as a genuine
+      // liveness-gate exit, so only the strong, explicit phrase match is
+      // trustworthy on prose like this.
+      if (hasHardExpiredSignal(evaluationText)) {
+        console.log(`⚰️  Dead posting (liveness gate): ${companyHint} - ${titleHint}`);
+        const newLine = line.replace(
+          /- \[\s*\].*/,
+          `- [x] ~~${companyHint} | ${titleHint}~~ — oferta nieaktywna`,
+        );
+        return { line: newLine, processed: true };
+      }
       console.error('Missing SCORE_SUMMARY block from model output:\n' + evaluationText.slice(0, 500));
       throw new Error('Missing SCORE_SUMMARY block from model output');
     }
