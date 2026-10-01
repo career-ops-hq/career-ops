@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,8 +33,9 @@ function linkForTest(t, target, path, directory = false) {
 function installCLI(root) {
   copyFileSync(join(ROOT, 'i18n-drift.mjs'), join(root, 'i18n-drift.mjs'));
   mkdirSync(join(root, 'lib'), { recursive: true });
-  for (const name of ['is-main-module.mjs', 'mjs-files.mjs']) {
-    copyFileSync(join(ROOT, 'lib', name), join(root, 'lib', name));
+  for (const name of ['is-main-module.mjs', 'mjs-files.mjs', 'scratch-dirs.mjs']) {
+    const source = join(ROOT, 'lib', name);
+    if (existsSync(source)) copyFileSync(source, join(root, 'lib', name));
   }
 }
 
