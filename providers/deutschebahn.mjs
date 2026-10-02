@@ -9,12 +9,19 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 // front over them, and the two share job ids. db.jobs's search page exposes a
 // server-rendered results endpoint that paginates over bare HTTP:
 //
-//   GET {origin}/service/search/de-de/{searchId}?query=&sort=pubExternalDate_tdt&itemsPerPage=20&pageNum={N}
+//   GET {origin}/service/search/de-de/{searchId}?query=&sort=pubExternalDate_tdt&itemsPerPage=1000&pageNum={N}
 //
 // An empty query sorted by `score` renders the page shell with no results
 // section at all, so the walk sorts by publication date (the order db.jobs's
 // own Stellensuche link uses). Newest-first also makes MAX_JOBS keep the most
 // recent postings.
+//
+// The order of postings that tie on the sort key (thousands share a
+// publication date) differs from one request to the next, under every sort
+// db.jobs offers, so consecutive pages overlap and skip postings at their
+// boundaries. A large page keeps those boundaries rare: db.jobs serves up to
+// a few thousand hits per request (beyond that it renders the results-less
+// shell), and one 1000-hit page covers MAX_JOBS in a single request.
 //
 // {searchId} is the DB search-config id (5441588 at time of writing) — it's
 // stable per portal, so we pin it via the api:/careers_url. Each result is:
@@ -30,10 +37,11 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 // The board is large (thousands of postings, mostly rail operations) — rely on
 // title/location filters; MAX_JOBS + max_pages bound the walk.
 
-const ITEMS_PER_PAGE = 20; // DB's default page size
-const MAX_PAGES = 60; // safety cap on request count (60*20 = 1200 postings)
+const ITEMS_PER_PAGE = 1000; // see header: large pages keep tie-order drift rare
+const MAX_PAGES = 5; // safety cap on request count (5*1000 = 5000 postings)
 const MAX_JOBS = 1000; // cap total postings pulled
 const PAGE_DELAY_MS = 150; // polite pacing between page requests
+const PAGE_TIMEOUT_MS = 30_000; // a 1000-hit page is ~4MB and takes several seconds
 const SORT = 'pubExternalDate_tdt'; // newest first; see header for why not `score`
 
 /** @param {string} s */
@@ -99,6 +107,16 @@ export function parseHits(html, origin) {
     out.push({ id, title, url, location: locM ? clean(locM[1]) : '' });
   }
   return out;
+}
+
+/**
+ * Number of hit anchors the page carries, before parseHits drops malformed
+ * or repeated rows — the page size the source actually returned.
+ * @param {string} html
+ */
+export function countHitAnchors(html) {
+  if (typeof html !== 'string') return 0;
+  return (html.match(/<a\b[^>]*class="[^"]*m-search-hit\b[^"]*"/gi) || []).length;
 }
 
 /**
@@ -168,14 +186,14 @@ export default {
     const jobs = [];
     const seen = new Set();
 
-    // Each page is a ~450KB HTML fragment; on a walk of up to 60 pages, an
-    // occasional single-page timeout/abort is a transient blip, not a board
-    // failure — fetchTextWithRetry absorbs it instead of failing the whole scan.
+    // Each page is a multi-megabyte HTML document; an occasional timeout/abort
+    // on one is a transient blip, not a board failure — fetchTextWithRetry
+    // absorbs it instead of failing the whole scan.
 
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       const url = `${cfg.searchBase}?qli=true&query=&sort=${SORT}&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
-      const html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error' });
+      const html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error', timeoutMs: PAGE_TIMEOUT_MS });
       const rows = parseHits(html, cfg.origin);
       if (rows.length === 0) {
         if (page === 0) {
@@ -195,15 +213,16 @@ export default {
         break; // past the last page
       }
 
-      let fresh = 0;
       for (const row of rows) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
-        fresh++;
         jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location });
       }
-      if (fresh === 0) break; // server clamped pageNum / looped
       if (jobs.length >= MAX_JOBS) break;
+      // The stop reads the hit count the source returned, never the parsed or
+      // post-dedup count: tie-order drift can make a full page repeat earlier
+      // hits while later pages still hold unseen postings.
+      if (countHitAnchors(html) < ITEMS_PER_PAGE) break; // short page: the board ended
     }
     return jobs.slice(0, MAX_JOBS);
   },

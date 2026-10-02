@@ -1360,7 +1360,7 @@ search_queries:
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
 #   enabled: true                         # ~445 English postings (zero-token XML)
 #
-# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+# - name: Deutsche Bahn                   # single-company; db.jobs search front
 #   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true

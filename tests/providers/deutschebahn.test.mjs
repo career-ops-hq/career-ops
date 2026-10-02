@@ -45,8 +45,16 @@ try {
   if (badRows.length === 1 && badRows[0].title === 'Bad&#xD800;Entity') pass('deutschebahn.parseHits() tolerates an invalid numeric entity (no RangeError crash)');
   else fail(`deutschebahn.parseHits() should degrade a malformed entity to literal text, got: ${JSON.stringify(badRows)}`);
 
-  // fetch — paginates ?pageNum=N, stops on the first no-fresh-ids page.
-  const dbPages = [dbHtml, '<html>' + dbHit('700000', 'C', 'Berlin, Deutschland') + '</html>', '<html></html>'];
+  // A full page as the source returns it: PAGE_SIZE hit anchors. Cycling a
+  // few ids keeps the fixture's unique postings small while the page still
+  // reads as full, the shape tie-order drift produces on the live board.
+  const PAGE_SIZE = 1000;
+  const fullPage = (ids) => '<html>' + Array.from({ length: PAGE_SIZE }, (_, i) => dbHit(ids[i % ids.length], `Job ${ids[i % ids.length]}`, 'Berlin, Deutschland')).join('') + '</html>';
+  if (dbModule.countHitAnchors(fullPage(['1', '2'])) === PAGE_SIZE && dbModule.countHitAnchors(dbHtml) === 2 && dbModule.countHitAnchors(undefined) === 0) pass('deutschebahn.countHitAnchors() counts raw hit anchors, repeats included');
+  else fail(`deutschebahn.countHitAnchors() wrong: ${dbModule.countHitAnchors(fullPage(['1', '2']))}`);
+
+  // fetch — paginates ?pageNum=N over full pages, stops on the first empty page.
+  const dbPages = [fullPage(['630365', '631112']), fullPage(['700000']), '<html></html>'];
   let dbCalls = 0;
   const dbSeen = [];
   const dbOpts = [];
@@ -56,8 +64,31 @@ try {
   else fail(`deutschebahn.fetch() returned ${dbJobs.length} jobs after ${dbCalls} calls`);
   if (dbSeen[0]?.includes('pageNum=0') && dbSeen[1]?.includes('pageNum=1')) pass('deutschebahn.fetch() pages via pageNum=N (0-based)');
   else fail(`deutschebahn.fetch() paged wrong: ${JSON.stringify(dbSeen.map((u) => u.match(/pageNum=\d+/)?.[0]))}`);
+  if (dbSeen.every((u) => u.includes(`itemsPerPage=${PAGE_SIZE}`))) pass('deutschebahn.fetch() requests 1000 hits per page');
+  else fail(`deutschebahn.fetch() page size wrong: ${JSON.stringify(dbSeen.map((u) => u.match(/itemsPerPage=\d+/)?.[0]))}`);
   if (dbOpts.every((o) => o?.redirect === 'error')) pass('deutschebahn.fetch() passes redirect:\'error\' on every request');
   else fail(`deutschebahn.fetch() redirect option wrong: ${JSON.stringify(dbOpts.map((o) => o?.redirect))}`);
+  if (dbOpts.every((o) => o?.timeoutMs >= 30_000)) pass('deutschebahn.fetch() raises the per-request timeout for the multi-megabyte page');
+  else fail(`deutschebahn.fetch() timeout wrong: ${JSON.stringify(dbOpts.map((o) => o?.timeoutMs))}`);
+
+  // The stop reads the source's own page size: a short page ends the walk,
+  // while a full page whose hits all repeat earlier ones does not.
+  let shortCalls = 0;
+  const shortJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, { sleep: async () => {}, fetchText: async () => { shortCalls++; return dbHtml; } });
+  if (shortJobs.length === 2 && shortCalls === 1) pass('deutschebahn.fetch() stops after a short page');
+  else fail(`deutschebahn.fetch() short-page stop wrong: ${shortJobs.length} jobs after ${shortCalls} calls`);
+  const repeatPages = [fullPage(['500001']), fullPage(['500001']), fullPage(['500002']), '<html></html>'];
+  let repeatCalls = 0;
+  const repeatJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, { sleep: async () => {}, fetchText: async () => repeatPages[repeatCalls++] ?? '<html></html>' });
+  if (repeatJobs.length === 2 && repeatCalls === 4) pass('deutschebahn.fetch() walks past a full page of repeated hits');
+  else fail(`deutschebahn.fetch() repeat-page walk wrong: ${repeatJobs.length} jobs after ${repeatCalls} calls`);
+
+  // MAX_JOBS: one full page of unique postings is the whole scan.
+  const uniquePage = fullPage(Array.from({ length: PAGE_SIZE }, (_, i) => String(600000 + i)));
+  let capJobsCalls = 0;
+  const capJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, { sleep: async () => {}, fetchText: async () => { capJobsCalls++; return uniquePage; } });
+  if (capJobs.length === 1000 && capJobsCalls === 1) pass('deutschebahn.fetch() stops at MAX_JOBS after a single full page');
+  else fail(`deutschebahn.fetch() MAX_JOBS stop wrong: ${capJobs.length} jobs after ${capJobsCalls} calls`);
   // An empty query sorted by `score` renders a results-less shell, so every
   // page must sort by publication date instead.
   if (dbSeen.every((u) => u.includes('sort=pubExternalDate_tdt') && !u.includes('sort=score'))) pass('deutschebahn.fetch() sorts by pubExternalDate_tdt, never score');
@@ -100,7 +131,7 @@ try {
   if (zeroWithLinks.error?.includes('posting links')) pass('deutschebahn.fetch() rejects a data-count="0" first page that still carries posting links');
   else fail(`deutschebahn.fetch() should throw on a zero-count page with posting links, got: ${JSON.stringify(zeroWithLinks)}`);
   let laterCalls = 0;
-  const laterCtx = { sleep: async () => {}, fetchText: async () => (++laterCalls === 1 ? dbHtml : `<html>${countHtml('3.596')}${driftedHit('900002')}</html>`) };
+  const laterCtx = { sleep: async () => {}, fetchText: async () => (++laterCalls === 1 ? fullPage(['630365', '631112']) : `<html>${countHtml('3.596')}${driftedHit('900002')}</html>`) };
   let laterError = null;
   try {
     await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, laterCtx);
@@ -119,7 +150,7 @@ try {
     console.warn = (msg) => warnings.push(String(msg));
     try {
       let calls = 0;
-      const ctx = { sleep: async () => {}, fetchText: async () => (++calls === 1 ? dbHtml : secondPage) };
+      const ctx = { sleep: async () => {}, fetchText: async () => (++calls === 1 ? fullPage(['630365', '631112']) : secondPage) };
       const jobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, ctx);
       return { jobs, warnings };
     } finally {
@@ -138,7 +169,7 @@ try {
   // every page keeps returning fresh ids (DB's board runs into the thousands,
   // so this cap is the only thing bounding a runaway scan).
   let capCalls = 0;
-  const capCtx = { sleep: async () => {}, fetchText: async () => { capCalls++; return dbHit(String(700100 + capCalls), `Job ${capCalls}`, 'Berlin, Deutschland'); } };
+  const capCtx = { sleep: async () => {}, fetchText: async () => { capCalls++; return fullPage([String(700100 + capCalls)]); } };
   const cappedJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 3 }, capCtx);
   if (cappedJobs.length === 3 && capCalls === 3) pass('deutschebahn.fetch() honors entry.max_pages and stops even with more pages available');
   else fail(`deutschebahn.fetch() max_pages cap wrong: ${cappedJobs.length} jobs after ${capCalls} calls`);
@@ -151,12 +182,11 @@ try {
     fetchText: async () => {
       retryCalls++;
       if (retryCalls === 1) throw new Error('This operation was aborted');
-      if (retryCalls === 2) return dbHit('800001', 'Retried Job', 'Berlin, Deutschland');
-      return '<html></html>'; // next page: empty, stop
+      return dbHit('800001', 'Retried Job', 'Berlin, Deutschland'); // short page: the walk ends here
     },
   };
   const retriedJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, retryCtx);
-  if (retriedJobs.length === 1 && retryCalls === 3) pass('deutschebahn.fetch() retries a transient failure and recovers');
+  if (retriedJobs.length === 1 && retryCalls === 2) pass('deutschebahn.fetch() retries a transient failure and recovers');
   else fail(`deutschebahn.fetch() retry wrong: ${retriedJobs.length} jobs after ${retryCalls} calls`);
 
   // A deterministic (non-transient) failure — a 4xx other than 429 — must NOT
@@ -181,11 +211,11 @@ try {
   else fail(`deutschebahn.fetch() should fail fast on a 404, got threw=${dbThrew} calls=${noRetryCalls}`);
 
   // Non-positive/non-integer max_pages falls back to the provider default
-  // (60) rather than collapsing to zero pages.
+  // (5) rather than collapsing to zero pages.
   let fallbackCalls = 0;
-  const fallbackCtx = { sleep: async () => {}, fetchText: async () => { fallbackCalls++; return fallbackCalls <= 5 ? dbHit(String(700200 + fallbackCalls), `Job ${fallbackCalls}`, 'Berlin, Deutschland') : '<html></html>'; } };
+  const fallbackCtx = { sleep: async () => {}, fetchText: async () => { fallbackCalls++; return fullPage([String(700200 + fallbackCalls)]); } };
   const fallbackJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 0 }, fallbackCtx);
-  if (fallbackJobs.length === 5 && fallbackCalls === 6) pass('deutschebahn.fetch() falls back to the default page cap for a non-positive max_pages');
+  if (fallbackJobs.length === 5 && fallbackCalls === 5) pass('deutschebahn.fetch() falls back to the default page cap for a non-positive max_pages');
   else fail(`deutschebahn.fetch() max_pages fallback wrong: ${fallbackJobs.length} jobs after ${fallbackCalls} calls`);
 } catch (e) {
   fail(`deutschebahn provider tests crashed: ${e.message}`);
