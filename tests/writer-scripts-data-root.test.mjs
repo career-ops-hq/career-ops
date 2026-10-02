@@ -152,6 +152,9 @@ const CLOSURE = {
   'set-status.mjs': [
     'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
     'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs', 'templates/states.yml',
+    // session-activity.mjs (#4532): advisory in-progress claim taken before
+    // the write below.
+    'session-activity.mjs', 'lib/is-main-module.mjs',
     // Runtime assets, not imports: an import scan does not see these and each
     // one only announces itself by crashing the child.
     'tracker-aliases.json',
@@ -159,7 +162,7 @@ const CLOSURE = {
   'generate-pdf.mjs': [
     'generate-pdf.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
     'tracker-parse.mjs', 'theme-style.mjs', 'lib/page-format.mjs', 'lib/is-main-module.mjs',
-    'cv-sections-core.mjs',
+    'cv-sections-core.mjs', 'cv-experience-order.mjs',
     'tracker-aliases.json',
   ],
 };
@@ -175,7 +178,11 @@ function markerFixture(script) {
   for (const file of CLOSURE[script]) copyFileSync(join(ROOT, file), join(codeRoot, file));
   // generate-pdf.mjs imports playwright at module scope, so without this the
   // child dies before it can print anything and the assertions say nothing.
-  try { symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'dir'); } catch { /* already there */ }
+  // A junction on Windows: a 'dir' symlink needs Developer Mode there, fails
+  // with EPERM, and the swallowed error surfaced only as ERR_MODULE_NOT_FOUND.
+  try {
+    symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  } catch { /* already there */ }
 
   // The marker: rule 3. No CAREER_OPS_* variable is set when this is used.
   writeFileSync(join(codeRoot, '.career-ops-data'), `${dataRoot}\n`);
@@ -236,5 +243,42 @@ test('generate-pdf honours a .career-ops-data marker for its workspace boundary'
       `a path inside the marked data root was reported as an escape:\n${r.all.slice(0, 500)}`);
     assert.match(r.all, /\u{1F4C4} Input:/u,
       `validation never reported its input, so the assertion above proves nothing:\n${r.all.slice(0, 500)}`);
+  } finally { markerCleanup(f); }
+});
+
+// refreshRootCache() keys on the RESOLVED workspace root (#4314), not on the
+// environment: the marker is a file on disk and can change while every
+// CAREER_OPS_* variable stays the same. An env-only key kept serving the first
+// data root to every later call in the same process.
+test('generate-pdf follows a .career-ops-data marker that changes mid-process', () => {
+  const f = markerFixture('generate-pdf.mjs');
+  const moved = join(f.dir, 'data-moved');
+  mkdirSync(join(moved, 'output'), { recursive: true });
+  try {
+    const probe = `
+      import { writeFileSync } from 'node:fs';
+      import { join } from 'node:path';
+      import { pathToFileURL } from 'node:url';
+      const [codeRoot, first, moved] = process.argv.slice(1);
+      const { isWorkspaceOutputPath } = await import(pathToFileURL(join(codeRoot, 'generate-pdf.mjs')).href);
+      const before = isWorkspaceOutputPath(join(first, 'output', 'cv.pdf'));
+      writeFileSync(join(codeRoot, '.career-ops-data'), moved + '\\n');
+      const after = isWorkspaceOutputPath(join(moved, 'output', 'cv.pdf'));
+      const stale = isWorkspaceOutputPath(join(first, 'output', 'cv.pdf'));
+      console.log('RESULT ' + JSON.stringify({ before, after, stale }));
+    `;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe, f.codeRoot, f.dataRoot, moved], {
+      cwd: f.dir,
+      encoding: 'utf-8',
+      timeout: 120_000,
+      // Every override blank on purpose: only the marker moves.
+      env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '' },
+    });
+    assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
+    const all = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    const line = (r.stdout ?? '').split('\n').find((l) => l.startsWith('RESULT '));
+    assert.ok(line, `the probe printed no result, so nothing was checked:\n${all.slice(0, 600)}`);
+    assert.deepEqual(JSON.parse(line.slice('RESULT '.length)), { before: true, after: true, stale: false },
+      'the workspace boundary did not follow the rewritten marker');
   } finally { markerCleanup(f); }
 });

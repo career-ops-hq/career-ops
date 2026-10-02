@@ -120,7 +120,8 @@ function containsWholeWord(text, word) {
  * handling, so scan.mjs's location_filter sees every place a multi-location
  * role is open to.
  *
- * Falls back to the pre-existing single-place logic — explicit `location`,
+ * Falls back to the single-place logic — explicit `location` (with the
+ * top-level `country` appended when the location doesn't already name it),
  * else assembled from city/country, appending "Remote" when `remote` is true
  * — when `locations` yields 0 or 1 distinct names.
  *
@@ -155,7 +156,17 @@ function assembleLocation(j) {
   const city = j.city || '';
   const country = j.country || '';
   const remote = j.remote ? 'Remote' : '';
-  return j.location || [city, country, remote].filter(Boolean).join(', ');
+  // The flat `location` gets the same country fold every `locations[]` entry
+  // gets above — without it a primary place spelled as a city or subdivision
+  // ("London, England") hides the country location_filter matches on, the
+  // asymmetry that dropped UK-primary postings on Ashby (formatLocation there).
+  if (typeof j.location === 'string' && j.location.trim()) {
+    const loc = j.location.trim();
+    return typeof country === 'string' && country.trim() && !containsWholeWord(loc, country.trim())
+      ? `${loc}, ${country.trim()}`
+      : loc;
+  }
+  return [city, country, remote].filter(Boolean).join(', ');
 }
 
 /**
@@ -177,7 +188,8 @@ function assembleLocation(j) {
  *   offer is dropped (see Drop rule below).
  * - location: see `assembleLocation` — joins `locations[]` when it lists 2+
  *   distinct places (appending "Remote" when `remote` is true and no place
- *   name already says so), else the explicit `location` field, else assembled
+ *   name already says so), else the explicit `location` field plus `country`
+ *   when it isn't already named there, else assembled
  *   from city/country, appending "Remote" when `remote` is true.
  * - description: Recruitee's list payload embeds each offer's full HTML body
  *   for free (same request — verified against a live board), so it is

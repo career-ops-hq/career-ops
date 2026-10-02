@@ -30,7 +30,7 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolve
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl } from './url-key.mjs';
@@ -164,8 +164,24 @@ try {
   process.exit(1);
 }
 
-// Canonical states and aliases
-const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
+// Canonical states — loaded from templates/states.yml, the single source of truth.
+// Adding a state or alias there is all that is needed; no code change required here.
+const _CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const _STATES_FILE = existsSync(join(_CODE_ROOT, 'templates/states.yml'))
+  ? join(_CODE_ROOT, 'templates/states.yml')
+  : join(_CODE_ROOT, 'states.yml');
+// A missing or unreadable states file is a broken install, not a reason to abort
+// the merge on a raw ENOENT. Say so once, then merge each status as written:
+// validateStatus() only rewrites to "Evaluated" when it has states to check.
+let _canonicalStates = [];
+try {
+  _canonicalStates = loadCanonicalStates(_STATES_FILE);
+} catch (err) {
+  console.warn(`⚠️  Cannot read canonical states (${err.message}): statuses are merged as written. Restore templates/states.yml, then run node normalize-statuses.mjs`);
+}
+const _aliasMap = Object.fromEntries(
+  _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.label]))
+);
 
 /**
  * Convert raw addition status text into one canonical tracker state.
@@ -182,29 +198,20 @@ function validateStatus(status) {
   const clean = status.replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
   const lower = clean.toLowerCase();
 
-  for (const valid of CANONICAL_STATES) {
-    if (valid.toLowerCase() === lower) return valid;
+  // Label match (case-insensitive)
+  for (const s of _canonicalStates) {
+    if (s.label.toLowerCase() === lower) return s.label;
   }
 
-  // Aliases
-  const aliases = {
-    // Spanish → English
-    'evaluada': 'Evaluated', 'condicional': 'Evaluated', 'hold': 'Evaluated', 'evaluar': 'Evaluated', 'verificar': 'Evaluated',
-    'aplicado': 'Applied', 'enviada': 'Applied', 'aplicada': 'Applied', 'applied': 'Applied', 'sent': 'Applied',
-    'respondido': 'Responded',
-    'entrevista': 'Interview',
-    'oferta': 'Offer',
-    'rechazado': 'Rejected', 'rechazada': 'Rejected',
-    'contratado': 'Hired', 'contratada': 'Hired', 'accepted': 'Hired', 'accept': 'Hired',
-    'descartado': 'Discarded', 'descartada': 'Discarded', 'cerrada': 'Discarded', 'cancelada': 'Discarded',
-    'no aplicar': 'SKIP', 'no_aplicar': 'SKIP', 'skip': 'SKIP', 'monitor': 'SKIP',
-    'geo blocker': 'SKIP',
-  };
-
-  if (aliases[lower]) return aliases[lower];
+  // Alias match
+  if (_aliasMap[lower]) return _aliasMap[lower];
 
   // DUPLICADO/Repost → Discarded
   if (/^(duplicado|dup|repost)/i.test(lower)) return 'Discarded';
+
+  // No states loaded (see above): keep the row's own status rather than record
+  // an "Evaluated" it never claimed.
+  if (!_canonicalStates.length && clean) return clean;
 
   console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
   return 'Evaluated';

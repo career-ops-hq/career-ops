@@ -2,8 +2,8 @@
 // personalization file EXISTS but still carries template content.
 //
 // Why this matters: doctor auto-copies `modes/_profile.md` and `modes/_brief.md`
-// from their templates on first run, so the existence check can never fail for
-// them. Left unedited, `_profile.md` feeds the template author's archetypes into
+// during explicit onboarding, so existence alone cannot detect unedited content.
+// Left unedited, `_profile.md` feeds the template author's archetypes into
 // every A-F evaluation — the system looks healthy and scores against a stranger.
 //
 // Each scenario uses a fresh --target dir so nothing leaks across cases.
@@ -18,9 +18,9 @@ console.log('\ndoctor.mjs — unfilled personalization templates');
 const DOCTOR = join(ROOT, 'doctor.mjs');
 const dirs = [];
 
-function runDoctor(cwd) {
+function runDoctor(cwd, args = []) {
   try {
-    const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd], {
+    const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
       cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
     return JSON.parse(out);
@@ -62,7 +62,7 @@ try {
   //    must not.
   {
     const dir = fixture('identical');
-    const s = runDoctor(dir);
+    const s = runDoctor(dir, ['--init-templates']);
     if (s._error) fail(`auto-copied templates: doctor crashed: ${s._error}`);
     else if (flagged(s, 'modes/_profile.md') && flagged(s, 'modes/_brief.md')) {
       pass('auto-copied templates are reported as unpersonalized');
@@ -81,7 +81,7 @@ try {
   //    gate this PR must not introduce.
   {
     const dir = fixture('nonblocking', { seedPrereqs: true });
-    const s = runDoctor(dir);
+    const s = runDoctor(dir, ['--init-templates']);
     if (s._error) fail(`non-blocking: doctor crashed: ${s._error}`);
     else if ((s.missing || []).length > 0) {
       fail(`non-blocking: fixture is not complete, so the gate is untestable: missing ${JSON.stringify(s.missing)}`);

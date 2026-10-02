@@ -55,9 +55,10 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
+import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -291,6 +292,38 @@ async function runDiscovered(filter = null) {
   }
 }
 
+// A scratch copy left by a killed run used to poison every walker that follows:
+// `.gitignore` hides it and the copy carries no `.git`, so neither `git status`
+// nor `isNestedCheckout()` could see it, and the layout guards read a second
+// copy of `tests/` as several hundred misplaced suites (#3940).
+//
+// What makes the run correct is `isScratchDir` in the walkers, not this sweep —
+// they skip a leftover whether it gets removed or not. This only reclaims the
+// disk, which is why it can afford the age gate that keeps it off a scratch a
+// concurrent run is still writing into.
+//
+// Placed before the `--only` exit below: the 264-failure run is exactly the one
+// a developer then re-runs with `--only core-test-layout` to look closer, and a
+// sweep they skip past would leave that second run behaving differently again.
+{
+  const { removed, failed } = sweepScratchDirs(ROOT);
+  // Only speak when there was something to say. A sweep is silent on the
+  // overwhelming majority of runs, and a line reporting that nothing happened
+  // would be noise at the top of every one of them. `kept` is deliberately not
+  // reported: a young scratch is somebody else's live run, and it is none of
+  // this run's business.
+  for (const name of removed) {
+    console.log(`  🧹 removed a stale scratch copy from an interrupted run: ${name}/`);
+  }
+  for (const { name, error } of failed) {
+    // Not fatal — the walkers skip it, so every guard below still grades the
+    // real tree — but not silent either: something is holding a directory this
+    // run tried to delete, and that is worth knowing before it becomes a
+    // disk-space question.
+    warn(`could not remove the stale scratch copy ${name}/ (${error}) — the guards skip it, so this run is unaffected`);
+  }
+}
+
 // `--only=providers/x` must not read as "no filter": the discovered-test
 // runner exits 1 when a filter matches nothing, precisely so a path typo can
 // never turn CI green — and a silently dropped filter runs the whole suite
@@ -422,6 +455,7 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  { name: 'keyword-match.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
@@ -441,6 +475,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'verify-ats.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
@@ -468,6 +503,7 @@ const scripts = [
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
+  { name: 'contact-extract-tests.mjs', expectExit: 0 },
   { name: 'set-status-tests.mjs', expectExit: 0 },
   // The one script in this list that genuinely needs longer than the shared
   // budget. It spawns competing writer processes for 27 contention cases, and
@@ -508,8 +544,11 @@ const scripts = [
   { name: 'archive-posting.mjs --help', expectExit: 0 },
 ];
 
-const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
+const scriptTmp = mkdtempSync(join(ROOT, SCRATCH_PREFIX));
 try {
+  // Claim before copying or running scripts. If this fails, stop and let the
+  // finally below remove the unused directory rather than run without an owner.
+  markScratchOwner(scriptTmp);
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
   // real ROOT/node_modules, which is how the root-level exclusion already
@@ -525,6 +564,25 @@ try {
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
+    // A leftover from an earlier interrupted run is not repository source, and
+    // copying one nests it inside this run's scratch — which is how #3940's
+    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
+    // run's OWN scratch is already excluded by name just above; what this adds
+    // is the stale one the startup sweep could not remove, and — since that
+    // sweep deliberately leaves a live run's directory alone — the one a
+    // concurrent run is writing into right now.
+    //
+    // Directories only, which is why this reads `stat` rather than sitting with
+    // the name-based exclusions above: the prefix can name a FILE too, and
+    // dropping a source file from the copy would make a script check pass by
+    // not running it.
+    //
+    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
+    // level. The two are asymmetric because their costs are: skipping a
+    // directory that turns out to be someone's oddly-named fixture loses a copy
+    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
+    // expensive to over-delete.
+    if (stat.isDirectory() && isScratchDir(name)) return;
     if (stat.isDirectory()) {
       // A linked worktree is a whole second checkout of this repo and carries a
       // `.git` FILE, not a directory, so the name-based exclusion above never
@@ -5078,16 +5136,18 @@ if (!fileExists('scripts/parsers/cohere_jobs.py')) {
   fail('Cohere parser example is still bundled as a runtime script');
 }
 
+// templates/portals.example.yml is copied verbatim by new users — its local-parser
+// example must point the script at a gitignored path, not the Git-tracked
+// scripts/parsers/ (see docs/local-parser-cookbook.md).
 const portalExample = readFile('templates/portals.example.yml');
 if (
-  !portalExample.includes('cohere_jobs.py') &&
-  portalExample.includes('scripts/parsers/example-js-company-jobs.js') &&
-  portalExample.includes('scripts/parsers/example_python_company_jobs.py') &&
-  portalExample.includes('already know their target careers URL')
+  portalExample.includes('script: local/example-js-company-jobs.js') &&
+  portalExample.includes('script: local/example_python_company_jobs.py') &&
+  !/^\s*#?\s*script:\s*['"]?scripts\/parsers\//m.test(portalExample)
 ) {
-  pass('portals example documents a generic local parser contract');
+  pass('portals example points the local-parser script at a gitignored path');
 } else {
-  fail('portals example still points at a bundled Cohere parser');
+  fail('portals example local-parser script is under the Git-tracked scripts/parsers/');
 }
 
 // Security hardening: command allowlist, in-repo script containment, careers_url/company validation.
@@ -7147,9 +7207,13 @@ overrideOut?.includes('Acme') && overrideOut?.includes('staff-engineer')
 // dry-run: output always contains a local:jds/ reference and today's date.
 // The date the child prints is its own clock read, so it is compared against
 // the day(s) spanning the call rather than one captured up-section — see
-// runAcrossUtcDay() for why a single capture fails a run that crosses
-// midnight UTC (#3816).
-const { out: refOut, days: refDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+// runAcrossLocalDay() for why a single capture fails a run that crosses
+// midnight (#3816).
+//
+// LOCAL day, not UTC: archive-posting names its capture with localToday(), so
+// asserting the UTC day here passed only where the two agree — which is most of
+// the day in most zones, and never in the evening west of Greenwich.
+const { out: refOut, days: refDays } = runAcrossLocalDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
 refOut?.includes('local:jds/') && refDays.some((day) => refOut?.includes(day))
   ? pass('dry-run: local:jds/ reference and date emitted')
   : fail('dry-run: reference or date missing from output');
@@ -7197,8 +7261,9 @@ reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('
   ? pass('--report N: value consumed, URL still parsed')
   : fail('--report N: swallowed the URL or dropped the report number');
 
-// omitting --report leaves the historical filename shape untouched
-const { out: noReportOut, days: noReportDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+// omitting --report leaves the historical filename shape untouched — the date
+// in it is the LOCAL calendar day (localToday()), the day the user was working.
+const { out: noReportOut, days: noReportDays } = runAcrossLocalDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
 noReportDays.some((day) => noReportOut?.includes(`jds/${day}_`))
   ? pass('no --report: filename shape unchanged')
   : fail('no --report: filename shape regressed');
@@ -13203,7 +13268,7 @@ try {
   rmSync(ready, { recursive: true, force: true });
 
   // Auto-copy template: when modes/_profile.md or modes/_custom.md is missing but template exists,
-  // doctor --json auto-copies them, records them in autoCopied, and does not report them as missing (#1369).
+  // doctor --json --init-templates copies them, records them in autoCopied, and does not report them as missing (#1369).
   const autoCopy = mkdtempSync(join(tmpdir(), 'co-autocopy-'));
   mkdirSync(join(autoCopy, 'config'), { recursive: true });
   mkdirSync(join(autoCopy, 'modes'), { recursive: true });
@@ -13212,7 +13277,7 @@ try {
   }
   writeFileSync(join(autoCopy, 'modes/_profile.template.md'), '# profile template\n');
   writeFileSync(join(autoCopy, 'modes/_custom.template.md'), '# custom template\n');
-  const ac = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', autoCopy]) || '{}');
+  const ac = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--init-templates', '--target', autoCopy]) || '{}');
   if (
     ac.onboardingNeeded === false &&
     Array.isArray(ac.missing) &&
@@ -13225,9 +13290,9 @@ try {
     existsSync(join(autoCopy, 'modes/_custom.md')) &&
     readFileSync(join(autoCopy, 'modes/_custom.md'), 'utf-8') === '# custom template\n'
   ) {
-    pass('Auto-copy template → modes/_profile.md and modes/_custom.md copied silently in --json mode (#1369)');
+    pass('Explicit onboarding → modes/_profile.md and modes/_custom.md copied with --init-templates (#1369)');
   } else {
-    fail(`Auto-copy template failed in --json mode: ${JSON.stringify(ac)}`);
+    fail(`Template initialization failed: ${JSON.stringify(ac)}`);
   }
   rmSync(autoCopy, { recursive: true, force: true });
 
@@ -15277,6 +15342,126 @@ try {
   fail(`scan Unicode dedup/match key tests crashed: ${e.message}`);
 }
 
+// ── 46. Keyword coverage (ATS match) ────────────────────────────
+console.log('\n46. Keyword coverage (ATS match)');
+
+try {
+  const { analyzeCoverage, extractKeywords, countOccurrences, variantForms, htmlToText } =
+    await import(pathToFileURL(join(ROOT, 'keyword-match.mjs')).href);
+
+  const cv = [
+    'Senior engineer. Built Python services with FastAPI. Python remains my primary language.',
+    'Deployed on k8s. Owned CI/CD pipelines. Wrote C++ modules and some JavaScript.',
+    'Strong in machine  learning and PostgreSQL. Set up observability once.',
+  ].join('\n');
+  const keywords = ['Python', 'FastAPI', 'Kubernetes', 'CI/CD', 'C++',
+    'Machine Learning', 'Postgres', 'observability', 'Java', 'gRPC'];
+  const r = analyzeCoverage(keywords, cv);
+
+  if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
+  else fail('keyword coverage: Python should be present');
+
+  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
+  else fail('keyword coverage: Python appears twice and must not be thin');
+
+  if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
+  else fail('keyword coverage: Kubernetes should match via k8s synonym');
+
+  if (r.present.includes('Machine Learning')) pass('keyword coverage: case + collapsed-whitespace match');
+  else fail('keyword coverage: Machine Learning should match "machine  learning"');
+
+  if (r.present.includes('C++') && r.present.includes('CI/CD')) pass('keyword coverage: symbol-bearing keywords match (C++, CI/CD)');
+  else fail('keyword coverage: C++ / CI/CD should match');
+
+  if (r.present.includes('Postgres')) pass('keyword coverage: synonym match (PostgreSQL -> Postgres)');
+  else fail('keyword coverage: Postgres should match via postgresql synonym');
+
+  if (!r.present.includes('Java') && r.missing.includes('Java')) pass('keyword coverage: word boundary holds (Java != JavaScript)');
+  else fail('keyword coverage: Java must not match inside JavaScript');
+
+  if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
+  else fail('keyword coverage: gRPC should be missing');
+
+  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
+  else fail('keyword coverage: observability should be thin');
+
+  if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
+  else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
+
+  if (countOccurrences('java', 'javascript and java') === 1) pass('keyword coverage: countOccurrences respects word boundaries');
+  else fail(`keyword coverage: countOccurrences boundary wrong: ${countOccurrences('java', 'javascript and java')}`);
+
+  if (!variantForms('aws').includes('aw') && !variantForms('k8s').includes('k8')) pass('keyword coverage: variantForms does not truncate short acronyms (aws, k8s)');
+  else fail(`keyword coverage: variantForms truncates acronyms: ${JSON.stringify(variantForms('aws'))}`);
+
+  const stripped = htmlToText('<style>.x{}</style><p>Python &amp; <b>gRPC</b></p>');
+  if (stripped === 'Python & gRPC') pass('keyword coverage: htmlToText strips tags/style and decodes entities');
+  else fail(`keyword coverage: htmlToText wrong: ${JSON.stringify(stripped)}`);
+
+  // Adversarial: a nested entity must resolve to the literal text "&lt;" (guards the
+  // &amp;-decoded-last fix, so it is not re-decoded into a "<" tag char), and a
+  // comment-sheltered or attribute-laden <script> must still be stripped (tag-filter fix).
+  const hardened = htmlToText('<!--<script>x</script>--><script type="text/js">evil()</script>a &amp;lt;b&gt; c');
+  if (hardened === 'a &lt;b> c') pass('keyword coverage: htmlToText resists nested-entity + sheltered-script bypass');
+  else fail(`keyword coverage: htmlToText hardening wrong: ${JSON.stringify(hardened)}`);
+
+  const htmlCv = '<html><body><h2>Summary</h2><p>Built Python and gRPC services.</p></body></html>';
+  const rHtml = analyzeCoverage(['Python', 'gRPC', 'Java'], htmlToText(htmlCv));
+  if (rHtml.coveragePct === 67 && rHtml.present.includes('gRPC')) pass('keyword coverage: scans text extracted from tailored HTML');
+  else fail(`keyword coverage: HTML scan wrong: ${JSON.stringify(rHtml)}`);
+
+  const kws = extractKeywords('## Keywords extracted\n- Python\n- FastAPI, gRPC\n\n## Next');
+  if (kws.length === 3 && kws[0] === 'Python' && kws[2] === 'gRPC') pass('keyword coverage: extractKeywords parses bullets + commas, stops at next heading');
+  else fail(`keyword coverage: extractKeywords wrong: ${JSON.stringify(kws)}`);
+
+  // Negative-path CLI: --self-test never touches the report/CV file-resolution path,
+  // so exercise it directly. A nonexistent report (and a no-arg invocation) must fail
+  // GRACEFULLY — clean exit 1 + a readable message, never an uncaught stack trace.
+  const kmCli = join(ROOT, 'keyword-match.mjs');
+  const noStack = (s) => !/\n\s+at\s/.test(s); // Node prints "    at <frame>" on an uncaught throw
+  const runCli = (argv) => {
+    try {
+      execFileSync(NODE, [kmCli, ...argv], { cwd: ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 });
+      return { status: 0, stderr: '' };
+    } catch (e) {
+      return { status: e.status, stderr: (e.stderr || '').toString() };
+    }
+  };
+
+  const missing = runCli([join(ROOT, '.tmp-test-no-such-report.md')]);
+  if (missing.status === 1 && /not found/i.test(missing.stderr) && noStack(missing.stderr)) {
+    pass('keyword coverage: CLI exits 1 with a clean message on a missing report file');
+  } else {
+    fail(`keyword coverage: CLI missing-report handling wrong: status=${missing.status} stderr=${JSON.stringify(missing.stderr)}`);
+  }
+
+  const noArg = runCli([]);
+  if (noArg.status === 1 && /Usage:/i.test(noArg.stderr) && noStack(noArg.stderr)) {
+    pass('keyword coverage: CLI prints usage + exits 1 when no report arg is given');
+  } else {
+    fail(`keyword coverage: CLI no-arg handling wrong: status=${noArg.status} stderr=${JSON.stringify(noArg.stderr)}`);
+  }
+
+  // A mistyped flag or a stray second path must fail fast instead of silently
+  // producing Markdown when JSON was asked for (both rejected before any file I/O).
+  const unknownOpt = runCli(['--jsno']);
+  if (unknownOpt.status === 1 && /Unknown option: --jsno/.test(unknownOpt.stderr) && noStack(unknownOpt.stderr)) {
+    pass('keyword coverage: CLI rejects an unknown option with exit 1');
+  } else {
+    fail(`keyword coverage: CLI unknown-option handling wrong: status=${unknownOpt.status} stderr=${JSON.stringify(unknownOpt.stderr)}`);
+  }
+
+  const extraArg = runCli(['first-report.md', 'second-report.md']);
+  if (extraArg.status === 1 && /Unexpected argument: second-report\.md/.test(extraArg.stderr) && noStack(extraArg.stderr)) {
+    pass('keyword coverage: CLI rejects an extra positional argument with exit 1');
+  } else {
+    fail(`keyword coverage: CLI extra-argument handling wrong: status=${extraArg.status} stderr=${JSON.stringify(extraArg.stderr)}`);
+  }
+
+} catch (e) {
+  fail(`keyword coverage tests crashed: ${e.message}`);
+}
+
 // ── Plugin engine (contract + sandbox + firewall) ────────────────
 console.log('\n49. Plugin engine (contract + sandbox + firewall)');
 
@@ -16470,10 +16655,15 @@ try {
       // next, and this section previously covered 4 of the 6 files present.
       let webUnits = [];
       try {
-        webUnits = readdirSync(join(ROOT, 'web', 'tests', 'lib'))
+        const webLibRoot = join(ROOT, 'web', 'tests', 'lib');
+        webUnits = readdirSync(webLibRoot, { recursive: true })
           .filter((f) => f.endsWith('.test.mjs'))
+          // A checkout under web/tests/lib holds another tree's suites; the
+          // parity walk below skips those the same way (#3762), so the gate
+          // must not run them.
+          .filter((f) => !isUnderNestedCheckout(webLibRoot, f))
           .sort()
-          .map((f) => `web/tests/lib/${f}`);
+          .map((f) => join('web', 'tests', 'lib', f));
       } catch (err) {
         // Fail rather than throw to the outer catch, which would skip every value
         // assertion below while reporting only "freeze section crashed".
@@ -18775,12 +18965,36 @@ try {
     const descriptions = [
       ['entity', entity.description || ''],
       ...projects.map((pr) => [`project ${pr.guid}`, pr.description || '']),
+      // Plans are read by funders too: a six-month plan quoting "72,400+ stars"
+      // with no date went stale the same way an entity description would.
+      ...plans.map((pl) => [`plan ${pl.guid}`, pl.description || '']),
     ];
     const undated = descriptions.filter(([, text]) => METRIC_RE.test(text) && !COUNTED_RE.test(text));
     if (undated.length === 0) {
       pass('every funding.json description that quotes a count also states when it was counted');
     } else {
       fail(`funding.json ${undated.map(([w]) => w).join(', ')}: quotes a metric with no "counted <date>"`);
+    }
+
+    // A repository wellKnown is the proof the directory asks for: it fetches that
+    // file and looks for the manifest URL in it. The repo moved to the org on
+    // 31-Aug and the listing kept flagging it as unproven until this file existed,
+    // so the check is that the file ships AND names the manifest's own URL.
+    const repoProofs = projects.filter((pr) => pr.repositoryUrl?.wellKnown);
+    if (repoProofs.length > 0) {
+      const WELL_KNOWN = '.well-known/funding-manifest-urls';
+      const MANIFEST_URL = 'https://github.com/career-ops-hq/career-ops/raw/main/funding.json';
+      let proof = null;
+      try { proof = readFile(WELL_KNOWN); } catch { proof = null; }
+      const listed = proof ? proof.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+      const pointsHere = repoProofs.every((pr) => pr.repositoryUrl.wellKnown.endsWith(`/${WELL_KNOWN}`));
+      if (proof !== null && listed.includes(MANIFEST_URL) && pointsHere) {
+        pass(`${WELL_KNOWN} ships and lists ${MANIFEST_URL}, and repositoryUrl.wellKnown points at it`);
+      } else {
+        fail(proof === null ? `repositoryUrl.wellKnown is set but ${WELL_KNOWN} is missing`
+          : !pointsHere ? `repositoryUrl.wellKnown does not point at ${WELL_KNOWN}`
+          : `${WELL_KNOWN} does not list ${MANIFEST_URL}`);
+      }
     }
   }
 } catch (e) {

@@ -155,11 +155,18 @@ test('no tracker writer resolves the tracker from its own directory', () => {
   const offenders = [];
   for (const file of readdirSync(ROOT).filter((f) => f.endsWith('.mjs'))) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
-    const call = src.match(/resolveTrackerPath\(\s*([A-Z_]+)\s*\)/);
-    if (!call) continue;
-    const def = src.match(new RegExp(`^const ${call[1]}\\s*=\\s*(.+)$`, 'm'));
-    if (def && /dirname\(\s*fileURLToPath/.test(def[1])) {
-      offenders.push(`${file}: resolveTrackerPath(${call[1]}) where ${call[1]} = ${def[1].trim().slice(0, 50)}`);
+    // Every call, and any identifier: reply-watch.mjs passed `__dirname`
+    // straight in and slipped past an uppercase-only, first-match pattern.
+    for (const [, arg] of src.matchAll(/resolveTrackerPath\(\s*([A-Za-z_]\w*|process\.cwd\(\))\s*\)/g)) {
+      // process.cwd() is the other wrong root: hired-share.mjs defaulted to it.
+      if (arg === 'process.cwd()') {
+        offenders.push(`${file}: resolveTrackerPath(process.cwd())`);
+        continue;
+      }
+      const def = src.match(new RegExp(`^const ${arg}\\s*=\\s*(.+)$`, 'm'));
+      if (def && /dirname\(\s*fileURLToPath/.test(def[1])) {
+        offenders.push(`${file}: resolveTrackerPath(${arg}) where ${arg} = ${def[1].trim().slice(0, 50)}`);
+      }
     }
   }
   assert.deepEqual(offenders, [], `tracker resolved from the code root:\n${offenders.join('\n')}`);

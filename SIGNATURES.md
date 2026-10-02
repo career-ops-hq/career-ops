@@ -184,3 +184,7 @@ public commit with a stated reason.
 - @samayoade10 | 2026-09-24 | "I want to explore the best way to find opportunities that ordinarily I won’t look at exploring." | id:42525188 | src:https://github.com/career-ops-hq/career-ops/discussions/4447 | n:136
 - @JAYPHARMA | 2026-09-27 | id:187297453 | src:https://github.com/career-ops-hq/career-ops/discussions/4512 | n:137
 - @michelle-toftely | 2026-09-27 | "I want hiring to become an evaluation of capability and future impact, rather than a checklist of historical titles." | id:334648826 | src:https://github.com/career-ops-hq/career-ops/discussions/4520 | n:138
+- @juanpabloescamilla-ing | 2026-09-28 | "Si puede servir para encontar un empleo mejor, me parece una interesante practica" | id:321902910 | src:https://github.com/career-ops-hq/career-ops/discussions/4568 | n:139
+- @faizhameed | Faiz Hameed | 2026-09-30 | id:41015883 | src:https://github.com/career-ops-hq/career-ops/discussions/4637 | n:140
+- @sec-js | 2026-09-30 | id:54868859 | src:https://github.com/career-ops-hq/career-ops/discussions/4654 | n:141
+- @nguyentuanngoc21 | 2026-10-01 | "I am trying with it, it looks good" | id:82352476 | src:https://github.com/career-ops-hq/career-ops/discussions/4662 | n:142

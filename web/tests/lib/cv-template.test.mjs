@@ -51,11 +51,21 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
   // unresolved base would compare two spellings of the same directory.
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cv-template-")));
   fs.copyFileSync(path.join(CORE, "cv-templates.mjs"), path.join(root, "cv-templates.mjs"));
-  // cv-templates.mjs imports ./lib/is-main-module.mjs relative to itself.
+  // cv-templates.mjs imports ./lib/is-main-module.mjs, ./path-resolver.mjs (its
+  // default profile path follows the data root) and ./providers/_html-entities.mjs
+  // (it decodes entities in a template meta block) relative to itself. A missing
+  // one throws at module load and every case below falls back to the base
+  // template, which is the same silent pass the js-yaml link below prevents.
   fs.mkdirSync(path.join(root, "lib"), { recursive: true });
   fs.copyFileSync(
     path.join(CORE, "lib", "is-main-module.mjs"),
     path.join(root, "lib", "is-main-module.mjs"),
+  );
+  fs.copyFileSync(path.join(CORE, "path-resolver.mjs"), path.join(root, "path-resolver.mjs"));
+  fs.mkdirSync(path.join(root, "providers"), { recursive: true });
+  fs.copyFileSync(
+    path.join(CORE, "providers", "_html-entities.mjs"),
+    path.join(root, "providers", "_html-entities.mjs"),
   );
   // js-yaml is a bare specifier: outside the checkout there is no node_modules on
   // the way up, the import throws, and EVERY case below would fall back to the

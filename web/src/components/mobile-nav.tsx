@@ -181,9 +181,12 @@ export function MobileNav() {
 
         <div className="co-msafe mt-auto space-y-3 border-t border-border px-4 pt-4">
           <UsageMeter />
-          <div className="flex items-center justify-between">
-            <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-            <ThemeToggle />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className="font-mono text-[10px] text-faint">THEME</span>
+            </div>
+            <ThemeToggle showLabel className="bg-surface-hover/40" />
           </div>
         </div>
       </aside>

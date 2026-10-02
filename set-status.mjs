@@ -42,7 +42,9 @@
  * State validation is strict against templates/states.yml (labels, ids, and
  * aliases resolve to the canonical label; anything else is rejected before the
  * tracker is touched). --note appends to the Notes cell with "; " and is
- * idempotent — re-running the same command is always safe.
+ * idempotent — re-running the same command is always safe. With --replace-note
+ * OLD, --note NEW instead replaces whole notes at "; " boundaries (including
+ * idempotent retries); a missing match fails without writing anything.
  *
  * The read-modify-write runs under the shared tracker lock (tracker-utils.mjs,
  * same lock as merge-tracker.mjs) and the file is replaced atomically. Only the
@@ -100,6 +102,7 @@ import {
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { claimActivity, releaseActivity, describeActiveOwner } from './session-activity.mjs';
 
 // Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
 // DATA_ROOT is the user's, and getCareerOpsRoot() is the only thing that honours
@@ -128,6 +131,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
+  --replace-note "OLD" Replace whole OLD notes with --note text; fail if neither is present
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
                      pass it when the transition happened earlier than it's recorded)
@@ -185,8 +189,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -249,6 +253,10 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--json') { flags.json = true; }
   else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
+}
+
+if (flags.replaceNote !== null && (!cell(flags.replaceNote) || flags.note === null || !cell(flags.note))) {
+  failUsage('--replace-note requires non-empty OLD and --note NEW values');
 }
 
 // --row and --report ARE the selector, so they replace the positional one.
@@ -568,73 +576,152 @@ if (flags.role && !flags.force && !roleMatchesTarget) {
 const oldStatus = target.status;
 const note = flags.note != null ? cell(flags.note) : null;
 
-// Rebuild only the matched line: change the Status cell, append the note, keep
-// every other cell exactly as parsed.
-const parts = lines[target.lineIdx].split('|').map(s => s.trim());
-while (parts.length <= Math.max(colmap.status, colmap.notes ?? 0)) parts.push('');
-
-const statusChanged = parts[colmap.status] !== newStatus;
-parts[colmap.status] = newStatus;
-
-let noteChanged = false;
-if (note) {
-  if (colmap.notes == null) {
-    failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
+// ── advisory session-activity claim (#4532) ──────────────────────
+//
+// Concurrent sessions have no mutual awareness today: two sessions can each
+// pick up the same tracker row and do redundant or conflicting work, with the
+// collision only surfacing after the fact (#4506/#4507 — two sessions each
+// wrote a batch/tracker-additions/*.tsv for the same report under a
+// differently spelled company name). session-activity.mjs is a purely
+// advisory signal modeled on reserve-report-num.mjs's sentinel pattern: it
+// never blocks or changes the exit code, it only lets this run warn when
+// another session already claimed the same row.
+//
+// Keyed by report number when the row has one (the stable identifier a
+// concurrent session reading the same report is most likely to key on too);
+// falling back to normalized company+role for a backfilled row with no
+// report link. Skipped entirely on --dry-run, matching the JD-archive-style
+// triggers elsewhere in this file: a preview claims nothing.
+//
+// This claim is process-bound because set-status releases it in this same
+// process's finally block. A confirmed-dead PID can therefore reclaim a claim
+// left behind by an early process exit; raw CLI claims remain TTL-bound.
+let activityClaim = null;
+if (!flags.dryRun) {
+  const activityReportNums = extractTrackerReportNumbers(target.report, target.notes);
+  const activityKey = activityReportNums.length
+    ? `report:${activityReportNums[0]}`
+    : `tracker-row:${normalizeCompany(target.company)}|${target.role}`;
+  try {
+    const claim = claimActivity(activityKey, {
+      label: `set-status → ${newStatus}`,
+      processBound: true,
+    });
+    if (claim.claimed) {
+      activityClaim = { key: activityKey, token: claim.token };
+    } else if (claim.owner) {
+      console.warn(`⚠ ${describeActiveOwner(claim.owner)}`);
+    }
+  } catch (err) {
+    // Never fails the status change — same policy as every other advisory
+    // hook in this file (follow-up seeding, status-log append).
+    console.warn(`⚠ session-activity claim failed (status change proceeding anyway): ${err.message}`);
   }
-  const existing = parts[colmap.notes] ?? '';
-  // Delimiter-aware idempotency: the note counts as already present only when
-  // it appears as a whole "; "-delimited entry (or as the entire field) — a
-  // bare substring of a longer entry ("sent" inside "sent CV") must not
-  // suppress a genuinely new note. Matching the full note text at entry
-  // boundaries (instead of splitting the field into segments) keeps retries
-  // idempotent even when the note itself contains "; ".
-  const hasNote = existing === note
-    || existing.startsWith(`${note}; `)
-    || existing.endsWith(`; ${note}`)
-    || existing.includes(`; ${note}; `);
-  if (!hasNote) {
-    parts[colmap.notes] = existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note;
-    noteChanged = true;
+}
+
+let statusChanged = false;
+let noteChanged = false;
+let statusLogged = false;
+const replacedNote = flags.replaceNote !== null ? cell(flags.replaceNote) : null;
+try {
+  // Rebuild only the matched line: change the Status cell, append the note, keep
+  // every other cell exactly as parsed.
+  const parts = lines[target.lineIdx].split('|').map(s => s.trim());
+  while (parts.length <= Math.max(colmap.status, colmap.notes ?? 0)) parts.push('');
+
+  statusChanged = parts[colmap.status] !== newStatus;
+  parts[colmap.status] = newStatus;
+
+  if (note) {
+    if (colmap.notes == null) {
+      failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
+    }
+    const existing = parts[colmap.notes] ?? '';
+    if (replacedNote !== null) {
+      // Use the same whole-note boundaries as append idempotency. Prefer the
+      // longer complete span so NEW containing OLD (including "; ") is not
+      // expanded again on retry, and OLD containing NEW is still replaced.
+      const alternatives = [note, replacedNote].sort((a, b) => b.length - a.length)
+        .map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const wholeNotes = new RegExp(`(^|; )(${alternatives.join('|')})(?=; |$)`, 'g');
+      let found = false;
+      const updated = existing.replace(wholeNotes, (_match, prefix, entry) => {
+        found = true;
+        return prefix + (entry === replacedNote ? note : entry);
+      });
+      if (!found) {
+        failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note nor --note matches a whole note in the Notes cell');
+      }
+      parts[colmap.notes] = updated;
+      noteChanged = updated !== existing;
+    } else {
+      // Delimiter-aware idempotency: the note counts as already present only when
+      // it appears as a whole "; "-delimited entry (or as the entire field) — a
+      // bare substring of a longer entry ("sent" inside "sent CV") must not
+      // suppress a genuinely new note. Matching the full note text at entry
+      // boundaries (instead of splitting the field into segments) keeps retries
+      // idempotent even when the note itself contains "; ".
+      const hasNote = existing === note
+        || existing.startsWith(`${note}; `)
+        || existing.endsWith(`; ${note}`)
+        || existing.includes(`; ${note}; `);
+      if (!hasNote) {
+        parts[colmap.notes] = existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note;
+        noteChanged = true;
+      }
+    }
+  }
+
+  if ((statusChanged || noteChanged) && !flags.dryRun) {
+    lines[target.lineIdx] = rebuildRow(parts);
+    try {
+      writeFileAtomic(APPS_FILE, lines.join('\n'));
+    } catch (err) {
+      // Same structured error contract as every other failure path — a raw
+      // stack trace on stdout/stderr would break --json consumers.
+      failWith(EXIT_USAGE, 'write-failure', `Cannot write tracker at ${APPS_FILE}: ${err.message}`);
+    }
+  }
+
+  // ── status-log append (transition ledger, read by funnel-velocity.mjs) ──
+  // Observation trail only: the tracker stays the source of truth for STATE,
+  // the ledger records WHEN transitions happened. A failed append is a warning,
+  // never a failure — the status write above already succeeded. Sibling of the
+  // tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
+  // the ledger next to the tracker it describes. Inside the lock window, so
+  // concurrent writers can't interleave lines.
+  if (statusChanged && !flags.dryRun) {
+    const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
+    // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
+    // so this appended a status-log row dated a day that had not happened yet
+    // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
+    // time-between-stages, so a future-dated transition skews the interval it
+    // measures rather than just looking odd in the file.
+    const eventDate = flags.on ?? localToday();
+    try {
+      appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\t${flags.source ?? 'set-status'}\t\n`);
+      statusLogged = true;
+    } catch (err) {
+      console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
+    }
+  }
+} finally {
+  lock?.release();
+  // Release the claim once the write (and its log append) has finished, so
+  // it never outlives the run — reached even if something above threw.
+  // Never fails the status change: a release failure is only ever a warning,
+  // and the stale-sentinel handling in session-activity.mjs means a leaked
+  // claim self-heals once this process is no longer alive anyway.
+  if (activityClaim) {
+    try {
+      releaseActivity(activityClaim.key, { token: activityClaim.token });
+    } catch (err) {
+      console.warn(`⚠ session-activity release failed (status change already committed): ${err.message}`);
+    }
   }
 }
 
 const changed = statusChanged || noteChanged;
-
-if (changed && !flags.dryRun) {
-  lines[target.lineIdx] = rebuildRow(parts);
-  try {
-    writeFileAtomic(APPS_FILE, lines.join('\n'));
-  } catch (err) {
-    // Same structured error contract as every other failure path — a raw
-    // stack trace on stdout/stderr would break --json consumers.
-    failWith(EXIT_USAGE, 'write-failure', `Cannot write tracker at ${APPS_FILE}: ${err.message}`);
-  }
-}
-
-// ── status-log append (transition ledger, read by funnel-velocity.mjs) ──
-// Observation trail only: the tracker stays the source of truth for STATE,
-// the ledger records WHEN transitions happened. A failed append is a warning,
-// never a failure — the status write above already succeeded. Sibling of the
-// tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
-// the ledger next to the tracker it describes. Inside the lock window, so
-// concurrent writers can't interleave lines.
-let statusLogged = false;
-if (statusChanged && !flags.dryRun) {
-  const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
-  // LOCAL today: the UTC day is TOMORROW for a west-of-Greenwich evening run,
-  // so this appended a status-log row dated a day that had not happened yet
-  // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
-  // time-between-stages, so a future-dated transition skews the interval it
-  // measures rather than just looking odd in the file.
-  const eventDate = flags.on ?? localToday();
-  try {
-    appendFileSync(logPath, `${target.num}\t${eventDate}\t${oldStatus}\t${newStatus}\t${flags.source ?? 'set-status'}\t\n`);
-    statusLogged = true;
-  } catch (err) {
-    console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
-  }
-}
-lock?.release();
 
 // ── follow-up seeding (#1430) ────────────────────────────────────
 //
@@ -712,6 +799,7 @@ const result = {
   oldStatus,
   newStatus,
   ...(note != null ? { note } : {}),
+  ...(replacedNote !== null ? { replacedNote } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
   // Fire the #1430 hook only on an actual transition INTO Applied — an
   // idempotent re-run of an already-Applied row must not invite a consumer

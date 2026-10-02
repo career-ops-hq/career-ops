@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.13.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.12.0...web-v0.13.0) (2026-10-01)
+
+
+### Features
+
+* add Hermes Agent headless CLI support ([#4623](https://github.com/career-ops-hq/career-ops/issues/4623)) ([a6b867a](https://github.com/career-ops-hq/career-ops/commit/a6b867adbc634cb61cc103ac8af350932878baf3))
+* **cli:** register Pi as a supported CLI host ([#4157](https://github.com/career-ops-hq/career-ops/issues/4157)) ([#4157](https://github.com/career-ops-hq/career-ops/issues/4157)) ([74c5d17](https://github.com/career-ops-hq/career-ops/commit/74c5d178a631540a9966122fef29db02b28918dc))
+* **explorer:** free banded title-vs-profile fit hint on discovery cards ([#3261](https://github.com/career-ops-hq/career-ops/issues/3261)) ([b080539](https://github.com/career-ops-hq/career-ops/commit/b0805395cc8d462bc9a6a36c0b2ea8921c522e50))
+* **ui:** stream matched job cards into results during scan ([#4200](https://github.com/career-ops-hq/career-ops/issues/4200)) ([78e13ca](https://github.com/career-ops-hq/career-ops/commit/78e13ca707a567d2d6b2dc5df5c65828104ee20a))
+* **web:** add city or location filter to Explore ([#4397](https://github.com/career-ops-hq/career-ops/issues/4397)) ([9a8667b](https://github.com/career-ops-hq/career-ops/commit/9a8667b39cb7c632e8b55dd62c836c8427e92069))
+* **web:** add pipeline Sankey on Analytics ([#3373](https://github.com/career-ops-hq/career-ops/issues/3373)) ([508abb3](https://github.com/career-ops-hq/career-ops/commit/508abb3b46c421ce00eff6f136a181b4df369ff1))
+* **web:** add shared theme provider and polish light-mode UX ([#4313](https://github.com/career-ops-hq/career-ops/issues/4313)) ([27a89b7](https://github.com/career-ops-hq/career-ops/commit/27a89b71af5c981e2ff7d05d085c14a3c8fe5270))
+* **web:** make the evaluated-role report a decision, not a dump ([#4210](https://github.com/career-ops-hq/career-ops/issues/4210)) ([3ebcaf6](https://github.com/career-ops-hq/career-ops/commit/3ebcaf661c6f20d432d4a02fe7c35df14d64cff2))
+* **web:** show tracker number in Pipeline ([#3477](https://github.com/career-ops-hq/career-ops/issues/3477)) ([bf2a764](https://github.com/career-ops-hq/career-ops/commit/bf2a764bb07acd30f6b8b372e6bbf659901c1ea6))
+
+
+### Bug Fixes
+
+* **apply:** the code-fence strip reached inside JSON string values ([#3302](https://github.com/career-ops-hq/career-ops/issues/3302)) ([c8e1777](https://github.com/career-ops-hq/career-ops/commit/c8e1777d087b2e7c5be729d6712c493e48540159))
+* **deps:** update npm dependencies ([#3541](https://github.com/career-ops-hq/career-ops/issues/3541)) ([f067b13](https://github.com/career-ops-hq/career-ops/commit/f067b135716c7cc528c71720aac33554048114f6))
+* **generate-pdf:** key the PDF manifest on report number and artifact kind ([#3959](https://github.com/career-ops-hq/career-ops/issues/3959)) ([10e789a](https://github.com/career-ops-hq/career-ops/commit/10e789a0363eba9f1aa73f8a1962e84e219aeb8d))
+* **paths:** resolve user-layer files via the data root in batch-tailor, cv-templates and openrouter-runner ([#4570](https://github.com/career-ops-hq/career-ops/issues/4570)) ([cda5b0a](https://github.com/career-ops-hq/career-ops/commit/cda5b0aa75ed601307f90e4810d26dcf20758259))
+* **tracker:** recognize localized headers across Node, web, and Go ([#3931](https://github.com/career-ops-hq/career-ops/issues/3931)) ([a827945](https://github.com/career-ops-hq/career-ops/commit/a827945b4a957976969b0a585019634f448ca44e))
+* **web:** date run-route reports, tracker rows and PDFs with the local day ([#4615](https://github.com/career-ops-hq/career-ops/issues/4615)) ([ca4be23](https://github.com/career-ops-hq/career-ops/commit/ca4be231b124d43aaa8ce76c3e8cfff6272255b6))
+* **web:** keep Explore results from sources that finished when another times out ([#4431](https://github.com/career-ops-hq/career-ops/issues/4431)) ([52d5ee5](https://github.com/career-ops-hq/career-ops/commit/52d5ee5342bfa110826dbedca8578561530bd3b3))
+* **web:** launch npm CLIs on Windows ([#2626](https://github.com/career-ops-hq/career-ops/issues/2626)) ([71d31f5](https://github.com/career-ops-hq/career-ops/commit/71d31f5c728fdc175fdd2e23972cfe29700b2b6c))
+* **web:** persist inbox Skip to pipeline.md ([#3632](https://github.com/career-ops-hq/career-ops/issues/3632)) ([fdaec05](https://github.com/career-ops-hq/career-ops/commit/fdaec0557fa5c79cbdac4b8f4cb13b9d5499e88b))
+* **web:** preserve profiles with invalid YAML root shapes ([#4108](https://github.com/career-ops-hq/career-ops/issues/4108)) ([5e79805](https://github.com/career-ops-hq/career-ops/commit/5e79805be0134b000612771c26e7dbddd6ed981b))
+* **web:** readInbox returns an empty inbox on a CRLF data/pipeline.md ([#3566](https://github.com/career-ops-hq/career-ops/issues/3566)) ([e0cad2e](https://github.com/career-ops-hq/career-ops/commit/e0cad2e0077da2e6e85fc6df0f03e7ff21243275))
+* **web:** regenerate the lockfile for next 16.3.4 ([#4477](https://github.com/career-ops-hq/career-ops/issues/4477)) ([71554e8](https://github.com/career-ops-hq/career-ops/commit/71554e882d9f101b47f92c704a2613088e05a400))
+* **web:** reject malformed follow-up IDs ([#3482](https://github.com/career-ops-hq/career-ops/issues/3482)) ([9fc269b](https://github.com/career-ops-hq/career-ops/commit/9fc269b24404409caaafc27a06eeb53988738e1a))
+* **web:** resolve engine scripts from the checkout, not the data root ([#4518](https://github.com/career-ops-hq/career-ops/issues/4518)) ([ddb330a](https://github.com/career-ops-hq/career-ops/commit/ddb330a7be6c0b230f6f0f5d7f5bfee6f63a80b8))
+* **web:** resolve the CV template from cv.template on dashboard runs ([#4035](https://github.com/career-ops-hq/career-ops/issues/4035)) ([5076dc0](https://github.com/career-ops-hq/career-ops/commit/5076dc0547bd81fbc12b1724e38a950084dfdcad))
+* **web:** retain tracker guard until canceled worker closes ([#4113](https://github.com/career-ops-hq/career-ops/issues/4113)) ([026ef23](https://github.com/career-ops-hq/career-ops/commit/026ef2350b2d6b580ba258db5a4cb340359ea171))
+* **web:** stop /api/apply/drive closing its stream twice on success ([#4039](https://github.com/career-ops-hq/career-ops/issues/4039)) ([dd34e28](https://github.com/career-ops-hq/career-ops/commit/dd34e28710265c78a91466617167e47dcb924999)), closes [#3966](https://github.com/career-ops-hq/career-ops/issues/3966)
+* **web:** stop replacement when backups fail ([#4499](https://github.com/career-ops-hq/career-ops/issues/4499)) ([54cef96](https://github.com/career-ops-hq/career-ops/commit/54cef96c6b6472e545f49d7e96ae3b4a6967db0c))
+* **web:** sync package-lock.json with next@16.3.4 so npm ci works again ([#4481](https://github.com/career-ops-hq/career-ops/issues/4481)) ([6326eb5](https://github.com/career-ops-hq/career-ops/commit/6326eb5d3804e8cb20d28acd5701a4e603a301f9))
+* **web:** the logo resolver deletes accented letters to guess a domain, and caches the miss forever ([#3318](https://github.com/career-ops-hq/career-ops/issues/3318)) ([#3319](https://github.com/career-ops-hq/career-ops/issues/3319)) ([36e5056](https://github.com/career-ops-hq/career-ops/commit/36e5056004703e3d89a4b82600eadb6d36e0016d))
+* **web:** the web tracker reader drops the Apply Link and Follow-up columns ([#3603](https://github.com/career-ops-hq/career-ops/issues/3603)) ([4be56a3](https://github.com/career-ops-hq/career-ops/commit/4be56a388dc53990015a17786c49453ac8d50b0f))
+* **web:** validate the saved cliId against what is installed before a run ([#4019](https://github.com/career-ops-hq/career-ops/issues/4019)) ([00e2507](https://github.com/career-ops-hq/career-ops/commit/00e2507055e5a458b56d6e9956b30d8147b8b17d))
+
+
+### Performance Improvements
+
+* **web:** reuse home data reads and reduce queue payload ([#4105](https://github.com/career-ops-hq/career-ops/issues/4105)) ([6a14576](https://github.com/career-ops-hq/career-ops/commit/6a14576ee1cf06f66a0d1b8b2b4ab5df827a891b))
+
 ## [0.12.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.11.0...web-v0.12.0) (2026-09-24)
 
 
