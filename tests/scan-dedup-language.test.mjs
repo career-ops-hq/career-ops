@@ -17,7 +17,8 @@
 //     across postings;
 //   - scan-history's requisition_id / language columns seed the decision, and
 //     tracker / pipeline rows inherit them by URL;
-//   - the row writer emits both columns, and a written row seeds the same key.
+//   - the row writer emits both columns, and a written row seeds the same key,
+//     including an id the writer's formula guard prefixed.
 import { pass, fail } from './helpers.mjs';
 import {
   ANY_REQUISITION,
@@ -30,6 +31,7 @@ import {
   matchesSeenCompanyRole,
   requisitionIdsForDedup,
   resolveDedupIncludeLanguage,
+  sanitizeTsvField,
 } from '../scan.mjs';
 import {
   parseScanHistoryLine,
@@ -308,4 +310,36 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
   const key = companyRoleDedupKey('Acme', 'Senior QA Manager');
   check(requisitionsByBase.get(key)?.has('JREQ 12757') && languagesByBase.get(key)?.get('JREQ 12757')?.has('en'),
     'formatScanHistoryRow → collectSeenCompanyRoles: a written row seeds its requisition and language');
+}
+{
+  // The writer prefixes an apostrophe to a cell starting with = + - @
+  // (spreadsheet-formula guard), so a live requisition id must meet its stored
+  // form, whether read from scan-history directly or inherited by a tracker row.
+  const key = companyRoleDedupKey('Acme', 'Senior QA Manager');
+  const line = formatScanHistoryRow({
+    url: DE_URL, source: 'smartrecruiters-api', title: 'Senior QA Manager', company: 'Acme', requisitionId: '-REQ1',
+  }, '2026-09-28');
+  const seed = (sources) => {
+    const requisitions = new Map();
+    const seen = collectSeenCompanyRoles(sources, {}, undefined, { requisitionsByBase: requisitions });
+    return { key, baseKey: key, seen, requisitions, locatedRequisitions: new Map() };
+  };
+  const fromHistory = seed({ scanHistoryText: `${HEADER}\n${line}\n` });
+  const fromTracker = seed({
+    scanHistoryText: `${HEADER}\n${line.replace('\tadded\t', '\tskipped_expired\t')}\n`,
+    applicationsText: `| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-09-28 | Acme | Senior QA Manager | 4.0/5 | Applied | ❌ | [001](../reports/001-acme-2026-09-28.md) | applied | ${DE_URL} |
+`,
+  });
+  check(matchesSeenCompanyRole(fromHistory, requisitionIdsForDedup({ requisitionId: '-REQ1' })) === true,
+    'requisitionIdsForDedup: a formula-guarded id read back from scan-history matches the live id (duplicate)');
+  check(matchesSeenCompanyRole(fromTracker, requisitionIdsForDedup({ requisitionId: '-REQ1' })) === true,
+    'requisitionIdsForDedup: a tracker row inheriting a formula-guarded id matches the live id (duplicate)');
+  check(matchesSeenCompanyRole(fromHistory, requisitionIdsForDedup({ requisitionId: '-REQ2' })) === false,
+    'requisitionIdsForDedup: another formula-guarded id stays a distinct requisition');
+  check(same(requisitionIdsForDedup({ requisitionId: "'abc" }), ["'ABC"]),
+    'requisitionIdsForDedup: a genuine leading apostrophe is kept');
+  check(['-REQ1', '=R1', '@x', '+1', "'=x", 'R1'].every((v) => sanitizeTsvField(sanitizeTsvField(v)) === sanitizeTsvField(v)),
+    'sanitizeTsvField is idempotent, so a stored id passed through it again keeps its form');
 }

@@ -2231,10 +2231,12 @@ export const ANY_REQUISITION = '*';
  *
  * - a requisition id the provider read from a dedicated ATS field
  *   (`Job.requisitionId`, e.g. SmartRecruiters `refNumber`), or the same value
- *   recorded in scan-history's `requisition_id` column. Taken verbatim (case
- *   folded), with no parsing: it is the employer's own identifier, not text,
- *   so it counts even without a digit. Forms read from a URL or from text
- *   must contain a digit;
+ *   recorded in scan-history's `requisition_id` column. Not parsed: it is the
+ *   employer's own identifier, not text, so it counts even without a digit.
+ *   It is compared case-folded and in the form scan-history stores it
+ *   (`sanitizeTsvField`, idempotent), so a live id and its stored copy meet
+ *   even when the writer's formula guard prefixed the stored one. Forms read
+ *   from a URL or from text must contain a digit;
  * - a Workday URL, via `workdayDedupKey` (the same parse the provider uses for
  *   cross-site dedupe, #3439, including its `-N` repost-suffix stripping);
  * - labelled free text (tracker Notes, a posting title) via the tracker's own
@@ -2282,7 +2284,7 @@ export const ANY_REQUISITION = '*';
 export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
   const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
-  if (suppliedId) return [suppliedId.toUpperCase()];
+  if (suppliedId) return [sanitizeTsvField(suppliedId).toUpperCase()];
   let raws;
   if (workdayKey) {
     // `workday:{hostname}:{reqId}` — a hostname has no colon, so the ID is
