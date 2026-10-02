@@ -2,6 +2,10 @@
 cv.md
 article-digest.md
 local/
+# Data-root marker (DATA_CONTRACT.md "Custom Data Directory"). It holds a path
+# on this machine only, so committing it would point every other clone at a
+# directory that does not exist there.
+/.career-ops-data
 # Everything under data/ is generated or personal at runtime — only .gitkeep
 # placeholders are tracked (verify with `git ls-files data/`). A blanket rule
 # means a new generated file (e.g. a future log/cache addition) is covered

@@ -585,7 +585,7 @@ if (!existsSync(PORTALS_FILE)) {
     // install: mergeProviderPlugins returns before any work when
     // config/plugins.yml is absent.
     const providers = await loadProviders(join(CODE_ROOT, 'providers'));
-    await mergeProviderPlugins(providers, { root: CODE_ROOT });
+    await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: CAREER_OPS });
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
     // findUnclaimedEntries silently skips an entry with no (or blank) `name` —

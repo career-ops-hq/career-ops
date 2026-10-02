@@ -76,12 +76,18 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 try {
   const { config } = await import('dotenv');
   // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
-  // single JSON object (#1906).
-  config({ quiet: true });
+  // single JSON object (#1906). Secrets are user-layer data, so a split
+  // checkout reads them beside the configured data root rather than from the
+  // caller's cwd (which may be the code checkout or an unrelated directory).
+  config({ path: path.join(DATA_ROOT, '.env'), quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -89,10 +95,6 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
-import { getCareerOpsRoot } from './path-resolver.mjs';
-const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
-
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
 // Overridable for the same reason the two inputs above are (#2271). A second
@@ -3408,7 +3410,7 @@ async function main() {
   // Opt-in: merge enabled keyed/auth-gated provider plugins. Returns immediately
   // (no discovery, no dotenv, no process.env mutation) when config/plugins.yml is
   // absent — so a plain scan with no plugins configured stays byte-identical.
-  await mergeProviderPlugins(providers, { root: path.dirname(PROVIDERS_DIR) });
+  await mergeProviderPlugins(providers, { root: path.dirname(PROVIDERS_DIR), dataRoot: DATA_ROOT });
   if (providers.size === 0) {
     console.error('Error: no providers loaded from providers/');
     process.exit(1);

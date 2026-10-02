@@ -33,11 +33,10 @@ import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
-import { normalizeUrl } from './url-key.mjs';
+import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from './url-key.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
-const MERGE_TRACKER_HELP_REQUESTED = process.argv.includes('--help') || process.argv.includes('-h');
-if (MERGE_TRACKER_HELP_REQUESTED) {
-  console.log(`Usage: node merge-tracker.mjs [options]
+const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
 Options:
   --dry-run        Preview the merge without writing files
@@ -45,9 +44,13 @@ Options:
   --migrate        Rewrite legacy report links relative to the tracker
   --migrate-via    Add the Via column to a legacy tracker
   --backfill-urls  Add the URL column and populate it from report metadata
-  -h, --help       Show this help and exit`);
-  process.exit(0);
-}
+  -h, --help       Show this help and exit`;
+// The flags below are read with process.argv.includes(), so a flag this script
+// does not know was dropped without a word: `--dryrun` ran the real merge,
+// rewrote applications.md and moved the TSVs into merged/ -- the one outcome
+// --dry-run exists to prevent. Reject it before anything is read or written.
+const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--backfill-urls', '--help', '-h'];
+validateFlags(process.argv.slice(2), MERGE_TRACKER_KNOWN_FLAGS, MERGE_TRACKER_USAGE);
 
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
@@ -1520,10 +1523,39 @@ for (const file of tsvFiles) {
   // rows pointing at the same report. Record-linkage practice names this
   // directly — treating missing as disagreement is a known bias, not a safe
   // default.
-  // Two present-and-different keys are PROOF the rows are distinct postings.
+  // Two present-and-different keys are PROOF the rows are distinct postings —
+  // but only while both name an EMPLOYER-CONTROLLED board, where one URL is one
+  // requisition. An aggregator re-lists a requisition the employer hosts
+  // elsewhere, so a single opening routinely carries a LinkedIn URL on the row
+  // it entered by and an Indeed or employer-ATS URL on the row a later sighting
+  // brought in. Those two keys differ because the two BOARDS differ, which is
+  // not information about the posting: it is the same UNKNOWN as an absent key,
+  // and must let the tier decide on company and title instead. The project
+  // already holds this for the mirror-image case — detect-reposts skips
+  // `aggregator: true` companies because "same company + same title" stops
+  // meaning "same opening" there (#2703).
+  //
+  // WITH ONE EXCEPTION, AND IT IS THE POSTING ID. Reading the whole URL as
+  // unknown also swallowed two DIFFERENT requisitions listed on the SAME board:
+  // LinkedIn 4001 (already Applied) and LinkedIn 4002 folded into one row that
+  // still said Applied while pointing at a posting nobody had applied to, with
+  // the first report orphaned and no marker — the silent, unrecoverable
+  // direction. The narrower and correct signal is the requisition identity the
+  // URL carries: two IDs extracted from the SAME aggregator that differ are two
+  // postings. Same ID, one side unextractable, or two different aggregators all
+  // stay UNKNOWN, so slug-vs-id spellings and uk./www. region hosts keep
+  // collapsing and #3652 is preserved. Gating on the HOST instead was measured
+  // to split one posting across two rows, which is why the ID is the gate.
   const urlDiffers = (cand) => {
     const candUrl = normalizeUrl(cand.url);
     if (!candUrl || !addUrl) return false;   // unknown → not evidence
+    if (isAggregatorUrl(cand.url) || isAggregatorUrl(addition.url)) {
+      const candId = aggregatorPostingId(cand.url);
+      const addId = aggregatorPostingId(addition.url);
+      // Comparable only on one board: a LinkedIn id and an Indeed id differing
+      // says the two BOARDS differ, which is the non-signal above.
+      return Boolean(candId && addId && candId.domain === addId.domain && candId.id !== addId.id);
+    }
     return candUrl !== addUrl;
   };
 

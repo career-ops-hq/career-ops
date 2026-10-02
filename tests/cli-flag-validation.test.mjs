@@ -448,6 +448,66 @@ test('rank-pipeline.mjs --help exits 0 and prints usage', () => {
   }
 });
 
+// merge-tracker.mjs read every flag with process.argv.includes() and never
+// looked for one it did not know, so `--dryrun` ran the real merge: it rewrote
+// applications.md and moved the TSV into merged/, the outcome --dry-run exists
+// to prevent. Like the rank-pipeline cases above these are not SCRIPTS rows: a
+// regression would merge into whatever tracker the environment points at, so
+// each case gets a throwaway tracker, additions dir, lock, index and reports dir.
+function runMergeTracker(root, ...args) {
+  const r = spawnSync(process.execPath, [join(ROOT, 'merge-tracker.mjs'), ...args], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+    timeout: 30_000,
+    env: {
+      ...process.env,
+      CAREER_OPS_ROOT: root,
+      CAREER_OPS_TRACKER: join(root, 'applications.md'),
+      CAREER_OPS_ADDITIONS: join(root, 'tracker-additions'),
+      CAREER_OPS_TRACKER_LOCK: join(root, 'lock'),
+      CAREER_OPS_TRACKER_DB: join(root, 'applications.db'),
+      CAREER_OPS_REPORTS: join(root, 'reports'),
+    },
+  });
+  assert.equal(r.error, undefined, `merge-tracker.mjs failed to spawn: ${r.error?.message}`);
+  assert.equal(r.signal, null, `merge-tracker.mjs was killed by ${r.signal} (timeout?)`);
+  return { ...r, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+test('merge-tracker.mjs rejects --dryrun instead of merging into the tracker', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-merge-tracker-'));
+  try {
+    mkdirSync(join(root, 'tracker-additions'));
+    mkdirSync(join(root, 'reports'));
+    const tracker = join(root, 'applications.md');
+    const before = '# Applications Tracker\n\n'
+      + '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n'
+      + '|---|------|---------|------|-------|--------|-----|--------|-------|\n'
+      + '| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ✅ | — | seed row |\n';
+    writeFileSync(tracker, before);
+    const tsv = join(root, 'tracker-additions', '2-globex.tsv');
+    writeFileSync(tsv, '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\tnew row\n');
+    const r = runMergeTracker(root, '--dryrun');
+    assert.equal(r.status, 1, `merge-tracker.mjs --dryrun exited ${r.status}, want 1`);
+    assert.match(r.all, /unrecognized flag\(s\): --dryrun/, 'merge-tracker.mjs did not name --dryrun');
+    assert.equal(readFileSync(tracker, 'utf-8'), before, '--dryrun changed applications.md');
+    assert.equal(readFileSync(tsv, 'utf-8').startsWith('2\t'), true, '--dryrun moved the TSV out of tracker-additions');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('merge-tracker.mjs --help exits 0 and prints usage', () => {
+  const root = mkdtempSync(join(tmpdir(), 'career-ops-merge-tracker-'));
+  try {
+    const r = runMergeTracker(root, '--help');
+    assert.equal(r.status, 0, `merge-tracker.mjs --help exited ${r.status}, want 0`);
+    assert.match(r.all, /Usage: node merge-tracker\.mjs \[options\]/, 'merge-tracker.mjs --help printed no usage block');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // cv-sync-check.mjs parsed no arguments before #3565, so a mistyped flag ran
 // the whole check suite and the caller had no way to discover the right
 // spelling. Its exit code is data-dependent (1 when cv.md is missing, which is

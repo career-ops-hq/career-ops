@@ -1113,6 +1113,7 @@ These have no `npm run` binding — modes and agents call them with
 |------------|---------|
 | `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
 | `node mark-pdf-ready.mjs <report#> [--dry-run] [--json]` | Mark the matched tracker's PDF cell ready after the web PDF render path finishes; resolves the report number, uses the shared tracker lock, and writes atomically |
+| `node sync-pdf-flags.mjs [--dry-run] [--prune [--write]] [--json]` | Reconcile tracker PDF column against data/pdf-index.tsv; `--prune` drops manifest rows whose PDF is gone from disk (dry run by default, `--write` to commit) |
 | `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
 | `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
 | `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
@@ -1212,6 +1213,23 @@ not overwrite one another. Exit status `0` covers a successful mark and an
 idempotent no-op; `1` is a usage, column, or write error; `2` means the tracker
 or report row was not found; `3` means the report matched more than one row;
 and `4` means the tracker lock timed out and the operation should be retried.
+
+---
+
+## sync-pdf-flags.mjs
+
+Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`.
+
+`--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`.
+
+```bash
+node sync-pdf-flags.mjs                          # sync PDF flags to tracker (dry-run with --dry-run)
+node sync-pdf-flags.mjs --prune                  # preview stale manifest rows whose PDF is missing
+node sync-pdf-flags.mjs --prune --write          # prune missing manifest rows from data/pdf-index.tsv
+node sync-pdf-flags.mjs --prune --write --json   # JSON output of prune results
+```
+
+Exit status: `0` success, `1` invalid option or write error, `2` missing tracker file or unreadable manifest, `4` tracker lock timeout.
 
 ---
 
