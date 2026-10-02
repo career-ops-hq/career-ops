@@ -58,6 +58,81 @@ try {
   else fail(`deutschebahn.fetch() paged wrong: ${JSON.stringify(dbSeen.map((u) => u.match(/pageNum=\d+/)?.[0]))}`);
   if (dbOpts.every((o) => o?.redirect === 'error')) pass('deutschebahn.fetch() passes redirect:\'error\' on every request');
   else fail(`deutschebahn.fetch() redirect option wrong: ${JSON.stringify(dbOpts.map((o) => o?.redirect))}`);
+  // An empty query sorted by `score` renders a results-less shell, so every
+  // page must sort by publication date instead.
+  if (dbSeen.every((u) => u.includes('sort=pubExternalDate_tdt') && !u.includes('sort=score'))) pass('deutschebahn.fetch() sorts by pubExternalDate_tdt, never score');
+  else fail(`deutschebahn.fetch() sort wrong: ${JSON.stringify(dbSeen.map((u) => u.match(/sort=[^&]*/)?.[0]))}`);
+
+  // parseResultCount — reads the results header, German thousands separator.
+  const countHtml = (n) => `<div class="h1 o-searchpage__result-count"><span class="result-count" data-count="${n}">${n} Stellen</span> zu deinen Suchkriterien gefunden</div>`;
+  if (dbModule.parseResultCount(countHtml('3.596')) === 3596 && dbModule.parseResultCount(countHtml('0')) === 0) pass('deutschebahn.parseResultCount() parses data-count incl. the thousands separator');
+  else fail(`deutschebahn.parseResultCount() wrong: ${dbModule.parseResultCount(countHtml('3.596'))}, ${dbModule.parseResultCount(countHtml('0'))}`);
+  if (dbModule.parseResultCount('<html>shell</html>') === null && dbModule.parseResultCount(undefined) === null) pass('deutschebahn.parseResultCount() returns null without a results header');
+  else fail('deutschebahn.parseResultCount() should return null without a results header');
+
+  // An empty first page: a genuinely empty search (data-count="0") is [],
+  // while a page with no results section or a positive count with no parsed
+  // hit throws instead of reading as "DB has no jobs".
+  const firstPageOutcome = async (html) => {
+    const ctx = { sleep: async () => {}, fetchText: async () => html };
+    try {
+      const jobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, ctx);
+      return { jobs };
+    } catch (e) {
+      return { error: e.message };
+    }
+  };
+  const emptyBoard = await firstPageOutcome(`<html>${countHtml('0')}<h3>Keine passenden Treffer</h3></html>`);
+  if (Array.isArray(emptyBoard.jobs) && emptyBoard.jobs.length === 0) pass('deutschebahn.fetch() returns [] for a genuinely empty search (data-count="0")');
+  else fail(`deutschebahn.fetch() empty search wrong: ${JSON.stringify(emptyBoard)}`);
+  const shell = await firstPageOutcome('<html><main data-maintenance-mode="false"><h1>Suche</h1></main></html>');
+  if (shell.error?.includes('no results section')) pass('deutschebahn.fetch() throws when the first page has no results section');
+  else fail(`deutschebahn.fetch() should throw on a results-less first page, got: ${JSON.stringify(shell)}`);
+  const markupDrift = await firstPageOutcome(`<html>${countHtml('3.596')}<div class="renamed-hit">x</div></html>`);
+  if (markupDrift.error?.includes('3596 postings')) pass('deutschebahn.fetch() throws when the count is positive but no hit parses');
+  else fail(`deutschebahn.fetch() should throw on a positive count with no hits, got: ${JSON.stringify(markupDrift)}`);
+
+  // Posting-shaped links the hit selector no longer matches: a renamed hit
+  // class keeps the `?jobId=` href, so a zero-count first page carrying one
+  // and a later page carrying one both throw instead of ending the walk.
+  const driftedHit = (id) => `<a href="/de-de/Suche/Job-1396${id}?jobId=${id}" class="m-renamed-hit" data-job-id="${id}"><span>Job ${id}</span></a>`;
+  const zeroWithLinks = await firstPageOutcome(`<html>${countHtml('0')}${driftedHit('900001')}</html>`);
+  if (zeroWithLinks.error?.includes('posting links')) pass('deutschebahn.fetch() rejects a data-count="0" first page that still carries posting links');
+  else fail(`deutschebahn.fetch() should throw on a zero-count page with posting links, got: ${JSON.stringify(zeroWithLinks)}`);
+  let laterCalls = 0;
+  const laterCtx = { sleep: async () => {}, fetchText: async () => (++laterCalls === 1 ? dbHtml : `<html>${countHtml('3.596')}${driftedHit('900002')}</html>`) };
+  let laterError = null;
+  try {
+    await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, laterCtx);
+  } catch (e) {
+    laterError = e.message;
+  }
+  if (laterError?.includes('posting links') && laterCalls === 2) pass('deutschebahn.fetch() throws when a later page carries posting links but no hit parses');
+  else fail(`deutschebahn.fetch() should throw on unparsed posting links past page 0, got error=${JSON.stringify(laterError)} calls=${laterCalls}`);
+
+  // An empty later page: inside the reported total it is a truncated walk
+  // (partials kept, warned); at/after the total or without a count it is
+  // the natural end of the board (no warning).
+  const laterEmpty = async (secondPage) => {
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (msg) => warnings.push(String(msg));
+    try {
+      let calls = 0;
+      const ctx = { sleep: async () => {}, fetchText: async () => (++calls === 1 ? dbHtml : secondPage) };
+      const jobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, ctx);
+      return { jobs, warnings };
+    } finally {
+      console.warn = origWarn;
+    }
+  };
+  const truncated = await laterEmpty(`<html>${countHtml('3.596')}</html>`);
+  if (truncated.jobs.length === 2 && truncated.warnings.length === 1 && truncated.warnings[0].includes('3596 postings reported')) pass('deutschebahn.fetch() keeps partials and warns when a page inside the reported total is empty');
+  else fail(`deutschebahn.fetch() truncated walk wrong: ${JSON.stringify(truncated)}`);
+  const endOfBoard = await laterEmpty(`<html>${countHtml('2')}</html>`);
+  const noCount = await laterEmpty('<html><h1>Suche</h1></html>');
+  if (endOfBoard.jobs.length === 2 && endOfBoard.warnings.length === 0 && noCount.jobs.length === 2 && noCount.warnings.length === 0) pass('deutschebahn.fetch() ends silently when the offset reached the total or no count is reported');
+  else fail(`deutschebahn.fetch() natural end wrong: end=${JSON.stringify(endOfBoard)} noCount=${JSON.stringify(noCount)}`);
 
   // max_pages safety valve — a small explicit cap stops the walk even though
   // every page keeps returning fresh ids (DB's board runs into the thousands,
