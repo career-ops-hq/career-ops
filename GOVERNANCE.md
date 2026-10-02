@@ -29,7 +29,7 @@ This is the one place the ladder and its criteria are written down: [MAINTAINERS
 
 ### Contributor
 
-**Earned with your 3rd merged PR.** It brings an invitation to the [career-ops-hq](https://github.com/career-ops-hq) organization (the **contributors** team). That is the whole criterion, and it is retroactive: no vote, no nomination, no application. Invitations go out in batches; if yours has not arrived, say so in an issue.
+**Earned with your 3rd merged PR.** It brings an invitation to the [career-ops-hq](https://github.com/career-ops-hq) organization (the **contributors** team). That is the whole criterion, and it is retroactive: no vote, no nomination, no application. If yours has not arrived, say so in an issue.
 
 - Listed in release notes when their contributions ship
 - Input is weighted more heavily in issue discussions
