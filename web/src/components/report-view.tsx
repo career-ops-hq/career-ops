@@ -22,6 +22,7 @@ import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { ReportMarkdown } from "@/components/report-markdown";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
+import { PageFrame } from "@/components/page-frame";
 
 // Progressive disclosure of the report. Current oferta.md writes letter F as
 // Interview Plan (STAR+R), not a verdict — never promote by letter (#3416).
@@ -91,7 +92,7 @@ export function ReportView({
   const companyName = company?.label ?? app?.company ?? meta?.title ?? id;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8 xl:max-w-5xl 2xl:max-w-[1600px]">
+    <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
       <Link
         href="/pipeline"
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
@@ -195,7 +196,7 @@ export function ReportView({
             );
             if (sections.length === 0) {
               return (
-                <div className="mt-8">
+                <div className="mt-8 max-w-4xl">
                   {callout}
                   <article className="report-prose mt-6">
                     <ReportMarkdown>{meta?.body ?? report}</ReportMarkdown>
@@ -204,7 +205,7 @@ export function ReportView({
               );
             }
             return (
-              <div className="mt-8">
+              <div className="mt-8 max-w-4xl">
                 {callout}
 
                 {mainSections.map((s, i) => {
@@ -262,6 +263,6 @@ export function ReportView({
           No report file found for #{id} in <code className="text-foreground">reports/</code>.
         </div>
       )}
-    </div>
+    </PageFrame>
   );
 }
