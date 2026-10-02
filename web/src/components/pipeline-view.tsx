@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useOptimistic, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
+import { canonStatus, scoreNum, scoreTone } from "@/lib/format";
+import { StatusSelect } from "@/components/status-select";
+import { applicationKey, applySavedStatus } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
@@ -42,6 +44,11 @@ export function PipelineView({
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  // Starts AFTER the POST succeeds. React replays the confirmed save over
+  // intervening snapshots and discards it when the refresh transition settles.
+  const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
+  const [announcement, setAnnouncement] = useState("");
+  const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
@@ -94,7 +101,7 @@ export function PipelineView({
 
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
-    let rows = applications;
+    let rows = visibleApplications;
     if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
       rows = rows.filter((r) => {
@@ -113,8 +120,8 @@ export function PipelineView({
       sort,
       scoreNum,
       (row) => companyPresentation(row).label,
-    );
-  }, [applications, tab, q, sort, minFilter]);
+    ) as Application[];
+  }, [visibleApplications, tab, q, sort, minFilter]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
@@ -123,7 +130,7 @@ export function PipelineView({
           <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
           <p className="mt-1 text-sm text-muted">
             <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
-            <span className="tabular-nums">{applications.length}</span> tracked
+            <span className="tabular-nums">{visibleApplications.length}</span> tracked
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
@@ -147,11 +154,12 @@ export function PipelineView({
             t === "INBOX"
               ? pendingInbox.length
               : t === "ALL"
-                ? applications.length
-                : applications.filter((r) => canonStatus(r.status).includes(t)).length;
+                ? visibleApplications.length
+                : visibleApplications.filter((r) => canonStatus(r.status).includes(t)).length;
           return (
             <button
               key={t}
+              ref={tab === t ? activeTab : undefined}
               onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
               className={cn(
                 // gap-1, not a whitespace text node: flex containers drop
@@ -167,6 +175,8 @@ export function PipelineView({
           );
         })}
       </div>
+
+      <p role="status" className="sr-only">{announcement}</p>
 
       {tab !== "INBOX" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
@@ -222,10 +232,11 @@ export function PipelineView({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => {
+              {filtered.map((r) => {
                 const company = companyPresentation(r);
+                const key = applicationKey(r);
                 return (
-                  <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                  <tr key={key} data-application-key={key} className="group transition-colors hover:bg-surface/40">
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
                       <Link href={`/pipeline/${r.n}`} className="transition-colors group-hover:text-brand">
                         #{r.n}
@@ -244,10 +255,25 @@ export function PipelineView({
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-muted">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {r.status}
-                    </span>
+                    <StatusSelect
+                      n={r.n}
+                      current={r.status}
+                      inline
+                      applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+                      onSaved={(status, restoreFocus) => {
+                        // If this focused row leaves its tab, preserve a useful
+                        // focus target. Do not interrupt someone using search.
+                        const focusedRow = document.activeElement?.closest("tr");
+                        if (tab !== "ALL" && !canonStatus(status).includes(tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+                          activeTab.current?.focus();
+                        }
+                        setAnnouncement(`Application #${r.n} status saved as ${status}.`);
+                        startTransition(() => {
+                          showSavedStatus({ key, status });
+                          router.refresh();
+                        });
+                      }}
+                    />
                   </td>
                   <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
                   </tr>
