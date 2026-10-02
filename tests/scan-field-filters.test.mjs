@@ -111,8 +111,5 @@ const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs'
   }
 }
 
-// Behaviour of the gate itself — which fields are read, what an absent field
-// does, AND semantics, rejection attribution and the dead-declaration warning
-// — is asserted against the real scan in tests/scan-field-filters-e2e.test.mjs.
-// Re-implementing the loop here would only prove the copy still agrees with
-// itself, and would stay green if scan.mjs stopped applying filter_on.
+// The gate itself is asserted against the real scan in
+// tests/scan-field-filters-e2e.test.mjs, not re-implemented here.

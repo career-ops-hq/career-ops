@@ -73,6 +73,7 @@ const REJECTED = [
   ['field_filters that is a list, not a mapping', 'field_filters: [noc]\n', 'filter_on: noc'],
   ['a field_filters.title block', 'field_filters:\n  title:\n    positive: ["Help Desk"]\n', 'filter_on: title'],
   ['a misspelled key in a block', nocBlock('    positve: ["stem:22"]\n'), 'filter_on: noc'],
+  ['a block holding only seniority_boost, which nothing here reads', nocBlock('    seniority_boost: ["senior"]\n'), 'filter_on: noc'],
   ['an empty block', 'field_filters:\n  noc: {}\n', 'filter_on: noc'],
   ['a block whose lists are empty', nocBlock('    positive: []\n    negative: []\n'), 'filter_on: noc'],
   ['a keyword list with no string entry', nocBlock('    positive: [123, null]\n'), 'filter_on: noc'],
