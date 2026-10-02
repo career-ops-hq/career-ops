@@ -31,7 +31,7 @@
 // That silent-zero failure is the whole risk of scraping and the reason for
 // `assertParsedSomething` below.
 
-import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 
 const TRUSTED_HOST = 'itviec.com';
@@ -66,12 +66,6 @@ const LOCATION_RE = /#map-pin"?><\/use><\/svg>\s*<div[^>]*title=["']([^"']*)["']
 /** Relative publication label: English "Posted … ago" or Vietnamese "Đăng … trước". */
 const POSTED_LABEL_RE =
   /(?:Posted|Đăng)\s*:?\s*(?:<\/\w+>\s*)?([^.<]{0,40}?(?:ago|trước)|today|hôm nay)/i;
-
-/** @param {any} ctx @param {number} ms */
-function sleep(ctx, ms) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /** @param {string} url */
 function assertItviecUrl(url) {
@@ -279,7 +273,7 @@ export default {
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await sleep(ctx, INTER_PAGE_DELAY_MS);
+      if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const url = assertItviecUrl(buildListUrl(entry, page));
       const html = await fetchTextWithRetry(ctx, url, {

@@ -1,10 +1,10 @@
 {
   "name": "career-ops",
-  "version": "1.34.0",
+  "version": "1.35.0",
   "description": "Open-source AI job search that runs locally in your AI coding CLI: scan job portals, evaluate listings into a structured A-H report with a 1-5 score, tailor your CV, track applications",
   "private": true,
   "engines": {
-    "node": ">=18"
+    "node": ">=18.17"
   },
   "scripts": {
     "doctor": "node doctor.mjs",
@@ -40,14 +40,17 @@
     "scan:seeds": "node scan-ats-full.mjs --seeds yc,a16z",
     "scan:yc": "node scan-ats-full.mjs --seeds yc",
     "scan:interamt": "node scan-interamt.mjs",
+    "scan:dayforce": "node scan-dayforce.mjs",
     "company:funded": "node company-funded.mjs",
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
+    "keyword-match": "node keyword-match.mjs",
     "calibrate": "node calibrate.mjs",
     "upskill": "node upskill.mjs",
+    "career-profile": "node career-profile.mjs",
     "add": "node add-entry.mjs",
     "reposts": "node detect-reposts.mjs",
     "digest": "node weekly-digest.mjs",
@@ -67,7 +70,7 @@
     "application:init": "node application-artifacts.mjs --init",
     "build:dashboard": "node build-dashboard.mjs",
     "serve:dashboard": "cd dashboard && go run .",
-    "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
+    "postinstall": "npx playwright install chromium || npx playwright install chromium",
     "manifesto": "node manifesto.mjs"
   },
   "keywords": [
@@ -98,6 +101,7 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^5.3.0",
-    "playwright": "1.63.0"
+    "playwright": "1.63.0",
+    "undici": "^6.28.1"
   }
 }
