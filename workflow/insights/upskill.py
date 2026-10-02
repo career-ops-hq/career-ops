@@ -8,35 +8,10 @@ from pathlib import Path
 import re
 import sqlite3
 
-try:
-    from workflow.skill_extract import canonicalize, extract_skills
-except ModuleNotFoundError:
-    from skill_extract import canonicalize, extract_skills
+from workflow.skill_extract import extract_skills
+from workflow.jd_skill_gap import scan_jd, classify_skill_gaps, split_skills_section
 
 
-REQUIREMENT = re.compile(
-    r"^#{0,6}\s*(?:required|requirements|qualifications|must[- ]have|preferred|nice[- ]to[- ]have|"
-    r"what\s+we(?:'|’)?\s*re\s+looking\s+for|what\s+you(?:(?:'|’)ll|\s+will)?\s+bring|"
-    r"who\s+you\s+are|about\s+you|your\s+(?:background|experience|profile)|"
-    r"you\s+(?:may|might|could)\s+be\s+a\s+good\s+fit|you(?:(?:'|’)ll|\s+will)?\s+have|"
-    r"it(?:'|’)?s\s+important\s+to\s+us\s+that\s+you\s+have|"
-    r"it\s+would\s+be\s+great\s+if\s+you\s+ha(?:ve|d)|ideal\s+candidate|"
-    r"skills\s+(?:and|&)\s+experience)s?\b.*$", re.I | re.ASCII,
-)
-NON_REQUIREMENT = re.compile(
-    r"^#{0,6}\s*(?:you\s+will(?!\s+have)|benefits?|perks?|benefits\s+and\s+perks|"
-    r"compensation|salary|pay\s+range|what\s+we\s+offer|why\s+(?:join|work|this\s+role)|"
-    r"about\s+(?:us|the\s+company|the\s+team|the\s+role)|how\s+(?:and\s+where\s+)?we\s+work|"
-    r"equal\s+opportunity|eeo|diversity|interview\s+process|how\s+to\s+apply|to\s+apply|"
-    r"our\s+(?:stack|process|values|mission))\b.*$", re.I | re.ASCII,
-)
-TOKEN = re.compile(r"\b([A-Z][A-Za-z0-9+.#]{0,29}[A-Za-z0-9+#](?:\.[a-z]{2,4})?)(?!\w)", re.ASCII)
-STOPWORDS = set("""the and for with you your our this that these those must able ability strong excellent proven
-a an or in of to as is are bachelor bachelors master masters degree diploma certification certificate experience
-years year senior junior entry level minimum preferred required candidates candidate applicants applicant ideal successful
-knowledge understanding familiarity exposure background skills skill communication team teams work working deep interest genuine
-solid comfortable passion passionate track record real bonus plus hands proficiency fluency expertise demonstrated extensive
-practical good great clear""".split())
 LOW_CONFIDENCE = {
     "empty-jd": "The JD file is empty, so nothing was checked.",
     "no-requirements-section": "No requirements section was recognized in this JD, so no text was scanned for skills. "
@@ -46,69 +21,11 @@ LOW_CONFIDENCE = {
 }
 
 
-def _jd_skills(jd: str) -> tuple[list[str], bool]:
-    skills = {}
-    inside = seen = False
-    for line in jd.splitlines():
-        if NON_REQUIREMENT.search(line):
-            inside = False
-            continue
-        if REQUIREMENT.search(line):
-            inside = seen = True
-            continue
-        if inside and re.match(r"^#{1,6}\s", line):
-            inside = False
-        bullet = re.match(r"^\s*[-*•]\s*(.+)\r?$", line)
-        if inside and bullet:
-            for match in TOKEN.finditer(bullet[1]):
-                token = match[1].strip()
-                if len(token) > 1 and token.lower() not in STOPWORDS:
-                    skills[token] = None
-    return list(skills), seen
-
-
-def _cv_regions(cv: str) -> tuple[str, str]:
-    lines = cv.splitlines()
-    heading = next(((index, len(match[1])) for index, line in enumerate(lines)
-                    if (match := re.fullmatch(r"(#{1,6})\s*Skills\s*", line, re.I))), None)
-    if heading is None:
-        return "", cv
-    index, level = heading
-    start = index + 1
-    end = next((line_number for line_number in range(start, len(lines))
-                if (match := re.match(r"(#{1,6})\s", lines[line_number])) and len(match[1]) <= level), len(lines))
-    section = lines[start:end]
-    subheadings = [(offset, match[2].strip().lower()) for offset, line in enumerate(section)
-                   if (match := re.match(r"(#{%d})\s+(.+)" % (level + 1), line))]
-    if not subheadings or not any(title == "production engineering" for _, title in subheadings):
-        return "\n".join(section), "\n".join(lines[:index] + lines[end:])
-    named, supported = [], section[:subheadings[0][0]]
-    for part, (offset, title) in enumerate(subheadings):
-        stop = subheadings[part + 1][0] if part + 1 < len(subheadings) else len(section)
-        content = section[offset + 1:stop]
-        if title == "production engineering":
-            named.extend(content)
-        elif title != "in progress":
-            supported.extend(content)
-    return "\n".join(named), "\n".join(lines[:index] + supported + lines[end:])
-
 
 def targeted_skill_gap(jd: str, cv: str) -> dict:
     """Preserve Node's named/prose/gap split and explicit inconclusive results."""
-    candidates, saw_section = _jd_skills(jd)
-    named, prose = _cv_regions(cv)
-    named_canon, prose_canon = extract_skills(named), extract_skills(prose)
-    buckets = {"existing": [], "supportedByResume": [], "gap": []}
-    for skill in candidates:
-        canonical = canonicalize(skill)
-        known = canonical != skill or bool(extract_skills(skill))
-        boundary = lambda text: bool(re.search(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", text, re.I | re.ASCII))
-        if (known and canonical in named_canon) or boundary(named):
-            buckets["existing"].append(skill)
-        elif (known and canonical in prose_canon) or boundary(prose):
-            buckets["supportedByResume"].append(skill)
-        else:
-            buckets["gap"].append(skill)
+    candidates, saw_section = scan_jd(jd)
+    buckets = classify_skill_gaps(candidates, cv)
     reason = None if candidates else "empty-jd" if not jd.strip() else "no-requirements-section" if not saw_section else "no-skill-candidates"
     return {"status": "classified" if candidates else "inconclusive", "reason": reason,
             "lowConfidence": {"reason": reason, "message": LOW_CONFIDENCE[reason]} if reason else None,
@@ -162,7 +79,7 @@ def upskill_view(db: sqlite3.Connection, cv: Path, *, min_reports: int = 5) -> d
         return {"status": "insufficient_data", "reports": len(reviewed), "minimum": min_reports,
                 "unparsed_reports": unparsed, "mandatory_only_reports": limited,
                 "gap_source": "reviewed score capability Gap rows and scan core capability gaps", "gaps": None}
-    named, _ = _cv_regions(re.sub(r"<!--[\s\S]*?-->", "", cv.read_text()))
+    named, _ = split_skills_section(re.sub(r"<!--[\s\S]*?-->", "", cv.read_text()))
     known = extract_skills(named)
     grouped = defaultdict(lambda: {"reports": set(), "topics": set()})
     topics = defaultdict(set)

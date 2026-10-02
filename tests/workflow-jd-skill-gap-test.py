@@ -26,7 +26,11 @@ assert scan_jd("##### Requirements\n- Python\n###### Benefits\n- Equity\n")[0] =
 assert scan_jd("## Requirements\r\n- C#, C++ or F#\r\n- Docker.\r\n")[0] == ["C#", "C++", "F#", "Docker"]
 deep_cv = "##### Skills\nPython\n###### Experience\nDeployed Kubernetes clusters\n"
 assert classify_skill_gaps(["Python", "Kubernetes"], deep_cv) == {
-    "existing": ["Python"], "supportedByResume": ["Kubernetes"], "gap": [],
+    "existing": ["Python", "Kubernetes"], "supportedByResume": [], "gap": [],
+}
+structured_cv = "## Skills\n### Production Engineering\nPython, TypeScript\n### Prototypes\nReact\n### In Progress\nKubernetes\n## Experience\nBuilt Docker services.\n"
+assert classify_skill_gaps(["Python", "TypeScript", "React", "Kubernetes", "Docker"], structured_cv) == {
+    "existing": ["Python", "TypeScript"], "supportedByResume": ["React", "Docker"], "gap": ["Kubernetes"],
 }
 assert canonicalize("cloud") == "cloud"
 assert canonicalize("k8s") == "Kubernetes"

@@ -31,7 +31,6 @@ bachelor bachelors master masters degree diploma certification certificate exper
 candidates candidate applicants applicant ideal successful knowledge understanding familiarity exposure background skills skill communication team teams work working
 deep interest genuine solid comfortable passion passionate track record real bonus plus hands proficiency fluency expertise demonstrated extensive practical good great clear
 """.split())
-SKILLS_HEADING = re.compile(r"^#{1,6}\s*Skills\s*$", re.I)
 ANY_HEADING = re.compile(r"^#{1,6}\s")
 
 
@@ -70,13 +69,30 @@ def skill_mentioned(skill: str, text: str) -> bool:
     return re.search(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", text, re.I | re.ASCII) is not None
 
 
-def split_skills_section(cv_text: str) -> tuple[str, str]:
-    lines = cv_text.split("\n")
-    start = next((i + 1 for i, line in enumerate(lines) if SKILLS_HEADING.match(line)), None)
-    if start is None:
-        return "", cv_text
-    end = next((i for i in range(start, len(lines)) if ANY_HEADING.match(lines[i])), len(lines))
-    return "\n".join(lines[start:end]), "\n".join(lines[:start - 1] + lines[end:])
+def split_skills_section(cv: str) -> tuple[str, str]:
+    lines = cv.splitlines()
+    heading = next(((index, len(match[1])) for index, line in enumerate(lines)
+                    if (match := re.fullmatch(r"(#{1,6})\s*Skills\s*", line, re.I))), None)
+    if heading is None:
+        return "", cv
+    index, level = heading
+    start = index + 1
+    end = next((line_number for line_number in range(start, len(lines))
+                if (match := re.match(r"(#{1,6})\s", lines[line_number])) and len(match[1]) <= level), len(lines))
+    section = lines[start:end]
+    subheadings = [(offset, match[2].strip().lower()) for offset, line in enumerate(section)
+                   if (match := re.match(r"(#{%d})\s+(.+)" % (level + 1), line))]
+    if not subheadings or not any(title == "production engineering" for _, title in subheadings):
+        return "\n".join(section), "\n".join(lines[:index] + lines[end:])
+    named, supported = [], section[:subheadings[0][0]]
+    for part, (offset, title) in enumerate(subheadings):
+        stop = subheadings[part + 1][0] if part + 1 < len(subheadings) else len(section)
+        content = section[offset + 1:stop]
+        if title == "production engineering":
+            named.extend(content)
+        elif title != "in progress":
+            supported.extend(content)
+    return "\n".join(named), "\n".join(lines[:index] + supported + lines[end:])
 
 
 def classify_skill_gaps(jd_skills: list[str], cv_text: str) -> dict[str, list[str]]:
