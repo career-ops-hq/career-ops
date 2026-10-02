@@ -168,11 +168,57 @@ try {
   // max_pages safety valve — a small explicit cap stops the walk even though
   // every page keeps returning fresh ids (DB's board runs into the thousands,
   // so this cap is the only thing bounding a runaway scan).
+  const captureWarnings = async (fn) => {
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (msg) => warnings.push(String(msg));
+    try {
+      return { ...(await fn()), warnings };
+    } finally {
+      console.warn = origWarn;
+    }
+  };
   let capCalls = 0;
   const capCtx = { sleep: async () => {}, fetchText: async () => { capCalls++; return fullPage([String(700100 + capCalls)]); } };
-  const cappedJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 3 }, capCtx);
-  if (cappedJobs.length === 3 && capCalls === 3) pass('deutschebahn.fetch() honors entry.max_pages and stops even with more pages available');
-  else fail(`deutschebahn.fetch() max_pages cap wrong: ${cappedJobs.length} jobs after ${capCalls} calls`);
+  const capped = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 3 }, capCtx) }));
+  if (capped.jobs.length === 3 && capCalls === 3) pass('deutschebahn.fetch() honors entry.max_pages and stops even with more pages available');
+  else fail(`deutschebahn.fetch() max_pages cap wrong: ${capped.jobs.length} jobs after ${capCalls} calls`);
+  if (capped.warnings.length === 1 && capped.warnings[0].includes('raise max_pages')) pass('deutschebahn.fetch() warns when max_pages cuts the walk after a full page');
+  else fail(`deutschebahn.fetch() cap warning wrong: ${JSON.stringify(capped.warnings)}`);
+  // The reported total shows the capped walk already covered the board: no warning.
+  const coveredPage = (id) => fullPage([id]).replace('</html>', `${countHtml('2.500')}</html>`);
+  let coveredCalls = 0;
+  const covered = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 3 }, { sleep: async () => {}, fetchText: async () => coveredPage(String(700150 + ++coveredCalls)) }) }));
+  if (covered.jobs.length === 3 && covered.warnings.length === 0) pass('deutschebahn.fetch() stays silent at max_pages when the reported total is already covered');
+  else fail(`deutschebahn.fetch() covered-cap wrong: ${JSON.stringify({ jobs: covered.jobs.length, warnings: covered.warnings })}`);
+
+  // A later page that exhausts its retries keeps the pages already collected
+  // and warns; under a liveness probe (ctx.maxPages) the rejection propagates.
+  const laterFailure = (probe) => {
+    let calls = 0;
+    return {
+      sleep: async () => {},
+      ...(probe ? { maxPages: 1 } : {}),
+      fetchText: async () => {
+        calls++;
+        if (calls === 1) return fullPage(['630365', '631112']);
+        const err = new Error('Not Found');
+        err.status = 404;
+        throw err;
+      },
+    };
+  };
+  const partial = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, laterFailure(false)) }));
+  if (partial.jobs.length === 2 && partial.warnings.length === 1 && partial.warnings[0].includes('page 1 failed') && !partial.warnings[0].includes('raise max_pages')) pass('deutschebahn.fetch() keeps partials and warns when a later page fails');
+  else fail(`deutschebahn.fetch() later-page failure wrong: ${JSON.stringify({ jobs: partial.jobs.length, warnings: partial.warnings })}`);
+  let probeError = null;
+  try {
+    await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, laterFailure(true));
+  } catch (e) {
+    probeError = e;
+  }
+  if (probeError?.status === 404) pass('deutschebahn.fetch() propagates a later-page failure unwrapped under ctx.maxPages');
+  else fail(`deutschebahn.fetch() should rethrow under ctx.maxPages, got: ${JSON.stringify(probeError?.message)}`);
 
   // A transient (no-status) fetch failure is retried via fetchTextWithRetry;
   // the walk recovers instead of dying on a single flaky page.
@@ -214,7 +260,7 @@ try {
   // (5) rather than collapsing to zero pages.
   let fallbackCalls = 0;
   const fallbackCtx = { sleep: async () => {}, fetchText: async () => { fallbackCalls++; return fullPage([String(700200 + fallbackCalls)]); } };
-  const fallbackJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 0 }, fallbackCtx);
+  const { jobs: fallbackJobs } = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 0 }, fallbackCtx) }));
   if (fallbackJobs.length === 5 && fallbackCalls === 5) pass('deutschebahn.fetch() falls back to the default page cap for a non-positive max_pages');
   else fail(`deutschebahn.fetch() max_pages fallback wrong: ${fallbackJobs.length} jobs after ${fallbackCalls} calls`);
 } catch (e) {

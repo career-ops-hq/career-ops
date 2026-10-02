@@ -190,12 +190,30 @@ export default {
     // on one is a transient blip, not a board failure — fetchTextWithRetry
     // absorbs it instead of failing the whole scan.
 
+    // Why the walk stopped: `cap` (max_pages ran out after a full page) unless
+    // an exit below names another reason.
+    let stopReason = 'cap';
+    let lastHtml = '';
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       const url = `${cfg.searchBase}?qli=true&query=&sort=${SORT}&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
-      const html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error', timeoutMs: PAGE_TIMEOUT_MS });
+      let html;
+      try {
+        html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error', timeoutMs: PAGE_TIMEOUT_MS });
+      } catch (err) {
+        // A failed first page is a dead board, and a liveness probe needs the
+        // rejection unwrapped (verify-portals reads ProbePageBudgetReached by
+        // type) — both propagate. A later page that exhausts its retries
+        // keeps the pages already collected.
+        if (page === 0 || ctx?.maxPages) throw err;
+        console.warn(`deutschebahn: ${entry.name}: page ${page} failed (${err?.message ?? err}) — keeping the ${jobs.length} collected so far`);
+        stopReason = 'fetch-error';
+        break;
+      }
+      lastHtml = html;
       const rows = parseHits(html, cfg.origin);
       if (rows.length === 0) {
+        stopReason = 'complete';
         if (page === 0) {
           assertEmptyFirstPage(html, url);
         } else {
@@ -218,11 +236,26 @@ export default {
         seen.add(row.id);
         jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location });
       }
-      if (jobs.length >= MAX_JOBS) break;
+      if (jobs.length >= MAX_JOBS) {
+        stopReason = 'max-jobs';
+        break;
+      }
       // The stop reads the hit count the source returned, never the parsed or
       // post-dedup count: tie-order drift can make a full page repeat earlier
       // hits while later pages still hold unseen postings.
-      if (countHitAnchors(html) < ITEMS_PER_PAGE) break; // short page: the board ended
+      if (countHitAnchors(html) < ITEMS_PER_PAGE) {
+        stopReason = 'complete'; // short page: the board ended
+        break;
+      }
+    }
+    // max_pages ran out on a full page: warn so a truncated board doesn't
+    // pass as complete, unless the reported total shows the walk already
+    // covered the whole board.
+    if (stopReason === 'cap') {
+      const count = parseResultCount(lastHtml);
+      if (count === null || maxPages * ITEMS_PER_PAGE < count) {
+        console.warn(`deutschebahn: ${entry.name}: stopped at ${maxPages} pages (${jobs.length} postings); raise max_pages on this entry`);
+      }
     }
     return jobs.slice(0, MAX_JOBS);
   },
