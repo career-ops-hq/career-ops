@@ -32,6 +32,7 @@ import {
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
 import { CONTROL_CHARS } from './tracker-utils.mjs';
+import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
@@ -285,6 +286,20 @@ function extractRole(reportContent) {
   return null;
 }
 
+// Canonical posting-URL key of a report, or '' when it carries none.
+// Same extraction as merge-tracker.mjs resolveReportUrl(): `**URL:**` is
+// matched anywhere on the line, not from column 0, because the documented
+// header is inline (`**Score:** 4.1/5 | **URL:** https://… | **PDF:** …`);
+// `[ \t]*` and `\S+` cannot cross a newline, so an empty header cannot
+// capture the next header's text. What comes back is the normalizeUrl() key,
+// never the raw text: `**URL:** N/A` (a recruiter-sourced role) has no key and
+// must stay "unknown", not become a value that two reports can differ on.
+function extractReportUrlKey(reportContent) {
+  const m = reportContent.match(/\*\*URL:\*\*[ \t]*(\S+)/);
+  if (!m) return '';
+  return normalizeUrl(m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, ''));
+}
+
 const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
@@ -294,21 +309,30 @@ const reportsByRole = new Map();
 for (const name of reportFiles) {
   const companySlug = name.match(REPORT_FILE_RE)[2];
   let role = null;
+  let urlKey = '';
   try {
-    role = extractRole(readFileSync(join(REPORTS_DIR, name), 'utf-8'));
+    const content = readFileSync(join(REPORTS_DIR, name), 'utf-8');
+    role = extractRole(content);
+    urlKey = extractReportUrlKey(content);
   } catch {
     // Unreadable report — the orphan check below still sees it.
   }
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push(name);
+  reportsByRole.get(key).push({ name, urlKey });
 }
 for (const group of reportsByRole.values()) {
-  if (group.length > 1) {
-    warn(`Duplicate reports for same company+role: ${group.join(', ')}`);
-    dupReports++;
-  }
+  if (group.length < 2) continue;
+  // Two present-and-different posting URLs are proof of two openings (one
+  // title posted per city, two reqs a recruiter opened with the same title),
+  // the same rule merge-tracker.mjs applies before it merges a row. A missing
+  // URL proves nothing, so the group is exempt only when EVERY report carries
+  // a key and no two share one.
+  const keys = group.map(r => r.urlKey);
+  if (keys.every(Boolean) && new Set(keys).size === keys.length) continue;
+  warn(`Duplicate reports for same company+role: ${group.map(r => r.name).join(', ')}`);
+  dupReports++;
 }
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
 
