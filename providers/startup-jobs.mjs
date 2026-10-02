@@ -145,20 +145,21 @@ function cleanUrl(value) {
 // quiet `[]`, so an upstream break surfaces instead of reading as 0 forever).
 const ENVELOPE_RE = /<rss\b[^>]*>[\s\S]*<channel\b[^>]*>[\s\S]*<\/channel>[\s\S]*<\/rss>/i;
 
-// CDATA sections carry a job <description>'s raw, unescaped text, which can
-// itself contain the literal substrings "<item>" / "</item>" / "</channel>" /
-// "</rss>" (e.g. a posting that mentions XML/RSS tooling). Matching envelope
-// shape, tag counts, or item boundaries directly against the raw XML would
-// mistake that text for real structure — at best false-positiving the
-// malformed-feed checks below, at worst (a non-greedy item-boundary match)
-// silently truncating that item's own description/location at the embedded
-// "</item>", while its earlier fields (title, company) still parse fine and
-// mask the loss. Replace each CDATA section with same-length filler first:
-// positions stay aligned with the original string, so a matched item block's
-// start/length can be used to slice the REAL xml (preserving the actual CDATA
-// content), while the filler itself never matches a tag.
-function maskCdata(str) {
-  return str.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (m) => '#'.repeat(m.length));
+// CDATA sections (a job <description>'s raw, unescaped text) and XML comments
+// can both carry the literal substrings "<item>" / "</item>" / "</channel>" /
+// "</rss>" without being real structure — a posting that mentions XML/RSS
+// tooling, or a feed-generator comment. Matching envelope shape, tag counts,
+// or item boundaries directly against the raw XML would mistake that text for
+// real structure — at best false-positiving the malformed-feed checks below,
+// at worst (a non-greedy item-boundary match) silently truncating that item's
+// own description/location at an embedded "</item>", while its earlier
+// fields (title, company) still parse fine and mask the loss. Replace both
+// with same-length filler first: positions stay aligned with the original
+// string, so a matched item block's start/length can be used to slice the
+// REAL xml (preserving the actual CDATA content), while the filler itself
+// never matches a tag.
+function maskCdataAndComments(str) {
+  return str.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, (m) => '#'.repeat(m.length));
 }
 
 /**
@@ -181,7 +182,7 @@ export function parseStartupJobsFeed(xml) {
     throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${typeof xml}`);
   }
 
-  const maskedXml = maskCdata(xml);
+  const maskedXml = maskCdataAndComments(xml);
 
   if (!ENVELOPE_RE.test(maskedXml)) {
     throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${xml.length}-char body`);

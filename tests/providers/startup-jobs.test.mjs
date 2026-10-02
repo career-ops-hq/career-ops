@@ -195,6 +195,16 @@ try {
   if (emptyChannelJobs.length === 0) pass('a valid envelope with zero items is a genuinely empty board → []');
   else fail(`an empty <channel> should return [], got ${emptyChannelJobs.length} jobs`);
 
+  // An XML comment can carry the same literal tag-like text a CDATA section
+  // can (e.g. a feed-generator comment mentioning <item>) — it must not trip
+  // the open/close tag count on an otherwise genuinely empty channel.
+  const commentMentionsItemTagsJobs = parseStartupJobsFeed('<rss><channel><!-- example <item> --></channel></rss>');
+  if (commentMentionsItemTagsJobs.length === 0) {
+    pass('literal <item> text inside an XML comment does not false-positive the truncation check');
+  } else {
+    fail(`comment-with-item-text feed returned ${commentMentionsItemTagsJobs.length} jobs, expected 0`);
+  }
+
   // A well-formed outer envelope can still wrap a body truncated mid-item —
   // an opening <item> with no closing tag, followed by a stray </channel></rss>
   // tail. The non-greedy item regex alone would just not match the dangling
