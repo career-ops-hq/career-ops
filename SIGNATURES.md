@@ -188,3 +188,4 @@ public commit with a stated reason.
 - @faizhameed | Faiz Hameed | 2026-09-30 | id:41015883 | src:https://github.com/career-ops-hq/career-ops/discussions/4637 | n:140
 - @sec-js | 2026-09-30 | id:54868859 | src:https://github.com/career-ops-hq/career-ops/discussions/4654 | n:141
 - @nguyentuanngoc21 | 2026-10-01 | "I am trying with it, it looks good" | id:82352476 | src:https://github.com/career-ops-hq/career-ops/discussions/4662 | n:142
+- @Krandheer | Randheer | 2026-10-02 | id:37265128 | src:https://github.com/career-ops-hq/career-ops/discussions/4712 | n:143

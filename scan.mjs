@@ -1353,6 +1353,56 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
   'skipped_blocked_host',
 ]);
 
+/**
+ * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
+ *
+ * Every other skipped status describes the posting: a dead URL stays dead, a
+ * blocked host stays blocked, so pinning it saves a later scan the work. These
+ * two describe the user's CONFIG instead — `location_filter` and
+ * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
+ * dropped under the old threshold never resurfaces under the new one, which is
+ * the opposite of what recording the drop is for.
+ *
+ * Pinning would also buy nothing: both cuts run on data the provider already
+ * returned, before any liveness verification, so a re-scan of one of these URLs
+ * costs no extra request.
+ *
+ * `collectSeenCompanyRoles` needs no companion change — it already seeds from
+ * `added` rows alone.
+ */
+const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_location',
+  'skipped_age',
+]);
+
+/**
+ * The offers not yet recorded under `status`, one per URL.
+ *
+ * The location and posting-age cuts run before dedup, and their rows never
+ * pin a URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so without this every scan
+ * appended the same rows again. A URL already carrying a row with the same
+ * status is skipped, and so is a second listing of one URL within this scan.
+ * A different status still writes, so a posting whose verdict changes is
+ * recorded again.
+ *
+ * @param {Array<{url: string}>} offers
+ * @param {string} status
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
+ */
+export function unrecordedOffers(offers, status, scanHistoryText = '') {
+  const recorded = new Set();
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, , , , , rowStatus] = line.split('\t');
+    if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
+  }
+  return offers.filter((offer) => {
+    const key = normalizeUrlForDedup(offer.url);
+    if (recorded.has(key)) return false;
+    recorded.add(key);
+    return true;
+  });
+}
+
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
@@ -1677,6 +1727,11 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
     const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
+    // Not pinned and not a recheck candidate either: the row records a config
+    // rejection, and the URL was never queued, so counting it as "eligible
+    // again" would overstate what the TTL released. See
+    // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
+    if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       seen.add(normalizeUrlForDedup(url));
       if (extraTokensFor) {
@@ -3485,6 +3540,11 @@ async function main() {
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;
   const cooldownOffers = [];
+  // Config-rejected offers, kept so the scan-history row can say what the
+  // summary counter only counts. Both lists stay empty under --dry-run, the
+  // same as every other history write below.
+  const locationFilteredOffers = [];
+  const ageFilteredOffers = [];
   let totalFound = 0;
   let totalFilteredTitle = 0;
   let totalFilteredTier = 0;
@@ -3623,10 +3683,12 @@ async function main() {
         // ("Program Manager - Remote") isn't rejected for a city-only location.
         if (!locationFilter(job.location, job.url, job.title)) {
           totalFilteredLocation++;
+          if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
+          if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postedDateFilter(job.postedAt)) {
@@ -3770,6 +3832,19 @@ async function main() {
   ];
   if (!dryRun && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+  }
+  // Offers the location and posting-age cuts removed: recorded for visibility,
+  // never added to pipeline.md. Both are OBSERVATIONAL_SCAN_HISTORY_STATUSES,
+  // so the rows carry no dedup weight — the threshold that rejected them is one
+  // the user edits, and a row written under the old threshold must not suppress
+  // the same posting once it moves.
+  // Each posting is recorded once per status, not once per scan.
+  if (!dryRun && (locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
+    const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const newLocationRows = unrecordedOffers(locationFilteredOffers, 'skipped_location', historyText);
+    const newAgeRows = unrecordedOffers(ageFilteredOffers, 'skipped_age', historyText);
+    if (newLocationRows.length > 0) await appendToScanHistory(newLocationRows, date, 'skipped_location');
+    if (newAgeRows.length > 0) await appendToScanHistory(newAgeRows, date, 'skipped_age');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.

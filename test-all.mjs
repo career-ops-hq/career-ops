@@ -55,7 +55,7 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
@@ -475,6 +475,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'verify-ats.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
@@ -7206,9 +7207,13 @@ overrideOut?.includes('Acme') && overrideOut?.includes('staff-engineer')
 // dry-run: output always contains a local:jds/ reference and today's date.
 // The date the child prints is its own clock read, so it is compared against
 // the day(s) spanning the call rather than one captured up-section — see
-// runAcrossUtcDay() for why a single capture fails a run that crosses
-// midnight UTC (#3816).
-const { out: refOut, days: refDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+// runAcrossLocalDay() for why a single capture fails a run that crosses
+// midnight (#3816).
+//
+// LOCAL day, not UTC: archive-posting names its capture with localToday(), so
+// asserting the UTC day here passed only where the two agree — which is most of
+// the day in most zones, and never in the evening west of Greenwich.
+const { out: refOut, days: refDays } = runAcrossLocalDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
 refOut?.includes('local:jds/') && refDays.some((day) => refOut?.includes(day))
   ? pass('dry-run: local:jds/ reference and date emitted')
   : fail('dry-run: reference or date missing from output');
@@ -7256,8 +7261,9 @@ reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('
   ? pass('--report N: value consumed, URL still parsed')
   : fail('--report N: swallowed the URL or dropped the report number');
 
-// omitting --report leaves the historical filename shape untouched
-const { out: noReportOut, days: noReportDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+// omitting --report leaves the historical filename shape untouched — the date
+// in it is the LOCAL calendar day (localToday()), the day the user was working.
+const { out: noReportOut, days: noReportDays } = runAcrossLocalDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
 noReportDays.some((day) => noReportOut?.includes(`jds/${day}_`))
   ? pass('no --report: filename shape unchanged')
   : fail('no --report: filename shape regressed');

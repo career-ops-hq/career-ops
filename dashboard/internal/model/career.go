@@ -2,19 +2,21 @@ package model
 
 // CareerApplication represents a single job application from the tracker.
 type CareerApplication struct {
-	Number       int
-	Date         string
-	Company      string
-	Role         string
-	Status       string
-	Score        float64
-	ScoreRaw     string
-	HasScore     bool // false when the Score cell is a sentinel (— / N/A / -)
-	HasPDF       bool
-	ReportPath   string
-	ReportNumber string
-	Notes        string
-	JobURL       string // URL of the original job posting
+	Number int
+	// Display numbers synthesized for backfill rows must never join ledger IDs.
+	TrackerNumberMissing bool
+	Date                 string
+	Company              string
+	Role                 string
+	Status               string
+	Score                float64
+	ScoreRaw             string
+	HasScore             bool // false when the Score cell is a sentinel (— / N/A / -)
+	HasPDF               bool
+	ReportPath           string
+	ReportNumber         string
+	Notes                string
+	JobURL               string // URL of the original job posting
 	// Derived from Notes free-text (see data.deriveNoteFields)
 	Location    string  // "City, ST" when a US city+state appears in the notes
 	WorkMode    string  // "Remote" | "Hybrid" | "Full" (onsite), "" when unknown

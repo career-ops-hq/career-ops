@@ -352,7 +352,7 @@ In targeted mode a local `--url-text` path is a **required** input, so it is rea
 
 ## salary-gap
 
-Folds compensation observations into per-application desired/advertised/actual values and gap aggregates. Sources: `reports/*.md` Machine Summary `advertised_comp` (advertised, source `jd` — historical reports backfill automatically), `data/salary-observations.tsv` (desired/actual/stated, append-only), and `config/profile.yml` `compensation.target_range` (desired default). Fold precedence: highest trust tier wins, then latest date (`actual`: contract > offer-letter > recruiter-verbal > user). Aggregates group by (company, role) and per currency — no FX conversion. Unparseable amounts, orphaned tracker numbers, sample sizes, and staleness are always reported.
+Folds compensation observations into per-application desired/advertised/actual values and gap aggregates. Sources: `reports/*.md` Machine Summary `advertised_comp` (advertised, source `jd` — historical reports backfill automatically), `data/salary-observations.tsv` (desired/actual/stated, append-only), and `config/profile.yml` `compensation.target_range` (desired default). Fold precedence: highest trust tier wins, then latest date (`actual`: contract > offer-letter > recruiter-verbal > user). Aggregates group by (company, role) and per currency — no FX conversion. Unparseable amounts, orphaned tracker numbers, mislabeled report links, sample sizes, and staleness are always reported.
 
 ```bash
 node salary-gap.mjs             # JSON
@@ -368,6 +368,10 @@ Observation line format (TSV, one per line, `#`-prefixed lines are comments):
 ```
 
 Amounts: number + optional k/K suffix, ranges allowed ("80-90k"), annual gross unless noted. Sources: jd | profile | user | recruiter-verbal | offer-letter | contract.
+
+**Column 1 is a tracker#, not a report#** (#4351). It is the `#` of the row in the active tracker file (`data/applications.md` in the default layout), and that row is where the observation's company and role come from. Do not read the number off a `reports/{###}-*.md` filename: those are two independent counters that diverge permanently once any row exists without a report — the same divergence `set-status.mjs` documents below — so on a diverged tracker `#5` and report 5 are different applications. To log a figure, find the application's tracker row and copy its `#`. Padding is not identity — `29` and `029` are the same tracker#, so either spelling matches, and a row that has no report at all still folds normally.
+
+A report's own `advertised_comp` reaches a row through that row's Report link, never by matching numbers, and the three ways that can be unclear are reported instead of guessed: an id that is both a tracker row and a different row's report (`ambiguousIds`), one report linked from several rows — a repost or a duplicate row, counted once on the first (`sharedReports`), and a Report link whose numeric label disagrees with the file it points at, e.g. `[5](../reports/006-globex-….md)` (`mislabeledReports` — the target is the report that gets joined, the label is only reported, so one row can never collect two companies' figures).
 
 **`stated` observations** are a narrower-purpose addition (#1852): a specific compensation number the candidate verbally committed to, in a specific interview round, to a specific interviewer — so a later round doesn't accidentally contradict it. `round` and `interviewer` are two optional trailing columns, meaningful only for `stated` rows (existing rows without them still parse — they default to `''`). `stated` observations carry no trust tier and never participate in the desired/advertised/actual fold or gap math; look them up with `getStatedObservations(observations, num)` or `--stated-for`. Interview-prep modes (`modes/interview/plan.md`, `modes/interview-prep.md`) check this before generating comp-related prep content — see their Inputs sections.
 
@@ -1109,6 +1113,7 @@ These have no `npm run` binding — modes and agents call them with
 |------------|---------|
 | `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
 | `node mark-pdf-ready.mjs <report#> [--dry-run] [--json]` | Mark the matched tracker's PDF cell ready after the web PDF render path finishes; resolves the report number, uses the shared tracker lock, and writes atomically |
+| `node sync-pdf-flags.mjs [--dry-run] [--prune [--write]] [--json]` | Reconcile tracker PDF column against data/pdf-index.tsv; `--prune` drops manifest rows whose PDF is gone from disk (dry run by default, `--write` to commit) |
 | `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
 | `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
 | `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
@@ -1208,6 +1213,23 @@ not overwrite one another. Exit status `0` covers a successful mark and an
 idempotent no-op; `1` is a usage, column, or write error; `2` means the tracker
 or report row was not found; `3` means the report matched more than one row;
 and `4` means the tracker lock timed out and the operation should be retried.
+
+---
+
+## sync-pdf-flags.mjs
+
+Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`.
+
+`--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`.
+
+```bash
+node sync-pdf-flags.mjs                          # sync PDF flags to tracker (dry-run with --dry-run)
+node sync-pdf-flags.mjs --prune                  # preview stale manifest rows whose PDF is missing
+node sync-pdf-flags.mjs --prune --write          # prune missing manifest rows from data/pdf-index.tsv
+node sync-pdf-flags.mjs --prune --write --json   # JSON output of prune results
+```
+
+Exit status: `0` success, `1` invalid option or write error, `2` missing tracker file or unreadable manifest, `4` tracker lock timeout.
 
 ---
 
