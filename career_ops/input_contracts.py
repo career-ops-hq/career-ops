@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+
 import hashlib
 import json
 from pathlib import Path
-from career_ops.context import INPUT_ROOT, SCAN_POLICY_VERSION, SCORE_POLICY_VERSION
+from career_ops.context import RULES_ROOT, INPUT_ROOT, SCAN_POLICY_VERSION, SCORE_POLICY_VERSION
 
 
 def digest(value: str) -> str:
@@ -30,11 +31,11 @@ def score_inputs(report: dict) -> str:
         "score_policy_version": SCORE_POLICY_VERSION,
         "jd_report": report,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
-        "profile": (INPUT_ROOT / "config" / "profile.yml").read_text(),
-        "targeting": (INPUT_ROOT / "modes" / "_profile.md").read_text(),
-        "rules": (INPUT_ROOT / "modes" / "_custom.md").read_text(),
+        "profile": (INPUT_ROOT / "profile.yml").read_text(),
+        "targeting": (INPUT_ROOT / "targeting.md").read_text(),
+        "rules": (RULES_ROOT / "scoring.md").read_text(),
         "articles": (INPUT_ROOT / "article-digest.md").read_text() if (INPUT_ROOT / "article-digest.md").is_file() else None,
-        "voice": (INPUT_ROOT / "voice-dna.md").read_text() if (INPUT_ROOT / "voice-dna.md").is_file() else None,
+        "voice": (INPUT_ROOT / "voice.md").read_text() if (INPUT_ROOT / "voice.md").is_file() else None,
         "writing_samples": {
             str(path.relative_to(INPUT_ROOT)): path.read_text()
             for path in sorted((INPUT_ROOT / "writing-samples").glob("**/*")) if path.is_file()
@@ -74,9 +75,9 @@ def canonical_scan_input(value: str) -> str:
         "scan_policy_version": SCAN_POLICY_VERSION,
         "source": source,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
-        "profile": (INPUT_ROOT / "config" / "profile.yml").read_text(),
-        "targeting": (INPUT_ROOT / "modes" / "_profile.md").read_text(),
-        "rules": (INPUT_ROOT / "modes" / "_custom.md").read_text(),
+        "profile": (INPUT_ROOT / "profile.yml").read_text(),
+        "targeting": (INPUT_ROOT / "targeting.md").read_text(),
+        "rules": (RULES_ROOT / "scoring.md").read_text(),
     }
     return json.dumps(inputs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -88,19 +89,19 @@ def apply_inputs(jd_report: dict, score_result: dict, feedback: list[str]) -> st
         "jd_report": jd_report,
         "score_result": score_result,
         "cv": (INPUT_ROOT / "cv.md").read_text(),
-        "profile": (INPUT_ROOT / "config" / "profile.yml").read_text(),
-        "targeting": (INPUT_ROOT / "modes" / "_profile.md").read_text(),
-        "rules": (INPUT_ROOT / "modes" / "_custom.md").read_text(),
-        "contract": (INPUT_ROOT / "prompts" / "shared" / "contract.md").read_text(),
-        "requirements": (INPUT_ROOT / "prompts" / "applications" / "workflow.md").read_text(),
+        "profile": (INPUT_ROOT / "profile.yml").read_text(),
+        "targeting": (INPUT_ROOT / "targeting.md").read_text(),
+        "rules": (RULES_ROOT / "scoring.md").read_text(),
+        "contract": (RULES_ROOT / "shared/contract.md").read_text(),
+        "requirements": (RULES_ROOT / "applications/workflow.md").read_text(),
         "articles": (INPUT_ROOT / "article-digest.md").read_text() if (INPUT_ROOT / "article-digest.md").is_file() else None,
-        "voice": (INPUT_ROOT / "voice-dna.md").read_text() if (INPUT_ROOT / "voice-dna.md").is_file() else None,
+        "voice": (INPUT_ROOT / "voice.md").read_text() if (INPUT_ROOT / "voice.md").is_file() else None,
         "writing_samples": {
             str(path.relative_to(INPUT_ROOT)): path.read_text()
             for path in sorted((INPUT_ROOT / "writing-samples").glob("**/*")) if path.is_file()
         } if (INPUT_ROOT / "writing-samples").is_dir() else {},
         "market_rules": {
-            market: (INPUT_ROOT / "markets" / market / "employment.md").read_text()
+            market: (RULES_ROOT / "markets" / market / "employment.md").read_text()
             for market in ("cn", "hk", "remote")
         },
         "feedback": feedback,

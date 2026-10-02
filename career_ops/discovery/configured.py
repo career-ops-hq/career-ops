@@ -116,7 +116,7 @@ def discover(directory: Path, config_path: Path, company_filter: str | None = No
              input_root: Path | None = None, profile_path: Path | None = None) -> dict:
     """Collect with Node provider plugins; decide and retain business facts in Python."""
     input_root = input_root or config_path.parent
-    profile_path = profile_path or input_root / "config" / "profile.yml"
+    profile_path = profile_path or input_root / "profile.yml"
     if dry_run:
         if resume:
             raise ValueError("Configured discovery dry runs cannot resume a retained run")
@@ -194,8 +194,8 @@ def discover(directory: Path, config_path: Path, company_filter: str | None = No
         return {"status": "failed", "error": message}
     from career_ops.discovery.graph import run_discovery_graph
 
-    inputs = {"config": config, "profile": profile, "blacklist": (input_root / "data" / "blacklist.md").read_text()
-              if (input_root / "data" / "blacklist.md").is_file() else "",
+    inputs = {"config": config, "profile": profile, "blacklist": (input_root / "blacklist.md").read_text()
+              if (input_root / "blacklist.md").is_file() else "",
               "company_filter": company_filter, "verify": verify, "headed_fallback": headed_fallback,
               "throttle_ms": throttle_ms, "rediscover_404": rediscover_404,
               "posted_after": posted_after, "posted_before": posted_before, "since_days": since_days,
@@ -249,7 +249,7 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
         aliases = company_aliases(config.get("company_aliases"))
         snapshot = database_snapshot(store.db, today=today, recheck_after_days=recheck, aliases=aliases)
         seen_urls, seen_roles = snapshot["seen"], snapshot["seen_company_roles"]
-        blacklist = _blacklist(input_root / "data" / "blacklist.md")
+        blacklist = _blacklist(input_root / "blacklist.md")
         windows = load_windows(profile)
         country = profile.get("location", {}).get("country", "") if isinstance(profile.get("location"), dict) else ""
         cooldown_offers, health, searches = [], [], []

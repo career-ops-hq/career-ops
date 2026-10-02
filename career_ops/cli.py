@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from importlib import import_module
 import json
@@ -68,7 +69,7 @@ def parser() -> argparse.ArgumentParser:
     global_command.add_argument("--resume", action="store_true")
     global_command.add_argument("--dry-run", action="store_true")
     global_command.add_argument("--json", action="store_true")
-    resolve_command = commands.add_parser("resolve-company", aliases=["resolve"])
+    resolve_command = commands.add_parser("resolve-company")
     resolve_command.add_argument("names", nargs="*")
     resolve_command.add_argument("--in", dest="input_path", type=Path)
     resolve_command.add_argument("--vendors")
@@ -161,7 +162,7 @@ def main() -> None:
             if domains[command] == "interviews.tools":
                 if rest[:1] == ["context"]:
                     rest += ["--db", str(route.directory / "opportunities.db")]
-            elif domains[command] in {"interviews.workflow", "candidate", "applications.communications", "notifications"}:
+            elif domains[command] in {"interviews.workflow", "candidate", "applications.communications", "notifications", "discovery.liveness_check"}:
                 rest = ["--directory", str(route.directory), *rest]
         sys.argv = [sys.argv[0], *rest]
         raise SystemExit(import_module("career_ops." + domains[command]).main() or 0)
@@ -190,7 +191,7 @@ def main() -> None:
                               posted_after=args.posted_after, posted_before=args.posted_before,
                               since_days=args.since, include_blacklisted=args.include_blacklisted,
                               dry_run=args.dry_run, resume=args.resume, input_root=INPUT_ROOT,
-                              profile_path=Path(os.environ.get("CAREER_OPS_PROFILE") or INPUT_ROOT / "config" / "profile.yml"))
+                              profile_path=Path(os.environ.get("CAREER_OPS_PROFILE") or INPUT_ROOT / "profile.yml"))
             if result["status"] == "failed":
                 raise RuntimeError(json.dumps(result, ensure_ascii=False, sort_keys=True))
         elif args.command == "global":
@@ -203,7 +204,7 @@ def main() -> None:
                                      include_blacklisted=args.include_blacklisted,
                                      shuffle=args.shuffle, resume=args.resume, dry_run=args.dry_run,
                                      input_root=INPUT_ROOT)
-        elif args.command in {"resolve", "resolve-company"}:
+        elif args.command == "resolve-company":
             requested = tuple(part.strip().lower() for part in args.vendors.split(",") if part.strip()) if args.vendors else (*VENDOR_ORDER, "workday")
             result = resolve_boards(Path(os.environ.get("CAREER_OPS_PORTALS") or INPUT_ROOT / "portals.yml"),
                                     input_path=args.input_path, names=args.names,
@@ -253,7 +254,7 @@ def main() -> None:
                         raise ValueError("preparation-plan requires --company and --role")
                     result = build_preparation_plan(
                         args.company, args.role, jd, (INPUT_ROOT / "cv.md").read_text(),
-                        (INPUT_ROOT / "config" / "profile.yml").read_text(),
+                        (INPUT_ROOT / "profile.yml").read_text(),
                         args.report.read_text() if args.report else "",
                         sources={"jd": str(args.jd) if args.jd else args.jd_url,
                                  "report": str(args.report) if args.report else None})
@@ -266,11 +267,11 @@ def main() -> None:
                     db.row_factory = sqlite3.Row
                     portals = INPUT_ROOT / "portals.yml"
                     if args.kind == "stats":
-                        result = stats_view(db, portals, INPUT_ROOT / "config" / "profile.yml")
+                        result = stats_view(db, portals, INPUT_ROOT / "profile.yml")
                     elif args.kind == "reposts":
                         result = repost_view(db, portals)
                     elif args.kind == "salary":
-                        result = salary_view(db, INPUT_ROOT / "config" / "profile.yml")
+                        result = salary_view(db, INPUT_ROOT / "profile.yml")
                     elif args.kind == "stated":
                         if not args.opportunity:
                             raise ValueError("insights stated requires --opportunity")
@@ -280,7 +281,7 @@ def main() -> None:
                     else:
                         view_result = company_view(db, portals, silence_days=args.silence_days,
                                                    include_stale=args.include_stale, company=args.company)
-                        result = company_signals(view_result, INPUT_ROOT / "config" / "profile.yml",
+                        result = company_signals(view_result, INPUT_ROOT / "profile.yml",
                                                  ROOT / "package.json", include_stale=args.include_stale) if args.kind == "company-signals" else view_result
         elif args.command == "salary":
             if not args.confirmed:
@@ -344,7 +345,7 @@ def main() -> None:
             finally:
                 if store:
                     store.close()
-        if args.command in {"resolve", "resolve-company"} and args.summary:
+        if args.command == "resolve-company" and args.summary:
             print(format_summary(result))
         else:
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import argparse
 from contextlib import redirect_stdout
 import fcntl
@@ -22,7 +23,7 @@ from langgraph.graph import END, START, StateGraph
 import yaml
 
 from career_ops.db import BusinessStore
-from career_ops.context import INPUT_ROOT
+from career_ops.context import RULES_ROOT, INPUT_ROOT, ROOT
 from career_ops.input_contracts import digest, score_inputs
 from career_ops.model_config import create_agent
 from career_ops.model import parse_object
@@ -87,10 +88,10 @@ def source_context(directory: Path, opportunity_id: str, statement: str | None =
         "score": artifact,
         "candidate_sources": candidate_sources,
         "style_and_rules": {"rules": inputs["rules"], "voice": inputs["voice"]},
-        "requirements": (INPUT_ROOT / "prompts/applications/workflow.md").read_text(),
-        "contract": (INPUT_ROOT / "prompts/shared/contract.md").read_text(),
+        "requirements": (RULES_ROOT / "applications/workflow.md").read_text(),
+        "contract": (RULES_ROOT / "shared/contract.md").read_text(),
         "market_rules": {
-            market: (INPUT_ROOT / "markets" / market / "employment.md").read_text()
+            market: (RULES_ROOT / "markets" / market / "employment.md").read_text()
             for market in ("cn", "hk", "remote")
         },
         "output_language": profile.get("language", {}).get("output", "en"),
@@ -375,7 +376,7 @@ def show(directory: Path, opportunity_id: str, statement: str | None = None) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path, default=INPUT_ROOT / "data")
+    parser.add_argument("--directory", type=Path, default=ROOT / "data")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("draft", "show"):
         command = commands.add_parser(name)

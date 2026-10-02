@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from career_ops.context import INPUT_ROOT
+
 import argparse
 import json
 from pathlib import Path
@@ -176,29 +178,29 @@ def main() -> None:
     ctx = commands.add_parser("context")
     ctx.add_argument("opportunity_id")
     ctx.add_argument("--db", required=True, type=Path)
-    ctx.add_argument("--input-root", type=Path, default=Path.cwd())
+    ctx.add_argument("--input-root", type=Path, default=INPUT_ROOT)
     ctx.add_argument("--sessions", type=Path)
     matcher = commands.add_parser("match-star")
     matcher.add_argument("question", nargs="*")
-    matcher.add_argument("--story-bank", type=Path, default=Path("interview-prep/story-bank.md"))
+    matcher.add_argument("--story-bank", type=Path, default=INPUT_ROOT / "stories/story-bank.md")
     matcher.add_argument("--jd", type=Path)
     matcher.add_argument("--top", default="1")
     matcher.add_argument("--list", action="store_true")
     prov = commands.add_parser("story-provenance")
-    prov.add_argument("--story-bank", type=Path, default=Path("interview-prep/story-bank.md"))
-    prov.add_argument("--cv", type=Path, default=Path("cv.md"))
+    prov.add_argument("--story-bank", type=Path, default=INPUT_ROOT / "stories/story-bank.md")
+    prov.add_argument("--cv", type=Path, default=INPUT_ROOT / "cv.md")
     prov.add_argument("--summary", action="store_true")
     prep = commands.add_parser("preparation-plan")
     prep.add_argument("--jd", type=Path, required=True)
     prep.add_argument("--company", required=True)
     prep.add_argument("--role", required=True)
-    prep.add_argument("--cv", type=Path, default=Path("cv.md"))
-    prep.add_argument("--profile", type=Path, default=Path("config/profile.yml"))
+    prep.add_argument("--cv", type=Path, default=INPUT_ROOT / "cv.md")
+    prep.add_argument("--profile", type=Path, default=INPUT_ROOT / "profile.yml")
     prep.add_argument("--report", type=Path)
     prep.add_argument("--output", type=Path)
     gap = commands.add_parser("jd-skill-gap")
     gap.add_argument("jd", type=Path)
-    gap.add_argument("--cv", type=Path, default=Path("cv.md"))
+    gap.add_argument("--cv", type=Path, default=INPUT_ROOT / "cv.md")
     gap.add_argument("--summary", action="store_true")
     args = parser.parse_args()
     try:

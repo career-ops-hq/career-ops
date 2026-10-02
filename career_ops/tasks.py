@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import difflib
 from datetime import datetime, timezone
 import fcntl
@@ -299,7 +300,7 @@ class Runtime:
             inputs = json.loads(self.store.task(state["task_id"])["input_payload"])
             pdf_receipt = render_resume(
                 state["task_id"], version, root.parents[1], Path(files["resume_payload"]),
-                pdf_path, INPUT_ROOT / "config" / "profile.yml",
+                pdf_path, INPUT_ROOT / "profile.yml",
                 package["resume_payload"]["candidate"]["name"],
                 inputs["jd_report"]["company"], inputs["jd_report"]["role"],
                 timeout_seconds=min(120, max(1, int(remaining))),

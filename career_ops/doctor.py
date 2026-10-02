@@ -16,7 +16,7 @@ from career_ops.context import INPUT_ROOT, ROOT
 
 
 def checks() -> dict[str, bool]:
-    profile_path = INPUT_ROOT / "config/profile.yml"
+    profile_path = INPUT_ROOT / "profile.yml"
     profile = yaml.safe_load(profile_path.read_text()) if profile_path.is_file() else {}
     resume = (profile or {}).get("cv", {}).get("reactive_resume", {})
     result = {

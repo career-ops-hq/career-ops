@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import yaml
 
 
-from career_ops.context import ROOT
+from career_ops.context import INPUT_ROOT
 ALLOWED_HOSTS = {
     "boards.greenhouse.io", "greenhouse.io", "jobs.ashbyhq.com", "ashbyhq.com",
     "jobs.lever.co", "jobs.eu.lever.co", "lever.co",
@@ -47,7 +47,7 @@ def detect_ats(url: str) -> tuple[str, str, str]:
     raise ValueError("URL not recognized as Greenhouse, Ashby, or Lever")
 
 
-def prepare_application(url: str, pdf: Path, cover: Path | None = None, *, root: Path = ROOT) -> tuple[str, str | None]:
+def prepare_application(url: str, pdf: Path, cover: Path | None = None, *, root: Path = INPUT_ROOT) -> tuple[str, str | None]:
     """Return a local fill guide and optional missing-cover warning; never submit."""
     output = (root / "output").resolve()
     pdf = (root / pdf).resolve()
@@ -56,7 +56,7 @@ def prepare_application(url: str, pdf: Path, cover: Path | None = None, *, root:
     if not pdf.is_file():
         raise ValueError(f"PDF not found: {pdf}")
     ats, company, job_id = detect_ats(url)
-    profile = yaml.safe_load((root / "config" / "profile.yml").read_text(encoding="utf-8")) or {}
+    profile = yaml.safe_load((root / "profile.yml").read_text(encoding="utf-8")) or {}
     if not isinstance(profile, dict):
         raise ValueError("profile must be a mapping")
     candidate = profile.get("candidate") or {}

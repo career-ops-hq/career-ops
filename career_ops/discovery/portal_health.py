@@ -28,7 +28,7 @@ DESIGNATORS = frozenset("inc incorporated llc llp lp ltd limited plc corp corpor
                         "gmbh ag kg sa sas sarl srl spa bv nv ab as oy aps pty pte kk kft".split())
 SUFFIXES = ("ai", "tech", "io", "hq", "labs")
 ATS = ("greenhouse", "ashby", "lever")
-from career_ops.context import ROOT
+from career_ops.context import ROOT, INPUT_ROOT
 
 
 def ascii_fold(value: str, *, punctuation: str = "space") -> str:
@@ -293,7 +293,7 @@ def verify_portals_file(path: Path, *, ats_only: bool = False) -> dict:
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description="Verify tracked portal reachability")
-    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", "portals.yml"))
+    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", str(INPUT_ROOT / "portals.yml")))
     parser.add_argument("--add", metavar="COMPANY")
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--ats-only", action="store_true")

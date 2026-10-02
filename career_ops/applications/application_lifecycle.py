@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import uuid
 from datetime import date
 from pathlib import Path
-from career_ops.context import ROOT
+from career_ops.context import ROOT, INPUT_ROOT
 from typing import Literal, TypedDict
 
 
@@ -364,8 +363,8 @@ class ApplicationStore:
         )]
 
     def followups(self, *, today: date | None = None, overdue_only: bool = False, applied_days: int | None = None) -> dict:
-        input_root = Path(os.environ.get("CAREER_OPS_INPUT_ROOT", ROOT))
-        config = cadence_config(input_root / "config/profile.yml", applied_days=applied_days)
+        input_root = INPUT_ROOT
+        config = cadence_config(input_root / "profile.yml", applied_days=applied_days)
         today = today or date.today()
         rows = self.db.execute(
             """SELECT o.id AS opportunityId,o.url,o.company,o.role,o.created_at AS opportunityCreatedAt,

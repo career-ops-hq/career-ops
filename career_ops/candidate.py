@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from career_ops.context import ROOT, INPUT_ROOT, source_path
+
 import argparse
 import difflib
 import fcntl
@@ -117,7 +119,7 @@ def validate_proposals(raw: object, root: Path) -> list[dict]:
         if is_user_statement and item["source"] != "user-stated":
             raise ValueError("user-stated provenance requires a user-stated source")
         if item["provenance"] == "verified" and not is_user_statement:
-            source = root / reference
+            source = source_path(root, reference)
             if not source.is_file() or item["exactEvidence"] not in source.read_text():
                 raise ValueError("Verified exactEvidence must appear in provenanceRef")
         if item["provenance"] == "unverified" and kinds:
@@ -258,7 +260,7 @@ def public_task(row: sqlite3.Row) -> dict:
 
 def preview(directory: Path, root: Path, proposal_path: Path) -> dict:
     raw = json.loads(proposal_path.read_text())
-    store = Store(directory / "cv-maintenance.db")
+    store = Store(directory / "opportunities.db")
     try:
         task = store.create(validate_proposals(raw, root), root)
     finally:
@@ -267,7 +269,7 @@ def preview(directory: Path, root: Path, proposal_path: Path) -> dict:
 
 
 def resume_preview(directory: Path, task_id: str) -> dict:
-    store = Store(directory / "cv-maintenance.db")
+    store = Store(directory / "opportunities.db")
     try:
         task = store.task(task_id)
         if task["status"] != "running":
@@ -335,7 +337,7 @@ def apply(directory: Path, root: Path, task_id: str, confirmation: str) -> dict:
     lock_dir.mkdir(parents=True, exist_ok=True)
     with (lock_dir / f"cv-{task_id}.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        store = Store(directory / "cv-maintenance.db")
+        store = Store(directory / "opportunities.db")
         try:
             task = store.task(task_id)
             if task["status"] == "completed":
@@ -375,8 +377,8 @@ def apply(directory: Path, root: Path, task_id: str, confirmation: str) -> dict:
 
 def parser() -> argparse.ArgumentParser:
     command = argparse.ArgumentParser(description=__doc__)
-    command.add_argument("--directory", type=Path, default=Path("data/workflow"))
-    command.add_argument("--root", type=Path, default=Path.cwd())
+    command.add_argument("--directory", type=Path, default=ROOT / "data")
+    command.add_argument("--root", type=Path, default=INPUT_ROOT)
     subcommands = command.add_subparsers(dest="command", required=True)
     create = subcommands.add_parser("preview")
     create.add_argument("proposal", type=Path)
@@ -401,7 +403,7 @@ def main() -> None:
         elif args.command == "resume":
             result = resume_preview(args.directory, args.task_id)
         else:
-            store = Store(args.directory / "cv-maintenance.db")
+            store = Store(args.directory / "opportunities.db")
             try:
                 result = public_task(store.task(args.task_id))
             finally:

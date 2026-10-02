@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from career_ops.context import source_path
+
 import json
 from pathlib import Path
 import sqlite3
@@ -106,10 +108,10 @@ def load_context(
                         {**dict(event), "payload": json.loads(event["payload"])}
                         for event in db.execute("SELECT * FROM application_events WHERE opportunity_id=? ORDER BY id", (str(opportunity_id),))
                     ]
-        candidate = {name: (input_root / name).read_text() for name in CANDIDATE_FILES if (input_root / name).is_file()}
+        candidate = {name: source_path(input_root, name).read_text() for name in CANDIDATE_FILES if source_path(input_root, name).is_file()}
         if require_candidate_sources and any(name not in candidate for name in ("cv.md", "config/profile.yml", "modes/_profile.md")):
             raise ValueError("Candidate source files are incomplete")
-        bank_path = input_root / "interview-prep" / "story-bank.md"
+        bank_path = source_path(input_root, "interview-prep/story-bank.md")
         bank = bank_path.read_text() if bank_path.is_file() else ""
         provenance = classify_numeric_claims(bank, candidate.get("cv.md", ""))
         count = sum(len(items) for items in provenance.values())
@@ -117,15 +119,15 @@ def load_context(
             "opportunity": opportunity, "results": results,
             "evaluation": evaluation, "artifacts": artifacts,
             "application": application, "candidate_sources": candidate,
-            "rules": (input_root / "modes" / "_custom.md").read_text() if (input_root / "modes" / "_custom.md").is_file() else "",
-            "market_rules": {name: (ROOT / "markets" / name / "employment.md").read_text()
+            "rules": (source_path(input_root, "modes/_custom.md")).read_text() if (source_path(input_root, "modes/_custom.md")).is_file() else "",
+            "market_rules": {name: (ROOT / "rules" / "markets" / name / "employment.md").read_text()
                              for name in ("cn", "hk", "remote")},
-            "contract": (ROOT / "prompts" / "shared" / "contract.md").read_text(),
-            "interview_requirements": (ROOT / "prompts" / "interviews" / "workflow.md").read_text(),
+            "contract": (ROOT / "rules/shared/contract.md").read_text(),
+            "interview_requirements": (ROOT / "rules/interviews/workflow.md").read_text(),
             "story_bank": bank, "story_provenance": provenance,
             "story_provenance_diagnosis": provenance_diagnosis(bank_path.is_file(), "cv.md" in candidate, len(stories(bank, require_action=False)), count),
-            "sessions": _historical_files(sessions_dir or input_root / "interview-prep" / "sessions", company, role),
-            "preparations": _historical_files(input_root / "interview-prep", company, role),
+            "sessions": _historical_files(sessions_dir or input_root / "stories" / "sessions", company, role),
+            "preparations": _historical_files(input_root / "stories", company, role),
         }
     finally:
         db.close()

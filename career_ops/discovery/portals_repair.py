@@ -19,7 +19,7 @@ SLUG = re.compile(r"^[A-Za-z0-9._-]+$")
 BLOCK_SCALAR = re.compile(r"^[|>][-+]?\d*\s*(#.*)?$")
 DOUBLE_QUOTED = re.compile(r'^"((?:[^"\\]|\\.)*)"[ \t]*(#.*)?$')
 SINGLE_QUOTED = re.compile(r"^'((?:[^']|'')*)'[ \t]*(#.*)?$")
-from career_ops.context import ROOT
+from career_ops.context import ROOT, INPUT_ROOT
 
 
 def _blocks(lines: list[str]) -> dict[str, tuple[int, int, str]]:
@@ -172,7 +172,7 @@ def repair_file(path: Path, *, apply: bool = False, verify=verify_ats_company) -
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description="Verify and repair tracked ATS board URLs")
-    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", "portals.yml"))
+    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", str(INPUT_ROOT / "portals.yml")))
     parser.add_argument("--fix", "--apply", dest="apply", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     arguments = parser.parse_args(argv)

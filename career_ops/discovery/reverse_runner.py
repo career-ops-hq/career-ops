@@ -321,7 +321,7 @@ def discover_global(directory: Path, config_path: Path, *, ats: list[str] | None
     stopped = False
     resumable = False
     checked_at = datetime.now(timezone.utc).isoformat()
-    blacklist_path = input_root / "data" / "blacklist.md"
+    blacklist_path = input_root / "blacklist.md"
     blacklist_hash = hashlib.sha256(json.dumps(_blacklist(blacklist_path), sort_keys=True,
                                              ensure_ascii=False).encode()).hexdigest()
     decision_inputs = {"liveness": liveness, "include_blacklisted": include_blacklisted,

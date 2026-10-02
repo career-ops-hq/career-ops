@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import yaml
 
 
-from career_ops.context import ROOT
+from career_ops.context import ROOT, INPUT_ROOT
 TITLE_FIELDS = ("positive", "negative", "seniority_boost")
 
 
@@ -202,7 +202,7 @@ def validate_file(path: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(ROOT / ".env", override=False)
     parser = argparse.ArgumentParser(description="Validate portals.yml policy and company entries")
-    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", "portals.yml"))
+    parser.add_argument("--file", default=os.environ.get("CAREER_OPS_PORTALS", str(INPUT_ROOT / "portals.yml")))
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:

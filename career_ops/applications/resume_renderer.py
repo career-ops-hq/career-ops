@@ -73,7 +73,7 @@ def render_resume(
     if (re.search(r"[ \t]-[ \t]*$", extracted.stdout, re.MULTILINE)
             or any(f"{left}-{right}" not in source_text for left, right in wrapped_compounds)):
         raise ValueError("Reactive Resume PDF contains non-source line-end hyphens")
-    input_root = profile.parent.parent
+    input_root = profile.parent
     facts = verify_document(extracted.stdout, input_root)
     if facts["verdict"] == "block":
         raise ValueError("Reactive Resume PDF failed the CV fact gate: " + json.dumps(facts, ensure_ascii=False))

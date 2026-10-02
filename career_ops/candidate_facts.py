@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from career_ops.context import ROOT
+from career_ops.context import INPUT_ROOT
 import re
 import unicodedata
 
@@ -163,7 +163,7 @@ def verify_document(target: str, root: Path) -> dict:
         raise ValueError("CV fact gate source is unavailable")
     article = root / "article-digest.md"
     source = cv.read_text() + "\n" + (article.read_text() if article.is_file() else "")
-    config_path = root / "config" / "cv-facts.json"
+    config_path = root / "cv-facts.json"
     config = json.loads(config_path.read_text()) if config_path.is_file() else {}
     return verify_facts(target, source, config)
 
@@ -176,12 +176,12 @@ def main() -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    root = ROOT
+    root = INPUT_ROOT
     sources = args.source or [root / "cv.md", root / "article-digest.md"]
     missing = [str(path) for path in sources if not path.is_file()]
     if missing and (args.source or missing[0] != str(root / "article-digest.md")):
         parser.error("source file unavailable: " + ", ".join(missing))
-    config_path = args.config or root / "config" / "cv-facts.json"
+    config_path = args.config or root / "cv-facts.json"
     config = json.loads(config_path.read_text()) if config_path.is_file() else {}
     result = verify_facts(args.document.read_text(), "\n".join(path.read_text() for path in sources if path.is_file()), config)
     if args.json:
