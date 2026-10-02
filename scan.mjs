@@ -2372,16 +2372,33 @@ export function languageFormsForDedup(language) {
 
 /**
  * Whether a candidate that matched a seen company+role key is nevertheless
- * another language version of it. Same shape as {@link isDistinctRequisition}:
- * true only when every seeded row for the key named its language and none of
- * them is the candidate's. A row with no known language keeps the duplicate.
+ * another language version of a seeded posting.
  *
- * @param {Set<string>|undefined} seededLanguages - Languages seen for matching keys.
+ * Languages are compared per requisition, so a requisition seen on one posting
+ * and a language seen on another never add up to a duplicate. Only seeded rows
+ * that could be the candidate's requisition take part: rows naming one of its
+ * forms, rows of unknown requisition, and every row when the candidate names
+ * none. True only when at least one such row exists, every one of them named
+ * its language, and none of those is the candidate's. A row with no known
+ * language keeps the duplicate.
+ *
+ * @param {Map<string, Set<string>>|undefined} seededLanguages - Languages seen
+ *   for matching keys, by requisition form ({@link ANY_REQUISITION} for a row
+ *   that named none), as recorded by {@link recordLanguages}.
  * @param {string[]} candidateLanguages - From {@link languageFormsForDedup}.
+ * @param {string[]|string|null} [candidateRequisitions] - From {@link requisitionIdsForDedup}.
  * @returns {boolean}
  */
-export function isDistinctLanguage(seededLanguages, candidateLanguages) {
-  return unseenOnEveryRow(seededLanguages, candidateLanguages);
+export function isDistinctLanguage(seededLanguages, candidateLanguages, candidateRequisitions = []) {
+  if (!(seededLanguages instanceof Map)) return false;
+  const requisitions = toRequisitionForms(candidateRequisitions);
+  const overlapping = [...seededLanguages]
+    .filter(([requisition]) => requisitions.length === 0
+      || requisition === ANY_REQUISITION
+      || requisitions.includes(requisition))
+    .map(([, languages]) => languages);
+  return overlapping.length > 0
+    && overlapping.every(languages => unseenOnEveryRow(languages, candidateLanguages));
 }
 
 function unseenOnEveryRow(seeded, candidate) {
@@ -2403,13 +2420,14 @@ function toRequisitionForms(requisitions) {
  * located candidate overlaps only its exact key and genuinely locationless
  * wildcard rows. A seen key stops being a duplicate when the candidate is a
  * different requisition OR (with language-aware dedup, i.e. a non-empty
- * `candidateLanguages`) a different language version.
+ * `candidateLanguages`) a language version no seeded posting of its
+ * requisition was in.
  */
 export function matchesSeenCompanyRole({ key, baseKey, seen, requisitions, locatedRequisitions, languages = new Map(), locatedLanguages = new Map() }, candidate, candidateLanguages = []) {
   if (key === null) return false;
   const distinct = (requisitionSets, languageSets, k) =>
     isDistinctRequisition(requisitionSets.get(k), candidate)
-    || isDistinctLanguage(languageSets.get(k), candidateLanguages);
+    || isDistinctLanguage(languageSets.get(k), candidateLanguages, candidate);
   if (seen.has(key) && !distinct(requisitions, languages, key)) return true;
   if (key !== baseKey && seen.has(baseKey)
     && !distinct(requisitions, languages, baseKey)) return true;
@@ -2425,6 +2443,18 @@ function recordForms(formsByKey, key, forms) {
   const list = toRequisitionForms(forms);
   if (list.length === 0) seen.add(ANY_REQUISITION);
   for (const form of list) seen.add(form);
+}
+
+/** Record a row's languages under a key, filed under each of its requisition
+ * forms ({@link ANY_REQUISITION} when it named none) — the shape
+ * {@link isDistinctLanguage} reads. */
+function recordLanguages(languagesByKey, key, requisitions, languages) {
+  let byRequisition = languagesByKey.get(key);
+  if (!byRequisition) languagesByKey.set(key, (byRequisition = new Map()));
+  const list = toRequisitionForms(requisitions);
+  for (const requisition of list.length > 0 ? list : [ANY_REQUISITION]) {
+    recordForms(byRequisition, requisition, languages);
+  }
 }
 
 /**
@@ -2471,7 +2501,8 @@ function recordForms(formsByKey, key, forms) {
  *   {@link isDistinctRequisition}. `locatedRequisitionsByBase` separately
  *   aggregates located rows for matching a locationless candidate; it never
  *   acts as a bare wildcard against a located candidate. `languagesByBase` and
- *   `locatedLanguagesByBase` do the same for posting languages (see
+ *   `locatedLanguagesByBase` do the same for posting languages, filed per key
+ *   under each requisition form of the row that carried them (see
  *   {@link isDistinctLanguage}).
  *
  * Requisition id and language are recorded per posting URL in scan-history
@@ -2510,14 +2541,14 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       recordForms(requisitionsByBase, key, requisition);
     }
     if (languagesByBase) {
-      recordForms(languagesByBase, key, language);
+      recordLanguages(languagesByBase, key, requisition, language);
     }
     const base = companyRoleDedupKey(c, r, canonicalize);
     if (locatedRequisitionsByBase && key !== base) {
       recordForms(locatedRequisitionsByBase, base, requisition);
     }
     if (locatedLanguagesByBase && key !== base) {
-      recordForms(locatedLanguagesByBase, base, language);
+      recordLanguages(locatedLanguagesByBase, base, requisition, language);
     }
   };
 
@@ -3908,10 +3939,10 @@ async function main() {
         if (key !== null) {
           seenCompanyRoles.add(key);
           recordForms(seenCompanyRoleRequisitions, key, requisition);
-          recordForms(seenCompanyRoleLanguages, key, language);
+          recordLanguages(seenCompanyRoleLanguages, key, requisition, language);
           if (key !== baseKey) {
             recordForms(locatedRequisitionsByBase, baseKey, requisition);
-            recordForms(locatedLanguagesByBase, baseKey, language);
+            recordLanguages(locatedLanguagesByBase, baseKey, requisition, language);
           }
         }
         // Tag with the company's careers domain so verify can offer a 404/410

@@ -13,6 +13,8 @@
 //   - language forms fold regional variants onto the primary subtag;
 //   - the language decision is conservative: an unknown language on either
 //     side, or the switch off, keeps the historical "duplicate" answer;
+//   - requisition and language are compared per seeded posting, never pooled
+//     across postings;
 //   - scan-history's requisition_id / language columns seed the decision, and
 //     tracker / pipeline rows inherit them by URL;
 //   - the row writer emits both columns, and a written row seeds the same key.
@@ -103,15 +105,16 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
 
 // ── 3. Language decision is conservative ─────────────────────────────────────
 {
+  const byRequisition = (languages) => new Map([['R1', new Set(languages)]]);
   const checks = [
-    [new Set(['de']), ['en'], true, 'another language version is distinct'],
-    [new Set(['de', 'en']), ['en'], false, 'a seen language is a duplicate'],
-    [new Set(['de', ANY_REQUISITION]), ['en'], false, 'a seed with unknown language keeps the duplicate'],
+    [byRequisition(['de']), ['en'], true, 'another language version is distinct'],
+    [byRequisition(['de', 'en']), ['en'], false, 'a seen language is a duplicate'],
+    [byRequisition(['de', ANY_REQUISITION]), ['en'], false, 'a seed with unknown language keeps the duplicate'],
     [undefined, ['en'], false, 'no seed data keeps the duplicate'],
-    [new Set(['de']), [], false, 'an unknown candidate language keeps the duplicate'],
+    [byRequisition(['de']), [], false, 'an unknown candidate language keeps the duplicate'],
   ];
   for (const [seeded, candidate, want, label] of checks) {
-    check(isDistinctLanguage(seeded, candidate) === want, `isDistinctLanguage: ${label}`, `expected ${want}`);
+    check(isDistinctLanguage(seeded, candidate, ['R1']) === want, `isDistinctLanguage: ${label}`, `expected ${want}`);
   }
 }
 
@@ -133,7 +136,7 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
     seen: new Set([key]),
     requisitions: new Map([[key, new Set(['ID2608-00427A'])]]),
     locatedRequisitions: new Map(),
-    languages: new Map([[key, new Set(['de'])]]),
+    languages: new Map([[key, new Map([['ID2608-00427A', new Set(['de'])]])]]),
     locatedLanguages: new Map(),
   };
   check(matchesSeenCompanyRole(state, ['ID2608-00427A'], ['en']) === false,
@@ -147,6 +150,35 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
   const legacy = { key, baseKey: key, seen: new Set([key]), requisitions: new Map(), locatedRequisitions: new Map() };
   check(matchesSeenCompanyRole(legacy, [], ['en']) === true,
     'matchesSeenCompanyRole: callers without language maps keep the historical answer');
+}
+{
+  // Requisition and language are compared per seeded posting: a requisition
+  // seen on one posting and a language seen on another do not add up to a
+  // duplicate.
+  const seed = (rows) => {
+    const requisitions = new Map();
+    const languages = new Map();
+    const seen = collectSeenCompanyRoles({
+      scanHistoryText: [HEADER, ...rows.map(([n, requisition, language]) =>
+        historyRow(`https://jobs.smartrecruiters.com/acmegmbh/${n}-senior-qa-manager`, { requisition, language }))].join('\n'),
+    }, {}, undefined, { requisitionsByBase: requisitions, languagesByBase: languages });
+    const key = companyRoleDedupKey('Acme', 'Senior QA Manager');
+    return { key, baseKey: key, seen, requisitions, locatedRequisitions: new Map(), languages, locatedLanguages: new Map() };
+  };
+  const pairs = seed([[1, 'R1', 'de'], [2, 'R2', 'en']]);
+  const cases = [
+    [pairs, ['R1'], ['en'], false, 'R1 seen in German, English seen on R2 → the English R1 is kept'],
+    [pairs, ['R1'], ['de'], true, 'the German R1 itself → duplicate'],
+    [pairs, ['R2'], ['de'], false, 'R2 seen in English → the German R2 is kept'],
+    [pairs, [], ['en'], true, 'no candidate requisition, English seen → duplicate'],
+    [pairs, ['R3'], ['en'], false, 'an unseen requisition → kept'],
+    [pairs, ['R1'], [], true, 'switch off, R1 seen → duplicate'],
+    [seed([[1, '', 'de'], [2, 'R2', 'en']]), ['R1'], ['en'], false, 'a German posting of unknown requisition does not make the English R1 a duplicate'],
+    [seed([[1, '', ''], [2, 'R2', 'en']]), ['R1'], ['en'], true, 'a posting of unknown requisition and language keeps the duplicate'],
+  ];
+  for (const [state, requisition, language, want, label] of cases) {
+    check(matchesSeenCompanyRole(state, requisition, language) === want, `matchesSeenCompanyRole: ${label}`, `expected ${want}`);
+  }
 }
 
 // ── 6. Seeding from scan-history, inherited by tracker and pipeline rows ─────
@@ -169,10 +201,11 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
   check(reqs && reqs.size === 1 && reqs.has('ID2608-00427A'),
     'collectSeenCompanyRoles: history, pipeline and tracker rows for one URL seed one requisition',
     `seeded [${reqs ? [...reqs].join(', ') : 'nothing'}]`);
-  check(langs && langs.size === 1 && langs.has('de'),
+  const requisitionLangs = langs?.get('ID2608-00427A');
+  check(langs?.size === 1 && requisitionLangs?.size === 1 && requisitionLangs.has('de'),
     'collectSeenCompanyRoles: pipeline and tracker rows inherit the history language (no unknown marker)',
-    `seeded [${langs ? [...langs].join(', ') : 'nothing'}]`);
-  check(isDistinctLanguage(langs, ['en']) === true,
+    `seeded ${langs ? JSON.stringify([...langs].map(([r, l]) => [r, [...l]])) : 'nothing'}`);
+  check(isDistinctLanguage(langs, ['en'], ['ID2608-00427A']) === true,
     'collectSeenCompanyRoles: the English version of that requisition is distinct in a later run');
 }
 {
@@ -196,7 +229,7 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
     pipelineText: `- [ ] https://jobs.smartrecruiters.com/acmegmbh/999-senior-qa-manager | Acme | Senior QA Manager | Hamburg, Germany\n`,
   }, {}, undefined, { languagesByBase });
   const langs = languagesByBase.get(companyRoleDedupKey('Acme', 'Senior QA Manager'));
-  check(langs && langs.has(ANY_REQUISITION),
+  check(langs?.get(ANY_REQUISITION)?.has(ANY_REQUISITION),
     'collectSeenCompanyRoles: a pipeline row whose URL history never described stays unknown');
 }
 {
@@ -205,7 +238,8 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
     scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${DE_URL}\t2026-09-28\tsmartrecruiters-api\tSenior QA Manager\tAcme\tadded\tHamburg, Germany\n`,
   }, {}, undefined, { languagesByBase });
   const langs = languagesByBase.get(companyRoleDedupKey('Acme', 'Senior QA Manager'));
-  check(langs && langs.size === 1 && langs.has(ANY_REQUISITION),
+  const unknownLangs = langs?.get(ANY_REQUISITION);
+  check(langs?.size === 1 && unknownLangs?.size === 1 && unknownLangs.has(ANY_REQUISITION),
     'collectSeenCompanyRoles: a legacy 7-column history row reads as unknown language');
 }
 {
@@ -216,7 +250,8 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
   }, {}, undefined, { includeLocation: true, languagesByBase, locatedLanguagesByBase });
   const located = companyRoleDedupKey('Acme', 'Senior QA Manager', undefined, 'Hamburg, Germany');
   const base = companyRoleDedupKey('Acme', 'Senior QA Manager');
-  check(languagesByBase.get(located)?.has('de') && locatedLanguagesByBase.get(base)?.has('de'),
+  check(languagesByBase.get(located)?.get('ID2608-00427A')?.has('de')
+      && locatedLanguagesByBase.get(base)?.get('ID2608-00427A')?.has('de'),
     'collectSeenCompanyRoles: with dedup_include_location the language lands on the located key and its base aggregate');
 }
 
@@ -271,6 +306,6 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
   const languagesByBase = new Map();
   collectSeenCompanyRoles({ scanHistoryText: `${HEADER}\n${line}\n` }, {}, undefined, { requisitionsByBase, languagesByBase });
   const key = companyRoleDedupKey('Acme', 'Senior QA Manager');
-  check(requisitionsByBase.get(key)?.has('JREQ 12757') && languagesByBase.get(key)?.has('en'),
+  check(requisitionsByBase.get(key)?.has('JREQ 12757') && languagesByBase.get(key)?.get('JREQ 12757')?.has('en'),
     'formatScanHistoryRow → collectSeenCompanyRoles: a written row seeds its requisition and language');
 }
