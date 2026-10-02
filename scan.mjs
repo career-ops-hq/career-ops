@@ -938,7 +938,6 @@ export const DEFAULT_VISA_NEGATIVE = [
   // (Relocation wording is deliberately excluded: relocation != sponsorship.)
   'citizens and permanent residents only',
   'permanent residents only',
-  'local candidates only',
 ];
 
 export function buildVisaFilter(visaFilter) {

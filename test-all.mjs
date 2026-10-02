@@ -8419,13 +8419,18 @@ try {
 
   // Default mode must reject unambiguous international no-sponsorship phrasing.
   const intlNegVisa = buildVisaFilter({ enabled: true });
-  if (
-    intlNegVisa('Singapore citizens and permanent residents only') === false &&
-    intlNegVisa('Local candidates only - no relocation provided') === false
-  ) {
+  if (intlNegVisa('Singapore citizens and permanent residents only') === false) {
     pass('visa_filter rejects international no-sponsorship phrasing');
   } else {
-    fail('visa_filter should reject citizens/PR-only and local-only postings');
+    fail('visa_filter should reject citizens/PR-only postings');
+  }
+
+  // "Local candidates only" usually rules out relocation, not sponsorship
+  // (relocation != sponsorship), so the minimal mode keeps those postings.
+  if (intlNegVisa('Local candidates only') === true) {
+    pass('visa_filter default keeps "local candidates only" postings');
+  } else {
+    fail('visa_filter default should not treat "local candidates only" as a sponsorship refusal');
   }
 
   // ── country_eligibility_filter (#2093) ──
