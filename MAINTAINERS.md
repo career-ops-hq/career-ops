@@ -20,28 +20,7 @@ A blocking gate whose owner is away is worse than no gate, and it fails invisibl
 
 ## The contributor ladder
 
-Career-ops grows its team in the open. There are three rungs:
-
-### 1. Contributor
-Anyone who opens a PR or a helpful issue. No permissions needed — just contribute. Good first contributions: a new open-API scanner provider (`providers/`), a translation, a docs fix, or a [good first issue](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### 2. Reviewer
-Trusted contributors who help triage and review incoming PRs. A reviewer is invited after a track record of **several merged, high-quality PRs** across more than one area, plus consistently helpful review comments on others' PRs. Reviewers help label, reproduce, and give first-pass feedback; merges still go through a maintainer.
-
-**How to get there:** keep shipping quality PRs, review others' work thoughtfully, and engage in discussions/RFCs. Identity is verified before any access is granted (see "Trust & access" below).
-
-### 3. Maintainer
-Reviewers who have shown sustained judgment aligned with the project's direction (local-first, AI-agnostic, human-in-the-loop) can be invited to maintain — with merge rights and a voice in architecture decisions.
-
-## What each rung can do
-
-| | Contributor | Reviewer | Maintainer |
-|---|:---:|:---:|:---:|
-| Open PRs / issues | ✅ | ✅ | ✅ |
-| Triage & label | | ✅ | ✅ |
-| First-pass review | | ✅ | ✅ |
-| Merge to `main` | | | ✅ |
-| Architecture / scoring / data-contract decisions | | | ✅ |
+How each rung of the ladder is earned lives in [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder), so there is only one version of it. In short: your 3rd merged PR brings an invitation to the [career-ops-hq](https://github.com/career-ops-hq) organization, and every rung above that is by invitation. Good first contributions: a new open-API scanner provider (`providers/`), a translation, a docs fix, or a [good first issue](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Trust & access
 

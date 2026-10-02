@@ -17,6 +17,8 @@ The goal is to build a self-sustaining community where the project thrives even 
 
 Anyone can grow their role in the project. Roles are earned through sustained, quality contributions — not requested or assigned.
 
+This is the one place the ladder and its criteria are written down: [MAINTAINERS.md](MAINTAINERS.md) lists who holds each role today, and [CONTRIBUTING.md](CONTRIBUTING.md) and announcements link here instead of keeping their own copy.
+
 ### Participant
 
 **Everyone starts here.**
@@ -27,7 +29,7 @@ Anyone can grow their role in the project. Roles are earned through sustained, q
 
 ### Contributor
 
-**Earned after 2+ merged PRs.**
+**Earned with your 3rd merged PR.** It brings an invitation to the [career-ops-hq](https://github.com/career-ops-hq) organization (the **contributors** team). That is the whole criterion, and it is retroactive: no vote, no nomination, no application. Invitations go out in batches; if yours has not arrived, say so in an issue.
 
 - Listed in release notes when their contributions ship
 - Input is weighted more heavily in issue discussions
@@ -35,7 +37,7 @@ Anyone can grow their role in the project. Roles are earned through sustained, q
 
 ### Triager
 
-**Earned after sustained contribution + demonstrated understanding of the project's architecture.**
+**By invitation**, after sustained contribution + demonstrated understanding of the project's architecture.
 
 - Can label and categorize issues
 - Can close duplicates and redirect support questions
@@ -44,9 +46,10 @@ Anyone can grow their role in the project. Roles are earned through sustained, q
 
 ### Reviewer
 
-**Earned after 5+ quality PRs merged + track record of helpful code reviews.**
+**By invitation**, after a run of quality merged PRs + a track record of helpful code reviews.
 
-- Can approve PRs (maintainer still merges)
+- Triage permissions on the repository; can approve PRs. A maintainer still approves and merges: branch protection only counts approvals from write access
+- Identity is verified before this access is granted (see [Trust & access](MAINTAINERS.md#trust--access))
 - Reviews carry the decision **inside the reviewer's area** (listed in [MAINTAINERS.md](MAINTAINERS.md)); outside it, an approval is a valued signal on code quality, not the routing decision
 - Routing (core vs. plugin vs. separate project, see CONTRIBUTING "Scope") and the critical files in `.github/CODEOWNERS` stay with the maintainers, before code review
 - Listed in CONTRIBUTORS.md
@@ -54,9 +57,10 @@ Anyone can grow their role in the project. Roles are earned through sustained, q
 
 ### Maintainer
 
-**Earned after 6+ months of sustained contribution + demonstrated alignment with project values.**
+**By invitation**, after sustained contribution + demonstrated alignment with project values.
 
 - Can merge PRs
+- Identity is verified before this access is granted (see [Trust & access](MAINTAINERS.md#trust--access))
 - Can release new versions
 - Participates in governance decisions
 - Voted in by existing maintainers
