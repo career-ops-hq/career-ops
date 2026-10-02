@@ -239,6 +239,11 @@ export function isFieldAbsent(value) {
   return value === undefined || value === null || String(value).trim() === '';
 }
 
+// Own properties only: `filter_on: constructor` must not read Object.prototype.
+export function declaredFieldValue(job, field) {
+  return Object.hasOwn(job, field) ? job[field] : undefined;
+}
+
 // ── Title filter overrides (per-company broadened title net) ───────
 // Optional. `title_filter_overrides` in portals.yml lets specific companies
 // (matched by an explicit slug list — the company/tenant slug the scanner
@@ -3793,7 +3798,7 @@ async function main() {
           if (field === 'title') continue;
           const key = declaredFieldKey(company._targetId, field);
           declaredFieldSeen.set(key, (declaredFieldSeen.get(key) || 0) + 1);
-          if (isFieldAbsent(job[field])) {
+          if (isFieldAbsent(declaredFieldValue(job, field))) {
             declaredFieldAbsent.set(key, (declaredFieldAbsent.get(key) || 0) + 1);
           }
         }
@@ -3834,11 +3839,10 @@ async function main() {
         for (const field of declaredFields) {
           if (field === 'title') {
             if (!titleFilter(job.title)) { failedField = field; break; }
-          } else if (isFieldAbsent(job[field])) {
-            sawAbsentField = true;
-          } else if (!fieldFilters.get(field)(String(job[field]))) {
-            failedField = field;
-            break;
+          } else {
+            const value = declaredFieldValue(job, field);
+            if (isFieldAbsent(value)) sawAbsentField = true;
+            else if (!fieldFilters.get(field)(String(value))) { failedField = field; break; }
           }
         }
         if (failedField === 'title') {

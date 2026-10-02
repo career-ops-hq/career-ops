@@ -642,14 +642,14 @@ title_filter:
 #   noc:
 #     positive: ["stem:22", "stem:13"]   # occupation codes starting 22 or 13
 #
-# tracked_companies:
+# and, as an entry under the tracked_companies: key further down:
 #   - name: Example Occupation-Coded Board
 #     careers_url: https://example.com/jobs
 #     scan_method: local_parser
 #     filter_on: noc
 #     parser:
 #       command: node
-#       script: scripts/parsers/example-board-jobs.js
+#       script: local/example-board-jobs.js
 #       format: jobs-json-v1
 
 # -- Search queries --
