@@ -1,4 +1,5 @@
 import { decodeEntities } from './_html-entities.mjs';
+import { htmlToText } from './_html-to-text.mjs';
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -139,9 +140,13 @@ function cleanUrl(value) {
  * `<description>` whose last line is the location (optionally followed by
  * " · {comp range}"). No structured company/location fields are offered.
  *
+ * The `<description>` text is also carried as plain-text `description` (it
+ * ships in the same payload, so it is free), giving the scanner's
+ * content_filter and visa_filter something to read.
+ *
  * @param {string} xml - raw RSS feed body
  * @param {string} [defaultCompany] - fallback company when a title has no " at " segment
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
  */
 export function parseStartupJobsFeed(xml, defaultCompany = DEFAULT_COMPANY) {
   if (typeof xml !== 'string') return [];
@@ -166,6 +171,10 @@ export function parseStartupJobsFeed(xml, defaultCompany = DEFAULT_COMPANY) {
       url,
     };
     if (postedAt !== undefined) job.postedAt = postedAt;
+    // Location above reads the raw lines; the description is flattened to
+    // plain text (and capped) by the shared helper, like pythonorg.mjs does.
+    const descriptionText = htmlToText(description);
+    if (descriptionText) job.description = descriptionText;
     jobs.push(job);
   }
 

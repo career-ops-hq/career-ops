@@ -125,6 +125,45 @@ try {
     fail(`row 2 title/company = ${JSON.stringify([jobs[2]?.title, jobs[2]?.company])}`);
   }
 
+  // description: the <description> text ships in the same payload, so it is
+  // carried as plain text for content_filter / visa_filter (whitespace
+  // collapsed, markup stripped by the shared htmlToText helper).
+  if (jobs[0]?.description === 'Own the platform that powers the whole engineering org. Amsterdam, Netherlands · €130,000 – €160,000 per year') {
+    pass('parseStartupJobsFeed carries the <description> text as job.description');
+  } else {
+    fail(`row 0 description = ${JSON.stringify(jobs[0]?.description)}`);
+  }
+
+  const descriptionXml = [
+    '<item>',
+    '  <title>Backend Engineer at Gamma</title>',
+    '  <link>https://startup.jobs/backend-engineer-gamma-10260827</link>',
+    '  <description>&lt;p&gt;We sponsor &lt;strong&gt;visas&lt;/strong&gt; for this role.&lt;/p&gt;',
+    '',
+    'Berlin, Germany</description>',
+    '</item>',
+    '<item>',
+    '  <title>Data Engineer at Delta</title>', // no <description> at all
+    '  <link>https://startup.jobs/data-engineer-delta-10260828</link>',
+    '</item>',
+    '<item>',
+    '  <title>Designer at Epsilon</title>', // empty <description>
+    '  <link>https://startup.jobs/designer-epsilon-10260829</link>',
+    '  <description></description>',
+    '</item>',
+  ].join('\n');
+  const descJobs = parseStartupJobsFeed(descriptionXml);
+  if (descJobs[0]?.description === 'We sponsor visas for this role. Berlin, Germany' && descJobs[0]?.location === 'Berlin, Germany') {
+    pass('parseStartupJobsFeed strips markup from job.description and still reads the location from the last line');
+  } else {
+    fail(`markup row = ${JSON.stringify(descJobs[0])}`);
+  }
+  if (descJobs.length === 3 && descJobs.slice(1).every((j) => !('description' in j) && j.location === '')) {
+    pass('an item with no (or an empty) <description> is kept, without a description field');
+  } else {
+    fail(`description-less rows = ${JSON.stringify(descJobs.slice(1))}`);
+  }
+
   // Robustness
   if (parseStartupJobsFeed('', 'X').length === 0) pass('empty input → empty result');
   else fail('empty input should yield empty result');
