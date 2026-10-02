@@ -1,9 +1,6 @@
 # Aggregator domains: known job aggregators and scrapers that repost listings from primary sources.
 # This list is maintained by the project via updates; it is not a user-editable file — do not add personal entries here.
 # Note: Indeed (indeed.com) is deliberately excluded because companies post there directly as a primary board.
-# The test for membership is whether the URL is employer-controlled. A multi-employer board owns its own
-# posting URLs even when employers post to it directly, so a URL mismatch against one is not evidence of
-# two distinct requisitions. See #3652.
 
 recruit.net # aggregator, reposts listings from other boards
 builtin.com # aggregator (Built In), tech job aggregator
