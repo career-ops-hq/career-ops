@@ -1,8 +1,10 @@
 import fs from "node:fs";
+import { profilePatchError } from "@/lib/profile-patch.mjs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { isMapping } from "@/lib/portals-config.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,13 +58,15 @@ function patchToProfile(p: ProfilePatch): Record<string, unknown> {
 }
 
 export async function POST(req: Request) {
-  let patch: ProfilePatch;
+  let payload: unknown;
   try {
-    patch = (await req.json()) as ProfilePatch;
+    payload = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const proposed = patchToProfile(patch);
+  const error = profilePatchError(payload);
+  if (error) return Response.json({ error }, { status: 400 });
+  const proposed = patchToProfile(payload as ProfilePatch);
   if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
 
   const root = careerOpsRoot();
@@ -86,7 +90,12 @@ export async function POST(req: Request) {
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }
-    base = isObj(parsed) ? (parsed as Record<string, unknown>) : {};
+    // Valid YAML can still be a list, scalar, or null. Treating those as an
+    // empty profile would discard the existing document on this partial write.
+    if (!isMapping(parsed)) {
+      return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });
+    }
+    base = parsed as Record<string, unknown>;
   }
 
   const merged = deepMerge(base, proposed);

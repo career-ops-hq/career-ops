@@ -6,6 +6,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmS
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -392,6 +393,11 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
+      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
+      // which matches by NAME — never fires on one, and the walk descends into a
+      // whole second checkout of this repository (#3499, #3762). The caller's
+      // own set stays authoritative for everything else.
+      if (isNestedCheckout(full)) continue;
       if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
     } else if (match.test(entry.name)) {
       out.push(full);

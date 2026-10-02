@@ -39,6 +39,15 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
+// PipelineOpenFailedMsg reports that an external open (job URL, manifesto or
+// CV PDF) failed. The dashboard runs under an alt-screen, so the failure has to
+// travel back to the pipeline screen as a flash: anything written to stderr is
+// never seen. Target is the URL or path that could not be opened.
+type PipelineOpenFailedMsg struct {
+	Target string
+	Err    string
+}
+
 // PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
 // from the application's recorded source HTML. Paths are relative to
 // CareerOpsPath (as recorded in the manifest).
@@ -123,6 +132,7 @@ const (
 	sortLocation = "location"
 	sortPay      = "pay"
 	sortLast     = "last"
+	sortPosted   = "posted"
 )
 
 // Filter modes
@@ -157,7 +167,7 @@ func getPipelineTabs() []pipelineTab {
 	}
 }
 
-var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
+var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast, sortPosted}
 
 // ColumnID identifies an optional table column in the pipeline view.
 type ColumnID int
@@ -478,6 +488,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		} else {
 			m.flash = "PDF regenerated and opened: " + filepath.Base(msg.Path)
 		}
+		return m, nil
+	case PipelineOpenFailedMsg:
+		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
@@ -1214,8 +1227,26 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	case sortLast:
 		// Most recent contact first; empty dates sink to the bottom.
 		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
+	case sortPosted:
+		// Freshest requisition first; rows with no posted date sink to the bottom.
+		return func(a, b model.CareerApplication) bool {
+			if (a.PostedOn == "") != (b.PostedOn == "") {
+				return a.PostedOn != ""
+			}
+			return a.PostedOn > b.PostedOn
+		}
 	default: // sortScore
-		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+		// Unevaluated rows float to the TOP, not the bottom. Their Score is
+		// Go's zero value, so a plain `a.Score > b.Score` ranks them below the
+		// worst-scoring role in the pipeline — which reads as "these are the
+		// weakest" when it means "these have not been looked at yet".
+		// "Needs evaluating" is more actionable than "scored badly".
+		return func(a, b model.CareerApplication) bool {
+			if a.HasScore != b.HasScore {
+				return !a.HasScore
+			}
+			return a.Score > b.Score
+		}
 	}
 }
 
@@ -1771,9 +1802,22 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	}
 	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
-	// Score with color
+	// Score with color. An unevaluated row carries no number: print the
+	// sentinel rather than %.1f of a zero value, which reads as a 0.0 fit.
 	scoreStyle := m.scoreStyle(app.Score)
-	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
+	scoreText := fmt.Sprintf("%.1f", app.Score)
+	if !app.HasScore {
+		// Show the tracker's own sentinel (— / N/A / -). Fall back to an em
+		// dash when the cell is empty or too wide for the score column.
+		scoreStyle = lipgloss.NewStyle().Foreground(m.theme.Subtext)
+		scoreText = strings.TrimSpace(app.ScoreRaw)
+		if scoreText == "" || lipgloss.Width(scoreText) > 3 {
+			scoreText = "\u2014"
+		}
+	}
+	// Width(3) so the sentinel occupies the same column as "4.2" and the
+	// row keeps its measured width.
+	score := scoreStyle.Width(3).Render(scoreText)
 
 	// Company (truncate)
 	company := truncateRunes(app.Company, cw.company)
@@ -1947,6 +1991,44 @@ func previewOutcome(app model.CareerApplication) string {
 	return outcome
 }
 
+// sanitizeFlash neutralizes control characters in the flash line.
+//
+// Every flash reaches the terminal through the single lipgloss.Render below,
+// and lipgloss wraps the string it is given without escaping it. Most of what
+// the flash line carries is not the program's own words: a tracker URL or a
+// manifest path read out of a file, or the last line a failed child process
+// printed. A control byte in any of those reaches the terminal as an
+// instruction rather than as text, which is how a cell that renders correctly
+// everywhere else can still move the cursor or repaint the help bar.
+//
+// The range is the one tracker-utils.mjs strips at the tracker write path
+// (CONTROL_CHARS, #3892): C0, DEL and C1. It differs deliberately in one
+// respect. cell() keeps \t, \r and \n because it has already folded them to a
+// space and dropping them there would glue words together; the help bar is a
+// single line, so they are folded to a space here instead of being kept.
+//
+// Stripping at the write path stops new bytes entering the tracker. It cannot
+// speak for a report header, a scan TSV, or a child process's stderr, none of
+// which pass through cell() -- and the flash renders all three.
+//
+// Text from those sources need not be valid UTF-8. strings.Map hands the
+// mapping function utf8.RuneError for a byte it cannot decode and writes
+// U+FFFD, so a raw 0x9b -- the byte an 8-bit terminal reads as CSI -- is
+// replaced rather than passed through. That is the property the guard needs;
+// it shows as a replacement character rather than disappearing, which is the
+// honest rendering of a byte nothing can decode.
+func sanitizeFlash(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func (m PipelineModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
@@ -1963,7 +2045,7 @@ func (m PipelineModel) renderHelp() string {
 			Background(m.theme.Surface).
 			Width(m.width).
 			Padding(0, 1)
-		return flashStyle.Render(m.flash)
+		return flashStyle.Render(sanitizeFlash(m.flash))
 	}
 
 	if m.colPicker {

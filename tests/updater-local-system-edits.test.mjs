@@ -13,13 +13,32 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
-import { gitIn, locallyModifiedSystemFiles } from '../update-system.mjs';
+import { gitIn, locallyModifiedSystemFiles, pathFullyPreserved, checkoutErrorIsBenign, probeAbsentUpstream } from '../update-system.mjs';
+
+const fixtures = [];
+
+// Registered on exit rather than removed per case, the same shape as
+// template-packs.test.mjs: the cases are top-level blocks, and a hook still
+// runs when one of them throws, which is the run that would otherwise leak
+// every repo created so far. Each run used to leave one repo per case in the
+// OS temp dir, and a global core.fsmonitor=true gives each of those a daemon
+// that outlives the run.
+process.on('exit', () => {
+  for (const dir of fixtures) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // A fixture that cannot be removed must not change the suite's verdict.
+    }
+  }
+});
 
 // A repo with an `upstream` branch standing in for FETCH_HEAD, and `main` as
 // the install. Both start from a shared base commit, which is what gives
 // merge-base a meaningful baseline.
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'co-local-edits-'));
+  fixtures.push(dir);
   const g = (...args) => gitIn(dir, ...args);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
@@ -62,6 +81,24 @@ function upstreamChange(repo, file, content) {
  */
 function replayUpdate(repo, version) {
   repo.g('checkout', 'upstream', '--', ...PATHS);
+  repo.g('commit', '-qm', `chore: auto-update system files to v${version}`);
+}
+
+/**
+ * Replay an update that PRESERVES some paths, which is what apply() does with
+ * whatever locallyModifiedSystemFiles reported: the preserved files are excluded
+ * from the checkout, so the auto-update commit it writes carries the user's
+ * content unchanged (#4170).
+ */
+function replayUpdatePreserving(repo, version, preserved) {
+  // Check out each path on its own rather than passing `:(exclude)` pathspecs
+  // together: `git checkout <ref> -- <paths> :(exclude)<path>` errors with
+  // "did not match any file(s)" when the exclusions cancel a path entirely,
+  // which is the failure apply() guards against with pathFullyPreserved.
+  for (const path of PATHS) {
+    if (preserved.includes(path)) continue;
+    repo.g('checkout', 'upstream', '--', path);
+  }
   repo.g('commit', '-qm', `chore: auto-update system files to v${version}`);
 }
 
@@ -263,6 +300,195 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     pass('a fully-excluded pathspec errors — hence the skip in apply() (#2337)');
   } else {
     fail(`#9 errored=${errored} content=${JSON.stringify(content)}`);
+  }
+}
+
+// ── 9b. pathFullyPreserved: a single-file match skips WITHOUT an upstream
+//    lookup ── The reported bug: every one of the reporter's 12 preserved
+//    files (AGENTS.md, fonts/*.ttf, cv-template.*.html, ...) is a single
+//    SYSTEM_PATHS entry, not a directory. The old code still ran an
+//    unnecessary `ls-tree` round-trip to "confirm" what the string match (`f
+//    === path`) had already proven, and when that lookup failed to return the
+//    expected result, execution fell through into the exact cancel-out
+//    checkout case 9 shows fails. Assert no git call happens at all for this
+//    case, so a future regression that reintroduces the lookup is caught even
+//    if the lookup itself would have "worked" in a normal test repo.
+{
+  let gitCalls = 0;
+  const spyCtx = { git: (...args) => { gitCalls++; throw new Error(`unexpected git call: ${args.join(' ')}`); } };
+
+  const preservedPaths = ['AGENTS.md'];
+  const preservedSet = new Set(preservedPaths);
+  const result = pathFullyPreserved('AGENTS.md', preservedPaths, preservedSet, spyCtx);
+
+  if (result === true && gitCalls === 0) {
+    pass('a single-file preserved path is skipped without any upstream lookup');
+  } else {
+    fail(`#9b expected true/0 calls, got result=${result} gitCalls=${gitCalls}`);
+  }
+}
+
+// ── 9c. pathFullyPreserved: a path unrelated to any preserved file is never
+//    skipped, and costs no git call either ──
+{
+  let gitCalls = 0;
+  const spyCtx = { git: (...args) => { gitCalls++; throw new Error(`unexpected git call: ${args.join(' ')}`); } };
+
+  const preservedPaths = ['AGENTS.md'];
+  const preservedSet = new Set(preservedPaths);
+  const result = pathFullyPreserved('modes/pdf.md', preservedPaths, preservedSet, spyCtx);
+
+  if (result === false && gitCalls === 0) {
+    pass('an unrelated path is never skipped, and needs no upstream lookup');
+  } else {
+    fail(`#9c expected false/0 calls, got result=${result} gitCalls=${gitCalls}`);
+  }
+}
+
+// ── 9d. pathFullyPreserved: a directory entirely made of preserved files IS
+//    skipped — the pre-existing behaviour this fix must not regress ──
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  // pathFullyPreserved's ls-tree branch reads FETCH_HEAD, same ref apply()
+  // fetches into for real. Populate it here by fetching the local `upstream`
+  // branch into this repo's own FETCH_HEAD.
+  repo.g('fetch', '.', 'upstream');
+  const preservedPaths = ['modes/pdf.md', 'modes/cover.md'];
+  const preservedSet = new Set(preservedPaths);
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  if (result === true) {
+    pass('a directory whose entire upstream content is preserved is skipped (ls-tree path)');
+  } else {
+    fail(`#9d expected true, got ${result}`);
+  }
+}
+
+// ── 9e. pathFullyPreserved: a directory only PARTLY preserved is NOT skipped
+//    — the rest of the directory still needs a real checkout ──
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  repo.g('fetch', '.', 'upstream'); // populate FETCH_HEAD, see #9d
+  const preservedPaths = ['modes/cover.md']; // pdf.md is NOT preserved here
+  const preservedSet = new Set(preservedPaths);
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  const result = pathFullyPreserved('modes/', preservedPaths, preservedSet, ctx);
+  if (result === false) {
+    pass('a directory only partly preserved is not skipped');
+  } else {
+    fail(`#9e expected false, got ${result}`);
+  }
+}
+
+// ── 9f. pathFullyPreserved: an unreadable upstream lookup is 'unknown' for a
+//    directory (not false), and never throws (#3824) ──
+{
+  const preservedPaths = ['modes/pdf.md'];
+  const preservedSet = new Set(preservedPaths);
+  const throwingCtx = { git: () => { throw new Error('unreadable ref'); } };
+
+  let threw = false;
+  let result = null;
+  try {
+    result = pathFullyPreserved('modes/', preservedPaths, preservedSet, throwingCtx);
+  } catch {
+    threw = true;
+  }
+  if (!threw && result === 'unknown') {
+    pass('an unreadable directory lookup returns "unknown" instead of throwing or claiming "not preserved"');
+  } else {
+    fail(`#9f threw=${threw} result=${JSON.stringify(result)}`);
+  }
+}
+
+// ── 9g. checkoutErrorIsBenign: the cancel-out abort a fully-preserved
+//    directory with an unreadable ls-tree used to trigger is now benign (#3824) ──
+{
+  // The error git actually raises when :(exclude) pathspecs cancel a checkout
+  // out (pinned live in section 9 above); stderr is where gitQuiet surfaces it.
+  const cancelOut = Object.assign(new Error('Command failed: git checkout FETCH_HEAD -- modes/'), {
+    stderr: "error: pathspec 'modes/' did not match any file(s) known to git\n",
+  });
+  const realFailure = Object.assign(new Error('Command failed: git checkout FETCH_HEAD -- modes/'), {
+    stderr: 'fatal: unable to write new index file\n',
+  });
+
+  const ok =
+    // 'unknown' + cancel-out message → benign, so apply() skips instead of aborting
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: false, preservedState: 'unknown' }) === true &&
+    // 'unknown' + a real failure → still rethrown
+    checkoutErrorIsBenign(realFailure, { absentUpstream: false, preservedState: 'unknown' }) === false &&
+    // a genuinely absent path does NOT soften an unrelated real failure — the
+    // cancel-out message must actually be present too (CodeRabbit, #3955
+    // review): absentUpstream/preservedState explain why nothing would be
+    // left to check out, they are not a license to swallow any error that
+    // happens to arrive on an absent path.
+    checkoutErrorIsBenign(realFailure, { absentUpstream: true, preservedState: false }) === false &&
+    // the same absent path WITH the actual cancel-out message is still benign
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: true, preservedState: false }) === true &&
+    // 'false' (real content not preserved) never softens a cancel-out message
+    checkoutErrorIsBenign(cancelOut, { absentUpstream: false, preservedState: false }) === false;
+
+  if (ok) {
+    pass('checkoutErrorIsBenign: benign only when git\'s own cancel-out message is present, real failures always abort');
+  } else {
+    fail('#9g checkoutErrorIsBenign did not gate the cancel-out message correctly');
+  }
+}
+
+// ── 9h. probeAbsentUpstream — the helper apply()'s catch calls, driven
+//    directly against a real repo AND with a throwing probe (#1998, #3824,
+//    #3955 review): a retired path lists empty → benign skip; a present path
+//    does not → real error rethrows; a probe that THROWS → false, never a skip ──
+{
+  const repo = makeRepo();
+  repo.g('fetch', '.', 'upstream'); // populate FETCH_HEAD, same ref apply() uses
+  const ctx = { git: (...args) => gitIn(repo.dir, ...args) };
+
+  // 'modes/pdf.md' is in the tree; 'lib/retired.mjs' never was — the shape of a
+  // SYSTEM_PATHS entry removed upstream but still present on an old install.
+  const retiredIsAbsent = probeAbsentUpstream('lib/retired.mjs', ctx);
+  const presentIsAbsent = probeAbsentUpstream('modes/pdf.md', ctx);
+
+  // The regression this guards: a probe that could not run must NOT report
+  // absence, or a real checkout failure gets masked as an expected skip.
+  const throwingProbe = probeAbsentUpstream('modes/pdf.md', {
+    git: () => { throw new Error('fatal: not a git repository'); },
+  });
+
+  // An index-write failure has nothing to do with the pathspec being
+  // cancelled out — absentUpstream/preservedState explain why a path would
+  // legitimately have nothing to check out, they do not turn an unrelated
+  // real error into that shape (CodeRabbit, #3955 review). checkoutErrorIsBenign
+  // must require git's own cancel-out message before it ever looks at those.
+  const realCheckoutFailure = Object.assign(new Error('git checkout FETCH_HEAD -- modes/'), {
+    stderr: 'fatal: unable to write new index file\n',
+  });
+  const cancelledOutFailure = Object.assign(new Error('git checkout FETCH_HEAD -- retired/'), {
+    stderr: "error: pathspec 'retired/' did not match any file(s) known to git\n",
+  });
+
+  const ok =
+    retiredIsAbsent === true &&
+    presentIsAbsent === false &&
+    throwingProbe === false &&
+    // composed the way apply()'s catch does: retired path → skip, throwing probe → rethrow
+    // An unrelated real failure (index corruption) rethrows even when the
+    // path is genuinely absent upstream — absentUpstream alone is not enough.
+    checkoutErrorIsBenign(realCheckoutFailure, { absentUpstream: retiredIsAbsent, preservedState: false }) === false &&
+    checkoutErrorIsBenign(realCheckoutFailure, { absentUpstream: throwingProbe, preservedState: false }) === false &&
+    // The actual cancel-out message, paired with the path genuinely being
+    // absent, is still the one shape that skips.
+    checkoutErrorIsBenign(cancelledOutFailure, { absentUpstream: retiredIsAbsent, preservedState: false }) === true;
+
+  if (ok) {
+    pass('probeAbsentUpstream: a retired path skips only on the real cancel-out message; an unrelated failure always rethrows');
+  } else {
+    fail(`#9h retired=${retiredIsAbsent} present=${presentIsAbsent} throwing=${throwingProbe}`);
   }
 }
 
@@ -499,5 +725,150 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     pass('an uncommitted revert to an older upstream version is reported too (#3129)');
   } else {
     fail(`#18 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+
+// ── 19. A customization an earlier update PRESERVED is still reported (#4170) ──
+//    The baseline used to be the newest auto-update commit, and an update keeps
+//    a customized file by folding the user's content into that same commit. So
+//    from the next update onward the file diffs clean against that baseline and
+//    the customization silently stops being protected: it is checked out raw on
+//    the update after that, losing the edit with no warning and no .bak.
+//
+//    The distinction the baseline has to make is "is this content the user's",
+//    not "did anything change since the last update". A file the update itself
+//    delivered must stay unreported (case 5 / #3094); a file the user wrote and
+//    an update merely carried along must not.
+{
+  const repo = makeRepo();
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+  // Update 1 refreshes another file and preserves this one, so its commit now
+  // contains the user's content.
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdatePreserving(repo, '2', ['generate-cover-letter.mjs']);
+  // Update 2 arrives.
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'generate-cover-letter.mjs') {
+    pass('a customization an earlier update preserved is still reported (#4170)');
+  } else {
+    fail(`#19 expected ['generate-cover-letter.mjs'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 20. With no merge-base, a COMMITTED customization is still reported ──
+//    The candidate set normally comes from the merge-base. When that call fails
+//    (a shallow clone, unrelated histories), the baseline falls back to the
+//    install's own first commit, and a customization that differs from it is
+//    still attributed to the user: content that no update installed and
+//    upstream never published is the user's, wherever the history starts.
+//    A fallback that only diffs against `HEAD` would miss it, because it
+//    compares the index and working tree and a customization already committed
+//    is invisible there: the file diffs clean, leaves the candidate set, and
+//    apply() replaces it with no warning and no .bak. That is the exact loss
+//    this detector exists to prevent.
+//
+//    Modelled with an orphan `unreachable` branch standing in for a ref with no
+//    common ancestor, which is what makes `git merge-base HEAD upstream` fail.
+//    Every file the fake upstream shares is REWRITTEN with upstream content
+//    first: `git rm --cached` leaves files on disk, so a plain `git add -A`
+//    would re-commit the user's own content and "adopt" the edit the case is
+//    trying to keep at risk.
+{
+  const repo = makeRepo();
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+
+  repo.g('checkout', '-q', '--orphan', 'unreachable');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'shipped script v2\n');
+  writeFileSync(join(repo.dir, 'modes/pdf.md'), 'shipped pdf v2\n');
+  writeFileSync(join(repo.dir, 'modes/cover.md'), 'shipped cover v2\n');
+  repo.g('add', '-A');
+  repo.g('commit', '-qm', 'unrelated upstream history');
+  repo.g('checkout', '-q', 'main');
+
+  let mergeBaseFailed = false;
+  try {
+    repo.g('merge-base', 'HEAD', 'unreachable');
+  } catch {
+    mergeBaseFailed = true;
+  }
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'unreachable', repo.ctx);
+  if (mergeBaseFailed && atRisk.includes('generate-cover-letter.mjs')) {
+    pass('with no merge-base, a committed customization is still reported');
+  } else if (!mergeBaseFailed) {
+    fail('#20 the fixture did not break merge-base, so the fallback was never exercised');
+  } else {
+    fail(`#20 expected the committed customization in the candidate set, got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 21. No merge-base with NO local edits: nothing is reported ──
+//    A fresh `git init` copy shares no ancestor with the fetched ref, so
+//    merge-base fails. The upstream difference is not a usable baseline there:
+//    every file upstream has touched since the copy differs from upstream, and
+//    reporting all of them preserves them on that update and on every later
+//    one, so those files never receive another upstream version without
+//    `--force`. With no local edits there is nothing to attribute and the
+//    result is empty.
+//
+//    This is the same fixture shape as the unrelated-histories case in
+//    updater-upgrade-safety.test.mjs, with the copy spelled out: one commit
+//    holding the install, an unrelated fetched ref that moved two files on.
+{
+  const repo = makeRepo();
+  repo.g('checkout', '-q', '--orphan', 'fetched');
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v2\n');
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'shipped script v2\n');
+  repo.g('add', '-A');
+  repo.g('commit', '-qm', 'unrelated fetched history');
+  repo.g('checkout', '-q', 'main');
+
+  let mergeBaseFailed = false;
+  try {
+    repo.g('merge-base', 'HEAD', 'fetched');
+  } catch {
+    mergeBaseFailed = true;
+  }
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'fetched', repo.ctx);
+  if (mergeBaseFailed && atRisk.length === 0) {
+    pass('with no merge-base and no local edits, nothing is reported');
+  } else if (!mergeBaseFailed) {
+    fail('#21 the fixture did not break merge-base, so the fallback was never exercised');
+  } else {
+    fail(`#21 expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 22. A local fix upstream adopted identically and has since changed past ──
+//    The install writes a fix; upstream ships the exact same content (so the
+//    checkout that adopted it was a no-op and no update commit ever changed the
+//    file); then upstream changes it again. The content is upstream's now: the
+//    fix is inside the newer upstream version, and reporting the file as a
+//    customization would pin it to the version upstream already moved past.
+//    The comparison is against upstream's published versions, not against what
+//    the update installed, because here there is no installed version to
+//    compare: the update never changed the file.
+{
+  const repo = makeRepo();
+  writeFileSync(join(repo.dir, 'generate-cover-letter.mjs'), 'local linkedin fix\n');
+  repo.g('commit', '-qam', 'local fix');
+  upstreamChange(repo, 'generate-cover-letter.mjs', 'local linkedin fix\n');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  // The update to v2 checks the adopted file out byte-identically (no-op) and
+  // installs pdf.md.
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'generate-cover-letter.mjs', 'broader cover fix\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 0) {
+    pass('a fix upstream adopted identically and moved past is not reported');
+  } else {
+    fail(`#22 expected [], got ${JSON.stringify(atRisk)}`);
   }
 }

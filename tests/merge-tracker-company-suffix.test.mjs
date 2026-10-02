@@ -137,6 +137,25 @@ ok('an employer-board URL mismatch still proves two postings apart', () => {
   } finally { cleanup(env); }
 });
 
+ok('a URL match carries the incoming company spelling onto the row', () => {
+  // The URL tier is a CONFIRMED same-posting identity (a normalized-URL
+  // match), unlike the fuzzy company+role tier above: the incoming spelling
+  // is authoritative here even though the row otherwise keeps its own name.
+  // A tracking-param tail (utm_source) must still normalize to the same key.
+  const env = makeEnv();
+  try {
+    const H = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |';
+    const S = '|---|---|---|---|---|---|---|---|---|---|';
+    writeFileSync(env.tracker, ['# Applications Tracker', '', H, S,
+      '| 1 | 2026-06-01 | Acme Technologies Inc. | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-a.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |', ''].join('\n'));
+    addTsv(env, '2-b.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌', '[2](reports/2-b.md)', 'n', 'https://boards.greenhouse.io/acme/jobs/7001?utm_source=x']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected the same posting to update in place, got ${rows.length} rows`);
+    assert.ok(rows[0].includes('| Acme |'), `row did not take the incoming spelling: ${rows[0]}`);
+  } finally { cleanup(env); }
+});
+
 ok('a role that does not fuzzy-match is unaffected by the wider company match', () => {
   const rows = mergeOne({
     existingCompany: 'Acme Technologies', existingRole: 'Director of Marketing',
@@ -167,4 +186,44 @@ ok('CONTROL: a blind-employer row cannot reach the tier (empty stem)', () => {
     addCompany: 'Acme Ltd', addRole: 'Director of Marketing',
   });
   assert.equal(rows.length, 2, 'an unknown employer never matches a named one');
+});
+
+ok('THE ROW KEEPS ITS NAME: a corporate-form merge does not rename the employer', () => {
+  const rows = mergeOne({
+    existingCompany: 'Acme Technologies Inc.', existingRole: 'Director of Marketing',
+    addCompany: 'Acme', addRole: 'Director of Marketing',
+  });
+  assert.equal(rows.length, 1, `expected 1 row, got ${rows.length}`);
+  assert.ok(rows[0].includes('| Acme Technologies Inc. |'), `row renamed: ${rows[0]}`);
+  assert.ok(rows[0].includes('4.1/5'), 're-eval score still written through');
+});
+
+ok('THE ROW KEEPS ITS NAME: with the variant on the incoming side too', () => {
+  const rows = mergeOne({
+    existingCompany: 'Acme', existingRole: 'Director of Marketing',
+    addCompany: 'Acme Canada', addRole: 'Director of Marketing',
+  });
+  assert.equal(rows.length, 1, `expected 1 row, got ${rows.length}`);
+  assert.ok(rows[0].includes('| Acme |'), `row renamed: ${rows[0]}`);
+});
+
+ok('EXACT BEFORE WIDE: an exact-company row further down wins over an earlier corporate-form row', () => {
+  // The state the wider match exists to prevent, already on disk: both
+  // spellings present. The addition must update the row that IS "Acme", not
+  // the first row that merely resembles it.
+  const env = makeEnv();
+  try {
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme Technologies | Director of Marketing | 4.0/5 | Applied | ❌ | [1](reports/1-a.md) | n |',
+      '| 5 | 2026-06-02 | Acme | Director of Marketing | 3.5/5 | Evaluated | ❌ | [5](reports/5-a.md) | n |',
+    ]);
+    addTsv(env, '9-b.tsv', ['9', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌', '[9](reports/9-b.md)', 'n']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, `both rows survive, got ${rows.length}`);
+    const row1 = rows.find(r => r.startsWith('| 1 |'));
+    const row5 = rows.find(r => r.startsWith('| 5 |'));
+    assert.ok(row1 && row1.includes('| Acme Technologies |') && row1.includes('4.0/5'), `row 1 was touched: ${row1}`);
+    assert.ok(row5 && row5.includes('4.1/5') && row5.includes('9-b.md'), `row 5 was not updated: ${row5}`);
+  } finally { cleanup(env); }
 });

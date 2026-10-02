@@ -26,13 +26,14 @@
  * permanent. A flywheel that nags stops being a celebration.
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const REPO_URL = 'https://github.com/career-ops-hq/career-ops';
 const TEMPLATE = 'i-got-hired.yml';
@@ -60,7 +61,13 @@ function loadState(root) {
   if (!existsSync(p)) return { byReport: {} };
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return { byReport: {} }; }
 }
-function saveState(root, s) { writeFileSync(statePath(root), JSON.stringify(s, null, 2) + '\n'); }
+function saveState(root, s) {
+  // A root on the legacy layout (applications.md at the top, no data/) still
+  // resolves its hires, so data/ may not exist yet when the answer is recorded.
+  const p = statePath(root);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileSync(p, JSON.stringify(s, null, 2) + '\n');
+}
 
 /** All tracker rows whose canonical state is Hired, as {report, role, company, location, date}. */
 export function hiredRows(trackerText) {
@@ -138,7 +145,10 @@ async function main() {
   const bad = validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (bad) { process.exitCode = 1; return; }
 
-  const root = flagValue(args, '--root') || resolveWorkspaceRoot(resolveTrackerPath(process.cwd()));
+  // Default to the configured data root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR /
+  // .career-ops-data marker), not process.cwd(): with the user layer outside the
+  // checkout, the cwd-derived root found no tracker and reported no hires.
+  const root = flagValue(args, '--root') || resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
   const trackerPath = resolveTrackerPath(root);
   const tracker = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf8') : '';
   const hires = hiredRows(tracker);

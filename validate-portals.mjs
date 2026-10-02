@@ -15,10 +15,56 @@ import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// providers/ ships with the checkout, but portals.yml is user data: it lives in
+// the data root, where scan.mjs reads it. A bare 'portals.yml' resolved against
+// the cwd instead, so `npm run validate:portals` (npm always runs it from the
+// checkout) could not find an external data root's file, and a run from any
+// other directory validated whatever copy sat there.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
+
+function hasText(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function hasValue(value) {
+  if (Array.isArray(value)) return value.some(hasValue);
+  return hasText(value) || typeof value === 'number' || typeof value === 'boolean';
+}
+
+// amazon.jobs facets filter only as `key[]=`, which the provider emits for a
+// YAML array (or a key already ending in `[]`); a scalar facet is ignored.
+const AMAZON_FACETS = new Set([
+  'normalized_country_code', 'normalized_state_name', 'normalized_city_name', 'normalized_location',
+  'location', 'category', 'business_category', 'job_function_id', 'schedule_type_id',
+  'employee_class', 'is_manager', 'is_intern',
+]);
+// Never narrow: request shaping, facet-count requests, and loc_query, which
+// leaves the hit count unchanged.
+const AMAZON_NON_FILTERS = new Set(['sort', 'result_limit', 'offset', 'facets', 'loc_query']);
+
+// Providers that narrow a large board with a block named after themselves and
+// silently treat a missing or unusable block as `{}`. Each predicate reports
+// whether the block carries a filter the provider actually sends; without one
+// the scan reads the whole board (amazon.jobs: 100k+ postings) while the entry
+// reads as coverage. Hand-kept: there is no provider metadata to derive this from.
+// A warning, not an error: the entry still scans, just too broadly.
+const PROVIDER_BLOCK_FILTERS = {
+  amazon: (block) => Object.entries(block).some(([key, value]) => {
+    if (key.endsWith('[]')) return hasValue(value);
+    if (AMAZON_NON_FILTERS.has(key)) return false;
+    if (AMAZON_FACETS.has(key)) return Array.isArray(value) && value.some(hasValue);
+    return hasValue(value);
+  }),
+  ibm: (block) => hasText(block.country)
+    || (Array.isArray(block.categories) && block.categories.some(hasText)),
+  // lang and urlPrefix only shape the request; country 'global' is the default.
+  phenom: (block) => (hasText(block.country) && block.country !== 'global')
+    || (isObject(block.selectedFields) && Object.values(block.selectedFields).some(hasValue)),
+};
 
 function add(list, path, message) {
   list.push({ path, message });
@@ -170,6 +216,9 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
       validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
+      if (config.location_filter.strict !== undefined && typeof config.location_filter.strict !== 'boolean') {
+        add(errors, 'location_filter.strict', 'must be a boolean when set');
+      }
     }
   }
 
@@ -262,6 +311,21 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `${base}.provider`, 'provider must be a non-empty string when set');
         } else if (!providerIds.has(entry.provider)) {
           add(errors, `${base}.provider`, `unknown provider "${entry.provider}"`);
+        }
+      }
+
+      const blockFilters = typeof entry.provider === 'string' && Object.hasOwn(PROVIDER_BLOCK_FILTERS, entry.provider)
+        ? PROVIDER_BLOCK_FILTERS[entry.provider]
+        : null;
+      // An absent block is not flagged: a global sweep is a valid choice.
+      if (blockFilters && entry[entry.provider] !== undefined) {
+        const block = entry[entry.provider];
+        if (!isObject(block) || !blockFilters(block)) {
+          add(
+            warnings,
+            `${base}.${entry.provider}`,
+            `${entry.provider} block sets no filter, so the scan reads the provider's entire board — add a location or keyword filter`
+          );
         }
       }
 

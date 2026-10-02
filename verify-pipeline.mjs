@@ -16,6 +16,9 @@
  * 11. Via channel consistency (see #1596)
  * 12. No # value reused across 2+ tracker rows (error — see #1704)
  * 13. applications.md <-> active-interviews.md status sync (see #1504)
+ * 14. data/follow-ups.md table schema (see #2971)
+ * 15. portals.yml entries no provider claims (see #3251)
+ * 16. No invisible control characters in tracker cells (error — see #3892)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -28,8 +31,12 @@ import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
+import { CONTROL_CHARS } from './tracker-utils.mjs';
+import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
+import { loadCanonicalStates } from './tracker-utils.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
@@ -50,22 +57,12 @@ const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 mkdirSync(REPORTS_DIR, { recursive: true });
 
-const CANONICAL_STATUSES = [
-  'evaluated', 'applied', 'responded', 'interview',
-  'offer', 'rejected', 'discarded', 'skip', 'hired',
-];
-
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated', 'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied', 'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded', 'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-  'contratado': 'hired', 'contratada': 'hired', 'hired': 'hired', 'accepted': 'hired', 'accept': 'hired',
-};
+// Canonical states — loaded from templates/states.yml, the single source of truth.
+const _canonicalStates = loadCanonicalStates(STATES_FILE);
+const CANONICAL_STATUSES = new Set(_canonicalStates.map(s => s.id));
+const ALIASES = Object.fromEntries(
+  _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.id]))
+);
 
 let errors = 0;
 let warnings = 0;
@@ -128,7 +125,7 @@ for (const e of entries) {
   // Strip trailing dates
   const statusOnly = clean.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
 
-  if (!CANONICAL_STATUSES.includes(statusOnly) && !ALIASES[statusOnly]) {
+  if (!CANONICAL_STATUSES.has(statusOnly) && !ALIASES[statusOnly]) {
     error(`#${e.num}: Non-canonical status "${e.status}"`);
     badStatuses++;
   }
@@ -289,6 +286,20 @@ function extractRole(reportContent) {
   return null;
 }
 
+// Canonical posting-URL key of a report, or '' when it carries none.
+// Same extraction as merge-tracker.mjs resolveReportUrl(): `**URL:**` is
+// matched anywhere on the line, not from column 0, because the documented
+// header is inline (`**Score:** 4.1/5 | **URL:** https://… | **PDF:** …`);
+// `[ \t]*` and `\S+` cannot cross a newline, so an empty header cannot
+// capture the next header's text. What comes back is the normalizeUrl() key,
+// never the raw text: `**URL:** N/A` (a recruiter-sourced role) has no key and
+// must stay "unknown", not become a value that two reports can differ on.
+function extractReportUrlKey(reportContent) {
+  const m = reportContent.match(/\*\*URL:\*\*[ \t]*(\S+)/);
+  if (!m) return '';
+  return normalizeUrl(m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, ''));
+}
+
 const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
@@ -298,21 +309,30 @@ const reportsByRole = new Map();
 for (const name of reportFiles) {
   const companySlug = name.match(REPORT_FILE_RE)[2];
   let role = null;
+  let urlKey = '';
   try {
-    role = extractRole(readFileSync(join(REPORTS_DIR, name), 'utf-8'));
+    const content = readFileSync(join(REPORTS_DIR, name), 'utf-8');
+    role = extractRole(content);
+    urlKey = extractReportUrlKey(content);
   } catch {
     // Unreadable report — the orphan check below still sees it.
   }
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push(name);
+  reportsByRole.get(key).push({ name, urlKey });
 }
 for (const group of reportsByRole.values()) {
-  if (group.length > 1) {
-    warn(`Duplicate reports for same company+role: ${group.join(', ')}`);
-    dupReports++;
-  }
+  if (group.length < 2) continue;
+  // Two present-and-different posting URLs are proof of two openings (one
+  // title posted per city, two reqs a recruiter opened with the same title),
+  // the same rule merge-tracker.mjs applies before it merges a row. A missing
+  // URL proves nothing, so the group is exempt only when EVERY report carries
+  // a key and no two share one.
+  const keys = group.map(r => r.urlKey);
+  if (keys.every(Boolean) && new Set(keys).size === keys.length) continue;
+  warn(`Duplicate reports for same company+role: ${group.map(r => r.name).join(', ')}`);
+  dupReports++;
 }
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
 
@@ -391,11 +411,31 @@ for (const e of entries) {
 // channel while リクルート and パーソル stay two; the raw spelling is kept for
 // the message. Before this, both non-Latin agencies normalized to '' and fell
 // back to 'direct', hiding exactly the double-submission this check exists for.
+//
+// A SKIP row is not a channel (#3978). The canonical way to RESOLVE a
+// cross-channel collision is the one states.yml already provides: apply
+// through one channel, mark the other SKIP ("Doesn't fit, don't apply").
+// Counting that row as a channel warned forever about the double submission
+// the user had just avoided, with no "resolve by hand" action left that could
+// clear it — so the only ways out were ignoring the check permanently or
+// falsifying the Via/Company to silence it. A check correct behaviour cannot
+// satisfy is worse than no check.
+//
+// Deliberately narrow — skip only. `discarded` is ambiguous ("Discarded by
+// candidate or offer closed") and can follow a real application; `rejected`
+// implies one was sent; `evaluated` is pre-decision, and warning BEFORE a
+// second submission is this check's most valuable moment. All three stay
+// channels. Status is read through the shared states.yml-driven
+// normalizeStatus() for the same reason the column layout comes from
+// tracker-parse: a local alias table here would miss the states.yml spellings
+// it never got told about (geo_blocker, uygun değil) and drift from Check 1.
+const isNeverSubmitted = (status) => normalizeStatus(String(status || '')) === 'skip';
 const normalizeChannel = (v) => normalizeVia(v ?? '') || 'direct';
 const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
   if (!company || company === '?') continue;
+  if (isNeverSubmitted(e.status)) continue;
   const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
   if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
   const channels = channelsByRole.get(key);
@@ -506,6 +546,104 @@ if (!existsSync(FOLLOWUPS_FILE)) {
     ok(`follow-ups.md schema valid (${fups.parsed} logged follow-up${fups.parsed === 1 ? '' : 's'})`);
   }
 }
+
+// --- Check 15: portals.yml entries no provider claims (#3251) ---
+// Coverage rot is invisible from every other check here: an entry with
+// `enabled: true` and a careers_url nothing matches reads as a tracked company
+// in the config and contributes zero postings on every scan. Twelve of those
+// were live on 2026-08-26, one of them a company whose real board existed and
+// was one character off the slug in the file.
+//
+// Only the OFFLINE half of audit-portals.mjs runs here — provider resolution is
+// pure config matching, so this check stays as fast and network-free as the rest
+// of verify-pipeline. The live half (does the board answer, and with whose
+// jobs?) needs 170 fetches and stays a separate command: `node audit-portals.mjs`.
+//
+// portals.yml is user-layer and gitignored, so its absence is not a finding.
+const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
+if (!existsSync(PORTALS_FILE)) {
+  ok('No portals.yml yet — nothing to coverage-check');
+} else {
+  try {
+    const { findUnclaimedEntries } = await import('./audit-portals.mjs');
+    const { loadProviders } = await import('./providers/_registry.mjs');
+    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+    const yaml = await import('js-yaml');
+
+    const cfg = yaml.load(readFileSync(PORTALS_FILE, 'utf-8')) || {};
+    // Both sections, because scan.mjs resolves both through the same registry:
+    // an unclaimed aggregator board is exactly as dead as an unclaimed company.
+    const entries = [
+      ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
+      ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
+    ];
+    // providers/ and plugins/ both ship in the code layer — resolve them from
+    // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
+    // health check sees only providers/*.mjs and reports every enabled
+    // plugin-provider entry as an unknown provider that "never scans", while
+    // the scanner resolves and scans it (#4026). No-op for a plugin-free
+    // install: mergeProviderPlugins returns before any work when
+    // config/plugins.yml is absent.
+    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
+    await mergeProviderPlugins(providers, { root: CODE_ROOT });
+    const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
+
+    // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
+    // it can't report what it can't label. Without this, that entry vanishes
+    // from silent/handoff/unknownProvider entirely, and the enabled count
+    // below (which doesn't share the same eligibility rule) would still
+    // include it — so a malformed entry never gets a provider check AND the
+    // "All N entries resolve" success line claims it as resolved anyway.
+    const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
+    for (const e of malformed) {
+      warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`);
+    }
+
+    for (const e of unknownProvider) {
+      error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`);
+    }
+    for (const e of silent) {
+      warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`);
+    }
+    if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
+      const enabled = entries.filter(e => e && e.enabled !== false).length;
+      ok(handoff.length > 0
+        ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
+        : `All ${enabled} enabled portals.yml entries resolve to a provider`);
+    }
+  } catch (err) {
+    warn(`Portal coverage check could not run: ${err.message}`);
+  }
+}
+
+// --- Check 16: invisible control bytes already in tracker cells (#3892) ---
+// cell() in tracker-utils.mjs strips these on the way in, which stops new ones
+// entering but can do nothing about the ones already written. This is the only
+// place such a byte is visible at all: it shifts or truncates the positional
+// `split('|')` parse, so a row silently reads as a different row or drops out
+// of a count entirely, while every renderer of the table — markdown, GitHub,
+// the web dashboard — shows the cell as correct. The corruption surfaces much
+// later as an unrelated arithmetic discrepancy with no trail back to the cause.
+//
+// Read off the RAW lines rather than the parsed `entries`, so a byte in a
+// column this file has no field for is caught too, and reported with the file
+// line number: a shifted parse is exactly the situation where the row's own #
+// cell is the thing not to trust.
+//
+// CONTROL_CHARS is imported, never re-declared — a second copy of the range
+// would let the write path and this detector disagree about what counts.
+let controlByteRows = 0;
+for (let i = 0; i < lines.length; i++) {
+  if (!lines[i].startsWith('|')) continue;
+  // .match() with a /g regex resets lastIndex; .test() would not, and would
+  // then skip every other offending row.
+  const found = lines[i].match(CONTROL_CHARS);
+  if (!found) continue;
+  const points = [...new Set(found.map(c => `U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}`))];
+  error(`applications.md line ${i + 1}: tracker row contains invisible control character(s) ${points.join(', ')} — delete them; they render as nothing in every view but shift the positional column parse`);
+  controlByteRows++;
+}
+if (controlByteRows === 0) ok('No control characters in tracker cells');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

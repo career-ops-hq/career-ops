@@ -16,12 +16,23 @@ Most local parsers are company-specific: the script already knows the source URL
   scan_method: local_parser
   parser:
     command: node
-    script: scripts/parsers/example-company-jobs.js
+    script: local/example-company-jobs.js
     format: jobs-json-v1
   enabled: true
 ```
 
 `args` are optional. Use them in whatever way helps the parser author: to make one script reusable across multiple companies, pass `{careers_url}` or `{company}`, enable a debug flag, store a JSON snapshot, or control any other script-specific behavior. `scan.mjs` executes the parser without shell interpolation and expands `{careers_url}` and `{company}` in parser arguments before execution.
+
+## Where the script lives
+
+`providers/local-parser.mjs` only runs a script that resolves **inside the repository root** — a whitelisted interpreter (`node`, `python3`, …) must take an in-repo script as its first argument, and a path that escapes the root is rejected. This is a deliberate boundary: `portals.yml` is not fully trusted on a shared or template config, so the parser command cannot point at an arbitrary binary or a file outside the checkout.
+
+Because the script has to sit in the tree, put a parser you do not intend to contribute under a path that Git ignores, so it is never staged:
+
+- `local/` is gitignored by default. `local/acme-jobs.mjs` is the simplest home for a one-off, company-specific parser.
+- `portals.yml` is already a user-layer file (gitignored), so the `parser:` block that points at the script stays private too.
+
+Use `scripts/parsers/` only for a parser you plan to open a PR for. `career-ops` does not bundle company-specific parser scripts, so in practice that is rare.
 
 ## Token savings
 
@@ -57,7 +68,7 @@ The parser must print one of these JSON shapes to stdout:
 }
 ```
 
-`title` and `url` are required. `company` is optional; when omitted, the scanner uses the `tracked_companies` entry name. Relative URLs are resolved against `careers_url`.
+`title` and `url` are required. `company` is optional; when omitted, the scanner uses the `tracked_companies` entry name. `location` is optional. `postedAt` is optional — an epoch-milliseconds number or a `Date.parse`-able string (`"2026-09-08"`, an ISO timestamp); `posted_at` / `publishedAt` / `published_at` / `published_date` / `datePosted` / `date_posted` are accepted as aliases (the last is what a page's JSON-LD `JobPosting` block calls it). It feeds `--posted-after` / `--since` and the scan output's posting-date column; an unparseable value is dropped and the row is still kept. Relative URLs are resolved against `careers_url`.
 
 ## Artifact Storage
 

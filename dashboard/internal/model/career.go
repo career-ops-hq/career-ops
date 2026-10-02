@@ -9,6 +9,7 @@ type CareerApplication struct {
 	Status       string
 	Score        float64
 	ScoreRaw     string
+	HasScore     bool // false when the Score cell is a sentinel (— / N/A / -)
 	HasPDF       bool
 	ReportPath   string
 	ReportNumber string

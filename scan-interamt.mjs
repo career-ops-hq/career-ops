@@ -15,6 +15,7 @@
  *   node scan-interamt.mjs --dry-run
  *   node scan-interamt.mjs --all            # skip date filter (use for first scan)
  *   node scan-interamt.mjs --keyword "Softwareentwickler"
+ *   node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
  */
 
 import { chromium } from 'playwright';
@@ -24,7 +25,9 @@ import * as yaml from 'js-yaml';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -56,16 +59,32 @@ const DEFAULT_KEYWORDS = [
 
 // ── Args ─────────────────────────────────────────────────────────────
 
+// Checked by validateFlags() in the main-module block below, before main()
+// runs (#4599). Without it, --help or a mistyped --dryrun fell through to a
+// live scan that appended to data/pipeline.md.
+const KNOWN_FLAGS = ['--dry-run', '--debug', '--all', '--keyword', '--help', '-h'];
+const VALUE_FLAGS = ['--keyword'];
+
+const USAGE = `Usage:
+  node scan-interamt.mjs
+  node scan-interamt.mjs --dry-run
+  node scan-interamt.mjs --all            # skip date filter (use for first scan)
+  node scan-interamt.mjs --keyword "Softwareentwickler"
+  node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
+  node scan-interamt.mjs --help|-h        # print this usage block and exit`;
+
 const args = process.argv.slice(2);
 const DRY_RUN    = args.includes('--dry-run');
 const DEBUG      = args.includes('--debug');
 const NO_DATE_FILTER = args.includes('--all');
-const kwIdx = args.indexOf('--keyword');
-if (kwIdx !== -1 && (args[kwIdx + 1] === undefined || args[kwIdx + 1].startsWith('--'))) {
+// flagValue/hasFlag rather than indexOf: validateFlags accepts --keyword=value
+// for a value flag, and indexOf() cannot see that form, so the scan would run
+// every keyword instead of the one asked for.
+const SINGLE_KEYWORD = flagValue(args, '--keyword') ?? null;
+if (hasFlag(args, '--keyword') && (!SINGLE_KEYWORD || SINGLE_KEYWORD.startsWith('--'))) {
   console.error('Error: --keyword requires a value, e.g. --keyword "Softwareentwickler"');
   process.exit(1);
 }
-const SINGLE_KEYWORD = kwIdx !== -1 ? args[kwIdx + 1] : null;
 
 // ── Load portals.yml ─────────────────────────────────────────────────
 
@@ -344,9 +363,7 @@ async function main() {
   }
 
   // Summary
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Interamt Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Interamt Scan', date);
   console.log(`Keywords searched:  ${keywords.length}`);
   console.log(`Total found:        ${totalFound}`);
   console.log(`Filtered by title:  ${titleSkipped.length}`);
@@ -382,6 +399,7 @@ async function main() {
 // doing that. A module should not scan the internet as a side effect of being
 // loaded (#3510).
 if (isMainModule(import.meta.url)) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

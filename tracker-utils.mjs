@@ -79,6 +79,27 @@ export function normalizeCompany(name) {
 }
 
 /**
+ * Control characters that are invisible in every rendered view of the tracker.
+ *
+ * C0 and DEL and C1, minus the three whitespace controls: `\t` is ordinary
+ * whitespace inside a cell, and `\r`/`\n` are folded to a single space by
+ * cell() before this runs — stripping any of the three would glue words
+ * together instead of separating them.
+ *
+ * Deliberately NOT shared with the plugin token/display sanitizer, which strips
+ * the same idea but a different range: it collapses all whitespace first and so
+ * can take `\t`/`\r`/`\n` with the rest, which here would destroy word breaks.
+ * Two ranges that must differ are two constants; only the ranges that must
+ * agree are shared, which is the single export below.
+ *
+ * Exported because verify-pipeline.mjs has to recognize exactly what cell()
+ * removes: stripping only stops NEW bytes entering, and a second copy of this
+ * range would let the write path and the detector disagree about what counts.
+ */
+// eslint-disable-next-line no-control-regex
+export const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
+
+/**
  * Neutralize characters that would corrupt the applications.md table.
  *
  * Tracker rows are read with a raw `line.split('|')`, so a literal pipe or a
@@ -87,11 +108,26 @@ export function normalizeCompany(name) {
  * on the inner pipe. Additive — normal cells are unchanged; only values that
  * would already break the table get sanitized.
  *
+ * Control characters (#3892) get the same treatment for the same reason, and
+ * here rather than in each writer: this is the one sanitizer every tracker
+ * writer passes through — merge-tracker's buildRow (and so the web, which
+ * dictates its rows through the same merge path), set-status's note. A guard
+ * added per writer is a guard the next writer is free to reintroduce the bug
+ * around. They are DELETED, not replaced with a space: the byte renders as
+ * nothing in markdown, on GitHub and in the dashboard, so a substitution would
+ * change text a human has already read. The asymmetry is the point — a byte
+ * that costs one regex to reject costs an unrelated arithmetic discrepancy
+ * much later to find, because every view of the table hides it.
+ *
  * @param {*} v - Free-text value headed for a table cell.
  * @returns {string} Table-safe value.
  */
 export function cell(v) {
-  return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
+  return String(v ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(CONTROL_CHARS, '')
+    .replace(/\s*\|\s*/g, ' / ')
+    .trim();
 }
 
 /**
@@ -129,6 +165,27 @@ export function resolveWorkspaceRoot(trackerPath) {
 }
 
 /**
+ * Workspace root for a script started from `rootDir`, derived from the
+ * *uncanonicalized* tracker path. Unlike `resolveWorkspaceRoot(resolveTrackerPath(rootDir))`,
+ * this does not realpath the tracker first, so a workspace that only symlinks its
+ * `data/` directory (the natural workaround for #524) still resolves to the repo
+ * rather than the symlink's target (#3169). Pointing `CAREER_OPS_TRACKER` at a
+ * genuinely external workspace keeps moving the whole set together (#2471), since
+ * the raw path is then the external tracker itself.
+ *
+ * The returned root is left in its lexical form, exactly as
+ * `resolveWorkspaceRoot(resolveTrackerPath(rootDir))` was, so it keeps the same
+ * spelling the module's containment checks compare against (they realpath both
+ * sides themselves for the symlinked-ancestor case, e.g. /tmp -> /private/tmp).
+ *
+ * @param {string} rootDir - The career-ops data root directory.
+ * @returns {string} Absolute workspace root directory.
+ */
+export function resolveWorkspaceRootFor(rootDir) {
+  return resolveWorkspaceRoot(resolve(rawTrackerPath(rootDir)));
+}
+
+/**
  * Resolve the PDF manifest (`data/pdf-index.tsv`) for the workspace that owns
  * a tracker. `CAREER_OPS_PDF_INDEX` overrides it explicitly.
  *
@@ -158,7 +215,7 @@ export function resolvePdfIndexPath(trackerPath) {
  * @param {string} path - Raw tracker path from config, env, or the default.
  * @returns {string} Absolute canonical path when the file exists, else resolved path.
  */
-import { canonicalizeTrackerPath } from './path-resolver.mjs';
+import { canonicalizeTrackerPath, rawTrackerPath } from './path-resolver.mjs';
 export { canonicalizeTrackerPath };
 
 /**
@@ -349,10 +406,12 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   // from the definition: waiters woke in lockstep and re-raced, and a caller
   // waiting on a healthy lock being handed round briskly was killed anyway.
   //
-  // There is no separate maxWaitMs knob here, so the ceiling is the same
-  // multiple of timeoutMs the definition defaults to.
+  // There is no separate maxWaitMs knob here, so no hardDeadline is passed and
+  // the policy applies its own ceiling. Writing one out here would put a fourth
+  // copy of that bound in the tree, and a copy that drifts changes retry timing
+  // silently — nothing fails, so nothing reports it (#3895).
   const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs,
   });
   for (;;) {
     if (holderStillWedged() || ceilingReached()) break;
@@ -662,8 +721,12 @@ export function writeFileAtomic(path, content) {
  * their aliases. Parsing it here (instead of hardcoding the list) means a new
  * state or alias lands in one file and every consumer follows.
  *
+ * `description` and `terminal` are passed through for callers that EXPLAIN the
+ * states rather than list them (set-status.mjs --help). Both default rather
+ * than throw: an entry omitting them is still a usable state.
+ *
  * @param {string} statesPath - Path to templates/states.yml.
- * @returns {{id:string,label:string,aliases:string[]}[]} Parsed state entries.
+ * @returns {{id:string,label:string,aliases:string[],description:string,terminal:boolean}[]} Parsed state entries.
  */
 export function loadCanonicalStates(statesPath) {
   const doc = yaml.load(readFileSync(statesPath, 'utf-8'));
@@ -674,6 +737,8 @@ export function loadCanonicalStates(statesPath) {
     id: String(s.id ?? ''),
     label: String(s.label ?? ''),
     aliases: Array.isArray(s.aliases) ? s.aliases.map(String) : [],
+    description: String(s.description ?? ''),
+    terminal: s.terminal === true,
   }));
 }
 

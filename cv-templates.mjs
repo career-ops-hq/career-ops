@@ -9,11 +9,14 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// templates/ is System Layer (code root); config/profile.yml is User Layer and
+// follows the data root. CAREER_OPS_PROFILE still wins over both.
 const DEFAULT_TEMPLATES_DIR = resolve(__dirname, 'templates');
 const DEFAULT_PROFILE_PATH =
-  process.env.CAREER_OPS_PROFILE || resolve(__dirname, 'config', 'profile.yml');
+  process.env.CAREER_OPS_PROFILE || resolve(getCareerOpsRoot(), 'config', 'profile.yml');
 
 export const KINDS = {
   cv: {
@@ -217,14 +220,20 @@ export function validateTemplate(path, kind) {
   return { ok: missing.length === 0, missing };
 }
 
-export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH } = {}) {
+export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, strict = false } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
   if (!existsSync(profilePath)) return null;
   let doc;
   try {
     doc = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
-  } catch {
+  } catch (err) {
+    if (strict) {
+      throw new Error(
+        `Failed to parse profile YAML at ${profilePath}. Fix the YAML syntax and retry the update. ${err?.message || err}`,
+        { cause: err },
+      );
+    }
     return null;
   }
   let node = doc;
