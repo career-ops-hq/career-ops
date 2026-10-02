@@ -13,15 +13,19 @@ import re
 import sys
 from urllib.parse import parse_qs, urlparse
 
+from career_ops.dashboard.actions import PrepareRunner
 from career_ops.dashboard.data import connect, job_detail, list_jobs, material_files
 
 
 PAGE = Path(__file__).with_name("index.html")
 DETAIL = re.compile(r"^/api/jobs/(\d+)$")
 FILE = re.compile(r"^/api/jobs/(\d+)/file$")
+PREPARE = re.compile(r"^/api/jobs/(\d+)/prepare$")
+ACTION_HEADER = "X-Career-Ops"
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
-def handler_for(database: Path) -> type[BaseHTTPRequestHandler]:
+def handler_for(database: Path, runner: PrepareRunner) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:
             sys.stderr.write("dashboard: " + format % args + "\n")
@@ -44,16 +48,52 @@ def handler_for(database: Path) -> type[BaseHTTPRequestHandler]:
                     self.send_body(HTTPStatus.OK, PAGE.read_bytes(), "text/html; charset=utf-8")
                 elif url.path == "/api/jobs":
                     with closing(connect(database)) as db:
-                        self.send_json(list_jobs(db))
+                        jobs = list_jobs(db)
+                    running = runner.statuses()
+                    self.send_json([{**job, "prepare_status": running.get(job["id"])} for job in jobs])
                 elif match := DETAIL.match(url.path):
                     with closing(connect(database)) as db:
                         detail = job_detail(db, int(match[1]))
                     self.send_json(detail) if detail else self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
                 elif match := FILE.match(url.path):
                     self.send_file(match[1], parse_qs(url.query).get("id", [""])[0])
+                elif match := PREPARE.match(url.path):
+                    self.send_json({"run": runner.status(int(match[1]))})
                 else:
                     self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             except Exception as error:  # surface store errors to the page instead of dropping the connection
+                self.log_message("error on %s: %r", url.path, error)
+                self.send_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+
+        def same_origin_action(self) -> bool:
+            """Reject cross-site and rebound-host requests; only the dashboard page sends the header."""
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+            origin = self.headers.get("Origin")
+            return (self.headers.get(ACTION_HEADER) == "dashboard" and host in LOCAL_HOSTS
+                    and (origin is None or urlparse(origin).netloc == self.headers.get("Host")))
+
+        def do_POST(self) -> None:
+            url = urlparse(self.path)
+            match = PREPARE.match(url.path)
+            if not match:
+                self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                return
+            if not self.same_origin_action():
+                self.send_json({"error": "forbidden"}, HTTPStatus.FORBIDDEN)
+                return
+            opportunity_id = int(match[1])
+            try:
+                with closing(connect(database)) as db:
+                    job = job_detail(db, opportunity_id)
+                if job is None:
+                    self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                elif not job["scores"]:
+                    self.send_json({"error": "该职位还没有有效打分，无法生成材料"}, HTTPStatus.CONFLICT)
+                else:
+                    self.send_json({"run": runner.start(opportunity_id)}, HTTPStatus.ACCEPTED)
+            except RuntimeError as error:
+                self.send_json({"error": str(error)}, HTTPStatus.CONFLICT)
+            except Exception as error:
                 self.log_message("error on %s: %r", url.path, error)
                 self.send_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
@@ -78,7 +118,7 @@ def serve(directory: Path, host: str, port: int) -> None:
     if not database.is_file():
         raise FileNotFoundError(f"Business store not found: {database}")
     try:
-        server = ThreadingHTTPServer((host, port), handler_for(database))
+        server = ThreadingHTTPServer((host, port), handler_for(database, PrepareRunner(directory)))
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             raise SystemExit(f"Port {port} is already in use; stop the other dashboard or pass --port.") from None

@@ -15,7 +15,7 @@ is the Career Ops Python environment. Run `.venv/bin/python -B -m career_ops
 | `list --view VIEW` | Opportunities (default), scores, decisions, applications or followups |
 | `insights` | Aggregate retained evidence |
 | `task` | Start explicit inputs; inspect, resume, run and cancel tasks |
-| `dashboard` | Serve a read-only local page of scanned, scored and applied jobs (`--port`, default 8765) |
+| `dashboard` | Local page of scanned, scored and applied jobs; its only write is starting `apply prepare` (`--port`, default 8765) |
 | `system` | Doctor, portal maintenance, liveness, company resolution, advance and notify |
 
 Daily commands derive inputs from the opportunity ID:

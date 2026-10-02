@@ -80,6 +80,13 @@ td .sub { color: var(--muted); font-size: 12px; }
 .drawer-head h2 { margin: 0 0 4px; font-size: 18px; }
 .drawer-head .meta { color: var(--muted); font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .drawer-head .close { position: absolute; right: 16px; top: 14px; }
+.actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+button.primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; padding: 5px 12px;
+  border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600; }
+button.primary:disabled { opacity: .6; cursor: progress; }
+.banner { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
+.banner.failed { border-left-color: var(--discard); }
+.banner pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .drawer-tabs { display: flex; gap: 2px; margin-top: 12px; overflow-x: auto; }
 .drawer-tabs .tab { border-radius: 6px 6px 0 0; }
 .drawer-body { padding: 16px 20px 40px; overflow-y: auto; flex: 1; }
@@ -145,6 +152,7 @@ details summary { cursor: pointer; font-weight: 600; }
     <button class="ghost close" id="close">关闭 ✕</button>
     <h2 id="dTitle"></h2>
     <div class="meta" id="dMeta"></div>
+    <div class="actions" id="dActions"></div>
     <nav class="drawer-tabs" id="dTabs"></nav>
   </div>
   <div class="drawer-body" id="dBody"></div>
@@ -182,6 +190,8 @@ const $ = id => document.getElementById(id);
 
 let jobs = [];
 let detail = null;
+const runs = {};
+const POLL_MS = 3000;
 let state = loadState();
 
 function loadState() {
@@ -221,6 +231,7 @@ async function loadJobs() {
     const response = await fetch("/api/jobs");
     if (!response.ok) throw new Error((await response.json()).error || response.statusText);
     jobs = await response.json();
+    jobs.filter(j => j.prepare_status === "running" && !runs[j.id]).forEach(j => { runs[j.id] = { status: "running" }; pollPrepare(j.id); });
     $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
     fillSelects();
     render();
@@ -288,7 +299,7 @@ function render() {
   $("rows").innerHTML = list.map(j => `
     <tr data-id="${j.id}" class="${detail && detail.id === j.id ? "selected" : ""}">
       <td class="num">${j.id}</td>
-      <td><div class="role">${esc(j.role)}${jobLink(j)}</div><div class="sub">${esc(j.company)} · ${esc(j.source)}${j.material_count ? " · 📎 材料" : ""}</div></td>
+      <td><div class="role">${esc(j.role)}${jobLink(j)}</div><div class="sub">${esc(j.company)} · ${esc(j.source)}${j.material_count ? " · 📎 材料" : ""}${runs[j.id]?.status === "running" ? " · ⏳ 生成中" : ""}</div></td>
       <td class="hide-sm">${esc(j.location || "—")}</td>
       <td class="num">${j.score ?? "—"}</td>
       <td>${dims(j.scores)}</td>
@@ -342,6 +353,7 @@ function renderDetail() {
   $("dTabs").innerHTML = DETAIL_TABS.map(t =>
     `<button class="tab ${d.tab === t.key ? "active" : ""}" data-tab="${t.key}">${t.label}${badge[t.key] ? `<span class="count">${badge[t.key]}</span>` : ""}</button>`
   ).join("");
+  $("dActions").innerHTML = actions(d);
   history.replaceState(null, "", `#job=${d.id}&tab=${d.tab}`);
   $("dBody").innerHTML = ({ overview, report, jd, materials, interviews, timeline })[d.tab](d);
   $("dBody").scrollTop = 0;
@@ -377,9 +389,70 @@ function evidenceCard(item) {
 function report(d) { return d.report ? md(d.report) : '<p class="sub">该职位尚无打分报告。</p>'; }
 function jd(d) { return d.jd ? `<pre class="plain">${esc(d.jd)}</pre>` : '<p class="sub">未保留 JD 原文。</p>'; }
 
+function actions(d) {
+  const run = runs[d.id];
+  const task = d.apply_task;
+  if (run?.status === "running") return `<button class="primary" disabled>⏳ 正在生成材料…</button><span class="sub">通常需要几分钟，可以关闭面板，完成后会自动刷新</span>`;
+  if (!d.scores) return `<button class="primary" disabled title="需要先完成打分">生成申请材料</button><span class="sub">需要先完成有效打分</span>`;
+  if (task?.status === "waiting") {
+    return `${pill("draft")} <span class="sub">草稿待你审阅（${esc(task.reason || "waiting")}），见「投递材料」</span>`;
+  }
+  const label = task?.status === "completed" ? "重新生成材料" : "生成申请材料";
+  return `<button class="primary" data-prepare="${d.id}">${label}</button><span class="sub">只生成草稿，不会提交申请</span>`;
+}
+
+function prepareBanner(d) {
+  const run = runs[d.id];
+  const task = d.apply_task;
+  if (run?.status === "running") return `<div class="banner">⏳ 正在生成：简历改动、Cover letter、Upskill、面试准备、反问问题…</div>`;
+  if (run?.status === "failed") return `<div class="banner failed"><strong>生成失败</strong><pre>${esc(run.error || "")}</pre></div>`;
+  if (task?.status === "waiting") {
+    const command = `.venv/bin/python -B -m career_ops task resume ${task.task_id}`;
+    return `<div class="banner"><strong>草稿待审阅</strong>（${esc(task.reason || "")}）。确认无误后运行：
+      <pre>${esc(command)} --decision confirm</pre>需要修改时运行：<pre>${esc(command)} --feedback "修改意见"</pre></div>`;
+  }
+  return "";
+}
+
+async function startPrepare(id) {
+  const job = jobs.find(j => j.id === id) || detail;
+  const message = `为「${job.company} · ${job.role}」生成申请材料？\n\n会用你的简历、资料和该职位打分结果调用模型，生成简历改动、Cover letter、Upskill、面试准备和反问问题。\n只生成草稿，不会提交申请。`;
+  if (!confirm(message)) return;
+  try {
+    const response = await fetch(`/api/jobs/${id}/prepare`, { method: "POST", headers: { "X-Career-Ops": "dashboard" } });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || response.statusText);
+    runs[id] = body.run;
+    refreshViews(id);
+    pollPrepare(id);
+  } catch (error) {
+    alert("无法开始生成：" + error.message);
+  }
+}
+
+async function pollPrepare(id) {
+  while (runs[id]?.status === "running") {
+    await new Promise(resolve => setTimeout(resolve, POLL_MS));
+    try {
+      const response = await fetch(`/api/jobs/${id}/prepare`);
+      const body = await response.json();
+      if (body.run) runs[id] = body.run;
+      else runs[id] = { status: "failed", error: "服务已重启，无法跟踪该任务；请刷新查看结果" };
+    } catch { /* keep polling through transient errors */ }
+  }
+  await loadJobs();
+  if (detail && detail.id === id) openJob(id, "materials");
+}
+
+function refreshViews(id) {
+  render();
+  if (detail && detail.id === id) renderDetail();
+}
+
 function materials(d) {
+  const banner = prepareBanner(d);
   if (!d.materials.length) {
-    return `<p class="sub">暂无投递材料。可运行 <code>.venv/bin/python -B -m career_ops apply prepare ${d.id}</code> 生成简历改动、Cover letter、Upskill、面试准备和反问问题。</p>`;
+    return `${banner}<p class="sub">暂无投递材料。点击上方「生成申请材料」生成简历改动、Cover letter、Upskill、面试准备和反问问题。</p>`;
   }
   const current = d.materials.find(m => m.id === d.material) || d.materials.find(m => m.content) || d.materials[0];
   const nav = d.materials.map(m =>
@@ -390,7 +463,7 @@ function materials(d) {
     ${current.exists ? `<a href="${href}" target="_blank" rel="noopener">打开原文件 ↗</a>` : '<span class="pill discard">文件缺失</span>'}</h4></div>`;
   let body = '<p class="sub">该文件不是文本格式，请点击「打开原文件」查看。</p>';
   if (current.content != null) body = current.name.endsWith(".md") ? md(current.content) : `<pre class="plain">${esc(current.content)}</pre>`;
-  return `<div class="material-nav">${nav}</div>${head}${body}`;
+  return `${banner}<div class="material-nav">${nav}</div>${head}${body}`;
 }
 
 function interviews(d) {
@@ -432,9 +505,10 @@ function timeline(d) {
 }
 
 document.addEventListener("click", event => {
-  const target = event.target.closest("[data-stage],[data-sort],tr[data-id],[data-tab],[data-material]");
+  const target = event.target.closest("[data-stage],[data-sort],tr[data-id],[data-tab],[data-material],[data-prepare]");
   if (!target) return;
-  if (target.dataset.stage) { state.stage = target.dataset.stage; render(); }
+  if (target.dataset.prepare) startPrepare(Number(target.dataset.prepare));
+  else if (target.dataset.stage) { state.stage = target.dataset.stage; render(); }
   else if (target.dataset.sort) {
     state.dir = state.sort === target.dataset.sort && state.dir === "desc" ? "asc" : "desc";
     state.sort = target.dataset.sort;

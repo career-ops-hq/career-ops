@@ -46,6 +46,14 @@ def _lifecycle(db: sqlite3.Connection) -> dict[str, dict]:
     return {str(row["opportunity_id"]): dict(row) for row in db.execute("SELECT * FROM application_lifecycle")}
 
 
+def _apply_tasks(db: sqlite3.Connection) -> dict[str, dict]:
+    latest: dict[str, dict] = {}
+    for row in db.execute("SELECT task_id,opportunity_id,status,waiting_reason FROM tasks WHERE module='apply' ORDER BY rowid DESC"):
+        latest.setdefault(str(row["opportunity_id"]), {"task_id": row["task_id"], "status": row["status"],
+                                                        "reason": row["waiting_reason"]})
+    return latest
+
+
 def _summary_score(score: dict | None) -> float | None:
     known = [value for value in (score or {}).values() if isinstance(value, int)]
     return round(sum(known) / len(known), 2) if known else None
@@ -74,6 +82,7 @@ def list_jobs(db: sqlite3.Connection) -> list[dict]:
     eligibility = {str(row["opportunity_id"]): row["status"] for row in db.execute("SELECT opportunity_id,status FROM eligibility")}
     evaluations = {str(row["opportunity_id"]): dict(row) for row in db.execute("SELECT * FROM evaluations")}
     materials = _material_counts(db)
+    apply_tasks = _apply_tasks(db)
     jobs = []
     for row in db.execute("SELECT * FROM opportunities ORDER BY id DESC"):
         key = str(row["id"])
@@ -100,6 +109,7 @@ def list_jobs(db: sqlite3.Connection) -> list[dict]:
             "application_updated_at": application["updated_at"] if application else None,
             "has_report": bool((score_result or {}).get("artifact", {}).get("report")),
             "material_count": materials.get(key, 0),
+            "apply_task": apply_tasks.get(key),
         })
     return jobs
 
