@@ -68,5 +68,5 @@ test('the shipped template still renders clean', () => {
   // renderer does not map, this fails instead of every user's render failing.
   const html = buildHtml(payload(), 'templates/cover-letter-template.html');
   assert.doesNotMatch(html, /\{\{[A-Z_]+\}\}/, 'bundled template must be fully mapped');
-  assert.match(html, /Jane Doe/);
+  assert.match(html, /Backend Engineer/);
 });

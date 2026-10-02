@@ -130,6 +130,21 @@ function buildCredentialsBlock(candidate) {
   return `<div class="credentials">${credentials.map(escapeHtml).join(" &nbsp;|&nbsp; ")}</div>`;
 }
 
+/** Right-aligned sender block: address lines, then "Date: …", as on a typed letter. */
+function buildSenderBlock(candidate, letter) {
+  const lines = [];
+  if (Array.isArray(candidate.address_lines)) {
+    for (const line of candidate.address_lines) {
+      if (typeof line === "string" && line.trim()) lines.push(line.trim());
+    }
+  } else if (typeof candidate.location === "string" && candidate.location.trim()) {
+    lines.push(candidate.location.trim());
+  }
+  if (letter.date) lines.push(`Date: ${letter.date}`);
+  if (!lines.length) return "";
+  return lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("\n");
+}
+
 /** Build the escaped company, city, and date line for the letter. */
 function buildDateline(letter) {
   const parts = [letter.company, letter.city, letter.date].filter(Boolean).map(escapeHtml);
@@ -264,6 +279,7 @@ export function buildHtml(payload, templatePath) {
 
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
+    "{{SENDER_BLOCK}}": buildSenderBlock(candidate, letter),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
     "{{CREDENTIALS_BLOCK}}": buildCredentialsBlock(candidate),
     "{{ROLE_TITLE}}": escapeHtml(letter.role_title),

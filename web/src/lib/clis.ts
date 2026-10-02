@@ -71,6 +71,9 @@ export const KNOWN: CliSpec[] = [
   // which displayed fine and recorded `tokens: 0` on every grok run.
   { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], streamArgs: (p) => ["-p", p, "--output-format", "streaming-json"], parseEvent: parseGrokEvent },
   { id: "hermes", name: "Hermes Agent", bin: "hermes", run: "hermes chat", url: "https://github.com/NousResearch/hermes-agent", args: (p) => ["chat", "-q", p, "--oneshot", "-Q", "--no-restore-cwd"] },
+  // Local Cursor CLI. --force is full approval for every worker, including PDF.
+  // The model is pinned so Auto cannot route a run onto a third-party model.
+  { id: "cursor", name: "Cursor CLI", bin: "agent", run: "agent -p", url: "https://cursor.com/docs/cli/overview", args: (p) => ["-p", "--force", "--model", "composer-2.5[fast=false]", "--trust", p] },
 ];
 
 function searchDirs(): string[] {

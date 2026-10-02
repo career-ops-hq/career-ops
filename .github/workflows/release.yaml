@@ -1,0 +1,27 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: release-drafter/release-drafter@v7.7.0
+        with:
+          tag: ${{ github.ref_name }}
+          name: career-ops ${{ github.ref_name }}
+          publish: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
