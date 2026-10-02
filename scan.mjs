@@ -216,14 +216,9 @@ export function normalizeFilterOn(value) {
   return list.length > 0 ? [...new Set(list)] : ['title'];
 }
 
-/**
- * Key for the per-(target, field) presence counters. Keyed by the target's
- * index in `targets`, not its name: two enabled targets may share a name
- * (validate-portals only warns), and their counters must stay apart.
- * @param {number} targetId
- * @param {string} field
- * @returns {string}
- */
+// Key for the per-(target, field) presence counters. Keyed by the target's
+// index in `targets`, not its name: two enabled targets may share a name
+// (validate-portals only warns), and their counters must stay apart.
 export function declaredFieldKey(targetId, field) {
   return JSON.stringify([targetId, field]);
 }
@@ -239,9 +234,11 @@ export function isFieldAbsent(value) {
   return value === undefined || value === null || String(value).trim() === '';
 }
 
-// Own properties only: `filter_on: constructor` must not read Object.prototype.
+// Own scalar properties only: `filter_on: constructor` must not read
+// Object.prototype, and an object value has no safe String() to judge.
 export function declaredFieldValue(job, field) {
-  return Object.hasOwn(job, field) ? job[field] : undefined;
+  const value = Object.hasOwn(job, field) ? job[field] : undefined;
+  return ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
 }
 
 // ── Title filter overrides (per-company broadened title net) ───────

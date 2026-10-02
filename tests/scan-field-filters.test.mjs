@@ -110,9 +110,10 @@ const titleKeywords = await import(pathToFileURL(join(ROOT, 'title-keywords.mjs'
     else fail(`${label}: expected ${want} for ${JSON.stringify(input)}`);
   }
   const { declaredFieldValue } = scan;
-  if (declaredFieldValue({ noc: '22221' }, 'noc') === '22221' && declaredFieldValue({}, 'constructor') === undefined) {
-    pass('declaredFieldValue reads own properties only (filter_on: constructor is absent, not Object)');
-  } else fail('declaredFieldValue read an inherited property');
+  if (declaredFieldValue({ noc: '22221' }, 'noc') === '22221' && declaredFieldValue({}, 'constructor') === undefined
+      && declaredFieldValue({ noc: { toString: 'bad' } }, 'noc') === undefined && declaredFieldValue({ noc: 7 }, 'noc') === 7) {
+    pass('declaredFieldValue reads own scalar properties only (inherited and object values count as absent)');
+  } else fail('declaredFieldValue read an inherited or non-scalar value');
 }
 
 // The gate itself is asserted against the real scan in
