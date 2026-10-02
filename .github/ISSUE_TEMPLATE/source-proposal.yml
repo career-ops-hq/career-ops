@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for proposing a source! This form walks the five rules of the
+        Thanks for proposing a source! This form walks the six rules of the
         [Source Indexing Policy](https://github.com/career-ops-hq/career-ops/blob/main/CONTRIBUTING.md#source-indexing-policy).
         Operators proposing their own board are welcome — that's what rule-based gates are for.
         You don't need code to propose a source; if you already have a provider PR, link it below.
@@ -65,11 +65,18 @@ body:
       placeholder: "Featured listings exist; the API marks them with featured: true and returns all listings regardless"
     validations:
       required: true
+  - type: textarea
+    id: rule6
+    attributes:
+      label: "Rule 6 — robots.txt"
+      description: "Paste the source's robots.txt. Which group applies to a generic client (`User-agent: *`)? Does any `Disallow` cover the listing paths a provider would read, or only routes it never requests (`/api`, a subscribe form)? Note any rule that names an AI/agent crawler (`ClaudeBot`, `anthropic-ai`)."
+    validations:
+      required: true
   - type: input
     id: provider-pr
     attributes:
       label: Provider PR (optional)
-      description: If you already wrote the provider, link the PR. A direct PR is welcome too — the same five rules apply before merge.
+      description: If you already wrote the provider, link the PR. A direct PR is welcome too — the same six rules apply before merge.
       placeholder: "#2465"
   - type: textarea
     id: extra

@@ -14,7 +14,7 @@
 // real script.
 import { pass, fail, ROOT, NODE, rmSync, walkFiles } from './helpers.mjs';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 
@@ -86,103 +86,145 @@ const CALL_SITES = [
   },
 ];
 
-const sandbox = mkdtempSync(join(tmpdir(), 'co-web-argv-'));
-try {
-  // A minimal data root: one Applied row, enough for every script here to have
-  // something to report on. Fictional company and role.
-  const tracker = join(sandbox, 'data', 'applications.md');
-  mkdirSync(join(sandbox, 'data'), { recursive: true });
-  writeFileSync(
-    tracker,
-    '# Applications Tracker\n\n' +
-    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
-    '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
-    '| 1 | 2026-01-05 | Northwind Robotics | Backend Engineer | 4.2/5 | Applied | ✅ | [1](reports/001-northwind-robotics-2026-01-05.md) | fixture |\n',
-    'utf-8',
-  );
-
-  const env = {
-    ...process.env,
-    CAREER_OPS_ROOT: sandbox,
-    CAREER_OPS_DATA_DIR: '',
-    // set-status.mjs resolves its root from the codebase, not from
-    // CAREER_OPS_ROOT, so without this the probe would read and write the
-    // developer's own tracker.
-    CAREER_OPS_TRACKER: tracker,
-    // verify-portals.mjs reads portals.yml relative to the codebase root, and
-    // a real one would put this probe on the network. Point it at a path that
-    // does not exist: the script's documented no-op for a fresh setup.
-    CAREER_OPS_PORTALS: join(sandbox, 'no-portals.yml'),
-  };
-
-  for (const site of CALL_SITES) {
-    if (site.probe === 'none') continue;
-    const argv = site.probe === 'flags-only' ? [...site.args, '--help'] : site.args;
-    const label = `${site.script} ${argv.join(' ')}`.trim();
-    const result = spawnSync(NODE, [join(ROOT, site.script), ...argv], {
-      cwd: ROOT, encoding: 'utf-8', timeout: 60_000, env,
-    });
-
-    if (result.error || result.signal) {
-      fail(`${label} — did not run (${result.error?.message || `killed by ${result.signal}`})`);
-      continue;
-    }
-    if (result.status !== 0) {
-      // The flag rejection is the failure this file exists to catch, so name it.
-      const why = /unrecognized flag/.test(result.stderr || '')
-        ? `${site.script} rejects a flag ${site.source} passes — ${result.stderr.trim()}`
-        : `exit ${result.status}: ${(result.stderr || result.stdout || '').trim().split('\n').slice(0, 3).join(' | ')}`;
-      fail(`${label} — ${why}`);
-      continue;
-    }
-    if (site.probe === 'run' && argv.includes('--json')) {
-      try {
-        JSON.parse(result.stdout);
-        pass(`${label} — exit 0, stdout parses as JSON (${site.source})`);
-      } catch (e) {
-        fail(`${label} — exit 0 but stdout is not JSON: ${e.message}`);
-      }
-    } else {
-      pass(`${label} — exit 0 (${site.source})`);
-    }
+/**
+ * Verify the static half of the contract against a checkout root.
+ *
+ * `tests/` is deliberately shipped by the updater while `web/` is not. The
+ * dynamic argv probes above still apply to that core-only install, but there
+ * are no web call sites to inspect there. Treat that absence as a scoped skip;
+ * if web/ is present, keep every source-consistency assertion strict.
+ *
+ * @param {{root?: string, reportPass?: (message: string) => void, reportFail?: (message: string) => void}} options
+ * @returns {{skipped: boolean}}
+ */
+export function verifyWebStaticSources({ root = ROOT, reportPass = pass, reportFail = fail } = {}) {
+  // web/ ships as its own release-please component and is excluded from
+  // SYSTEM_PATHS wholesale (validate-system-paths-coverage.mjs,
+  // EXCLUDE_PREFIXES = ['web/']), so `update-system.mjs apply` never installs
+  // it. An install created that way has no web/ at all, and the two checks
+  // below read the web sources unconditionally: readFileSync threw ENOENT and
+  // took the whole suite with it, so the argv probes above — which need only
+  // the core scripts and are the point of this file — reported nothing either.
+  const webRoot = join(root, 'web');
+  if (!existsSync(webRoot)) {
+    reportPass('web/ is not present in this checkout — skipping static argv-source contract');
+    return { skipped: true };
   }
 
-  // --- static half ---------------------------------------------------------
-  // The probes above test the argv as transcribed into this file. These two
-  // checks tie that transcription back to the sources, so a flag added to a
-  // web route — or a whole new route that spawns a script — cannot land
-  // without going through a probe.
+  const webSrcRoot = join(webRoot, 'src');
+  if (!existsSync(webSrcRoot)) {
+    reportFail('web/ exists but web/src is missing — cannot verify the static argv-source contract');
+    return { skipped: false };
+  }
 
   // Every `"--flag"` literal in a listed source must appear in its argv here.
   // This covers the argv literals the routes write inline; it does NOT cover a
   // flag assembled at runtime from a variable or a template string.
   const flagDrift = [];
   for (const site of CALL_SITES) {
-    const src = readFileSync(join(ROOT, site.source), 'utf-8');
+    const src = readFileSync(join(root, site.source), 'utf-8');
     const literals = [...new Set([...src.matchAll(/"(--[a-z][a-z0-9-]*)"/g)].map((m) => m[1]))];
     for (const flag of literals) {
-      if (!site.args.includes(flag)) flagDrift.push(`${site.source} passes ${flag}, which no probe above covers`);
+      if (!site.args.includes(flag))
+        flagDrift.push(`${site.source} passes ${flag}, which no probe above covers`);
     }
   }
-  if (flagDrift.length === 0) pass('every --flag literal in the listed web sources is covered by a probe');
-  else for (const d of flagDrift) fail(d);
+  if (flagDrift.length === 0)
+    reportPass('every --flag literal in the listed web sources is covered by a probe');
+  else for (const d of flagDrift) reportFail(d);
 
   // Every web source that spawns a core script must be listed. A new route is
   // a new argv nobody has put to the script.
-  const spawners = walkFiles(join(ROOT, 'web', 'src'), /\.(ts|tsx|mjs)$/)
-    .map((f) => relative(ROOT, f).split(sep).join('/'))
+  const spawners = walkFiles(webSrcRoot, /\.(ts|tsx|mjs)$/)
+    .map((f) => relative(root, f).split(sep).join('/'))
     .filter((rel) => {
-      const src = readFileSync(join(ROOT, rel), 'utf-8');
+      const src = readFileSync(join(root, rel), 'utf-8');
       return /\brootScript\(/.test(src) && /\b(execFile|spawn)\(/.test(src);
     });
   const listed = new Set(CALL_SITES.map((s) => s.source));
   const unlisted = spawners.filter((f) => !listed.has(f));
-  if (unlisted.length === 0) pass(`all ${spawners.length} web sources that spawn a core script are listed here`);
-  else fail(`web sources spawning a core script with no argv probe: ${unlisted.join(', ')}`);
+  if (unlisted.length === 0)
+    reportPass(`all ${spawners.length} web sources that spawn a core script are listed here`);
+  else reportFail(`web sources spawning a core script with no argv probe: ${unlisted.join(', ')}`);
 
   const stale = [...listed].filter((f) => !spawners.includes(f));
-  if (stale.length === 0) pass('no stale entries — every listed source still spawns a core script');
-  else fail(`listed sources that no longer spawn a core script: ${stale.join(', ')}`);
-} finally {
-  rmSync(sandbox, { recursive: true, force: true });
+  if (stale.length === 0) reportPass('no stale entries — every listed source still spawns a core script');
+  else reportFail(`listed sources that no longer spawn a core script: ${stale.join(', ')}`);
+
+  return { skipped: false };
+}
+
+export function runWebCoreArgvContract() {
+  const sandbox = mkdtempSync(join(tmpdir(), 'co-web-argv-'));
+  try {
+    // A minimal data root: one Applied row, enough for every script here to have
+    // something to report on. Fictional company and role.
+    const tracker = join(sandbox, 'data', 'applications.md');
+    mkdirSync(join(sandbox, 'data'), { recursive: true });
+    writeFileSync(
+      tracker,
+      '# Applications Tracker\n\n' +
+        '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+        '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+        '| 1 | 2026-01-05 | Northwind Robotics | Backend Engineer | 4.2/5 | Applied | ✅ | [1](reports/001-northwind-robotics-2026-01-05.md) | fixture |\n',
+      'utf-8',
+    );
+
+    const env = {
+      ...process.env,
+      CAREER_OPS_ROOT: sandbox,
+      CAREER_OPS_DATA_DIR: '',
+      // set-status.mjs resolves its root from the codebase, not from
+      // CAREER_OPS_ROOT, so without this the probe would read and write the
+      // developer's own tracker.
+      CAREER_OPS_TRACKER: tracker,
+      // verify-portals.mjs reads portals.yml relative to the codebase root, and
+      // a real one would put this probe on the network. Point it at a path that
+      // does not exist: the script's documented no-op for a fresh setup.
+      CAREER_OPS_PORTALS: join(sandbox, 'no-portals.yml'),
+    };
+
+    for (const site of CALL_SITES) {
+      if (site.probe === 'none') continue;
+      const argv = site.probe === 'flags-only' ? [...site.args, '--help'] : site.args;
+      const label = `${site.script} ${argv.join(' ')}`.trim();
+      const result = spawnSync(NODE, [join(ROOT, site.script), ...argv], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        timeout: 60_000,
+        env,
+      });
+
+      if (result.error || result.signal) {
+        fail(`${label} — did not run (${result.error?.message || `killed by ${result.signal}`})`);
+        continue;
+      }
+      if (result.status !== 0) {
+        // The flag rejection is the failure this file exists to catch, so name it.
+        const why = /unrecognized flag/.test(result.stderr || '')
+          ? `${site.script} rejects a flag ${site.source} passes — ${result.stderr.trim()}`
+          : `exit ${result.status}: ${(result.stderr || result.stdout || '').trim().split('\n').slice(0, 3).join(' | ')}`;
+        fail(`${label} — ${why}`);
+        continue;
+      }
+      if (site.probe === 'run' && argv.includes('--json')) {
+        try {
+          JSON.parse(result.stdout);
+          pass(`${label} — exit 0, stdout parses as JSON (${site.source})`);
+        } catch (e) {
+          fail(`${label} — exit 0 but stdout is not JSON: ${e.message}`);
+        }
+      } else {
+        pass(`${label} — exit 0 (${site.source})`);
+      }
+    }
+
+    verifyWebStaticSources();
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
+}
+
+if (process.env.CAREER_OPS_WEB_ARGV_CONTRACT_STATIC_ONLY !== '1') {
+  runWebCoreArgvContract();
 }

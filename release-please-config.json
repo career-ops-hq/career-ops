@@ -5,6 +5,7 @@
     ".": {
       "release-type": "simple",
       "package-name": "career-ops",
+      "exclude-paths": ["web"],
       "extra-files": [
         {
           "type": "json",

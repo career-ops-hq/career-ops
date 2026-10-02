@@ -15,7 +15,7 @@ try {
   const {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
-    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob,
+    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
@@ -80,6 +80,34 @@ try {
     pass('normalizeJd shapes { url, title, text } and compacts both');
   } else {
     fail(`normalizeJd => ${JSON.stringify(jd)}`);
+  }
+
+  // normalizeJd prefers a schema.org JobPosting from JSON-LD when the page
+  // ships one, over the rendered DOM text — but the comparison must be on
+  // NORMALIZED length, not raw length. Phenom-style chrome ("Apply now / Save
+  // job / Share ...") is mostly repeated newlines: it can out-length a real,
+  // shorter-in-raw-HTML JSON-LD description before whitespace is collapsed,
+  // even though the JSON-LD is clearly the substantive content once both are
+  // normalized. (Regression for the case where raw-length comparison let DOM
+  // chrome win and the JD came out empty.)
+  const chromeHeavy = 'Apply now\n\n\n\n\n\n\n\nSave job\n\n\n\n\n\n\n\nShare\n\n\n\n\n\n\n\nLocation\n\n\n\n\n\n\n\nBasel\n\n\n\n\n\n\n\nJob ID\n\n\n\n\n\n\n\n2024\n\n\n\n\n\n\n\n';
+  const substantiveLd = '<p>Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.</p>';
+  const ldWins = normalizeJd({ title: '', text: chromeHeavy, jsonLdDescription: substantiveLd }, 'https://x/1');
+  if (ldWins.text === 'Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.') {
+    pass('normalizeJd compares normalized (not raw) DOM length, so JSON-LD wins over whitespace-heavy DOM chrome');
+  } else {
+    fail(`normalizeJd chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
+  }
+
+  // ...and the rule stays "longer wins", not "JSON-LD always wins": a genuinely
+  // longer, substantive DOM text must still beat a short stub JobPosting.
+  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section spanning several sentences.';
+  const stubLd = '<p>Rust Engineer</p>';
+  const domWins = normalizeJd({ title: '', text: realDomText, jsonLdDescription: stubLd }, 'https://x/1');
+  if (domWins.text === realDomText) {
+    pass('normalizeJd keeps the rendered DOM text when the JSON-LD is a shorter stub');
+  } else {
+    fail(`normalizeJd dom-vs-stub-ld => ${JSON.stringify(domWins.text)}`);
   }
 
   // normalizeJd honors a custom text cap (a long JD is truncated at the cap, not
@@ -332,6 +360,41 @@ try {
   if (ghNulls.every((v) => v === null)) pass('normalizeGreenhouseJob returns null without a description body');
   else fail(`normalizeGreenhouseJob nulls => ${JSON.stringify(ghNulls)}`);
 
+  // normalizeSmartRecruitersJob — the JD is jobAd.sections (HTML blocks in page
+  // order); location carries remote/hybrid flags, often the only work-model signal.
+  const sr = normalizeSmartRecruitersJob(
+    {
+      name: 'Senior Engineer',
+      location: { city: 'Bengaluru', country: 'in', fullLocation: 'Bengaluru, KA, India', remote: false, hybrid: true },
+      jobAd: { sections: {
+        companyDescription: { title: 'Company', text: '<p>We make things.</p>' },
+        jobDescription: { title: 'Job Description', text: '&lt;p&gt;Own the API.&lt;/p&gt;' },
+        qualifications: { title: 'Qualifications', text: '<ul><li>5+ years</li></ul>' },
+        additionalInformation: { title: '', text: '' },
+      } },
+    },
+    'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer',
+  );
+  if (sr
+      && sr.title === 'Senior Engineer'
+      && sr.text.includes('Location: Bengaluru, KA, India')
+      && sr.text.includes('Work model: Hybrid')
+      && sr.text.indexOf('We make things.') < sr.text.indexOf('Own the API.')
+      && sr.text.includes('- 5+ years')
+      && !sr.text.includes('&lt;')) {
+    pass('normalizeSmartRecruitersJob joins sections in page order and surfaces location + work model');
+  } else {
+    fail(`normalizeSmartRecruitersJob => ${JSON.stringify(sr)}`);
+  }
+
+  const srNulls = [
+    normalizeSmartRecruitersJob(null, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X' }, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X', jobAd: { sections: { jobDescription: { text: '<p> </p>' } } } }, 'https://x/1'),
+  ];
+  if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
+  else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
+
   // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
   // etc.) as separate HTML blocks; dropping them loses half the JD.
   const lever = normalizeLeverJob(
@@ -468,6 +531,8 @@ try {
     ['lever', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
     ['ashby', 'https://jobs.ashbyhq.com/acme/some-job-id'],
     ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
+    ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
+    ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);

@@ -54,6 +54,7 @@
  *                               salary_filter and rendered into pipeline.md's
  *                               compensation column via formatCompensation(); an
  *                               empty/absent value always passes the filter.
+ *                               `adp-workforcenow.mjs` is another producer.
  * @property {number} [trustScore] 0-100 trust score from _trust-validator.mjs.
  * @property {string[]} [trustFlags] Flags raised by trust validation (e.g.
  *                                   'invalid_url', 'suspicious_domain').
