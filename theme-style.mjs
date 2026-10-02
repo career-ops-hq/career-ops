@@ -42,10 +42,10 @@ export const STYLE_VAR_MAP = {
   // Each template keeps its OWN current behavior as the default (its :root
   // token default, or the .job var() fallback where it declares none), so
   // this is purely additive — no shipped template's default pagination
-  // changes for anyone who doesn't set this. Raw CSS keyword (e.g. "avoid" or
-  // "auto"), same contract as the other tokens. Trade-off worth knowing:
-  // "avoid" cannot help an entry taller than a full page — it still splits,
-  // just after leaving a bottom gap on the page before it.
+  // changes for anyone who doesn't set this. A break-inside keyword, normally
+  // "avoid" or "auto", same contract as the other tokens. Trade-off worth
+  // knowing: "avoid" cannot help an entry taller than a full page — it still
+  // splits, just after leaving a bottom gap on the page before it.
   job_break_inside: '--job-break-inside',
 };
 

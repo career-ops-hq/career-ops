@@ -159,7 +159,8 @@ spend_tier: standard
 #   font_family:      "Outfit, Inter, sans-serif"
 #   font_size:        "10pt"              # base body text size
 #   margin:           "0.5in"             # page margin (@page)
-#   job_break_inside: "avoid"             # "avoid" keeps each role on one page; "auto" lets it split
+#   job_break_inside: "avoid"             # keep each role whole (one taller than a page still splits);
+#                                         # "auto" lets roles split. Unset: the template's own default
 
 cv:
   output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)
