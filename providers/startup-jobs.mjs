@@ -25,7 +25,10 @@ import { htmlToText } from './_html-to-text.mjs';
 // job: namespace), so both are parsed heuristically:
 //   - company: the title's trailing "... at {Company}" segment, split on the
 //     LAST " at " (a company literally named "...at..." would mis-split —
-//     accepted, defensive fallback below keeps the item instead of dropping it).
+//     accepted). A title with no usable " at " segment has no identifiable
+//     employer, so the row is skipped entirely rather than attributed to the
+//     board itself — a listing the scanner can't name a real employer for is
+//     not a real, employer-attributed posting (providers/ADDING_A_PROVIDER.md).
 //   - location: the description's last non-empty line, with anything after
 //     " · " (a trailing comp range) stripped. Observed shapes: "{body}\n\n{Location}",
 //     "{body}\n\n{Location} · {Comp}", or just "{Location}" with no body at all.
@@ -66,16 +69,17 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-const DEFAULT_COMPANY = 'Startup Jobs';
-
-/** Split "{Role} at {Company}" on the LAST " at " — returns [title, company]. */
-function splitTitleCompany(rawTitle, fallbackCompany) {
-  const fallback = typeof fallbackCompany === 'string' && fallbackCompany.trim() ? fallbackCompany.trim() : DEFAULT_COMPANY;
+/**
+ * Split "{Role} at {Company}" on the LAST " at " segment. Returns `null`
+ * when the title carries no usable employer segment — the caller skips that
+ * row rather than attributing it to the board itself.
+ */
+function splitTitleCompany(rawTitle) {
   const idx = rawTitle.lastIndexOf(' at ');
-  if (idx === -1) return { title: rawTitle, company: fallback };
+  if (idx === -1) return null;
   const title = rawTitle.slice(0, idx).trim();
   const company = rawTitle.slice(idx + 4).trim();
-  if (!title || !company) return { title: rawTitle, company: fallback };
+  if (!title || !company) return null;
   return { title, company };
 }
 
@@ -102,7 +106,7 @@ export default {
     // redirect:'error' prevents SSRF via server-side redirects; the hostname
     // is always the fixed FEED_HOST regardless of entry-supplied query params.
     const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
-    return parseStartupJobsFeed(text, entry?.name);
+    return parseStartupJobsFeed(text);
   },
 };
 
@@ -132,6 +136,15 @@ function cleanUrl(value) {
   }
 }
 
+// The documented envelope is `<rss>...<channel>...</channel>...</rss>` (item
+// blocks live inside it, but a feed can legitimately have zero of them — a
+// genuinely empty board). Anything short of that — an empty body, a truncated
+// fetch, an HTML error page, a non-string argument — is not the documented
+// shape and is not silently read as "zero jobs" (providers/ADDING_A_PROVIDER.md
+// "Defensive parsing": a malformed envelope is a descriptive throw, never a
+// quiet `[]`, so an upstream break surfaces instead of reading as 0 forever).
+const ENVELOPE_RE = /<rss\b[^>]*>[\s\S]*<channel\b[^>]*>[\s\S]*<\/channel>[\s\S]*<\/rss>/i;
+
 /**
  * Parse Startup Jobs' public RSS feed. Exported for unit tests.
  *
@@ -145,11 +158,13 @@ function cleanUrl(value) {
  * content_filter and visa_filter something to read.
  *
  * @param {string} xml - raw RSS feed body
- * @param {string} [defaultCompany] - fallback company when a title has no " at " segment
  * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
  */
-export function parseStartupJobsFeed(xml, defaultCompany = DEFAULT_COMPANY) {
-  if (typeof xml !== 'string') return [];
+export function parseStartupJobsFeed(xml) {
+  if (typeof xml !== 'string' || !ENVELOPE_RE.test(xml)) {
+    const got = typeof xml === 'string' ? `${xml.length}-char body` : typeof xml;
+    throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${got}`);
+  }
   const jobs = [];
   const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
 
@@ -160,7 +175,9 @@ export function parseStartupJobsFeed(xml, defaultCompany = DEFAULT_COMPANY) {
     const rawTitle = tagText(item, 'title');
     if (!rawTitle) continue;
 
-    const { title, company } = splitTitleCompany(rawTitle, defaultCompany);
+    const split = splitTitleCompany(rawTitle);
+    if (!split) continue; // no " at " segment — employer unknown, skip the row
+    const { title, company } = split;
     const description = tagText(item, 'description');
     const postedAt = toEpochMs(tagText(item, 'pubDate'));
 

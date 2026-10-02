@@ -76,7 +76,7 @@ try {
     '  <description>Remote, Germany</description>', // location-only, no body text, no comp
     '</item>',
     '<item>',
-    '  <title>No At Segment Here</title>', // no " at " — falls back to default company
+    '  <title>No At Segment Here</title>', // no " at " — employer unknown, row is skipped
     '  <link>https://startup.jobs/no-at-segment-10260826</link>',
     '  <description>Some body text.',
     '',
@@ -88,9 +88,9 @@ try {
     '</channel></rss>',
   ].join('\n');
 
-  const jobs = parseStartupJobsFeed(sampleXml, 'Startup Jobs');
-  if (jobs.length === 3) pass('parseStartupJobsFeed keeps 3 valid items (drops the link-less one)');
-  else fail(`parseStartupJobsFeed returned ${jobs.length} jobs, expected 3`);
+  const jobs = parseStartupJobsFeed(sampleXml);
+  if (jobs.length === 2) pass('parseStartupJobsFeed keeps 2 valid items (drops the link-less one and the unattributed one)');
+  else fail(`parseStartupJobsFeed returned ${jobs.length} jobs, expected 2`);
 
   if (jobs[0]?.title === 'Senior Platform Engineer' && jobs[0]?.company === 'Acme & Co') {
     pass('parseStartupJobsFeed splits title/company on the last " at " and decodes entities');
@@ -119,10 +119,10 @@ try {
     fail(`row 1 = ${JSON.stringify(jobs[1])}`);
   }
 
-  if (jobs[2]?.title === 'No At Segment Here' && jobs[2]?.company === 'Startup Jobs') {
-    pass('parseStartupJobsFeed falls back to the default company when the title has no " at " segment');
+  if (jobs.every((j) => j.title !== 'No At Segment Here')) {
+    pass('parseStartupJobsFeed skips a title with no usable " at " segment instead of attributing it to the board');
   } else {
-    fail(`row 2 title/company = ${JSON.stringify([jobs[2]?.title, jobs[2]?.company])}`);
+    fail('the unattributed-employer item should have been dropped, not kept');
   }
 
   // description: the <description> text ships in the same payload, so it is
@@ -135,6 +135,7 @@ try {
   }
 
   const descriptionXml = [
+    '<rss><channel>',
     '<item>',
     '  <title>Backend Engineer at Gamma</title>',
     '  <link>https://startup.jobs/backend-engineer-gamma-10260827</link>',
@@ -151,6 +152,7 @@ try {
     '  <link>https://startup.jobs/designer-epsilon-10260829</link>',
     '  <description></description>',
     '</item>',
+    '</channel></rss>',
   ].join('\n');
   const descJobs = parseStartupJobsFeed(descriptionXml);
   if (descJobs[0]?.description === 'We sponsor visas for this role. Berlin, Germany' && descJobs[0]?.location === 'Berlin, Germany') {
@@ -164,23 +166,43 @@ try {
     fail(`description-less rows = ${JSON.stringify(descJobs.slice(1))}`);
   }
 
-  // Robustness
-  if (parseStartupJobsFeed('', 'X').length === 0) pass('empty input → empty result');
-  else fail('empty input should yield empty result');
-  if (parseStartupJobsFeed(null, 'X').length === 0) pass('null input → empty result (no crash)');
-  else fail('null input should yield empty result without crashing');
-  if (parseStartupJobsFeed('<item><title>Bare at Co</title></item>').length === 0) {
-    pass('an item with no <link> is dropped, not crashed on');
-  } else {
-    fail('item with no link should be dropped');
-  }
+  // Robustness — envelope validation (providers/ADDING_A_PROVIDER.md
+  // "Defensive parsing": a malformed envelope is a descriptive throw, never
+  // a quiet `[]`, so an upstream break surfaces instead of reading as 0 jobs
+  // forever). A genuinely empty <channel> (zero items) is still a valid
+  // envelope and returns `[]` — that case is exercised separately below.
+  let threwOnEmpty = false;
+  try { parseStartupJobsFeed(''); } catch { threwOnEmpty = true; }
+  if (threwOnEmpty) pass('empty input throws — not the documented <rss><channel> envelope');
+  else fail('empty input should throw, not silently return []');
+
+  let threwOnNull = false;
+  try { parseStartupJobsFeed(null); } catch { threwOnNull = true; }
+  if (threwOnNull) pass('null input throws — not a string, not the documented envelope');
+  else fail('null input should throw, not silently return []');
+
+  let threwOnHtml = false;
+  try { parseStartupJobsFeed('<html><body>502 Bad Gateway</body></html>'); } catch { threwOnHtml = true; }
+  if (threwOnHtml) pass('an HTML error page throws instead of reading as an empty board');
+  else fail('an HTML error page should throw, not silently return []');
+
+  let threwOnBareItem = false;
+  try { parseStartupJobsFeed('<item><title>Bare at Co</title></item>'); } catch { threwOnBareItem = true; }
+  if (threwOnBareItem) pass('a bare <item> with no <rss><channel> wrapper throws — truncated/malformed feed');
+  else fail('a bare <item> with no envelope should throw, not silently return []');
+
+  const emptyChannelJobs = parseStartupJobsFeed('<rss><channel></channel></rss>');
+  if (emptyChannelJobs.length === 0) pass('a valid envelope with zero items is a genuinely empty board → []');
+  else fail(`an empty <channel> should return [], got ${emptyChannelJobs.length} jobs`);
 
   // A non-startup.jobs link in <link> is dropped, never trusted as the job URL.
   const untrustedXml = [
+    '<rss><channel>',
     '<item>',
     '  <title>Evil at Co</title>',
     '  <link>https://evil.example.com/job/1</link>',
     '</item>',
+    '</channel></rss>',
   ].join('\n');
   if (parseStartupJobsFeed(untrustedXml).length === 0) pass('a link hosted off startup.jobs is dropped');
   else fail('a link hosted off startup.jobs should be dropped, not trusted');
@@ -200,8 +222,8 @@ try {
       fetchJson: async () => { throw new Error('fetchJson should not be called'); },
     },
   );
-  if (fetchJobs.length === 3) pass('startup-jobs.fetch() hits the role-scoped feed with redirect:error and returns parsed jobs');
-  else fail(`startup-jobs.fetch() returned ${fetchJobs.length} jobs, expected 3`);
+  if (fetchJobs.length === 2) pass('startup-jobs.fetch() hits the role-scoped feed with redirect:error and returns parsed jobs');
+  else fail(`startup-jobs.fetch() returned ${fetchJobs.length} jobs, expected 2`);
 
 } catch (e) {
   fail(`startup-jobs provider tests crashed: ${e.message}`);
