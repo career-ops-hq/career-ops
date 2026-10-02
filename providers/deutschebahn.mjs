@@ -148,6 +148,30 @@ export function assertNoUnparsedHits(html, url) {
 }
 
 /**
+ * Number of distinct posting ids linked on the page (`?jobId={digits}`) that
+ * no hit anchor carries — postings the hit selector misses on a page where it
+ * still matches others (a hit variant with a different class). Every
+ * posting link on a results page belongs to a hit anchor, so any surplus is
+ * a selector gap.
+ * @param {string} html
+ */
+export function countMissedPostingLinks(html) {
+  if (typeof html !== 'string') return 0;
+  const idOf = (s) => s.match(/[?&](?:amp;)?jobId=(\d+)/)?.[1];
+  const hitIds = new Set();
+  for (const a of html.match(/<a\b[^>]*class="[^"]*m-search-hit\b[^"]*"[^>]*>/gi) || []) {
+    const id = idOf(a);
+    if (id) hitIds.add(id);
+  }
+  const missed = new Set();
+  for (const link of html.match(/href="[^"]*[?&](?:amp;)?jobId=\d+/g) || []) {
+    const id = idOf(link);
+    if (id && !hitIds.has(id)) missed.add(id);
+  }
+  return missed.size;
+}
+
+/**
  * A first page with no parsed hits is a genuinely empty board only when its
  * results header says data-count="0" and it carries no posting-shaped link. A
  * missing header (db.jobs rendered the results shell) or a
@@ -237,6 +261,13 @@ export default {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
         jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location });
+      }
+      // Postings the hit selector misses beside ones it matches: the parsed
+      // rows stand (a partial gap is not a dead board), and the warning keeps
+      // the gap from passing silently. Checked before either stop below.
+      const missed = countMissedPostingLinks(html);
+      if (missed > 0) {
+        console.warn(`deutschebahn: ${entry.name}: page ${page} links ${missed} posting(s) no hit anchor carries — the hit markup may have a new variant`);
       }
       if (jobs.length >= MAX_JOBS) {
         stopReason = 'max-jobs';

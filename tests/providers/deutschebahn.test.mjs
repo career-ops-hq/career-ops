@@ -141,6 +141,22 @@ try {
   if (laterError?.includes('posting links') && laterCalls === 2) pass('deutschebahn.fetch() throws when a later page carries posting links but no hit parses');
   else fail(`deutschebahn.fetch() should throw on unparsed posting links past page 0, got error=${JSON.stringify(laterError)} calls=${laterCalls}`);
 
+  // A renamed hit beside a parsed one: the parsed row stands and the gap warns.
+  const mixedHtml = '<html>' + dbHit('630365', 'Teilprojektleiter:in Tunnel / Logistik', 'München, Deutschland') + driftedHit('900003') + '</html>';
+  if (dbModule.countMissedPostingLinks(mixedHtml) === 1 && dbModule.countMissedPostingLinks(dbHtml) === 0 && dbModule.countMissedPostingLinks(undefined) === 0) pass('deutschebahn.countMissedPostingLinks() counts posting links no hit anchor carries');
+  else fail(`deutschebahn.countMissedPostingLinks() wrong: ${dbModule.countMissedPostingLinks(mixedHtml)}, ${dbModule.countMissedPostingLinks(dbHtml)}`);
+  const mixedWarnings = [];
+  const mixedOrigWarn = console.warn;
+  console.warn = (msg) => mixedWarnings.push(String(msg));
+  let mixedJobs;
+  try {
+    mixedJobs = await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, { sleep: async () => {}, fetchText: async () => mixedHtml });
+  } finally {
+    console.warn = mixedOrigWarn;
+  }
+  if (mixedJobs?.length === 1 && mixedWarnings.length === 1 && mixedWarnings[0].includes('1 posting(s) no hit anchor carries')) pass('deutschebahn.fetch() keeps parsed hits and warns when a posting link has no hit anchor');
+  else fail(`deutschebahn.fetch() mixed-page wrong: ${JSON.stringify({ jobs: mixedJobs?.length, warnings: mixedWarnings })}`);
+
   // An empty later page: inside the reported total it is a truncated walk
   // (partials kept, warned); at/after the total or without a count it is
   // the natural end of the board (no warning).
