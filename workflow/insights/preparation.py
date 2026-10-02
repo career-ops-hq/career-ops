@@ -8,10 +8,10 @@ import json
 import re
 
 try:
-    from workflow.insights.skills import canonicalize, extract_skills
+    from workflow.skill_extract import canonicalize, extract_skills
     from workflow.insights.upskill import targeted_skill_gap
 except ModuleNotFoundError:
-    from insights.skills import canonicalize, extract_skills
+    from skill_extract import canonicalize, extract_skills
     from insights.upskill import targeted_skill_gap
 
 

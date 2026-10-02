@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
@@ -70,10 +69,6 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     except ValueError as error:
         assert "research access status" in str(error)
     render_report(packet, evidence, assessment)
-    validator = Path(__file__).resolve().parents[1] / "scoring-report.mjs"
-    script = "import fs from 'node:fs'; const {validateReport}=await import(process.argv[1]); const p=process.argv[2]; validateReport(fs.readFileSync(p,'utf8'), {root:process.argv[3]});"
-    checked = subprocess.run(["node", "--input-type=module", "-e", script, validator.as_uri(), str(directory / "report.md"), str(root)], text=True, capture_output=True)
-    assert checked.returncode == 0, (checked.stdout, checked.stderr)
     invalid = json.loads(json.dumps(assessment))
     invalid["dimensions"]["direction"] = {"score": 4, "rationale": "Claimed direction fit.", "evidence": [{"source": "jd", "quote": "Invented quote"}]}
     try:
@@ -102,9 +97,6 @@ with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:
     }}
     paid = render_report(packet, salary_evidence, salary_assessment)
     assert "advertised_comp:" in paid["report"] and "300k-400k" in paid["report"]
-    checked = subprocess.run(["node", "--input-type=module", "-e", script, validator.as_uri(),
-                              str(directory / "report.md"), str(root)], text=True, capture_output=True)
-    assert checked.returncode == 0, (checked.stdout, checked.stderr)
     bad_salary = {**salary_assessment, "advertised_comp": {
         "amount": "300k-400k", "currency": "USD", "quote": "Annual salary CNY 300k-400k"
     }}

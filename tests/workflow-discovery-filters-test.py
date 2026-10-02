@@ -2,6 +2,7 @@
 
 import json
 import sys
+import yaml
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,3 +79,9 @@ config = {"title_filter": {"positive": ["Python"]}, "skip_tiers": ["entry"],
 assert filter_reason(job, config, "China") == "tier"
 assert filter_reason({**job, "title": "Python Engineer"}, config, "China") == "location"
 assert filter_reason({**job, "title": "Python Engineer", "location": "China"}, config, "China") == "content"
+
+example = yaml.safe_load((ROOT / 'templates/portals.example.yml').read_text())
+for title in ('Customer Care Agent', 'Senior Customer Care Agent'):
+    assert not title_match(title, example['title_filter'])[0]
+for title in ('AI Agents Manager: Customer Care', 'AI Support Delivery Manager: Customer Care'):
+    assert title_match(title, example['title_filter'])[0]

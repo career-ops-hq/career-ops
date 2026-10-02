@@ -32,7 +32,7 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like Python global discovery use it for recency
  *                               filtering.
- * @property {number} [trustScore] 0-100 trust score from _trust-validator.mjs.
+ * @property {number} [trustScore] 0-100 trust annotation.
  * @property {string[]} [trustFlags] Flags raised by trust validation (e.g.
  *                                   'invalid_url', 'suspicious_domain').
  * @property {'high'|'medium'|'low'} [trustLevel] Classification derived from

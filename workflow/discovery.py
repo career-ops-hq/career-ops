@@ -20,7 +20,7 @@ try:
     from workflow.discovery_dedup import company_aliases, company_role_key, database_snapshot, url_key, _text_key
     from workflow.discovery_filters import filter_reason
     from workflow.discovery_fingerprint import cross_listings, fingerprint
-    from workflow.discovery_prescreen import candidate_source_hash, write_placeholder
+    from workflow.discovery_prescreen import candidate_source_hash
     from workflow.discovery_store import DiscoveryStore
     from workflow.discovery_trust import trust
     from workflow.discovery_verify import observe, route
@@ -29,7 +29,7 @@ except ModuleNotFoundError:
     from discovery_dedup import company_aliases, company_role_key, database_snapshot, url_key, _text_key
     from discovery_filters import filter_reason
     from discovery_fingerprint import cross_listings, fingerprint
-    from discovery_prescreen import candidate_source_hash, write_placeholder
+    from discovery_prescreen import candidate_source_hash
     from discovery_store import DiscoveryStore
     from discovery_trust import trust
     from discovery_verify import observe, route
@@ -262,7 +262,6 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
         blacklist = _blacklist(input_root / "data" / "blacklist.md")
         windows = load_windows(profile)
         country = profile.get("location", {}).get("country", "") if isinstance(profile.get("location"), dict) else ""
-        source_hash = candidate_source_hash(input_root, profile_path)
         cooldown_offers, health, searches = [], [], []
         failures.extend({"company": "provider-collector", "error": line, "kind": "coverage_warning"}
                         for line in collector_warnings)
@@ -365,7 +364,7 @@ def _decide_collected(directory: Path, config: dict, profile: dict, input_root: 
                                       if streaks[item["company"]] >= threshold})
         incomplete = bool(failures or company_filter and not companies + boards)
         return {"accepted": accepted, "cooldown_offers": cooldown_offers,
-                "verification_outcomes": verification_outcomes, "source_hash": source_hash,
+                "verification_outcomes": verification_outcomes,
                 "today": today.isoformat(), "summary": summary, "health": health,
                 "result": {"status": "partial" if incomplete and found else "failed" if incomplete else "completed",
                            "sources": companies + boards, "checked": found, "added": len(accepted), "errors": len(failures),
@@ -406,7 +405,6 @@ def _publish_decision(directory: Path, decision: dict, capture, run_id: str | No
                 offer["scan_jd"] = {"text": snapshot_value["text"], "final_url": snapshot_value["url"],
                                     "retrieved_at": snapshot_value["retrieved_at"],
                                     "content_hash": hashlib.sha256(snapshot_value["text"].encode()).hexdigest()}
-            write_placeholder(offer, decision["source_hash"], directory / "prescreen-cache")
             store.ingest(offer, offer["source"], observed_on=decision["today"])
         for offer in decision["cooldown_offers"]:
             store.scan_outcome(offer, offer["status"])

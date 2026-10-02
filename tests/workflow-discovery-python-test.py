@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from workflow.discovery import discover
 from workflow.discovery_dedup import database_snapshot
-from workflow.discovery_prescreen import candidate_source_hash
 from workflow.discovery_store import DiscoveryStore
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -382,8 +381,6 @@ with tempfile.TemporaryDirectory() as temporary:
     result = discover(root / "committed", alternate, capture=lambda directory, url: None,
                       input_root=root, profile_path=profile)
     assert result["added"] == 1
-    cache = next((root / "committed" / "prescreen-cache").glob("*.json"))
-    assert json.loads(cache.read_text())["input"]["candidate_source_hash"] == candidate_source_hash(root, profile)
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)

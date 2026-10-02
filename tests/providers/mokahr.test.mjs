@@ -13,7 +13,7 @@ try {
   const modUrl = pathToFileURL(join(ROOT, 'providers/mokahr.mjs')).href;
   const mokahr = (await import(modUrl)).default;
   const { decryptMokaHrEnvelope, parseMokaHrJobs } = await import(modUrl);
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'tests/fixtures/legacy-scan-helpers.mjs')).href);
+  const normalizeUrlForDedup = (await import(pathToFileURL(join(ROOT, 'url-key.mjs')).href)).normalizeUrl;
   const { normalizeUrl } = await import(pathToFileURL(join(ROOT, 'url-key.mjs')).href);
 
   if (mokahr.id === 'mokahr') pass('mokahr.id is "mokahr"');

@@ -3,7 +3,6 @@
 from datetime import date
 import json
 import sqlite3
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -63,16 +62,11 @@ with tempfile.TemporaryDirectory() as temporary:
     with sqlite3.connect(database) as connection:
         connection.row_factory = sqlite3.Row
         python = database_snapshot(connection, today=today, recheck_after_days=7)
-    node_script = """import {loadDatabaseDedupSnapshot} from './tests/fixtures/legacy-scan-helpers.mjs';
-const snapshot = await loadDatabaseDedupSnapshot(process.argv[1], {recheckAfterDays: 7, today: '2026-09-28'});
-console.log(JSON.stringify({seen: [...snapshot.seen].sort(), roles: [...snapshot.seenCompanyRoles].sort(),
-  recheck: snapshot.recheckEligible, fingerprints: snapshot.fingerprintHistory}));"""
-    result = subprocess.run(["node", "--input-type=module", "-e", node_script, str(database)],
-                            cwd=ROOT, capture_output=True, text=True, timeout=30)
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"seen": sorted(python["seen"]),
-                                         "roles": sorted(python["seen_company_roles"]),
-                                         "recheck": python["recheck_eligible"],
-                                         "fingerprints": python["fingerprint_history"]}
+    assert python["seen"] == {
+        "https://example.com/new-added", "https://example.com/old-processed",
+        "https://example.com/dead", "https://example.com/blocked", "https://example.com/cool-active",
+    }
+    assert python["seen_company_roles"] == {"beta::engineer", "gamma::designer"}
+    assert python["fingerprint_history"] == []
     assert len(python["seen"]) == 5 and len(python["seen_company_roles"]) == 2
     assert python["recheck_eligible"] == 2

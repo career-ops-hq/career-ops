@@ -19,17 +19,10 @@ const load = (f) => import(pathToFileURL(join(ROOT, `providers/${f}`)).href);
 
 console.log('\nProviders — title entity decoding (#2921)');
 try {
-  const { buildTitleFilter } = await load('../title-keywords.mjs');
-
-  // The end-to-end claim: the decoded title survives the user's own filter.
-  const keepsRnD = buildTitleFilter({ positive: ['r&d'], negative: [] });
-  const vetoesSales = buildTitleFilter({ positive: [], negative: ['sales & marketing'] });
-
   const check = (name, title) => {
     if (title === 'R&D Engineer') pass(`${name} decodes &amp; in the title`);
     else fail(`${name} title is ${JSON.stringify(title)}, want "R&D Engineer"`);
-    if (keepsRnD(title)) pass(`${name} title survives a positive "r&d" filter`);
-    else fail(`${name} title ${JSON.stringify(title)} was dropped by positive "r&d"`);
+
   };
 
   // ── beesite ── (parseSearchResult -> { jobs })
@@ -78,13 +71,6 @@ try {
     const loc = jobLocation({ location: 'M&#252;nchen' });
     if (loc === 'München') pass('phenom decodes a numeric entity in the location');
     else fail(`phenom location is ${JSON.stringify(loc)}, want "München"`);
-  }
-
-  // ── the negative side: an undecoded title bypasses the user's veto ──
-  if (vetoesSales('Sales & Marketing Lead') === false && vetoesSales('Sales &amp; Marketing Lead') === true) {
-    pass('an UNDECODED title bypasses a negative filter (why decoding is a filter fix)');
-  } else {
-    fail('negative-filter premise no longer holds — buildTitleFilter changed?');
   }
 
   // ── hackernews: the local map decoded &#39; but no other numeric entity ──

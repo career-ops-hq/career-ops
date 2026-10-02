@@ -9,9 +9,9 @@ import re
 import sqlite3
 
 try:
-    from workflow.insights.skills import canonicalize, extract_skills
+    from workflow.skill_extract import canonicalize, extract_skills
 except ModuleNotFoundError:
-    from insights.skills import canonicalize, extract_skills
+    from skill_extract import canonicalize, extract_skills
 
 
 REQUIREMENT = re.compile(
