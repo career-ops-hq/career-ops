@@ -145,6 +145,22 @@ function cleanUrl(value) {
 // quiet `[]`, so an upstream break surfaces instead of reading as 0 forever).
 const ENVELOPE_RE = /<rss\b[^>]*>[\s\S]*<channel\b[^>]*>[\s\S]*<\/channel>[\s\S]*<\/rss>/i;
 
+// CDATA sections carry a job <description>'s raw, unescaped text, which can
+// itself contain the literal substrings "<item>" / "</item>" / "</channel>" /
+// "</rss>" (e.g. a posting that mentions XML/RSS tooling). Matching envelope
+// shape, tag counts, or item boundaries directly against the raw XML would
+// mistake that text for real structure — at best false-positiving the
+// malformed-feed checks below, at worst (a non-greedy item-boundary match)
+// silently truncating that item's own description/location at the embedded
+// "</item>", while its earlier fields (title, company) still parse fine and
+// mask the loss. Replace each CDATA section with same-length filler first:
+// positions stay aligned with the original string, so a matched item block's
+// start/length can be used to slice the REAL xml (preserving the actual CDATA
+// content), while the filler itself never matches a tag.
+function maskCdata(str) {
+  return str.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (m) => '#'.repeat(m.length));
+}
+
 /**
  * Parse Startup Jobs' public RSS feed. Exported for unit tests.
  *
@@ -161,9 +177,14 @@ const ENVELOPE_RE = /<rss\b[^>]*>[\s\S]*<channel\b[^>]*>[\s\S]*<\/channel>[\s\S]
  * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
  */
 export function parseStartupJobsFeed(xml) {
-  if (typeof xml !== 'string' || !ENVELOPE_RE.test(xml)) {
-    const got = typeof xml === 'string' ? `${xml.length}-char body` : typeof xml;
-    throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${got}`);
+  if (typeof xml !== 'string') {
+    throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${typeof xml}`);
+  }
+
+  const maskedXml = maskCdata(xml);
+
+  if (!ENVELOPE_RE.test(maskedXml)) {
+    throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${xml.length}-char body`);
   }
 
   // A valid outer envelope can still wrap a body truncated mid-item — e.g. a
@@ -172,25 +193,25 @@ export function parseStartupJobsFeed(xml) {
   // non-greedy item regex below would simply not match that dangling <item>,
   // so an otherwise-truncated feed would read as "zero items" — a genuinely
   // empty board — instead of the broken fetch it actually is. Count open vs
-  // close tags within the channel body first: a mismatch is unambiguous
-  // truncation evidence and throws, rather than silently dropping the
-  // incomplete item and returning whatever did parse.
-  //
-  // CDATA sections (a real job <description>'s raw, unescaped text) can
-  // themselves contain the literal substring "<item>" or "</item>" — e.g. a
-  // posting that mentions XML/RSS tags — which would false-positive this
-  // count on a perfectly valid feed. Strip CDATA content before counting;
-  // actual structural tags never live inside it.
-  const channelBody = (xml.match(/<channel\b[^>]*>([\s\S]*)<\/channel>/i) || [, ''])[1];
-  const channelBodyOutsideCdata = channelBody.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
-  const openItems = (channelBodyOutsideCdata.match(/<item\b/gi) || []).length;
-  const closedItems = (channelBodyOutsideCdata.match(/<\/item>/gi) || []).length;
+  // close tags within the (masked) channel body first: a mismatch is
+  // unambiguous truncation evidence and throws, rather than silently
+  // dropping the incomplete item and returning whatever did parse.
+  const maskedChannelBody = (maskedXml.match(/<channel\b[^>]*>([\s\S]*)<\/channel>/i) || [, ''])[1];
+  const openItems = (maskedChannelBody.match(/<item\b/gi) || []).length;
+  const closedItems = (maskedChannelBody.match(/<\/item>/gi) || []).length;
   if (openItems !== closedItems) {
     throw new Error(`startup-jobs: malformed feed — ${openItems} <item> open tag(s) but ${closedItems} </item> close tag(s) (truncated response?)`);
   }
 
+  // Item boundaries are matched against the masked xml (so CDATA text can't
+  // end a block early), but each block is then sliced from the REAL xml at
+  // that same position/length, preserving the actual CDATA content for the
+  // field parsing below.
   const jobs = [];
-  const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
+  const blocks = [];
+  for (const m of maskedXml.matchAll(/<item\b[^>]*>[\s\S]*?<\/item>/gi)) {
+    blocks.push(xml.slice(m.index, m.index + m[0].length));
+  }
 
   for (const item of blocks) {
     const url = cleanUrl(tagText(item, 'link'));

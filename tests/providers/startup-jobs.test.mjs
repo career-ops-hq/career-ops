@@ -233,6 +233,17 @@ try {
   } else {
     fail(`CDATA-with-item-text feed returned ${JSON.stringify(cdataJobs)}`);
   }
+  // The embedded "</item>" text must not end the item block early either —
+  // description and location (both of which live AFTER that embedded text
+  // in source order) have to survive intact, not just the company.
+  if (
+    cdataJobs[0]?.description === 'Experience with elements and closing tags in RSS feeds. Remote, Canada' &&
+    cdataJobs[0]?.location === 'Remote, Canada'
+  ) {
+    pass('a CDATA-embedded "</item>" does not truncate the item block — description and location both survive intact');
+  } else {
+    fail(`CDATA-with-item-text description/location = ${JSON.stringify([cdataJobs[0]?.description, cdataJobs[0]?.location])}`);
+  }
 
   // A non-startup.jobs link in <link> is dropped, never trusted as the job URL.
   const untrustedXml = [
