@@ -4771,9 +4771,15 @@ try {
 
 let fixtureRoot = null;
 let originalCwd = process.cwd();
+const priorPipelineEnv = process.env.CAREER_OPS_PIPELINE;
 try {
   fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-missing-pipeline-'));
   process.env.CAREER_OPS_ROOT = fixtureRoot;
+  // CAREER_OPS_PIPELINE outranks the root pinned above, and scan.mjs also loads
+  // .env at import, so a developer's own value received this fixture row. An
+  // empty value keeps the default path (PIPELINE_PATH reads it with ||), and
+  // dotenv never overwrites a variable that is already set.
+  process.env.CAREER_OPS_PIPELINE = '';
   const { appendToPipeline } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href + '?cachebust=' + Date.now());
   try {
     mkdirSync(join(fixtureRoot, 'data'), { recursive: true });
@@ -4796,6 +4802,8 @@ try {
   fail(`scan.mjs fresh-install pipeline test crashed: ${err.message}`);
 } finally {
   delete process.env.CAREER_OPS_ROOT;
+  if (priorPipelineEnv === undefined) delete process.env.CAREER_OPS_PIPELINE;
+  else process.env.CAREER_OPS_PIPELINE = priorPipelineEnv;
   if (fixtureRoot) {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
