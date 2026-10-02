@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 
 from career_ops.evaluation.decisions import classify, valid_scores
+from career_ops.input_contracts import digest, score_inputs
 
 
 MATERIAL_LABELS = {
@@ -52,6 +53,16 @@ def _apply_tasks(db: sqlite3.Connection) -> dict[str, dict]:
         latest.setdefault(str(row["opportunity_id"]), {"task_id": row["task_id"], "status": row["status"],
                                                         "reason": row["waiting_reason"]})
     return latest
+
+
+def _score_current(score_result: dict | None, scan: dict | None) -> bool | None:
+    """Mirror the apply guard: a score is current only for today's JD, candidate and policy inputs."""
+    if not score_result or not scan or scan.get("outcome") != "jd_report":
+        return None
+    try:
+        return digest(score_inputs(scan["artifact"])) == score_result.get("input_hash")
+    except (KeyError, OSError, ValueError):
+        return False
 
 
 def _summary_score(score: dict | None) -> float | None:
@@ -104,6 +115,7 @@ def list_jobs(db: sqlite3.Connection) -> list[dict]:
             "scores": score if isinstance(score, dict) else None,
             "score": _summary_score(score) if valid_scores(score) else evaluation.get("upper_score"),
             "action": _action(score, scan),
+            "score_current": _score_current(score_result, scan),
             "scored_at": evaluation.get("created_at"),
             "application_status": application["status"] if application else None,
             "application_updated_at": application["updated_at"] if application else None,

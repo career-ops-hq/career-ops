@@ -65,7 +65,7 @@ td .sub { color: var(--muted); font-size: 12px; }
   color: var(--muted); white-space: nowrap; }
 .pill.focus, .pill.pass, .pill.active, .pill.applied, .pill.offer, .pill.hired { background: var(--focus-bg); color: var(--focus); }
 .pill.deprioritize, .pill.uncertain, .pill.unknown, .pill.responded, .pill.interview { background: var(--depri-bg); color: var(--depri); }
-.pill.discard, .pill.fail, .pill.expired, .pill.closed, .pill.rejected, .pill.ineligible { background: var(--discard-bg); color: var(--discard); }
+.pill.discard, .pill.fail, .pill.stale, .pill.expired, .pill.closed, .pill.rejected, .pill.ineligible { background: var(--discard-bg); color: var(--discard); }
 .dims { display: flex; gap: 4px; }
 .dim { width: 22px; text-align: center; border-radius: 4px; font-size: 12px; background: var(--neutral-bg); color: var(--muted); }
 .dim.s5, .dim.s4 { background: var(--focus-bg); color: var(--focus); }
@@ -128,7 +128,7 @@ details summary { cursor: pointer; font-weight: 600; }
 <section class="filters">
   <input type="search" id="q" placeholder="搜索公司 / 职位 / 地点 / ID">
   <label>决策 <select id="fAction"><option value="">全部</option><option value="focus">focus</option>
-    <option value="deprioritize">deprioritize</option><option value="discard">discard</option><option value="none">未打分</option></select></label>
+    <option value="deprioritize">deprioritize</option><option value="discard">discard</option><option value="none">未打分</option><option value="stale">分数过期</option></select></label>
   <label>状态 <select id="fState"></select></label>
   <label>来源 <select id="fSource"></select></label>
   <label>存活 <select id="fLiveness"></select></label>
@@ -238,7 +238,7 @@ async function loadJobs() {
     const body = await readJson(response);
     if (!response.ok) throw new Error(body.error || response.statusText);
     jobs = body;
-    jobs.filter(j => j.prepare_status === "running" && !runs[j.id]).forEach(j => { runs[j.id] = { status: "running" }; pollPrepare(j.id); });
+    jobs.filter(j => j.run?.status === "running" && runs[j.id]?.status !== "running").forEach(j => { runs[j.id] = { ...j.run }; pollRun(j.id); });
     $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
     fillSelects();
     render();
@@ -272,7 +272,7 @@ function filtered() {
   const min = state.min === "" ? null : Number(state.min);
   return jobs.filter(j => inStage(j, state.stage)
     && (!q || [j.id, j.company, j.role, j.location, j.source].some(v => String(v ?? "").toLowerCase().includes(q)))
-    && (!state.action || (state.action === "none" ? !j.action : j.action === state.action))
+    && (!state.action || (state.action === "none" ? !j.scores : state.action === "stale" ? j.score_current === false : j.action === state.action))
     && (!state.state || j.state === state.state)
     && (!state.source || j.source === state.source)
     && (!state.liveness || j.liveness === state.liveness)
@@ -306,9 +306,9 @@ function render() {
   $("rows").innerHTML = list.map(j => `
     <tr data-id="${j.id}" class="${detail && detail.id === j.id ? "selected" : ""}">
       <td class="num">${j.id}</td>
-      <td><div class="role">${esc(j.role)}${jobLink(j)}</div><div class="sub">${esc(j.company)} · ${esc(j.source)}${j.material_count ? " · 📎 材料" : ""}${runs[j.id]?.status === "running" ? " · ⏳ 生成中" : ""}</div></td>
+      <td><div class="role">${esc(j.role)}${jobLink(j)}</div><div class="sub">${esc(j.company)} · ${esc(j.source)}${j.material_count ? " · 📎 材料" : ""}${runs[j.id]?.status === "running" ? ` · ⏳ ${ACTION_TEXT[runs[j.id].action].running}` : ""}</div></td>
       <td class="hide-sm">${esc(j.location || "—")}</td>
-      <td class="num">${j.score ?? "—"}</td>
+      <td class="num">${j.score ?? "—"}${j.score_current === false ? ' <span class="pill stale" title="简历、资料或打分规则已变更">过期</span>' : ""}</td>
       <td>${dims(j.scores)}</td>
       <td>${pill(j.action)}</td>
       <td>${pill(j.state)}</td>
@@ -374,7 +374,7 @@ function overview(d) {
     ["公司", esc(d.company)], ["来源", esc(d.source)], ["地点", esc(d.location || "—")],
     ["流程状态", pill(d.state)], ["存活", `${pill(d.liveness)} <span class="sub">${esc(artifact.liveness_reason || "")}</span>`],
     ["预筛", pill(d.prescreen)], ["资格", pill(d.eligibility)],
-    ["综合分", d.score ?? "—"], ["维度分", dims(d.scores)], ["决策", pill(d.action)],
+    ["综合分", `${d.score ?? "—"} ${d.score_current === false ? pill("stale") + ' <span class="sub">打分后简历、资料或规则有变更</span>' : ""}`], ["维度分", dims(d.scores)], ["决策", pill(d.action)],
     ["发现时间", esc(d.created_at)], ["抓取时间", esc(d.captured_at || "—")], ["打分时间", esc(d.scored_at || "—")],
     ["投递状态", `${pill(d.application_status)} <span class="sub">${esc(d.application_updated_at || "")}</span>`],
   ];
@@ -394,26 +394,60 @@ function evidenceCard(item) {
     ${lines.map(line => `<div class="sub">• ${esc(typeof line === "string" ? line : JSON.stringify(line))}</div>`).join("")}</div>`;
 }
 
-function report(d) { return d.report ? md(d.report) : '<p class="sub">该职位尚无打分报告。</p>'; }
+function report(d) {
+  const stale = d.score_current === false ? '<div class="banner failed">此报告基于旧版简历、资料或打分规则，建议点击上方「重新打分」。</div>' : "";
+  return runBanner(d, "rescore") + stale + (d.report ? md(d.report) : '<p class="sub">该职位尚无打分报告。</p>');
+}
 function jd(d) { return d.jd ? `<pre class="plain">${esc(d.jd)}</pre>` : '<p class="sub">未保留 JD 原文。</p>'; }
+
+const ACTION_TEXT = {
+  prepare: { running: "正在生成材料", failed: "生成材料失败", done: "materials",
+    banner: "正在生成：简历改动、Cover letter、Upskill、面试准备、反问问题…",
+    confirm: job => `为「${job.company} · ${job.role}」生成申请材料？\n\n会用你的简历、资料和该职位打分结果调用模型，生成简历改动、Cover letter、Upskill、面试准备和反问问题。\n只生成草稿，不会提交申请。` },
+  rescore: { running: "正在重新打分", failed: "重新打分失败", done: "report",
+    banner: "正在用当前简历、资料和打分规则重新打分（复用已保存的 JD，不重新抓取）…",
+    confirm: job => `用当前简历、资料和打分规则重新给「${job.company} · ${job.role}」打分？\n\n会调用模型并覆盖旧的打分报告；复用已保存的 JD，不重新抓取页面。` },
+};
+
+function actionButton(id, action, label, primary = true) {
+  return `<button class="${primary ? "primary" : "ghost"}" data-action="${action}" data-job="${id}">${label}</button>`;
+}
 
 function actions(d) {
   const run = runs[d.id];
   const task = d.apply_task;
-  if (run?.status === "running") return `<button class="primary" disabled>⏳ 正在生成材料…</button><span class="sub">通常需要几分钟，可以关闭面板，完成后会自动刷新</span>`;
-  if (!d.scores) return `<button class="primary" disabled title="需要先完成打分">生成申请材料</button><span class="sub">需要先完成有效打分</span>`;
+  if (run?.status === "running") {
+    return `<button class="primary" disabled>⏳ ${ACTION_TEXT[run.action].running}…</button><span class="sub">通常需要几分钟，可以关闭面板，完成后会自动刷新</span>`;
+  }
+  if (d.scan_outcome !== "jd_report") return `<span class="sub">没有可用的 JD 扫描结果，暂不能打分或生成材料</span>`;
   if (task?.status === "waiting") {
-    return `${pill("draft")} <span class="sub">草稿待你审阅（${esc(task.reason || "waiting")}），见「投递材料」</span>`;
+    return `${pill("draft")} <span class="sub">材料草稿待你审阅（${esc(task.reason || "waiting")}），见「投递材料」</span>`;
+  }
+  if (!d.scores) return `${actionButton(d.id, "rescore", "开始打分")}<span class="sub">打分后才能生成申请材料</span>`;
+  if (d.score_current === false) {
+    return `${pill("stale")} ${actionButton(d.id, "rescore", "重新打分")}
+      <button class="ghost" disabled title="分数过期，需先重新打分">生成申请材料</button>
+      <span class="sub">简历、资料或打分规则在打分后有变更</span>`;
   }
   const label = task?.status === "completed" ? "重新生成材料" : "生成申请材料";
-  return `<button class="primary" data-prepare="${d.id}">${label}</button><span class="sub">只生成草稿，不会提交申请</span>`;
+  return `${actionButton(d.id, "prepare", label)}<span class="sub">只生成草稿，不会提交申请</span>`;
+}
+
+function runBanner(d, action) {
+  const run = runs[d.id];
+  if (!run || run.action !== action) return "";
+  if (run.status === "running") return `<div class="banner">⏳ ${ACTION_TEXT[action].banner}</div>`;
+  if (run.status === "failed") return `<div class="banner failed"><strong>${ACTION_TEXT[action].failed}</strong><pre>${esc(run.error || "")}</pre></div>`;
+  if (run.task && run.task.status !== "completed" && action === "rescore") {
+    return `<div class="banner">打分任务状态：${pill(run.task.status)} ${esc(run.task.reason || "")}</div>`;
+  }
+  return "";
 }
 
 function prepareBanner(d) {
-  const run = runs[d.id];
   const task = d.apply_task;
-  if (run?.status === "running") return `<div class="banner">⏳ 正在生成：简历改动、Cover letter、Upskill、面试准备、反问问题…</div>`;
-  if (run?.status === "failed") return `<div class="banner failed"><strong>生成失败</strong><pre>${esc(run.error || "")}</pre></div>`;
+  const banner = runBanner(d, "prepare");
+  if (banner) return banner;
   if (task?.status === "waiting") {
     const command = `.venv/bin/python -B -m career_ops task resume ${task.task_id}`;
     return `<div class="banner"><strong>草稿待审阅</strong>（${esc(task.reason || "")}）。确认无误后运行：
@@ -422,34 +456,33 @@ function prepareBanner(d) {
   return "";
 }
 
-async function startPrepare(id) {
+async function startAction(id, action) {
   const job = jobs.find(j => j.id === id) || detail;
-  const message = `为「${job.company} · ${job.role}」生成申请材料？\n\n会用你的简历、资料和该职位打分结果调用模型，生成简历改动、Cover letter、Upskill、面试准备和反问问题。\n只生成草稿，不会提交申请。`;
-  if (!confirm(message)) return;
+  if (!confirm(ACTION_TEXT[action].confirm(job))) return;
   try {
-    const response = await fetch(`/api/jobs/${id}/prepare`, { method: "POST", headers: { "X-Career-Ops": "dashboard" } });
+    const response = await fetch(`/api/jobs/${id}/${action}`, { method: "POST", headers: { "X-Career-Ops": "dashboard" } });
     const body = await readJson(response);
     if (!response.ok) throw new Error(body.error || response.statusText);
     runs[id] = body.run;
+    if (detail && detail.id === id) detail.tab = ACTION_TEXT[action].done;
     refreshViews(id);
-    pollPrepare(id);
+    pollRun(id);
   } catch (error) {
-    alert("无法开始生成：" + error.message);
+    alert("无法开始：" + error.message);
   }
 }
 
-async function pollPrepare(id) {
+async function pollRun(id) {
   while (runs[id]?.status === "running") {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
     try {
-      const response = await fetch(`/api/jobs/${id}/prepare`);
+      const response = await fetch(`/api/jobs/${id}/run`);
       const body = await readJson(response);
-      if (body.run) runs[id] = body.run;
-      else runs[id] = { status: "failed", error: "服务已重启，无法跟踪该任务；请刷新查看结果" };
+      runs[id] = body.run || { ...runs[id], status: "failed", error: "服务已重启，无法跟踪该任务；请刷新查看结果" };
     } catch { /* keep polling through transient errors */ }
   }
   await loadJobs();
-  if (detail && detail.id === id) openJob(id, "materials");
+  if (detail && detail.id === id) openJob(id, ACTION_TEXT[runs[id].action]?.done || "overview");
 }
 
 function refreshViews(id) {
@@ -513,9 +546,9 @@ function timeline(d) {
 }
 
 document.addEventListener("click", event => {
-  const target = event.target.closest("[data-stage],[data-sort],tr[data-id],[data-tab],[data-material],[data-prepare]");
+  const target = event.target.closest("[data-stage],[data-sort],tr[data-id],[data-tab],[data-material],[data-action]");
   if (!target) return;
-  if (target.dataset.prepare) startPrepare(Number(target.dataset.prepare));
+  if (target.dataset.action) startAction(Number(target.dataset.job), target.dataset.action);
   else if (target.dataset.stage) { state.stage = target.dataset.stage; render(); }
   else if (target.dataset.sort) {
     state.dir = state.sort === target.dataset.sort && state.dir === "desc" ? "asc" : "desc";

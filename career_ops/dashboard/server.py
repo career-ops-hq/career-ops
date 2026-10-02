@@ -13,19 +13,31 @@ import re
 import sys
 from urllib.parse import parse_qs, urlparse
 
-from career_ops.dashboard.actions import PrepareRunner
+from career_ops.dashboard.actions import ACTIONS, ActionRunner
 from career_ops.dashboard.data import connect, job_detail, list_jobs, material_files
 
 
 PAGE = Path(__file__).with_name("index.html")
 DETAIL = re.compile(r"^/api/jobs/(\d+)$")
 FILE = re.compile(r"^/api/jobs/(\d+)/file$")
-PREPARE = re.compile(r"^/api/jobs/(\d+)/prepare$")
+ACTION = re.compile(r"^/api/jobs/(\d+)/(" + "|".join(ACTIONS) + r")$")
+RUN = re.compile(r"^/api/jobs/(\d+)/run$")
 ACTION_HEADER = "X-Career-Ops"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
-def handler_for(database: Path, runner: PrepareRunner) -> type[BaseHTTPRequestHandler]:
+def action_refusal(job: dict, action: str) -> str | None:
+    """Refuse early what the CLI would reject, with a reason the page can show."""
+    if job["scan_outcome"] != "jd_report":
+        return "该职位没有可用的 JD 扫描结果"
+    if action == "prepare" and not job["scores"]:
+        return "该职位还没有打分，请先打分"
+    if action == "prepare" and job["score_current"] is False:
+        return "分数已过期（简历、资料或打分规则已变更），请先重新打分"
+    return None
+
+
+def handler_for(database: Path, runner: ActionRunner) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:
             sys.stderr.write("dashboard: " + format % args + "\n")
@@ -50,14 +62,14 @@ def handler_for(database: Path, runner: PrepareRunner) -> type[BaseHTTPRequestHa
                     with closing(connect(database)) as db:
                         jobs = list_jobs(db)
                     running = runner.statuses()
-                    self.send_json([{**job, "prepare_status": running.get(job["id"])} for job in jobs])
+                    self.send_json([{**job, "run": running.get(job["id"])} for job in jobs])
                 elif match := DETAIL.match(url.path):
                     with closing(connect(database)) as db:
                         detail = job_detail(db, int(match[1]))
                     self.send_json(detail) if detail else self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
                 elif match := FILE.match(url.path):
                     self.send_file(match[1], parse_qs(url.query).get("id", [""])[0])
-                elif match := PREPARE.match(url.path):
+                elif match := RUN.match(url.path):
                     self.send_json({"run": runner.status(int(match[1]))})
                 else:
                     self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -74,23 +86,23 @@ def handler_for(database: Path, runner: PrepareRunner) -> type[BaseHTTPRequestHa
 
         def do_POST(self) -> None:
             url = urlparse(self.path)
-            match = PREPARE.match(url.path)
+            match = ACTION.match(url.path)
             if not match:
                 self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
                 return
             if not self.same_origin_action():
                 self.send_json({"error": "forbidden"}, HTTPStatus.FORBIDDEN)
                 return
-            opportunity_id = int(match[1])
+            opportunity_id, action = int(match[1]), match[2]
             try:
                 with closing(connect(database)) as db:
                     job = job_detail(db, opportunity_id)
                 if job is None:
                     self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-                elif not job["scores"]:
-                    self.send_json({"error": "该职位还没有有效打分，无法生成材料"}, HTTPStatus.CONFLICT)
+                elif refusal := action_refusal(job, action):
+                    self.send_json({"error": refusal}, HTTPStatus.CONFLICT)
                 else:
-                    self.send_json({"run": runner.start(opportunity_id)}, HTTPStatus.ACCEPTED)
+                    self.send_json({"run": runner.start(opportunity_id, action)}, HTTPStatus.ACCEPTED)
             except RuntimeError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.CONFLICT)
             except Exception as error:
@@ -118,7 +130,7 @@ def serve(directory: Path, host: str, port: int) -> None:
     if not database.is_file():
         raise FileNotFoundError(f"Business store not found: {database}")
     try:
-        server = ThreadingHTTPServer((host, port), handler_for(database, PrepareRunner(directory)))
+        server = ThreadingHTTPServer((host, port), handler_for(database, ActionRunner(directory)))
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             raise SystemExit(f"Port {port} is already in use; stop the other dashboard or pass --port.") from None
