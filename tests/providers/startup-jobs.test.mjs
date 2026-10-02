@@ -195,6 +195,24 @@ try {
   if (emptyChannelJobs.length === 0) pass('a valid envelope with zero items is a genuinely empty board → []');
   else fail(`an empty <channel> should return [], got ${emptyChannelJobs.length} jobs`);
 
+  // A well-formed outer envelope can still wrap a body truncated mid-item —
+  // an opening <item> with no closing tag, followed by a stray </channel></rss>
+  // tail. The non-greedy item regex alone would just not match the dangling
+  // <item> and read this as a genuinely empty board; the open/close tag-count
+  // check must catch it instead.
+  const truncatedMidItemXml = [
+    '<rss><channel>',
+    '<item>',
+    '  <title>Platform Engineer at Zeta</title>',
+    '  <link>https://startup.jobs/platform-engineer-zeta-10260830</link>',
+    // feed cut off here — no closing </item>
+    '</channel></rss>',
+  ].join('\n');
+  let threwOnTruncatedItem = false;
+  try { parseStartupJobsFeed(truncatedMidItemXml); } catch { threwOnTruncatedItem = true; }
+  if (threwOnTruncatedItem) pass('a feed truncated mid-item (unclosed <item>) throws, not read as a genuinely empty board');
+  else fail('a truncated mid-item feed should throw, not silently return []');
+
   // A non-startup.jobs link in <link> is dropped, never trusted as the job URL.
   const untrustedXml = [
     '<rss><channel>',

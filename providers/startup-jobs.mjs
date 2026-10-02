@@ -165,6 +165,23 @@ export function parseStartupJobsFeed(xml) {
     const got = typeof xml === 'string' ? `${xml.length}-char body` : typeof xml;
     throw new Error(`startup-jobs: unexpected feed response — expected an <rss><channel> envelope, got: ${got}`);
   }
+
+  // A valid outer envelope can still wrap a body truncated mid-item — e.g. a
+  // response cut off after an opening <item> but before its closing tag,
+  // with a stray </channel></rss> tail from buffering/retry behavior. The
+  // non-greedy item regex below would simply not match that dangling <item>,
+  // so an otherwise-truncated feed would read as "zero items" — a genuinely
+  // empty board — instead of the broken fetch it actually is. Count open vs
+  // close tags within the channel body first: a mismatch is unambiguous
+  // truncation evidence and throws, rather than silently dropping the
+  // incomplete item and returning whatever did parse.
+  const channelBody = (xml.match(/<channel\b[^>]*>([\s\S]*)<\/channel>/i) || [, ''])[1];
+  const openItems = (channelBody.match(/<item\b/gi) || []).length;
+  const closedItems = (channelBody.match(/<\/item>/gi) || []).length;
+  if (openItems !== closedItems) {
+    throw new Error(`startup-jobs: malformed feed — ${openItems} <item> open tag(s) but ${closedItems} </item> close tag(s) (truncated response?)`);
+  }
+
   const jobs = [];
   const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
 
