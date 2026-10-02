@@ -213,6 +213,27 @@ try {
   if (threwOnTruncatedItem) pass('a feed truncated mid-item (unclosed <item>) throws, not read as a genuinely empty board');
   else fail('a truncated mid-item feed should throw, not silently return []');
 
+  // A CDATA description that literally mentions "<item>"/"</item>" text (e.g.
+  // a posting about XML/RSS tooling) must NOT trip the open/close tag count —
+  // those are raw characters inside the description, not structural tags.
+  const cdataMentionsItemTagsXml = [
+    '<rss><channel>',
+    '<item>',
+    '  <title>XML Integration Engineer at Eta</title>',
+    '  <link>https://startup.jobs/xml-integration-engineer-eta-10260831</link>',
+    '  <description><![CDATA[Experience with <item> elements and </item> closing tags in RSS feeds.',
+    '',
+    'Remote, Canada]]></description>',
+    '</item>',
+    '</channel></rss>',
+  ].join('\n');
+  const cdataJobs = parseStartupJobsFeed(cdataMentionsItemTagsXml);
+  if (cdataJobs.length === 1 && cdataJobs[0]?.company === 'Eta') {
+    pass('literal <item>/</item> text inside a CDATA description does not false-positive the truncation check');
+  } else {
+    fail(`CDATA-with-item-text feed returned ${JSON.stringify(cdataJobs)}`);
+  }
+
   // A non-startup.jobs link in <link> is dropped, never trusted as the job URL.
   const untrustedXml = [
     '<rss><channel>',

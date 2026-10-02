@@ -175,9 +175,16 @@ export function parseStartupJobsFeed(xml) {
   // close tags within the channel body first: a mismatch is unambiguous
   // truncation evidence and throws, rather than silently dropping the
   // incomplete item and returning whatever did parse.
+  //
+  // CDATA sections (a real job <description>'s raw, unescaped text) can
+  // themselves contain the literal substring "<item>" or "</item>" — e.g. a
+  // posting that mentions XML/RSS tags — which would false-positive this
+  // count on a perfectly valid feed. Strip CDATA content before counting;
+  // actual structural tags never live inside it.
   const channelBody = (xml.match(/<channel\b[^>]*>([\s\S]*)<\/channel>/i) || [, ''])[1];
-  const openItems = (channelBody.match(/<item\b/gi) || []).length;
-  const closedItems = (channelBody.match(/<\/item>/gi) || []).length;
+  const channelBodyOutsideCdata = channelBody.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+  const openItems = (channelBodyOutsideCdata.match(/<item\b/gi) || []).length;
+  const closedItems = (channelBodyOutsideCdata.match(/<\/item>/gi) || []).length;
   if (openItems !== closedItems) {
     throw new Error(`startup-jobs: malformed feed — ${openItems} <item> open tag(s) but ${closedItems} </item> close tag(s) (truncated response?)`);
   }
