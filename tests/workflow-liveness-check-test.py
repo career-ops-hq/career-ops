@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.liveness_check import current_urls, check
+from career_ops.discovery.liveness_check import current_urls, check
 
 
 with TemporaryDirectory() as directory:
@@ -49,7 +49,7 @@ with TemporaryDirectory() as directory:
 };
 """)
     env = {**os.environ, "NODE_OPTIONS": f"--import={mock}"}
-    command = [sys.executable, "-B", "-m", "workflow.liveness_check"]
+    command = [sys.executable, "-B", "-m", "career_ops", "liveness"]
     run = subprocess.run([*command, "--directory", str(data)], cwd=ROOT, env=env,
                          capture_output=True, text=True, timeout=20)
     assert run.returncode == 1, run.stderr

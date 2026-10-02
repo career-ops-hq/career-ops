@@ -13,9 +13,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow import communications
-from workflow.communications import review_node
-from workflow.discovery_store import DiscoveryStore
+from career_ops.applications import communications
+from career_ops.applications.communications import review_node
+from career_ops.discovery.store import DiscoveryStore
 
 
 PYTHON = Path(sys.executable)
@@ -24,8 +24,8 @@ COMMUNICATION_RUNNER = f"{PYTHON} {ROOT / 'tests/fixtures/workflow-communication
 
 
 def call(directory: Path, inputs: Path, module: str, *args: str, expected: int = 0, extra: dict | None = None) -> dict:
-    command = ([str(PYTHON), "-m", "workflow.career_ops"] if module == "workflow"
-               else [str(PYTHON), "-m", "workflow.communications"])
+    command = ([str(PYTHON), "-m", "career_ops"] if module == "workflow"
+               else [str(PYTHON), "-m", "career_ops", "communication"])
     result = subprocess.run(command + ["--directory", str(directory), *args], cwd=ROOT, text=True, capture_output=True,
                             env={**os.environ, "PYTHONPATH": str(ROOT), "CAREER_OPS_INPUT_ROOT": str(inputs),
                                  "CAREER_OPS_MODEL_RUNNER": MODEL_RUNNER,
@@ -159,7 +159,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-communications-") as tempora
 for defect in ({"authorship_scope": "fail"}, {"unlisted_claims": ["Unlisted ownership"]}):
     decision = {"verdict": "approve", "grounded": "pass", "policy": "pass",
                 "authorship_scope": "pass", "unlisted_claims": [], "reason": "Checked"}
-    with patch("workflow.communications.model_call", return_value={**decision, **defect}):
+    with patch("career_ops.applications.communications.model_call", return_value={**decision, **defect}):
         try:
             review_node({"context": {}, "draft": {}})
         except ValueError:

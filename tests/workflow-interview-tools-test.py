@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def run(*args: object) -> str:
     result = subprocess.run(
-        [sys.executable, "-B", "-m", "workflow.interview_tools", *(str(arg) for arg in args)],
+        [sys.executable, "-B", "-m", "career_ops", "interview", *(str(arg) for arg in args)],
         cwd=ROOT, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr

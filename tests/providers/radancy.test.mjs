@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — radancy (TalentBrew SSR search-results parser)');
 try {
-  const radancyModule = await import(pathToFileURL(join(ROOT, 'providers/radancy.mjs')).href);
+  const radancyModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/radancy.mjs')).href);
   const radancy = radancyModule.default;
   const { resolveListUrl: radListUrl, parseResults } = radancyModule;
 

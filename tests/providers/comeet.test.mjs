@@ -7,7 +7,7 @@ console.log('\nProvider — comeet');
 
 
 try {
-  const comeetModule = await import(pathToFileURL(join(ROOT, 'providers/comeet.mjs')).href);
+  const comeetModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/comeet.mjs')).href);
   const comeet = comeetModule.default;
   const { parseComeetResponse } = comeetModule;
 
@@ -142,4 +142,3 @@ try {
 } catch (e) {
   fail(`comeet provider tests crashed: ${e.message}`);
 }
-

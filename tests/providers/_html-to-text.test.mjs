@@ -10,7 +10,7 @@ import { pathToFileURL } from 'url';
 console.log('\nShared — _html-to-text');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/_html-to-text.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/_html-to-text.mjs')).href);
   const { htmlToText, DESCRIPTION_CAP } = mod;
 
   if (DESCRIPTION_CAP === 4000) pass('DESCRIPTION_CAP is 4000 (greenhouse/alibaba precedent)');

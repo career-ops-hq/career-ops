@@ -21,7 +21,7 @@ const v6 = (referenznummer, stellenangebotsTitel, ort, extra = {}) => ({
 const page = (...jobs) => ({ ergebnisliste: jobs });
 
 try {
-  const arbeitsagenturModule = await import(pathToFileURL(join(ROOT, 'providers/arbeitsagentur.mjs')).href);
+  const arbeitsagenturModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/arbeitsagentur.mjs')).href);
   const aa = arbeitsagenturModule.default;
   const { parseArbeitsagenturConfig, buildLocation, normalizeJob } = arbeitsagenturModule;
 

@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery import discover
+from career_ops.discovery.configured import discover
 
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as temporary:
         Path(command[-1]).write_text(json.dumps({"results": [
             {"status": "fetched", "provider": "workday", "jobs": jobs}]}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-    with patch("workflow.discovery.subprocess.run", side_effect=collect):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=collect):
         result = discover(root / "work", portals, posted_after="2025-01-01",
                           capture=lambda directory, url: None)
     assert seen["since_ms"] == datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000
@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as temporary:
         raise AssertionError("Invalid date must fail before collection")
 
 for command in ("discover", "global"):
-    duplicate = subprocess.run([sys.executable, "-B", "-m", "workflow.career_ops", command,
+    duplicate = subprocess.run([sys.executable, "-B", "-m", "career_ops", command,
                                 "--since=7", "--since", "1", "--help"],
                                cwd=ROOT, capture_output=True, text=True)
     assert duplicate.returncode == 2 and "--since given 2 times" in duplicate.stderr

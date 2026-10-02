@@ -24,7 +24,7 @@ const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 // pathToFileURL, not a bare path: on Windows `join()` yields `D:\a\...`,
 // which is not a valid ESM specifier, and the whole file fails at import.
 // Same form tests/providers/ashby.test.mjs already uses.
-const { default: ashby } = await import(pathToFileURL(join(ROOT, 'providers/ashby.mjs')).href);
+const { default: ashby } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/ashby.mjs')).href);
 
 const ENTRY = { name: 'DeadCo', careers_url: 'https://jobs.ashbyhq.com/deadco' };
 

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — dassault (Exalead card_search_api XML parser)');
 try {
-  const dassaultModule = await import(pathToFileURL(join(ROOT, 'providers/dassault.mjs')).href);
+  const dassaultModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/dassault.mjs')).href);
   const dassault = dassaultModule.default;
   const { parseHits, buildUrl } = dassaultModule;
 

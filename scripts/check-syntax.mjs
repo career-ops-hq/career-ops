@@ -13,7 +13,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'output', 'data', 'coverage', 'test-results']);
+const SKIP_DIRS = new Set(['.git', '.venv', '__pycache__', 'node_modules', 'output', 'data', 'coverage', 'test-results']);
 
 function collect(dir) {
   const files = [];

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — rippling');
 
 try {
-  const ripplingModule = await import(pathToFileURL(join(ROOT, 'providers/rippling.mjs')).href);
+  const ripplingModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/rippling.mjs')).href);
   const rippling = ripplingModule.default;
   const { parseRipplingResponse } = ripplingModule;
 

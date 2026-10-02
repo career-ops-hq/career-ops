@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — remotli');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/remotli.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/remotli.mjs')).href);
   const remotli = mod.default;
   const { normalizeRemotliJob } = mod;
 

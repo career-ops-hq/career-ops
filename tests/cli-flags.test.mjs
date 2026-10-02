@@ -11,7 +11,7 @@ import { pathToFileURL } from 'url';
 console.log('\ncli-flags — value-taking flags in both forms');
 
 try {
-  const { flagValue, hasFlag } = await import(pathToFileURL(join(ROOT, 'lib/cli-flags.mjs')).href);
+  const { flagValue, hasFlag } = await import(pathToFileURL(join(ROOT, 'adapters/node/shared/cli-flags.mjs')).href);
 
   const check = (label, actual, expected) => {
     if (actual === expected) pass(label);
@@ -62,7 +62,7 @@ try {
   // validateFlags — the unrecognized-flag / --help shape hand-rolled
   // identically by several scripts, consolidated here for
   // #2775 and reused as-is by scan.mjs's own fix (#2270).
-  const { validateFlags } = await import(pathToFileURL(join(ROOT, 'lib/cli-flags.mjs')).href);
+  const { validateFlags } = await import(pathToFileURL(join(ROOT, 'adapters/node/shared/cli-flags.mjs')).href);
 
   // The all-valid path never calls process.exit, so it is safe to call
   // in-process and assert it simply returns.
@@ -81,7 +81,7 @@ try {
 
   // Everything that exits the process is spawned in a child process — a
   // direct in-process exit would kill this test runner too.
-  const cliFlagsUrl = JSON.stringify(pathToFileURL(join(ROOT, 'lib/cli-flags.mjs')).href);
+  const cliFlagsUrl = JSON.stringify(pathToFileURL(join(ROOT, 'adapters/node/shared/cli-flags.mjs')).href);
   const runValidate = (args, knownFlags, usage, options) => {
     const script = `
       const { validateFlags } = await import(${cliFlagsUrl});

@@ -7,8 +7,8 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — alibaba (talent.alibaba.com JSON API)');
 try {
-  const alibaba = (await import(pathToFileURL(join(ROOT, 'providers/alibaba.mjs')).href)).default;
-  const { parseAlibabaResponse } = await import(pathToFileURL(join(ROOT, 'providers/alibaba.mjs')).href);
+  const alibaba = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/alibaba.mjs')).href)).default;
+  const { parseAlibabaResponse } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/alibaba.mjs')).href);
 
   if (alibaba.id === 'alibaba') pass('alibaba.id is "alibaba"');
   else fail(`alibaba.id is ${JSON.stringify(alibaba.id)}`);

@@ -9,7 +9,7 @@ try {
   const {
     default: nodesk,
     parseNodeskFeed,
-  } = await import(pathToFileURL(join(ROOT, 'providers/nodesk.mjs')).href);
+  } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/nodesk.mjs')).href);
 
   if (nodesk.id === 'nodesk') {
     pass('nodesk.id is "nodesk"');
@@ -122,4 +122,3 @@ try {
 } catch (e) {
   fail(`nodesk provider tests crashed: ${e.message}`);
 }
-

@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — lever');
 
 try {
-  const leverModule = await import(pathToFileURL(join(ROOT, 'providers/lever.mjs')).href);
+  const leverModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/lever.mjs')).href);
   const lever = leverModule.default;
 
   if (lever.id === 'lever') pass('lever.id is "lever"');

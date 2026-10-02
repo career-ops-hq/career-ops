@@ -12,9 +12,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery import discover
-from workflow.discovery_verify import observe, route
-from workflow import career_ops
+from career_ops.discovery.configured import discover
+from career_ops.discovery.verify import observe, route
+from career_ops import cli as career_ops
 
 
 def offer(index: int) -> dict:
@@ -52,7 +52,7 @@ def verified_batch(command, **kwargs):
     return subprocess.CompletedProcess(command, 0, "", "")
 
 
-with patch("workflow.discovery_verify.subprocess.run", side_effect=verified_batch):
+with patch("career_ops.discovery.verify.subprocess.run", side_effect=verified_batch):
     assert len(observe([offer(index) for index in range(20)], throttle_ms=8000,
                        headed_fallback=True, rediscover_404=True)) == 20
 
@@ -62,9 +62,9 @@ def completed_before_timeout(command, **kwargs):
     raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
 
-with patch("workflow.discovery_verify.subprocess.run", side_effect=completed_before_timeout):
+with patch("career_ops.discovery.verify.subprocess.run", side_effect=completed_before_timeout):
     assert observe([offer(0)]) == [{"url": offer(0)["url"], "result": "active"}]
-with patch("workflow.discovery_verify.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
+with patch("career_ops.discovery.verify.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
     try:
         observe([offer(0)])
     except subprocess.TimeoutExpired:

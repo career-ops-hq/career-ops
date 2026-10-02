@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — smartrecruiters');
 
 try {
-  const smartrecruitersModule = await import(pathToFileURL(join(ROOT, 'providers/smartrecruiters.mjs')).href);
+  const smartrecruitersModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/smartrecruiters.mjs')).href);
   const sr = smartrecruitersModule.default;
   const { parseSmartRecruitersResponse, extractDescription } = smartrecruitersModule;
 
@@ -453,4 +453,3 @@ try {
 } catch (e) {
   fail(`smartrecruiters provider tests crashed: ${e.message}`);
 }
-

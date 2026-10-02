@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { collectHealth } from '../providers/_health_probe.mjs';
+import { collectHealth } from '../adapters/node/providers/_health_probe.mjs';
 
 const entry = { name: 'Example', careers_url: 'https://example.com/jobs' };
 const context = { fetchJson: async () => ({}), fetchText: async () => '' };

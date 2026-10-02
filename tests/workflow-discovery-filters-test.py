@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.discovery_filters import (classify_tier, content_match, country_match, filter_reason,
+from career_ops.discovery.filters import (classify_tier, content_match, country_match, filter_reason,
                                         location_hint, location_match, posted_date_match, posting_age_match,
                                         salary_match, title_match, visa_match)
 

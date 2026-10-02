@@ -1,6 +1,6 @@
 // Pin IBM's official search contract, URL trust boundary, and incomplete-page signal.
 import assert from 'node:assert/strict';
-import provider, { parseIbmPage } from '../../providers/ibm-careers.mjs';
+import provider, { parseIbmPage } from '../../adapters/node/providers/ibm-careers.mjs';
 
 const entry = { name: 'IBM', careers_url: 'https://www.ibm.com/careers/search' };
 const row = (id) => ({ _source: { title: 'Software Engineer',

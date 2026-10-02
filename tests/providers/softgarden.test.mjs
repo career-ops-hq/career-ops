@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — softgarden (hosted jobs widget parser)');
 try {
-  const softgardenModule = await import(pathToFileURL(join(ROOT, 'providers/softgarden.mjs')).href);
+  const softgardenModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/softgarden.mjs')).href);
   const softgarden = softgardenModule.default;
   const { resolveWidgetUrl, parseSoftgardenDate, parseWidget } = softgardenModule;
 

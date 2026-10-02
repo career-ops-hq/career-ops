@@ -7,7 +7,7 @@ import sys
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.career_ops import Runtime
+from career_ops.tasks import Runtime
 
 
 class Store:
@@ -21,11 +21,11 @@ class Store:
 
 
 store = Store()
-with patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": ""}), patch("workflow.career_ops.subprocess.Popen") as popen:
+with patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": ""}), patch("career_ops.tasks.subprocess.Popen") as popen:
     process = popen.return_value.__enter__.return_value
     process.communicate.return_value = (json.dumps({"artifact": {}, "tool_calls": 2}), "")
     process.returncode = 0
     result = Runtime(store, Path("/tmp")).run_model("scan_evidence", {}, {"task_id": "test"})
     assert result["artifact"] == {}
     assert result["tool_calls"] == 0
-    assert popen.call_args.args[0][:3] == [sys.executable, "-m", "workflow.model_runner"]
+    assert popen.call_args.args[0][:3] == [sys.executable, "-m", "career_ops.model_runner"]

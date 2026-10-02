@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_fingerprint import cross_listings, fingerprint, normalize_jd, similarity
+from career_ops.discovery.fingerprint import cross_listings, fingerprint, normalize_jd, similarity
 
 body = "We build cloud services with Python and Kubernetes. " * 12
 assert normalize_jd("<p>Python &amp; SQL</p> https://example.com/x") == "python sql"

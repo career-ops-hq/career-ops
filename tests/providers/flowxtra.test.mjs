@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — flowxtra');
 
 try {
-  const flowxtraModule = await import(pathToFileURL(join(ROOT, 'providers/flowxtra.mjs')).href);
+  const flowxtraModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/flowxtra.mjs')).href);
   const flowxtra = flowxtraModule.default;
   const { normalizeFlowxtraJob } = flowxtraModule;
 

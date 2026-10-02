@@ -13,11 +13,12 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
-CLI = ROOT / "workflow" / "career_ops.py"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 RUNNER = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-model-runner.py'}"
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import BusinessStore, canonical_scan_input, cron_score, scan_discovered, score_inputs
+from career_ops.db import BusinessStore
+from career_ops.input_contracts import canonical_scan_input, score_inputs
+from career_ops.tasks import cron_score, scan_discovered
 
 
 BUSINESS_RESULTS = """
@@ -44,7 +45,7 @@ CREATE TRIGGER artifact_requires_evaluated BEFORE INSERT ON artifacts
 
 def run(directory: Path, *args: str) -> dict:
     result = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), *args],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), *args],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
@@ -85,12 +86,12 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     }))
     assert inline["status"] == "completed"
     invalid_envelope = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "scan", "inline", json.dumps({"source": json.loads(source.read_text())})],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "scan", "inline", json.dumps({"source": json.loads(source.read_text())})],
         text=True, capture_output=True,
     )
     assert invalid_envelope.returncode == 1 and "not a workflow envelope" in invalid_envelope.stderr
     invalid_liveness = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "scan", "inline", json.dumps({**json.loads(source.read_text()), "liveness": "closed"})],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "scan", "inline", json.dumps({**json.loads(source.read_text()), "liveness": "closed"})],
         text=True, capture_output=True,
     )
     assert invalid_liveness.returncode == 1 and "JD or liveness is invalid" in invalid_liveness.stderr
@@ -103,7 +104,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     assert scored["status"] == "completed"
     assert scored["artifact"]["outcome"] == "score"
     missing = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "missing", "scan:missing"],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "missing", "scan:missing"],
         text=True, capture_output=True,
     )
     assert missing.returncode == 1 and "Missing completed scan result" in missing.stderr
@@ -136,7 +137,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "url": "https://example.com/jobs/3",
     }))
     crashed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "scan", "job-3", str(crash_source), "--crash-at", "publish"],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "scan", "job-3", str(crash_source), "--crash-at", "publish"],
         text=True, capture_output=True, env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
     assert crashed.returncode == 86
@@ -194,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-") as temporary:
     database.close()
     assert run(directory, "cron-score")["task"]["status"] == "completed"
     score_crash = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "1", "scan:1", "--crash-at", "publish"],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "1", "scan:1", "--crash-at", "publish"],
         text=True, capture_output=True, env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
     assert score_crash.returncode == 86
@@ -240,9 +241,9 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-wait-") as temporary:
         "text": "Build reviewed AI agent workflows in Shanghai as an employee.",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
     }
-    with patch("workflow.career_ops.capture_jd", return_value=None), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
+    with patch("career_ops.tasks.capture_jd", return_value=None), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
         assert cron_score(directory)["status"] == "waiting"
-    with patch("workflow.career_ops.capture_jd", return_value=refreshed), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
+    with patch("career_ops.tasks.capture_jd", return_value=refreshed), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
         recovered = cron_score(directory)
     assert recovered["opportunity_id"] == "1"
     assert recovered["task"]["task_id"] == blocked_task["task_id"]
@@ -258,7 +259,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-fair-") as temporary:
       INSERT INTO opportunities VALUES (2,'https://example.com/jobs/two','Two','Engineer');
     """)
     database.close()
-    with patch("workflow.career_ops.capture_jd", return_value=None), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
+    with patch("career_ops.tasks.capture_jd", return_value=None), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
         assert cron_score(directory)["opportunity_id"] == "1"
         assert cron_score(directory)["opportunity_id"] == "2"
         assert cron_score(directory)["opportunity_id"] == "1"
@@ -269,7 +270,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-fair-") as temporary:
         "text": "Build reviewed AI agent workflows in Shanghai as an employee.",
         "retrieved_at": datetime.now(timezone.utc).isoformat(),
     }
-    with patch("workflow.career_ops.capture_jd", return_value=refreshed), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
+    with patch("career_ops.tasks.capture_jd", return_value=refreshed), patch.dict(os.environ, {"CAREER_OPS_MODEL_RUNNER": RUNNER}):
         assert scan_discovered(directory, "2")["task_id"] == waiting["task_id"]
 
 with tempfile.TemporaryDirectory(prefix="career-ops-cron-retry-") as temporary:
@@ -286,15 +287,15 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-retry-") as temporary:
     failed = store.start("1", "scan", "{}")
     store.wait(failed["task_id"], "failure:RuntimeError")
     store.close()
-    with patch("workflow.career_ops.current_discovered_scan_source", return_value={"jd": "fixture"}), \
-         patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+    with patch("career_ops.tasks.current_discovered_scan_source", return_value={"jd": "fixture"}), \
+         patch("career_ops.tasks.start_and_run", return_value={"status": "completed"}) as start:
         assert cron_score(directory)["opportunity_id"] == "2"
         assert start.call_args.args[1] == "2"
     database = sqlite3.connect(directory / "opportunities.db")
     database.execute("DELETE FROM opportunities WHERE id=2")
     database.commit()
     database.close()
-    with patch("workflow.career_ops.resume_task", return_value={"status": "completed"}) as resume:
+    with patch("career_ops.tasks.resume_task", return_value={"status": "completed"}) as resume:
         assert cron_score(directory)["opportunity_id"] == "1"
         assert resume.call_args.args == (directory, failed["task_id"], None, None)
     database = sqlite3.connect(directory / "opportunities.db")
@@ -328,24 +329,24 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-stale-") as temporary:
                      (scored["task_id"], scored["task_id"], "1", "score", store.task(scored["task_id"])["input_hash"],
                       json.dumps({"outcome": "score", "artifact": {"score": {"direction": 4, "compensation": None, "company": 4}}})))
     store.close()
-    with patch("workflow.career_ops.capture_jd", return_value=None), \
-         patch("workflow.career_ops.start_and_run", return_value={"status": "waiting"}) as start:
+    with patch("career_ops.tasks.capture_jd", return_value=None), \
+         patch("career_ops.tasks.start_and_run", return_value={"status": "waiting"}) as start:
         scan_discovered(directory, "1", True)
         assert json.loads(start.call_args.args[3])["liveness"] == "uncertain"
     fresh = {"status": "captured", "url": report["url"], "text": "Current official JD.",
              "retrieved_at": datetime.now(timezone.utc).isoformat()}
-    with patch("workflow.career_ops.capture_jd", return_value=fresh), \
-         patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+    with patch("career_ops.tasks.capture_jd", return_value=fresh), \
+         patch("career_ops.tasks.start_and_run", return_value={"status": "completed"}) as start:
         scan_discovered(directory, "1", True)
         source = json.loads(start.call_args.args[3])
         assert source["liveness"] == "active" and source["jd"] == fresh["text"]
         assert source["captured_at"] == fresh["retrieved_at"]
-    with patch("workflow.career_ops.scan_discovered", return_value={"status": "waiting"}), \
-         patch("workflow.career_ops.start_and_run") as start:
+    with patch("career_ops.tasks.scan_discovered", return_value={"status": "waiting"}), \
+         patch("career_ops.tasks.start_and_run") as start:
         assert cron_score(directory)["status"] == "waiting"
         start.assert_not_called()
-    with patch("workflow.career_ops.scan_discovered", return_value={"status": "completed", "artifact": {"outcome": "jd_report"}}) as scan, \
-         patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+    with patch("career_ops.tasks.scan_discovered", return_value={"status": "completed", "artifact": {"outcome": "jd_report"}}) as scan, \
+         patch("career_ops.tasks.start_and_run", return_value={"status": "completed"}) as start:
         assert cron_score(directory)["opportunity_id"] == "1"
         assert scan.call_args.args == (directory, "1", True)
         assert start.call_args.args == (directory, "1", "score", "scan:1", None, True)
@@ -383,7 +384,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-rescanned-") as tempora
                          (task["task_id"], task["task_id"], "1", "scan", source,
                           json.dumps({"outcome": outcome, "artifact": {}})))
     store.close()
-    with patch("workflow.career_ops.start_and_run", return_value={"status": "completed"}) as start:
+    with patch("career_ops.tasks.start_and_run", return_value={"status": "completed"}) as start:
         assert cron_score(directory)["opportunity_id"] == "1"
         assert start.call_args.args == (directory, "1", "score", "scan:1", None)
     scan_input = {"schema_version": "scan_input_v1", "opportunity_id": "1",

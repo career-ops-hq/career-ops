@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — beesite (milch \& zucker GJB search API)');
 try {
-  const beesiteModule = await import(pathToFileURL(join(ROOT, 'providers/beesite.mjs')).href);
+  const beesiteModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/beesite.mjs')).href);
   const beesite = beesiteModule.default;
   const { resolveConfig: beeConfig, buildSearchUrl, parseBeesiteDate, parseSearchResult } = beesiteModule;
 

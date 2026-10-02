@@ -6,7 +6,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.reverse_discovery import (blacklist_offers, date_class, output_offer, pre_enrich, rejection,
+from career_ops.discovery.reverse_discovery import (blacklist_offers, date_class, output_offer, pre_enrich, rejection,
                                         retain_jobs, title_config)
 
 

@@ -1,7 +1,7 @@
 /** Verify MTR Taleo list parsing and form-backed pagination. */
 
 import assert from 'node:assert/strict';
-import mtr, { parseList } from '../../providers/mtr-taleo.mjs';
+import mtr, { parseList } from '../../adapters/node/providers/mtr-taleo.mjs';
 
 function page(number, id) {
   const fields = Array(43).fill('');

@@ -8,7 +8,7 @@ console.log('\nProvider — DNS cache');
 
 try {
   const { createCachedLookup, isResolverFailure } = await import(
-    pathToFileURL(join(ROOT, 'providers/_dns-cache.mjs')).href
+    pathToFileURL(join(ROOT, 'adapters/node/providers/_dns-cache.mjs')).href
   );
 
   /**
@@ -205,7 +205,7 @@ try {
     const probe = [
       'import dns from "node:dns";',
       'const before = dns.lookup;',
-      'await import("./providers/_dns-cache.mjs");',
+      'await import("./adapters/node/providers/_dns-cache.mjs");',
       'console.log(dns.lookup === before ? "UNPATCHED" : "PATCHED");',
     ].join('');
 

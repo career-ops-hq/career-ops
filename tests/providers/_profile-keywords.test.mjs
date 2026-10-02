@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { profileTargetKeywords, resolveProfileKeywords, providerKeywords } from '../../providers/_profile-keywords.mjs';
+import { profileTargetKeywords, resolveProfileKeywords, providerKeywords } from '../../adapters/node/providers/_profile-keywords.mjs';
 
 assert.deepEqual(profileTargetKeywords({ target_roles: { search_keywords: ['AI', ' ai ', '智能体'] } }), ['ai', '智能体']);
 for (const words of [undefined, [], '', ['AI', null], ['AI', ' ']]) {

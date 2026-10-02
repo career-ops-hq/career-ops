@@ -28,7 +28,7 @@ import { tmpdir } from 'os';
 console.log('\nbrowser-extract.mjs — flag validation and value forms');
 
 const NODE = process.execPath;
-const SCRIPT = join(ROOT, 'browser-extract.mjs');
+const SCRIPT = join(ROOT, 'adapters/node/browser/browser-extract.mjs');
 
 // cwd is deliberately not the project root: the script resolves its own paths
 // through import.meta.url, and a cwd-relative read would show up here.

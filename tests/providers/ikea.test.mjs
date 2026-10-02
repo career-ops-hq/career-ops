@@ -1,7 +1,7 @@
 /** Verify IKEA's bounded public search pagination and result parsing. */
 
 import assert from 'node:assert/strict';
-import ikea, { parseSearchPage } from '../../providers/ikea.mjs';
+import ikea, { parseSearchPage } from '../../adapters/node/providers/ikea.mjs';
 
 const page = (number, pages, id) => `<section data-total-job-results="2" data-total-pages="${pages}" data-current-page="${number}">
 <li class="job-list__item"><a href="/en/job/shanghai/ai-engineer/24107/${id}" data-job-id="${id}" class="job-list__anchor">

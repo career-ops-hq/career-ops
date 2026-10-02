@@ -9,12 +9,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow import model_adapter
-from workflow import apply_graph
-from workflow import score_graph
-from workflow.score_graph import _normalize_assessment
+from career_ops import model as model_adapter
+from career_ops.applications import apply_graph
+from career_ops.evaluation import score_graph
+from career_ops.evaluation.score_graph import _normalize_assessment
 
-spec = importlib.util.spec_from_file_location("workflow_model_runner", ROOT / "workflow" / "model_runner.py")
+spec = importlib.util.spec_from_file_location("workflow_model_runner", ROOT / "career_ops" / "model_runner.py")
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 

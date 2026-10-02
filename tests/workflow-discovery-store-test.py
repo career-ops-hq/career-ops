@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_store import DiscoveryStore
+from career_ops.discovery.store import DiscoveryStore
 
 with tempfile.TemporaryDirectory() as temporary:
     store = DiscoveryStore(Path(temporary) / "opportunities.db")

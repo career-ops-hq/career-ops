@@ -10,7 +10,7 @@
 // generalized pattern requires any job noun within 60 chars of "has been
 // filled" and rejects "filled out" (a candidate completing a form).
 import { pass, fail } from './helpers.mjs';
-import { classifyLiveness } from '../liveness-core.mjs';
+import { classifyLiveness } from '../adapters/node/browser/liveness-core.mjs';
 
 console.log('\nliveness-core — "filled" reqs (incl. Phenom/ICF phrasing) classify as expired');
 

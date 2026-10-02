@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — workable');
 
 try {
-  const workableModule = await import(pathToFileURL(join(ROOT, 'providers/workable.mjs')).href);
+  const workableModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/workable.mjs')).href);
   const workable = workableModule.default;
   const { parseWorkableMarkdown, parseWorkableWidget } = workableModule;
 
@@ -310,4 +310,3 @@ try {
 } catch (e) {
   fail(`workable provider tests crashed: ${e.message}`);
 }
-

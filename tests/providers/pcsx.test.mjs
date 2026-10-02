@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — pcsx');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/pcsx.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/pcsx.mjs')).href);
   const { parsePcsxResponse } = mod;
   const provider = mod.default;
 

@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow import portals_repair
-from workflow.portals_repair import compute_fixes, repair_file
+from career_ops.discovery import portals_repair
+from career_ops.discovery.portals_repair import compute_fixes, repair_file
 
 
 RAW = """tracked_companies:
@@ -65,11 +65,11 @@ with TemporaryDirectory() as directory:
     assert "boards-api.greenhouse.io/v1/boards/oldalpha" not in portal.read_text()
 
     for arguments in (["--file", str(portal), "--unknown"], ["--file"], ["--file="]):
-        command = subprocess.run([sys.executable, "-m", "workflow.portals_repair", *arguments],
+        command = subprocess.run([sys.executable, "-m", "career_ops", "portal", "repair", *arguments],
                                  cwd=ROOT, text=True, capture_output=True)
         assert command.returncode != 0 and "error:" in command.stderr
 
-    missing = subprocess.run([sys.executable, "-m", "workflow.portals_repair",
+    missing = subprocess.run([sys.executable, "-m", "career_ops", "portal", "repair",
                               "--file", str(Path(directory) / "missing.yml")],
                              cwd=ROOT, text=True, capture_output=True, check=True)
     assert "nothing to fix" in missing.stdout

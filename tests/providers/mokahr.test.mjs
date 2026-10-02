@@ -10,11 +10,11 @@ import { createCipheriv } from 'crypto';
 
 console.log('\nProvider — mokahr (MokaHR AES-encrypted jobs/v2 API)');
 try {
-  const modUrl = pathToFileURL(join(ROOT, 'providers/mokahr.mjs')).href;
+  const modUrl = pathToFileURL(join(ROOT, 'adapters/node/providers/mokahr.mjs')).href;
   const mokahr = (await import(modUrl)).default;
   const { decryptMokaHrEnvelope, parseMokaHrJobs } = await import(modUrl);
-  const normalizeUrlForDedup = (await import(pathToFileURL(join(ROOT, 'url-key.mjs')).href)).normalizeUrl;
-  const { normalizeUrl } = await import(pathToFileURL(join(ROOT, 'url-key.mjs')).href);
+  const normalizeUrlForDedup = (await import(pathToFileURL(join(ROOT, 'adapters/node/shared/url-key.mjs')).href)).normalizeUrl;
+  const { normalizeUrl } = await import(pathToFileURL(join(ROOT, 'adapters/node/shared/url-key.mjs')).href);
 
   if (mokahr.id === 'mokahr') pass('mokahr.id is "mokahr"');
   else fail(`mokahr.id is ${JSON.stringify(mokahr.id)}`);

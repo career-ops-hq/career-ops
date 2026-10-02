@@ -9,7 +9,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.insights.preparation import build_preparation_plan, parse_report_classifications, validate_preparation_plan
+from career_ops.evaluation.preparation import build_preparation_plan, parse_report_classifications, validate_preparation_plan
 
 JD = "# Role\n\n## Requirements\n- Python, Kubernetes, Rust\n"
 CV = "# Skills\nPython\n\n# Experience\nDeployed Kubernetes services.\n"
@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as temp:
     (root / "jd.md").write_text(JD)
     output = root / "output" / "plan.json"
     env = {**os.environ, "CAREER_OPS_INPUT_ROOT": str(root)}
-    run = subprocess.run([sys.executable, "-m", "workflow.career_ops", "insights", "preparation-plan",
+    run = subprocess.run([sys.executable, "-m", "career_ops", "insights", "preparation-plan",
                           "--jd", str(root / "jd.md"), "--company", "Acme", "--role", "Engineer",
                           "--output", str(output)], cwd=ROOT, env=env, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr

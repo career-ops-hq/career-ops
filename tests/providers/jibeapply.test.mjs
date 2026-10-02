@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — jibeapply');
 
 try {
-  const jibeapplyModule = await import(pathToFileURL(join(ROOT, 'providers/jibeapply.mjs')).href);
+  const jibeapplyModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/jibeapply.mjs')).href);
   const jibeapply = jibeapplyModule.default;
   const { parseJibeapplyResponse } = jibeapplyModule;
 
@@ -308,4 +308,3 @@ try {
 } catch (e) {
   fail(`jibeapply provider tests crashed: ${e.message}`);
 }
-

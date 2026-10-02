@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.interview_evidence import classify_numeric_claims, format_ats, match_stories, provenance_diagnosis, stories, tokens
+from career_ops.interviews.evidence import classify_numeric_claims, format_ats, match_stories, provenance_diagnosis, stories, tokens
 
 
 cv = """Reduced onboarding ramp time from 8 hours to 2 hours per cohort.

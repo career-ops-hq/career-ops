@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_graph import run_discovery_graph
+from career_ops.discovery.graph import run_discovery_graph
 
 
 with tempfile.TemporaryDirectory() as temporary:

@@ -1,6 +1,6 @@
 /** Check source-scoped searches, fair limits, JD evidence, deduplication and partial failures. */
 import assert from 'node:assert/strict';
-import { collectSearch, jobFromPage, searchOptions, searchRequest, withinSites } from '../../providers/search.mjs';
+import { collectSearch, jobFromPage, searchOptions, searchRequest, withinSites } from '../../adapters/node/providers/search.mjs';
 
 const entry = { name: 'Board', provider: 'search', search: { method: 'web', sites: ['jobs.example.com/roles'], locations: ['Hong Kong'] }, max_results: 3 };
 const options = searchOptions(entry);

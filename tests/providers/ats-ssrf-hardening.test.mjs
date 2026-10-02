@@ -11,8 +11,8 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — SSRF redirect hardening (lever / ashby)');
 
 try {
-  const lever = (await import(pathToFileURL(join(ROOT, 'providers/lever.mjs')).href)).default;
-  const ashby = (await import(pathToFileURL(join(ROOT, 'providers/ashby.mjs')).href)).default;
+  const lever = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/lever.mjs')).href)).default;
+  const ashby = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/ashby.mjs')).href)).default;
 
   // Each instance must hit its own host with redirect:'error' — a wrong host
   // silently returns another tenant's (or no) postings instead of erroring.
@@ -48,4 +48,3 @@ try {
 } catch (e) {
   fail(`SSRF redirect hardening tests crashed: ${e.message}`);
 }
-

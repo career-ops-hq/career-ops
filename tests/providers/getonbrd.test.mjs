@@ -7,7 +7,7 @@ console.log('\nProvider — getonbrd');
 
 
 try {
-  const getonbrdModule = await import(pathToFileURL(join(ROOT, 'providers/getonbrd.mjs')).href);
+  const getonbrdModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/getonbrd.mjs')).href);
   const getonbrd = getonbrdModule.default;
 
   if (getonbrd.id === 'getonbrd') pass('getonbrd.id is "getonbrd"');
@@ -149,4 +149,3 @@ try {
 } catch (e) {
   fail(`getonbrd provider tests crashed: ${e.message}`);
 }
-

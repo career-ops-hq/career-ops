@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — mycareersfuture');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/mycareersfuture.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/mycareersfuture.mjs')).href);
   const mycareersfuture = mod.default;
   const { parseConfig, cleanUrl, normalizeJob } = mod;
 

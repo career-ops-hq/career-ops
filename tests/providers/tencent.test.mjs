@@ -7,8 +7,8 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — tencent (careers.tencent.com JSON API)');
 try {
-  const tencent = (await import(pathToFileURL(join(ROOT, 'providers/tencent.mjs')).href)).default;
-  const { parseTencentResponse } = await import(pathToFileURL(join(ROOT, 'providers/tencent.mjs')).href);
+  const tencent = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/tencent.mjs')).href)).default;
+  const { parseTencentResponse } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/tencent.mjs')).href);
 
   if (tencent.id === 'tencent') pass('tencent.id is "tencent"');
   else fail(`tencent.id is ${JSON.stringify(tencent.id)}`);
@@ -242,4 +242,3 @@ try {
 } catch (e) {
   fail(`tencent provider tests crashed: ${e.message}`);
 }
-

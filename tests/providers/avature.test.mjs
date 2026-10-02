@@ -7,7 +7,7 @@ console.log('\nProvider — avature (career-site SearchJobs parser)');
 
 
 try {
-  const avatureModule = await import(pathToFileURL(join(ROOT, 'providers/avature.mjs')).href);
+  const avatureModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/avature.mjs')).href);
   const avature = avatureModule.default;
   const { parseArticles } = avatureModule;
 

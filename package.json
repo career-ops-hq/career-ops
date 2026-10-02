@@ -1,19 +1,16 @@
 {
   "name": "career-ops",
   "version": "1.28.0",
-  "description": "AI-powered job search pipeline \u2014 works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
+  "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, Codex, OpenCode, Antigravity, Grok, Qwen, Kimi, Copilot)",
   "private": true,
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "doctor": "node doctor.mjs",
+    "doctor": ".venv/bin/python -B -m career_ops doctor",
     "lint": "node scripts/check-syntax.mjs",
-    "liveness": "workflow/.venv/bin/python -B -m workflow.liveness_check",
-    "workflow": "workflow/.venv/bin/python -B -m workflow.career_ops",
-    "application:lifecycle": "workflow/.venv/bin/python -B -m workflow.career_ops application",
-    "interview:context": "workflow/.venv/bin/python -B -m workflow.interview_tools context",
-    "cv:maintain": "workflow/.venv/bin/python -B workflow/cv_maintenance.py"
+    "check": ".venv/bin/python -B scripts/check.py",
+    "career-ops": ".venv/bin/python -B -m career_ops"
   },
   "keywords": [
     "ai",
@@ -32,7 +29,7 @@
     "grok",
     "ai-agent-skill"
   ],
-  "author": "Santiago Fern\u00e1ndez de Valderrama <hi@santifer.io> (https://santifer.io)",
+  "author": "Santiago Fernández de Valderrama <hi@santifer.io> (https://santifer.io)",
   "homepage": "https://santifer.io",
   "repository": {
     "type": "git",

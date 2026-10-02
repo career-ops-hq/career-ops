@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — amazon (amazon.jobs search.json)');
 
 try {
-  const amazon = (await import(pathToFileURL(join(ROOT, 'providers/amazon.mjs')).href)).default;
+  const amazon = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/amazon.mjs')).href)).default;
 
   if (amazon.id === 'amazon') pass('amazon.id is "amazon"');
   else fail(`amazon.id is ${JSON.stringify(amazon.id)}`);
@@ -70,4 +70,3 @@ try {
 } catch (e) {
   fail(`amazon provider tests crashed: ${e.message}`);
 }
-

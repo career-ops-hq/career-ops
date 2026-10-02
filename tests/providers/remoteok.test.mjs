@@ -10,7 +10,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — remoteok');
 
 try {
-  const remoteokModule = await import(pathToFileURL(join(ROOT, 'providers/remoteok.mjs')).href);
+  const remoteokModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/remoteok.mjs')).href);
   const remoteok = remoteokModule.default;
 
   if (remoteok.id === 'remoteok') pass('remoteok.id is "remoteok"');

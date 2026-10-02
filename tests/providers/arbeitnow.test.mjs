@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — arbeitnow');
 
 try {
-  const arbeitnowModule = await import(pathToFileURL(join(ROOT, 'providers/arbeitnow.mjs')).href);
+  const arbeitnowModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/arbeitnow.mjs')).href);
   const arbeitnow = arbeitnowModule.default;
   const { normalizeArbeitnowJob } = arbeitnowModule;
 

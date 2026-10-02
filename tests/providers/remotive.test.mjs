@@ -7,7 +7,7 @@ console.log('\nProvider — remotive');
 
 
 try {
-  const remotiveModule = await import(pathToFileURL(join(ROOT, 'providers/remotive.mjs')).href);
+  const remotiveModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/remotive.mjs')).href);
   const remotive = remotiveModule.default;
 
   if (remotive.id === 'remotive') pass('remotive.id is "remotive"');
@@ -110,4 +110,3 @@ try {
 } catch (e) {
   fail(`remotive provider tests crashed: ${e.message}`);
 }
-

@@ -10,11 +10,11 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.interviews import apply_review_patch, confirm, current_context, normalize_model_artifact, restore_markdown_quotes, resume, run_task, show, show_markdown, start, validate_artifact
-from workflow.interview_model import prompt as interview_prompt
-from workflow.interview_review import render_markdown
-from workflow.career_ops import digest as text_digest
-from workflow.interview_store import InterviewStore, digest as store_digest
+from career_ops.interviews.workflow import apply_review_patch, confirm, current_context, normalize_model_artifact, restore_markdown_quotes, resume, run_task, show, show_markdown, start, validate_artifact
+from career_ops.interviews.model import prompt as interview_prompt
+from career_ops.interviews.review import render_markdown
+from career_ops.input_contracts import digest as text_digest
+from career_ops.interviews.store import InterviewStore, digest as store_digest
 
 
 for phase in ("draft", "review"):
@@ -126,7 +126,7 @@ validate_artifact("practice", named_artifact, named_context)
 with tempfile.TemporaryDirectory() as temporary, \
      patch.dict(os.environ, {"CAREER_OPS_INTERVIEW_RUNNER": runner, "CAREER_OPS_INTERVIEW_MODEL_ENABLED": "1",
                              "INTERVIEW_TEST_MARKDOWN_QUOTE": "1"}), \
-     patch("workflow.interviews.current_context", return_value={
+     patch("career_ops.interviews.workflow.current_context", return_value={
          **context, "candidate_sources": {**context["candidate_sources"],
                                            "cv.md": "- **Languages and frameworks:** Python"},
      }):
@@ -142,8 +142,8 @@ bound_context = {
         "score": {"outcome": "score", "review": {}, "input_hash": text_digest("score-input")},
     },
 }
-with patch("workflow.interviews.load_context", return_value=bound_context), \
-     patch("workflow.interviews.score_inputs", return_value="score-input"):
+with patch("career_ops.interviews.workflow.load_context", return_value=bound_context), \
+     patch("career_ops.interviews.workflow.score_inputs", return_value="score-input"):
     try:
         current_context(Path("unused"), "7")
     except ValueError as error:
@@ -152,7 +152,7 @@ with patch("workflow.interviews.load_context", return_value=bound_context), \
         raise AssertionError("Interview accepted a different role's reviewed scan")
 
 with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"CAREER_OPS_INTERVIEW_RUNNER": runner, "CAREER_OPS_INTERVIEW_MODEL_ENABLED": "1"}), \
-     patch("workflow.interviews.current_context", return_value=context):
+     patch("career_ops.interviews.workflow.current_context", return_value=context):
     directory = Path(temporary)
     prepared = start(directory, "7", "round-1", "prepare", {"interview_at": "2026-10-01T10:00:00+08:00"})
     assert prepared["status"] == "waiting" and prepared["reason"] == "user_review"
@@ -241,7 +241,7 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"CAREER
         assert "requires feedback" in str(error)
     else:
         raise AssertionError("Reviewed draft silently regenerated without feedback")
-    with patch("workflow.interviews.current_context", return_value={"changed": True}):
+    with patch("career_ops.interviews.workflow.current_context", return_value={"changed": True}):
         try:
             resume(directory, task_id, feedback="Revise an outdated draft")
         except ValueError as error:
@@ -256,7 +256,7 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"CAREER
     assert revised["status"] == "waiting" and revised["artifact"]["version"] == 2
     assert confirm(directory, task_id)["status"] == "completed"
     assert confirm(directory, task_id)["status"] == "completed"
-    with patch("workflow.interviews.current_context", return_value={"changed": True}):
+    with patch("career_ops.interviews.workflow.current_context", return_value={"changed": True}):
         assert confirm(directory, task_id)["status"] == "completed"
     assert start(directory, "7", "round-1", "prepare", {"interview_at": "2026-10-01T10:00:00+08:00"})["task_id"] == task_id
     store = InterviewStore(directory / "opportunities.db")
@@ -364,8 +364,8 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"CAREER
         concurrent.close()
         return context
 
-    with patch("workflow.interviews.current_context", side_effect=competing_resume), \
-         patch("workflow.interviews.run_task", side_effect=AssertionError("Duplicate resume reached graph")):
+    with patch("career_ops.interviews.workflow.current_context", side_effect=competing_resume), \
+         patch("career_ops.interviews.workflow.run_task", side_effect=AssertionError("Duplicate resume reached graph")):
         try:
             resume(directory, interrupted)
         except ValueError as error:
@@ -402,7 +402,7 @@ with tempfile.TemporaryDirectory() as temporary, patch.dict(os.environ, {"CAREER
     store.close()
     assert run_task(directory, crash_task["task_id"])["model_calls"] == crash_task["model_calls"]
 
-    with patch("workflow.interviews.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+    with patch("career_ops.interviews.workflow.subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")):
         try:
             start(directory, "7", "round-empty-runner", "prepare", {})
         except RuntimeError as error:

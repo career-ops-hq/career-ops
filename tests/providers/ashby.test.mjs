@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — ashby');
 
 try {
-  const ashbyModule = await import(pathToFileURL(join(ROOT, 'providers/ashby.mjs')).href);
+  const ashbyModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/ashby.mjs')).href);
   const ashby = ashbyModule.default;
   const { parseCompensation } = ashbyModule;
 

@@ -8,7 +8,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — agentic-jobs (agentic-engineering-jobs.com REST API)');
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/agentic-jobs.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/agentic-jobs.mjs')).href);
   const agentic = mod.default;
   const { countryName, stripHtml, normalizeAgenticLocation, normalizeAgenticSalary, normalizeAgenticJob } = mod;
 

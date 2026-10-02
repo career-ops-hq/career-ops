@@ -7,7 +7,7 @@ console.log('\nProvider — workday');
 
 
 try {
-  const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
+  const workdayModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/workday.mjs')).href);
   const workday = workdayModule.default;
   const { parseWorkdayResponse } = workdayModule;
 

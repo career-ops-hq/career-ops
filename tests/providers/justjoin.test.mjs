@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — justjoin');
 
 try {
-  const justjoinModule = await import(pathToFileURL(join(ROOT, 'providers/justjoin.mjs')).href);
+  const justjoinModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/justjoin.mjs')).href);
   const jj = justjoinModule.default;
   const { parseJustJoinResponse } = justjoinModule;
 

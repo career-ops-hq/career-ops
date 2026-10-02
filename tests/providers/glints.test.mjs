@@ -7,7 +7,7 @@ console.log('\nProvider — glints');
 
 
 try {
-  const glintsModule = await import(pathToFileURL(join(ROOT, 'providers/glints.mjs')).href);
+  const glintsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/glints.mjs')).href);
   const glints = glintsModule.default;
   const { parseGlintsItem } = glintsModule;
 
@@ -200,4 +200,3 @@ try {
 } catch (e) {
   fail(`glints provider tests crashed: ${e.message}`);
 }
-

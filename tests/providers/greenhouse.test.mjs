@@ -11,7 +11,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — greenhouse');
 
 try {
-  const greenhouseModule = await import(pathToFileURL(join(ROOT, 'providers/greenhouse.mjs')).href);
+  const greenhouseModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/greenhouse.mjs')).href);
   const greenhouse = greenhouseModule.default;
   const { isWorkModelOnly, officesUrlFor, buildOfficeMap, contentToText } = greenhouseModule;
 

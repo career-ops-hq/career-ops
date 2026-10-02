@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — deutschebahn (db.jobs search-fragment parser)');
 try {
-  const dbModule = await import(pathToFileURL(join(ROOT, 'providers/deutschebahn.mjs')).href);
+  const dbModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/deutschebahn.mjs')).href);
   const db = dbModule.default;
   const { resolveConfig: dbConfig, parseHits: dbParseHits } = dbModule;
 

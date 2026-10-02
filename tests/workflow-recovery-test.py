@@ -13,16 +13,17 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import BusinessStore, digest, resume_task, run_task
-from workflow.model_adapter import record_call
+from career_ops.db import BusinessStore
+from career_ops.input_contracts import digest
+from career_ops.tasks import resume_task, run_task
+from career_ops.model import record_call
 
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
-CLI = ROOT / "workflow" / "career_ops.py"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
 def call(directory: Path, *args: str, expected: int = 0, env: dict | None = None) -> dict:
     result = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), *args],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), *args],
         text=True, capture_output=True, env={**os.environ, **(env or {})},
     )
     assert result.returncode == expected, (args, result.stdout, result.stderr)
@@ -68,7 +69,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
 
     call_log = directory / "failed-calls.log"
     failed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "failed", str(report("failed"))],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "failed", str(report("failed"))],
         text=True, capture_output=True, env={
             **os.environ, **model_env, "WORKFLOW_TEST_RUNNER_FAIL": "1", "WORKFLOW_TEST_CALL_LOG": str(call_log)
         },
@@ -76,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     assert failed.returncode == 1
     assert call_log.read_text().splitlines() == ["evaluate"]
     metered = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "failed-metered", str(report("failed-metered"))],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "failed-metered", str(report("failed-metered"))],
         text=True, capture_output=True,
         env={**os.environ, **model_env, "WORKFLOW_TEST_DURABLE_FAIL": "1"},
     )
@@ -88,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         ).fetchone()
     assert usage == (1, 1)
     malformed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "malformed-output", str(report("malformed-output"))],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "malformed-output", str(report("malformed-output"))],
         text=True, capture_output=True,
         env={**os.environ, **model_env, "WORKFLOW_TEST_DURABLE_SUCCESS": "1",
              "WORKFLOW_TEST_INVALID_JSON": "1", "WORKFLOW_TEST_SLEEP": "0.05"},
@@ -118,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     changed_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "input-change")
     (inputs / "cv.md").write_text("Candidate facts v2")
     changed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "run", changed_task["task_id"]],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "run", changed_task["task_id"]],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert changed.returncode == 1 and "changed before business commit" in changed.stderr
@@ -134,7 +135,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     scan_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "scan-input-change")
     (inputs / "cv.md").write_text("Candidate facts v2")
     stale_scan = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "run", scan_task["task_id"]],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "run", scan_task["task_id"]],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert stale_scan.returncode == 1 and "Scan inputs changed before business commit" in stale_scan.stderr
@@ -142,7 +143,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
 
     lock_report = report("locked")
     running = subprocess.Popen(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "locked", str(lock_report)],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "locked", str(lock_report)],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env={**os.environ, **model_env, "WORKFLOW_TEST_SLEEP": "2"},
     )
@@ -158,7 +159,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         time.sleep(0.05)
     assert locked_task_id
     duplicate_runner = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "run", locked_task_id],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "run", locked_task_id],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert duplicate_runner.returncode == 1 and "already executing" in duplicate_runner.stderr
@@ -253,7 +254,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     failed_apply = store.start("apply-checkpoint-resume", "apply", "{}")
     store.add_usage(failed_apply["task_id"], 3, 2)
     store.wait(failed_apply["task_id"], "failure:RuntimeError")
-    with patch("workflow.career_ops.run_task", return_value={"status": "resumed"}) as run:
+    with patch("career_ops.tasks.run_task", return_value={"status": "resumed"}) as run:
         assert resume_task(directory, failed_apply["task_id"], None, None) == {"status": "resumed"}
     assert run.call_args.args[1] == failed_apply["task_id"]
     assert "start_state" not in run.call_args.kwargs
@@ -263,7 +264,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     feedback_task = store.start("feedback-rollback", "apply", "{}")
     store.wait(feedback_task["task_id"], "user_review")
     assert run_task(directory, feedback_task["task_id"])["reason"] == "user_review"
-    with patch("workflow.career_ops.current_apply_input", return_value="{}"), \
+    with patch("career_ops.tasks.current_apply_input", return_value="{}"), \
          patch.object(BusinessStore, "reset_input", side_effect=ValueError("simulated reset failure")):
         try:
             resume_task(directory, feedback_task["task_id"], None, None, feedback="Source-backed revision")
@@ -274,7 +275,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     assert store.feedback(feedback_task["task_id"]) == []
     assert store.task(feedback_task["task_id"])["status"] == "waiting"
     store.set_context(feedback_task["task_id"], "input_change", {"jd_report": {}, "diff": "changed JD"})
-    with patch("workflow.career_ops.current_apply_input", return_value="{}"), \
+    with patch("career_ops.tasks.current_apply_input", return_value="{}"), \
          patch.object(BusinessStore, "reset_input", side_effect=ValueError("simulated JD reset failure")):
         try:
             resume_task(directory, feedback_task["task_id"], None, None, decision="accept-jd-change")

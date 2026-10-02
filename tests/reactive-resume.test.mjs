@@ -6,11 +6,10 @@ import assert from 'node:assert/strict';
 import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { buildResumePatch, renderReactiveResume } from '../reactive-resume.mjs';
+import { buildResumePatch, renderReactiveResume } from '../adapters/node/resume.mjs';
 
 const root = await mkdtemp(join(tmpdir(), 'career-ops-reactive-resume-'));
 try {
-  const inputPath = join(root, 'output', '007-acme-role', 'cv', 'tailored', 'v001', 'cv.json');
   const metadataPath = join(root, 'output', '007-acme-role', 'cv', 'reactive-resume.json');
   const outputPath = join(root, 'output', '007-acme-role', 'cv', 'tailored', 'v001', 'cv.pdf');
   const payload = {
@@ -34,16 +33,15 @@ try {
     const method = init.method ?? 'GET';
     calls.push({ method, path, body: init.body && JSON.parse(init.body) });
     if (method === 'GET' && path === '/resumes') return Response.json([]);
-    if (method === 'POST' && path.endsWith('/duplicate')) return Response.json(init.body.includes('workflow') ? 'resume-workflow' : 'resume-007');
+    if (method === 'POST' && path.endsWith('/duplicate')) return Response.json('resume-workflow');
     if (method === 'GET' && path.startsWith('/resumes/resume-') && !path.endsWith('/pdf')) {
-      const workflow = path === '/resumes/resume-workflow';
-      return Response.json({ id: workflow ? 'resume-workflow' : 'resume-007',
-        name: workflow ? 'Career Ops workflow — Acme — Role' : 'Career Ops #007 — Acme — Role',
-        slug: workflow ? 'career-ops-workflow-123e4567-e89b-12d3-a456-426614174000' : 'career-ops-r007', updatedAt });
+      return Response.json({ id: 'resume-workflow',
+        name: 'Career Ops workflow — Acme — Role',
+        slug: 'career-ops-workflow-123e4567-e89b-12d3-a456-426614174000', updatedAt });
     }
     if (method === 'PATCH' && path.startsWith('/resumes/resume-')) {
       updatedAt = '2026-08-25T00:01:00.000Z';
-      return Response.json({ id: 'resume-007', updatedAt });
+      return Response.json({ id: 'resume-workflow', updatedAt });
     }
     if (method === 'GET' && path.startsWith('/resumes/resume-') && path.endsWith('/pdf')) {
       return new Response(Buffer.from('%PDF-test'), { headers: { 'content-type': 'application/pdf' } });
@@ -51,7 +49,7 @@ try {
     return new Response('unexpected request', { status: 500 });
   };
   const options = {
-    payload, inputPath, outputPath, metadataPath, taskId: '123e4567-e89b-12d3-a456-426614174000', company: 'Acme', role: 'Role', version: 1,
+    payload, outputPath, metadataPath, taskId: '123e4567-e89b-12d3-a456-426614174000', company: 'Acme', role: 'Role', version: 1,
     baseResumeId: 'base-id', apiBaseUrl: 'http://127.0.0.1:3000/api/openapi', apiKey: 'test-key', fetchImpl,
   };
   await renderReactiveResume(options);

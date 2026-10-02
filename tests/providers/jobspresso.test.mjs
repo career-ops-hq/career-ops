@@ -9,7 +9,7 @@ try {
   const {
     default: jobspresso,
     parseJobspressoFeed,
-  } = await import(pathToFileURL(join(ROOT, 'providers/jobspresso.mjs')).href);
+  } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/jobspresso.mjs')).href);
 
   if (jobspresso.id === 'jobspresso') {
     pass('jobspresso.id is "jobspresso"');
@@ -110,4 +110,3 @@ try {
 } catch (e) {
   fail(`jobspresso provider tests crashed: ${e.message}`);
 }
-

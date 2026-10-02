@@ -1,17 +1,15 @@
 // tests/browser-extract.test.mjs — unit coverage for the pure logic in
 // browser-extract.mjs (config resolution + result normalizers). The Playwright
 // navigation path is exercised live, not here.
-import { pass, fail, rmSync, ROOT } from './helpers.mjs';
+import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
 
 console.log('\nbrowser-extract.mjs (config + normalizers)');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
-  const { resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/browser/browser-extract.mjs')).href);
+  const { compactText, normalizeJd, normalizeListing, parseArgs,
     readPage, microsoftStructuredJd } = mod;
 
   const microsoftUrl = 'https://apply.careers.microsoft.com/careers/job/123456';
@@ -51,26 +49,6 @@ try {
   });
   if (waitedForIbm) pass('IBM JD waits for hydrated content after its locale redirect');
   else fail('IBM JD did not wait for content');
-
-  // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
-  const tmp = mkdtempSync(join(tmpdir(), 'career-ops-extractor-'));
-  try {
-    const write = (name, body) => { const p = join(tmp, name); writeFileSync(p, body); return p; };
-    if (resolveExtractorMode(write('cli.yml', 'scan:\n  extractor: cli\n')) === 'cli') pass('resolveExtractorMode reads scan.extractor: cli');
-    else fail('resolveExtractorMode should read cli');
-    if (resolveExtractorMode(write('mcp.yml', 'scan:\n  extractor: mcp\n')) === 'mcp') pass('resolveExtractorMode reads scan.extractor: mcp');
-    else fail('resolveExtractorMode should read mcp');
-    if (resolveExtractorMode(write('none.yml', 'candidate:\n  full_name: X\n')) === 'mcp') pass('resolveExtractorMode defaults to mcp when the key is absent');
-    else fail('resolveExtractorMode should default to mcp');
-    if (resolveExtractorMode(write('bad.yml', 'scan:\n  extractor: nonsense\n')) === 'mcp') pass('resolveExtractorMode falls back to mcp for an unknown value');
-    else fail('resolveExtractorMode should fall back to mcp on garbage');
-    if (resolveExtractorMode(join(tmp, 'does-not-exist.yml')) === 'mcp') pass('resolveExtractorMode returns mcp when the profile is missing');
-    else fail('resolveExtractorMode should return mcp for a missing file');
-    if (resolveExtractorMode(write('malformed.yml', 'scan:\n  extractor: [cli\n')) === 'mcp') pass('resolveExtractorMode falls back to mcp on malformed YAML (catch branch)');
-    else fail('resolveExtractorMode should return mcp when the YAML is invalid');
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
 
   // parseArgs — index-based: a flag value is never mistaken for the URL, and 0 is honored
   const flagsFirst = parseArgs(['--mode', 'listing', 'https://x/careers']);

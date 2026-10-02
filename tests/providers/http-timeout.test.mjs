@@ -9,7 +9,7 @@ import { pass, fail, ROOT } from '../helpers.mjs';
 
 console.log('\nProvider — _http timeout');
 
-const { fetchJson, fetchText } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+const { fetchJson, fetchText } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/_http.mjs')).href);
 
 // Independent upper bound: if the mechanism under test regresses and the call
 // never settles, this makes the test fail fast (hitting the elapsed assertion)

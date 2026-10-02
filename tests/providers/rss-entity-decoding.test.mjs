@@ -9,7 +9,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProviders — entity decoding is illegal-code-point safe (#2790)');
 
-const load = (f) => import(pathToFileURL(join(ROOT, 'providers/' + f)).href);
+const load = (f) => import(pathToFileURL(join(ROOT, 'adapters/node/providers/' + f)).href);
 const { decodeEntities } = await load('_html-entities.mjs');
 
 // A NUL or a *lone* surrogate must never reach a title. A valid supplementary
@@ -155,7 +155,7 @@ for (const [label, getTitle] of checked) {
 // rather than silently excused by an exception list.
 {
   const { readdirSync, readFileSync } = await import('fs');
-  const dir = join(ROOT, 'providers');
+  const dir = join(ROOT, 'adapters/node/providers');
   // Every provider on main writes the import one way, but the guard must not
   // depend on that: quote style and `const`/arrow declarations are exactly the
   // cosmetic variations a re-introduced copy would arrive with, and matching

@@ -10,7 +10,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — joinup');
 
 try {
-  const joinup = (await import(pathToFileURL(join(ROOT, 'providers/joinup.mjs')).href)).default;
+  const joinup = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/joinup.mjs')).href)).default;
 
   if (joinup.id === 'joinup') pass('joinup.id is "joinup"');
   else fail(`joinup.id is ${JSON.stringify(joinup.id)}`);

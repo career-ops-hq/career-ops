@@ -14,8 +14,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.reverse_checkpoint import write_checkpoint
-from workflow.reverse_runner import (collect_boards, directory_concurrency, discover_global, enrich_dates,
+from career_ops.discovery.reverse_checkpoint import write_checkpoint
+from career_ops.discovery.reverse_runner import (collect_boards, directory_concurrency, discover_global, enrich_dates,
                                      load_seed, publish_reverse_offers, seed_entry)
 
 
@@ -49,7 +49,7 @@ def enriched_then_hung(command, **kwargs):
     raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
 
-with patch("workflow.reverse_runner.subprocess.run", side_effect=enriched_then_hung):
+with patch("career_ops.discovery.reverse_runner.subprocess.run", side_effect=enriched_then_hung):
     enriched, complete = enrich_dates([{"title": "Engineer"}, {"title": "Engineer II"}], timeout_seconds=1)
     assert not complete and len(enriched) == 1 and enriched[0]["postedAt"] == NOW - 1000
 
@@ -60,7 +60,7 @@ def completed_then_hung(command, **kwargs):
     raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
 
-with patch("workflow.reverse_runner.subprocess.run", side_effect=completed_then_hung):
+with patch("career_ops.discovery.reverse_runner.subprocess.run", side_effect=completed_then_hung):
     assert len(collect_boards([{"name": f"board{index}"} for index in range(7)], NOW, False, 6)) == 7
 
 
@@ -73,10 +73,10 @@ def partial_then_hung(command, **kwargs):
     raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
 
-with patch("workflow.reverse_runner.subprocess.run", side_effect=partial_then_hung):
+with patch("career_ops.discovery.reverse_runner.subprocess.run", side_effect=partial_then_hung):
     partial = collect_boards([{"name": name} for name in ("first", "slow", "last")], NOW, False, 6)
     assert [row["status"] if row else None for row in partial] == ["fetched", None, "fetched"]
-with patch("workflow.reverse_runner.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
+with patch("career_ops.discovery.reverse_runner.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
     try:
         collect_boards([{"name": "unfetched"}], NOW, False, 6)
     except subprocess.TimeoutExpired:
@@ -98,10 +98,10 @@ def seed_finished_then_hung(command, **kwargs):
     raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
 
-with patch("workflow.reverse_runner.subprocess.run", side_effect=seed_finished_then_hung):
+with patch("career_ops.discovery.reverse_runner.subprocess.run", side_effect=seed_finished_then_hung):
     assert load_seed("yc")["companies"] == [{"name": "yc"}]
     assert load_seed("a16z")["companies"] == [{"name": "a16z"}]
-with patch("workflow.reverse_runner.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 10_060)):
+with patch("career_ops.discovery.reverse_runner.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 10_060)):
     try:
         load_seed("yc")
     except subprocess.TimeoutExpired:
@@ -125,7 +125,7 @@ with tempfile.TemporaryDirectory() as temporary:
         }]}]
 
     lane = root / "data"
-    with patch("workflow.reverse_runner.decide_reverse_offers", side_effect=RuntimeError("after source sweep")):
+    with patch("career_ops.discovery.reverse_runner.decide_reverse_offers", side_effect=RuntimeError("after source sweep")):
         try:
             discover_global(lane, config, ats=["greenhouse"], collect=one_offer,
                             load_source=one_board, now_ms=NOW)
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory() as temporary:
         verification_calls.append(len(offers))
         return [{"url": offer["url"], "result": "active"} for offer in offers]
 
-    with patch("workflow.reverse_runner.publish_reverse_offers", side_effect=RuntimeError("before publish")):
+    with patch("career_ops.discovery.reverse_runner.publish_reverse_offers", side_effect=RuntimeError("before publish")):
         try:
             discover_global(publish_lane, config, ats=["greenhouse"], collect=one_offer,
                             load_source=one_board, liveness=True, verify=verify_once, now_ms=NOW)
@@ -196,7 +196,7 @@ with tempfile.TemporaryDirectory() as temporary:
         assert "offers" not in completed_graph.checkpoint["channel_values"]
 
     changed_lane = root / "changed-decision-inputs"
-    with patch("workflow.reverse_runner.publish_reverse_offers", side_effect=RuntimeError("before publish")):
+    with patch("career_ops.discovery.reverse_runner.publish_reverse_offers", side_effect=RuntimeError("before publish")):
         try:
             discover_global(changed_lane, config, ats=["greenhouse"], collect=one_offer,
                             load_source=one_board, now_ms=NOW)
@@ -216,7 +216,7 @@ with tempfile.TemporaryDirectory() as temporary:
     blacklist_lane = root / "changed-blacklist"
     blacklist_root = root / "blacklist-input"
     (blacklist_root / "data").mkdir(parents=True)
-    with patch("workflow.reverse_runner.publish_reverse_offers", side_effect=RuntimeError("before publish")):
+    with patch("career_ops.discovery.reverse_runner.publish_reverse_offers", side_effect=RuntimeError("before publish")):
         try:
             discover_global(blacklist_lane, config, ats=["greenhouse"], collect=one_offer,
                             load_source=one_board, input_root=blacklist_root, now_ms=NOW)
@@ -254,7 +254,7 @@ with tempfile.TemporaryDirectory() as temporary:
         publish_reverse_offers(*args, **kwargs)
         raise RuntimeError("after business commit")
 
-    with patch("workflow.reverse_runner.publish_reverse_offers", side_effect=committed_then_crashed):
+    with patch("career_ops.discovery.reverse_runner.publish_reverse_offers", side_effect=committed_then_crashed):
         try:
             discover_global(committed_lane, config, ats=["greenhouse"], collect=one_offer,
                             load_source=one_board, now_ms=NOW)

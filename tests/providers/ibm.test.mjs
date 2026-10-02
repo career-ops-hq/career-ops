@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — ibm');
 
 try {
-  const ibmModule = await import(pathToFileURL(join(ROOT, 'providers/ibm.mjs')).href);
+  const ibmModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/ibm.mjs')).href);
   const ibm = ibmModule.default;
   const { parseIbmResponse, buildPostFilter } = ibmModule;
 
@@ -97,4 +97,3 @@ try {
 } catch (e) {
   fail(`ibm provider tests crashed: ${e.message}`);
 }
-

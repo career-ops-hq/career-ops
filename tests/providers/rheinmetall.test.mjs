@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — rheinmetall (SSR vacancy-list parser)');
 try {
-  const rheinmetallModule = await import(pathToFileURL(join(ROOT, 'providers/rheinmetall.mjs')).href);
+  const rheinmetallModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/rheinmetall.mjs')).href);
   const rheinmetall = rheinmetallModule.default;
   const { resolveListUrl, parseVacancies } = rheinmetallModule;
 

@@ -7,8 +7,8 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — meituan (zhaopin.meituan.com JSON API)');
 try {
-  const meituan = (await import(pathToFileURL(join(ROOT, 'providers/meituan.mjs')).href)).default;
-  const { parseMeituanResponse } = await import(pathToFileURL(join(ROOT, 'providers/meituan.mjs')).href);
+  const meituan = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/meituan.mjs')).href)).default;
+  const { parseMeituanResponse } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/meituan.mjs')).href);
 
   if (meituan.id === 'meituan') pass('meituan.id is "meituan"');
   else fail(`meituan.id is ${JSON.stringify(meituan.id)}`);

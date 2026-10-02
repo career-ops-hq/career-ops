@@ -9,9 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_dedup import (company_aliases, company_role_key, database_snapshot, role_key,
+from career_ops.discovery.dedup import (company_aliases, company_role_key, database_snapshot, role_key,
                                       should_dedup, url_key)
-from workflow.discovery_store import DiscoveryStore
+from career_ops.discovery.store import DiscoveryStore
 
 assert url_key("https://EXAMPLE.com/Jobs/1/?utm_source=x&gh_jid=42#details") == "https://example.com/jobs/1?gh_jid=42"
 assert url_key("https://app.mokahr.com/m/candidate/apply/tenant#/job/123") == "https://app.mokahr.com/m/candidate/apply/tenant?mokahr_job_id=123"

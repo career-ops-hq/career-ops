@@ -4,8 +4,8 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.jd_skill_gap import classify_skill_gaps, diagnose_extraction, scan_jd
-from workflow.skill_extract import canonicalize, extract_skills
+from career_ops.evaluation.skill_gap import classify_skill_gaps, diagnose_extraction, scan_jd
+from career_ops.skills import canonicalize, extract_skills
 
 
 jd = "# Role\n## Requirements\n- Python, Kubernetes, Rust\n## Benefits\n- 401k, Equity\n"

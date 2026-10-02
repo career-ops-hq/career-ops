@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — landingjobs');
 
 try {
-  const ljModule = await import(pathToFileURL(join(ROOT, 'providers/landingjobs.mjs')).href);
+  const ljModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/landingjobs.mjs')).href);
   const landingjobs = ljModule.default;
   const { normalizeLandingJob, companyFromUrl } = ljModule;
 

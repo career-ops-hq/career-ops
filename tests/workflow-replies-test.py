@@ -9,14 +9,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.replies import _classify, classify, import_reply, invite_candidates, invite_signals, match, parse_pasted, view_reply
+from career_ops.applications.replies import _classify, classify, import_reply, invite_candidates, invite_signals, match, parse_pasted, view_reply
 
 
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
 def call(directory, *args, ok=True):
-    result = subprocess.run([PYTHON, "-B", "-m", "workflow.career_ops", "--directory", str(directory), "reply", *args],
+    result = subprocess.run([PYTHON, "-B", "-m", "career_ops", "--directory", str(directory), "reply", *args],
                             cwd=ROOT, text=True, capture_output=True)
     assert (result.returncode == 0) == ok, result.stderr
     return json.loads(result.stdout) if ok else result.stderr

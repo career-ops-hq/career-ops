@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.insights.company import company_view, company_signals
+from career_ops.insights.company import company_view, company_signals
 
 
 with tempfile.TemporaryDirectory() as temp:

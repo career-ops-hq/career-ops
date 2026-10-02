@@ -7,7 +7,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_filters import classify_tier
+from career_ops.discovery.filters import classify_tier
 
 
 cases = json.loads((ROOT / "tests" / "fixtures" / "classify-tier-baseline.json").read_text())

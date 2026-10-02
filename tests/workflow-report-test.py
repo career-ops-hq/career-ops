@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.report import render_report
+from career_ops.evaluation.report import render_report
 
 
 with tempfile.TemporaryDirectory(prefix="career-ops-report-") as temporary:

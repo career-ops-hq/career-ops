@@ -7,7 +7,7 @@ console.log('\nProvider — personio');
 
 
 try {
-  const personioModule = await import(pathToFileURL(join(ROOT, 'providers/personio.mjs')).href);
+  const personioModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/personio.mjs')).href);
   const personio = personioModule.default;
   const { parsePersonioXml, parsePersonioHtml } = personioModule;
 
@@ -310,4 +310,3 @@ try {
 } catch (e) {
   fail(`personio provider tests crashed: ${e.message}`);
 }
-

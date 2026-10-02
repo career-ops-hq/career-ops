@@ -1,7 +1,7 @@
 /** Keep iCIMS detail enrichment a host-guarded raw provider tool. */
 
 import assert from 'node:assert/strict';
-import { enrich } from '../providers/_enrich.mjs';
+import { enrich } from '../adapters/node/providers/_enrich.mjs';
 
 const url = 'https://careers-acme.icims.com/jobs/123/engineer/job';
 const completed = [];

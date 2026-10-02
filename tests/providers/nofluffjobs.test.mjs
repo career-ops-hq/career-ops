@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — nofluffjobs');
 
 try {
-  const nofluffjobsModule = await import(pathToFileURL(join(ROOT, 'providers/nofluffjobs.mjs')).href);
+  const nofluffjobsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/nofluffjobs.mjs')).href);
   const nfj = nofluffjobsModule.default;
   const { parseNoFluffJobsResponse } = nofluffjobsModule;
 
@@ -107,4 +107,3 @@ try {
 } catch (e) {
   fail(`nofluffjobs provider tests crashed: ${e.message}`);
 }
-

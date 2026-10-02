@@ -12,7 +12,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — gem');
 
 try {
-  const gemModule = await import(pathToFileURL(join(ROOT, 'providers/gem.mjs')).href);
+  const gemModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/gem.mjs')).href);
   const gem = gemModule.default;
 
   if (gem.id === 'gem') pass('gem.id is "gem"');

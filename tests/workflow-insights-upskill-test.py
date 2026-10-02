@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.insights.upskill import targeted_skill_gap, upskill_view
+from career_ops.insights.upskill import targeted_skill_gap, upskill_view
 
 
 jd = "## Requirements\n- Python and Kubernetes\n- Terraform and Java\n## Benefits\n- Docker\n"

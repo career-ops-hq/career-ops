@@ -7,7 +7,7 @@ console.log('\nProvider — themuse');
 
 
 try {
-  const museModule = await import(pathToFileURL(join(ROOT, 'providers/themuse.mjs')).href);
+  const museModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/themuse.mjs')).href);
   const themuse = museModule.default;
   const { normalizeMuseJob } = museModule;
 
@@ -336,4 +336,3 @@ try {
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
 }
-

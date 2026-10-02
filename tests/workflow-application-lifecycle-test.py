@@ -8,13 +8,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
-CLI = ROOT / "workflow" / "career_ops.py"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
 def call(directory: Path, *args: str, ok: bool = True) -> dict:
     result = subprocess.run(
-        [PYTHON, "-B", CLI, "--directory", directory, "application", *args],
+        [PYTHON, "-B", "-m", "career_ops", "--directory", directory, "application", *args],
         text=True, capture_output=True,
     )
     assert (result.returncode == 0) is ok, result.stderr

@@ -8,13 +8,12 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / "workflow" / "career_ops.py"
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
 def run(directory: Path, *args: str, expected: int = 0, env: dict | None = None) -> dict:
     result = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), *args],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), *args],
         text=True,
         capture_output=True,
         env={**os.environ, **(env or {})},
@@ -62,7 +61,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     duplicate = run(directory, "start", "score", "job-1", str(job1), env=model_env)
     assert duplicate == completed
     rejected = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "job-1", str(report("job-1", "Changed JD"))],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "job-1", str(report("job-1", "Changed JD"))],
         text=True,
         capture_output=True,
         env={**os.environ, **model_env},
@@ -119,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     assert uncertain["status"] == "completed" and uncertain["artifact"]["outcome"] == "score"
 
     arbitrary = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "score", "bad", "arbitrary text"],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "bad", "arbitrary text"],
         text=True, capture_output=True,
     )
     assert arbitrary.returncode == 1 and "jd_report_v1" in arbitrary.stderr
@@ -141,7 +140,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cli-") as temporary:
     assert cancelled["status"] == "completed"
     assert cancelled["allowed_actions"] == []
     terminal_resume = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "resume", second["task_id"], "--input", str(report("job-2"))],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "resume", second["task_id"], "--input", str(report("job-2"))],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert terminal_resume.returncode == 1 and "Terminal task cannot resume" in terminal_resume.stderr

@@ -8,7 +8,7 @@ import tempfile
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.notifications import deliver
+from career_ops.notifications import deliver
 
 
 def check(outcome):
@@ -29,7 +29,7 @@ def check(outcome):
             if outcome == "crash":
                 raise SystemExit("process stopped after claim")
 
-        with patch("workflow.notifications.eligible_report", return_value=payload):
+        with patch("career_ops.notifications.eligible_report", return_value=payload):
             if outcome == "crash":
                 try:
                     deliver(directory, payload["opportunity_id"], sender)
@@ -53,7 +53,7 @@ check("crash")
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
-    python = root / "workflow/.venv/bin/python"
+    python = root / ".venv/bin/python"
     python.parent.mkdir(parents=True)
     python.write_text('#!/bin/sh\nprintf "%s|%s\\n" "${CAREER_OPS_NOTIFICATIONS_ENABLED:-}" "$*" >> "$CALLS"\n')
     python.chmod(0o755)
@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(["sh", str(Path(__file__).resolve().parents[1] / "scripts/career-ops-score.sh")],
                    cwd=root, env={**environment, "CALLS": str(calls)}, check=True)
     assert calls.read_text().splitlines() == [
-        "|-B -m workflow.career_ops cron-score",
-        "1|-B -m workflow.notifications cron",
+        "|-B -m career_ops cron-score",
+        "1|-B -m career_ops notify cron",
     ]
 print("notification graph and scheduled wrapper: delivery and replay checks passed")

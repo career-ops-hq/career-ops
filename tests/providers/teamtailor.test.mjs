@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — teamtailor');
 
 try {
-  const teamtailorModule = await import(pathToFileURL(join(ROOT, 'providers/teamtailor.mjs')).href);
+  const teamtailorModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/teamtailor.mjs')).href);
   const teamtailor = teamtailorModule.default;
   const { parseTeamtailorFeed } = teamtailorModule;
 
@@ -178,4 +178,3 @@ try {
 } catch (e) {
   fail(`teamtailor provider tests crashed: ${e.message}`);
 }
-

@@ -12,9 +12,9 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery import discover
-from workflow.discovery_dedup import database_snapshot
-from workflow.discovery_store import DiscoveryStore
+from career_ops.discovery.configured import discover
+from career_ops.discovery.dedup import database_snapshot
+from career_ops.discovery.store import DiscoveryStore
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory() as temporary:
             assert str(error) == "crash after business commit"
         else:
             raise AssertionError("Expected injected crash")
-    with patch("workflow.discovery.collect_provider_results", side_effect=AssertionError("collector repeated")):
+    with patch("career_ops.discovery.configured.collect_provider_results", side_effect=AssertionError("collector repeated")):
         resumed = discover(output, portals, capture=lambda directory, url: None, resume=True)
     assert resumed["added"] == 1 and resumed["filtered"]["dupes"] == 2
     with sqlite3.connect(output / "opportunities.db") as db:
@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory() as temporary:
         failed = json.loads(db.execute("SELECT summary FROM scan_runs").fetchone()[0])
         assert failed["status"] == "failed" and failed["found"] == 3 and failed["newAdded"] == 0
         assert db.execute("SELECT count(*) FROM opportunities").fetchone()[0] == 1
-    with patch("workflow.discovery.collect_provider_results", side_effect=AssertionError("collector repeated")):
+    with patch("career_ops.discovery.configured.collect_provider_results", side_effect=AssertionError("collector repeated")):
         resumed = discover(output, portals, capture=lambda directory, url: None, resume=True)
     assert resumed["added"] == 1 and resumed["filtered"]["dupes"] == 2
     with sqlite3.connect(output / "opportunities.db") as db:
@@ -153,14 +153,14 @@ with tempfile.TemporaryDirectory() as temporary:
                       "url": "https://example.com/job/partial"}], "truncated": True,
             "truncation_kind": "coverage_gap"}]}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-    with patch("workflow.discovery.subprocess.run", side_effect=truncated_collection):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=truncated_collection):
         result = discover(root / "work", portals, capture=lambda directory, url: None)
     assert result["status"] == "partial" and result["added"] == 1
     assert result["errors"] == 1 and result["failures"][0]["kind"] == "coverage_warning"
     assert result["failures"][0]["reason"] == "coverage_gap"
     with sqlite3.connect(root / "work" / "opportunities.db") as db:
         assert db.execute("SELECT status FROM source_health").fetchone()[0] == "incomplete"
-    with patch("workflow.discovery.subprocess.run", side_effect=truncated_collection):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=truncated_collection):
         second = discover(root / "work", portals, capture=lambda directory, url: None)
         third = discover(root / "work", portals, capture=lambda directory, url: None)
     assert second["persistent_failures"] == []
@@ -175,7 +175,7 @@ with tempfile.TemporaryDirectory() as temporary:
             "jobs": [{"company": "Partial PCSX", "title": "Engineer", "url": "https://example.com/job/1"}],
             "truncated": True, "truncation_kind": "auth"}]}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-    with patch("workflow.discovery.subprocess.run", side_effect=late_auth):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=late_auth):
         partial = discover(root / "work", portals, capture=lambda directory, url: None)
     assert partial["status"] == "partial" and partial["added"] == 1
     assert partial["failures"][0]["reason"] == "auth"
@@ -191,7 +191,7 @@ with tempfile.TemporaryDirectory() as temporary:
             "jobs": [{"company": "Capped iCIMS", "title": "Engineer",
                       "url": "https://example.com/job/icims-cap"}], "capped": True}]}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-    with patch("workflow.discovery.subprocess.run", side_effect=capped_collection):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=capped_collection):
         result = discover(root / "work", portals, capture=lambda directory, url: None)
     assert result["status"] == "partial" and result["added"] == 1
     assert result["failures"][0]["reason"] == "page_cap"
@@ -213,7 +213,7 @@ with tempfile.TemporaryDirectory() as temporary:
             "jobs": [{"company": "Fallback", "title": "Engineer", "url": "https://example.com/fallback"}],
             "warning": "local parser failed, used API fallback: unavailable"}]}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-    with patch("workflow.discovery.subprocess.run", side_effect=fallback_collection):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=fallback_collection):
         fallback = discover(root / "work", portals, capture=lambda directory, url: None)
     assert fallback["status"] == "partial" and fallback["added"] == 1 and fallback["errors"] == 1
     with sqlite3.connect(root / "work" / "opportunities.db") as db:
@@ -224,17 +224,17 @@ with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     portals = root / "portals.yml"
     portals.write_text("tracked_companies:\n  - name: Collector Failure\n    provider: greenhouse\n")
-    with patch("workflow.discovery.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
         failed = discover(root / "work", portals)
     assert failed == {"status": "failed", "error": "Provider scanner exceeded its 900-second budget"}
     with sqlite3.connect(root / "work" / "opportunities.db") as db:
         summary = json.loads(db.execute("SELECT summary FROM scan_runs").fetchone()[0])
         assert summary["status"] == "failed" and summary["newAdded"] == 0
         assert db.execute("SELECT count(*) FROM source_health").fetchone()[0] == 0
-    with patch("workflow.discovery.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
         preview = discover(root / "dry-run", portals, dry_run=True)
     assert preview["status"] == "failed" and not (root / "dry-run").exists()
-    with patch("workflow.discovery.subprocess.run", side_effect=KeyboardInterrupt):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=KeyboardInterrupt):
         try:
             discover(root / "interrupted", portals)
         except KeyboardInterrupt:
@@ -248,7 +248,7 @@ with tempfile.TemporaryDirectory() as temporary:
         Path(command[-1]).write_text(json.dumps({"results": [{"status": "fetched", "provider": "greenhouse",
                                                          "jobs": []}]}))
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
-    with patch("workflow.discovery.subprocess.run", side_effect=finished_then_hung):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=finished_then_hung):
         recovered = discover(root / "late-exit", portals)
     assert recovered["status"] == "completed" and recovered["checked"] == 0
 
@@ -267,7 +267,7 @@ with tempfile.TemporaryDirectory() as temporary:
         return run
 
     with patch.object(DiscoveryStore, "scan_run_once", commit_then_interrupt), \
-            patch("workflow.discovery.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
+            patch("career_ops.discovery.configured.subprocess.run", side_effect=subprocess.TimeoutExpired("node", 900)):
         try:
             discover(root / "work", portals)
         except RuntimeError as error:
@@ -288,7 +288,7 @@ with tempfile.TemporaryDirectory() as temporary:
             {"status": "fetched", "provider": "greenhouse", "jobs": {}}]}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    with patch("workflow.discovery.subprocess.run", side_effect=malformed):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=malformed):
         for resume in (False, True):
             try:
                 discover(root / "work", portals, resume=resume)
@@ -308,7 +308,7 @@ with tempfile.TemporaryDirectory() as temporary:
         assert kwargs["timeout"] == 1260
         Path(command[-1]).write_text(json.dumps({"results": [{"status": "fetched", "provider": "greenhouse", "jobs": []}] * 11}))
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-    with patch("workflow.discovery.subprocess.run", side_effect=observe_budget):
+    with patch("career_ops.discovery.configured.subprocess.run", side_effect=observe_budget):
         assert discover(root / "work", portals)["status"] == "completed"
 
 with tempfile.TemporaryDirectory() as temporary:
@@ -365,14 +365,14 @@ with tempfile.TemporaryDirectory() as temporary:
     (root / "cv.md").write_text("# Candidate\n")
     (root / "modes").mkdir()
     (root / "modes" / "_profile.md").write_text("Targeting\n")
-    preview = subprocess.run([str(ROOT / "workflow" / ".venv" / "bin" / "python"), "-B", "-m", "workflow.career_ops",
+    preview = subprocess.run([str(ROOT / ".venv" / "bin" / "python"), "-B", "-m", "career_ops",
                               "--directory", str(root / "preview"), "discover", "--dry-run"], cwd=ROOT,
                              env={**os.environ, "CAREER_OPS_INPUT_ROOT": str(root), "CAREER_OPS_PORTALS": str(alternate),
                                   "CAREER_OPS_PROFILE": str(profile)}, capture_output=True, text=True, timeout=90)
     assert preview.returncode == 0, preview.stderr
     assert json.loads(preview.stdout)["checked"] == 3
     assert not (root / "preview" / "opportunities.db").exists()
-    global_preview = subprocess.run([str(ROOT / "workflow" / ".venv" / "bin" / "python"), "-B", "-m", "workflow.career_ops",
+    global_preview = subprocess.run([str(ROOT / ".venv" / "bin" / "python"), "-B", "-m", "career_ops",
                                      "--directory", str(root / "global-preview"), "global", "--dry-run", "--ats=,"], cwd=ROOT,
                                     env={**os.environ, "CAREER_OPS_INPUT_ROOT": str(root), "CAREER_OPS_PORTALS": str(alternate)},
                                     capture_output=True, text=True, timeout=90)
@@ -387,7 +387,7 @@ with tempfile.TemporaryDirectory() as temporary:
     portals = root / "portals.yml"
     for index, (value, expected) in enumerate((("7days", 7), ("3.5", 3), ("true", None))):
         portals.write_text(f"scan_history:\n  recheck_after_days: {value}\ntracked_companies: []\n")
-        with patch("workflow.discovery.database_snapshot", wraps=database_snapshot) as snapshot:
+        with patch("career_ops.discovery.configured.database_snapshot", wraps=database_snapshot) as snapshot:
             discover(root / f"recheck-{index}", portals)
         assert snapshot.call_args.kwargs["recheck_after_days"] == expected
 
@@ -410,7 +410,7 @@ with tempfile.TemporaryDirectory() as temporary:
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
     for word in ["AI Engineer", "智能体工程师"]:
         profile.write_text(yaml.safe_dump({"target_roles": {"search_keywords": [word]}}))
-        with patch("workflow.discovery.subprocess.run", side_effect=collected_search):
+        with patch("career_ops.discovery.configured.subprocess.run", side_effect=collected_search):
             result = discover(root / "work", portals, profile_path=profile,
                               capture=lambda *_: (_ for _ in ()).throw(AssertionError("JD read repeated")))
         assert result["status"] == "completed" and result["added"] == 1, result

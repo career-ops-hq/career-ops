@@ -11,7 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.portal_config import validate_config
+from career_ops.discovery.portal_config import validate_config
 
 
 CASES = [
@@ -47,7 +47,7 @@ with TemporaryDirectory() as directory:
     path = Path(directory) / "portals.yml"
     for index, config in enumerate(CASES):
         path.write_text(yaml.safe_dump(config, sort_keys=False))
-        python = subprocess.run([sys.executable, "-B", "-m", "workflow.portal_config", "--file", str(path)],
+        python = subprocess.run([sys.executable, "-B", "-m", "career_ops", "portal", "validate", "--file", str(path)],
                                 cwd=ROOT, capture_output=True, text=True)
         assert (python.returncode == 0) == expected[index]["ok"], (index, python.stdout, python.stderr)
         assert messages(python.stdout) == expected[index]["messages"], (index, messages(python.stdout))

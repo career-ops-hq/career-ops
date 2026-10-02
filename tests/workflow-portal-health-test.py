@@ -14,9 +14,9 @@ from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow import portal_health
-from workflow.http_identity import DEFAULT_USER_AGENT
-from workflow.portal_health import (board_title_owner, identity_matches, parse_ats_slug,
+from career_ops.discovery import portal_health
+from career_ops.http_identity import DEFAULT_USER_AGENT
+from career_ops.discovery.portal_health import (board_title_owner, identity_matches, parse_ats_slug,
                                     probe_provider, ProviderHealthSession, slug_candidates, verify_ats_company,
                                     verify_companies)
 
@@ -37,7 +37,7 @@ assert board_title_owner("<body>no title</body>") is None
 assert not identity_matches("Mercury Systems", board_title_owner("<title>Mercury &amp; Co Jobs</title>"))
 
 node_ua = subprocess.run(["node", "--input-type=module", "-e",
-                          "import {DEFAULT_USER_AGENT} from './user-agent.mjs'; console.log(DEFAULT_USER_AGENT)"],
+                          "import {DEFAULT_USER_AGENT} from './adapters/node/shared/user-agent.mjs'; console.log(DEFAULT_USER_AGENT)"],
                          cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
 assert DEFAULT_USER_AGENT == node_ua
 with patch.object(portal_health, "urlopen", return_value=BytesIO(b"x" * 9000)) as open_url:
@@ -96,7 +96,7 @@ with ProviderHealthSession() as session:
 with TemporaryDirectory() as directory:
     portal = Path(directory) / "portals.yml"
     portal.write_text("tracked_companies:\n  - name: Disabled\n    enabled: false\n")
-    command = subprocess.run([sys.executable, "-B", "-m", "workflow.portal_health", "--ats-only",
+    command = subprocess.run([sys.executable, "-B", "-m", "career_ops", "portal", "health", "--ats-only",
                               "--json", "--strict", "--file", str(portal)],
                              cwd=ROOT, capture_output=True, text=True, check=True)
     assert json.loads(command.stdout) == {"found": True, "results": []}

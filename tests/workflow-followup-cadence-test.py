@@ -9,8 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.application_lifecycle import ApplicationStore
-from workflow.followup_cadence import DEFAULT_CADENCE, applied_date_from_notes, cadence, cadence_config
+from career_ops.applications.application_lifecycle import ApplicationStore
+from career_ops.applications.followup_cadence import DEFAULT_CADENCE, applied_date_from_notes, cadence, cadence_config
 
 
 today = date(2026, 9, 27)

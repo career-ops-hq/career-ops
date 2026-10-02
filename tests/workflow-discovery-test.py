@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import current_discovered_scan_source, discovered_scan_source, same_posting_url
-from workflow.discovery import capture_jd
+from career_ops.tasks import current_discovered_scan_source, discovered_scan_source, same_posting_url
+from career_ops.discovery.configured import capture_jd
 
 
 jd = "Real captured job description with responsibilities and qualifications."
@@ -38,16 +38,16 @@ stale = json.loads(row["capture_payload"])
 stale["scan_jd"]["retrieved_at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
 assert discovered_scan_source({**row, "capture_payload": json.dumps(stale)})["liveness"] == "uncertain"
 fresh = {"status": "captured", "url": url, "text": jd + " Updated", "retrieved_at": captured_at}
-with patch("workflow.career_ops.capture_jd", return_value=fresh) as browser:
+with patch("career_ops.tasks.capture_jd", return_value=fresh) as browser:
     recovered = current_discovered_scan_source({**row, "capture_payload": json.dumps(stale)}, Path("/tmp/scan"))
 assert browser.call_count == 1 and recovered["liveness"] == "active"
 assert recovered["jd"] == fresh["text"]
-with patch("workflow.career_ops.capture_jd", return_value=None):
+with patch("career_ops.tasks.capture_jd", return_value=None):
     assert current_discovered_scan_source({**row, "capture_payload": json.dumps(stale)}, Path("/tmp/scan"))["liveness"] == "uncertain"
-with patch("workflow.discovery.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"snapshot": fresh}))) as browser:
+with patch("career_ops.discovery.configured.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"snapshot": fresh}))) as browser:
     assert capture_jd(Path("/tmp/scan"), url) == fresh
-assert browser.call_args.args[0][1].endswith("lib/scan-jd.mjs")
-with patch("workflow.discovery.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"snapshot": fresh}))) as browser:
+assert browser.call_args.args[0][1].endswith("adapters/node/browser/scan-jd.mjs")
+with patch("career_ops.discovery.configured.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"snapshot": fresh}))) as browser:
     assert capture_jd(Path("/tmp/scan"), url, fresh=True) == fresh
 assert browser.call_args.args[0][-1] == "--fresh"
 ibm = "https://careers.ibm.com/careers/JobDetail?jobId=131606"
@@ -59,7 +59,7 @@ ibm_row = {**row, "url": ibm, "capture_payload": json.dumps({
                             "final_url": localized, "content_hash": hashlib.sha256(jd.encode()).hexdigest()},
 })}
 assert discovered_scan_source(ibm_row)["liveness"] == "active"
-with patch("workflow.discovery.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="not-json")):
+with patch("career_ops.discovery.configured.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="not-json")):
     assert capture_jd(Path("/tmp/scan"), url) is None
 
 print("workflow discovery: evidence handoff passed")

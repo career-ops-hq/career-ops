@@ -8,19 +8,20 @@ on your behalf.
 ## Runtime
 
 - Node.js 18+
-- Python environment at `/Users/oii/.hermes/hermes-agent/venv`
+- Python 3.11+ in the root `.venv` (`uv sync --locked`)
 - SQLite operational store: `data/opportunities.db`
 
-The retained entrypoints are intentionally small. Run the workflow through the
-canonical agent skill at `.agents/skills/career-ops/SKILL.md`; scripts support
-that workflow rather than exposing a public product surface.
+Run `.venv/bin/python -B -m career_ops --help` for the unified business CLI.
+The agent router is `.agents/skills/career-ops/SKILL.md`. Node modules under
+`adapters/node` collect external formats, observe browser pages, and render
+Reactive Resume payloads; Python owns business decisions and persisted facts.
 
 ## Core checks
 
 ```bash
-node doctor.mjs --json
+.venv/bin/python -B -m career_ops doctor --json
 node scripts/check-syntax.mjs
-workflow/.venv/bin/python -B tests/workflow-scan-test.py
+.venv/bin/python -B scripts/check.py
 ```
 
 ## Data boundaries

@@ -7,7 +7,7 @@ console.log('\nProvider — successfactors (SAP RMK tile parser)');
 
 
 try {
-  const successfactorsModule = await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href);
+  const successfactorsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/successfactors.mjs')).href);
   const sf = successfactorsModule.default;
   const { parseTiles, cityFromSlug, resolveConfig } = successfactorsModule;
 

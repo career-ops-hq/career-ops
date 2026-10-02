@@ -7,7 +7,7 @@ console.log('\nProvider — weworkremotely');
 
 
 try {
-  const wwrModule = await import(pathToFileURL(join(ROOT, 'providers/weworkremotely.mjs')).href);
+  const wwrModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/weworkremotely.mjs')).href);
   const weworkremotely = wwrModule.default;
   const { parseWwrFeed } = wwrModule;
 
@@ -134,4 +134,3 @@ try {
 } catch (e) {
   fail(`weworkremotely provider tests crashed: ${e.message}`);
 }
-

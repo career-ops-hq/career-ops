@@ -7,7 +7,7 @@ console.log('\nProvider — pinpoint');
 
 
 try {
-  const pinpointModule = await import(pathToFileURL(join(ROOT, 'providers/pinpoint.mjs')).href);
+  const pinpointModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/pinpoint.mjs')).href);
   const pinpoint = pinpointModule.default;
   const { parsePinpointResponse } = pinpointModule;
 
@@ -188,4 +188,3 @@ try {
 } catch (e) {
   fail(`pinpoint provider tests crashed: ${e.message}`);
 }
-

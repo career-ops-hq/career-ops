@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — higheredjobs');
 
 try {
-  const hejModule = await import(pathToFileURL(join(ROOT, 'providers/higheredjobs.mjs')).href);
+  const hejModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/higheredjobs.mjs')).href);
   const higheredjobs = hejModule.default;
   const { parseHigherEdJobsFeed } = hejModule;
 
@@ -141,4 +141,3 @@ try {
 } catch (e) {
   fail(`higheredjobs provider tests crashed: ${e.message}`);
 }
-

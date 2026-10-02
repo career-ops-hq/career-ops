@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — larajobs');
 
 try {
-  const larajobsModule = await import(pathToFileURL(join(ROOT, 'providers/larajobs.mjs')).href);
+  const larajobsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/larajobs.mjs')).href);
   const larajobs = larajobsModule.default;
   const { parseLarajobsFeed } = larajobsModule;
 

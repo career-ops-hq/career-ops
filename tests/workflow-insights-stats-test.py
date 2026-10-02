@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.insights.stats import stats_view
+from career_ops.insights.stats import stats_view
 
 
 with tempfile.TemporaryDirectory() as temp:

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import main
+from career_ops.cli import main
 
 
 def invoke(*args: str):
@@ -17,7 +17,7 @@ def invoke(*args: str):
         main()
 
 
-with patch("workflow.career_ops.discover") as discover:
+with patch("career_ops.cli.discover") as discover:
     try:
         invoke("discover", "--company=")
     except SystemExit as error:
@@ -26,7 +26,7 @@ with patch("workflow.career_ops.discover") as discover:
         raise AssertionError("An empty company filter must not start a full scan")
     discover.assert_not_called()
 
-with patch("workflow.career_ops.discover", return_value={"status": "completed"}) as discover:
+with patch("career_ops.cli.discover", return_value={"status": "completed"}) as discover:
     invoke("discover", "--company", "AIA", "--verify", "--headed-fallback", "--throttle=8000",
            "--rediscover-404", "--posted-after=2026-01-01", "--posted-before=2026-09-01",
            "--since=7", "--include-blacklisted", "--dry-run")
@@ -40,7 +40,7 @@ with patch("workflow.career_ops.discover", return_value={"status": "completed"})
     invoke("discover", "--resume")
     assert discover.call_args.kwargs["resume"] is True
 
-with patch("workflow.career_ops.discover_global", return_value={"status": "completed"}) as global_run:
+with patch("career_ops.cli.discover_global", return_value={"status": "completed"}) as global_run:
     invoke("global", "--ats=", "--md-out=")
     assert global_run.call_args.kwargs["ats"] is None
     assert global_run.call_args.kwargs["md_out"] is None

@@ -1,7 +1,7 @@
 /** Verify the current a16z portfolio payload is parsed without losing the legacy fallback. */
 
 import assert from 'node:assert/strict';
-import { parseA16zPayload } from '../seeds/vc-portfolios.mjs';
+import { parseA16zPayload } from '../adapters/node/seeds/vc-portfolios.mjs';
 
 const current = `<script>window.a16z_portfolio_companies = [
   {"title":"Abridge","web":"https://abridge.com"},

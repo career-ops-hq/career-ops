@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — hackernews');
 
 try {
-  const hackernewsModule = await import(pathToFileURL(join(ROOT, 'providers/hackernews.mjs')).href);
+  const hackernewsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/hackernews.mjs')).href);
   const hn = hackernewsModule.default;
   const { parseHnComment, resolveLatestThreadId } = hackernewsModule;
 

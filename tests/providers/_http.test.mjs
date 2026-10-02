@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — _http retry helpers');
 
 const { isRetryableError, fetchJsonWithRetry, fetchResponse } =
-  await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  await import(pathToFileURL(join(ROOT, 'adapters/node/providers/_http.mjs')).href);
 
 // isRetryableError() — status-based classification.
 if (isRetryableError({ status: 429 }) === true) pass('isRetryableError(429) is true');

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureScanJds, readScanJd, samePostingUrl, JD_MAX_AGE_MS } from '../lib/scan-jd.mjs';
+import { captureScanJds, readScanJd, samePostingUrl, JD_MAX_AGE_MS } from '../adapters/node/browser/scan-jd.mjs';
 const root = mkdtempSync(join(tmpdir(), 'scan-jd-'));
 try {
   const offer = { url: 'https://example.com/jobs/123' };
@@ -13,7 +13,7 @@ try {
   const extract = async url => { calls++; return { url, title: 'Engineer', text: 'Responsibilities and qualifications' }; };
   assert.deepEqual(await captureScanJds([offer, offer], root, extract), { captured: 1, reused: 0, failed: 0 });
   assert.equal(readScanJd(offer.url, root).text, 'Responsibilities and qualifications');
-  const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../lib/scan-jd.mjs', import.meta.url)), offer.url, root], { encoding: 'utf8' });
+  const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../adapters/node/browser/scan-jd.mjs', import.meta.url)), offer.url, root], { encoding: 'utf8' });
   assert.equal(cli.status, 0, cli.stderr);
   assert.equal(JSON.parse(cli.stdout).snapshot.text, 'Responsibilities and qualifications');
   assert.equal((await captureScanJds([offer], root, extract)).reused, 1);

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — bamboohr');
 
 try {
-  const bamboohrModule = await import(pathToFileURL(join(ROOT, 'providers/bamboohr.mjs')).href);
+  const bamboohrModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/bamboohr.mjs')).href);
   const bamboohr = bamboohrModule.default;
   const { parseBambooHRResponse } = bamboohrModule;
 
@@ -102,4 +102,3 @@ try {
 } catch (e) {
   fail(`bamboohr provider tests crashed: ${e.message}`);
 }
-

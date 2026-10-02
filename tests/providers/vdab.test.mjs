@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — vdab');
 
 try {
-  const vdabModule = await import(pathToFileURL(join(ROOT, 'providers/vdab.mjs')).href);
+  const vdabModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/vdab.mjs')).href);
   const vdab = vdabModule.default;
   const { parseVdabConfig, normalizeJob, extractDescription } = vdabModule;
 

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — tkms (filter/query JSON API)');
 try {
-  const tkmsModule = await import(pathToFileURL(join(ROOT, 'providers/tkms.mjs')).href);
+  const tkmsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/tkms.mjs')).href);
   const tkms = tkmsModule.default;
   const { resolveConfig: tkConfig, slugify: tkSlug, parseTkmsDate, tkmsLocation, parseQuery } = tkmsModule;
 

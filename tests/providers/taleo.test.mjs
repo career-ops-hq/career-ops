@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — taleo');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/taleo.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/taleo.mjs')).href);
   const { resolveSite, parseSearchPage, parseTaleoResponse } = mod;
 
   // resolveSite: classic taleo.net tenant

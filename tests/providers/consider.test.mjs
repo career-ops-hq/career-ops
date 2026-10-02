@@ -11,7 +11,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — consider');
 
 try {
-  const consider = (await import(pathToFileURL(join(ROOT, 'providers/consider.mjs')).href)).default;
+  const consider = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/consider.mjs')).href)).default;
 
   if (consider.id === 'consider') pass('consider.id is "consider"');
   else fail(`consider.id is ${JSON.stringify(consider.id)}`);

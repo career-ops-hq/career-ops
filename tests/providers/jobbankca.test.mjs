@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — jobbankca');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/jobbankca.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/jobbankca.mjs')).href);
   const jobbankca = mod.default;
   const { parseJobBankFeed, buildFeedUrl, assertJobBankUrl } = mod;
 

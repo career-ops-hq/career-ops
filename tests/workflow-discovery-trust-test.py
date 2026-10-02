@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_trust import trust
+from career_ops.discovery.trust import trust
 
 config = {"enabled": True}
 assert trust({"url": "", "company": "Acme"}, config) == {

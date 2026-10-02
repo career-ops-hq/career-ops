@@ -15,7 +15,7 @@ import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
-const load = (f) => import(pathToFileURL(join(ROOT, `providers/${f}`)).href);
+const load = (f) => import(pathToFileURL(join(ROOT, `adapters/node/providers/${f}`)).href);
 
 console.log('\nProviders — title entity decoding (#2921)');
 try {

@@ -7,7 +7,7 @@ console.log('\nProvider — breezy');
 
 
 try {
-  const breezyModule = await import(pathToFileURL(join(ROOT, 'providers/breezy.mjs')).href);
+  const breezyModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/breezy.mjs')).href);
   const breezy = breezyModule.default;
   const { parseBreezyResponse } = breezyModule;
 
@@ -108,4 +108,3 @@ try {
 } catch (e) {
   fail(`breezy provider tests crashed: ${e.message}`);
 }
-

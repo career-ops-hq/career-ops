@@ -6,7 +6,7 @@ import { pass, fail, ROOT } from '../helpers.mjs';
 
 console.log('\nProvider — icims');
 
-const mod = await import(pathToFileURL(join(ROOT, 'providers/icims.mjs')).href);
+const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/icims.mjs')).href);
 const icims = mod.default;
 const { parseIcimsSearchPage } = mod;
 

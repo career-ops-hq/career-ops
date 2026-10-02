@@ -13,7 +13,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — manfred');
 
 try {
-  const manfredModule = await import(pathToFileURL(join(ROOT, 'providers/manfred.mjs')).href);
+  const manfredModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/manfred.mjs')).href);
   const manfred = manfredModule.default;
   const { normalizeManfredOffer, normalizeCurrency, parseCompensation, resolveLocation, resolveLang } = manfredModule;
 

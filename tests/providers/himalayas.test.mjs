@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — himalayas');
 
 try {
-  const himalayasModule = await import(pathToFileURL(join(ROOT, 'providers/himalayas.mjs')).href);
+  const himalayasModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/himalayas.mjs')).href);
   const himalayas = himalayasModule.default;
   const { parseHimalayasResponse } = himalayasModule;
 

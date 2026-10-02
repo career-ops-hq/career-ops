@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collect } from '../providers/_collect.mjs';
+import { collect } from '../adapters/node/providers/_collect.mjs';
 
 const providers = new Map([
   ['fixture', { id: 'fixture', async fetch(target, context) {
@@ -99,7 +99,7 @@ try {
     careers_url: 'https://boards.example.com/fixture',
     parser: { command: 'node', script: 'tests/fixtures/three-city-board.mjs' } }] }));
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const run = spawnSync(process.execPath, [join(root, 'providers/_collect.mjs'), input, output],
+  const run = spawnSync(process.execPath, [join(root, 'adapters/node/providers/_collect.mjs'), input, output],
     { cwd: root, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   const fetched = JSON.parse(readFileSync(output, 'utf8')).results[0];

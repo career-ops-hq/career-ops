@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — jobicy');
 
 try {
-  const jobicyModule = await import(pathToFileURL(join(ROOT, 'providers/jobicy.mjs')).href);
+  const jobicyModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/jobicy.mjs')).href);
   const jobicy = jobicyModule.default;
   const { parseJobicyResponse } = jobicyModule;
 

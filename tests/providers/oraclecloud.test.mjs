@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — oraclecloud');
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/oraclecloud.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/oraclecloud.mjs')).href);
   const oc = mod.default;
   const { parseOracleResponse, resolveSite, buildApiUrl, buildJobUrl } = mod;
 

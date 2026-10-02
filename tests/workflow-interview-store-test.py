@@ -5,8 +5,8 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.interview_store import InterviewStore, REVIEW_CHECKS
-from workflow.interviews import task_view
+from career_ops.interviews.store import InterviewStore, REVIEW_CHECKS
+from career_ops.interviews.workflow import task_view
 
 
 with tempfile.TemporaryDirectory() as temporary:

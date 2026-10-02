@@ -60,7 +60,7 @@ elif phase == "apply_evaluate":
 elif phase == "evaluate":
     if os.environ.get("WORKFLOW_TEST_DURABLE_FAIL") or os.environ.get("WORKFLOW_TEST_DURABLE_SUCCESS"):
         sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-        from workflow.model_adapter import record_call
+        from career_ops.model import record_call
         record_call()
         if os.environ.get("WORKFLOW_TEST_DURABLE_FAIL"):
             raise SystemExit("injected failure after model dispatch")

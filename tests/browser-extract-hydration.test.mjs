@@ -1,7 +1,7 @@
 /** Exercise hydrated JD text and publisher metadata through the browser extraction path. */
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { readPage } from '../browser-extract.mjs';
+import { readPage } from '../adapters/node/browser/browser-extract.mjs';
 
 const browser = await chromium.launch({ headless: true });
 try {

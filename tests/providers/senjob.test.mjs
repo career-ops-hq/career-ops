@@ -57,7 +57,7 @@ const ROW_INLINE = `
 const PAGE = `<html><body><table>${ROW_WITH_SIBLING_DATE}${ROW_INLINE}</table></body></html>`;
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/senjob.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/senjob.mjs')).href);
   const senjob = mod.default;
   const { parseListingPage, buildListUrl, visibleText, assertParsedSomething } = mod;
 

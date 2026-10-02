@@ -8,7 +8,7 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
 with tempfile.TemporaryDirectory(prefix="career-ops-discovery-cli-") as temporary:
@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-discovery-cli-") as temporar
 
     def run(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [str(PYTHON), "-B", "-m", "workflow.career_ops", "--directory", str(directory / "data"), *args],
+            [str(PYTHON), "-B", "-m", "career_ops", "--directory", str(directory / "data"), *args],
             cwd=ROOT, env=environment, text=True, capture_output=True, timeout=30,
         )
 

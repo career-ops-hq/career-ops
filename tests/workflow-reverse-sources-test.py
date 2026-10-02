@@ -7,7 +7,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.reverse_sources import (CACHE_SECONDS, dataset_fingerprint, load_company_list,
+from career_ops.discovery.reverse_sources import (CACHE_SECONDS, dataset_fingerprint, load_company_list,
                                       sample_companies, to_entry)
 
 

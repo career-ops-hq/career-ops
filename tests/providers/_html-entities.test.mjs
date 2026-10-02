@@ -9,7 +9,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — _html-entities (shared HTML entity decoder)');
 try {
-  const { decodeEntities } = await import(pathToFileURL(join(ROOT, 'providers/_html-entities.mjs')).href);
+  const { decodeEntities } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/_html-entities.mjs')).href);
 
   if (decodeEntities('Program &amp; Release') === 'Program & Release') pass('decodeEntities decodes named entities (&amp;)');
   else fail(`named entity wrong: ${JSON.stringify(decodeEntities('Program &amp; Release'))}`);

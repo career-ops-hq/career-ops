@@ -11,12 +11,11 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = Path(sys.executable)
-CLI = ROOT / "workflow" / "cv_maintenance.py"
 
 
 def call(data: Path, facts: Path, *args: str, expected: int = 0, env: dict | None = None) -> dict:
     result = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(data), "--root", str(facts), *args],
+        [str(PYTHON), "-m", "career_ops", "cv", "--directory", str(data), "--root", str(facts), *args],
         text=True, capture_output=True, env={**os.environ, **(env or {})},
     )
     assert result.returncode == expected, (args, result.stdout, result.stderr)

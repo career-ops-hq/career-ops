@@ -5,7 +5,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — phenom (Phenom People CareerConnect widgets API)');
 try {
-  const phenomModule = await import(pathToFileURL(join(ROOT, 'providers/phenom.mjs')).href);
+  const phenomModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/phenom.mjs')).href);
   const phenom = phenomModule.default;
   const { resolveConfig: phConfig, slugify, parsePhenomDate, jobLocation, parseRefineSearch } = phenomModule;
 

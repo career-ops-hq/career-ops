@@ -8,7 +8,8 @@ import time
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.career_ops import BusinessStore, Runtime
+from career_ops.db import BusinessStore
+from career_ops.tasks import Runtime
 
 
 with tempfile.TemporaryDirectory(prefix="career-ops-process-timeout-") as temporary:
@@ -23,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-process-timeout-") as tempor
     )
     store = BusinessStore(directory / "opportunities.db")
     task = store.start("job", "scan", "{}")
-    with patch("workflow.career_ops.ATTEMPT_SECONDS", 1), patch.dict(
+    with patch("career_ops.tasks.ATTEMPT_SECONDS", 1), patch.dict(
         os.environ, {"CAREER_OPS_MODEL_RUNNER": f"{sys.executable} {runner}"}
     ):
         try:

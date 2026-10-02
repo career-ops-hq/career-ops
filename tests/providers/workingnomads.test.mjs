@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — workingnomads');
 
 try {
-  const workingnomadsModule = await import(pathToFileURL(join(ROOT, 'providers/workingnomads.mjs')).href);
+  const workingnomadsModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/workingnomads.mjs')).href);
   const workingnomads = workingnomadsModule.default;
 
   if (workingnomads.id === 'workingnomads') pass('workingnomads.id is "workingnomads"');
@@ -117,4 +117,3 @@ try {
 } catch (e) {
   fail(`workingnomads provider tests crashed: ${e.message}`);
 }
-

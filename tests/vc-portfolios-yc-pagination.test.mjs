@@ -14,7 +14,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nvc-portfolios — YC pagination (issue #2525)');
 
-const mod = await import(pathToFileURL(join(ROOT, 'seeds/vc-portfolios.mjs')).href);
+const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/seeds/vc-portfolios.mjs')).href);
 const { fetchYCCompanies, parseYCNextPage, YC_MAX_PAGES } = mod;
 
 const realFetch = global.fetch;

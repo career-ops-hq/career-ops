@@ -37,7 +37,7 @@ function mockCtx(pages) {
 }
 
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/eightfold.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/eightfold.mjs')).href);
   const ef = mod.default;
   const { resolveTenant, buildApiUrl, buildJobUrl, parseEightfoldResponse } = mod;
 

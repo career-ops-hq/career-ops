@@ -8,8 +8,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.reverse_checkpoint import compatible, load_checkpoint, resume_at, write_checkpoint
-from workflow.reverse_sources import dataset_fingerprint
+from career_ops.discovery.reverse_checkpoint import compatible, load_checkpoint, resume_at, write_checkpoint
+from career_ops.discovery.reverse_sources import dataset_fingerprint
 
 
 values = ["acme", "beta", "gamma"]

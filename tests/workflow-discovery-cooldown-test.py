@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.discovery_cooldown import company_match, cooldown, load_windows
+from career_ops.discovery.cooldown import company_match, cooldown, load_windows
 
 assert company_match("Nestlé Deutschland", "Nestlé")
 assert company_match("株式会社アカネ", "株式会社アカネ")

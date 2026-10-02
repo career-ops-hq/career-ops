@@ -7,7 +7,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — wttj (Welcome to the Jungle Algolia index)');
 try {
-  const mod = await import(pathToFileURL(join(ROOT, 'providers/wttj.mjs')).href);
+  const mod = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/wttj.mjs')).href);
   const wttj = mod.default;
   const { parseEnvPayload, normalizeWttjHit } = mod;
 

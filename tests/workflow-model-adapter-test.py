@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow import model_adapter as adapter
+from career_ops import model as adapter
 
 
 assert adapter.parse_object('Explanation\n```json\n{"ok":true}\n```') == {"ok": True}

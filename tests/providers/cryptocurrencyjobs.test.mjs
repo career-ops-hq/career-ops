@@ -7,8 +7,8 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — cryptocurrencyjobs');
 
 try {
-  const ccj = (await import(pathToFileURL(join(ROOT, 'providers/cryptocurrencyjobs.mjs')).href)).default;
-  const { parseCryptocurrencyJobsRss, splitTitle } = await import(pathToFileURL(join(ROOT, 'providers/cryptocurrencyjobs.mjs')).href);
+  const ccj = (await import(pathToFileURL(join(ROOT, 'adapters/node/providers/cryptocurrencyjobs.mjs')).href)).default;
+  const { parseCryptocurrencyJobsRss, splitTitle } = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/cryptocurrencyjobs.mjs')).href);
 
   if (ccj.id === 'cryptocurrencyjobs') pass('cryptocurrencyjobs.id is "cryptocurrencyjobs"');
   else fail(`cryptocurrencyjobs.id is ${JSON.stringify(ccj.id)}`);
@@ -96,4 +96,3 @@ try {
 } catch (e) {
   fail(`cryptocurrencyjobs provider tests crashed: ${e.message}`);
 }
-

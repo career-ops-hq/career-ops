@@ -6,7 +6,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.interview_context import load_context
+from career_ops.interviews.context import load_context
 
 
 with tempfile.TemporaryDirectory() as temporary:

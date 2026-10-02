@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.insights.salary import parse_amount, salary_fold, salary_view
+from career_ops.insights.salary import parse_amount, salary_fold, salary_view
 
 
 assert parse_amount("80-90k")["mid"] == 85000

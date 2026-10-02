@@ -10,10 +10,10 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.career_ops import BusinessStore, validate_resume_payload
+from career_ops.db import BusinessStore
+from career_ops.input_contracts import validate_resume_payload
 
-PYTHON = ROOT / "workflow" / ".venv" / "bin" / "python"
-CLI = ROOT / "workflow" / "career_ops.py"
+PYTHON = ROOT / ".venv" / "bin" / "python"
 RUNNER = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-model-runner.py'}"
 RESUME_RENDERER = f"{PYTHON} {ROOT / 'tests' / 'fixtures' / 'workflow-resume-renderer.py'}"
 
@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-draft-migration-") as tempor
 def call(directory: Path, input_root: Path, *args: str, expected: int = 0,
          extra_env: dict | None = None) -> dict:
     result = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), *args],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), *args],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER, "CAREER_OPS_RESUME_RENDERER": RESUME_RENDERER,
              "CAREER_OPS_INPUT_ROOT": str(input_root), **(extra_env or {})},
@@ -207,7 +207,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     call(directory, inputs, "start", "scan", "job-3", str(third))
     call(directory, inputs, "start", "score", "job-3", "scan:job-3")
     crashed = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "apply", "job-3", "score:job-3", "--crash-at", "publish"],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "apply", "job-3", "score:job-3", "--crash-at", "publish"],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER, "CAREER_OPS_RESUME_RENDERER": RESUME_RENDERER,
              "CAREER_OPS_INPUT_ROOT": str(inputs)},
@@ -224,7 +224,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-apply-") as temporary:
     call(directory, inputs, "start", "score", "job-4", "scan:job-4")
     apply_call_log = root / "failed-export-model-calls.txt"
     failed_export = subprocess.run(
-        [str(PYTHON), str(CLI), "--directory", str(directory), "start", "apply", "job-4", "score:job-4"],
+        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "apply", "job-4", "score:job-4"],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER, "CAREER_OPS_RESUME_RENDERER": RESUME_RENDERER,
              "CAREER_OPS_INPUT_ROOT": str(inputs), "CAREER_OPS_RESUME_FAIL_ONCE": str(root / "export-failed"),

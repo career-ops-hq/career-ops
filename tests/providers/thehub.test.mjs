@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — thehub');
 
 try {
-  const thehubModule = await import(pathToFileURL(join(ROOT, 'providers/thehub.mjs')).href);
+  const thehubModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/thehub.mjs')).href);
   const thehub = thehubModule.default;
   const { normalizeHubJob, parseThehubConfig } = thehubModule;
 

@@ -7,7 +7,7 @@ console.log('\nProvider — jobstreet');
 
 
 try {
-  const jobstreetModule = await import(pathToFileURL(join(ROOT, 'providers/jobstreet.mjs')).href);
+  const jobstreetModule = await import(pathToFileURL(join(ROOT, 'adapters/node/providers/jobstreet.mjs')).href);
   const jobstreet = jobstreetModule.default;
   const { parseJobstreetItem } = jobstreetModule;
 
@@ -178,4 +178,3 @@ try {
 } catch (e) {
   fail(`jobstreet provider tests crashed: ${e.message}`);
 }
-

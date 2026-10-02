@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow.decisions import classify, order
+from career_ops.evaluation.decisions import classify, order
 
 
 score = {"direction": 4, "compensation": 4, "company": None}

@@ -8,8 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.salary_observations import record_salary
-from workflow.insights.salary import salary_view, stated_view
+from career_ops.applications.salary_observations import record_salary
+from career_ops.insights.salary import salary_view, stated_view
 
 
 with tempfile.TemporaryDirectory() as temp:

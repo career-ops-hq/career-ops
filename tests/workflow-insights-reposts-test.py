@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.insights.reposts import detect_reposts, repost_view, title_key
+from career_ops.insights.reposts import detect_reposts, repost_view, title_key
 
 
 def row(url, company, title, day):

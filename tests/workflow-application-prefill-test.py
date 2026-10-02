@@ -9,7 +9,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.application_prefill import detect_ats, prepare_application
+from career_ops.applications.application_prefill import detect_ats, prepare_application
 
 
 with tempfile.TemporaryDirectory(prefix="career-ops-application-prefill-") as temporary:
@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-application-prefill-") as te
     else:
         raise AssertionError("PDF outside output/ was accepted")
 
-help_result = subprocess.run([sys.executable, "-m", "workflow.application_prefill", "--help"],
+help_result = subprocess.run([sys.executable, "-m", "career_ops", "prefill", "--help"],
                              cwd=ROOT, text=True, capture_output=True)
 assert help_result.returncode == 0 and "--url" in help_result.stdout
 

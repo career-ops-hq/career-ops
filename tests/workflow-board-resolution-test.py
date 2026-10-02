@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.board_resolution import (ProviderProbeSession, VENDOR_ORDER, candidate_urls, dedupe_matches, derive_slug,
+from career_ops.discovery.board_resolution import (ProviderProbeSession, VENDOR_ORDER, candidate_urls, dedupe_matches, derive_slug,
                                        insert_tracked_companies, parse_company_input, parse_workday_hint, portal_entry,
                                        resolve_boards, resolve_company)
 
@@ -121,7 +121,7 @@ with tempfile.TemporaryDirectory() as directory:
     assert again["metadata"]["freshWritten"] == 0 and portals.read_text().count("name: Stripe") == 1
     assert dedupe_matches([stripe], [{"name": "Else", "api": stripe["api"]}])[1] == [stripe]
 
-script = '''import { probe } from "./providers/_probe.mjs";
+script = '''import { probe } from "./adapters/node/providers/_probe.mjs";
 const p = new Map([["test", { detect: e => e.careers_url.includes("allowed") ? {} : null,
   fetch: async (_e, ctx) => { if (ctx.maxPages) throw Error("wrong cap"); return [{}, {}]; } }]]);
 const good = await probe({ name: "X", provider: "test", careers_url: "https://allowed.example/jobs" }, p, {});
@@ -131,7 +131,7 @@ result = subprocess.run(["node", "--input-type=module", "-e", script], capture_o
 boundary = json.loads(result.stdout)
 assert boundary["good"] == {"status": "match", "jobCount": 2}
 assert boundary["bad"]["status"] == "error" and boundary["bad"]["error"] == "no API URL derivable"
-cli = subprocess.run([sys.executable, "-m", "workflow.career_ops", "resolve-company", "--help"],
+cli = subprocess.run([sys.executable, "-m", "career_ops", "resolve-company", "--help"],
                      cwd=ROOT, capture_output=True, text=True, check=True)
 assert "--vendors" in cli.stdout and "--write" in cli.stdout
 with ProviderProbeSession() as session:

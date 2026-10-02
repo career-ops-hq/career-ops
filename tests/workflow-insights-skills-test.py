@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from workflow.skill_extract import canonicalize, extract_skills
+from career_ops.skills import canonicalize, extract_skills
 
 
 assert extract_skills("Needs k8s, golang and Postgres; NodeJS a plus") == {
