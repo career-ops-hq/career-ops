@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-patterns = sys.argv[1:] or ['tests/*-test.py', 'tests/**/*.test.mjs', 'tests/*.test.mjs']
+patterns = sys.argv[1:] or ['tests/**/*-test.py', 'tests/**/*.test.mjs']
 files = sorted({path for pattern in patterns for path in ROOT.glob(pattern) if path.is_file()})
 if not files:
     raise SystemExit('No checks matched')

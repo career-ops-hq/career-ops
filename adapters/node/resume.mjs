@@ -235,10 +235,10 @@ async function main() {
     options: {
       'task-id': { type: 'string' }, 'artifact-root': { type: 'string' },
       company: { type: 'string' }, role: { type: 'string' }, version: { type: 'string', default: '1' },
-      metadata: { type: 'string' }, profile: { type: 'string', default: 'config/profile.yml' },
+      metadata: { type: 'string' }, profile: { type: 'string', default: 'inputs/profile.yml' },
     },
   });
-  if (positionals.length !== 2) throw new Error('Usage: node reactive-resume.mjs <cv.json> <cv.pdf> --task-id=UUID --artifact-root=DIR');
+  if (positionals.length !== 2) throw new Error('Usage: node adapters/node/resume.mjs <cv.json> <cv.pdf> --task-id=UUID --artifact-root=DIR');
   dotenv.config({ path: resolve('.env'), quiet: true });
   const profile = yaml.load(await readFile(resolve(values.profile), 'utf8'));
   const config = profile?.cv?.reactive_resume ?? {};
