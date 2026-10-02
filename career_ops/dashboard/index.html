@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Career Ops Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+  --accent: #2f6fde; --accent-soft: #e8f0fd; --hover: #f1f4f9;
+  --focus: #18794e; --focus-bg: #e4f5ec; --depri: #9a6700; --depri-bg: #fbf1d9;
+  --discard: #b42318; --discard-bg: #fde8e7; --neutral-bg: #eef0f4;
+  --shadow: 0 8px 30px rgba(20, 30, 50, .14);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151b; --panel: #1a1e26; --text: #e5e8ee; --muted: #949cad; --line: #2b313c;
+    --accent: #6d9ef5; --accent-soft: #1e2a40; --hover: #212733;
+    --focus: #5fd39a; --focus-bg: #173326; --depri: #e8bd5a; --depri-bg: #352b14;
+    --discard: #f3877e; --discard-bg: #3a1c1a; --neutral-bg: #262c37;
+    --shadow: 0 8px 30px rgba(0, 0, 0, .5);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--panel);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+.tabs { display: flex; gap: 4px; }
+.tab { border: 0; background: none; color: var(--muted); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+.tab.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.tab .count { font-size: 12px; margin-left: 4px; opacity: .8; }
+.spacer { flex: 1; }
+.updated { color: var(--muted); font-size: 12px; }
+button.ghost { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 5px 10px;
+  border-radius: 6px; cursor: pointer; font: inherit; }
+button.ghost:hover { background: var(--hover); }
+.filters { display: flex; gap: 8px; padding: 12px 24px; flex-wrap: wrap; align-items: center; }
+.filters input, .filters select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; }
+.filters input[type=search] { width: 260px; }
+.filters label { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+main { padding: 0 24px 24px; }
+.table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; cursor: pointer; user-select: none;
+  position: sticky; top: 0; background: var(--panel); }
+th.sorted { color: var(--accent); }
+th .arrow { font-size: 10px; margin-left: 2px; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover); }
+tbody tr.selected { background: var(--accent-soft); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+td .role { font-weight: 550; }
+td .sub { color: var(--muted); font-size: 12px; }
+.ext { margin-left: 4px; font-size: 12px; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--neutral-bg);
+  color: var(--muted); white-space: nowrap; }
+.pill.focus, .pill.pass, .pill.active, .pill.applied, .pill.offer, .pill.hired { background: var(--focus-bg); color: var(--focus); }
+.pill.deprioritize, .pill.uncertain, .pill.unknown, .pill.responded, .pill.interview { background: var(--depri-bg); color: var(--depri); }
+.pill.discard, .pill.fail, .pill.expired, .pill.closed, .pill.rejected, .pill.ineligible { background: var(--discard-bg); color: var(--discard); }
+.dims { display: flex; gap: 4px; }
+.dim { width: 22px; text-align: center; border-radius: 4px; font-size: 12px; background: var(--neutral-bg); color: var(--muted); }
+.dim.s5, .dim.s4 { background: var(--focus-bg); color: var(--focus); }
+.dim.s3 { background: var(--depri-bg); color: var(--depri); }
+.dim.s2, .dim.s1 { background: var(--discard-bg); color: var(--discard); }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(860px, 100vw); background: var(--panel);
+  box-shadow: var(--shadow); transform: translateX(100%); transition: transform .2s ease; z-index: 10;
+  display: flex; flex-direction: column; }
+.drawer.open { transform: none; }
+.drawer-head { padding: 16px 20px 0; border-bottom: 1px solid var(--line); }
+.drawer-head h2 { margin: 0 0 4px; font-size: 18px; }
+.drawer-head .meta { color: var(--muted); font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.drawer-head .close { position: absolute; right: 16px; top: 14px; }
+.drawer-tabs { display: flex; gap: 2px; margin-top: 12px; overflow-x: auto; }
+.drawer-tabs .tab { border-radius: 6px 6px 0 0; }
+.drawer-body { padding: 16px 20px 40px; overflow-y: auto; flex: 1; }
+.kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin-bottom: 16px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; word-break: break-word; }
+.section-title { font-size: 13px; font-weight: 650; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+.card h4 { margin: 0 0 6px; font-size: 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.md { line-height: 1.65; overflow-wrap: anywhere; }
+.md table { border: 1px solid var(--line); margin: 8px 0; font-size: 13px; }
+.md th { position: static; cursor: auto; }
+.md h1, .md h2 { font-size: 16px; border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-top: 22px; }
+.md h3 { font-size: 15px; }
+.md code { background: var(--neutral-bg); padding: 1px 4px; border-radius: 4px; }
+.md pre { background: var(--neutral-bg); padding: 10px; border-radius: 6px; overflow-x: auto; }
+pre.plain { white-space: pre-wrap; word-break: break-word; font: inherit; margin: 0; }
+details summary { cursor: pointer; font-weight: 600; }
+.material-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.material-nav button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.error { color: var(--discard); padding: 16px; }
+@media (max-width: 720px) {
+  header, .filters, main { padding-left: 16px; padding-right: 16px; }
+  .filters input[type=search] { width: 100%; }
+  .kv { grid-template-columns: 1fr; }
+  .hide-sm { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Career Ops</h1>
+  <nav class="tabs" id="stageTabs"></nav>
+  <span class="spacer"></span>
+  <span class="updated" id="updated"></span>
+  <button class="ghost" id="refresh" title="重新读取数据库">刷新</button>
+</header>
+
+<section class="filters">
+  <input type="search" id="q" placeholder="搜索公司 / 职位 / 地点 / ID">
+  <label>决策 <select id="fAction"><option value="">全部</option><option value="focus">focus</option>
+    <option value="deprioritize">deprioritize</option><option value="discard">discard</option><option value="none">未打分</option></select></label>
+  <label>状态 <select id="fState"></select></label>
+  <label>来源 <select id="fSource"></select></label>
+  <label>存活 <select id="fLiveness"></select></label>
+  <label>最低分 <input type="number" id="fMin" min="0" max="5" step="0.5" style="width:70px"></label>
+  <label><input type="checkbox" id="fMaterials"> 仅有材料</label>
+  <button class="ghost" id="reset">重置</button>
+</section>
+
+<main>
+  <div class="table-wrap">
+    <table>
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>没有符合条件的职位</div>
+  </div>
+</main>
+
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <button class="ghost close" id="close">关闭 ✕</button>
+    <h2 id="dTitle"></h2>
+    <div class="meta" id="dMeta"></div>
+    <nav class="drawer-tabs" id="dTabs"></nav>
+  </div>
+  <div class="drawer-body" id="dBody"></div>
+</aside>
+
+<script>
+const STAGES = [
+  { key: "all", label: "全部" },
+  { key: "scanned", label: "已扫描" },
+  { key: "scored", label: "已打分" },
+  { key: "applied", label: "已投递" },
+];
+const COLUMNS = [
+  { key: "id", label: "ID", num: true },
+  { key: "company", label: "公司 / 职位" },
+  { key: "location", label: "地点", cls: "hide-sm" },
+  { key: "score", label: "分数", num: true },
+  { key: "dims", label: "方向·薪酬·公司", sortValue: j => j.scores ? (j.scores.direction ?? 0) : -1 },
+  { key: "action", label: "决策" },
+  { key: "state", label: "状态" },
+  { key: "application_status", label: "投递" },
+  { key: "created_at", label: "发现时间", cls: "hide-sm" },
+  { key: "scored_at", label: "打分时间", cls: "hide-sm" },
+];
+const DETAIL_TABS = [
+  { key: "overview", label: "概览" },
+  { key: "report", label: "打分报告" },
+  { key: "jd", label: "JD" },
+  { key: "materials", label: "投递材料" },
+  { key: "interviews", label: "面试" },
+  { key: "timeline", label: "投递记录" },
+];
+const STORAGE_KEY = "career-ops-dashboard";
+const $ = id => document.getElementById(id);
+
+let jobs = [];
+let detail = null;
+let state = loadState();
+
+function loadState() {
+  const fallback = { stage: "all", sort: "id", dir: "desc", q: "", action: "", state: "", source: "", liveness: "", min: "", materials: false };
+  try { return { ...fallback, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") }; }
+  catch { return fallback; }
+}
+function saveState() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* storage unavailable */ }
+}
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function md(text) {
+  if (!text) return '<p class="sub">无内容</p>';
+  if (window.marked && window.DOMPurify) return `<div class="md">${DOMPurify.sanitize(marked.parse(text))}</div>`;
+  return `<pre class="plain">${esc(text)}</pre>`;
+}
+function pill(value) { return value ? `<span class="pill ${esc(value)}">${esc(value)}</span>` : '<span class="sub">—</span>'; }
+function shortDate(value) { return value ? esc(String(value).slice(0, 10)) : "—"; }
+function safeUrl(url) { return /^https?:\/\//i.test(url || "") ? url : "#"; }
+function jobLink(job, text = "↗") {
+  return `<a class="ext" href="${esc(safeUrl(job.url))}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="打开职位链接">${text}</a>`;
+}
+function dims(scores) {
+  if (!scores) return '<span class="sub">—</span>';
+  return `<span class="dims">${["direction", "compensation", "company"].map(k => {
+    const v = scores[k];
+    return `<span class="dim ${v ? "s" + v : ""}" title="${k}">${v ?? "?"}</span>`;
+  }).join("")}</span>`;
+}
+
+async function loadJobs() {
+  $("refresh").disabled = true;
+  try {
+    const response = await fetch("/api/jobs");
+    if (!response.ok) throw new Error((await response.json()).error || response.statusText);
+    jobs = await response.json();
+    $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
+    fillSelects();
+    render();
+  } catch (error) {
+    $("rows").innerHTML = `<tr><td colspan="${COLUMNS.length}" class="error">加载失败：${esc(error.message)}</td></tr>`;
+  } finally {
+    $("refresh").disabled = false;
+  }
+}
+
+function fillSelects() {
+  const options = (key, id) => {
+    const values = [...new Set(jobs.map(j => j[key]).filter(Boolean))].sort();
+    if (!values.includes(state[key])) state[key] = "";
+    $(id).innerHTML = `<option value="">全部</option>` + values.map(v => `<option>${esc(v)}</option>`).join("");
+    $(id).value = state[key];
+  };
+  options("state", "fState");
+  options("source", "fSource");
+  options("liveness", "fLiveness");
+}
+
+function inStage(job, stage) {
+  if (stage === "all") return true;
+  if (stage === "scored") return job.stage === "scored" || (job.stage === "applied" && job.scores);
+  return job.stage === stage;
+}
+
+function filtered() {
+  const q = state.q.trim().toLowerCase();
+  const min = state.min === "" ? null : Number(state.min);
+  return jobs.filter(j => inStage(j, state.stage)
+    && (!q || [j.id, j.company, j.role, j.location, j.source].some(v => String(v ?? "").toLowerCase().includes(q)))
+    && (!state.action || (state.action === "none" ? !j.action : j.action === state.action))
+    && (!state.state || j.state === state.state)
+    && (!state.source || j.source === state.source)
+    && (!state.liveness || j.liveness === state.liveness)
+    && (min === null || (j.score ?? -1) >= min)
+    && (!state.materials || j.material_count > 0));
+}
+
+function sorted(list) {
+  const column = COLUMNS.find(c => c.key === state.sort) || COLUMNS[0];
+  const value = column.sortValue || (j => j[column.key]);
+  const direction = state.dir === "asc" ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const x = value(a), y = value(b);
+    if (x == null && y == null) return b.id - a.id;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    const result = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "zh-CN");
+    return result * direction || b.id - a.id;
+  });
+}
+
+function render() {
+  $("stageTabs").innerHTML = STAGES.map(s =>
+    `<button class="tab ${state.stage === s.key ? "active" : ""}" data-stage="${s.key}">${s.label}<span class="count">${jobs.filter(j => inStage(j, s.key)).length}</span></button>`
+  ).join("");
+  $("thead").innerHTML = COLUMNS.map(c =>
+    `<th data-sort="${c.key}" class="${c.cls || ""} ${state.sort === c.key ? "sorted" : ""}">${c.label}${state.sort === c.key ? `<span class="arrow">${state.dir === "asc" ? "▲" : "▼"}</span>` : ""}</th>`
+  ).join("");
+  const list = sorted(filtered());
+  $("empty").hidden = list.length > 0;
+  $("rows").innerHTML = list.map(j => `
+    <tr data-id="${j.id}" class="${detail && detail.id === j.id ? "selected" : ""}">
+      <td class="num">${j.id}</td>
+      <td><div class="role">${esc(j.role)}${jobLink(j)}</div><div class="sub">${esc(j.company)} · ${esc(j.source)}${j.material_count ? " · 📎 材料" : ""}</div></td>
+      <td class="hide-sm">${esc(j.location || "—")}</td>
+      <td class="num">${j.score ?? "—"}</td>
+      <td>${dims(j.scores)}</td>
+      <td>${pill(j.action)}</td>
+      <td>${pill(j.state)}</td>
+      <td>${pill(j.application_status)}</td>
+      <td class="num hide-sm">${shortDate(j.created_at)}</td>
+      <td class="num hide-sm">${shortDate(j.scored_at)}</td>
+    </tr>`).join("");
+  ["q", "fAction", "fMin"].forEach(id => {
+    const key = { q: "q", fAction: "action", fMin: "min" }[id];
+    if ($(id).value !== String(state[key])) $(id).value = state[key];
+  });
+  $("fMaterials").checked = state.materials;
+  saveState();
+}
+
+async function openJob(id, tab = "overview") {
+  $("drawer").classList.add("open");
+  $("drawer").setAttribute("aria-hidden", "false");
+  $("dTitle").textContent = "加载中…";
+  $("dMeta").innerHTML = "";
+  $("dBody").innerHTML = "";
+  history.replaceState(null, "", `#job=${id}&tab=${tab}`);
+  try {
+    const response = await fetch(`/api/jobs/${id}`);
+    if (!response.ok) throw new Error((await response.json()).error || response.statusText);
+    detail = await response.json();
+    detail.tab = tab;
+    renderDetail();
+    render();
+  } catch (error) {
+    $("dBody").innerHTML = `<div class="error">加载失败：${esc(error.message)}</div>`;
+  }
+}
+
+function closeJob() {
+  $("drawer").classList.remove("open");
+  $("drawer").setAttribute("aria-hidden", "true");
+  detail = null;
+  history.replaceState(null, "", location.pathname);
+  render();
+}
+
+function renderDetail() {
+  const d = detail;
+  $("dTitle").innerHTML = `${esc(d.role)} ${jobLink(d, "打开职位 ↗")}`;
+  $("dMeta").innerHTML = [esc(d.company), `#${d.id}`, esc(d.location || ""), pill(d.stage), pill(d.action), pill(d.application_status)]
+    .filter(Boolean).join(" ");
+  const badge = { materials: d.materials.length, interviews: d.interviews.length, timeline: d.application_events.length + d.application_activity.length };
+  $("dTabs").innerHTML = DETAIL_TABS.map(t =>
+    `<button class="tab ${d.tab === t.key ? "active" : ""}" data-tab="${t.key}">${t.label}${badge[t.key] ? `<span class="count">${badge[t.key]}</span>` : ""}</button>`
+  ).join("");
+  history.replaceState(null, "", `#job=${d.id}&tab=${d.tab}`);
+  $("dBody").innerHTML = ({ overview, report, jd, materials, interviews, timeline })[d.tab](d);
+  $("dBody").scrollTop = 0;
+}
+
+function overview(d) {
+  const artifact = d.scan_artifact || {};
+  const rows = [
+    ["职位链接", `<a href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer">${esc(d.url)}</a>`],
+    ["公司", esc(d.company)], ["来源", esc(d.source)], ["地点", esc(d.location || "—")],
+    ["流程状态", pill(d.state)], ["存活", `${pill(d.liveness)} <span class="sub">${esc(artifact.liveness_reason || "")}</span>`],
+    ["预筛", pill(d.prescreen)], ["资格", pill(d.eligibility)],
+    ["综合分", d.score ?? "—"], ["维度分", dims(d.scores)], ["决策", pill(d.action)],
+    ["发现时间", esc(d.created_at)], ["抓取时间", esc(d.captured_at || "—")], ["打分时间", esc(d.scored_at || "—")],
+    ["投递状态", `${pill(d.application_status)} <span class="sub">${esc(d.application_updated_at || "")}</span>`],
+  ];
+  const prescreen = artifact.prescreen || {};
+  const findings = [...(prescreen.discard_reasons || []), ...(prescreen.uncertainties || []), ...(prescreen.missing || [])];
+  const evidence = d.eligibility_detail ? (d.eligibility_detail.evidence.evidence || d.eligibility_detail.evidence.uncertainties || []) : [];
+  return `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    ${findings.length ? `<div class="section-title">预筛发现</div>${findings.map(evidenceCard).join("")}` : ""}
+    ${evidence.length ? `<div class="section-title">资格证据</div>${evidence.map(evidenceCard).join("")}` : ""}
+    ${artifact.core_capabilities && artifact.core_capabilities.length ? `<div class="section-title">核心能力要求</div>${jsonBlock(artifact.core_capabilities)}` : ""}`;
+}
+
+function evidenceCard(item) {
+  if (typeof item !== "object" || !item) return `<div class="card">${esc(item)}</div>`;
+  const lines = Array.isArray(item.evidence) ? item.evidence : item.evidence ? [item.evidence] : [];
+  return `<div class="card"><h4>${pill(item.gate || item.code)} ${esc(item.message || item.code || "")}</h4>
+    ${lines.map(line => `<div class="sub">• ${esc(typeof line === "string" ? line : JSON.stringify(line))}</div>`).join("")}</div>`;
+}
+
+function report(d) { return d.report ? md(d.report) : '<p class="sub">该职位尚无打分报告。</p>'; }
+function jd(d) { return d.jd ? `<pre class="plain">${esc(d.jd)}</pre>` : '<p class="sub">未保留 JD 原文。</p>'; }
+
+function materials(d) {
+  if (!d.materials.length) {
+    return `<p class="sub">暂无投递材料。可运行 <code>.venv/bin/python -B -m career_ops apply prepare ${d.id}</code> 生成简历改动、Cover letter、Upskill、面试准备和反问问题。</p>`;
+  }
+  const current = d.materials.find(m => m.id === d.material) || d.materials.find(m => m.content) || d.materials[0];
+  const nav = d.materials.map(m =>
+    `<button class="ghost ${m.id === current.id ? "active" : ""}" data-material="${esc(m.id)}">${esc(m.label)} <span class="sub">${esc(m.package)}</span></button>`
+  ).join("");
+  const href = `/api/jobs/${d.id}/file?id=${encodeURIComponent(current.id)}`;
+  const head = `<div class="card"><h4>${esc(current.label)} <span class="sub">${esc(current.name)}</span>
+    ${current.exists ? `<a href="${href}" target="_blank" rel="noopener">打开原文件 ↗</a>` : '<span class="pill discard">文件缺失</span>'}</h4></div>`;
+  let body = '<p class="sub">该文件不是文本格式，请点击「打开原文件」查看。</p>';
+  if (current.content != null) body = current.name.endsWith(".md") ? md(current.content) : `<pre class="plain">${esc(current.content)}</pre>`;
+  return `<div class="material-nav">${nav}</div>${head}${body}`;
+}
+
+function interviews(d) {
+  if (!d.interviews.length) {
+    return `<p class="sub">暂无已确认的面试准备。可运行 <code>.venv/bin/python -B -m career_ops interview preparation-plan ${d.id}</code> 或开始面试准备会话。</p>`;
+  }
+  return d.interviews.map(item => `<details class="card" open><summary>${pill(item.kind)} ${esc(item.session)} <span class="sub">${esc(item.confirmed_at)}</span></summary>
+    ${renderArtifact(item.artifact)}</details>`).join("");
+}
+
+function renderArtifact(value) {
+  if (typeof value === "string") return md(value);
+  if (Array.isArray(value)) {
+    if (value.length && value.every(v => v && typeof v === "object" && !Array.isArray(v))) {
+      const keys = [...new Set(value.flatMap(Object.keys))];
+      return `<div class="md"><table><thead><tr>${keys.map(k => `<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${
+        value.map(row => `<tr>${keys.map(k => `<td>${esc(typeof row[k] === "object" ? JSON.stringify(row[k]) : row[k])}</td>`).join("")}</tr>`).join("")
+      }</tbody></table></div>`;
+    }
+    return `<ul>${value.map(v => `<li>${renderArtifact(v)}</li>`).join("")}</ul>`;
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([k, v]) => `<div class="section-title">${esc(k)}</div>${renderArtifact(v)}`).join("");
+  }
+  return esc(value);
+}
+
+function jsonBlock(value) { return `<pre class="plain md"><code>${esc(JSON.stringify(value, null, 2))}</code></pre>`; }
+
+function timeline(d) {
+  const items = [
+    ...d.application_events.map(e => ({ at: e.created_at, title: `${e.from_status || "—"} → ${e.to_status}`, tag: e.action, source: e.source, payload: e.payload })),
+    ...d.application_activity.map(e => ({ at: e.created_at, title: e.type, tag: "activity", source: e.source, payload: e.payload })),
+    ...d.followups.map(e => ({ at: e.created_at, title: `跟进 ${e.kind}${e.next_date ? " · " + e.next_date : ""}`, tag: "followup", source: e.source, payload: e.payload })),
+  ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  if (!items.length) return '<p class="sub">尚无投递记录。</p>';
+  return items.map(i => `<div class="card"><h4>${pill(i.tag)} ${esc(i.title)} <span class="sub">${esc(i.at)} · ${esc(i.source || "")}</span></h4>
+    ${i.payload && Object.keys(i.payload).length ? renderArtifact(i.payload) : ""}</div>`).join("");
+}
+
+document.addEventListener("click", event => {
+  const target = event.target.closest("[data-stage],[data-sort],tr[data-id],[data-tab],[data-material]");
+  if (!target) return;
+  if (target.dataset.stage) { state.stage = target.dataset.stage; render(); }
+  else if (target.dataset.sort) {
+    state.dir = state.sort === target.dataset.sort && state.dir === "desc" ? "asc" : "desc";
+    state.sort = target.dataset.sort;
+    render();
+  } else if (target.dataset.id) openJob(Number(target.dataset.id), state.stage === "applied" ? "materials" : state.stage === "scored" ? "report" : "overview");
+  else if (target.dataset.tab) { detail.tab = target.dataset.tab; renderDetail(); }
+  else if (target.dataset.material) { detail.material = target.dataset.material; renderDetail(); }
+});
+const bind = (id, key, read = el => el.value) => $(id).addEventListener("input", e => { state[key] = read(e.target); render(); });
+bind("q", "q"); bind("fAction", "action"); bind("fState", "state"); bind("fSource", "source");
+bind("fLiveness", "liveness"); bind("fMin", "min"); bind("fMaterials", "materials", el => el.checked);
+$("reset").addEventListener("click", () => {
+  state = { ...state, q: "", action: "", state: "", source: "", liveness: "", min: "", materials: false };
+  fillSelects(); render();
+});
+$("refresh").addEventListener("click", loadJobs);
+$("close").addEventListener("click", closeJob);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && detail) closeJob(); });
+
+loadJobs().then(() => {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (params.get("job")) openJob(Number(params.get("job")), params.get("tab") || "overview");
+});
+</script>
+</body>
+</html>

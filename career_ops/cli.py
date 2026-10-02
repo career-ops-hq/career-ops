@@ -135,6 +135,11 @@ def parser() -> argparse.ArgumentParser:
     for name in ("interview", "cv"):
         commands.add_parser(name, help="manage " + name + " preparation and confirmation", add_help=False).add_argument("arguments", nargs=argparse.REMAINDER)
 
+    dashboard = commands.add_parser("dashboard", help="serve a read-only local dashboard of jobs, scores and applications")
+    dashboard.set_defaults(operation="dashboard")
+    dashboard.add_argument("--host", default="127.0.0.1")
+    dashboard.add_argument("--port", type=int, default=8765)
+
     system = commands.add_parser("system", help="maintain sources, environment and scheduled operations")
     operations = system.add_subparsers(dest="operation", required=True)
     operations.add_parser("advance", help="advance one eligible scan/score task").set_defaults(operation="cron-score")
@@ -205,6 +210,10 @@ def main() -> None:
         cli.error("put global immediately after discover, then its options")
     if args.operation == "listing" and args.view != "followups" and (args.overdue_only or args.applied_days is not None):
         cli.error("--overdue-only and --applied-days require --view followups")
+    if args.operation == "dashboard":
+        from career_ops.dashboard.server import serve
+        serve(args.directory, args.host, args.port)
+        return
     try:
         if args.operation == "start":
             args.directory.mkdir(parents=True, exist_ok=True)
