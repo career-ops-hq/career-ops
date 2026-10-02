@@ -2,7 +2,7 @@
 // (#1837): token parsing, style-block building/sanitizing, HTML injection, and a
 // guard that the shipped templates actually read the variables with defaults.
 import { pass, fail, ROOT } from './helpers.mjs';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { pathToFileURL } from 'url';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -140,45 +140,79 @@ try {
   // .job var() fallback, the only default in the templates that don't. The
   // modern and legacy properties are checked separately with a property
   // boundary, so `page-break-inside:` can never satisfy the `break-inside:`
-  // check. The token may be declared on :root only: a declaration on any
-  // other selector would beat the profile override, which arrives as a later
-  // :root block.
+  // check, and the legacy alias must come first: declared last it wins the
+  // cascade and turns any keyword it does not accept (avoid-page) into auto.
+  // The token may be declared on :root only. On body or anything inside it, a
+  // declaration would beat the profile override, which arrives as a later
+  // :root block; :root-only also keeps a single place to read the default.
   {
+    for (const v of ['avoid', 'auto']) {
+      const block = buildThemeStyleBlock(styleTokensFrom({ job_break_inside: v }));
+      if (block.includes(`--job-break-inside: ${v};`)) pass(`job_break_inside: ${v} reaches the injected :root block`);
+      else fail(`job_break_inside: ${v} => ${block}`);
+    }
+
+    const { listTemplates } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
+    // [effective default, declared on :root]
     const expected = {
-      'templates/cv-template.html': 'auto',
-      'templates/cv-template.compact.html': 'auto',
-      'templates/cv-template.executive.html': 'auto',
-      'templates/cv-template.jake.html': 'auto',
-      'templates/cv-template.leadership.html': 'auto',
-      'templates/cv-template.modern.html': 'auto',
-      'templates/cv-template.zh-minimal.html': 'auto',
-      'templates/resume-template.html': 'avoid',
-      'templates/ats/cv-template.ats.html': 'avoid',
+      'templates/cv-template.html': ['auto', true],
+      'templates/cv-template.compact.html': ['auto', true],
+      'templates/cv-template.executive.html': ['auto', true],
+      'templates/cv-template.jake.html': ['auto', true],
+      'templates/cv-template.leadership.html': ['auto', true],
+      'templates/cv-template.modern.html': ['auto', true],
+      'templates/cv-template.zh-minimal.html': ['auto', false],
+      'templates/resume-template.html': ['avoid', false],
+      'templates/ats/cv-template.ats.html': ['avoid', true],
     };
-    // Innermost `selector { body }` rules of every <style> block, comments
-    // stripped (they hold braces and token names). Enough for these
-    // hand-written templates: an @media wrapper yields its inner rules.
+    // A new template must declare its default here, or the opt-in would ship
+    // dead in it (template-page-breaks.test.mjs discovers templates the same way).
+    const discovered = listTemplates('cv').filter((t) => t.format === 'html')
+      .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
+    const unlisted = discovered.filter((t) => !(t in expected));
+    if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared job_break_inside default`);
+    else fail(`templates with no declared job_break_inside default: ${unlisted.join(', ') || '(none discovered)'}`);
+
+    // Innermost `selector { body }` rules of every <style> block, with
+    // comments stripped (they hold braces and token names) and {{PLACEHOLDER}}s
+    // neutralized as template-page-breaks.test.mjs does, since a placeholder's
+    // braces would hide its whole rule. An @media wrapper yields its inner rules.
     const cssRules = (src) => [...[...src.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
       .map((m) => m[1]).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\{\{[^{}]*\}\}/g, 'PLACEHOLDER')
       .matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .map(([, selector, body]) => ({ selector: selector.trim(), body }));
-    const declValues = (body, prop) => [...body.matchAll(new RegExp(`(?:^|[\\s;{])${prop}\\s*:\\s*([^;}]+)`, 'g'))]
-      .map((m) => m[1].replace(/\s+/g, ' ').trim());
-    const isJobSelector = (selector) => selector.split(',').some((s) => /(?:^|[\s>+~])\.job$/.test(s.trim()));
+    // CSS property names are ASCII case-insensitive.
+    const declRe = (prop) => new RegExp(`(?:^|[\\s;{])${prop}\\s*:\\s*([^;}]+)`, 'gi');
+    const declValues = (body, prop) => [...body.matchAll(declRe(prop))].map((m) => m[1].replace(/\s+/g, ' ').trim());
+    const declIndex = (body, prop) => body.search(declRe(prop));
+    // A rule targets .job when the subject compound of any selector in its
+    // list carries the class: `.job`, `div.job`, `.job:last-child`,
+    // `:is(.job, .x)`, but not `.job li` or `.job-company`.
+    const selectorList = (sel) => sel.split(/,(?![^()]*\))/).map((s) => s.trim());
+    const subject = (s) => s.replace(/\([^()]*\)/g, (m) => m.replace(/[\s>+~]/g, '')).split(/\s*[\s>+~]\s*/).pop();
+    const isJobSelector = (sel) => selectorList(sel).some((s) => /\.job(?![\w-])/.test(subject(s)));
 
-    for (const [tpl, value] of Object.entries(expected)) {
+    for (const [tpl, [value, declaresRoot]] of Object.entries(expected)) {
       const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
       const jobRules = rules.filter((r) => isJobSelector(r.selector));
       const want = `var(--job-break-inside, ${value})`;
       const modern = jobRules.flatMap((r) => declValues(r.body, 'break-inside'));
       const legacy = jobRules.flatMap((r) => declValues(r.body, 'page-break-inside'));
+      const aliases = jobRules.flatMap((r) => [...declValues(r.body, '-webkit-column-break-inside'), ...declValues(r.body, 'all')]);
+      const legacyFirst = jobRules.every((r) => {
+        const legacyAt = declIndex(r.body, 'page-break-inside');
+        const modernAt = declIndex(r.body, 'break-inside');
+        return legacyAt === -1 || modernAt === -1 || legacyAt < modernAt;
+      });
       const tokenDecls = rules.flatMap((r) => declValues(r.body, '--job-break-inside').map((v) => `${r.selector} => ${v}`));
       const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
-      const rootDefaultOk = tokenDecls.every((d) => d === `:root => ${value}`);
-      if (readsToken(modern) && readsToken(legacy) && rootDefaultOk) {
-        pass(`${tpl}: .job break-inside and page-break-inside read --job-break-inside with its own default (${value})${tokenDecls.length ? ', matching its :root default' : ''}`);
+      // Exact rather than `every`: a :root block the parse lost must fail, not pass on an empty list.
+      const rootDefaultOk = JSON.stringify(tokenDecls) === JSON.stringify(declaresRoot ? [`:root => ${value}`] : []);
+      if (readsToken(modern) && readsToken(legacy) && !aliases.length && legacyFirst && rootDefaultOk) {
+        pass(`${tpl}: .job page-break-inside then break-inside read --job-break-inside with its own default (${value})${declaresRoot ? ', matching its :root default' : ''}`);
       } else {
-        fail(`${tpl}: #3242 contract broken (want ${want}, token declared on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} token=${JSON.stringify(tokenDecls)}`);
+        fail(`${tpl}: #3242 contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
       }
     }
   }
