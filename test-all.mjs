@@ -13458,9 +13458,11 @@ try {
   const doctorEnv = { env: { ...process.env, CLAUDE_CONFIG_DIR: emptyClaudeCfg } };
 
   // No project MCP config → doctor surfaces a (non-fatal) warning instead of
-  // letting SPA job boards fail silently.
+  // letting SPA job boards fail silently. doctor reads project MCP config from
+  // its launch directory, not --target, so this runs from the empty fixture:
+  // run()'s default cwd is the checkout, whose own .mcp.json would answer.
   const noMcp = mkdtempSync(join(tmpdir(), 'co-nomcp-'));
-  const a = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', noMcp], doctorEnv) || '{}');
+  const a = JSON.parse(run(NODE, [join(ROOT, 'doctor.mjs'), '--json', '--target', noMcp], { ...doctorEnv, cwd: noMcp }) || '{}');
   if (Array.isArray(a.warnings) && a.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('No Playwright MCP config → warning surfaced');
   } else {
