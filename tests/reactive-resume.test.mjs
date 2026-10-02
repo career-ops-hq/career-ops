@@ -51,16 +51,15 @@ try {
     return new Response('unexpected request', { status: 500 });
   };
   const options = {
-    payload, inputPath, outputPath, metadataPath, reportNum: 7, company: 'Acme', role: 'Role', version: 1,
+    payload, inputPath, outputPath, metadataPath, taskId: '123e4567-e89b-12d3-a456-426614174000', company: 'Acme', role: 'Role', version: 1,
     baseResumeId: 'base-id', apiBaseUrl: 'http://127.0.0.1:3000/api/openapi', apiKey: 'test-key', fetchImpl,
-    recordManifest: false,
   };
   await renderReactiveResume(options);
   await renderReactiveResume(options);
 
   assert.equal(calls.filter((call) => call.method === 'POST').length, 1, 'the base resume is duplicated only once');
   assert.equal(calls.filter((call) => call.method === 'PATCH').length, 2, 'reruns patch the stable managed copy');
-  assert.equal(JSON.parse(await readFile(metadataPath, 'utf8')).resume_id, 'resume-007');
+  assert.equal(JSON.parse(await readFile(metadataPath, 'utf8')).resume_id, 'resume-workflow');
   assert.equal((await readFile(outputPath)).toString(), '%PDF-test');
   const operations = buildResumePatch(payload);
   assert.equal(operations.find((op) => op.path === '/sections/skills/items').value[0].name, 'Core Competencies');
@@ -70,13 +69,7 @@ try {
   assert.equal(operations.find((op) => op.path === '/basics/headline').value, '', 'unverified base content is cleared');
   assert.deepEqual(operations.find((op) => op.path === '/customSections').value, [], 'base custom content is cleared');
   assert.deepEqual(operations.find((op) => op.path === '/sections/languages/items').value, [], 'unmapped base sections are cleared');
-  const workflowOptions = {
-    ...options, reportNum: undefined, taskId: '123e4567-e89b-12d3-a456-426614174000',
-    metadataPath: join(root, 'workflow', 'reactive-resume.json'),
-    outputPath: join(root, 'workflow', 'resume.pdf'),
-  };
-  await renderReactiveResume(workflowOptions);
-  await renderReactiveResume(workflowOptions);
+  const workflowOptions = options;
   const taskPatch = calls.find((call) => call.method === 'PATCH' && call.path === '/resumes/resume-workflow');
   assert.equal(taskPatch.body.operations.find((op) => op.path === '/sections/projects/startOnNewPage').value, false);
   assert.equal(taskPatch.body.operations.find((op) => op.path === '/sections/profiles/columns').value, 2);
@@ -89,9 +82,6 @@ try {
     '/metadata/page/gapY': 4,
     '/metadata/page/marginY': 12,
   });
-  assert.equal(calls.filter((call) => call.method === 'PATCH' && call.path === '/resumes/resume-007')
-    .every((call) => !call.body.operations.some((op) => op.path === '/metadata/typography/body/lineHeight')), true);
-  assert.equal(calls.filter((call) => call.method === 'POST').length, 2, 'a workflow task owns a distinct stable copy');
   assert.equal(JSON.parse(await readFile(workflowOptions.metadataPath, 'utf8')).slug,
     'career-ops-workflow-123e4567-e89b-12d3-a456-426614174000');
   const nextMetadata = join(root, 'workflow', 'v002', 'reactive-resume.json');
@@ -100,7 +90,7 @@ try {
   await renderReactiveResume({ ...workflowOptions, payload: { ...payload, projects_start_on_new_page: true }, metadataPath: nextMetadata, version: 2 });
   const lastTaskPatch = calls.filter((call) => call.method === 'PATCH' && call.path === '/resumes/resume-workflow').at(-1);
   assert.equal(lastTaskPatch.body.operations.find((op) => op.path === '/sections/projects/startOnNewPage').value, true);
-  assert.equal(calls.filter((call) => call.method === 'POST').length, 2, 'a new package version reuses the task copy');
+  assert.equal(calls.filter((call) => call.method === 'POST').length, 1, 'a new package version reuses the task copy');
   await assert.rejects(
     renderReactiveResume({ ...options, payload: { summary: '' }, fetchImpl: () => { throw new Error('must not call API'); } }),
     /candidate\.name is required/,

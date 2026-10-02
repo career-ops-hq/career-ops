@@ -10,8 +10,6 @@ import unicodedata
 from pathlib import Path
 from typing import TypedDict
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import END, START, StateGraph
 
 try:
     from workflow.application_lifecycle import ApplicationStore, mutate
@@ -257,16 +255,6 @@ def _match(state: ReplyState) -> dict:
             "invite_candidates": invite_candidates(state["invite"], state["applications"])}
 
 
-def _graph(saver: SqliteSaver):
-    graph = StateGraph(ReplyState)
-    graph.add_node("classify", _classify)
-    graph.add_node("match", _match)
-    graph.add_edge(START, "classify")
-    graph.add_edge("classify", "match")
-    graph.add_edge("match", END)
-    return graph.compile(checkpointer=saver)
-
-
 def import_reply(directory: Path, message: dict) -> dict:
     """Save original evidence and one suggestion without changing lifecycle status."""
     if not isinstance(message, dict) or not isinstance(message.get("message_id"), str) or not message["message_id"].strip():
@@ -311,9 +299,9 @@ def import_reply(directory: Path, message: dict) -> dict:
             applications.append({"id": str(row["id"]), "company": row["company"], "role": row["role"],
                                  "status": db.execute("SELECT status FROM application_lifecycle WHERE opportunity_id=?", (str(row["id"]),)).fetchone()[0],
                                  "notes": "\n".join(item for item in notes if isinstance(item, str))})
-        with SqliteSaver.from_conn_string(str(directory / "workflow-checkpoints.db")) as saver:
-            state = _graph(saver).invoke({"message": message, "applications": applications, "classification": {}, "invite": {}, "match": {}, "invite_candidates": []},
-                                         {"configurable": {"thread_id": "reply:" + hashlib.sha256(message["message_id"].encode()).hexdigest()}})
+        state: ReplyState = {"message": message, "applications": applications}
+        state.update(_classify(state))
+        state.update(_match(state))
         found = state["match"]
         suggestion = state["classification"]["suggested"] if found.get("confidence") in {"high", "medium"} else None
         db.execute("BEGIN IMMEDIATE")
@@ -369,7 +357,7 @@ def view_reply(directory: Path, message_id: str) -> dict | None:
 
 
 def confirm_reply(directory: Path, message_id: str, opportunity_id: str, status: str, *, reason: str = "") -> dict:
-    """Record a user's selected transition through the lifecycle graph."""
+    """Record a user's selected lifecycle transition."""
     reply = view_reply(directory, message_id)
     if not reply:
         raise ValueError("Unknown reply")

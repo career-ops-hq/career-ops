@@ -12,8 +12,6 @@
  *  - Same SLUG_RE guard used by the global scanner for every slug that reaches
  *    URL interpolation — a tampered or malformed payload can never inject
  *    unexpected characters into a URL.
- *  - `parseSeedEntries()` is a pure, synchronous function (no network) so it
- *    can be unit-tested with inline fixtures without any mocking.
  *
  * Typical usage (via the Python workflow):
  *   python -m workflow.career_ops global --seeds yc
@@ -260,76 +258,6 @@ export function parseA16zPayload(html) {
   }
 
   return [...seen.values()];
-}
-
-// ── Generic pure parser (entry point for test-all.mjs) ───────────────
-
-/**
- * Parse a raw seed payload (either YC JSON or a16z HTML) into validated
- * SeedCompany entries. This is the universal testable unit cited in the
- * issue acceptance criteria.
- *
- * @param {unknown} payload     JSON object (YC) or HTML string (a16z).
- * @param {'yc'|'a16z'} source  Which VC portfolio this payload came from.
- * @returns {SeedCompany[]}
- */
-export function parseSeedEntries(payload, source) {
-  if (source === 'a16z') {
-    return parseA16zPayload(typeof payload === 'string' ? payload : '');
-  }
-  // Default: YC (also used for unknown sources — parse defensively).
-  return parseYCPayload(payload);
-}
-
-// ── toPortalEntry converter ──────────────────────────────────────────
-
-/**
- * Convert a SeedCompany into a PortalEntry-shaped object that ATS provider
- * detect() can consume directly.
- *
- * Resolution order for careers_url:
- *  1. If `company.ats === 'greenhouse'` and `company.ats_id` is set → Greenhouse board URL.
- *  2. If `company.ats === 'lever'` and `company.ats_id` is set → Lever URL.
- *  3. If `company.ats === 'ashby'` and `company.ats_id` is set → Ashby URL.
- *  4. Derive from slug: try Greenhouse, Lever, Ashby URLs (provider.detect() will
- *     validate at scan time; if none match, the entry is skipped with a warning).
- *  5. Fallback: company website URL (the ATS may be on a custom subdomain).
- *
- * @param {SeedCompany} company
- * @returns {SeedPortalEntry}
- */
-export function toPortalEntry(company) {
-  let careers_url = '';
-
-  // Explicit ATS hint from the YC dataset.
-  const atsId = company.ats_id && SLUG_RE.test(company.ats_id) ? company.ats_id : null;
-  if (atsId) {
-    if (company.ats === 'greenhouse') {
-      careers_url = `https://job-boards.greenhouse.io/${atsId}`;
-    } else if (company.ats === 'lever') {
-      careers_url = `https://jobs.lever.co/${atsId}`;
-    } else if (company.ats === 'ashby') {
-      careers_url = `https://jobs.ashbyhq.com/${atsId}`;
-    }
-  }
-
-  // No explicit ATS: try Greenhouse by slug (most common for YC companies), then
-  // Lever, then Ashby — provider.detect() will confirm or skip at scan time.
-  if (!careers_url && company.slug && SLUG_RE.test(company.slug)) {
-    // Use a format that greenhouse.mjs detect() can match.
-    careers_url = `https://job-boards.greenhouse.io/${company.slug}`;
-  }
-
-  // Last resort: company website (ATS may auto-detect from the domain).
-  if (!careers_url) {
-    careers_url = company.url || '';
-  }
-
-  return {
-    name: company.name,
-    careers_url,
-    source: company.source,
-  };
 }
 
 // ── Network fetchers ─────────────────────────────────────────────────

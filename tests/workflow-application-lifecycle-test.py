@@ -46,10 +46,6 @@ with tempfile.TemporaryDirectory() as temporary:
 
     submitted = call(directory, "submit", "42", "--confirmed", "--idempotency-key", "submit-42")
     assert submitted["status"] == "applied" and not submitted["reused"]
-    checkpoint = sqlite3.connect(directory / "workflow-checkpoints.db")
-    checkpoint.execute("DELETE FROM checkpoints")
-    checkpoint.commit()
-    checkpoint.close()
     assert call(directory, "submit", "42", "--confirmed", "--idempotency-key", "submit-42")["reused"]
     cross_action = call(directory, "transition", "42", "applied", "--confirmed", "--source", "candidate-confirmed", "--idempotency-key", "submit-42", ok=False)
     assert "Idempotency key conflicts" in cross_action["error"]
@@ -157,9 +153,6 @@ with tempfile.TemporaryDirectory() as temporary:
     assert manual["events"][0]["source"] == "user-confirmed"
     assert manual["events"][0]["packageResultKey"] is None
 
-    checkpoint = sqlite3.connect(directory / "workflow-checkpoints.db")
-    assert checkpoint.execute("SELECT count(*) FROM checkpoints").fetchone()[0] >= 1
-    checkpoint.close()
 
 with tempfile.TemporaryDirectory() as temporary:
     directory = Path(temporary)

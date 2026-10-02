@@ -1,4 +1,4 @@
-"""Select current opportunities and report read-only LangGraph liveness checks."""
+"""Select current opportunities and report read-only liveness checks."""
 
 from __future__ import annotations
 
@@ -9,19 +9,12 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from typing import Callable, TypedDict
+from typing import Callable
 
 from dotenv import load_dotenv
-from langgraph.graph import END, START, StateGraph
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-class LivenessState(TypedDict, total=False):
-    urls: list[str]
-    observations: list[dict]
-    summary: dict[str, int]
 
 
 def current_urls(database: Path) -> list[str]:
@@ -64,25 +57,14 @@ def observe(urls: list[str], *, headed_fallback: bool, throttle_ms: int) -> list
     return observations
 
 
-def graph(*, select_urls: Callable[[], list[str]], reader: Callable[[list[str]], list[dict]]):
-    """Keep selection, observation and result decisions in separate graph nodes."""
-    builder = StateGraph(LivenessState)
-    builder.add_node("select", lambda _state: {"urls": select_urls()})
-    builder.add_node("observe", lambda state: {"observations": reader(state["urls"])})
-
-    def summarize(state: LivenessState) -> dict:
-        counts = {"active": 0, "expired": 0, "uncertain": 0, "via_api": 0}
-        for observation in state["observations"]:
-            counts[observation["result"]] += 1
-            counts["via_api"] += int(observation["via_api"])
-        return {"summary": counts}
-
-    builder.add_node("summarize", summarize)
-    builder.add_edge(START, "select")
-    builder.add_edge("select", "observe")
-    builder.add_edge("observe", "summarize")
-    builder.add_edge("summarize", END)
-    return builder.compile()
+def check(*, select_urls: Callable[[], list[str]], reader: Callable[[list[str]], list[dict]]) -> dict:
+    """Read observations once and summarize them without persistent execution state."""
+    observations = reader(select_urls())
+    counts = {"active": 0, "expired": 0, "uncertain": 0, "via_api": 0}
+    for observation in observations:
+        counts[observation["result"]] += 1
+        counts["via_api"] += int(observation["via_api"])
+    return {"observations": observations, "summary": counts}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -119,9 +101,9 @@ def main(argv: list[str] | None = None) -> int:
         return urls
 
     try:
-        result = graph(select_urls=select_urls,
+        result = check(select_urls=select_urls,
                        reader=lambda values: observe(values, headed_fallback=not args.no_fallback,
-                                                     throttle_ms=throttle_ms)).invoke({})
+                                                     throttle_ms=throttle_ms))
     except (OSError, sqlite3.Error, subprocess.SubprocessError, ValueError, RuntimeError) as error:
         parser.exit(1, f"Liveness check failed: {error}\n")
     for observation in result["observations"]:

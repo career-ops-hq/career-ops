@@ -1,4 +1,4 @@
-"""Record confirmed compensation evidence through an idempotent LangGraph."""
+"""Record confirmed compensation evidence in one idempotent business transaction."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from pathlib import Path
 import sqlite3
 from typing import TypedDict
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import END, START, StateGraph
 
 
 TYPES = {"desired", "advertised", "actual", "stated"}
@@ -26,8 +24,6 @@ class SalaryState(TypedDict):
     note: str
     round: str
     interviewer: str
-    validated: bool
-    result: dict
 
 
 class SalaryStore:
@@ -40,7 +36,7 @@ class SalaryStore:
     def close(self) -> None:
         self.db.close()
 
-    def validate(self, state: SalaryState) -> dict:
+    def validate(self, state: SalaryState) -> None:
         if any(not isinstance(state[key], str) for key in FIELDS):
             raise ValueError("Salary observation fields must be strings")
         if not state["operation_id"].strip() or state["type"] not in TYPES:
@@ -54,11 +50,9 @@ class SalaryStore:
             raise ValueError("Salary observation date must be YYYY-MM-DD") from error
         if not self.db.execute("SELECT 1 FROM opportunities WHERE id=?", (state["opportunity_id"],)).fetchone():
             raise ValueError("Salary observation opportunity does not exist")
-        return {"validated": True}
 
     def commit(self, state: SalaryState) -> dict:
-        if not state["validated"]:
-            raise ValueError("Salary observation was not validated")
+        self.validate(state)
         values = tuple(state[key].strip() for key in FIELDS)
         self.db.execute("BEGIN IMMEDIATE")
         try:
@@ -95,25 +89,15 @@ class SalaryStore:
 
 
 def record_salary(directory: Path, observation: dict, operation_id: str) -> dict:
-    """Checkpoint validation and commit; replay only the same operation."""
+    """Validate and commit; replay only the same operation."""
     if not isinstance(observation, dict) or not isinstance(operation_id, str):
         raise ValueError("Salary observation must be an object with an operation ID")
     if set(observation) - set(FIELDS):
         raise ValueError("Salary observation has unknown fields")
-    state: SalaryState = {"operation_id": operation_id, **{key: observation.get(key, "") for key in FIELDS},
-                          "validated": False, "result": {}}
+    state: SalaryState = {"operation_id": operation_id, **{key: observation.get(key, "") for key in FIELDS}}
     store = SalaryStore(directory / "opportunities.db")
     try:
-        builder = StateGraph(SalaryState)
-        builder.add_node("validate", store.validate)
-        builder.add_node("commit", lambda current: {"result": store.commit(current)})
-        builder.add_edge(START, "validate")
-        builder.add_edge("validate", "commit")
-        builder.add_edge("commit", END)
-        with SqliteSaver.from_conn_string(str(directory / "workflow-checkpoints.db")) as saver:
-            result = builder.compile(checkpointer=saver).invoke(
-                state, {"configurable": {"thread_id": f"salary:{operation_id}"}}
-            )
-        return {"opportunity_id": state["opportunity_id"], **result["result"]}
+        return {"opportunity_id": state["opportunity_id"], **store.commit(state)}
+
     finally:
         store.close()

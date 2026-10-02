@@ -35,16 +35,12 @@ workflow/.venv/bin/python -m workflow.career_ops global --seeds yc --ats greenho
 ### Programmatic
 
 ```js
-import { fetchYCCompanies, fetchA16zCompanies, toPortalEntry, SEED_SOURCES } from './seeds/vc-portfolios.mjs';
+import { fetchYCCompanies, fetchA16zCompanies, SEED_SOURCES } from './seeds/vc-portfolios.mjs';
 
 // Fetch YC companies
 const companies = await fetchYCCompanies();
 console.log(companies[0]);
 // → { name: 'Stripe', slug: 'stripe', url: 'https://stripe.com', source: 'yc', batch: 'W11' }
-
-// Convert to a PortalEntry for ATS provider.detect()
-const entry = toPortalEntry(companies[0]);
-// → { name: 'Stripe', careers_url: 'https://job-boards.greenhouse.io/stripe', source: 'yc' }
 
 // Using the registry
 for (const [id, source] of Object.entries(SEED_SOURCES)) {
@@ -60,7 +56,7 @@ for (const [id, source] of Object.entries(SEED_SOURCES)) {
 | Y Combinator | `https://api.ycombinator.com/v0.1/companies` | JSON API | None |
 | a16z | `https://a16z.com/portfolio/` | Public HTML page | None |
 
-- **YC**: Fetches up to 3 pages × 1000 companies. Covers all public YC batches.
+- **YC**: Fetches up to 500 pages × 1000 companies. Covers all public YC batches.
 - **a16z**: Parses the public portfolio page. Falls back gracefully if the page structure changes.
 
 ## Security
@@ -84,7 +80,7 @@ export const SEED_SOURCES = {
 };
 ```
 
-4. Add test cases in `test-all.mjs` covering your `parseXyzPayload()` function.
+4. Add test cases in `the offline adapter tests` covering your `parseXyzPayload()` function.
 
 ## Prior art
 

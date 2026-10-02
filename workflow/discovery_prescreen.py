@@ -23,4 +23,3 @@ def candidate_source_hash(input_root: Path, profile: Path) -> str:
     """Bind discovery to the candidate source bytes."""
     return _hash({"cv": _read(input_root / "cv.md"), "profile": _read(profile),
                   "profileRules": _read(input_root / "modes" / "_profile.md")})
-

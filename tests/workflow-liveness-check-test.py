@@ -1,4 +1,4 @@
-"""Check canonical URL selection and the API-first LangGraph liveness path."""
+"""Check canonical URL selection and the API-first liveness path."""
 
 import os
 from pathlib import Path
@@ -10,7 +10,7 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow.liveness_check import current_urls, graph
+from workflow.liveness_check import current_urls, check
 
 
 with TemporaryDirectory() as directory:
@@ -37,7 +37,7 @@ with TemporaryDirectory() as directory:
         return [{"url": url, "result": result, "via_api": True}
                 for url, result in zip(urls, ("active", "expired"))]
 
-    state = graph(select_urls=lambda: selected, reader=reader).invoke({})
+    state = check(select_urls=lambda: selected, reader=reader)
     assert observed == selected
     assert state["summary"] == {"active": 1, "expired": 1, "uncertain": 0, "via_api": 2}
 
@@ -64,8 +64,5 @@ with TemporaryDirectory() as directory:
                              capture_output=True, text=True, timeout=20)
         assert run.returncode == 0 and "1 active  0 expired" in run.stdout, (args, run.stderr)
 
-    wrapper = subprocess.run(["node", str(ROOT / "check-liveness.mjs"), "--file", "urls.txt"],
-                             cwd=data, env=env, capture_output=True, text=True, timeout=20)
-    assert wrapper.returncode == 0 and "1 active  0 expired" in wrapper.stdout, wrapper.stderr
 
 print("workflow liveness: canonical selection, graph, and API-first CLI passed")

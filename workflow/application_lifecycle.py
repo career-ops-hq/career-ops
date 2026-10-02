@@ -10,8 +10,6 @@ from datetime import date
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import END, START, StateGraph
 
 try:
     from workflow.followup_cadence import DEFAULT_CADENCE, applied_date_from_notes, cadence, cadence_config, calendar_day
@@ -46,8 +44,6 @@ class ApplicationState(TypedDict):
     source: str
     payload: dict
     idempotency_key: str
-    validated: bool
-    result: dict
 
 
 class ApplicationStore:
@@ -488,31 +484,6 @@ class ApplicationStore:
         }
 
 
-class ApplicationWorkflow:
-    """Keep validation and the atomic business write as explicit recoverable nodes."""
-
-    def __init__(self, store: ApplicationStore):
-        self.store = store
-
-    def validate(self, state: ApplicationState) -> dict:
-        self.store.validate(state)
-        return {"validated": True}
-
-    def commit(self, state: ApplicationState) -> dict:
-        if not state["validated"]:
-            raise ValueError("Application operation was not validated")
-        return {"result": self.store.commit(state)}
-
-    def graph(self, saver: SqliteSaver):
-        builder = StateGraph(ApplicationState)
-        builder.add_node("validate", self.validate)
-        builder.add_node("commit", self.commit)
-        builder.add_edge(START, "validate")
-        builder.add_edge("validate", "commit")
-        builder.add_edge("commit", END)
-        return builder.compile(checkpointer=saver)
-
-
 def mutate(
     directory: Path,
     opportunity_id: str,
@@ -536,16 +507,10 @@ def mutate(
         "source": source,
         "payload": payload or {},
         "idempotency_key": operation_id,
-        "validated": False,
-        "result": {},
     }
     store = ApplicationStore(directory / "opportunities.db")
     try:
-        with SqliteSaver.from_conn_string(str(directory / "workflow-checkpoints.db")) as saver:
-            result = ApplicationWorkflow(store).graph(saver).invoke(
-                state, {"configurable": {"thread_id": f"application:{operation_id}"}}
-            )
-        response = {"opportunity_id": str(opportunity_id), **result["result"]}
+        response = {"opportunity_id": str(opportunity_id), **store.commit(state)}
         if action == "outcome":
             response["outcome"] = value
             response["preserved_artifacts"] = store.application(str(opportunity_id))["artifacts"]

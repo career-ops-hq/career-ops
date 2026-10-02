@@ -152,7 +152,7 @@ Follow-up queries compute the retained cadence from business history and
 profile overrides; schedule/retire/reopen record manual decisions, not sends.
 Reply import retains the original user-provided message, deterministic
 classification, match signals, and ranked invite candidates. It only suggests
-a status. Confirmation runs the application lifecycle graph; an unmatched or
+a status. Confirmation records an atomic application lifecycle transaction; an unmatched or
 ambiguous application or a different status needs an explicit reason.
 
 Communication drafts use the same published scan and current score, candidate

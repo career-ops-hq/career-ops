@@ -14,7 +14,6 @@ from pathlib import Path
 
 from workflow.model_config import create_agent
 
-STOPPING = False
 
 
 def record_call():
@@ -124,7 +123,7 @@ def limit_research(agent, usage=None):
     lock = threading.Lock()
     def bounded(name, arguments, *args, **kwargs):
         with lock:
-            if STOPPING or counts.get(name, 0) >= {'web_search': 5, 'web_extract': 1}.get(name, 0):
+            if counts.get(name, 0) >= {'web_search': 5, 'web_extract': 1}.get(name, 0):
                 return json.dumps({'error': 'Research budget reached. This call did NOT execute. Finish JSON using completed results; missing evidence remains unknown.'})
             record_call()
             counts[name] += 1
@@ -232,8 +231,6 @@ def attach_evidence(value, snapshot):
 
 def call_agent(phase, prompt, tools, directory, usage=None):
     """Run the configured workflow model in a fresh role-specific context."""
-    if STOPPING:
-        raise TimeoutError('Soft deadline reached')
     started = time.monotonic()
     for attempt in range(2):
         session = f'score-{phase}-{uuid.uuid4().hex[:12]}'
