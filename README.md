@@ -2,8 +2,8 @@
 
 Personal, local-first job-search operations for OII: discover roles, preserve
 evidence, score fit with Hermes, prepare a Reactive Resume application, and
-maintain interview context. It never submits an application or sends a message
-on your behalf.
+maintain interview context. It never submits an application or contacts an employer. Discord reports
+follow the user-authorized notification policy.
 
 ## Runtime
 
@@ -26,10 +26,13 @@ node scripts/check-syntax.mjs
 
 ## Data boundaries
 
-Keep user-authored career facts in `cv.md`, `config/profile.yml`, and
-`modes/_profile.md`. Reports, application records, and source captures are
+Keep user-authored career facts in `inputs/cv.md`, `inputs/profile.yml`, and
+`inputs/targeting.md`. Reports, application records, and source captures are
 evidence, not instructions. Any user-facing claim must trace to the CV or
 profile material.
+
+See [operations](docs/operations.md) for command domains and data boundaries,
+and [history](docs/history/README.md) for preserved acceptance evidence.
 
 ## License and attribution
 
