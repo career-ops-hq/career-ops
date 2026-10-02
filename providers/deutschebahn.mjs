@@ -19,9 +19,11 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 // The order of postings that tie on the sort key (thousands share a
 // publication date) differs from one request to the next, under every sort
 // db.jobs offers, so consecutive pages overlap and skip postings at their
-// boundaries. A large page keeps those boundaries rare: db.jobs serves up to
-// a few thousand hits per request (beyond that it renders the results-less
-// shell), and one 1000-hit page covers MAX_JOBS in a single request.
+// boundaries. A large page keeps those boundaries rare: db.jobs doesn't cap
+// the page size, and one 1000-hit page covers MAX_JOBS in a single request.
+// Any request whose window reaches the board's total renders the
+// results-less shell instead, so the board's last posting is never served
+// and a last partial page arrives as the shell rather than short.
 //
 // {searchId} is the DB search-config id (5441588 at time of writing) — it's
 // stable per portal, so we pin it via the api:/careers_url. Each result is:
