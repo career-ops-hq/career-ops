@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory() as temporary:
         "reason": "no-story-bank", "message": f"{directory / 'missing.md'} not found — nothing was checked.",
     }
     assert "supportedByResume" in run("story-provenance", "--story-bank", bank, "--cv", cv, "--summary")
-    gaps = json.loads(run("jd-skill-gap", jd, "--cv", cv))
+    gaps = json.loads(run("jd-skill-gap", "--jd", jd, "--cv", cv))
     assert "Python" in gaps["existing"] and "FastAPI" in gaps["gap"]
     plan = json.loads(run("preparation-plan", "--jd", jd, "--company", "Acme", "--role", "Engineer",
                           "--cv", cv, "--output", output))

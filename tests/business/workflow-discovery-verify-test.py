@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory() as temporary:
         assert db.execute("SELECT count(*) FROM opportunities").fetchone()[0] == 0
         assert db.execute("SELECT status FROM scan_outcomes").fetchone()[0] == "skipped_expired"
 
-for flags, expected in (([], 0), (["--throttle"], 5000), (["--throttle=0"], 5000),
+for flags, expected in (([], 0), (["--throttle=5000"], 5000), (["--throttle=0"], 0),
                         (["--throttle=8000"], 8000)):
     with patch.object(sys, "argv", ["career_ops", "discover", "--verify", *flags]), \
             patch.object(career_ops, "discover", return_value={"status": "completed"}) as operation, \

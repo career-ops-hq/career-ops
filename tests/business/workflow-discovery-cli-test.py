@@ -41,12 +41,12 @@ with patch("career_ops.cli.discover", return_value={"status": "completed"}) as d
     assert discover.call_args.kwargs["resume"] is True
 
 with patch("career_ops.cli.discover_global", return_value={"status": "completed"}) as global_run:
-    invoke("global", "--ats=", "--md-out=")
+    invoke("discover", "global", "--ats=", "--md-out=")
     assert global_run.call_args.kwargs["ats"] is None
     assert global_run.call_args.kwargs["md_out"] is None
-    invoke("global", "--seeds=yc", "--ats=", "--md-out", ".")
+    invoke("discover", "global", "--seeds=yc", "--ats=", "--md-out", ".")
     assert global_run.call_args.kwargs["ats"] is None
     assert global_run.call_args.kwargs["seeds"] == ["yc"]
     assert global_run.call_args.kwargs["md_out"] == Path(".")
-    invoke("global", "--limit=0")
+    invoke("discover", "global", "--limit=0")
     assert global_run.call_args.kwargs["limit"] is None

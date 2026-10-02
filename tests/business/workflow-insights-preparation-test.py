@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as temp:
     (root / "jd.md").write_text(JD)
     output = root / "output" / "plan.json"
     env = {**os.environ, "CAREER_OPS_INPUT_ROOT": str(root)}
-    run = subprocess.run([sys.executable, "-m", "career_ops", "insights", "preparation-plan",
+    run = subprocess.run([sys.executable, "-m", "career_ops", "interview", "preparation-plan",
                           "--jd", str(root / "jd.md"), "--company", "Acme", "--role", "Engineer",
                           "--output", str(output)], cwd=ROOT, env=env, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr

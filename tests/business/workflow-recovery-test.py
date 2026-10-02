@@ -23,7 +23,7 @@ PYTHON = ROOT / ".venv" / "bin" / "python"
 
 def call(directory: Path, *args: str, expected: int = 0, env: dict | None = None) -> dict:
     result = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), *args],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), *args],
         text=True, capture_output=True, env={**os.environ, **(env or {})},
     )
     assert result.returncode == expected, (args, result.stdout, result.stderr)
@@ -53,15 +53,15 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         }))
         return path
 
-    call(directory, "start", "score", "precommit-crash", str(report("precommit-crash")), "--crash-at", "before_publish", expected=86, env=model_env)
-    crashed = call(directory, "list")[0]
-    recovered = call(directory, "run", crashed["task_id"], "--crash-at", "before_publish", env=model_env)
+    call(directory, "task", "start", "score", "precommit-crash", str(report("precommit-crash")), "--crash-at", "before_publish", expected=86, env=model_env)
+    crashed = call(directory, "task", "list")[0]
+    recovered = call(directory, "task", "run", crashed["task_id"], "--crash-at", "before_publish", env=model_env)
     assert recovered["status"] == "completed"
 
-    call(directory, "start", "score", "publish-crash", str(report("publish-crash")), "--crash-at", "publish", expected=86, env=model_env)
-    published = [task for task in call(directory, "list") if task["opportunity_id"] == "publish-crash"][0]
+    call(directory, "task", "start", "score", "publish-crash", str(report("publish-crash")), "--crash-at", "publish", expected=86, env=model_env)
+    published = [task for task in call(directory, "task", "list") if task["opportunity_id"] == "publish-crash"][0]
     assert published["status"] == "completed"
-    reconciled = call(directory, "run", published["task_id"], "--crash-at", "publish", env=model_env)
+    reconciled = call(directory, "task", "run", published["task_id"], "--crash-at", "publish", env=model_env)
     assert reconciled == published
     database = sqlite3.connect(directory / "opportunities.db")
     assert database.execute("SELECT count(*) FROM results WHERE task_id=?", (published["task_id"],)).fetchone()[0] == 1
@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
 
     call_log = directory / "failed-calls.log"
     failed = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "failed", str(report("failed"))],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "score", "failed", str(report("failed"))],
         text=True, capture_output=True, env={
             **os.environ, **model_env, "WORKFLOW_TEST_RUNNER_FAIL": "1", "WORKFLOW_TEST_CALL_LOG": str(call_log)
         },
@@ -78,25 +78,25 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
     assert failed.returncode == 1
     assert call_log.read_text().splitlines() == ["evaluate"]
     metered = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "failed-metered", str(report("failed-metered"))],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "score", "failed-metered", str(report("failed-metered"))],
         text=True, capture_output=True,
         env={**os.environ, **model_env, "WORKFLOW_TEST_DURABLE_FAIL": "1"},
     )
     assert metered.returncode == 1
-    metered_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "failed-metered")
+    metered_task = next(task for task in call(directory, "task", "list") if task["opportunity_id"] == "failed-metered")
     with sqlite3.connect(directory / "opportunities.db") as usage_db:
         usage = usage_db.execute(
             "SELECT tool_calls,attempt_tool_calls FROM tasks WHERE task_id=?", (metered_task["task_id"],)
         ).fetchone()
     assert usage == (1, 1)
     malformed = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "malformed-output", str(report("malformed-output"))],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "score", "malformed-output", str(report("malformed-output"))],
         text=True, capture_output=True,
         env={**os.environ, **model_env, "WORKFLOW_TEST_DURABLE_SUCCESS": "1",
              "WORKFLOW_TEST_INVALID_JSON": "1", "WORKFLOW_TEST_SLEEP": "0.05"},
     )
     assert malformed.returncode == 1
-    malformed_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "malformed-output")
+    malformed_task = next(task for task in call(directory, "task", "list") if task["opportunity_id"] == "malformed-output")
     with sqlite3.connect(directory / "opportunities.db") as usage_db:
         calls, seconds = usage_db.execute(
             "SELECT attempt_tool_calls,attempt_elapsed_seconds FROM tasks WHERE task_id=?",
@@ -104,7 +104,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         ).fetchone()
     assert calls == 2 and seconds >= 0.05
     metered_success = call(
-        directory, "start", "score", "metered-success", str(report("metered-success")),
+        directory, "task", "start", "score", "metered-success", str(report("metered-success")),
         env={**model_env, "WORKFLOW_TEST_DURABLE_SUCCESS": "1"},
     )
     assert metered_success["status"] == "completed"
@@ -113,18 +113,18 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
             "SELECT tool_calls,attempt_tool_calls FROM tasks WHERE task_id=?", (metered_success["task_id"],)
         ).fetchone()
     assert usage == (2, 2)
-    isolated = call(directory, "start", "score", "isolated", str(report("isolated")), env=model_env)
+    isolated = call(directory, "task", "start", "score", "isolated", str(report("isolated")), env=model_env)
     assert isolated["status"] == "completed"
 
-    call(directory, "start", "score", "input-change", str(report("input-change")), "--crash-at", "before_publish", expected=86, env=model_env)
-    changed_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "input-change")
+    call(directory, "task", "start", "score", "input-change", str(report("input-change")), "--crash-at", "before_publish", expected=86, env=model_env)
+    changed_task = next(task for task in call(directory, "task", "list") if task["opportunity_id"] == "input-change")
     (inputs / "cv.md").write_text("Candidate facts v2")
     changed = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "run", changed_task["task_id"]],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "run", changed_task["task_id"]],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert changed.returncode == 1 and "changed before business commit" in changed.stderr
-    assert call(directory, "show", changed_task["task_id"])["reason"] == "input_changed"
+    assert call(directory, "task", "show", changed_task["task_id"])["reason"] == "input_changed"
     (inputs / "cv.md").write_text("Candidate facts v1")
     scan_source = directory / "scan-input.json"
     scan_source.write_text(json.dumps({
@@ -132,19 +132,19 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         "url": "https://example.com/scan-input-change", "company": "Example", "role": "AI Engineer",
         "jd": "Build agent workflows.", "captured_at": "2026-09-21T00:00:00Z", "liveness": "active",
     }))
-    call(directory, "start", "scan", "scan-input-change", str(scan_source), "--crash-at", "before_publish", expected=86, env=model_env)
-    scan_task = next(task for task in call(directory, "list") if task["opportunity_id"] == "scan-input-change")
+    call(directory, "task", "start", "scan", "scan-input-change", str(scan_source), "--crash-at", "before_publish", expected=86, env=model_env)
+    scan_task = next(task for task in call(directory, "task", "list") if task["opportunity_id"] == "scan-input-change")
     (inputs / "cv.md").write_text("Candidate facts v2")
     stale_scan = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "run", scan_task["task_id"]],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "run", scan_task["task_id"]],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert stale_scan.returncode == 1 and "Scan inputs changed before business commit" in stale_scan.stderr
-    assert call(directory, "show", scan_task["task_id"])["reason"] == "input_changed"
+    assert call(directory, "task", "show", scan_task["task_id"])["reason"] == "input_changed"
 
     lock_report = report("locked")
     running = subprocess.Popen(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "locked", str(lock_report)],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "score", "locked", str(lock_report)],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env={**os.environ, **model_env, "WORKFLOW_TEST_SLEEP": "2"},
     )
@@ -160,7 +160,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-recovery-") as temporary:
         time.sleep(0.05)
     assert locked_task_id
     duplicate_runner = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "run", locked_task_id],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "run", locked_task_id],
         text=True, capture_output=True, env={**os.environ, **model_env},
     )
     assert duplicate_runner.returncode == 1 and "already executing" in duplicate_runner.stderr

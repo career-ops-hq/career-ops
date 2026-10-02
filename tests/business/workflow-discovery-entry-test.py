@@ -22,8 +22,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-discovery-cli-") as temporar
             cwd=ROOT, env=environment, text=True, capture_output=True, timeout=30,
         )
 
-    for command in ("discover", "global"):
-        result = run(command, "--help")
+    for command in (("discover",), ("discover", "global")):
+        result = run(*command, "--help")
         assert result.returncode == 0 and "usage:" in result.stdout.lower()
         assert not (directory / "data" / "opportunities.db").exists()
 
@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-discovery-cli-") as temporar
     portals = directory / "portals.yml"
     portals.write_text("{}\n")
     environment["CAREER_OPS_PORTALS"] = str(portals)
-    result = run("global", "--ats=,", "--json")
+    result = run("discover", "global", "--ats=,")
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["sources"] == []
     assert (directory / "data" / "opportunities.db").is_file()

@@ -49,7 +49,7 @@ with TemporaryDirectory() as directory:
 };
 """)
     env = {**os.environ, "NODE_OPTIONS": f"--import={mock}"}
-    command = [sys.executable, "-B", "-m", "career_ops", "liveness"]
+    command = [sys.executable, "-B", "-m", "career_ops", "system", "liveness"]
     run = subprocess.run([*command, "--directory", str(data)], cwd=ROOT, env=env,
                          capture_output=True, text=True, timeout=20)
     assert run.returncode == 1, run.stderr

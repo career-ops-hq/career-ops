@@ -7,7 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "doctor": ".venv/bin/python -B -m career_ops doctor",
+    "doctor": ".venv/bin/python -B -m career_ops system doctor",
     "lint": "node scripts/check-syntax.mjs",
     "check": ".venv/bin/python -B scripts/check.py",
     "career-ops": ".venv/bin/python -B -m career_ops"

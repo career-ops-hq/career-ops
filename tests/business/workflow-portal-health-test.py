@@ -96,7 +96,7 @@ with ProviderHealthSession() as session:
 with TemporaryDirectory() as directory:
     portal = Path(directory) / "portals.yml"
     portal.write_text("tracked_companies:\n  - name: Disabled\n    enabled: false\n")
-    command = subprocess.run([sys.executable, "-B", "-m", "career_ops", "portal", "health", "--ats-only",
+    command = subprocess.run([sys.executable, "-B", "-m", "career_ops", "system", "portal", "health", "--ats-only",
                               "--json", "--strict", "--file", str(portal)],
                              cwd=ROOT, capture_output=True, text=True, check=True)
     assert json.loads(command.stdout) == {"found": True, "results": []}

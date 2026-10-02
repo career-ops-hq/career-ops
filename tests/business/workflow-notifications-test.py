@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(["sh", str(Path(__file__).resolve().parents[2] / "scripts/career-ops-score.sh")],
                    cwd=root, env={**environment, "CALLS": str(calls)}, check=True)
     assert calls.read_text().splitlines() == [
-        "|-B -m career_ops cron-score",
-        "1|-B -m career_ops notify cron",
+        "|-B -m career_ops system advance",
+        "1|-B -m career_ops system notify cron",
     ]
 print("notification graph and scheduled wrapper: delivery and replay checks passed")

@@ -26,12 +26,12 @@ export function samePostingUrl(requested, actual) {
   } catch { return false; }
 }
 
-export function scanJdPath(url, root = process.cwd()) {
+export function scanJdPath(url, root) {
   const key = createHash('sha256').update(normalizeUrl(url)).digest('hex');
-  return resolve(root, 'data/scan-jds', `${key}.json`);
+  return resolve(root, 'cache/scan-jds', `${key}.json`);
 }
 
-export function readScanJd(url, root = process.cwd(), now = Date.now()) {
+export function readScanJd(url, root, now = Date.now()) {
   try {
     const record = JSON.parse(readFileSync(scanJdPath(url, root), 'utf8'));
     const age = now - Date.parse(record.retrieved_at);
@@ -42,7 +42,7 @@ export function readScanJd(url, root = process.cwd(), now = Date.now()) {
   } catch { return null; }
 }
 
-export async function captureScanJds(offers, root = process.cwd(), extract = async url => {
+export async function captureScanJds(offers, root, extract = async url => {
   const { stdout } = await exec(process.execPath, [extractor, url, '--max-chars', '100000', '--timeout', '30000'],
     { timeout: 45000, maxBuffer: 2 * 1024 * 1024 });
   return JSON.parse(stdout);
@@ -75,7 +75,7 @@ export async function captureScanJds(offers, root = process.cwd(), extract = asy
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [url, root, mode] = process.argv.slice(2);
   if (!url || !root) {
-    console.error('Usage: node lib/scan-jd.mjs <posting-url> <capture-root> [--fresh]');
+    console.error('Usage: node adapters/node/browser/scan-jd.mjs <posting-url> <data-directory> [--fresh]');
     process.exitCode = 2;
   } else {
     const counts = await captureScanJds([{ url }], root, undefined, mode === '--fresh');

@@ -45,7 +45,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-application-prefill-") as te
     else:
         raise AssertionError("PDF outside output/ was accepted")
 
-help_result = subprocess.run([sys.executable, "-m", "career_ops", "prefill", "--help"],
+help_result = subprocess.run([sys.executable, "-m", "career_ops", "apply", "prefill", "--help"],
                              cwd=ROOT, text=True, capture_output=True)
 assert help_result.returncode == 0 and "--url" in help_result.stdout
 

@@ -40,8 +40,8 @@ with tempfile.TemporaryDirectory() as temporary:
     else:
         raise AssertionError("Invalid date must fail before collection")
 
-for command in ("discover", "global"):
-    duplicate = subprocess.run([sys.executable, "-B", "-m", "career_ops", command,
+for command in (("discover",), ("discover", "global")):
+    duplicate = subprocess.run([sys.executable, "-B", "-m", "career_ops", *command,
                                 "--since=7", "--since", "1", "--help"],
                                cwd=ROOT, capture_output=True, text=True)
     assert duplicate.returncode == 2 and "--since given 2 times" in duplicate.stderr

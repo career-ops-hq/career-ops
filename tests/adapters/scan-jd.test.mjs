@@ -5,9 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureScanJds, readScanJd, samePostingUrl, JD_MAX_AGE_MS } from '../../adapters/node/browser/scan-jd.mjs';
+import { captureScanJds, readScanJd, scanJdPath, samePostingUrl, JD_MAX_AGE_MS } from '../../adapters/node/browser/scan-jd.mjs';
 const root = mkdtempSync(join(tmpdir(), 'scan-jd-'));
 try {
+  assert.equal(scanJdPath('https://example.com/jobs/123', root).startsWith(join(root, 'cache', 'scan-jds')), true);
   const offer = { url: 'https://example.com/jobs/123' };
   let calls = 0;
   const extract = async url => { calls++; return { url, title: 'Engineer', text: 'Responsibilities and qualifications' }; };

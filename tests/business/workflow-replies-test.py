@@ -16,7 +16,7 @@ PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
 def call(directory, *args, ok=True):
-    result = subprocess.run([PYTHON, "-B", "-m", "career_ops", "--directory", str(directory), "reply", *args],
+    result = subprocess.run([PYTHON, "-B", "-m", "career_ops", "--directory", str(directory), "apply", "reply", *args],
                             cwd=ROOT, text=True, capture_output=True)
     assert (result.returncode == 0) == ok, result.stderr
     return json.loads(result.stdout) if ok else result.stderr

@@ -373,7 +373,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert json.loads(preview.stdout)["checked"] == 3
     assert not (root / "preview" / "opportunities.db").exists()
     global_preview = subprocess.run([str(ROOT / ".venv" / "bin" / "python"), "-B", "-m", "career_ops",
-                                     "--directory", str(root / "global-preview"), "global", "--dry-run", "--ats=,"], cwd=ROOT,
+                                     "--directory", str(root / "global-preview"), "discover", "global", "--dry-run", "--ats=,"], cwd=ROOT,
                                     env={**os.environ, "CAREER_OPS_INPUT_ROOT": str(root), "CAREER_OPS_PORTALS": str(alternate)},
                                     capture_output=True, text=True, timeout=90)
     assert global_preview.returncode == 0, global_preview.stderr

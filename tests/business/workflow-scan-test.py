@@ -45,7 +45,7 @@ CREATE TRIGGER artifact_requires_evaluated BEFORE INSERT ON artifacts
 
 def run(directory: Path, *args: str) -> dict:
     result = subprocess.run(
-        [str(PYTHON), "-c", "from career_ops import tasks; tasks.capture_jd = lambda *a, **k: None; from career_ops.cli import main; main()", "--directory", str(directory), *args],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), *args],
         text=True, capture_output=True,
         env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
@@ -75,23 +75,23 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "jd": "Build and review agent workflows as an employee in Shanghai.",
     }))
 
-    scanned = run(directory, "start", "scan", "job-1", str(source))
+    scanned = run(directory, "task", "start", "scan", "job-1", str(source))
     assert scanned["status"] == "completed"
     assert scanned["artifact"]["artifact"]["schema_version"] == "jd_report_v1"
     assert "review" not in scanned["artifact"]
-    assert run(directory, "start", "scan", "job-1", str(source)) == scanned
+    assert run(directory, "task", "start", "scan", "job-1", str(source)) == scanned
 
-    inline = run(directory, "start", "scan", "inline", json.dumps({
+    inline = run(directory, "task", "start", "scan", "inline", json.dumps({
         **json.loads(source.read_text()), "opportunity_id": "inline", "jd": "x" * 5000,
     }))
     assert inline["status"] == "completed"
     invalid_envelope = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "scan", "inline", json.dumps({"source": json.loads(source.read_text())})],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "scan", "inline", json.dumps({"source": json.loads(source.read_text())})],
         text=True, capture_output=True,
     )
     assert invalid_envelope.returncode == 1 and "not a workflow envelope" in invalid_envelope.stderr
     invalid_liveness = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "scan", "inline", json.dumps({**json.loads(source.read_text()), "liveness": "closed"})],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "scan", "inline", json.dumps({**json.loads(source.read_text()), "liveness": "closed"})],
         text=True, capture_output=True,
     )
     assert invalid_liveness.returncode == 1 and "JD or liveness is invalid" in invalid_liveness.stderr
@@ -100,11 +100,11 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
     assert database.execute("SELECT count(*) FROM workflow_source_evidence").fetchone()[0] == 2
     database.close()
 
-    scored = run(directory, "start", "score", "job-1", "scan:job-1")
+    scored = run(directory, "task", "start", "score", "job-1", "scan:job-1")
     assert scored["status"] == "completed"
     assert scored["artifact"]["outcome"] == "score"
     missing = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "missing", "scan:missing"],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "score", "missing", "scan:missing"],
         text=True, capture_output=True,
     )
     assert missing.returncode == 1 and "Missing completed scan result" in missing.stderr
@@ -117,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "liveness": "uncertain",
         "jd": "Access denied",
     }))
-    waiting = run(directory, "start", "scan", "job-2", str(blocked))
+    waiting = run(directory, "task", "start", "scan", "job-2", str(blocked))
     assert waiting["status"] == "waiting"
     assert waiting["reason"] == "source_access_unknown"
     recovered_source = directory / "recovered.json"
@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "liveness": "active",
         "jd": "Build agent workflows as a full-time employee.",
     }))
-    recovered = run(directory, "resume", waiting["task_id"], "--input", str(recovered_source))
+    recovered = run(directory, "task", "resume", waiting["task_id"], "--input", str(recovered_source))
     assert recovered["status"] == "completed" and recovered["attempt"] == 2
 
     crash_source = directory / "crash.json"
@@ -137,12 +137,12 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "url": "https://example.com/jobs/3",
     }))
     crashed = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "scan", "job-3", str(crash_source), "--crash-at", "publish"],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "scan", "job-3", str(crash_source), "--crash-at", "publish"],
         text=True, capture_output=True, env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
     assert crashed.returncode == 86
-    crashed_task = next(task for task in run(directory, "list") if task["opportunity_id"] == "job-3")
-    recovered_crash = run(directory, "run", crashed_task["task_id"], "--crash-at", "publish")
+    crashed_task = next(task for task in run(directory, "task", "list") if task["opportunity_id"] == "job-3")
+    recovered_crash = run(directory, "task", "run", crashed_task["task_id"], "--crash-at", "publish")
     assert recovered_crash["status"] == "completed"
 
     excluded_source = directory / "excluded.json"
@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-scan-") as temporary:
         "url": "https://example.com/jobs/4",
         "test_exclude": True,
     }))
-    excluded = run(directory, "start", "scan", "job-4", str(excluded_source))
+    excluded = run(directory, "task", "start", "scan", "job-4", str(excluded_source))
     assert excluded["artifact"]["outcome"] == "exclude"
 
 with tempfile.TemporaryDirectory(prefix="career-ops-active-") as temporary:
@@ -193,15 +193,15 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-") as temporary:
     database.executescript(BUSINESS_RESULTS)
     database.commit()
     database.close()
-    assert run(directory, "cron-score")["task"]["status"] == "completed"
+    assert run(directory, "system", "advance")["task"]["status"] == "completed"
     score_crash = subprocess.run(
-        [str(PYTHON), "-m", "career_ops", "--directory", str(directory), "start", "score", "1", "scan:1", "--crash-at", "publish"],
+        [str(PYTHON), str(ROOT / "tests/fixtures/workflow-cli.py"), "--directory", str(directory), "task", "start", "score", "1", "scan:1", "--crash-at", "publish"],
         text=True, capture_output=True, env={**os.environ, "CAREER_OPS_MODEL_RUNNER": RUNNER},
     )
     assert score_crash.returncode == 86
-    crashed_score = next(task for task in run(directory, "list") if task["opportunity_id"] == "1" and task["module"] == "score")
-    assert run(directory, "run", crashed_score["task_id"], "--crash-at", "publish")["status"] == "completed"
-    assert run(directory, "cron-score") == {"status": "idle", "reason": "no_unscored_opportunities"}
+    crashed_score = next(task for task in run(directory, "task", "list") if task["opportunity_id"] == "1" and task["module"] == "score")
+    assert run(directory, "task", "run", crashed_score["task_id"], "--crash-at", "publish")["status"] == "completed"
+    assert run(directory, "system", "advance") == {"status": "idle", "reason": "no_unscored_opportunities"}
     database = sqlite3.connect(directory / "opportunities.db")
     assert database.execute("SELECT state FROM opportunities WHERE id=1").fetchone()[0] == "evaluated"
     assert database.execute("SELECT count(*) FROM evaluations WHERE opportunity_id=1").fetchone()[0] == 1
@@ -231,11 +231,11 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-wait-") as temporary:
     database.executescript(BUSINESS_RESULTS)
     database.commit()
     database.close()
-    assert run(directory, "cron-score")["task"]["status"] == "waiting"
-    advanced = run(directory, "cron-score")
+    assert run(directory, "system", "advance")["task"]["status"] == "waiting"
+    advanced = run(directory, "system", "advance")
     assert advanced["opportunity_id"] == "2" and advanced["task"]["status"] == "completed"
-    assert run(directory, "cron-score")["opportunity_id"] == "2"
-    blocked_task = next(task for task in run(directory, "list") if task["opportunity_id"] == "1")
+    assert run(directory, "system", "advance")["opportunity_id"] == "2"
+    blocked_task = next(task for task in run(directory, "task", "list") if task["opportunity_id"] == "1")
     refreshed = {
         "status": "captured", "url": "https://example.com/jobs/blocked",
         "text": "Build reviewed AI agent workflows in Shanghai as an employee.",
@@ -264,7 +264,7 @@ with tempfile.TemporaryDirectory(prefix="career-ops-cron-fair-") as temporary:
         assert cron_score(directory)["opportunity_id"] == "2"
         assert cron_score(directory)["opportunity_id"] == "1"
         assert cron_score(directory)["opportunity_id"] == "2"
-    waiting = next(task for task in run(directory, "list") if task["opportunity_id"] == "2")
+    waiting = next(task for task in run(directory, "task", "list") if task["opportunity_id"] == "2")
     refreshed = {
         "status": "captured", "url": "https://example.com/jobs/two",
         "text": "Build reviewed AI agent workflows in Shanghai as an employee.",

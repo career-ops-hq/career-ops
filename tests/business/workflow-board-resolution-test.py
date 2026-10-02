@@ -131,7 +131,7 @@ result = subprocess.run(["node", "--input-type=module", "-e", script], capture_o
 boundary = json.loads(result.stdout)
 assert boundary["good"] == {"status": "match", "jobCount": 2}
 assert boundary["bad"]["status"] == "error" and boundary["bad"]["error"] == "no API URL derivable"
-cli = subprocess.run([sys.executable, "-m", "career_ops", "resolve-company", "--help"],
+cli = subprocess.run([sys.executable, "-m", "career_ops", "system", "resolve-company", "--help"],
                      cwd=ROOT, capture_output=True, text=True, check=True)
 assert "--vendors" in cli.stdout and "--write" in cli.stdout
 with ProviderProbeSession() as session:

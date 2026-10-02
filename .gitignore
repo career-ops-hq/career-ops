@@ -10,8 +10,6 @@ data/**
 output/**
 !output/.gitkeep
 local/
-batch/**
-!batch/.gitkeep
 *.bak*
 *passport*
 *diploma*

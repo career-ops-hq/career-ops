@@ -65,11 +65,11 @@ with TemporaryDirectory() as directory:
     assert "boards-api.greenhouse.io/v1/boards/oldalpha" not in portal.read_text()
 
     for arguments in (["--file", str(portal), "--unknown"], ["--file"], ["--file="]):
-        command = subprocess.run([sys.executable, "-m", "career_ops", "portal", "repair", *arguments],
+        command = subprocess.run([sys.executable, "-m", "career_ops", "system", "portal", "repair", *arguments],
                                  cwd=ROOT, text=True, capture_output=True)
         assert command.returncode != 0 and "error:" in command.stderr
 
-    missing = subprocess.run([sys.executable, "-m", "career_ops", "portal", "repair",
+    missing = subprocess.run([sys.executable, "-m", "career_ops", "system", "portal", "repair",
                               "--file", str(Path(directory) / "missing.yml")],
                              cwd=ROOT, text=True, capture_output=True, check=True)
     assert "nothing to fix" in missing.stdout

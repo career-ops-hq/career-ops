@@ -13,7 +13,7 @@ PYTHON = ROOT / ".venv" / "bin" / "python"
 
 def call(directory: Path, *args: str, ok: bool = True) -> dict:
     result = subprocess.run(
-        [PYTHON, "-B", "-m", "career_ops", "--directory", directory, "application", *args],
+        [PYTHON, "-B", "-m", "career_ops", "--directory", directory, "apply", "record", *args],
         text=True, capture_output=True,
     )
     assert (result.returncode == 0) is ok, result.stderr

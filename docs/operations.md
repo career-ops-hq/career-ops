@@ -4,15 +4,37 @@ Install dependencies with `uv sync --locked` and `npm ci`. The root `.venv`
 is the Career Ops Python environment. Run `.venv/bin/python -B -m career_ops
 --help`; each command has its own `--help`.
 
-| Domain | Commands |
+| Command | Purpose |
 | --- | --- |
-| Discovery | discover, global, resolve-company, portal validate/repair/health, liveness |
-| Evaluation and recovery | start, run, resume, cancel, scan-discovered, cron-score, show, list, scores, decisions |
-| Applications | application, reply, communication, prefill |
-| Interview preparation | interview start/show/resume/confirm/history, context, match-star, story-provenance, preparation-plan, jd-skill-gap |
-| Candidate facts | cv preview/apply/show/resume, cv check |
-| Retained insights | insights |
-| Runtime and delivery | doctor, notify |
+| `discover [global]` | Collect configured sources or sweep public ATS directories |
+| `evaluate ID` | Scan and score a retained opportunity |
+| `apply` | Prepare materials; record confirmed events, replies and salary; communication and prefill |
+| `interview` | Preparation plans, skill gaps, stories and durable sessions |
+| `cv` | Preview, confirm, recover and check candidate facts |
+| `show ID` | Show an opportunity and its retained results |
+| `list --view VIEW` | Opportunities (default), scores, decisions, applications or followups |
+| `insights` | Aggregate retained evidence |
+| `task` | Start explicit inputs; inspect, resume, run and cancel tasks |
+| `system` | Doctor, portal maintenance, liveness, company resolution, advance and notify |
+
+Daily commands derive inputs from the opportunity ID:
+
+```bash
+.venv/bin/python -B -m career_ops list
+.venv/bin/python -B -m career_ops evaluate 123
+.venv/bin/python -B -m career_ops apply prepare 123
+.venv/bin/python -B -m career_ops interview preparation-plan 123
+.venv/bin/python -B -m career_ops interview jd-skill-gap 123
+.venv/bin/python -B -m career_ops task show TASK_ID
+.venv/bin/python -B -m career_ops task resume TASK_ID --decision confirm
+```
+
+Use `task start scan|score|apply ID INPUT` for explicit input imports. Business
+commands emit JSON by default. Put global sweep options after `discover global`.
+`discover --throttle MS` takes milliseconds; zero disables the delay.
+`system resolve-company` previews by default; `--write` and `--dry-run` cannot
+be combined. Application events retain confirmation, source attribution and
+idempotency requirements; preparing materials never records submission.
 
 `--directory PATH` before the command selects the business store directory;
 its default is `data/`. Interview context maps it to `opportunities.db`.
@@ -51,5 +73,10 @@ must not overwrite those artifacts.
 Hermes invokes `scripts/career-ops-scan.sh` and `scripts/career-ops-score.sh`;
 installed copies under `~/.hermes/scripts/` must match. Scan collects discovery;
 score advances existing evaluation tasks and uses the previously authorized
-notification policy. Check `doctor --json` and the offline suite before enabling
+notification policy. Check `system doctor --json` and the offline suite before enabling
 changed wrappers. Neither doctor nor offline fixtures send candidate data.
+
+JD capture cache lives at `data/cache/scan-jds/` and is reused for at most 24 hours.
+Retained source evidence belongs to the business store and referenced artifacts.
+Unreferenced acceptance output, expired captures and old tracker-import batches
+are removed without an archive.

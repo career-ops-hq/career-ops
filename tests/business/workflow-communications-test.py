@@ -25,7 +25,7 @@ COMMUNICATION_RUNNER = f"{PYTHON} {ROOT / 'tests/fixtures/workflow-communication
 
 def call(directory: Path, inputs: Path, module: str, *args: str, expected: int = 0, extra: dict | None = None) -> dict:
     command = ([str(PYTHON), "-m", "career_ops"] if module == "workflow"
-               else [str(PYTHON), "-m", "career_ops", "communication"])
+               else [str(PYTHON), "-m", "career_ops", "apply", "communication"])
     result = subprocess.run(command + ["--directory", str(directory), *args], cwd=ROOT, text=True, capture_output=True,
                             env={**os.environ, "PYTHONPATH": str(ROOT), "CAREER_OPS_INPUT_ROOT": str(inputs),
                                  "CAREER_OPS_MODEL_RUNNER": MODEL_RUNNER,
@@ -65,8 +65,8 @@ with tempfile.TemporaryDirectory(prefix="career-ops-communications-") as tempora
         "company": "Acme", "role": "AI Engineer", "captured_at": "2026-09-24T00:00:00Z",
         "liveness": "active", "jd": "Build AI agents with evidence controls.",
     }))
-    call(directory, inputs, "workflow", "start", "scan", "1", str(source))
-    call(directory, inputs, "workflow", "start", "score", "1", "scan:1")
+    call(directory, inputs, "workflow", "task", "start", "scan", "1", str(source))
+    call(directory, inputs, "workflow", "task", "start", "score", "1", "scan:1")
     with sqlite3.connect(directory / "opportunities.db") as db:
         original = db.execute("SELECT payload FROM results WHERE opportunity_id='1' AND module='score'").fetchone()[0]
         invalid = json.loads(original)

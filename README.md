@@ -19,7 +19,7 @@ Reactive Resume payloads; Python owns business decisions and persisted facts.
 ## Core checks
 
 ```bash
-.venv/bin/python -B -m career_ops doctor --json
+.venv/bin/python -B -m career_ops system doctor --json
 node scripts/check-syntax.mjs
 .venv/bin/python -B scripts/check.py
 ```
