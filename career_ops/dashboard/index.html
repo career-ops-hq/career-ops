@@ -225,12 +225,19 @@ function dims(scores) {
   }).join("")}</span>`;
 }
 
+async function readJson(response) {
+  const text = await response.text();
+  try { return JSON.parse(text); }
+  catch { throw new Error(`HTTP ${response.status} ${response.statusText}（服务返回的不是 JSON，可能需要重启 dashboard）`); }
+}
+
 async function loadJobs() {
   $("refresh").disabled = true;
   try {
     const response = await fetch("/api/jobs");
-    if (!response.ok) throw new Error((await response.json()).error || response.statusText);
-    jobs = await response.json();
+    const body = await readJson(response);
+    if (!response.ok) throw new Error(body.error || response.statusText);
+    jobs = body;
     jobs.filter(j => j.prepare_status === "running" && !runs[j.id]).forEach(j => { runs[j.id] = { status: "running" }; pollPrepare(j.id); });
     $("updated").textContent = "更新于 " + new Date().toLocaleTimeString();
     fillSelects();
@@ -326,8 +333,9 @@ async function openJob(id, tab = "overview") {
   history.replaceState(null, "", `#job=${id}&tab=${tab}`);
   try {
     const response = await fetch(`/api/jobs/${id}`);
-    if (!response.ok) throw new Error((await response.json()).error || response.statusText);
-    detail = await response.json();
+    const body = await readJson(response);
+    if (!response.ok) throw new Error(body.error || response.statusText);
+    detail = body;
     detail.tab = tab;
     renderDetail();
     render();
@@ -420,7 +428,7 @@ async function startPrepare(id) {
   if (!confirm(message)) return;
   try {
     const response = await fetch(`/api/jobs/${id}/prepare`, { method: "POST", headers: { "X-Career-Ops": "dashboard" } });
-    const body = await response.json();
+    const body = await readJson(response);
     if (!response.ok) throw new Error(body.error || response.statusText);
     runs[id] = body.run;
     refreshViews(id);
@@ -435,7 +443,7 @@ async function pollPrepare(id) {
     await new Promise(resolve => setTimeout(resolve, POLL_MS));
     try {
       const response = await fetch(`/api/jobs/${id}/prepare`);
-      const body = await response.json();
+      const body = await readJson(response);
       if (body.run) runs[id] = body.run;
       else runs[id] = { status: "failed", error: "服务已重启，无法跟踪该任务；请刷新查看结果" };
     } catch { /* keep polling through transient errors */ }
