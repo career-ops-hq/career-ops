@@ -117,7 +117,7 @@ try {
   if (Array.isArray(emptyBoard.jobs) && emptyBoard.jobs.length === 0) pass('deutschebahn.fetch() returns [] for a genuinely empty search (data-count="0")');
   else fail(`deutschebahn.fetch() empty search wrong: ${JSON.stringify(emptyBoard)}`);
   const shell = await firstPageOutcome('<html><main data-maintenance-mode="false"><h1>Suche</h1></main></html>');
-  if (shell.error?.includes('no results section')) pass('deutschebahn.fetch() throws when the first page has no results section');
+  if (shell.error?.includes('results shell')) pass('deutschebahn.fetch() throws when the first page has no results section');
   else fail(`deutschebahn.fetch() should throw on a results-less first page, got: ${JSON.stringify(shell)}`);
   const markupDrift = await firstPageOutcome(`<html>${countHtml('3.596')}<div class="renamed-hit">x</div></html>`);
   if (markupDrift.error?.includes('3596 postings')) pass('deutschebahn.fetch() throws when the count is positive but no hit parses');

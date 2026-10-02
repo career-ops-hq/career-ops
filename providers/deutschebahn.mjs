@@ -11,19 +11,19 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 //
 //   GET {origin}/service/search/de-de/{searchId}?query=&sort=pubExternalDate_tdt&itemsPerPage=1000&pageNum={N}
 //
-// An empty query sorted by `score` renders the page shell with no results
-// section at all, so the walk sorts by publication date (the order db.jobs's
-// own Stellensuche link uses). Newest-first also makes MAX_JOBS keep the most
-// recent postings.
+// A posting db.jobs can't render blanks any page that holds it: the page
+// comes back as the results shell with neither hits nor a result count.
+// Such a posting sorts first under `score` (an empty query) and under
+// ascending publication date, and last under descending date, so the walk
+// sorts newest-first (the order db.jobs's own Stellensuche link uses), which
+// keeps it out of the pages MAX_JOBS reaches and keeps the most recent
+// postings.
 //
 // The order of postings that tie on the sort key (thousands share a
 // publication date) differs from one request to the next, under every sort
 // db.jobs offers, so consecutive pages overlap and skip postings at their
 // boundaries. A large page keeps those boundaries rare: db.jobs doesn't cap
 // the page size, and one 1000-hit page covers MAX_JOBS in a single request.
-// Any request whose window reaches the board's total renders the
-// results-less shell instead, so the board's last posting is never served
-// and a last partial page arrives as the shell rather than short.
 //
 // {searchId} is the DB search-config id (5441588 at time of writing) — it's
 // stable per portal, so we pin it via the api:/careers_url. Each result is:
@@ -123,7 +123,7 @@ export function countHitAnchors(html) {
 
 /**
  * Total hit count from the results header, or null when the page has no
- * results section (the shell db.jobs renders for a query it can't serve).
+ * results section (the shell db.jobs renders for a page it can't render).
  * @param {string} html
  */
 export function parseResultCount(html) {
@@ -150,7 +150,7 @@ export function assertNoUnparsedHits(html, url) {
 /**
  * A first page with no parsed hits is a genuinely empty board only when its
  * results header says data-count="0" and it carries no posting-shaped link. A
- * missing header (the request no longer yields a results section) or a
+ * missing header (db.jobs rendered the results shell) or a
  * positive count (the hit markup changed) is a broken scan and throws, so it
  * never reads as "DB has no jobs".
  * @param {string} html @param {string} url
@@ -159,7 +159,7 @@ export function assertEmptyFirstPage(html, url) {
   assertNoUnparsedHits(html, url);
   const count = parseResultCount(html);
   if (count === 0) return;
-  if (count === null) throw new Error(`deutschebahn: ${url} returned no results section — the search request is no longer served`);
+  if (count === null) throw new Error(`deutschebahn: ${url} rendered the results shell with no hits and no result count — db.jobs blanks a page holding a posting it can't render, or the search request is no longer served`);
   throw new Error(`deutschebahn: ${url} reports ${count} postings but no hit could be parsed — the listing markup changed`);
 }
 
