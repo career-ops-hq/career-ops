@@ -397,10 +397,16 @@ function normalizeKeywordList(value) {
 // only boundary-anchors 2-3 letter acronyms. Location keywords need boundaries on
 // every keyword, so they get their own compiler rather than changing title-matching
 // behaviour. Returns a predicate, mirroring compileKeyword()'s shape.
+// Edges are tested one code point at a time against a fully anchored class:
+// V8 in Node 26 returns false for /[\p{L}]$/u against an astral letter at
+// end-of-string (#4478), so "𐐀" lost its trailing boundary and matched "𐐀x".
+const LOCATION_WORD_CP = /^[\p{L}\p{M}\p{N}]$/u;
+
 function compileLocationKeyword(keyword) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const startsWord = /^[\p{L}\p{M}\p{N}]/u.test(keyword);
-  const endsWord = /[\p{L}\p{M}\p{N}]$/u.test(keyword);
+  const codePoints = [...keyword];
+  const startsWord = LOCATION_WORD_CP.test(codePoints[0] ?? '');
+  const endsWord = LOCATION_WORD_CP.test(codePoints.at(-1) ?? '');
   const prefix = startsWord ? '(?<![\\p{L}\\p{M}\\p{N}])' : '';
   const suffix = endsWord ? '(?![\\p{L}\\p{M}\\p{N}])' : '';
   const re = new RegExp(`${prefix}${escaped}${suffix}`, 'u');
@@ -1066,45 +1072,75 @@ export function buildSalaryFilter(salaryFilter) {
 // merges" rule #2445/#2569 protects was written to prevent.
 const CORPORATE_FORMS = [
   '株式会社', '合同会社', '有限会社',   // Japanese
-  '股份有限公司', '有限公司',           // Chinese (longer form first)
-  '주식회사',                           // Korean
+  '合名会社', '合資会社', '一般社団法人',
+  '股份有限公司',                       // Chinese (longer forms first)
+  '有限责任公司', '有限責任公司',       // no 有限公司 suffix: 责任 sits between
+  '有限公司',
+  '주식회사', '유한회사',               // Korean
 ];
 
-// Split an already normalizeTextKey'd string into [form, remainder], where
-// `form` is the one leading or trailing corporate-form marker found, or null.
+// Split an already normalizeTextKey'd string into [forms, remainder], where
+// `forms` names the corporate-form markers found at its leading and trailing
+// edges, in that order, or null when there are none. Order is kept rather than
+// sorted: 株式会社アカネ有限会社 and 有限会社アカネ株式会社 stay apart, the
+// conservative reading when a name carries two forms.
 // No space anchor: unlike LEGAL_SUFFIXES these forms are frequently written
 // unspaced (株式会社メルカリ), which is exactly the case the \b-based approach
 // cannot reach. The spaced variant (株式会社 メルカリ) already matched before
 // #2570, through the punctuation-to-space key and the containment fallback
-// below; the unspaced one is the gap. At most one strip — a name is not
-// expected to carry two forms — and longer forms are checked first
+// below; the unspaced one is the gap. Longer forms are checked first
 // (股份有限公司 before 有限公司) so a strip cannot leave a dangling 股份 behind.
 //
-// Returning the form rather than just the remainder is what lets companyMatch
+// BOTH edges are inspected, not just the first form list order finds. A name
+// carrying a form at each end (合同会社 アカネ株式会社) is rare, but reading
+// only one of them let the other slip past the different-form check below:
+// the shared 株式会社 was compared, the 合同会社 never was, and containment
+// merged the pair.
+//
+// Returning the forms rather than just the remainder is what lets companyMatch
 // tell "one side omitted the form" from "the two sides carry DIFFERENT forms".
 // A bare remainder cannot express that difference, and collapsing it merges
 // 株式会社アカネ with 合同会社アカネ — a KK and a GK are two different legal
 // entities sharing a trade name, so that is a false merge, the one direction
 // #2445/#2569's "splits, never merges" rule exists to forbid.
 function stripCorporateForm(key) {
-  for (const form of CORPORATE_FORMS) {
-    if (key.startsWith(form)) return [form, key.slice(form.length)];
-    if (key.endsWith(form)) return [form, key.slice(0, -form.length)];
+  const forms = [];
+  let rest = key;
+  const prefix = CORPORATE_FORMS.find((form) => rest.startsWith(form));
+  if (prefix) {
+    forms.push(prefix);
+    rest = rest.slice(prefix.length);
   }
-  return [null, key];
+  const suffix = CORPORATE_FORMS.find((form) => rest.endsWith(form));
+  if (suffix) {
+    forms.push(suffix);
+    rest = rest.slice(0, -suffix.length);
+  }
+  return [forms.length ? forms.join('|') : null, rest];
 }
 
-// Apply the strip to a pair of keys, or decline to. Two DIFFERENT explicit
-// forms are positive evidence of two different entities, the same way a
-// mismatched req number is (#1524), so the raw keys are kept and the pair is
-// left to fail on its own merits. Otherwise strip, falling back to the raw key
-// when the strip empties it (a name that IS just the marker, e.g. "株式会社"
-// alone) so neither the equality check nor the containment fallback is ever
-// handed an empty "no signal" string.
+// Apply the strip to a pair of keys, or return null: a verdict that the pair
+// is NOT the same company, which companyMatch returns before any equality or
+// containment check. Two cases earn it:
+//
+//  - DIFFERENT explicit forms on the two sides are positive evidence of two
+//    different entities, the same way a mismatched req number is (#1524).
+//    Merely declining to strip was not enough: the raw keys still reached the
+//    containment fallback, where 株式会社アカネ is a bounded substring of
+//    合同会社 株式会社アカネ.
+//  - Exactly one side is ONLY a marker ("株式会社" alone). That side carries no
+//    trade name to compare, and falling back to its raw key let it equal
+//    株式会社株式会社 once that was stripped. Two identical bare markers still
+//    compare equal, since both then keep their raw keys.
+//
+// Otherwise strip, falling back to the raw key when the strip empties it, so
+// neither the equality check nor the containment fallback is ever handed an
+// empty "no signal" string.
 function stripFormPair(rawA, rawB) {
-  const [formA, restA] = stripCorporateForm(rawA);
-  const [formB, restB] = stripCorporateForm(rawB);
-  if (formA && formB && formA !== formB) return [rawA, rawB];
+  const [formsA, restA] = stripCorporateForm(rawA);
+  const [formsB, restB] = stripCorporateForm(rawB);
+  if (formsA && formsB && formsA !== formsB) return null;
+  if (Boolean(formsA && !restA) !== Boolean(formsB && !restB)) return null;
   return [restA || rawA, restB || rawB];
 }
 
@@ -1117,18 +1153,26 @@ export function companyMatch(jobCompany, windowCompany) {
   //
   // Corporate-form stripping (#2570) happens right here, before either the
   // equality check or the containment fallback below, so both benefit. See
-  // stripFormPair: it declines to strip when the two sides carry different
-  // forms, so this stays a split, never a merge.
-  const [c1NoSpaces, c2NoSpaces] = stripFormPair(
+  // stripFormPair: it returns null when the forms show two different
+  // entities, and that ends the comparison, so this stays a split, never a
+  // merge. The no-space key reaches every such verdict first in practice (an
+  // exhaustive search over prefix/suffix/separator combinations found no
+  // exception); the spaced key's null check is defensive, and keeps a null
+  // from ever being destructured.
+  const noSpaces = stripFormPair(
     normalizeTextKey(jobCompany),
     normalizeTextKey(windowCompany),
   );
+  if (!noSpaces) return false;
+  const [c1NoSpaces, c2NoSpaces] = noSpaces;
   if (c1NoSpaces && c1NoSpaces === c2NoSpaces) return true;
 
-  const [c1WithSpaces, c2WithSpaces] = stripFormPair(
+  const withSpaces = stripFormPair(
     normalizeTextKey(jobCompany, ' '),
     normalizeTextKey(windowCompany, ' '),
   );
+  if (!withSpaces) return false;
+  const [c1WithSpaces, c2WithSpaces] = withSpaces;
   if (!c1WithSpaces || !c2WithSpaces) return false;
 
   // Containment: a short window name should still match a longer official one
@@ -1367,6 +1411,56 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
   'skipped_invalid_url',
   'skipped_blocked_host',
 ]);
+
+/**
+ * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
+ *
+ * Every other skipped status describes the posting: a dead URL stays dead, a
+ * blocked host stays blocked, so pinning it saves a later scan the work. These
+ * two describe the user's CONFIG instead — `location_filter` and
+ * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
+ * dropped under the old threshold never resurfaces under the new one, which is
+ * the opposite of what recording the drop is for.
+ *
+ * Pinning would also buy nothing: both cuts run on data the provider already
+ * returned, before any liveness verification, so a re-scan of one of these URLs
+ * costs no extra request.
+ *
+ * `collectSeenCompanyRoles` needs no companion change — it already seeds from
+ * `added` rows alone.
+ */
+const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_location',
+  'skipped_age',
+]);
+
+/**
+ * The offers not yet recorded under `status`, one per URL.
+ *
+ * The location and posting-age cuts run before dedup, and their rows never
+ * pin a URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so without this every scan
+ * appended the same rows again. A URL already carrying a row with the same
+ * status is skipped, and so is a second listing of one URL within this scan.
+ * A different status still writes, so a posting whose verdict changes is
+ * recorded again.
+ *
+ * @param {Array<{url: string}>} offers
+ * @param {string} status
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
+ */
+export function unrecordedOffers(offers, status, scanHistoryText = '') {
+  const recorded = new Set();
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, , , , , rowStatus] = line.split('\t');
+    if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
+  }
+  return offers.filter((offer) => {
+    const key = normalizeUrlForDedup(offer.url);
+    if (recorded.has(key)) return false;
+    recorded.add(key);
+    return true;
+  });
+}
 
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
@@ -1692,6 +1786,11 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
     const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
+    // Not pinned and not a recheck candidate either: the row records a config
+    // rejection, and the URL was never queued, so counting it as "eligible
+    // again" would overstate what the TTL released. See
+    // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
+    if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       seen.add(normalizeUrlForDedup(url));
       if (extraTokensFor) {
@@ -2023,9 +2122,25 @@ export function normalizeRoleForDedup(role) {
   // a key fix) and is deliberately out of scope here.
   let title = String(role ?? '').normalize('NFKC').toLowerCase();
   while (true) {
-    const match = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
-    if (!match || !isRoleLocationSuffix(match[1])) break;
-    title = title.slice(0, match.index).trimEnd();
+    // Bracketed: "Engineering Manager (Remote)", "… [US]".
+    const bracketed = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
+    if (bracketed && isRoleLocationSuffix(bracketed[1])) {
+      title = title.slice(0, bracketed.index).trimEnd();
+      continue;
+    }
+    // Pipe-delimited: "Senior Engineering Manager, Grafana Frontend | USA | Remote".
+    // Grafana Labs posts one requisition per country and packs the place into
+    // the TITLE rather than only the location field, so the same role arrives
+    // as six titles. Without this, the tracker's clean title never matches the
+    // scanned one and an already-evaluated role is re-added on the next scan.
+    // Only the trailing segment is considered, and only when it is a known
+    // location suffix, so "Engineering Manager | Payments" keeps its qualifier.
+    const piped = title.match(/\s*\|\s*([^|]+?)\s*$/);
+    if (piped && isRoleLocationSuffix(piped[1])) {
+      title = title.slice(0, piped.index).trimEnd();
+      continue;
+    }
+    break;
   }
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
   // every non-Latin title to '', so バックエンドエンジニア and フロントエンド
@@ -3556,6 +3671,11 @@ async function main() {
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;
   const cooldownOffers = [];
+  // Config-rejected offers, kept so the scan-history row can say what the
+  // summary counter only counts. Both lists stay empty under --dry-run, the
+  // same as every other history write below.
+  const locationFilteredOffers = [];
+  const ageFilteredOffers = [];
   let totalFound = 0;
   let totalFilteredTitle = 0;
   let totalFilteredTier = 0;
@@ -3738,10 +3858,12 @@ async function main() {
         // ("Program Manager - Remote") isn't rejected for a city-only location.
         if (!locationFilter(job.location, job.url, job.title)) {
           totalFilteredLocation++;
+          if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
+          if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postedDateFilter(job.postedAt)) {
@@ -3885,6 +4007,19 @@ async function main() {
   ];
   if (!dryRun && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+  }
+  // Offers the location and posting-age cuts removed: recorded for visibility,
+  // never added to pipeline.md. Both are OBSERVATIONAL_SCAN_HISTORY_STATUSES,
+  // so the rows carry no dedup weight — the threshold that rejected them is one
+  // the user edits, and a row written under the old threshold must not suppress
+  // the same posting once it moves.
+  // Each posting is recorded once per status, not once per scan.
+  if (!dryRun && (locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
+    const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const newLocationRows = unrecordedOffers(locationFilteredOffers, 'skipped_location', historyText);
+    const newAgeRows = unrecordedOffers(ageFilteredOffers, 'skipped_age', historyText);
+    if (newLocationRows.length > 0) await appendToScanHistory(newLocationRows, date, 'skipped_location');
+    if (newAgeRows.length > 0) await appendToScanHistory(newAgeRows, date, 'skipped_age');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.

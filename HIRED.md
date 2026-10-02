@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=12 level=role role="Salesforce Administrator - Sales & Service Cloud (f/m/d)" geo="Germany" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/4457" -->
+### Hire #12
+
+> Tracked about 70 Salesforce/CRM roles over roughly 10 weeks and kept the focus on admin roles that matched my core profile. The one that landed went from first video call to signed
+
+**Salesforce Administrator - Sales &amp; Service Cloud (f/m/d)** · Germany · 10 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4457)
+
 <!-- hire n=11 level=handle handle=SPerekrestova role="Software Engineer" sector="Big tech / global marketplace" geo="Amsterdam, Netherlands" weeks=8 link="https://github.com/career-ops-hq/career-ops/issues/4339" -->
 ### Hire #11
 

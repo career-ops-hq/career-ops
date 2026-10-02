@@ -4,8 +4,8 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check]
- *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]
  *
  * --batch renders every document in a JSON manifest (an array of
  * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
@@ -24,6 +24,12 @@
  * role) rather than accidentally scrambled by an agent. Without this flag,
  * any divergence from cv.md's section order still fails generation.
  *
+ * --allow-nonchronological downgrades the work-experience ordering guard from
+ * a thrown error to a console warning. By default a CV whose experience entries
+ * are not newest-first fails generation: promoting "the most relevant role" to
+ * the top is a functional-resume technique that buries the candidate's most
+ * recent senior title and reads as concealment to ATS parsers and recruiters.
+ *
  * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
  * The actual page count is checked after Chromium writes the PDF; overflow
  * warns with trimming guidance by default. --strict-pages turns that warning
@@ -41,13 +47,20 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
-import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { validateCvExperienceOrder } from './cv-experience-order.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, resolvePageFormat } from './lib/page-format.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
-const workspaceRoot = resolveWorkspaceRoot(trackerPath);
+// Derive the workspace root from the uncanonicalized tracker path (#3169): a
+// repo that symlinks only its data/ out (the #524 workaround) must still resolve
+// cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
+// target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
+// spelling the rest of the module compares against stays canonical as before.
+const workspaceRoot = resolveWorkspaceRootFor(getCareerOpsRoot());
 const PDF_PAGE_MARGIN = '0.6in';
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
@@ -66,15 +79,31 @@ const PDF_PAGE_MARGIN = '0.6in';
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
-  if (__rootCache.key !== key) {
-    // Always re-derive: falling back to the import-time const when the variable
-    // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
-    __rootCache = { key, root, canonical: realpathSync(root) };
+  // Derive the root on EVERY call and key the cache on the resolved value.
+  //
+  // The root can move three ways: CAREER_OPS_TRACKER, CAREER_OPS_ROOT /
+  // CAREER_OPS_DATA_DIR, and the .career-ops-data marker file. Keying on the
+  // environment alone misses the marker, which is a file on disk and can change
+  // while the environment does not, so the cache would keep serving a stale
+  // workspace. The resolved root is the one value that captures all three, and
+  // what is memoised is only realpathSync(), the syscall worth avoiding.
+  //
+  // getCareerOpsRoot(), not __dirname: the data root is the env vars, then a
+  // .career-ops-data marker, then the repo, and only the last of those is the
+  // script's own directory. With the user layer outside the checkout this
+  // derived the workspace from the CODE directory, so every path under the
+  // real data root read as an escape and the PDF was refused (#4389). Line 49
+  // already used getCareerOpsRoot(), so the two disagreed inside one module.
+  //
+  // Same #3169 derivation as the import-time const: resolveWorkspaceRootFor works
+  // from the uncanonicalized tracker so a symlinked data/ stays in the repo.
+  const root = resolveWorkspaceRootFor(getCareerOpsRoot());
+  if (__rootCache.key !== root) {
+    __rootCache = { key: root, root, canonical: realpathSync(root) };
   }
   return __rootCache;
 }
+
 // Two accessors on purpose, so each call site keeps the exact semantics it had:
 // the containment guard compares canonical forms (a symlinked ancestor must not
 // read as an escape), while the manifest/output helpers work in the lexical form
@@ -1200,43 +1229,130 @@ export function injectPrintPageCss(html, format) {
   return `${pageStyle}\n${html}`;
 }
 
+/** The artifact kinds data/pdf-index.tsv keys on, alongside the report number. */
+export const ARTIFACT_KINDS = ['cv', 'cover'];
+
+/**
+ * Decide which artifact a render produces, for the manifest's `kind` column.
+ *
+ * Resolved here rather than in the CLI because every path converges on
+ * renderInPage(): the CLI, the --batch manifest, generate-cover-letter.mjs, and
+ * the ad-hoc scripts that call the exported renderHtmlToPdf() directly. A
+ * caller that forgets to declare a cover letter is the normal case, not the
+ * exceptional one, so the default has to be derived rather than assumed to be
+ * a CV (#3887).
+ *
+ * Precedence, most specific first:
+ *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
+ *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *      the cover check so a company whose own name starts with "Cover" keeps
+ *      its CV filed as a CV.
+ *   3. `cover` as the leading or trailing token: both real conventions, the
+ *      `cover-...` prefix and the `{company}-{role}-cover.pdf` suffix that
+ *      generate-cover-letter.mjs writes.
+ *   4. 'cv', the overwhelmingly common render.
+ *
+ * Anchored to the ends of the name on purpose: an unanchored "cover" would read
+ * a company or role carrying the word mid-name as a cover letter, and --kind is
+ * the escape hatch for a name that signals nothing either way.
+ *
+ * @param {string|undefined} explicit - A caller-declared kind, if any.
+ * @param {string} [outputPath] - Destination PDF path, used for inference.
+ * @returns {{kind: 'cv'|'cover'|null, source: 'declared'|'name'|'default'}}
+ *   `kind` is null when `explicit` is not a recognized kind, so the caller can
+ *   reject it rather than silently rendering something else.
+ */
+export function resolveArtifactKind(explicit, outputPath) {
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
+    const declared = String(explicit).trim().toLowerCase();
+    return ARTIFACT_KINDS.includes(declared)
+      ? { kind: declared, source: 'declared' }
+      : { kind: null, source: 'declared' };
+  }
+
+  const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
+  if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
+    return { kind: 'cover', source: 'name' };
+  }
+  return { kind: 'cv', source: 'default' };
+}
+
+/**
+ * Merge one generated-PDF row into the manifest's existing data lines.
+ *
+ * The manifest holds one row per report number AND artifact kind, so a CV and
+ * a cover letter for the same application coexist (#3887). Superseding on the
+ * report number alone meant whichever document was generated last deleted the
+ * other, and readers that resolve "the PDF for report N" then returned a cover
+ * letter as the CV.
+ *
+ * @param {string[]} existingLines - Current manifest lines, comments included.
+ * @param {{reportNum: string, pdf: string, html: string, format: string, date: string, kind?: 'cv'|'cover'}} row
+ * @returns {string[]} Data lines to write, the incoming row last.
+ */
+export function applyManifestRow(existingLines, row) {
+  // "008" and "8" are the same report - zero-padded report-link form vs
+  // unpadded tracker-# form. Normalize so replacement rows match.
+  const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
+  const incomingKind = row.kind === 'cover' ? 'cover' : 'cv';
+
+  const kept = existingLines.filter((line) => {
+    if (!line.trim() || line.startsWith('#')) return false;
+    const fields = line.split('\t');
+    if (fields[1] === row.pdf) return false;
+    if (!row.reportNum || normKey(fields[0]) !== normKey(row.reportNum)) return true;
+    // Same report: the incoming row supersedes only its own kind's slot. A
+    // legacy row carries no kind, so an incoming CV claims it (the manifest
+    // must not grow a duplicate every time an untagged row's CV is
+    // regenerated) while an incoming cover letter leaves it alone rather than
+    // guessing that an unmarked row was a cover.
+    const existingKind = (fields[5] || '').trim();
+    return incomingKind === 'cover'
+      ? existingKind !== 'cover'
+      : existingKind === 'cover';
+  });
+
+  kept.push([row.reportNum || '', row.pdf, row.html, row.format, row.date, incomingKind].join('\t'));
+  return kept;
+}
+
 /**
  * Record a generated PDF in data/pdf-index.tsv so tools can map a tracker
  * report number to the exact PDF (and its source HTML for regeneration).
  *
- * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * tracker workspace with forward slashes. One row per PDF path; when a report
- * number is given, older rows for that report are dropped too (regenerated
- * CVs supersede stale entries). The file is gitignored: it references
- * gitignored output/ artifacts and is meaningless on another machine.
+ * Columns: report \t pdf \t html \t format \t date \t kind - paths relative to
+ * the tracker workspace with forward slashes. One row per PDF path, and one row
+ * per (report number, kind) so a report's CV and its cover letter coexist while
+ * a regenerated document still supersedes its own stale entry. kind is appended
+ * last because find.mjs, outcome.mjs and the web reader all parse this file
+ * positionally; a reordered header would break them silently. The file is
+ * gitignored: it references gitignored output/ artifacts and is meaningless on
+ * another machine.
  */
-function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
+function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
   const manifestPath = resolvePdfIndexPath(trackerPath);
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
   const date = new Date().toISOString().slice(0, 10);
-  // "008" and "8" are the same report — zero-padded report-link form vs
-  // unpadded tracker-# form. Normalize so replacement rows match.
-  const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
 
-  let lines = [];
-  if (existsSync(manifestPath)) {
-    lines = readFileSync(manifestPath, 'utf-8').split('\n').filter((line) => {
-      if (!line.trim() || line.startsWith('#')) return false;
-      const fields = line.split('\t');
-      if (fields[1] === relPDF) return false;
-      if (reportNum && normKey(fields[0]) === normKey(reportNum)) return false;
-      return true;
-    });
-  }
-
-  lines.push([reportNum || '', relPDF, relHTML, format, date].join('\t'));
+  const existing = existsSync(manifestPath)
+    ? readFileSync(manifestPath, 'utf-8').split('\n')
+    : [];
+  const lines = applyManifestRow(existing, {
+    reportNum,
+    pdf: relPDF,
+    html: relHTML,
+    format,
+    date,
+    kind,
+  });
 
   mkdirSync(dirname(manifestPath), { recursive: true });
   writeFileSync(
     manifestPath,
-    '# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n' +
+    '# report\tpdf\thtml\tformat\tdate\tkind - written by generate-pdf.mjs, do not edit\n' +
       lines.join('\n') + '\n'
   );
   return relPDF;
@@ -1253,16 +1369,40 @@ async function generatePDF() {
   let skipFactCheck = false;
 
   // Parse arguments
+  // Empty, not 'cv': an omitted --kind must fall through to inference from the
+  // output filename rather than pinning every render to a CV.
+  // Supplied and value are separate questions: `--kind=` yields '', which is
+  // falsy, so a guard reading the value alone waves the flag through.
+  let kindFlag = '', kindSupplied = false, reportSupplied = false;
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
-  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false;
+  let inputPath, outputPath, format = null, reportNum = '', allowReorder = false, allowNonChronological = false;
   let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
     } else if (arg.startsWith('--report=')) {
+      reportSupplied = true;
       reportNum = arg.split('=')[1].trim();
+    } else if (arg === '--report') {
+      // Same missing-operand case as --kind below. Swallowed, the render writes
+      // no manifest row for the report the caller named. The value is CLEARED as
+      // well as marked supplied: the last occurrence of a flag is the caller's
+      // final intent, and this one carries no operand, so `--report=7 --report`
+      // must not keep the 7.
+      reportSupplied = true;
+      reportNum = '';
+    } else if (arg === '--kind') {
+      // A flag missing its operand, not an absent flag. Left unhandled it falls
+      // through to the positional arms below and is dropped silently, so the
+      // render infers a kind the caller never asked for. Marked supplied AND
+      // cleared, so `--kind=cover --kind` cannot reuse the earlier operand.
+      kindSupplied = true;
+      kindFlag = '';
+    } else if (arg.startsWith('--kind=')) {
+      kindSupplied = true;
+      kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
       batchManifestPath = arg.slice('--batch='.length);
     } else if (arg.startsWith('--max-pages=')) {
@@ -1270,6 +1410,8 @@ async function generatePDF() {
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
       allowReorder = true;
+    } else if (arg === '--allow-nonchronological') {
+      allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
     } else if (arg === '--skip-fact-check') {
@@ -1279,6 +1421,24 @@ async function generatePDF() {
     } else if (!outputPath) {
       outputPath = arg;
     }
+  }
+
+  // A --kind that was passed and is unusable is a hard error: silently filing a
+  // cover letter as a CV is the failure the flag exists to prevent. Checked
+  // before any rendering work starts.
+  // resolveArtifactKind treats an empty value as "not supplied" and falls back
+  // to filename inference, which is what the per-entry batch path needs. So an
+  // empty value cannot be caught by its return, and the CLI has to reject it
+  // here: the caller typed the flag, and silently inferring instead is the
+  // substitution the flag exists to prevent.
+  if (reportSupplied && !reportNum) {
+    console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
+    process.exit(1);
+  }
+
+  if (kindSupplied && (!kindFlag || !resolveArtifactKind(kindFlag).kind)) {
+    console.error(`Invalid --kind "${kindFlag}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+    process.exit(1);
   }
 
   if (!Number.isInteger(maxPages) || maxPages < 1) {
@@ -1301,9 +1461,10 @@ async function generatePDF() {
   format = resolvePageFormat(format, { profilePath: resolve(workspaceRoot, 'config', 'profile.yml') });
 
   // Batch mode (#2384): render every document in the manifest through one
-  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
-  // all entries; each entry supplies its own input/output and may override
-  // format/reportNum. Takes no positional input/output.
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
+  // --allow-nonchronological to all entries; each entry supplies its own
+  // input/output and may override format/reportNum. Takes no positional
+  // input/output.
   if (batchManifestPath) {
     // --report keys a single PDF to one tracker row; a batch renders N distinct
     // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
@@ -1313,15 +1474,24 @@ async function generatePDF() {
       console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
+    // Same reasoning for --kind, and the same consequence if it is ignored
+    // instead. runBatchFromManifest is not given the flag, so a global
+    // --kind=cover leaves every entry on filename inference; one whose name is
+    // not cover-shaped is filed as a CV and its row supersedes the report's real
+    // CV slot in pdf-index.tsv. Per-entry "kind" is the channel that works.
+    if (kindSupplied) {
+      console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
+      process.exit(1);
+    }
+    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder, allowNonChronological });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
-    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
-    console.error('{input, output, format?, reportNum?}) through one shared Chromium and writes');
+    console.error('{input, output, format?, reportNum?, kind?}) through one shared Chromium and writes');
     console.error('<manifest>.results.json; it exits non-zero if any document fails.');
     console.error('');
     console.error('This script only converts an already-built HTML file to PDF.');
@@ -1368,6 +1538,15 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Drop the optional sections that came in as a bare header — a title with
+  // nothing under it (#3986). The builders already strip these from the payload
+  // side, but neither builder is on every path here: the web pdf flow has the
+  // agent emit finished HTML, which reaches this script with the empty wrappers
+  // still in place. Deciding from the rendered content covers both, and running
+  // it before the reorder and the guard means they judge the document that will
+  // actually be printed. A CV with nothing empty comes through unchanged.
+  html = stripEmptyRenderedSections(html);
+
   // Apply the user's declared section order (config/profile.yml `cv.sections`)
   // before the guard runs, so the guard judges the document that will be
   // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
@@ -1378,6 +1557,7 @@ async function generatePDF() {
   html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
+  validateCvExperienceOrder(html, { allowNonChronological });
 
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
@@ -1423,6 +1603,7 @@ async function generatePDF() {
     format,
     baseDir: dirname(inputPath),
     reportNum,
+    kind: kindFlag,
     inputPath,
     maxPages,
     strictPages,
@@ -1446,7 +1627,7 @@ async function generatePDF() {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean}} globals
+ * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean, allowNonChronological: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -1515,8 +1696,22 @@ async function runBatchFromManifest(manifestPath, globals) {
         throw new Error(`invalid format "${declaredFormat}" (use: ${[...PAGE_FORMATS].join(', ')})`);
       }
 
+      // An OMITTED kind falls through to inference from the entry's output name.
+      // A kind that is present but empty is a different thing: the manifest
+      // author asked for one, and inferring instead can file a cover letter as a
+      // CV and replace the report's CV row. Same distinction the --kind flag
+      // draws above, on the path that actually renders the batch.
+      const entryKindSupplied = Object.prototype.hasOwnProperty.call(spec, 'kind');
+      const entryKind = (spec.kind ?? '').toString().trim();
+      if (entryKindSupplied && (!entryKind || !resolveArtifactKind(entryKind).kind)) {
+        throw new Error(`invalid kind "${entryKind}" (use: ${ARTIFACT_KINDS.join(', ')})`);
+      }
+
+      // Present but empty is a supplied value, same as kind above: reportNum is
+      // what keys the manifest row, so accepting '' writes the render nowhere.
+      const entryReportSupplied = Object.prototype.hasOwnProperty.call(spec, 'reportNum');
       const entryReport = (spec.reportNum ?? '').toString().trim();
-      if (entryReport && !/^\d+$/.test(entryReport)) {
+      if (entryReportSupplied && (!entryReport || !/^\d+$/.test(entryReport))) {
         throw new Error(`invalid reportNum "${entryReport}" (use the numeric report number)`);
       }
 
@@ -1537,11 +1732,14 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
-      // Same order as the single render: reorder first so the guard judges the
-      // document that will actually be printed. Without this the batch path
-      // rendered N CVs with cv.sections silently inert.
+      // Same order as the single render: strip the bare-header sections, then
+      // reorder, so the guard judges the document that will actually be
+      // printed. Without this the batch path rendered N CVs with cv.sections
+      // silently inert.
+      html = stripEmptyRenderedSections(html);
       html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       html = normalizeTextForATS(html).html;
 
       entries.push({
@@ -1551,6 +1749,7 @@ async function runBatchFromManifest(manifestPath, globals) {
         format: entryFormat,
         baseDir: dirname(entryInput),
         reportNum: entryReport,
+        kind: entryKind,
         inputPath: entryInput,
         maxPages: globals.maxPages,
         strictPages: globals.strictPages,
@@ -1743,6 +1942,18 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   ) ? requestedBaseDir : resolve(outputRoot);
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
+  // Every render path converges here, so the manifest's kind is decided here
+  // too rather than in each caller (#3887). A null kind means the caller
+  // declared one this manifest cannot key on: the CLI and the batch loop
+  // validate before rendering, but a direct renderHtmlToPdf() caller has
+  // nothing else in front of it, and applyManifestRow() reads null as 'cv' —
+  // so an unrecognized kind would evict the report's real CV row and hand the
+  // apply flow the wrong document. Rejected here, before the page renders, so
+  // a mislabelled artifact never reaches disk either.
+  const { kind: artifactKind } = resolveArtifactKind(opts.kind, outputPath);
+  if (!artifactKind) {
+    throw new Error(`Invalid artifact kind "${opts.kind}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+  }
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
@@ -1835,7 +2046,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
     try {
-      updatePDFManifest(reportNum, outputPath, inputPath, format);
+      updatePDFManifest(reportNum, outputPath, inputPath, format, artifactKind);
       console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
     } catch (err) {
       // The PDF itself succeeded — never fail the run over manifest bookkeeping.

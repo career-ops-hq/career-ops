@@ -32,6 +32,7 @@
 
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
+import { atsVendorOf } from './ats-vendor.mjs';
 
 const TIMEOUT_MS = 8_000;
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
@@ -95,7 +96,7 @@ const ATS_PROVIDERS = [
     id: 'greenhouse',
     // boards.greenhouse.io/{board}/jobs/{id} · job-boards[.eu].greenhouse.io/{board}/jobs/{id}
     match(u) {
-      if (!/(^|\.)greenhouse\.io$/.test(u.hostname)) return null;
+      if (atsVendorOf(u.href) !== 'greenhouse') return null;
       const m = u.pathname.match(/^\/([^/]+)\/jobs\/(\d+)\/?$/);
       return m ? { board: m[1], id: m[2] } : null;
     },
@@ -105,6 +106,7 @@ const ATS_PROVIDERS = [
     id: 'lever',
     // jobs.(eu.)?lever.co/{slug}/{id}
     match(u) {
+      if (atsVendorOf(u.href) !== 'lever') return null;
       const host = u.hostname.match(/^jobs\.((?:eu\.)?lever\.co)$/);
       if (!host) return null;
       const m = u.pathname.match(/^\/([^/]+)\/([^/?#]+)\/?$/);
@@ -127,7 +129,7 @@ const ATS_PROVIDERS = [
     // fixed-host URL; {jobId} is used solely to filter the parsed board (SAFE_SEGMENT
     // still validates both).
     match(u) {
-      if (u.hostname !== 'jobs.ashbyhq.com') return null;
+      if (atsVendorOf(u.href) !== 'ashby' || u.hostname !== 'jobs.ashbyhq.com') return null;
       const m = u.pathname.match(/^\/([^/]+)\/([^/]+)(?:\/application)?\/?$/);
       return m ? { org: m[1], jobId: m[2] } : null;
     },
@@ -162,6 +164,7 @@ const ATS_PROVIDERS = [
     // single-segment SAFE_SEGMENT check other providers use directly) validates
     // it component-by-component.
     match(u) {
+      if (atsVendorOf(u.href) !== 'workday') return null;
       const m = `${u.hostname}${u.pathname}`.match(
         /^([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)\/job\/(.+?)\/?$/
       );

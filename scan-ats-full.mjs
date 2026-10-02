@@ -31,6 +31,7 @@
  *   node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
  *   node scan-ats-full.mjs --since 7            # postings from the last 7 days
  *   node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+ *   node scan-ats-full.mjs --history-seeds --ats successfactors # scan history-derived boards
  *   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
  *   node scan-ats-full.mjs --dry-run            # preview without writing files
  *   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
@@ -44,6 +45,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { createHash } from 'crypto';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
@@ -55,7 +57,7 @@ import ashby from './providers/ashby.mjs';
 import workday, { WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import bamboohr from './providers/bamboohr.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -63,6 +65,9 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { boardKey, loadDeadBoards, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { KNOWN_ATS_VENDORS } from './ats-vendor.mjs';
+import { loadHistoryAtsSeeds } from './history-ats-seeds.mjs';
+import { loadProviders } from './providers/_registry.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -73,6 +78,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 // Its portals fallback had the same split: it honored CAREER_OPS_PORTALS but
 // otherwise looked in the cwd instead of the data root.
 const DATA_ROOT = getCareerOpsRoot();
+const PROVIDERS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'providers');
 const CACHE_DIR = path.join(DATA_ROOT, 'data/cache/ats-companies');
 const CACHE_TTL_HOURS = 24;
 // Tracks `main` deliberately: the dataset's value is freshness (new boards
@@ -303,7 +309,7 @@ export const SOURCES = {
 // ── CLI args ────────────────────────────────────────────────────────
 
 const KNOWN_FLAGS = [
-  '--since', '--limit', '--ats', '--seeds', '--dry-run', '--liveness',
+  '--since', '--limit', '--ats', '--seeds', '--history-seeds', '--dry-run', '--liveness',
   '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
   '--shuffle', '--resume', '--help', '-h',
 ];
@@ -316,6 +322,8 @@ const USAGE = `Usage:
   node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
   node scan-ats-full.mjs --since 7            # postings from the last 7 days
   node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+  node scan-ats-full.mjs --history-seeds       # also scan boards from local application history
+  node scan-ats-full.mjs --history-seeds --ats successfactors # history-derived boards for this ATS
   node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
   node scan-ats-full.mjs --dry-run            # preview without writing files
   node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
@@ -325,7 +333,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
   node scan-ats-full.mjs --help               # print this usage block and exit`;
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = argv.slice(2);
 
   // Shared with reply-watch.mjs/dedup-tracker.mjs/scan.mjs via
@@ -375,15 +383,26 @@ function parseArgs(argv) {
   const ats = atsArg
     ? atsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : (seeds.length > 0 ? [] : Object.keys(SOURCES));
-  const unknown = ats.filter(a => !SOURCES[a]);
+  const validAts = new Set([...Object.keys(SOURCES), ...KNOWN_ATS_VENDORS]);
+  const unknown = ats.filter(a => !validAts.has(a));
   if (unknown.length) {
-    console.error(`Error: unknown ATS source(s): ${unknown.join(', ')}. Valid: ${Object.keys(SOURCES).join(', ')}`);
+    console.error(`Error: unknown ATS source(s): ${unknown.join(', ')}. Valid: ${[...validAts].join(', ')}`);
     process.exit(1);
+  }
+  const historySeeds = args.includes('--history-seeds');
+  const historyOnly = ats.filter(a => !SOURCES[a]);
+  if (!historySeeds && historyOnly.length) {
+    throw new Error(
+      `--ats ${historyOnly.join(',')} ${historyOnly.length === 1 ? 'has' : 'have'} no public directory source; ` +
+      're-run with --history-seeds to scan boards derived from local application history.',
+    );
   }
   return {
     sinceDays,
     limit,
     ats,
+    atsExplicit: Boolean(atsArg),
+    historySeeds,
     seeds,
     dryRun: args.includes('--dry-run'),
     liveness: args.includes('--liveness'),
@@ -532,7 +551,7 @@ export function dedupTokenFor(job, provider) {
 // offer's lookup misses and callers fall back to URL-only dedup, unchanged
 // from before #3439.
 export function providerForSource(source) {
-  return SOURCES[String(source || '').replace(/-full$/, '')]?.provider;
+  return SOURCES[String(source || '').replace(/(?:-history)?-full$/, '')]?.provider;
 }
 
 // Cap-aware company sampling. Default: the dataset's natural (alphabetical)
@@ -689,6 +708,85 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
   return { offers, errors, total: capped.length };
 }
 
+/**
+ * Scan the ATS boards derived from the user's tracker and scan history.
+ * Unsupported vendor labels stay in the local seed set but make no network
+ * request. Known labels begin feeding the sweep automatically when a provider
+ * with the same id is added later, without a tracker migration.
+ */
+export async function runHistorySeedScan(seeds, providers, opts, ctx, processJobs) {
+  const selected = opts.atsExplicit
+    ? seeds.filter((seed) => opts.ats.includes(seed.vendor))
+    : seeds;
+  const grouped = new Map();
+  for (const seed of selected) {
+    if (!grouped.has(seed.vendor)) grouped.set(seed.vendor, []);
+    grouped.get(seed.vendor).push(seed);
+  }
+  const capped = [...grouped.values()].flatMap((group) => sampleCompanies(group, opts.limit, opts.shuffle));
+  const scannable = [];
+  for (const seed of capped) {
+    const provider = providers.get(seed.vendor);
+    if (!provider) continue;
+    const entry = { name: seed.company, careers_url: seed.careersUrl, provider: seed.vendor };
+    try {
+      if (provider.detect?.(entry)) scannable.push({ seed, provider, entry });
+    } catch { /* unroutable history is a skipped seed, not a failed network request */ }
+  }
+  let errors = 0;
+  const timeoutMs = opts.companyTimeoutMs ?? COMPANY_TIMEOUT_MS;
+  const withHostSlot = createKeyedLimiter(SINGLE_HOST_CONCURRENCY);
+  // An arbitrary provider may ignore cancellation or never settle. Once one
+  // request times out, quarantine that host for the rest of this run: queued
+  // boards are counted as errors instead of starting more requests behind the
+  // six still potentially in flight. This lets the sweep finish without ever
+  // exceeding the host cap.
+  const quarantinedHosts = new Set();
+
+  await parallelEach(scannable, CONCURRENCY, async ({ seed, provider, entry }) => {
+    const hostKey = (() => {
+      try { return new URL(entry.careers_url).hostname.toLowerCase(); } catch { return seed.vendor; }
+    })();
+    await withHostSlot(hostKey, async () => {
+      if (quarantinedHosts.has(hostKey)) {
+        errors++;
+        if (opts.verbose) console.error(`  ✗ ${seed.vendor}-history/${entry.name}: host skipped after an earlier timeout`);
+        return;
+      }
+      const operation = { active: true };
+      const operationPromise = (async () => {
+        const jobs = await provider.fetch(entry, ctx);
+        if (!operation.active) return;
+        await processJobs(jobs, `${seed.vendor}-history`, provider, entry.name, () => operation.active);
+      })();
+      let timedOut = false;
+      try {
+        await withTimeout(operationPromise, timeoutMs, `${seed.vendor}-history/${entry.name}`, () => {
+          timedOut = true;
+          operation.active = false;
+        });
+      } catch (err) {
+        operation.active = false;
+        if (timedOut) quarantinedHosts.add(hostKey);
+        errors++;
+        if (opts.verbose) console.error(`  ✗ ${seed.vendor}-history/${entry.name}: ${err.message}`);
+      } finally {
+        // Observe a late rejection without waiting indefinitely. A timed-out
+        // operation keeps running at most as one of the host's original six;
+        // quarantining prevents queued work from replacing it.
+        operationPromise.catch(() => {});
+      }
+    });
+  });
+
+  return {
+    total: scannable.length,
+    derived: selected.length,
+    unsupported: capped.length - scannable.length,
+    errors,
+  };
+}
+
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
 // One company's whole fetch may not exceed this — even with per-request
@@ -696,10 +794,39 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
 // one company, not freeze a worker slot for the rest of a 12k-company sweep.
 const COMPANY_TIMEOUT_MS = 5 * 60_000;
 
-export function withTimeout(promise, ms, label) {
+export function createKeyedLimiter(limit) {
+  const states = new Map();
+  return async function withKeySlot(key, fn) {
+    let state = states.get(key);
+    if (!state) {
+      state = { active: 0, queue: [] };
+      states.set(key, state);
+    }
+    if (state.active >= limit) {
+      await new Promise((resolve) => state.queue.push(resolve));
+    } else {
+      state.active++;
+    }
+    try {
+      return await fn();
+    } finally {
+      const next = state.queue.shift();
+      if (next) next();
+      else {
+        state.active--;
+        if (state.active === 0) states.delete(key);
+      }
+    }
+  };
+}
+
+export function withTimeout(promise, ms, label, onTimeout = null) {
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label}: timed out after ${Math.round(ms / 1000)}s`)), ms);
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`${label}: timed out after ${Math.round(ms / 1000)}s`));
+    }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -836,9 +963,17 @@ async function main() {
   // content_filter.by_title_keyword the same way scan.mjs does.
   opts.titleFilterConfig = fullTitleFilterConfig;
 
+  // User-layer history is an opt-in additive board directory. It fills vendors
+  // that have no public community dataset without changing the tracker schema,
+  // but an ordinary reverse scan never reads the user's application history.
+  const historySeeds = opts.historySeeds
+    ? loadHistoryAtsSeeds({ dataRoot: DATA_ROOT, scanHistoryPath: SCAN_HISTORY_PATH })
+    : [];
+
   const atsSummary = opts.ats.length ? `ats: ${opts.ats.join(', ')}` : '';
   const seedsSummary = opts.seeds.length ? `seeds: ${opts.seeds.join(', ')}` : '';
-  const sourcesSummary = [atsSummary, seedsSummary].filter(Boolean).join(' | ');
+  const historySummary = opts.historySeeds ? 'history seeds' : '';
+  const sourcesSummary = [atsSummary, seedsSummary, historySummary].filter(Boolean).join(' | ');
   log(`Reverse ATS scan — ${sourcesSummary} | since ${opts.sinceDays}d${opts.limit < Infinity ? ` | limit ${opts.limit}/ats` : ''}${opts.shuffle ? ' | shuffled' : ''}${opts.includeUndated ? ' | +undated' : ''}${opts.liveness ? ' | liveness' : ''}${opts.dryRun ? ' | DRY RUN' : ''}`);
 
   // extraTokensFor: a historical scan-history.tsv row records the URL it was
@@ -989,8 +1124,9 @@ async function main() {
   // Per-job filter chain, shared by the parallel sweep, the truncation retry
   // pass (workday), and date enrichment (icims). Closure over the filters and
   // counters so both passes update the same run totals.
-  const processJobs = async (jobs, sourceName, provider, companySlug) => {
+  const processJobs = async (jobs, sourceName, provider, companySlug, shouldContinue = () => true) => {
     for (const job of jobs) {
+      if (!shouldContinue()) return;
       if (!job.url || !job.title) continue;
       // Confirmed-stale postings are always dropped. Undated postings are
       // dropped by default (a reverse scan targets *fresh* roles) but
@@ -1012,6 +1148,7 @@ async function main() {
       if (dateClass === 'undated' && provider.enrichDate
           && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title)) {
         try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
+        if (!shouldContinue()) return;
         dateClass = classifyPostingDate(job, cutoff);
       }
       if (dateClass === 'stale') continue;
@@ -1033,7 +1170,7 @@ async function main() {
   // scope by the time the checkpoint's fate is decided at the end of main().
   let stoppedByOutage = false;
 
-  for (const name of opts.ats) {
+  for (const name of opts.ats.filter((ats) => SOURCES[ats])) {
     const source = SOURCES[name];
     // Stats are accumulated BEFORE the completed-source skip: on --resume a
     // source finished before the checkpoint was written still contributed its
@@ -1238,6 +1375,16 @@ async function main() {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
     log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
+  }
+
+  // ── User tracker + scan-history ATS seeds (#3697) ───────────────
+  if (historySeeds.length && !stoppedByOutage) {
+    const providers = await loadProviders(PROVIDERS_DIR);
+    log(`\n🌱 Application history — ${historySeeds.length} unique ATS board(s) derived locally...`);
+    const result = await runHistorySeedScan(historySeeds, providers, opts, ctx, processJobs);
+    totalCompaniesScanned += result.total;
+    totalErrors += result.errors;
+    log(`  done — ${result.total} board(s) probed, ${result.unsupported} without a scanner provider (${result.errors} errors)`);
   }
 
   // ── VC portfolio seed sources (--seeds flag) ───────────────────────

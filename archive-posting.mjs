@@ -32,6 +32,7 @@ import { reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -180,8 +181,12 @@ function slugify(text) {
     .slice(0, 60);
 }
 
+// The LOCAL calendar day. This names the capture file, and AGENTS.md is explicit
+// that a date-named capture "stops resolving the day after it is written" -- with
+// the UTC day an evening run west of Greenwich writes TOMORROW's date, so the
+// name is already stale at the moment it is created, before a single day passes.
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return localToday();
 }
 
 /**

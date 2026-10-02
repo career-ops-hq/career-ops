@@ -1,0 +1,579 @@
+// tests/ats-lint.test.mjs — the ATS lint's rules are data, and the data must
+// stay tied to the prose it claims to enforce (#3109).
+//
+// Three things drift here if nothing watches them, and each has a test below:
+//
+//   1. A rule's citation. The issue that designed this file cited
+//      `modes/pdf.md:62-69`, and one bullet inserted by #2504 moved five of the
+//      seven anchors. Every `source` entry is now the bullet's own TEXT, and
+//      "the doc still says this" is a string search, not a line count.
+//   2. The detector map. A rule naming a detector that does not exist would be
+//      reported as `skipped` — indistinguishable, to a reader of the output,
+//      from a rule that is deliberately unimplemented.
+//   3. The must-not-flag contract. Each implemented rule is asserted to fire on
+//      a violating fixture AND to stay quiet on the constructs its
+//      `must_not_flag` clause names. A rule with only the first half has not
+//      been shown to discriminate.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { atsLint, loadAtsRules, ATS_DETECTORS } from '../cv-templates.mjs';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const { rules, cannotCatch, sourceDoc } = loadAtsRules();
+
+/** Write `html` to a throwaway file and lint it. */
+function lint(html, kind = 'cv') {
+  const dir = mkdtempSync(join(tmpdir(), 'atslint-'));
+  const path = join(dir, 'cv-template.html');
+  writeFileSync(path, html);
+  return atsLint(path, kind);
+}
+
+/** Finding ids only — the assertion is about which rules fired, not wording. */
+const ids = (result) => result.findings.map((f) => f.id).sort();
+
+test('ats-rules.yml: every rule carries the fields the contract promises', () => {
+  assert.ok(rules.length >= 7, `expected the seven documented rules, got ${rules.length}`);
+  const seen = new Set();
+  for (const rule of rules) {
+    assert.ok(rule.id, 'every rule needs an id');
+    assert.ok(!seen.has(rule.id), `duplicate rule id: ${rule.id}`);
+    seen.add(rule.id);
+    assert.ok(rule.rule, `${rule.id}: needs a human-readable rule name`);
+    assert.equal(rule.severity, 'warning', `${rule.id}: atsLint is advisory; every rule is a warning`);
+    assert.ok(Array.isArray(rule.source) && rule.source.length > 0, `${rule.id}: needs at least one source quote`);
+    assert.ok(rule.must_not_flag, `${rule.id}: the must-not-flag contract is the half that decides whether a rule is worth having`);
+    if (rule.detect === null) {
+      assert.ok(rule.unimplemented_because, `${rule.id}: an unimplemented rule must say what has to be settled first`);
+    }
+  }
+});
+
+test('ats-rules.yml: every source quote still appears verbatim in modes/pdf.md', () => {
+  assert.equal(sourceDoc, 'modes/pdf.md');
+  const doc = readFileSync(join(ROOT, sourceDoc), 'utf-8');
+  for (const rule of rules) {
+    for (const quote of rule.source) {
+      assert.ok(
+        doc.includes(quote),
+        `${rule.id}: ${sourceDoc} no longer contains its cited rule text.\n  quote: ${quote}\n`
+          + '  Either the doc was reworded (update the quote) or the rule is no longer project policy (remove it).'
+      );
+    }
+  }
+});
+
+test('ats-rules.yml: no accepted section header is invented past the doc', () => {
+  const rule = rules.find((r) => r.id === 'standard-section-headers');
+  const cited = rule.source.join('\n');
+  for (const header of rule.headers) {
+    assert.ok(cited.includes(header), `"${header}" is accepted by the lint but is named in no cited modes/pdf.md bullet`);
+  }
+});
+
+test('detector map and rules file name exactly the same detectors', () => {
+  const named = new Set(rules.map((r) => r.detect).filter(Boolean));
+  const registered = new Set(Object.keys(ATS_DETECTORS));
+  for (const name of named) {
+    assert.ok(registered.has(name), `ats-rules.yml names detector "${name}" but nothing registers it — it would report as skipped, which reads as deliberate`);
+  }
+  for (const name of registered) {
+    assert.ok(named.has(name), `detector "${name}" is registered but no rule dispatches it — dead code, or a rule that was dropped`);
+  }
+});
+
+test('unimplemented rules report as skipped, never as a pass', () => {
+  const result = lint('<html><body><p>nothing to see</p></body></html>');
+  const unimplemented = rules.filter((r) => r.detect === null).map((r) => r.id).sort();
+  assert.deepEqual(result.skipped.map((s) => s.id).sort(), unimplemented);
+  assert.ok(unimplemented.length > 0, 'the judgment rules are meant to be present and unimplemented');
+  for (const s of result.skipped) assert.ok(s.reason, `${s.id}: a skipped rule must say why`);
+});
+
+test('atsLint surfaces the ceiling it cannot check', () => {
+  const result = lint('<html><body></body></html>');
+  assert.ok(result.cannotCatch.length >= 2, 'both measured classes must reach the caller');
+  for (const entry of result.cannotCatch) {
+    assert.ok(entry.id && entry.summary && entry.needs);
+  }
+  assert.deepEqual(
+    cannotCatch.map((c) => c.id).sort(),
+    ['css-generated-content-positioned', 'glyph-run-fragmentation']
+  );
+});
+
+// ── no-nested-tables ────────────────────────────────────────────────
+
+test('no-nested-tables: fires on a table inside a table', () => {
+  const result = lint('<body><table><tr><td><table><tr><td>x</td></tr></table></td></tr></table></body>');
+  assert.deepEqual(ids(result), ['no-nested-tables']);
+  assert.equal(result.ok, false);
+});
+
+test('no-nested-tables: must not flag a single flat table, however many', () => {
+  const flat = '<table><tr><td>a</td><td>b</td></tr></table>';
+  const result = lint(`<body>${flat}<p>text</p>${flat}${flat}</body>`);
+  assert.deepEqual(ids(result), []);
+  assert.equal(result.ok, true);
+});
+
+test('no-nested-tables: a table written inside a comment is prose, not markup', () => {
+  const result = lint('<body><!-- <table><table> --><table><tr><td>a</td></tr></table></body>');
+  assert.deepEqual(ids(result), []);
+});
+
+// ── no-hidden-text ──────────────────────────────────────────────────
+
+test('no-hidden-text: fires on each inline hiding trick', () => {
+  for (const decl of ['display:none', 'visibility:hidden', 'font-size:0', 'color:#fff', 'color: white', 'color:rgb(255, 255, 255)']) {
+    const result = lint(`<body><span style="${decl}">Kubernetes Terraform</span></body>`);
+    assert.deepEqual(ids(result), ['no-hidden-text'], `expected a finding for style="${decl}"`);
+  }
+});
+
+test('no-hidden-text: single-quoted style attributes are not a bypass', () => {
+  const result = lint("<body><span style='display:none'>stuffed</span></body>");
+  assert.deepEqual(ids(result), ['no-hidden-text']);
+});
+
+test('no-hidden-text: an unquoted style attribute is not a bypass either', () => {
+  // `<span style=display:none>` is valid HTML and hides the text. A quote-only
+  // matcher read it as no style attribute at all and passed the document.
+  const result = lint('<body><span style=display:none>Kubernetes</span></body>');
+  assert.deepEqual(ids(result), ['no-hidden-text']);
+});
+
+test('no-hidden-text: must not flag an attribute that merely ENDS in "style"', () => {
+  // `data-style` carries data, not styling. Unanchored, the matcher read those
+  // values as the element's own inline style and called visible text hidden.
+  for (const attr of ['data-style', 'my-style']) {
+    assert.deepEqual(ids(lint(`<body><span ${attr}="display:none">Senior Director</span></body>`)), [],
+      `${attr}="…" is not an inline style and must not be reported as hidden`);
+  }
+});
+
+test('no-hidden-text: must not flag a stylesheet rule (the shipped ats template hides a separator that way)', () => {
+  const result = lint(
+    '<html><head><style>.contact-row .separator { display: none; }\n'
+      + '@media print { .screen-only { display: none; } }\n'
+      + '.badge { color: #fff; background: #1f3864; }</style></head>'
+      + '<body><span class="separator">·</span><span aria-hidden="true">•</span></body></html>'
+  );
+  assert.deepEqual(ids(result), []);
+  assert.equal(result.ok, true);
+});
+
+test('no-hidden-text: font-size:0 must not swallow a legitimate 0.9em', () => {
+  const result = lint('<body><span style="font-size:0.9em">visible</span></body>');
+  assert.deepEqual(ids(result), []);
+});
+
+test('no-hidden-text: a white VALUE on a property that is not `color` is not white text', () => {
+  // A badge — white background, dark text — is the first thing a real template
+  // carries, and `color:#fff` is a substring of `background-color:#fff`. A lint
+  // that fires on the most ordinary construct in the file teaches its reader to
+  // ignore it, so the must-not-flag half is what decides whether this rule is
+  // worth having at all.
+  for (const decl of [
+    'background-color:#fff; color:#111',
+    'background-color: white',
+    'border-color:#ffffff',
+    'outline-color: rgb(255, 255, 255)',
+    'text-decoration-color:#fff',
+  ]) {
+    assert.deepEqual(ids(lint(`<body><span style="${decl}">Senior Director</span></body>`)), [],
+      `style="${decl}" is visible text and must not be reported as hidden`);
+  }
+  // The other half: narrowing to a standalone `color` must not narrow the rule
+  // out of existence. Genuine white-on-white still fires, including when the
+  // declaration is not the first one in the attribute.
+  for (const decl of ['color:#fff', 'background:#fff;color:#ffffff', 'background-color:#fff; color: white']) {
+    assert.deepEqual(ids(lint(`<body><span style="${decl}">Kubernetes Terraform</span></body>`)), ['no-hidden-text'],
+      `style="${decl}" hides text and must still fire`);
+  }
+});
+
+// ── standard-section-headers ────────────────────────────────────────
+
+test('standard-section-headers: fires on a literal heading the doc does not sanction', () => {
+  const result = lint('<body><div class="section-title">Career Highlights</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.match(result.findings[0].detail, /Career Highlights/);
+});
+
+test('standard-section-headers: an unquoted class attribute is still a heading', () => {
+  // `<div class=section-title>` is valid HTML. The matcher required quotes, so
+  // a non-standard heading written this way was skipped and the lint passed it.
+  const result = lint('<body><div class=section-title>Career Highlights</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+});
+
+test('standard-section-headers: must not flag data-class as a class attribute', () => {
+  // The matcher accepted any attribute whose name ENDED in "class", so
+  // data-class, ng-class and friends produced a finding for ordinary markup.
+  const result = lint('<body><div data-class="section-title">Career Highlights</div></body>');
+  assert.deepEqual(ids(result), []);
+});
+
+test('standard-section-headers: a non-English document is not judged by the English list', () => {
+  // The header enumeration is English-only, so a template declaring lang="zh"
+  // and writing its headings literally had every one reported. The rule's own
+  // must_not_flag names localised headers as a case it must not flag.
+  const zh = lint('<html lang="zh"><body><h2>\u5de5\u4f5c\u7ecf\u5386</h2><h2>\u6559\u80b2\u80cc\u666f</h2></body></html>');
+  assert.deepEqual(ids(zh), []);
+
+  const es = lint('<html lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
+  assert.deepEqual(ids(es), []);
+});
+
+test('standard-section-headers: a non-English document says the rule was skipped', () => {
+  // Silence and a pass must stay distinguishable, the same way a rendered-only
+  // rule is reported rather than dropped.
+  const r = lint('<html lang="zh"><body><h2>\u5de5\u4f5c\u7ecf\u5386</h2></body></html>');
+  assert.ok(
+    r.skipped.some((s) => s.id === 'standard-section-headers'),
+    `expected a skip entry, got ${JSON.stringify(r.skipped)}`,
+  );
+});
+
+test('standard-section-headers: an English or absent lang is still judged', () => {
+  assert.deepEqual(ids(lint('<html lang="en"><body><h2>Career Highlights</h2></body></html>')), ['standard-section-headers']);
+  assert.deepEqual(ids(lint('<html lang="en-GB"><body><h2>Career Highlights</h2></body></html>')), ['standard-section-headers']);
+  assert.deepEqual(ids(lint('<body><h2>Career Highlights</h2></body>')), ['standard-section-headers']);
+});
+
+test('standard-section-headers: a commented-out lang does not silence the rule', () => {
+  // The language read matched raw text, so a commented-out non-English <html>
+  // ahead of the real document made the rule skip an English CV entirely.
+  // Silence is the dangerous direction: the lint stops checking and says so
+  // only in `skipped`, which nothing gates on.
+  const html = '<!-- <html lang="es"> --><html lang="en"><body><h2>Career Highlights</h2></body></html>';
+  assert.deepEqual(ids(lint(html)), ['standard-section-headers']);
+});
+
+test('standard-section-headers: lang inside another attribute value is not the lang', () => {
+  const html = '<html data-note=" lang=es" lang="en"><body><h2>Career Highlights</h2></body></html>';
+  assert.deepEqual(ids(lint(html)), ['standard-section-headers']);
+});
+
+test('standard-section-headers: a quoted ">" does not cut the lang off the tag', () => {
+  // The opening tag was captured with `[^>]*`, which stops at the first '>'
+  // in the source. A '>' inside a quoted attribute value ends the capture
+  // early, so the tag arrives at the attribute walker already missing `lang`.
+  // A Spanish CV then reads as English and every heading is reported.
+  //
+  // Direction matters. The two evasions above SILENCE the rule. This one makes
+  // it fire where its own must_not_flag says it must stay quiet.
+  const r = lint('<html data-note=">" lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
+  assert.deepEqual(ids(r), []);
+  assert.ok(r.skipped.some((x) => x.id === 'standard-section-headers'));
+});
+
+test('standard-section-headers: quoted and unquoted lang values all read the same', () => {
+  // The tag capture and the attribute walker have to agree on where a value
+  // ends. Both quoting styles and the bare form are valid HTML, so all three
+  // skip a Spanish document.
+  for (const tag of ['<html lang="es">', "<html lang='es'>", '<html lang=es>']) {
+    const r = lint(`${tag}<body><h2>Experiencia Laboral</h2></body></html>`);
+    assert.deepEqual(ids(r), [], `expected no findings for ${tag}`);
+    assert.ok(r.skipped.some((x) => x.id === 'standard-section-headers'), `expected a skip for ${tag}`);
+  }
+});
+
+test('standard-section-headers: a real non-English lang still skips', () => {
+  const r = lint('<html lang="es"><body><h2>Experiencia Laboral</h2></body></html>');
+  assert.deepEqual(ids(r), []);
+  assert.ok(r.skipped.some((x) => x.id === 'standard-section-headers'));
+});
+
+test('standard-section-headers: must not flag a placeholder heading', () => {
+  // Every shipped template writes these, and the rendered wording belongs to
+  // the payload, not the template. The skip assertion matters as much as the
+  // findings one: quiet because the rule ran and had nothing to object to, not
+  // quiet because lang="{{LANG}}" made it stand down.
+  const result = lint(
+    '<html lang="{{LANG}}"><body>'
+      + '<h1>{{NAME}}</h1>'
+      + '<div class="section-title">{{SECTION_SUMMARY}}</div>'
+      + '<div class="section-title">{{SECTION_EXPERIENCE}}</div>'
+      + '</body></html>'
+  );
+  assert.deepEqual(ids(result), []);
+  assert.deepEqual(result.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+});
+
+test('standard-section-headers: a heading built from two placeholders is still unchosen', () => {
+  // isPlaceholderOnly strips every {{...}} run and then trims, so a heading
+  // split across two placeholders collapses to nothing and stays quiet. Anchor
+  // the check to one whole placeholder, or drop that trim, and the space
+  // between them survives. The heading then reads as literal wording, and a
+  // template that composes a heading this way is flagged for a rename it never
+  // made. Both edits pass every other case, so this fixture pins both.
+  const r = lint(
+    '<body><div class="section-title">{{SECTION_EXPERIENCE}} {{SECTION_SUFFIX}}</div></body>'
+  );
+  assert.deepEqual(ids(r), []);
+  assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+});
+
+test('standard-section-headers: an unsubstituted lang placeholder is not a language', () => {
+  // Every shipped CV template declares lang="{{LANG}}". Read as a declaration,
+  // that is the language "{{lang}}", which is not "en", so the rule stood down
+  // on every CV template the project ships and ran on the cover letter alone.
+  // A template has not picked a language yet. An unsubstituted placeholder is
+  // absence, and absence already means run.
+  //
+  // The second spelling is the point. {{LANG}} is what the repo ships today,
+  // and a check written against that one string leaves the next name silent
+  // again. The predicate has to be general, so both names are asserted.
+  for (const name of ['{{LANG}}', '{{DOC_LANG}}']) {
+    const r = lint(`<html lang="${name}"><body><h2>Career Highlights</h2></body></html>`);
+    assert.deepEqual(ids(r), ['standard-section-headers'], name);
+    assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), [], name);
+  }
+});
+
+test('standard-section-headers: a lang in the body is not the document language', () => {
+  // The tag capture ends at the '>' that closes <html>. Widened to run past
+  // it, the attribute walker reads the first lang ANYWHERE in the document, so
+  // one quoted foreign-language line silences the rule across the whole CV.
+  // Direction matters: this one silences, and a silenced rule reports nothing.
+  const r = lint('<html><body><h2>Career Timeline</h2><p lang="es">hola</p></body></html>');
+  assert.deepEqual(ids(r), ['standard-section-headers']);
+  assert.deepEqual(r.skipped.filter((s) => s.id === 'standard-section-headers'), []);
+});
+
+test('standard-section-headers: must not flag the standard or additive headers', () => {
+  const headers = rules.find((r) => r.id === 'standard-section-headers').headers;
+  const html = `<body>${headers.map((h) => `<div class="section-title">${h}</div>`).join('')}</body>`;
+  assert.deepEqual(ids(lint(html)), []);
+  // Case is not a rename.
+  assert.deepEqual(ids(lint('<body><div class="section-title">WORK EXPERIENCE</div></body>')), []);
+});
+
+test('standard-section-headers: an entity-escaped sanctioned header is not a rename', () => {
+  // "Awards & Honors" is sanctioned, and HTML writes that ampersand as `&amp;`.
+  // Reading the heading as tags-stripped-only left the literal `Awards &amp;
+  // Honors`, which is in no accepted set, so writing the header the normal way
+  // was reported as an invented synonym.
+  assert.deepEqual(ids(lint('<body><div class="section-title">Awards &amp; Honors</div></body>')), []);
+  // Same shape, different entity: `&nbsp;` between the two words of a heading.
+  assert.deepEqual(ids(lint('<body><div class="section-title">Work&nbsp;Experience</div></body>')), []);
+  // Decoding must not turn the detector into a pass: a heading the doc does not
+  // sanction still fires when it is written with an entity, and is reported in
+  // its decoded form rather than as the escape the author typed.
+  const result = lint('<body><div class="section-title">Awards &amp; Highlights</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.match(result.findings[0].detail, /Awards & Highlights/);
+});
+
+test('standard-section-headers: a decorative empty element does not hide the heading', () => {
+  // An icon span carries no text, so it cannot change what a heading SAYS —
+  // but it closes early, and a capture that stops at the first `</` ended at
+  // the icon instead of the heading. The text went missing and the heading was
+  // skipped as empty: a non-standard heading passing as clean, which is the
+  // one failure mode a linter must not have.
+  const icon = '<body><div class="section-title"><span class="icon"></span>Career Highlights</div></body>';
+  assert.deepEqual(ids(lint(icon)), ['standard-section-headers']);
+  assert.match(lint(icon).findings[0].detail, /Career Highlights/);
+  // The same idiom nested, which is how icon fonts are actually written.
+  const nested = '<body><div class="section-title"><span class="icon"><i class="fa"></i></span>Career Highlights</div></body>';
+  assert.deepEqual(ids(lint(nested)), ['standard-section-headers']);
+  // And the must-not-flag half: decoration around a SANCTIONED header stays
+  // quiet. Without this the rule could "pass" by flagging everything.
+  assert.deepEqual(
+    ids(lint('<body><div class="section-title"><span class="icon"></span>Work Experience</div></body>')),
+    []
+  );
+});
+
+test('standard-section-headers: inline markup inside a heading does not truncate it', () => {
+  // The class-based capture stopped at the first `</`, which is the close of
+  // whatever is nested INSIDE the heading, not the heading's own. So
+  // `Work <em>Experience</em> Details` was read as "Work Experience" — a
+  // SANCTIONED header — and a non-standard heading passed silently. Truncating
+  // onto an accepted name is the worst shape of this bug: the empty case at
+  // least got skipped visibly, this one reports clean.
+  const result = lint('<body><div class="section-title">Work <em>Experience</em> Details</div></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.match(result.findings[0].detail, /Work Experience Details/);
+  // Truncation the other way round: markup wrapping the whole heading text.
+  assert.deepEqual(
+    ids(lint('<body><div class="section-title"><span>Career Highlights</span></div></body>')),
+    ['standard-section-headers']
+  );
+  // And the must-not-flag half — inline emphasis inside a sanctioned header
+  // stays quiet, so the rule is not passing this by flagging everything.
+  assert.deepEqual(ids(lint('<body><div class="section-title">Work <em>Experience</em></div></body>')), []);
+});
+
+test('standard-section-headers: one heading is reported once', () => {
+  // An element carrying both a heading tag and the class is matched by both
+  // passes, and reported the same finding twice.
+  const result = lint('<body><h2 class="section-title">Career Highlights</h2></body>');
+  assert.deepEqual(ids(result), ['standard-section-headers']);
+  assert.equal(result.findings.length, 1, 'one heading, one finding');
+});
+
+test('standard-section-headers: does not run for cover letters', () => {
+  const html = '<body><h1>Dear Hiring Manager</h1></body>';
+  assert.deepEqual(ids(lint(html, 'cv')), ['standard-section-headers']);
+  assert.deepEqual(ids(lint(html, 'cover')), []);
+});
+
+// ── contract ────────────────────────────────────────────────────────
+
+test('atsLint never throws, and an unreadable template is not a silent pass', () => {
+  const result = atsLint(join(ROOT, 'templates', 'does-not-exist.html'), 'cv');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /ENOENT|no such file/i);
+  assert.deepEqual(result.findings, []);
+});
+
+test('atsLint never throws on an unreadable rules file either', () => {
+  const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath: '/nonexistent/ats-rules.yml' });
+  assert.equal(result.ok, false);
+  assert.ok(result.error);
+});
+
+test('a rules file that defines no rules is an error, not a clean pass', () => {
+  // A missing `rules:` key, a wrongly-typed one and an empty list all loaded
+  // as [], so the lint evaluated zero rules and reported ok. A lint that
+  // checks nothing and says it passed is worse than one that fails loudly.
+  // An unreadable rules file already surfaces through result.error; a rules
+  // file that lints nothing takes the same path.
+  for (const body of ['source_doc: nothing\n', 'source_doc: nothing\nrules: []\n', 'rules: not-a-list\n']) {
+    const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+    writeFileSync(rulesPath, body);
+
+    assert.throws(() => loadAtsRules(rulesPath), /no rules/i, `expected a throw for: ${body}`);
+
+    const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath });
+    assert.equal(result.ok, false, `expected ok:false for: ${body}`);
+    assert.match(result.error, /no rules/i);
+    assert.deepEqual(result.findings, []);
+  }
+});
+
+/**
+ * Run the CLI. CAREER_OPS_PROFILE picks the default template, so a developer
+ * who exports it lints a different file than CI does, and the rest of the
+ * environment is kept so node itself still works.
+ */
+const cli = (args) => {
+  const { CAREER_OPS_PROFILE, ...env } = process.env;
+  return spawnSync(process.execPath, ['cv-templates.mjs', ...args], { cwd: ROOT, encoding: 'utf-8', env });
+};
+
+test('the CLI refuses a non-HTML template rather than reporting it clean', () => {
+  // Every detector is an HTML pattern, so a .tex template lints to zero
+  // findings — a pass that checked nothing. That must be an error, not JSON.
+  const tex = cli(['lint', 'cv', '--format=tex']);
+  assert.notEqual(tex.status, 0, 'a .tex lint must fail rather than print findings');
+  assert.match(tex.stderr, /HTML templates only/);
+  assert.equal(tex.stdout.trim(), '', 'nothing that looks like a clean result may be printed');
+
+  const html = cli(['lint', 'cv']);
+  assert.equal(html.status, 0, `the html path must still work: ${html.stderr}`);
+  assert.equal(JSON.parse(html.stdout).ok, true);
+});
+
+test('the CLI test helper does not inherit CAREER_OPS_PROFILE', () => {
+  // The variable picks the default CV template, so the suite passed or failed
+  // on whatever the developer happened to export. Pointed at a profile naming
+  // a template that does not exist, the inheriting helper could not resolve.
+  const profile = join(mkdtempSync(join(tmpdir(), 'atsprofile-')), 'profile.yml');
+  writeFileSync(profile, 'cv:\n  template: no-such-template\n');
+  const prior = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = profile;
+  try {
+    const html = cli(['lint', 'cv']);
+    assert.equal(html.status, 0, `an ambient CAREER_OPS_PROFILE must not reach the child: ${html.stderr}`);
+    assert.equal(JSON.parse(html.stdout).ok, true);
+  } finally {
+    if (prior === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = prior;
+  }
+});
+
+// A nonempty `rules:` list satisfied the loader no matter what was in it.
+// `rules: [{}]` loaded, atsLint recorded a skip carrying no rule id, and
+// returned ok:true on a document full of the things the lint exists to catch.
+// The shipped file's conformance was already asserted above; nothing stopped a
+// different --rules-path being garbage. The contract the loader enforces is the
+// one ats-rules.yml's own header states.
+test('a rules file whose entries are malformed is an error, not a clean pass', () => {
+  const VALID = 'id: x\n    rule: X\n    severity: warning\n    detect: null\n'
+    + '    unimplemented_because: pending\n    source:\n      - q\n    must_not_flag: n\n';
+  const cases = [
+    ['an empty entry', 'rules:\n  - {}\n', /id/i],
+    ['a null entry', 'rules:\n  - ~\n', /mapping/i],
+    ['a scalar entry', 'rules:\n  - just-a-string\n', /mapping/i],
+    ['no id', `rules:\n  - ${VALID.replace('id: x\n    ', '')}`, /id/i],
+    ['no rule name', `rules:\n  - ${VALID.replace('rule: X\n    ', '')}`, /rule/i],
+    ['a non-warning severity', `rules:\n  - ${VALID.replace('severity: warning', 'severity: error')}`, /severity/i],
+    ['no source quote', `rules:\n  - ${VALID.replace('source:\n      - q\n    ', '')}`, /source/i],
+    ['an empty source list', `rules:\n  - ${VALID.replace('source:\n      - q', 'source: []')}`, /source/i],
+    ['no must_not_flag', `rules:\n  - ${VALID.replace('must_not_flag: n\n', '')}`, /must_not_flag/i],
+    ['a null detector with no reason', `rules:\n  - ${VALID.replace('unimplemented_because: pending\n    ', '')}`, /unimplemented_because/i],
+    // A rule whose detect key is misspelled, missing, mistyped or names
+    // nothing keeps a registered detector from ever running, and atsLint
+    // reported the silence as "no detector yet" — false about the rule, and a
+    // clean pass on a document the detector would have caught.
+    ['no detect key at all', `rules:\n  - ${VALID.replace('detect: null\n    unimplemented_because: pending\n    ', '')}`, /detect/i],
+    ['a typo\'d detect key', `rules:\n  - ${VALID.replace('detect: null', 'detector: hidden-text')}`, /detect/i],
+    ['a non-string detect', `rules:\n  - ${VALID.replace('detect: null', 'detect: 7')}`, /detect/i],
+    ['a detect naming no registered detector', `rules:\n  - ${VALID.replace('detect: null', 'detect: no-such-detector')}`, /detect/i],
+    ['a detect naming an inherited Object property', `rules:\n  - ${VALID.replace('detect: null', 'detect: toString')}`, /detect/i],
+    ['duplicate ids', `rules:\n  - ${VALID}  - ${VALID}`, /duplicate/i],
+  ];
+  for (const [label, body, pattern] of cases) {
+    const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+    writeFileSync(rulesPath, body);
+    assert.throws(() => loadAtsRules(rulesPath), pattern, `expected a throw for ${label}`);
+
+    const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath });
+    assert.equal(result.ok, false, `expected ok:false for ${label}`);
+    assert.deepEqual(result.findings, [], `${label}: a rejected config reports no findings`);
+  }
+});
+
+// The other half. A rule with `detect: null` is agreed policy with no detector
+// yet, and has to stay loadable, or the validator would delete the open items.
+test('a valid rule with a null detector still loads and still skips', () => {
+  const rulesPath = join(mkdtempSync(join(tmpdir(), 'atsrules-')), 'ats-rules.yml');
+  writeFileSync(rulesPath, 'rules:\n  - id: x\n    rule: X\n    severity: warning\n'
+    + '    detect: null\n    unimplemented_because: pending\n    source:\n      - q\n    must_not_flag: n\n');
+  const loaded = loadAtsRules(rulesPath);
+  assert.equal(loaded.rules.length, 1);
+
+  const result = atsLint(join(ROOT, 'templates', 'cv-template.html'), 'cv', { rulesPath });
+  assert.equal(result.error, null);
+  assert.deepEqual(result.skipped.map((s) => s.id), ['x'], 'the skip has to carry the rule id');
+});
+
+// The usage line advertises `--fallback` for list, resolve and lint together.
+// `resolve` passed it through and `lint` dropped it, so `lint cv NAME --fallback`
+// reported "Template not found" for a name `resolve cv NAME --fallback` answers.
+// The two subcommands take the same three arguments and have to resolve alike.
+test('the CLI honours --fallback on lint, the same as on resolve', () => {
+  const missing = 'definitely-not-a-real-template';
+
+  // Control: without the flag both subcommands refuse, so the flag is what differs.
+  assert.notEqual(cli(['resolve', 'cv', missing]).status, 0, 'resolve without --fallback must refuse');
+  assert.notEqual(cli(['lint', 'cv', missing]).status, 0, 'lint without --fallback must refuse');
+
+  const resolved = cli(['resolve', 'cv', missing, '--fallback']);
+  assert.equal(resolved.status, 0, `resolve --fallback must answer: ${resolved.stderr}`);
+  assert.match(resolved.stdout.trim(), /cv-template\.html$/, 'it falls back to the standard template');
+
+  const linted = cli(['lint', 'cv', missing, '--fallback']);
+  assert.equal(linted.status, 0, `lint --fallback must answer too: ${linted.stderr}`);
+  assert.equal(JSON.parse(linted.stdout).ok, true);
+});
