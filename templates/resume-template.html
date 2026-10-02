@@ -432,7 +432,6 @@
 
   /* === PAGE BREAK CONTROL === */
   .avoid-break,
-  .project,
   .edu-item {
     break-inside: avoid;
     page-break-inside: avoid;
@@ -446,6 +445,16 @@
   .job {
     page-break-inside: var(--job-break-inside, avoid);
     break-inside: var(--job-break-inside, avoid);
+  }
+
+  /* Opt-in — unchanged default (this template has always kept a project whole;
+     override via config/profile.yml style.project_break_inside: auto to let a
+     project flow across a page break instead). This template's :root token
+     block does not declare --project-break-inside, so the fallback below is the
+     only default. */
+  .project {
+    page-break-inside: var(--project-break-inside, avoid);
+    break-inside: var(--project-break-inside, avoid);
   }
 
   /* === RTL (Arabic) Support === */
