@@ -986,7 +986,7 @@ search_queries:
 # URL to detect, so they must be selected with an explicit `provider:`
 # field: 4dayweek, agentic-jobs, arbeitnow, arbeitsagentur, flowxtra, getonbrd, glints,
 # himalayas, ibm, jobbankca, jobicy, jobstreet, justjoin, landingjobs, mycareersfuture, nofluffjobs, remoteok, remotive, senjob,
-# manfred, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
+# manfred, startup-jobs, thehub, vdab, weworkremotely, workingnomads, wttj, a16z-speedrun-talent,
 # telegram-channel. Examples for every built-in provider are below.
 
 # ── Built-in provider examples ────────────────────────────────────
@@ -1425,6 +1425,14 @@ search_queries:
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
 #   provider: larajobs
+#   enabled: true
+#
+# - name: Startup Jobs                    # global startup/scale-up jobs (public RSS feed, ~50-item snapshot)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer    # optional role slug (confirmed live: platform-engineer,
+#                                 # site-reliability-engineer, devops-engineer, engineering, ...)
+#     workplace: remote          # optional free-text, e.g. "remote"
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
