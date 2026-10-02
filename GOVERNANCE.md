@@ -48,7 +48,7 @@ This is the one place the ladder and its criteria are written down: [MAINTAINERS
 
 **By invitation**, after a run of quality merged PRs + a track record of helpful code reviews.
 
-- Triage permissions on the repository; can approve PRs. A maintainer still approves and merges: branch protection only counts approvals from write access
+- Triage permissions on the repository; can submit reviews. A maintainer still approves and merges: branch protection only counts approvals from write access
 - Identity is verified before this access is granted (see [Trust & access](MAINTAINERS.md#trust--access))
 - Reviews carry the decision **inside the reviewer's area** (listed in [MAINTAINERS.md](MAINTAINERS.md)); outside it, an approval is a valued signal on code quality, not the routing decision
 - Routing (core vs. plugin vs. separate project, see CONTRIBUTING "Scope") and the critical files in `.github/CODEOWNERS` stay with the maintainers, before code review

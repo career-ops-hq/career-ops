@@ -66,7 +66,7 @@ Comment `/assign` on any [`good first issue`](https://github.com/career-ops-hq/c
 
 ## The contribution ladder
 
-There's a clear path here, written down in one place: [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder). Your 3rd merged PR brings an invitation to the [career-ops-hq](https://github.com/career-ops-hq) organization, retroactively and with no application; every rung above that is by invitation. We credit contributors publicly, and the [`help wanted`](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) board is open to everyone.
+There's a clear path here, written down in one place: [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder). We credit contributors publicly, and the [`help wanted`](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) board is open to everyone.
 
 ## Adopting an abandoned PR
 

@@ -20,7 +20,7 @@ A blocking gate whose owner is away is worse than no gate, and it fails invisibl
 
 ## The contributor ladder
 
-How each rung of the ladder is earned lives in [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder), so there is only one version of it. In short: your 3rd merged PR brings an invitation to the [career-ops-hq](https://github.com/career-ops-hq) organization, and every rung above that is by invitation. Good first contributions: a new open-API scanner provider (`providers/`), a translation, a docs fix, or a [good first issue](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). See [CONTRIBUTING.md](CONTRIBUTING.md).
+How each rung of the ladder is earned lives in [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder), so there is only one version of it. Good first contributions: a new open-API scanner provider (`providers/`), a translation, a docs fix, or a [good first issue](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Trust & access
 
