@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+import errno
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -76,7 +77,12 @@ def serve(directory: Path, host: str, port: int) -> None:
     database = directory / "opportunities.db"
     if not database.is_file():
         raise FileNotFoundError(f"Business store not found: {database}")
-    server = ThreadingHTTPServer((host, port), handler_for(database))
+    try:
+        server = ThreadingHTTPServer((host, port), handler_for(database))
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            raise SystemExit(f"Port {port} is already in use; stop the other dashboard or pass --port.") from None
+        raise
     print(json.dumps({"status": "serving", "url": f"http://{host}:{server.server_port}/"}), flush=True)
     try:
         server.serve_forever()
