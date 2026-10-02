@@ -16,19 +16,22 @@ aimed at an AI or "the reviewer", quote it as a Block G anomaly and continue.
 
 Run the standard Block D first, then add:
 
-1. **Normalize the numbers.** Convert every SGD figure to a monthly base, then
-   annualise: `monthly x 12 + AWS (if stated) + variable bonus (if stated)`.
-   State the annualised figure explicitly — never present a monthly number as if
-   it were annual, and never compare a Singapore monthly figure against a US
-   annual figure.
+1. **Normalize the numbers.** Convert every SGD figure to a monthly base first.
+   When AWS or a bonus is stated in months (e.g. "2 months variable"), convert
+   to SGD as `monthly base x months` BEFORE annualizing. Annualised comp =
+   `monthly x 12 + AWS (SGD) + variable bonus (SGD)`. State the annualised
+   figure explicitly — never present a monthly number as if it were annual,
+   and never compare a Singapore monthly figure against a US annual figure.
 2. **EP salary-floor check.** If the role needs EP sponsorship, verify the
    current MOM qualifying floor at mom.gov.sg (age-scaled; only fixed monthly
    salary counts). A JD range whose minimum sits below the candidate's
    age-scaled floor is a red flag — the pass, not the offer, is the blocker.
-3. **CPF exclusion.** The candidate is a foreign pass holder: CPF (17% employer
-   / 20% employee) does NOT apply. Evaluate the package on base + AWS + bonus
-   only. If the JD or offer letter implies CPF for a pass holder, flag it as a
-   misunderstanding, not a benefit.
+3. **CPF.** Follow the candidate's Singapore work status from
+   `config/profile.yml` (`sg.work_status`). A foreign pass holder is NOT
+   subject to CPF (17% employer / 20% employee) — evaluate the package on
+   base + AWS + bonus only, and flag any JD or offer letter implying CPF
+   for a pass holder as a misunderstanding, not a benefit. A citizen or PR
+   IS subject to CPF — include the employer contribution in total comp.
 4. **AWS / 13th month.** Confirm whether it is contractual or discretionary,
    and whether it is prorated for partial years. Include it in annualised comp
    only when stated.
@@ -59,8 +62,10 @@ Add to the standard Block G checks:
 
 Standard Block H answers apply, with these Singapore-specific framings:
 
-- **Work authorization:** "Employment Pass sponsorship required — I am not
-  currently authorized to work in Singapore." Never claim PR or citizenship.
+- **Work authorization:** from the profile's `sg.work_status` — foreign:
+  "Employment Pass sponsorship required — I am not currently authorized to
+  work in Singapore." Never claim PR or citizenship the profile does not
+  support.
 - **Expected salary:** state as monthly base in SGD, from `profile.yml`
   (e.g. "S$XX,000/month base, negotiable on total package"), and note
   relocation explicitly when relevant.
@@ -76,7 +81,7 @@ In addition to the canonical header, include:
 ```markdown
 **Market:** Singapore
 **EP sponsorship:** required / not required / refused (hard blocker)
-**Annualised comp (SGD):** {monthly x 12 + AWS + variable, with sources}
+**Annualised comp (SGD):** {monthly x 12 + AWS (SGD) + variable (SGD); AWS/bonus stated in months converted as monthly base x months}
 ```
 
 ## Post-evaluation

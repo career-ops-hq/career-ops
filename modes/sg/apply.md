@@ -16,11 +16,15 @@ guidance for the GENERATE step.
 
 ## Singapore-specific fields
 
-- **Work authorization / right to work:** "Employment Pass sponsorship required.
-  I am not currently authorized to work in Singapore." Never select or imply
-  Singaporean/PR status. If the form only offers "Are you authorized to work
-  in Singapore? Yes/No" with no sponsorship nuance, answer No and add the
-  sponsorship need in a free-text field.
+- **Work authorization / right to work:** read the candidate's Singapore work
+  status from `config/profile.yml` (`sg.work_status`: `citizen` | `pr` |
+  `pass-holder` | `foreign`). When the profile is silent, default to `foreign`
+  ("Employment Pass sponsorship required. I am not currently authorized to
+  work in Singapore.") and say so in the Notes. Never select or imply a
+  status the profile does not support. If the form only offers "Are you
+  authorized to work in Singapore? Yes/No" with no sponsorship nuance,
+  answer from the profile status and add the sponsorship need in a free-text
+  field.
 - **Require sponsorship (now or in the future)?** Yes — plainly and always.
   This is the field that decides EP feasibility; never soften it.
 - **Expected salary:** monthly base in SGD from `profile.yml`
@@ -42,27 +46,42 @@ guidance for the GENERATE step.
 
 ## Output format
 
-```
-## Answers for [Company] -- [Role]
+Follow `modes/apply.md`'s output format verbatim — `## Responses for
+[Company] — [Role]`, the `Based on:` line, one `Length:` line per answer,
+the trailing Notes — and add the Singapore header line:
 
-Base: Report #NNN | Score: X.X/5 | Archetype: [type] | Market: Singapore | EP: required
+```text
+## Responses for [Company] — [Role]
+
+Based on: Report #NNN | Score: X.X/5 | Archetype: [type] | Market: Singapore | EP: required / not required / refused | SG status: [from profile]
 
 ---
 
 ### 1. [Exact form question]
-> [Ready-to-paste answer]
+> [Response ready for copy-paste, or "Ask candidate: ..." if the field needs confirmation]
+Length: [used/allowed characters or words, or "limit unknown"]
 
 ### 2. [Next question]
-> [Answer]
+> [Response]
+Length: [used/allowed characters or words, or "limit unknown"]
 
-...
+Repeat the response and length lines for every remaining question.
 
 ---
 
 Notes:
+- [SG work status used and its source: profile `sg.work_status` or defaulted to foreign]
 - [Role variations, observations, etc.]
 - [Customization points the candidate should double-check]
 ```
+
+## Application Answers
+
+Persist exactly as `modes/apply.md` specifies: after the final answers are
+filled into the form or handed to the candidate for copy-paste, update the
+matched report with an additive `## Application Answers` section (recovered
+through the strict reader, never re-read as prose); on confirmed submission,
+refresh it from `filled` to `submitted`.
 
 ## After applying (optional)
 
