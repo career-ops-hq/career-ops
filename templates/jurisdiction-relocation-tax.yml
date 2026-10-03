@@ -1,0 +1,264 @@
+# Career-Ops — Interprovincial/Interstate Relocation Tax Bands (jurisdiction table) (#4694)
+#
+# Part of the jurisdiction-compliance-lens umbrella (#2026), member "Interprovincial/
+# interstate relocation — real purchasing power". Consumed by salary-gap.mjs's
+# relocation-adjustment functions (loadRelocationTable / matchJurisdiction /
+# computeRelocationAdjustment) and surfaced in modes/oferta.md Block G, Signal 16.
+#
+# This file is a DATA REFERENCE, not instruction logic: adding a new jurisdiction
+# (another province, a US state) never requires touching salary-gap.mjs's math —
+# only a new entry here, following the schema below. The engine is generic
+# (federal brackets + sub-national brackets -> progressive bracket tax), the
+# table is jurisdiction-keyed. Canada is the first seed, not a hardcoded ceiling —
+# the same pattern the AI-screening-disclosure table used (NYC/Illinois/EU) and
+# the covenant table used (California first, Ontario second).
+#
+# CONTRIBUTION RULE (mandatory, same discipline as every other jurisdiction table
+# in this repo): no entry/bracket lands here without
+#   1. a regulator-grade citable source (the tax authority's own published rate
+#      table, or a reputable accounting-firm bulletin summarizing it with an
+#      explicit tax year), AND
+#   2. an explicit `tax_year` the brackets apply to, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. an `official_source.url` pointing at the tax authority's OFFICIAL page —
+#      never a third-party mirror, scraped cost-of-living site, or aggregator.
+# Unverified or "I heard the rate is..." rows will be rejected in review.
+#
+# NEVER-ASSERT / PHRASING-DISCIPLINE RULE (mandatory, mirrored in modes/oferta.md
+# Signal 16): rows here compute a SIMPLIFIED, TRANSPARENT tax-bracket figure —
+# federal + sub-national MARGINAL BRACKETS ONLY, applied progressively. They do
+# NOT model basic personal amounts, non-refundable credits, CPP/EI/QPIP
+# contributions, provincial surtaxes (e.g. Ontario's), health premiums, or any
+# other credit/deduction. The output is a directional "which province keeps more
+# of this gross number," never an exact take-home-pay calculation, and the
+# agent/script must say so every time this table is used. NOT FINANCIAL OR TAX
+# ADVICE — a corroborating data point for the candidate's own judgment, exactly
+# like every other umbrella member's warn-only, human-in-the-loop posture.
+#
+# COST-OF-LIVING SCOPE NOTE (v1 limitation, intentional — see #4694's own text):
+# this table does NOT include a cost-of-living index between cities. Statistics
+# Canada's CPI measures price CHANGE over time within one city, not a relative
+# price LEVEL between two cities, and no official, free, citable StatCan
+# cross-city cost-of-living index was found during this table's construction.
+# Shipping a cost-of-living adjustment here would mean inventing a number or
+# pulling one from a scraped third-party cost-of-living site, both of which
+# violate the seed-discipline rule above. Scoped out deliberately; a follow-up
+# issue should pick this up only if/when a genuinely citable official source is
+# found — see the candidate-rows comment block at the end of this file.
+#
+# Schema:
+#   jurisdictions:
+#     {CODE}:                      — jurisdiction code, e.g. CA-FEDERAL, CA-ON
+#       jurisdiction_name: string  — human-readable name for report output
+#       country: string            — country name (not code) for report output
+#       level: "federal" | "provincial" | "state"
+#       currency: string           — ISO 4217 code the brackets below are denominated
+#                                     in (e.g. "CAD"). REQUIRED on every sub-national
+#                                     row: salary-gap.mjs's computeRelocationAdjustment
+#                                     refuses to run gross figures through these
+#                                     brackets unless the advertised/--currency value
+#                                     matches this field exactly (case-insensitive) —
+#                                     an UNKNOWN or mismatched currency (e.g. a
+#                                     "150k USD" posting against this CAD table)
+#                                     returns `{ ok: false, reason: 'currency-mismatch' }`
+#                                     rather than silently taxing the wrong number
+#                                     (#4696). A row with no `currency` field skips
+#                                     this check entirely (legacy/fixture tables only —
+#                                     never omit it from a real jurisdiction row).
+#       tax_year: integer          — the tax year these brackets apply to
+#       aliases: list              — strings that identify this jurisdiction inside
+#                                     a free-text location (candidate's own
+#                                     config/profile.yml location, or a posting's
+#                                     stated work location) — province/state names,
+#                                     common abbreviations, and major cities.
+#                                     Matched case-insensitively as whole words;
+#                                     absence of a match is "no signal," never an
+#                                     assumed non-match penalty (evidence-strength
+#                                     honesty rule). federal rows carry no aliases
+#                                     (they are combined with every sub-national
+#                                     row of the same country, never matched
+#                                     directly against a location string).
+#       brackets: list             — ascending by `up_to`; each entry:
+#         up_to: number|null       — upper bound of this bracket in the local
+#                                     currency, or null for the top (unbounded) bracket
+#         rate: number             — marginal rate as a decimal (0.145 = 14.5%)
+#       official_source:
+#         url: string              — the tax authority's own published rate page
+#         what_it_shows: string    — what a candidate finds there
+#       legal_basis: string        — statute/regulation citation
+#       sources: list              — citable pages/bulletins backing the row
+#       as_of: YYYY-MM-DD          — date this row was last verified against sources
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (suggestions only — do NOT add without the
+# source + tax_year + as_of + official-source discipline above):
+#   - CA-QC : Quebec — deliberately excluded from this v1. Quebec collects its
+#             own provincial tax separately from the CRA (not the federal-collects-
+#             for-the-province model every other included province uses) and
+#             applies a federal abatement that this engine's simple
+#             federal-plus-provincial bracket sum does not model. Needs its own
+#             computation path, not just a new table row — verify before adding.
+#   - CA-MB, CA-SK, CA-NB, CA-PE, CA-NL, CA-YT, CA-NT, CA-NU : not yet seeded;
+#     real, citable 2026 rates exist (CRA publishes all of them on the same
+#     federal/provincial rates page) — straightforward additions for a future PR.
+#   - US-* : US state income tax bands (IRS federal + each state's own revenue
+#     department) — the natural second country for this table, matching #4694's
+#     own proposed scope. No US state seeded yet; verify against the state's own
+#     department-of-revenue page before adding, same discipline as above.
+#   - An official cost-of-living index — only if a genuinely citable, free,
+#     official (not scraped-aggregator) cross-city source is found. Do not seed
+#     on a plausible-looking number from a cost-of-living website.
+
+jurisdictions:
+  CA-FEDERAL:
+    jurisdiction_name: "Canada — Federal"
+    country: "Canada"
+    level: federal
+    currency: "CAD"
+    tax_year: 2026
+    # Federal rows are combined with every provincial row of the same country —
+    # never matched directly against a location string, so no aliases here.
+    brackets:
+      - { up_to: 58523, rate: 0.14 }
+      - { up_to: 117045, rate: 0.205 }
+      - { up_to: 181440, rate: 0.26 }
+      - { up_to: 258482, rate: 0.29 }
+      - { up_to: null, rate: 0.33 }
+    official_source:
+      url: "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html"
+      what_it_shows: "CRA's official current-year federal (and provincial/territorial) personal income tax rates and bracket thresholds."
+    legal_basis: "Income Tax Act (Canada), s. 117(2) — federal bracket rates and thresholds, indexed annually to inflation"
+    sources:
+      - "Canada Revenue Agency — Canadian income tax rates for individuals (current and previous years)"
+      - "Canada Revenue Agency — Personal income tax rates and brackets, current year"
+    as_of: "2026-10-01"
+
+  CA-ON:
+    jurisdiction_name: "Ontario, Canada"
+    country: "Canada"
+    level: provincial
+    currency: "CAD"
+    tax_year: 2026
+    aliases:
+      - "Ontario"
+      - ", ON"
+      - " ON"
+      - "Toronto"
+      - "Midland"
+      - "Ottawa"
+      - "Hamilton"
+      - "London, Ontario"
+      - "Kitchener"
+      - "Waterloo"
+      - "Mississauga"
+      - "Markham"
+      - "Windsor, Ontario"
+    brackets:
+      - { up_to: 53891, rate: 0.0505 }
+      - { up_to: 107785, rate: 0.0915 }
+      - { up_to: 150000, rate: 0.1116 }
+      - { up_to: 220000, rate: 0.1216 }
+      - { up_to: null, rate: 0.1316 }
+    official_source:
+      url: "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html"
+      what_it_shows: "CRA's official current-year Ontario provincial personal income tax rates and bracket thresholds."
+    legal_basis: "Taxation Act, 2007 (Ontario), s. 6 — provincial bracket rates and thresholds, indexed annually (the $150,000/$220,000 thresholds are statutorily frozen, not indexed)"
+    enforcement_notes: >-
+      Ontario also levies an individual surtax (20% of basic Ontario tax over a
+      threshold, plus 36% over a higher threshold) and an Ontario Health Premium
+      on top of these bracket rates. Neither is modeled by this table's simple
+      bracket-tax computation — see the NEVER-ASSERT note at the top of this file.
+    sources:
+      - "Canada Revenue Agency — Canadian income tax rates for individuals (current and previous years)"
+      - "2026 Ontario Income Tax Tables (Richter LLP) — cross-checked against the CRA page above"
+    as_of: "2026-10-01"
+
+  CA-NS:
+    jurisdiction_name: "Nova Scotia, Canada"
+    country: "Canada"
+    level: provincial
+    currency: "CAD"
+    tax_year: 2026
+    aliases:
+      - "Nova Scotia"
+      - ", NS"
+      - " NS"
+      - "Halifax"
+      - "Dartmouth"
+      - "Sydney, Nova Scotia"
+      - "Truro"
+    brackets:
+      - { up_to: 30995, rate: 0.0879 }
+      - { up_to: 61991, rate: 0.1495 }
+      - { up_to: 97417, rate: 0.1667 }
+      - { up_to: 157124, rate: 0.175 }
+      - { up_to: null, rate: 0.21 }
+    official_source:
+      url: "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html"
+      what_it_shows: "CRA's official current-year Nova Scotia provincial personal income tax rates and bracket thresholds."
+    legal_basis: "Income Tax Act (Nova Scotia), RSNS 1989, c. 217 — provincial bracket rates and thresholds; 2026 is the first tax year these brackets are indexed to inflation (1.6% factor)"
+    sources:
+      - "Canada Revenue Agency — Canadian income tax rates for individuals (current and previous years)"
+      - "Tax Highlights from the 2026 Nova Scotia Budget (CI Financial) — cross-checked against the CRA page above"
+    as_of: "2026-10-01"
+
+  CA-AB:
+    jurisdiction_name: "Alberta, Canada"
+    country: "Canada"
+    level: provincial
+    currency: "CAD"
+    tax_year: 2026
+    aliases:
+      - "Alberta"
+      - ", AB"
+      - " AB"
+      - "Calgary"
+      - "Edmonton"
+      - "Red Deer"
+      - "Lethbridge"
+    brackets:
+      - { up_to: 61200, rate: 0.08 }
+      - { up_to: 154259, rate: 0.10 }
+      - { up_to: 185111, rate: 0.12 }
+      - { up_to: 246813, rate: 0.13 }
+      - { up_to: 370220, rate: 0.14 }
+      - { up_to: null, rate: 0.15 }
+    official_source:
+      url: "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html"
+      what_it_shows: "CRA's official current-year Alberta provincial personal income tax rates and bracket thresholds."
+    legal_basis: "Alberta Personal Income Tax Act, RSA 2000, c. A-30 — provincial bracket rates and thresholds, indexed annually under Alberta's own escalator"
+    sources:
+      - "Canada Revenue Agency — Canadian income tax rates for individuals (current and previous years)"
+      - "Tax Highlights from the 2026 Alberta Budget (CI Financial) — cross-checked against the CRA page above"
+    as_of: "2026-10-01"
+
+  CA-BC:
+    jurisdiction_name: "British Columbia, Canada"
+    country: "Canada"
+    level: provincial
+    currency: "CAD"
+    tax_year: 2026
+    aliases:
+      - "British Columbia"
+      - ", BC"
+      - " BC"
+      - "Vancouver"
+      - "Victoria, British Columbia"
+      - "Surrey"
+      - "Burnaby"
+      - "Kelowna"
+    brackets:
+      - { up_to: 50363, rate: 0.056 }
+      - { up_to: 100728, rate: 0.077 }
+      - { up_to: 115648, rate: 0.105 }
+      - { up_to: 140430, rate: 0.1229 }
+      - { up_to: 190405, rate: 0.147 }
+      - { up_to: 265545, rate: 0.168 }
+      - { up_to: null, rate: 0.205 }
+    official_source:
+      url: "https://www.canada.ca/en/revenue-agency/services/tax/individuals/tax-rates-brackets/current-year.html"
+      what_it_shows: "CRA's official current-year British Columbia provincial personal income tax rates and bracket thresholds."
+    legal_basis: "Income Tax Act (British Columbia), RSBC 1996, c. 215 — provincial bracket rates and thresholds; the lowest-bracket rate rose from 5.06% to 5.60% effective 2026-01-01"
+    sources:
+      - "Canada Revenue Agency — Canadian income tax rates for individuals (current and previous years)"
+      - "Key updates from British Columbia's 2026 budget (Baker Tilly) — cross-checked against the CRA page above"
+    as_of: "2026-10-01"
