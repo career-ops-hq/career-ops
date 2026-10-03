@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-opus-5, rep 1, profile ai-engineer.
+# Report: 001-halcyon-robotics-software-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3
+ARCHETYPE: AI Forward Deployed
+ARCHETYPE_RAW: AI Forward Deployed / Agentic — Automation
+LEGITIMACY: Suspicious
+DECISION: Skip
+WORK_AUTH: not_needed
+COST_USD: 2.7477485
+TURNS: 24
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: none
+EXPECT_FAILURES: none
+---END_SUMMARY---

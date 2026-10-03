@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-sonnet-5+effort-medium, rep 1, profile ai-engineer.
+# Report: 001-halcyon-robotics-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3.1
+ARCHETYPE: AI Forward Deployed
+ARCHETYPE_RAW: AI Forward Deployed Engineer
+LEGITIMACY: Suspicious
+DECISION: Research first
+WORK_AUTH: not_needed
+COST_USD: 0.8347372
+TURNS: 16
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: none
+EXPECT_FAILURES: none
+---END_SUMMARY---

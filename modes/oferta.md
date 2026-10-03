@@ -762,7 +762,47 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (the posting's full text, pasted verbatim — see requirement below)
 ```
 
-**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`. It also includes `risk_summary`: the Risk Summary block mirrored as a map (schema and enum values in `batch/batch-prompt.md`), and `requirement_importance`: Block B's table mirrored row by row, carrying each row's evidence tier, importance band and match (`[]` when the JD yields no usable requirement list). The `inferred` cap from Block B's gate holds in the YAML too — `importance` is never `critical` or `high` when `evidence: inferred`.
+**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md`, which stays the source of truth for the rules (`tests/prompt-parity.test.mjs` keeps this copy key-for-key identical to it). Write exactly these keys — no renamed, extra or missing ones — and pick every `{a | b}` value verbatim from its list; downstream scripts parse them literally:
+
+```yaml
+company: "{company}"
+role: "{role}"
+score: {X.X}
+legitimacy_tier: "{High Confidence | Proceed with Caution | Suspicious}"
+archetype: "{detected}"
+final_decision: "{Apply | Consider | Research first | Skip}"
+hard_stops:
+  - "{blocking gap or risk}"
+soft_gaps:
+  - "{non-blocking gap}"
+top_strengths:
+  - "{strength most relevant to this role}"
+risk_level: "{Low | Medium | High}"
+confidence: "{Low | Medium | High}"
+next_action: "{one concrete next step}"
+work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
+discard_reasons:
+  - "{predicted reason if final_decision is Skip/Consider, e.g. salary_too_low, hybrid_required, tech_stack_mismatch, seniority_mismatch, geo_restriction, size_mismatch, company_culture, or other specific reason}"
+via: {agency/recruiter firm as a quoted string, or null for direct applications}
+company_confidential: {true when the end employer is unknown (company is "?"), else false}
+advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
+reports_to: {the JD's stated reporting line as a quoted string (e.g. "VP of Marketing"), or null when the JD names none}
+requirement_importance:
+  - requirement: "{JD requirement}"
+    jd_signal: "{verbatim JD quote for stated; structure reference for structural; null for inferred}"
+    evidence: "{stated | structural | inferred}"
+    importance: "{critical | high | meaningful | preferred | low_signal}"
+    match: "{strong | partial | missing | na}"
+risk_summary:
+  legitimacy: "{high_confidence | proceed_with_caution | suspicious}"
+  classification: "{clear | flagged | not_evaluated}"
+  culture: "{pass | caution | fail | not_evaluated}"
+  interview_redflags: "{none | caution | warning | not_evaluated}"
+  ai_infra: "{consistent | mismatch | not_evaluated}"
+  ai_screening_disclosure: "{disclosed | corroborating_only | no_match | not_evaluated}"
+```
+
+ It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`. It also includes `risk_summary`: the Risk Summary block mirrored as a map (schema and enum values in `batch/batch-prompt.md`), and `requirement_importance`: Block B's table mirrored row by row, carrying each row's evidence tier, importance band and match (`[]` when the JD yields no usable requirement list). The `inferred` cap from Block B's gate holds in the YAML too — `importance` is never `critical` or `high` when `evidence: inferred`.
 
 **JD archival (required, #2789):** every report MUST carry a `## Job Description (archived verbatim)` section with the posting's full text pasted as-is — never summarized, never paraphrased. A `**URL:**` header alone is not an archive: it is a live pointer that rots once the posting closes or gets taken down, which reliably happens somewhere in the weeks between applying and a later interview round, and there is no way to recover the original requirements after that. This is the primary mechanism, not a fallback — the report is the one artifact guaranteed to get written and tracked, unlike a separate `jds/` file. If the JD is very long, write it to `archive-posting.mjs --report={num}` instead (or another `{num}-...`-prefixed capture) and, in place of the text, put in this section **exactly** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` — `check-jd-archive.mjs` only credits this canonical pointer sentence when it resolves back to that report's number via `findCaptureForReport`; a slug-only `jds/{slug}.md` with no report number does not validate here. This exact phrasing matters: the check only treats a section as a pointer (requiring resolution) when the section is nothing but this sentence — any additional prose alongside it is read as the archived text itself, not a pointer, so don't mix the two. Slug-only captures remain fine for `jd-skill-gap.mjs` run standalone, outside a full evaluation, where there is no report to link back to. `check-jd-archive.mjs` validates every `reports/*.md` has one form or the other and is wired into `test-all.mjs` — a report missing both is a test failure.
 

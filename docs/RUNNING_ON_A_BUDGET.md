@@ -451,6 +451,28 @@ Two things follow from that, and they are the cheapest wins available:
 - **Batch beats pasting** when you have several roles: `batch/batch-runner.sh` reuses one worker instead of re-sending the instructions per role.
 - **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.003 evaluation and an exhausted five-hour limit.
 
+### Measured: one Claude Code evaluation, per model
+
+The 26,000 tokens above are the instruction floor of a single turn. A real evaluation takes 14–25 turns and re-reads its context on each one, so the total it processes is far larger — most of it served from the prompt cache. These are the averages of 108 recorded `/career-ops oferta` runs in headless Claude Code (golden set, one synthetic profile, web research off); method and caveats in [`evals/results/README.md`](../evals/results/README.md).
+
+| Per evaluation | Haiku 4.5 | Sonnet 5 | Opus 5.5 | Opus 5 |
+|---|---|---|---|---|
+| **On a subscription (Pro/Max):** tokens processed / generated | 0.76M / 12k | 2.4M / 32k | 1.1M / 15k | 1.9M / 30k |
+| Turns | 14 | 25 | 14 | 24 |
+| Wall time | 2.6 min | 5.5 min | 2.3 min | 6.4 min |
+| **On an API key:** cost at list price | $0.25 | $1.27 | $1.26 | $2.84 |
+| Mean score difference vs Opus 5 | 0.48 | 0.28 | 0.30 | — |
+
+A subscription spends usage-window allowance rather than dollars; how it weighs each token type is Anthropic's accounting, so read the token row as the relative signal between models, not as an exact share of your limit.
+
+What to do with it:
+
+- **Interactive sessions** run on whatever `/model` you picked — `spend_tier` does not switch it. If you evaluate on Opus 5, Opus 5.5 gave equivalent scores with fewer tokens and about a third of the wait.
+- **Batch** workers run on the tier's model (section 2), billed to your key or to your plan through `CLAUDE_CODE_OAUTH_TOKEN` (section 2b).
+- **Haiku** is the cheapest on both views but not yet a drop-in: its scores ran ~0.5 higher than Opus and moved ±0.4 between identical runs, so double-check anything it puts near 4.0.
+
+These numbers age with every model and prompt release. Re-measure with `node evals/record-claude.mjs` (it spends real money; see [`evals/README.md`](../evals/README.md)).
+
 ### Step 4: Tailor the CV HTML (~3,000 Tokens)
 
 Now, use the headless tailor to inject JD keywords, reorder experience, and build the customized HTML for the role.

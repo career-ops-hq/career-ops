@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-sonnet-5+effort-medium, rep 1, profile ai-engineer.
+# Report: 001-vortexa-global-solutions-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 2
+ARCHETYPE: Agentic / Automation
+ARCHETYPE_RAW: Agentic / Automation,AI Forward Deployed
+LEGITIMACY: Proceed with Caution
+DECISION: null
+WORK_AUTH: unstated
+COST_USD: 0.8369712
+TURNS: 23
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key report; extra key date; extra key url; extra key legitimacy; extra key culture_screen; extra key verification; missing legitimacy_tier; archetype not string; missing final_decision; missing hard_stops; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; missing discard_reasons; missing company_confidential; missing reports_to; 4 requirement_importance row(s) off-schema (e.g. missing jd_signal); extra key risk_summary.posting_legitimacy; extra key risk_summary.employment_classification; extra key risk_summary.culture_screen; extra key risk_summary.interview_red_flags; extra key risk_summary.ai_infrastructure_mismatch; missing risk_summary.legitimacy; missing risk_summary.classification; missing risk_summary.culture; missing risk_summary.interview_redflags; missing risk_summary.ai_infra; risk_summary.ai_screening_disclosure "no_jurisdiction_match" not in enum
+EXPECT_FAILURES: none
+---END_SUMMARY---
