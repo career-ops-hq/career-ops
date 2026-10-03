@@ -5,7 +5,7 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
@@ -19,6 +19,7 @@ import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
+import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -223,6 +224,41 @@ function checkTrackedBakFiles(root) {
       "git ls-files '*.bak*'            # find them",
       'git rm --cached <each path>      # untrack, leaving the file on disk',
       'git commit -m "chore: untrack .bak backups"',
+    ],
+  };
+}
+
+// A checkout made without symlink support (Windows without Developer Mode,
+// core.symlinks=false) writes each per-CLI skill entrypoint as a regular file
+// holding only the symlink target text, so that CLI loads a ~43-byte skill with
+// no router in it (career-ops#4589). update-system.mjs apply repairs these via
+// ensureSkillEntrypoints, but apply returns early on an install that is already
+// up to date, so a fresh clone never reaches it and nothing else says why
+// /career-ops does nothing. Read-only on purpose (doctor must not write): it
+// names the stubs and the one command that materializes them.
+function checkSkillEntrypoints(root) {
+  const stubs = [];
+  for (const entry of SKILL_ENTRYPOINTS) {
+    const entryPath = join(root, ...entry.path.split('/'));
+    try {
+      const stat = lstatSync(entryPath);
+      if (stat.isSymbolicLink() || !stat.isFile()) continue;
+      if (readFileSync(entryPath, 'utf-8').trim() === entry.pointer) stubs.push(entry.path);
+    } catch {
+      // Missing or unreadable: not a stub. A CLI the user never installed is
+      // not worth a warning, and ensureSkillEntrypoints creates absent ones.
+    }
+  }
+  if (stubs.length === 0) {
+    return { pass: true, label: 'CLI skill entrypoints are real files or symlinks' };
+  }
+  return {
+    warn: true,
+    label: `${stubs.length} CLI skill entrypoint${stubs.length === 1 ? ' is' : 's are'} a symlink-target stub, not the skill — this checkout has no symlink support, so that CLI loads an empty /career-ops`,
+    fix: [
+      ...stubs,
+      'node update-system.mjs apply --confirm   # or, without updating:',
+      `node -e "import('./scaffolder/bin/skill-entrypoints.mjs').then(m => console.log(m.materializeSkillEntrypoints(process.cwd())))"`,
     ],
   };
 }
@@ -723,6 +759,7 @@ async function main() {
     checkBillingSource(),
     checkDependencies(),
     checkTrackedBakFiles(codeRoot),
+    checkSkillEntrypoints(codeRoot),
     await checkPlaywright(),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
@@ -902,10 +939,12 @@ function onboardingState(root) {
   // codeRoot (the code checkout), which only differs from `root` when a real
   // split-checkout data root is in play and no --target was given.
   const bakCheck = checkTrackedBakFiles(codeRoot);
+  const skillCheck = checkSkillEntrypoints(codeRoot);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
+    ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
