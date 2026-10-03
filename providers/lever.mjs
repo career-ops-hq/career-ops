@@ -87,10 +87,14 @@ export default {
     assertLeverUrl(apiUrl);
     const json = await ctx.fetchJson(apiUrl, { redirect: 'error', timeoutMs: LEVER_TIMEOUT_MS });
     if (!Array.isArray(json)) return [];
+    const boardSlug = new URL(apiUrl).pathname.match(/^\/v0\/postings\/([^/]+)\/?$/)?.[1] || '';
     return json.map(j => ({
       title: j.text || '',
       url: j.hostedUrl || '',
       company: entry.name,
+      listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
+        ? { ats_provider: 'lever', board_slug: boardSlug, posting_id: j.id }
+        : undefined,
       location: resolveLocation(j.categories),
       // Lever's v0 postings list ships the full description for free (same
       // payload, no per-job request) — enables scan.mjs content_filter.

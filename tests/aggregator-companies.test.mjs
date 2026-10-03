@@ -22,7 +22,7 @@ import {
 
 console.log('\naggregator companies — skipped, and visibly skipped');
 
-const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company';
+const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key';
 const row = (url, date, title, company) =>
   [url, date, 'greenhouse', title, company, 'added', 'Remote', '', '', '', '', ''].join('\t');
 

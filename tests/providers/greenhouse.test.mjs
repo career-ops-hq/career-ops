@@ -208,9 +208,12 @@ try {
   if (fetched[0]?.title === 'Senior Backend Engineer'
       && fetched[0]?.url === 'https://job-boards.greenhouse.io/acme/jobs/101'
       && fetched[0]?.company === 'Acme'
+      && fetched[0]?.listingIdentity?.ats_provider === 'greenhouse'
+      && fetched[0]?.listingIdentity?.board_slug === 'acme'
+      && fetched[0]?.listingIdentity?.posting_id === '101'
       && fetched[0]?.location === 'Berlin, Germany'
       && fetched[0]?.postedAt === Date.parse('2026-07-01T09:30:00-04:00'))
-    pass('greenhouse.fetch() maps title/absolute_url/entry.name/location.name/first_published');
+    pass('greenhouse.fetch() maps ATS identity, title/URL/company/location/date');
   else fail(`greenhouse.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
 
   if (fetched[1]?.title === '' && fetched[1]?.location === '' && fetched[1]?.postedAt === undefined)
