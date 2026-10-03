@@ -121,8 +121,16 @@
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* The separator is generated content on the item BEFORE it, not an element of
+     its own. As its own flex item it was an independent box, so `flex-wrap`
+     could place it first on a new line — and attaching it to the following item
+     instead would only move the problem, since that item starts the wrapped
+     line. Trailing the preceding item, it leaves with that item or not at all.
+     margin-inline-start (logical) keeps RTL — html[lang="ar"] — correct. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -692,13 +700,9 @@
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>

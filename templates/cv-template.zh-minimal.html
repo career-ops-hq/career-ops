@@ -115,8 +115,12 @@ version: 1.0.0
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -744,13 +748,9 @@ version: 1.0.0
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>

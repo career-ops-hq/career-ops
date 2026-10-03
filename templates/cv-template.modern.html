@@ -119,7 +119,15 @@ version: 1.0.0
     font-weight: 600;
   }
 
-  .separator { margin: 0 6px; color: #c6ccd4; }
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    /* The leading space replaces the markup whitespace that sat before the old
+       separator element; without it every item after the first shifts left. */
+    content: " |";
+    margin-inline: 6px;
+    color: #c6ccd4;
+  }
 
   /* === SECTIONS === */
   .section { margin-bottom: 14px; }
@@ -399,13 +407,9 @@ version: 1.0.0
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>
