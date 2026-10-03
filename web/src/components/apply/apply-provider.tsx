@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
+import { readFillResult } from "@/lib/apply/fill-stream.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
 type Meta = { needsConfirmation?: boolean };
@@ -357,44 +358,18 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
       if (generation.current !== gen) return; // left mid-fill
-      if (!r.body) {
-        setError("The agent couldn't start filling.");
-        setStatus("error");
-        return;
+      const result = await readFillResult(r, (step) => setDriveSteps((p) => [...p, step]), () => generation.current === gen);
+      if (!result || generation.current !== gen) return; // left mid-fill
+      if (result.status === "done") {
+        setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: result.filled ? "AI filled the form for you — review every answer on the real form, then submit it yourself." : "AI did its best but couldn't finish — check the real form before submitting." }]);
+      } else {
+        setError(result.error);
       }
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (generation.current !== gen) return; // left mid-fill
-        buf += dec.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          let ev: { t?: string; message?: string; filled?: boolean } & DriveStep;
-          try {
-            ev = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (ev.t === "step") setDriveSteps((p) => [...p, ev as DriveStep]);
-          else if (ev.t === "done") {
-            setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: ev.filled ? "AI filled the form for you — review every answer on the real form, then submit it yourself." : "AI did its best but couldn't finish — check the real form before submitting." }]);
-            setStatus("done");
-          } else if (ev.t === "error") {
-            setError(ev.message || "The agent couldn't fill the form.");
-            setStatus("error");
-          }
-        }
-      }
+      setStatus(result.status);
     } catch (e) {
       if (generation.current !== gen) return; // left mid-fill
-      setError(`The agent couldn't fill the form: ${e instanceof Error ? e.message : "stream error"}.`);
-      setStatus("error");
+      setError(`The agent couldn't fill the form: ${e instanceof Error ? e.message : "stream error"}. Check the real form before trying again.`);
+      setStatus("ready");
     }
   }, []);
   const agentFillRef = useRef(agentFill);
