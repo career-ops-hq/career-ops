@@ -1745,11 +1745,13 @@ function extractPipelineCompanyRole(line) {
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
+  const identityPromotableUrls = new Set();
   // Rows the age policy has released. Held rather than counted here: the two
   // sources parsed below carry no age policy of their own, so a row the TTL has
   // just freed can be re-pinned a few lines later. The count is taken at the end,
   // against the finished set, so it reports what is actually rescannable.
   const recheckCandidates = new Set();
+  const recheckListingTokens = new Map();
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
@@ -1761,13 +1763,22 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
-      seen.add(normalizeUrlForDedup(url));
-      if (extraTokensFor) {
+      const urlToken = normalizeUrlForDedup(url);
+      seen.add(urlToken);
+      // Only an accepted posting row can teach this scan a strong identity.
+      // URL-specific failures (for example blocked hosts) must not suppress a
+      // different URL that happens to carry the same provider identity.
+      if (status === 'added') identityPromotableUrls.add(urlToken);
+      if (extraTokensFor && status === 'added') {
         for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
         }
       }
-    } else recheckCandidates.add(normalizeUrlForDedup(url));
+    } else {
+      const urlToken = normalizeUrlForDedup(url);
+      recheckCandidates.add(urlToken);
+      if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+    }
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
@@ -1816,6 +1827,14 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     const done = /^\s*- \[x\]/i.test(line);
     if ((done || inProcessed) && recheckCandidates.has(key)) continue;
     seen.add(key);
+    // A stale history row is still pinned while its actionable pipeline entry
+    // exists. Keep its strong identity pinned for the same period, or an ATS
+    // alias could slip through while the original URL remains queued.
+    const listingToken = recheckListingTokens.get(key);
+    if (listingToken) {
+      seen.add(listingToken);
+      identityPromotableUrls.add(key);
+    }
   }
 
   // applications.md — extract URLs from report links and any inline URLs
@@ -1829,7 +1848,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   let recheckEligible = 0;
   for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
-  return { seen, recheckEligible };
+  return { seen, recheckEligible, identityPromotableUrls };
 }
 
 // Path options mirror mergeIntoPipeline's seam below: the defaults are the
@@ -2698,10 +2717,14 @@ export function listingIdentityToken(offer) {
   }
 }
 
-export function isOfferSeen(offer, seenUrls) {
+export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
   const urlToken = normalizeUrlForDedup(offer?.url);
   const identityToken = listingIdentityToken(offer);
-  return seenUrls.has(urlToken) || Boolean(identityToken && seenUrls.has(identityToken));
+  if (seenUrls.has(urlToken)) {
+    if (identityToken && identityPromotableUrls?.has(urlToken)) seenUrls.add(identityToken);
+    return true;
+  }
+  return Boolean(identityToken && seenUrls.has(identityToken));
 }
 
 export function markOfferSeen(offer, seenUrls) {
@@ -2782,7 +2805,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const scanHistoryText = readIfExists(scanHistoryPath);
   const pipelineText = readIfExists(pipelinePath);
   const applicationsText = readIfExists(applicationsPath);
-  const { seen, recheckEligible } = collectSeenUrls(
+  const { seen, recheckEligible, identityPromotableUrls } = collectSeenUrls(
     { scanHistoryText, pipelineText, applicationsText },
     policy,
     { extraTokensFor: (_url, _portal, listingKey) => listingKey ? `listing:${listingKey}` : null },
@@ -2796,7 +2819,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const locatedRequisitionsByBase = new Map();
   const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases, requisitionsByBase: seenCompanyRoleRequisitions, locatedRequisitionsByBase });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
-  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, fingerprintHistory };
+  return { seen, identityPromotableUrls, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -3778,7 +3801,7 @@ async function main() {
           continue;
         }
         const dedupUrl = normalizeUrlForDedup(job.url);
-        if (isOfferSeen(job, seenUrls)) {
+        if (isOfferSeen(job, seenUrls, dedupSnapshot.identityPromotableUrls)) {
           totalDupes++;
           continue;
         }
