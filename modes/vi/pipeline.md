@@ -68,7 +68,7 @@ Liệt kê riêng các mục `needs_confirmation` kèm URL và câu hỏi, khôn
 - [x] #144 | https://boards.greenhouse.io/xyz/jobs/012 | BigCo | SA | 2.1/5 | PDF ❌
 ```
 
-> **Giữ tiêu đề mục bằng tiếng Anh: `## Pending` và `## Processed`.** `scan.mjs` (`PENDING_MARKERS`/`PROCESSED_MARKERS`) và `reconcile-pipeline.mjs` (`PENDING_RE`/`PROCESSED_RE`) hiện chỉ nhận cách viết tiếng Anh và tiếng Tây Ban Nha; một tiêu đề tiếng Việt như "Đang chờ" sẽ khiến scanner không tìm thấy mục và ghi sai chỗ. Khi đọc, vẫn linh hoạt với tiêu đề bằng ngôn ngữ khác nếu tệp hiện có đã viết như vậy; khi ghi, trung thành với phong cách của tệp hiện có.
+> **Luôn ghi tiêu đề mục bằng tiếng Anh: `## Pending` và `## Processed`.** `scan.mjs` (`PENDING_MARKERS`/`PROCESSED_MARKERS`) và `reconcile-pipeline.mjs` (`PENDING_RE`/`PROCESSED_RE`) hiện chỉ nhận cách viết tiếng Anh và tiếng Tây Ban Nha; một tiêu đề tiếng Việt như "Đang chờ" sẽ khiến scanner không tìm thấy mục và ghi sai chỗ. Khi đọc, vẫn chấp nhận tiêu đề bằng ngôn ngữ khác nếu tệp hiện có đã viết như vậy. Khi ghi, nếu tệp có tiêu đề mà scanner không nhận (không phải tiếng Anh hay Tây Ban Nha), đổi chúng thành `## Pending` và `## Processed` trước khi ghi và báo cho người dùng biết đã đổi; không giữ nguyên tiêu đề scanner không đọc được.
 
 Các dòng Pending có độ rộng thay đổi. Dạng thô nhất là URL dán trần, `- [ ] {url}` (1 cột) -- thứ bạn thả vào hộp thư bằng tay. Các mục do scanner viết thêm `| {company} | {title}` (3 cột) cộng hai cột tùy chọn cuối: `| {location}` (cột 4) và `| {compensation}` (cột 5). Scanner chỉ điền các cột cuối khi ATS cung cấp, nên dòng 1, 3, 4 và 5 cột đều hợp lệ -- `{url} | {company} | {title} | {location} | {compensation}` là dạng tối đa (chuẩn), không phải dạng duy nhất. Các cột theo vị trí, nên dòng có lương luôn có ô địa điểm (để trống nếu không biết); dòng chỉ có địa điểm giữ 4 cột. Các dòng ngắn hơn hiện có vẫn hợp lệ và được đọc như có giá trị rỗng ở các cột cuối còn thiếu.
 
@@ -84,7 +84,7 @@ Khi có nhiều hơn một, thứ tự là `posted:` → `trust:` → `note:` �
 ## Nhận diện JD thông minh từ URL
 
 1. **Playwright (ưu tiên):** `browser_navigate` + `browser_snapshot`. Hoạt động với mọi SPA.
-   - **Tùy chọn -- bộ trích CLI (`scan.extractor: cli` trong `config/profile.yml`):** chạy `node browser-extract.mjs <url>` (mặc định `--mode jd`) thay thế; nó trả `{ "url", "title", "text" }` gọn -- văn bản chính của JD với số token ít hơn khoảng 4-5 lần so với snapshot đầy đủ. Dùng `text` của nó làm JD. **Âm thầm quay về** `browser_navigate` + `browser_snapshot` nếu lỗi hoặc không có.
+   - **Tùy chọn -- bộ trích CLI (`scan.extractor: cli` trong `config/profile.yml`):** chạy `node browser-extract.mjs <url>` (mặc định `--mode jd`) thay thế; nó trả `{ "url", "title", "text" }` gọn -- văn bản chính của JD với số token ít hơn khoảng 4-5 lần so với snapshot đầy đủ. Dùng `text` của nó làm JD. Khi xử lý tuần tự, **âm thầm quay về** `browser_navigate` + `browser_snapshot` nếu lỗi hoặc không có. Trong worker chạy nền song song, KHÔNG quay về trình duyệt (nhiều worker dùng chung một phiên trình duyệt sẽ lẫn điều hướng và snapshot, làm tin này bị gắn nội dung của tin khác): trả lỗi trích xuất để bên điều phối thử lại tuần tự.
 2. **WebFetch (dự phòng):** cho trang tĩnh hoặc khi Playwright không có.
 3. **WebSearch (phương án cuối):** tìm trên các cổng phụ có lập chỉ mục JD.
 
