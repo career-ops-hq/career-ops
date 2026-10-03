@@ -196,6 +196,7 @@ export default {
     const json = /** @type {any} */ (await ctx.fetchJson(listHref, { redirect: 'error' }));
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
+    const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';
 
     // Only pay for /offices when this board actually hides its cities there.
     let officeMap = null;
@@ -239,6 +240,9 @@ export default {
         title: j.title || '',
         url: j.absolute_url,
         company: entry.name,
+        listingIdentity: boardSlug && (typeof j.id === 'string' || (typeof j.id === 'number' && Number.isSafeInteger(j.id)))
+          ? { ats_provider: 'greenhouse', board_slug: boardSlug, posting_id: String(j.id) }
+          : undefined,
         location,
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable

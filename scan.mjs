@@ -64,6 +64,7 @@ import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
+import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
@@ -1744,15 +1745,21 @@ function extractPipelineCompanyRole(line) {
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
+  const identityPromotableUrls = new Map();
   // Rows the age policy has released. Held rather than counted here: the two
   // sources parsed below carry no age policy of their own, so a row the TTL has
   // just freed can be re-pinned a few lines later. The count is taken at the end,
   // against the finished set, so it reports what is actually rescannable.
   const recheckCandidates = new Set();
+  const recheckListingTokens = new Map();
+  const addIdentityPromotableUrl = (urlToken, listingKey = '') => {
+    if (!identityPromotableUrls.has(urlToken)) identityPromotableUrls.set(urlToken, new Set());
+    identityPromotableUrls.get(urlToken).add(listingKey || null);
+  };
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
+    const [url, firstSeen, portal, , , status = 'added', , , , , , , listingKey] = line.split('\t');
     if (!url) continue;
     // Not pinned and not a recheck candidate either: the row records a config
     // rejection, and the URL was never queued, so counting it as "eligible
@@ -1760,13 +1767,22 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
-      seen.add(normalizeUrlForDedup(url));
-      if (extraTokensFor) {
-        for (const token of [].concat(extraTokensFor(url, portal) || [])) {
+      const urlToken = normalizeUrlForDedup(url);
+      seen.add(urlToken);
+      // Only an accepted posting row can teach this scan a strong identity.
+      // URL-specific failures (for example blocked hosts) must not suppress a
+      // different URL that happens to carry the same provider identity.
+      if (!PERMANENT_SCAN_HISTORY_STATUSES.has(status)) addIdentityPromotableUrl(urlToken, listingKey);
+      if (extraTokensFor && !PERMANENT_SCAN_HISTORY_STATUSES.has(status)) {
+        for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
         }
       }
-    } else recheckCandidates.add(normalizeUrlForDedup(url));
+    } else {
+      const urlToken = normalizeUrlForDedup(url);
+      recheckCandidates.add(urlToken);
+      if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+    }
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
@@ -1815,6 +1831,14 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     const done = /^\s*- \[x\]/i.test(line);
     if ((done || inProcessed) && recheckCandidates.has(key)) continue;
     seen.add(key);
+    // A stale history row is still pinned while its actionable pipeline entry
+    // exists. Keep its strong identity pinned for the same period, or an ATS
+    // alias could slip through while the original URL remains queued.
+    const listingToken = recheckListingTokens.get(key);
+    if (listingToken) {
+      seen.add(listingToken);
+      addIdentityPromotableUrl(key, recheckListingTokens.get(key)?.slice('listing:'.length));
+    }
   }
 
   // applications.md — extract URLs from report links and any inline URLs
@@ -1828,7 +1852,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   let recheckEligible = 0;
   for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
-  return { seen, recheckEligible };
+  return { seen, recheckEligible, identityPromotableUrls };
 }
 
 // Path options mirror mergeIntoPipeline's seam below: the defaults are the
@@ -2678,7 +2702,95 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // cols) are unaffected, and older rows that lack it are tolerated by
     // consumers normalizing the raw name on the fly.
     normalizeCompanyName(offer.company || ''),
+    offer.listingKey || '',
   ].map(sanitizeTsvField).join('\t');
+}
+
+// The provider must explicitly supply all three ATS-native identity fields;
+// a URL or title never fills a missing component. This v1 token shares the
+// scanner's seen set with normalized URL tokens but remains type-prefixed.
+export function listingIdentityToken(offer) {
+  if (!offer?.listingIdentity) return null;
+  try {
+    const record = computeListingFingerprint({ strong: offer.listingIdentity });
+    return record.listing_key ? `listing:${record.listing_key}` : null;
+  } catch {
+    // Malformed or incomplete provider identity is not strong evidence; the
+    // existing URL and company/role rules remain responsible for that offer.
+    return null;
+  }
+}
+
+export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
+  const urlToken = normalizeUrlForDedup(offer?.url);
+  const identityToken = listingIdentityToken(offer);
+  if (seenUrls.has(urlToken)) {
+    const historicalKeys = identityPromotableUrls?.get(urlToken);
+    const currentKey = identityToken?.slice('listing:'.length);
+    if (identityToken && historicalKeys
+        && (historicalKeys.has(null) || historicalKeys.has(currentKey))) seenUrls.add(identityToken);
+    return true;
+  }
+  return Boolean(identityToken && seenUrls.has(identityToken));
+}
+
+export function markOfferSeen(offer, seenUrls, { includeIdentity = true } = {}) {
+  const urlToken = normalizeUrlForDedup(offer?.url);
+  const identityToken = listingIdentityToken(offer);
+  seenUrls.add(urlToken);
+  if (identityToken && includeIdentity) {
+    offer.listingKey = identityToken.slice('listing:'.length);
+    seenUrls.add(identityToken);
+  }
+}
+
+/**
+ * Keep the first live offer for each strong ATS identity and add its token to
+ * the run's seen set. Call only with offers accepted by liveness verification.
+ */
+export function retainVerifiedListingIdentities(offers, seenUrls, verificationStatusByOffer = new Map()) {
+  const selectedByIdentity = new Map();
+  const withoutIdentity = [];
+  for (const offer of offers) {
+    const token = listingIdentityToken(offer);
+    if (!token) {
+      withoutIdentity.push(offer);
+      continue;
+    }
+    const status = verificationStatusByOffer.get(offer);
+    const rank = status === 'active' ? 1 : 0;
+    const current = selectedByIdentity.get(token);
+    if (!current || rank > current.rank) selectedByIdentity.set(token, { offer, rank });
+  }
+  const retained = [...selectedByIdentity.values()].map(({ offer }) => offer);
+  const retainedSet = new Set(retained);
+  // Keep input order for unrelated offers while replacing an uncertain alias
+  // with an active one for the same identity, regardless of which was fetched
+  // first.
+  const ordered = offers.filter((offer) => !listingIdentityToken(offer) || retainedSet.has(offer));
+  const uniqueOrdered = [];
+  const seenObjects = new Set();
+  for (const offer of ordered) {
+    if (seenObjects.has(offer)) continue;
+    seenObjects.add(offer);
+    uniqueOrdered.push(offer);
+  }
+  for (const offer of [...withoutIdentity, ...retained]) {
+    const token = listingIdentityToken(offer);
+    if (!token) continue;
+    seenUrls.add(token);
+    offer.listingKey = token.slice('listing:'.length);
+  }
+  return uniqueOrdered;
+}
+
+/**
+ * Move a verified posting to a rediscovered URL. The source URL's ATS identity
+ * cannot describe the target until its provider resolves that target explicitly.
+ */
+export function migrateOfferToUrl(offer, url) {
+  const { listingIdentity: _sourceIdentity, listingKey: _sourceKey, ...sourceFields } = offer;
+  return { ...sourceFields, url, previousUrl: offer.url };
 }
 
 /**
@@ -2749,7 +2861,11 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const scanHistoryText = readIfExists(scanHistoryPath);
   const pipelineText = readIfExists(pipelinePath);
   const applicationsText = readIfExists(applicationsPath);
-  const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
+  const { seen, recheckEligible, identityPromotableUrls } = collectSeenUrls(
+    { scanHistoryText, pipelineText, applicationsText },
+    policy,
+    { extraTokensFor: (_url, _portal, listingKey) => listingKey ? `listing:${listingKey}` : null },
+  );
   // Preserve the exported snapshot field for existing callers. The scanner's
   // decision uses locatedRequisitionsByBase, not this legacy set.
   const seenCompanyRoleBases = new Set();
@@ -2759,7 +2875,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const locatedRequisitionsByBase = new Map();
   const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize, { includeLocation, locatedBases: seenCompanyRoleBases, requisitionsByBase: seenCompanyRoleRequisitions, locatedRequisitionsByBase });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
-  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, fingerprintHistory };
+  return { seen, identityPromotableUrls, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -2833,7 +2949,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     // (formatScanHistoryRow) emits, in the same order: the original 7 positional
     // cols (url…location) plus the append-only trailing cols added since —
     // fingerprint (7), posted_at (8), trust_score (9), trust_flags (10),
-    // normalized_company (11). Written ONLY on fresh-file creation; existing files
+    // normalized_company (11), listing_key (12). Written ONLY on fresh-file creation; existing files
     // (including headerless legacy files and older 7-col-header files) are never
     // rewritten. All readers either skip line 0 unconditionally, detect the header
     // by its `url\t` prefix, or skip non-URL col-0 rows, so widening it stays
@@ -2841,7 +2957,7 @@ export async function appendToScanHistory(offers, date, status = 'added') {
     // outcomes (`skipped_expired`, etc.) without the legacy `(expired)` suffix.
     if (!existsSync(SCAN_HISTORY_PATH)) {
       mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      atomicWriteFile(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n');
+      atomicWriteFile(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key\n');
     }
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
@@ -3228,6 +3344,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
   //               opt-in stricter filter; keeping these defeats the purpose.
   //   invalid   → up-front URL guard rejections (malformed / non-http / private)
   const verified = [];
+  const verificationStatusByOffer = new Map();
   const expired = [];
   const dropped = [];
   const invalid = [];
@@ -3262,7 +3379,9 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
             // 'uncertain' (timeout/DNS/5xx) must not commit an unverified URL —
             // fall through to expired (the original 404/410 is a real closure).
             if (recheck.result === 'active') {
-              migrated.push({ ...offer, url: newUrl, previousUrl: offer.url });
+              const migratedOffer = migrateOfferToUrl(offer, newUrl);
+              migrated.push(migratedOffer);
+              verificationStatusByOffer.set(migratedOffer, 'active');
               console.log(`  🔄 migrated  ${offer.company} | ${offer.title} → ${newUrl}`);
               continue;
             }
@@ -3285,6 +3404,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
       } else {
         // 'active' or 'uncertain' due to navigation_error (transient — retry next scan)
         verified.push(offer);
+        verificationStatusByOffer.set(offer, result);
         const icon = result === 'active' ? '✅' : '⚠️';
         console.log(`  ${icon} ${result.padEnd(9)} ${offer.company} | ${offer.title}`);
       }
@@ -3297,7 +3417,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
     await browser.close();
   }
 
-  return { verified, expired, dropped, invalid, migrated };
+  return { verified, expired, dropped, invalid, migrated, verificationStatusByOffer };
 }
 
 // Stable codes from liveness-browser's up-front URL guard. Routing dispatches
@@ -3586,6 +3706,7 @@ async function main() {
   let totalFilteredVisa = 0;
   let totalDupes = 0;
   const newOffers = [];
+  const verifyDedupKeys = new Map();
   const errors = [...resolveErrors];
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
@@ -3672,6 +3793,8 @@ async function main() {
       }
 
       for (const job of jobs) {
+        const listingToken = listingIdentityToken(job);
+        job.listingKey = listingToken ? listingToken.slice('listing:'.length) : '';
         // Trust enrichment — runs before filters, never drops
         const trustResult = trustValidator(job);
         job.trustScore = trustResult.score;
@@ -3739,7 +3862,7 @@ async function main() {
           continue;
         }
         const dedupUrl = normalizeUrlForDedup(job.url);
-        if (seenUrls.has(dedupUrl)) {
+        if (isOfferSeen(job, seenUrls, dedupSnapshot.identityPromotableUrls)) {
           totalDupes++;
           continue;
         }
@@ -3761,6 +3884,7 @@ async function main() {
         }
         const cooldownResult = cooldownFilter(job);
         if (cooldownResult.skip) {
+          markOfferSeen(job, seenUrls);
           totalFilteredCooldown++;
           cooldownOffers.push({
             job: { ...job, source: sourceName },
@@ -3772,8 +3896,11 @@ async function main() {
         // same breath as the set it indexes, so a role first surfaced with a
         // city THIS run also suppresses a locationless twin later in the run —
         // not only across runs.
-        seenUrls.add(dedupUrl);
-        if (key !== null) {
+        // Verify mode can reject this URL as expired or invalid later. Pin the
+        // URL now for same-run URL dedup, but wait to pin its cross-URL identity
+        // until liveness verification accepts an offer.
+        markOfferSeen(job, seenUrls, { includeIdentity: !verify });
+        if (key !== null && !verify) {
           seenCompanyRoles.add(key);
           recordRequisition(seenCompanyRoleRequisitions, key, requisition);
           if (key !== baseKey) recordRequisition(locatedRequisitionsByBase, baseKey, requisition);
@@ -3782,12 +3909,14 @@ async function main() {
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
         const careersUrlDomain = extractCareersUrlDomain(company.careers_url);
-        newOffers.push({
+        const offerForVerification = {
           ...job,
           source: sourceName,
           tracked: Boolean(careersUrlDomain),
           careersUrlDomain,
-        });
+        };
+        newOffers.push(offerForVerification);
+        if (verify) verifyDedupKeys.set(offerForVerification, { key, baseKey, requisition });
       }
     } catch (err) {
       errors.push({
@@ -3818,7 +3947,40 @@ async function main() {
     // Migrated offers re-enter the pipeline at their newly discovered URL.
     if (migratedOffers.length > 0) {
       verifiedOffers = [...verifiedOffers, ...migratedOffers];
+      for (const migrated of migratedOffers) {
+        const previous = newOffers.find((offer) => offer.url === migrated.previousUrl);
+        const priorKeys = previous && verifyDedupKeys.get(previous);
+        if (priorKeys) verifyDedupKeys.set(migrated, { ...priorKeys, requisition: requisitionIdsForDedup({ url: migrated.url, text: migrated.title }) });
+      }
     }
+    // Several URL aliases can reach verification before liveness is known.
+    // Keep the first accepted offer for each strong identity, and only then
+    // publish the identity token to this run's dedup set. Rejected aliases do
+    // not hide a later live URL.
+    const countBeforeIdentityDedup = verifiedOffers.length;
+    verifiedOffers = retainVerifiedListingIdentities(verifiedOffers, seenUrls, result.verificationStatusByOffer);
+    totalDupes += countBeforeIdentityDedup - verifiedOffers.length;
+    const acceptedOffers = [];
+    for (const offer of verifiedOffers) {
+      const keys = verifyDedupKeys.get(offer);
+      if (keys?.key !== null && keys?.key !== undefined && matchesSeenCompanyRole({
+        key: keys.key,
+        baseKey: keys.baseKey,
+        seen: seenCompanyRoles,
+        requisitions: seenCompanyRoleRequisitions,
+        locatedRequisitions: locatedRequisitionsByBase,
+      }, keys.requisition)) {
+        totalDupes++;
+        continue;
+      }
+      if (keys?.key !== null && keys?.key !== undefined) {
+        seenCompanyRoles.add(keys.key);
+        recordRequisition(seenCompanyRoleRequisitions, keys.key, keys.requisition);
+        if (keys.key !== keys.baseKey) recordRequisition(locatedRequisitionsByBase, keys.baseKey, keys.requisition);
+      }
+      acceptedOffers.push(offer);
+    }
+    verifiedOffers = acceptedOffers;
   }
 
   // 5.7. Cross-listing check (#1597): fingerprint each new offer's JD body and

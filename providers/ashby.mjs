@@ -316,10 +316,14 @@ export default {
       { retries: ASHBY_RETRIES, baseDelayMs: ASHBY_BACKOFF_BASE_MS },
     ));
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const boardSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1] || '';
     return jobs.map(/** @param {any} j */ (j) => ({
       title: j.title || '',
       url: j.jobUrl || '',
       company: entry.name,
+      listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
+        ? { ats_provider: 'ashby', board_slug: boardSlug, posting_id: j.id }
+        : undefined,
       location: formatLocation(j),
       // Ashby's posting-api list ships `descriptionPlain` for free (same
       // payload, no per-job request) — mirrors lever. Enables scan.mjs's
