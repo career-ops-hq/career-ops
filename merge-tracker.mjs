@@ -1375,6 +1375,7 @@ console.log(`📊 Existing: ${existingApps.length} entries, max #${maxNum}`);
 let added = 0;
 let updated = 0;
 let skipped = 0;
+let missingReports = 0;
 const pdfIndex = loadPdfIndex();
 const pdfSynced = syncPdfFlags(existingApps, appLines, pdfIndex);
 updated += pdfSynced;
@@ -1500,6 +1501,19 @@ for (const file of tsvFiles) {
     }
     skipped++;
     continue;
+  }
+
+  // #4748: the report cell is copied into the tracker as-is, so a link to a
+  // report that is not on disk would otherwise go in silently and only surface
+  // later in verify-pipeline. Warn, but still merge: the application record is
+  // the user's data and must not be lost or rewritten because a report is
+  // missing. Cells with no link (—, N/A, empty) are the documented "no report"
+  // convention and are not flagged. Resolved against REPORTS_ROOT (the data
+  // root), via the same helper the Pass 0.5 dedup uses.
+  if (/\]\([^)]+\)/.test(addition.report || '') && !resolveReportPath(addition.report)) {
+    const linked = (addition.report.match(/\]\(([^)]+)\)/) || [])[1].trim();
+    console.warn(`⚠️  ${file}: ${addition.company} — ${addition.role}: report link "${linked}" does not resolve to a file under ${REPORTS_ROOT} — the row is not rewritten; verify-pipeline will flag it until the report exists`);
+    missingReports++;
   }
 
   let duplicate = null;
@@ -1979,6 +1993,7 @@ if (!DRY_RUN) {
 }
 
 console.log(`\n📊 Summary: +${added} added, 🔄${updated} updated, ⏭️${skipped} skipped${failedAdditions.length ? `, ❌${failedAdditions.length} NOT merged` : ''}`);
+if (missingReports > 0) console.log(`⚠️  ${missingReports} row(s) link to a report that is not on disk (see warnings above)`);
 if (DRY_RUN) console.log('(dry-run — no changes written)');
 trackerLock.release();
 
