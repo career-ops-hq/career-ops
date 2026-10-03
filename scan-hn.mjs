@@ -23,6 +23,19 @@ import { localToday } from './lib/local-today.mjs';
 import hnProvider from './providers/hackernews.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = `Usage:
+  node scan-hn.mjs                  # scan the latest "Ask HN: Who is hiring?" thread
+
+Fetches the newest hiring thread from Hacker News and keeps the postings that
+match hn_hiring.keywords in portals.yml (default: "Software Engineer"). With
+GEMINI_API_KEY set, Gemini extracts each posting instead of the keyword match.
+New offers are appended to data/pipeline.md and to the scan history.
+
+Flags:
+  --help, -h                        # show this help and exit`;
 
 // ── Configuration ────────────────────────────────────────────────────
 // Imported from scan.mjs so it honors CAREER_OPS_PORTALS and the data root (#3510).
@@ -153,5 +166,10 @@ async function main() {
 }
 
 if (isMainModule(import.meta.url)) {
+  // Before main(): --help must not start a live scan, and a flag this script
+  // does not have (a --dry-run it never had) must fail rather than fall
+  // through to one. Inside the main-module guard because
+  // tests/hn-scanner.test.mjs imports this module.
+  validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
   main().catch(err => { console.error("Fatal:", err.message); process.exit(1); });
 }

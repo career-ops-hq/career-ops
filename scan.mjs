@@ -76,12 +76,18 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 try {
   const { config } = await import('dotenv');
   // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
-  // single JSON object (#1906).
-  config({ quiet: true });
+  // single JSON object (#1906). Secrets are user-layer data, so a split
+  // checkout reads them beside the configured data root rather than from the
+  // caller's cwd (which may be the code checkout or an unrelated directory).
+  config({ path: path.join(DATA_ROOT, '.env'), quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -89,10 +95,6 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
-import { getCareerOpsRoot } from './path-resolver.mjs';
-const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
-
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
 // Overridable for the same reason the two inputs above are (#2271). A second
@@ -861,12 +863,13 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 
 // ── Visa / work-authorization filter ────────────────────────────────
 // Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
-// Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
-// the generic "visa sponsorship" wording) and drops roles that explicitly
-// refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
-// it only has signal for providers that populate job.description (see the
-// content_filter header above); jobs without one fall back to the
-// require_mention rule below.
+// Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1),
+// Singapore (Employment Pass / S Pass / ONE Pass / Work Pass), EU (Blue Card),
+// UK (Skilled Worker), plus the generic "visa sponsorship" wording — and drops
+// roles that explicitly refuse sponsorship. Like content_filter it reads the job
+// DESCRIPTION text, so it only has signal for providers that populate
+// job.description (see the content_filter header above); jobs without one fall
+// back to the require_mention rule below.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
@@ -877,9 +880,10 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 //     one `positive` keyword; a missing/empty description is rejected. Use this
 //     to surface *only* postings that actively advertise sponsorship.
 //
-// `positive` / `negative` default to a curated US-sponsorship vocabulary when
-// omitted, so `visa_filter: { enabled: true }` works out of the box; supplying
-// either list overrides that default.
+// `positive` / `negative` default to a curated sponsorship vocabulary (US,
+// Singapore, EU, UK work-visa wording) when omitted, so
+// `visa_filter: { enabled: true }` works out of the box; supplying either list
+// overrides that default.
 
 export const DEFAULT_VISA_POSITIVE = [
   'visa sponsorship',
@@ -897,6 +901,25 @@ export const DEFAULT_VISA_POSITIVE = [
   'h-1b1',
   'h1b1',
   'o-1 visa',
+  // Singapore (Ministry of Manpower work passes). Multi-word forms only:
+  // bare 's pass' / 'one pass' false-positive on ordinary English
+  // ("Class Pass", "makes one pass"), so they are deliberately absent.
+  'employment pass',
+  's pass sponsorship',
+  's pass application',
+  's pass holder',
+  'one pass scheme',
+  'one pass application',
+  'one pass holder',
+  'work pass sponsorship',
+  'work pass application',
+  // EU Blue Card. Bare 'blue card' is kept: in employment text it is the EU
+  // permit far more often than anything else.
+  'eu blue card',
+  'blue card',
+  // UK Skilled Worker route.
+  'skilled worker visa',
+  'skilled worker sponsorship',
 ];
 
 export const DEFAULT_VISA_NEGATIVE = [
@@ -913,6 +936,10 @@ export const DEFAULT_VISA_NEGATIVE = [
   'sponsorship is not available',
   'sponsorship not available',
   'not offer visa sponsorship',
+  // Unambiguous sponsorship refusals phrased for non-US postings.
+  // (Relocation wording is deliberately excluded: relocation != sponsorship.)
+  'citizens and permanent residents only',
+  'permanent residents only',
 ];
 
 export function buildVisaFilter(visaFilter) {
@@ -1353,6 +1380,56 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
   'skipped_blocked_host',
 ]);
 
+/**
+ * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
+ *
+ * Every other skipped status describes the posting: a dead URL stays dead, a
+ * blocked host stays blocked, so pinning it saves a later scan the work. These
+ * two describe the user's CONFIG instead — `location_filter` and
+ * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
+ * dropped under the old threshold never resurfaces under the new one, which is
+ * the opposite of what recording the drop is for.
+ *
+ * Pinning would also buy nothing: both cuts run on data the provider already
+ * returned, before any liveness verification, so a re-scan of one of these URLs
+ * costs no extra request.
+ *
+ * `collectSeenCompanyRoles` needs no companion change — it already seeds from
+ * `added` rows alone.
+ */
+const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_location',
+  'skipped_age',
+]);
+
+/**
+ * The offers not yet recorded under `status`, one per URL.
+ *
+ * The location and posting-age cuts run before dedup, and their rows never
+ * pin a URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so without this every scan
+ * appended the same rows again. A URL already carrying a row with the same
+ * status is skipped, and so is a second listing of one URL within this scan.
+ * A different status still writes, so a posting whose verdict changes is
+ * recorded again.
+ *
+ * @param {Array<{url: string}>} offers
+ * @param {string} status
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
+ */
+export function unrecordedOffers(offers, status, scanHistoryText = '') {
+  const recorded = new Set();
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, , , , , rowStatus] = line.split('\t');
+    if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
+  }
+  return offers.filter((offer) => {
+    const key = normalizeUrlForDedup(offer.url);
+    if (recorded.has(key)) return false;
+    recorded.add(key);
+    return true;
+  });
+}
+
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
@@ -1677,6 +1754,11 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
     const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
+    // Not pinned and not a recheck candidate either: the row records a config
+    // rejection, and the URL was never queued, so counting it as "eligible
+    // again" would overstate what the TTL released. See
+    // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
+    if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       seen.add(normalizeUrlForDedup(url));
       if (extraTokensFor) {
@@ -2008,9 +2090,25 @@ export function normalizeRoleForDedup(role) {
   // a key fix) and is deliberately out of scope here.
   let title = String(role ?? '').normalize('NFKC').toLowerCase();
   while (true) {
-    const match = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
-    if (!match || !isRoleLocationSuffix(match[1])) break;
-    title = title.slice(0, match.index).trimEnd();
+    // Bracketed: "Engineering Manager (Remote)", "… [US]".
+    const bracketed = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
+    if (bracketed && isRoleLocationSuffix(bracketed[1])) {
+      title = title.slice(0, bracketed.index).trimEnd();
+      continue;
+    }
+    // Pipe-delimited: "Senior Engineering Manager, Grafana Frontend | USA | Remote".
+    // Grafana Labs posts one requisition per country and packs the place into
+    // the TITLE rather than only the location field, so the same role arrives
+    // as six titles. Without this, the tracker's clean title never matches the
+    // scanned one and an already-evaluated role is re-added on the next scan.
+    // Only the trailing segment is considered, and only when it is a known
+    // location suffix, so "Engineering Manager | Payments" keeps its qualifier.
+    const piped = title.match(/\s*\|\s*([^|]+?)\s*$/);
+    if (piped && isRoleLocationSuffix(piped[1])) {
+      title = title.slice(0, piped.index).trimEnd();
+      continue;
+    }
+    break;
   }
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
   // every non-Latin title to '', so バックエンドエンジニア and フロントエンド
@@ -3337,7 +3435,7 @@ async function main() {
   // Opt-in: merge enabled keyed/auth-gated provider plugins. Returns immediately
   // (no discovery, no dotenv, no process.env mutation) when config/plugins.yml is
   // absent — so a plain scan with no plugins configured stays byte-identical.
-  await mergeProviderPlugins(providers, { root: path.dirname(PROVIDERS_DIR) });
+  await mergeProviderPlugins(providers, { root: path.dirname(PROVIDERS_DIR), dataRoot: DATA_ROOT });
   if (providers.size === 0) {
     console.error('Error: no providers loaded from providers/');
     process.exit(1);
@@ -3469,6 +3567,11 @@ async function main() {
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;
   const cooldownOffers = [];
+  // Config-rejected offers, kept so the scan-history row can say what the
+  // summary counter only counts. Both lists stay empty under --dry-run, the
+  // same as every other history write below.
+  const locationFilteredOffers = [];
+  const ageFilteredOffers = [];
   let totalFound = 0;
   let totalFilteredTitle = 0;
   let totalFilteredTier = 0;
@@ -3607,10 +3710,12 @@ async function main() {
         // ("Program Manager - Remote") isn't rejected for a city-only location.
         if (!locationFilter(job.location, job.url, job.title)) {
           totalFilteredLocation++;
+          if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
+          if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postedDateFilter(job.postedAt)) {
@@ -3754,6 +3859,19 @@ async function main() {
   ];
   if (!dryRun && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+  }
+  // Offers the location and posting-age cuts removed: recorded for visibility,
+  // never added to pipeline.md. Both are OBSERVATIONAL_SCAN_HISTORY_STATUSES,
+  // so the rows carry no dedup weight — the threshold that rejected them is one
+  // the user edits, and a row written under the old threshold must not suppress
+  // the same posting once it moves.
+  // Each posting is recorded once per status, not once per scan.
+  if (!dryRun && (locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
+    const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const newLocationRows = unrecordedOffers(locationFilteredOffers, 'skipped_location', historyText);
+    const newAgeRows = unrecordedOffers(ageFilteredOffers, 'skipped_age', historyText);
+    if (newLocationRows.length > 0) await appendToScanHistory(newLocationRows, date, 'skipped_location');
+    if (newAgeRows.length > 0) await appendToScanHistory(newAgeRows, date, 'skipped_age');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.

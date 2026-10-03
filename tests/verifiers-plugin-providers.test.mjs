@@ -10,31 +10,23 @@
 // (the real verifiers resolve an enabled plugin instead of flagging it).
 import {
   readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync,
-  symlinkSync, readdirSync,
+  readdirSync,
 } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { pass, fail, NODE } from './helpers.mjs';
+import { pass, fail, warn, linkNodeModules, stripJsComments, NODE } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 console.log('\nverifiers resolve provider plugins like the scanner (#4026)');
 
-// Strip block and line comments so a commented-out mention of the call does
-// not satisfy the structural check (a call-only revert must redden it).
-function stripJsComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
-
 // A throwaway checkout that verify-pipeline/verify-portals run FROM, so the
-// test never reads, writes, or deletes the developer's real config/plugins.yml
-// (mergeProviderPlugins resolves plugins/ and config/plugins.yml from the
-// script's own CODE_ROOT). Copies the flat scripts plus the four dirs the
-// verifiers reach into; node_modules is symlinked.
+// test never reads, writes, or deletes the developer's real files. Plugin code
+// resolves from this CODE_ROOT while config/plugins.yml resolves from the
+// separate Data Root, matching a split checkout. Copies the flat scripts plus
+// the four dirs the verifiers reach into; node_modules is symlinked.
 function prepareFixtureCodeRoot(tmp) {
   const codeRoot = join(tmp, 'code-root');
   mkdirSync(codeRoot, { recursive: true });
@@ -46,10 +38,19 @@ function prepareFixtureCodeRoot(tmp) {
   for (const dir of ['providers', 'plugins', 'templates', 'lib', 'batch']) {
     if (existsSync(join(ROOT, dir))) cpSync(join(ROOT, dir), join(codeRoot, dir), { recursive: true });
   }
-  if (existsSync(join(ROOT, 'node_modules'))) {
-    symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'dir');
-  }
-  return codeRoot;
+  // Through the shared helper, so this site and the one in test-all.mjs cannot
+  // drift again: each had half of the pair (a guard here, the Windows junction
+  // type there) and the halves are now one function.
+  //
+  // The reason used to be dropped, on the stated grounds that an absent tree
+  // already failed two of this fixture's assertions. Two of four, measured: the
+  // spawned verifier dies ERR_MODULE_NOT_FOUND, and the FIRST check reads that
+  // crash output, finds no "unknown provider: apify" in it, and passes. It then
+  // reports that verify-pipeline.mjs resolves the plugin, about a run that never
+  // reached the resolution code. A false green is the failure this whole file
+  // exists to remove, so the reason is carried out and the caller skips on it.
+  const depsReason = linkNodeModules(codeRoot, ROOT);
+  return { codeRoot, depsReason };
 }
 
 const MINIMAL_TRACKER =
@@ -77,12 +78,16 @@ const MINIMAL_TRACKER =
 //    "missing env APIFY_TOKEN" stub. A minimal tracker is seeded so
 //    verify-pipeline gets past its "no applications.md" early exit and actually
 //    reaches the provider-resolution check. ──
-{
+providerFixture: {
   const tmp = mkdtempSync(join(tmpdir(), 'co-4026-'));
   try {
-    const codeRoot = prepareFixtureCodeRoot(tmp);
-    mkdirSync(join(codeRoot, 'config'), { recursive: true });
-    writeFileSync(join(codeRoot, 'config', 'plugins.yml'), 'plugins:\n  apify: { enabled: true }\n');
+    const { codeRoot, depsReason } = prepareFixtureCodeRoot(tmp);
+    if (depsReason) {
+      // break, not return: this is a labeled block, and the finally below still
+      // runs so the temp tree is removed.
+      warn(`skipping the provider-resolution checks: ${depsReason}`);
+      break providerFixture;
+    }
 
     // verify-pipeline.mjs resolves CAREER_OPS via getCareerOpsRoot() and, past
     // the tracker, mkdir's/reads real-looking data/reports paths under it
@@ -90,7 +95,8 @@ const MINIMAL_TRACKER =
     // inherits the full process.env, so a developer's own CAREER_OPS_ROOT
     // would otherwise leak in and the check would touch their real checkout.
     const dataRoot = join(tmp, 'data-root');
-    mkdirSync(dataRoot, { recursive: true });
+    mkdirSync(join(dataRoot, 'config'), { recursive: true });
+    writeFileSync(join(dataRoot, 'config', 'plugins.yml'), 'plugins:\n  apify: { enabled: true }\n');
 
     const tracker = join(tmp, 'applications.md');
     writeFileSync(tracker, MINIMAL_TRACKER);

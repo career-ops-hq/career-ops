@@ -3,7 +3,7 @@
  *
  * Snapshot of current tracker status, with status-log overlays so a later
  * Rejected/Discarded does not erase Interview/Offer/Hired that already happened.
- * stats.mjs everInterview cannot see that path; this chart can.
+ * The cumulative headline tiles also recover these stages from the ledger.
  *
  * Status folding goes through canonStatus (status-alias.mjs) — the same map
  * Analytics stage bars and cumulative tiles use — so "Oferta" / "mülakat"
