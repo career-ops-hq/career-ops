@@ -6,7 +6,7 @@ import path from "node:path";
 import { resolveTrackerPath as coreResolve } from "../../../path-resolver.mjs";
 import { resolveTrackerPath, readTrackerFile } from "../../src/lib/core/tracker-files.mjs";
 
-test("web tracker and ledger follow the core resolver across supported layouts", () => {
+test("web tracker and ledger follow the core resolver across supported layouts", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "tracker-files-"));
   const prior = process.env.CAREER_OPS_TRACKER;
   try {
@@ -28,9 +28,21 @@ test("web tracker and ledger follow the core resolver across supported layouts",
     check(path.join(root, "custom"));
     process.env.CAREER_OPS_TRACKER = path.relative(process.cwd(), path.join(root, "custom/applications.md"));
     check(path.join(root, "custom"));
-    fs.symlinkSync(path.join(root, "custom/applications.md"), path.join(root, "linked.md"));
-    process.env.CAREER_OPS_TRACKER = path.join(root, "linked.md");
-    check(path.join(root, "custom"));
+    // A FILE symlink needs a privilege a non-elevated Windows shell lacks, and
+    // a junction only links directories, so this one leg has no stand-in there.
+    // Skip it by name; any other error is still a failure.
+    let linked = true;
+    try {
+      fs.symlinkSync(path.join(root, "custom/applications.md"), path.join(root, "linked.md"));
+    } catch (e) {
+      if (e?.code !== "EPERM" || e?.syscall !== "symlink") throw e;
+      linked = false;
+      t.diagnostic("symlinked-tracker leg skipped: no symlink privilege (EPERM)");
+    }
+    if (linked) {
+      process.env.CAREER_OPS_TRACKER = path.join(root, "linked.md");
+      check(path.join(root, "custom"));
+    }
     fs.unlinkSync(path.join(root, "custom/status-log.tsv"));
     assert.equal(readTrackerFile(root, "status-log.tsv"), null);
     fs.mkdirSync(path.join(root, "custom/status-log.tsv"));
