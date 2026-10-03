@@ -121,6 +121,17 @@
     line-height: 1.1;
   }
 
+  .header-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: hsl(187, 74%, 32%);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
   .header-gradient {
     height: 2px;
     background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color));
@@ -251,6 +262,14 @@
   .job-location {
     font-size: 10px;
     color: #888;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: #555;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -416,11 +435,20 @@
 
   /* === PAGE BREAK CONTROL === */
   .avoid-break,
-  .job,
   .project,
   .edu-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — unchanged default (this template has always kept a role
+     whole; override via config/profile.yml style.job_break_inside: auto to
+     let a role flow across a page break instead). This template's :root token
+     block does not declare --job-break-inside, so the fallback below is the
+     only default. */
+  .job {
+    page-break-inside: var(--job-break-inside, avoid);
+    break-inside: var(--job-break-inside, avoid);
   }
 
   /* === RTL (Arabic) Support === */
@@ -431,6 +459,7 @@
   }
 
   html[lang="ar"] .header h1,
+  html[lang="ar"] .header-title,
   html[lang="ar"] .section-title,
   html[lang="ar"] .job-company,
   html[lang="ar"] .project-title,
@@ -480,6 +509,7 @@
   }
 
   html[lang="ja"] .header h1,
+  html[lang="ja"] .header-title,
   html[lang="ja"] .section-title,
   html[lang="ja"] .job-company,
   html[lang="ja"] .project-title,
@@ -536,6 +566,7 @@
      rule above can't reach them — same gap CodeRabbit flagged on #2616,
      fixed the same way as the ja/zh-CN blocks below. */
   html[lang="ko"] .header h1,
+  html[lang="ko"] .header-title,
   html[lang="ko"] .section-title,
   html[lang="ko"] .job-company,
   html[lang="ko"] .project-title {
@@ -545,6 +576,7 @@
   }
 
   html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .header-title,
   html[lang="zh-TW"] .section-title,
   html[lang="zh-TW"] .job-company,
   html[lang="zh-TW"] .project-title {
@@ -554,10 +586,12 @@
   }
 
   html[lang="zh-CN"] .header h1,
+  html[lang="zh-CN"] .header-title,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
   html[lang="zh-CN"] .project-title,
   html[lang="zh"] .header h1,
+  html[lang="zh"] .header-title,
   html[lang="zh"] .section-title,
   html[lang="zh"] .job-company,
   html[lang="zh"] .project-title {
@@ -592,6 +626,7 @@
   <!-- HEADER -->
   <div class="header avoid-break">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <span>{{PHONE}}</span>

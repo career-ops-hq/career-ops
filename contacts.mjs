@@ -86,6 +86,16 @@ const vcfPathArg = (() => {
 const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'other']);
 
 // --- Phonebook parsing (TSV) ---
+export function escapeFormulaCell(value) {
+  const cell = String(value ?? '');
+  return /^'*[=+\-@]/.test(cell) ? `'${cell}` : cell;
+}
+
+export function unescapeFormulaCell(value) {
+  const cell = String(value ?? '');
+  return cell.replace(/^'(?='*[=+\-@])/, '');
+}
+
 // line: {name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}
 // Cells are split BEFORE trimming the line (only the trailing \r is stripped):
 // name is the required FIRST cell, so a leading tab (empty name) must surface
@@ -99,7 +109,7 @@ export function parseContacts(content) {
     const line = raw.replace(/\r$/, '');
     const t = line.trim();
     if (!t || t.startsWith('#')) continue;
-    const cells = line.split('\t').map(c => c.trim());
+    const cells = line.split('\t').map(c => unescapeFormulaCell(c.trim()));
     if (cells.length < 4) { quality.shortRows.push({ line: lineNo, cells: cells.length }); continue; }
     const [name, company, type, title = '', phone = '', email = '', linkedin = '', tracker = ''] = cells;
     // notes is the LAST column: a stray tab pasted inside a note must not

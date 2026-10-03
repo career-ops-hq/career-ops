@@ -226,8 +226,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", companies: ev.companies } }));
                 break;
               case "progress":
-                // `matches` is the GLOBAL running total (the engine batches the
-                // offer list to the very end), so it drives the live hero counter.
+                // `matches` is the engine's running total. Live `offer` events
+                // (stderr JSON in --json mode) populate the card list; this
+                // number still drives the hero counter.
                 setMatchCount((m) => Math.max(m, ev.matches));
                 setSources((s) => ({ ...s, [ev.ats]: { ...s[ev.ats as AtsSource], state: "active", done: ev.scanned, total: ev.total } }));
                 break;
@@ -237,6 +238,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
               case "offer":
                 acc.push(ev.offer);
                 setOffers((o) => [...o, ev.offer]);
+                setMatchCount((m) => Math.max(m, acc.length));
                 break;
               case "summary": {
                 companiesScannedAcc = ev.companiesScanned;
@@ -246,7 +248,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                   capHitAcc = true;
                   setCapHit(true);
                 }
-                const datasetIssue = ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false;
+                const datasetIssue =
+                  (ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false) ||
+                  (ev.incomplete?.length ?? 0) > 0;
                 if (datasetIssue) datasetIssueAcc = true;
                 if (typeof ev.postingsDroppedNoDate === "number" && ev.postingsDroppedNoDate > 0) {
                   droppedNoDateAcc = ev.postingsDroppedNoDate;
@@ -277,6 +281,13 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     runningRef.current = false;
     if (acc.length > 0) {
+      // A scan that ended in an error still keeps what it found (a legacy scan
+      // stopped at the deadline, or every --json source stopped): mark it partial
+      // and keep the reason, which ResultsList shows beside the results.
+      if (sawError) {
+        setPartial(true);
+        setError(sawError);
+      }
       setMatchCount(acc.length);
       setPhase("revealing");
       setStatus(`${acc.length} fresh role${acc.length === 1 ? "" : "s"} found — free.`);

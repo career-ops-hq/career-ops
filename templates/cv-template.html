@@ -20,6 +20,10 @@
        comes from the later @page rule injectPrintPageCss appends (which reads
        this same variable), so this default must match it exactly. */
     --page-margin: 0.6in;
+    /* #3242: unchanged default — a role may still flow across a page break to
+       keep the CV compact (see #1145). Override via config/profile.yml
+       `style.job_break_inside: avoid` for "a role is one unit, never split". */
+    --job-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -85,6 +89,17 @@
     letter-spacing: -0.02em;
     margin-bottom: 6px;
     line-height: 1.1;
+  }
+
+  .header-title {
+    font-family: var(--font-family);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--accent-color);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    line-height: 1.2;
   }
 
   .header-gradient {
@@ -222,6 +237,14 @@
   .job-location {
     font-size: 10px;
     color: #888;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: #555;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -455,12 +478,19 @@
     page-break-inside: avoid;
   }
 
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    page-break-inside: var(--job-break-inside, auto);
+    break-inside: var(--job-break-inside, auto);
+  }
+
   /* Keep a heading attached to the content that follows it, so headings are not
      orphaned at the bottom of a page. */
   .section-title,
   .job-company,
   .job-role,
   .job-location,
+  .job-context,
   .edu-location,
   .project-title {
     break-after: avoid;
@@ -484,6 +514,7 @@
   }
 
   html[lang="ar"] .header h1,
+  html[lang="ar"] .header-title,
   html[lang="ar"] .section-title,
   html[lang="ar"] .job-company,
   html[lang="ar"] .project-title,
@@ -533,6 +564,7 @@
   }
 
   html[lang="ja"] .header h1,
+  html[lang="ja"] .header-title,
   html[lang="ja"] .section-title,
   html[lang="ja"] .job-company,
   html[lang="ja"] .project-title,
@@ -559,6 +591,7 @@
   }
 
   html[lang="zh-CN"] .header h1,
+  html[lang="zh-CN"] .header-title,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
   html[lang="zh-CN"] .project-title,
@@ -566,6 +599,7 @@
   html[lang="zh-CN"] .competency-tag,
   html[lang="zh-CN"] .skill-category,
   html[lang="zh"] .header h1,
+  html[lang="zh"] .header-title,
   html[lang="zh"] .section-title,
   html[lang="zh"] .job-company,
   html[lang="zh"] .project-title,
@@ -593,6 +627,7 @@
   }
 
   html[lang="ko"] .header h1,
+  html[lang="ko"] .header-title,
   html[lang="ko"] .section-title,
   html[lang="ko"] .job-company,
   html[lang="ko"] .project-title,
@@ -624,6 +659,7 @@
   }
 
   html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .header-title,
   html[lang="zh-TW"] .section-title,
   html[lang="zh-TW"] .job-company,
   html[lang="zh-TW"] .project-title,
@@ -655,6 +691,7 @@
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>

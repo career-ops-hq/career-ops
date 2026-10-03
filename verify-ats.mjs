@@ -24,6 +24,7 @@ import { readFileSync, statSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs'; 
+import { asciiFold } from './lib/ascii-fold.mjs';
 
 const DEFAULT_MIN_SCORE = 70;
 
@@ -59,6 +60,12 @@ const ATS_SAFE_FONTS = new Set([
   'noto sans cjk jp', 'noto sans jp', 'meiryo', 'ms pgothic', 'pingfang sc',
   'hiragino sans gb', 'microsoft yahei', 'noto sans cjk sc', 'noto sans sc',
   'source han sans sc',
+  // Korean (html[lang="ko"]) and Traditional Chinese (html[lang="zh-TW"]) — the
+  // template declares these stacks unconditionally, so omitting them docked the
+  // full fonts weight from every CV, English ones included.
+  'apple sd gothic neo', 'malgun gothic', 'noto sans cjk kr', 'noto sans kr',
+  'nanum gothic', 'pingfang tc', 'microsoft jhenghei', 'noto sans cjk tc',
+  'noto sans tc', 'source han sans tc',
 ]);
 
 // Generic CSS families — always valid, never "non-standard", so skip them.
@@ -87,9 +94,133 @@ function collapse(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** Strip a fragment of inner tags to a plain-text label. */
+// The named entities a generated CV actually carries: the Latin-1 letters an
+// accented heading is written with, plus the five markup ones. Anything else
+// arrives numeric, which is handled generically below.
+const NAMED_ENTITIES = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
+  igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï', ntilde: 'ñ',
+  ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø',
+  ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü', yacute: 'ý', yuml: 'ÿ',
+  szlig: 'ß', thorn: 'þ', eth: 'ð', scaron: 'š', zcaron: 'ž', oelig: 'œ',
+};
+
+/**
+ * Decode the HTML entities a generated CV carries, in ONE pass.
+ *
+ * Single-pass is what makes this safe. Chained `.replace()` calls have to
+ * decode `&amp;` last, or `&amp;lt;` becomes `&lt;` and then `<`, unescaping
+ * text that was never an entity. Here each match is replaced once and the
+ * replacement is never rescanned, so `&amp;lt;` yields `&lt;` whatever order
+ * the table is written in, and the ordering constraint disappears.
+ *
+ * Case-insensitive for named entities because generated markup is not
+ * consistent about it; numeric and hex forms are decoded generically.
+ * @param {string} text
+ * @returns {string}
+ */
+function decodeEntities(text) {
+  return text.replace(/&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10);
+      // Lone surrogates and out-of-range values are not text; leave them literal.
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return whole;
+      if (code >= 0xd800 && code <= 0xdfff) return whole;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[body.toLowerCase()];
+    return named === undefined ? whole : named;
+  });
+}
+
+/**
+ * Strip a fragment of inner tags to a plain-text label.
+ *
+ * Entities are decoded, because this produces the section headings the scorer
+ * matches against. `Exp&eacute;rience` reached the matcher as
+ * `exp eacute rience` and matched nothing, so a French CV was reported as
+ * missing the Experience section it plainly has (#4261).
+ */
 function stripInline(fragment) {
-  return collapse(fragment.replace(/<[^>]+>/g, ' '));
+  return collapse(decodeEntities(fragment.replace(/<[^>]+>/g, ' ')));
+}
+
+/**
+ * Resolve one `font-family` declaration to the family names it actually asks
+ * for, lowercased.
+ *
+ * A `var(--x)` reference is not a font name, so it must not be reported as a
+ * "non-standard font" — but its fallback slot can hold one (`var(--x, Georgia)`),
+ * and that name has to survive or a genuinely risky font would hide behind a
+ * custom property. So the reference itself is dropped and everything it wrapped
+ * is kept. The custom property's *definition* (`--font-family: "Liberation
+ * Sans", …`) is scanned separately: the caller's pattern is unanchored, so it
+ * matches the declaration and the real faces are still checked.
+ * @param {string} declaration The text after `font-family:`, up to the `;`.
+ * @returns {string[]} Lowercased family names, empty entries removed.
+ */
+function parseFontFamilies(declaration) {
+  return declaration
+    // `var(--name` plus the comma before its fallback; the orphaned `)` that
+    // closed the reference is removed with the remaining punctuation below.
+    // The name is "any run that is not a separator", not `[\w-]+`: a custom
+    // property may be non-ASCII (`--字体`, `--police-caractères`) or carry a
+    // CSS escape, and an ASCII-only class stops at the first such character —
+    // leaving its tail behind to be reported as a font the CV never named.
+    //
+    // The separator set is CSS whitespace, spelled out rather than `\s`. The
+    // two disagree on U+00A0: JavaScript calls it whitespace, CSS calls it an
+    // ordinary identifier character (it is >= U+0080), so `\s` ended the name
+    // early on `var(--font family)` and reported `family` as a font.
+    .replace(/var\([ \t\n\f\r]*--(?:\\[\s\S]|[^ \t\n\f\r,()])*[ \t\n\f\r]*,?/gi, ' ')
+    .split(',')
+    // cssTrim, not `.trim()`, for the same JS-vs-CSS disagreement as above but
+    // at the ends of the name: `.trim()` also strips U+00A0, so the quoted
+    // family `" Arial"` — which is NOT Arial, and resolves to nothing —
+    // became `arial`, matched ATS_SAFE_FONTS, and passed silently.
+    .map(raw => cssTrim(raw.replace(/['"()]/g, '')).toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Trim CSS whitespace, and only CSS whitespace.
+ *
+ * `String.prototype.trim()` strips every Unicode space, which is wrong here:
+ * CSS whitespace is just these five characters, and everything else it would
+ * remove (U+00A0, U+2000-U+200A, U+3000, …) is an ordinary identifier
+ * character that belongs to the family name.
+ * @param {string} text
+ * @returns {string}
+ */
+function cssTrim(text) {
+  return text.replace(/^[ \t\n\f\r]+|[ \t\n\f\r]+$/g, '');
+}
+
+/**
+ * A font name made safe to print. Anything that renders as blank but is not a
+ * plain space — every other Unicode space separator, plus control and format
+ * characters — is shown as an escape, so a name flagged *because* of such a
+ * character does not read as an ordinary one the reader cannot tell apart.
+ * @param {string} name
+ * @returns {string}
+ */
+function describeFontName(name) {
+  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch => {
+    if (ch === ' ') return ch;
+    const code = ch.codePointAt(0);
+    // `\uXXXX` is only unambiguous up to U+FFFF. Above it the escape runs to
+    // five or six hex digits, and the reader has no way to tell where it ends:
+    // U+E0001 printed bare is `1`, which reads as `` followed by a
+    // literal "1", naming a different character than the one that was flagged.
+    // The braced form is the spelling that terminates itself.
+    return code > 0xffff
+      ? `\\u{${code.toString(16)}}`
+      : `\\u${code.toString(16).padStart(4, '0')}`;
+  });
 }
 
 /**
@@ -218,7 +349,16 @@ function extractHeadings(html) {
   for (const m of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) {
     out.push(stripInline(m[1]));
   }
-  return out.map(s => s.toLowerCase()).filter(Boolean);
+  // Folded to ASCII, because the patterns matched against these are ASCII by
+  // construction. Without it `Compétences` never matches `competenc` and
+  // `Expérience` never matches `experience`, so an accented heading reads
+  // as a missing section (#4261). Same fix lib/ascii-fold.mjs documents for
+  // verify-portals.mjs and providers/_trust-validator.mjs; this was the third
+  // instance. The unfolded text is kept too: folding is lossy for scripts with
+  // no ASCII base letter (スキル, مهارات), whose patterns must match the original.
+  return out
+    .flatMap(s => [s.toLowerCase(), asciiFold(s).toLowerCase()])
+    .filter(Boolean);
 }
 
 /**
@@ -278,10 +418,80 @@ function auditAts(html, opts = {}) {
 
   // 2. Standard section headings.
   const headingBlob = extractHeadings(html).join(' | ');
+  // Matched against BOTH the raw heading and its ASCII fold (extractHeadings
+  // emits each). The Latin terms are therefore written unaccented: `competenc`
+  // catches Competences, Competências and Competenze via the fold, so only
+  // genuinely different words need their own alternative.
+  //
+  // career-ops ships evaluation modes for ar, da, de, es, fr, hi, id, it, ja,
+  // ko, nl, pl, pt, ru, tr, ua, zh and zh-TW, and before this every one of
+  // them failed the gate on a structurally perfect CV. The Skills and
+  // experience terms are taken from the `| Skills |` and `| Career history |`
+  // rows of each modes/<lang>/README.md rather than invented here; the
+  // education terms had no such table and are the ordinary CV heading in each
+  // language. Native-speaker corrections welcome, as in #3223.
+  // Each term must START a word: `formation` must not be found inside
+  // `Information`, nor `formacion` inside `Informacion`. `\b` is ASCII-only, so
+  // the boundary is "not preceded by a letter or digit" in any script. Terms
+  // stay open on the right (`experien`, `competen`) and the German, Dutch and
+  // Danish compounds that put the key word LAST are listed whole.
+  const startsWord = (terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})`, 'u');
   const required = [
-    { name: 'Experience', re: /experience|work history|employment/ },
-    { name: 'Education', re: /education|academic/ },
-    { name: 'Skills', re: /skills|competenc|proficienc/ },
+    { name: 'Experience', re: startsWord([
+      'experience', 'work history', 'employment',          // en
+      'experien', 'esperienza',                            // es pt fr (folded); it spells it with an s
+      'erfahrung', 'berufserfahrung', 'arbeitserfahrung', 'werdegang', // de: compounds put it last
+      'ervaring', 'werkervaring', 'loopbaan',              // nl
+      'doswiadczenie', 'przebieg kariery',                 // pl
+      'deneyim',                                           // tr
+      'erhvervserfaring', 'karriereforlob',                // da
+      'riwayat karier', 'pengalaman',                      // id
+      'parcours professionnel',                            // fr
+      'trayectoria', 'trajetoria',                         // es pt
+      'percorso professionale',                            // it
+      '職務経歴', '職歴',                                    // ja
+      '경력',                                                // ko
+      'опыт работы',                                    // ru
+      'досвід роботи',                                    // ua
+      'الخبرات', 'التاريخ المهني',                        // ar
+      'करियर',                                              // hi
+      '工作经历', '工作經歷',                                  // zh zh-TW
+    ]) },
+    { name: 'Education', re: startsWord([
+      'education', 'academic',                             // en
+      'formation', 'formacion', 'formacao',                // fr es pt
+      'ausbildung', 'bildung', 'studium',                  // de
+      'istruzione',                                        // it
+      'opleiding',                                         // nl
+      'wyksztalcenie',                                     // pl
+      'egitim',                                            // tr
+      'uddannelse',                                        // da
+      'pendidikan',                                        // id
+      '学歴',                                                // ja
+      '학력',                                                // ko
+      'образование',                                      // ru
+      'освіта',                                              // ua
+      'التعليم', 'المؤهلات',                            // ar
+      'शिक्षा',                                             // hi
+      '教育背景', '學歷',                                    // zh zh-TW
+    ]) },
+    { name: 'Skills', re: startsWord([
+      'skills', 'competen', 'proficienc',                  // en, + es pt fr folded; 'competen' also covers it 'Competenze'
+      'kenntnisse', 'fachkenntnisse', 'sprachkenntnisse', 'fahigkeiten', // de
+      'habilidades',                                       // es pt
+      'vaardigheden',                                      // nl
+      'umiejetnosci',                                      // pl
+      'beceri',                                            // tr
+      'kompetenc', 'kernkompetenc',                        // da + pl/pt variants
+      'keahlian',                                          // id
+      'スキル',                                              // ja
+      '역량', '기술',                                          // ko
+      'навыки',                                              // ru
+      'навички',                                             // ua
+      'مهارات',                                             // ar
+      'कौशल',                                               // hi
+      '技能', '专业技能', '專業技能',                           // zh zh-TW: 專業技能 does not start with 技能
+    ]) },
   ];
   const missing = [];
   for (const s of required) {
@@ -350,7 +560,12 @@ function auditAts(html, opts = {}) {
 
   // 5. No CV text baked into images.
   let imageScore = WEIGHTS.images;
-  const imgs = [...html.matchAll(/<img\b[^>]*>/gi)].map(m => m[0]);
+  // Scanned on the content regions only: an `<img>` written inside a comment or
+  // a `<style>` body renders nothing. The shipped templates/cv-template.html
+  // documents its photo slot with the literal text "<img> is emitted" in a CSS
+  // comment, which the raw scan counted as a rendered image and docked every CV
+  // built from the base template 5 points for.
+  const imgs = [...stripNonContentRegions(html).matchAll(/<img\b[^>]*>/gi)].map(m => m[0]);
   const contentImgs = imgs.filter(tag => !/class\s*=\s*(?:"[^"]*\bcv-photo\b[^"]*"|'[^']*\bcv-photo\b[^']*')/i.test(tag));
   if (contentImgs.length > 0 && text.length < TEXT_LOW_WITH_IMG) {
     imageScore = 0;
@@ -366,9 +581,8 @@ function auditAts(html, opts = {}) {
   const families = new Set();
   for (const blob of styleBlobs) {
     for (const m of blob.matchAll(/font-family\s*:\s*([^;{}]+)/gi)) {
-      for (const raw of m[1].split(',')) {
-        const fam = raw.replace(/['"]/g, '').trim().toLowerCase();
-        if (fam && !GENERIC_FAMILIES.has(fam)) families.add(fam);
+      for (const fam of parseFontFamilies(m[1])) {
+        if (!GENERIC_FAMILIES.has(fam)) families.add(fam);
       }
     }
   }
@@ -377,7 +591,7 @@ function auditAts(html, opts = {}) {
     score += WEIGHTS.fonts;
   } else {
     score += Math.max(0, WEIGHTS.fonts - unsafeFonts.length * 3);
-    add('warning', `Non-standard font(s): ${unsafeFonts.join(', ')}. Prefer widely-supported, embeddable fonts (Arial, Helvetica, Calibri, Times New Roman, Georgia) for reliable ATS text extraction.`);
+    add('warning', `Non-standard font(s): ${unsafeFonts.map(describeFontName).join(', ')}. Prefer widely-supported, embeddable fonts (Arial, Helvetica, Calibri, Times New Roman, Georgia) for reliable ATS text extraction.`);
   }
 
   // 7. UTF-8 declared.
@@ -453,7 +667,7 @@ export {
  * Build a clean, ATS-friendly CV HTML fixture for the self-test, with hooks to
  * override individual pieces (font, email, charset, sections, extra body) so a
  * single check can be regressed in isolation.
- * @param {{font?:string, email?:string, charset?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
+ * @param {{font?:string, email?:string, charset?:string, experience?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
  * @returns {string} A full HTML document.
  */
 function buildCleanHtml(overrides = {}) {
@@ -461,6 +675,7 @@ function buildCleanHtml(overrides = {}) {
     font = "'Liberation Sans', Arial, sans-serif",
     email = '<a href="mailto:jane@example.com">jane@example.com</a>',
     charset = '<meta charset="UTF-8">',
+    experience = '<div class="section"><div class="section-title">Work Experience</div>\n    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,\n    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>',
     education = '<div class="section"><div class="section-title">Education</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
     skills = '<div class="section"><div class="section-title">Skills</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>',
     extraBody = '',
@@ -477,9 +692,7 @@ function buildCleanHtml(overrides = {}) {
     distributed systems. Led platform teams delivering resilient services on Kubernetes, with a
     focus on observability, cost efficiency, and clean, well-tested Python codebases used daily
     across the organization.</p></div>
-  <div class="section"><div class="section-title">Work Experience</div>
-    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,
-    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>
+  ${experience}
   <div class="section"><div class="section-title">Projects</div>
     <p>Open-source tracing toolkit adopted by several teams for latency debugging.</p></div>
   ${education}
@@ -514,6 +727,74 @@ function runSelfTest() {
   check('missing Education+Skills is flagged', hasIssue(noSections.issues, 'Education') && hasIssue(noSections.issues, 'Skills'));
   check('missing two required sections is critical', hasCritical(noSections.issues));
 
+  // A CV in any language career-ops ships a mode for must clear the gate on the
+  // same structure an English one clears it on. Before #4261 every one of these
+  // was reported as missing all three sections, which is critical, so a
+  // structurally perfect non-English CV did not merely score lower: it FAILED.
+  {
+    const localized = {
+      fr: ['Expérience professionnelle', 'Formation', 'Compétences'],
+      de: ['Berufserfahrung', 'Ausbildung', 'Kenntnisse'],
+      es: ['Experiencia profesional', 'Formación', 'Competencias'],
+      it: ['Esperienza professionale', 'Istruzione', 'Competenze'],
+      pt: ['Experiência profissional', 'Formação', 'Habilidades'],
+      nl: ['Werkervaring', 'Opleiding', 'Vaardigheden'],
+      pl: ['Doświadczenie zawodowe', 'Wykształcenie', 'Umiejętności'],
+      tr: ['İş deneyimi', 'Eğitim', 'Beceriler'],
+      da: ['Erhvervserfaring', 'Uddannelse', 'Kompetencer'],
+      id: ['Pengalaman kerja', 'Pendidikan', 'Keahlian'],
+      ja: ['職務経歴', '学歴', 'スキル'],
+      ko: ['경력', '학력', '역량'],
+      ru: ['Опыт работы', 'Образование', 'Навыки'],
+      ua: ['Досвід роботи', 'Освіта', 'Навички'],
+      ar: ['الخبرات المهنية', 'التعليم', 'مهارات'],
+      hi: ['करियर इतिहास', 'शिक्षा', 'कौशल'],
+      zh: ['工作经历', '教育背景', '技能'],
+      'zh-TW': ['工作經歷', '學歷', '專業技能'],
+    };
+    const failing = Object.entries(localized)
+      .filter(([, [exp, edu, skl]]) => {
+        // Each localized heading REPLACES the English one, so the English fallback
+        // cannot satisfy the requirement on the localized heading's behalf.
+        const cv = auditAts(buildCleanHtml({
+          experience: `<div class="section"><div class="section-title">${exp}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>`,
+          education: `<div class="section"><div class="section-title">${edu}</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>`,
+          skills: `<div class="section"><div class="section-title">${skl}</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>`,
+        }));
+        return hasIssue(cv.issues, 'missing standard section');
+      })
+      .map(([lang]) => lang);
+    check(`every localized mode's CV headings are recognized (${Object.keys(localized).length} languages)`,
+      failing.length === 0);
+  }
+
+  // The entity form of the same heading must read the same as the literal one:
+  // `Exp&eacute;rience` reached the matcher as `exp eacute rience`.
+  const entityHeading = auditAts(buildCleanHtml({
+    education: '<div class="section"><div class="section-title">&Eacute;ducation</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
+  }));
+  check('an HTML-entity heading is decoded before matching', !hasIssue(entityHeading.issues, 'missing standard section'));
+
+  // A term must start a word: `Personal Information` contains `formation` and
+  // `Informacion personal` contains `formacion`, and neither is an Education
+  // heading. A CV with no Education section must still be told so.
+  for (const heading of ['Personal Information', 'Informations personnelles', 'Información personal']) {
+    const noEdu = auditAts(buildCleanHtml({ education: `<div class="section"><div class="section-title">${heading}</div><p>Based in San Francisco.</p></div>` }));
+    check(`"${heading}" does not pass for Education`, hasIssue(noEdu.issues, 'missing standard section'));
+  }
+  // ...while the compounds that put the key word last are still recognized.
+  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring']) {
+    const compound = auditAts(buildCleanHtml({ experience: `<div class="section"><div class="section-title">${heading}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>` }));
+    check(`compound heading "${heading}" is recognized for Experience`, !hasIssue(compound.issues, 'missing standard section'));
+  }
+
+  // Decoding must not double-unescape: `&amp;lt;` is the literal text "&lt;",
+  // not "<". A single pass gives that for free, whatever order the table is in.
+  check('decodeEntities does not double-unescape', decodeEntities('&amp;lt;') === '&lt;');
+  check('decodeEntities reads decimal and hex forms', decodeEntities('&#233;&#xe9;&#XE9;') === 'ééé');
+  // An unknown or malformed entity is text, and must survive untouched.
+  check('decodeEntities leaves an unknown entity alone', decodeEntities('&nosuch; &#xZZ; R&D') === '&nosuch; &#xZZ; R&D');
+
   // Table-based layout ⇒ critical, reading order warning.
   const tableCv = auditAts(
     '<html><head><meta charset="utf-8"></head><body><table><tr><td>' +
@@ -529,9 +810,89 @@ function runSelfTest() {
   check('content image with low text is flagged', hasIssue(imgCv.issues, 'image'));
   check('content image with low text is critical', hasCritical(imgCv.issues));
 
+  // An <img> that only appears in a comment or a <style> body renders nothing,
+  // so it must not be counted. templates/cv-template.html documents its photo
+  // slot with the literal text "<img> is emitted" in a CSS comment.
+  const documentedImg = auditAts(buildCleanHtml({
+    extraBody: '<style>/* with no candidate.photo no <img> is emitted */</style>' +
+      '<!-- the photo slot emits an <img src="me.jpg"> when opted in -->',
+  }));
+  check('an <img> inside a comment or <style> is not counted', !hasIssue(documentedImg.issues, 'image'));
+
+  // …but a real <img> in the body still is — the strip above must not hide one.
+  const realImg = auditAts(buildCleanHtml({ extraBody: '<img src="chart.png">' }));
+  check('a rendered <img> is still counted', hasIssue(realImg.issues, 'non-photo image'));
+
   // Non-standard font ⇒ warning naming the font.
   const badFont = auditAts(buildCleanHtml({ font: "'Comic Sans MS', cursive" }));
   check('non-standard font is flagged', hasIssue(badFont.issues, 'comic sans ms'));
+
+  // A var() reference is not a font name and must not be reported as one.
+  const varFont = auditAts(buildCleanHtml({ font: 'var(--font-family), Arial, sans-serif' }));
+  check('a var() reference is not reported as a font', !hasIssue(varFont.issues, 'non-standard font'));
+
+  // …but a font named in var()'s fallback slot must not hide behind it.
+  const varFallback = auditAts(buildCleanHtml({ font: "var(--font-family, 'Comic Sans MS'), sans-serif" }));
+  check('a font in a var() fallback is still flagged', hasIssue(varFallback.issues, 'comic sans ms'));
+
+  // A custom property is not restricted to ASCII. An ASCII-only name class
+  // stops at the first such character and leaves the tail behind as a "font":
+  // `var(--police-caractères)` reported `ères`, and `var(--字体, Arial)`
+  // reported `字体` — names the CV never asked for.
+  const varNonAscii = auditAts(buildCleanHtml({ font: 'var(--字体, Arial), var(--police-caractères), sans-serif' }));
+  check('a non-ASCII custom-property name is consumed whole', !hasIssue(varNonAscii.issues, 'non-standard font'));
+
+  // An escaped character inside the name is part of the name, not a separator.
+  const varEscaped = auditAts(buildCleanHtml({ font: 'var(--a\\,b), Arial, sans-serif' }));
+  check('an escaped character in a custom-property name is consumed', !hasIssue(varEscaped.issues, 'non-standard font'));
+
+  // U+00A0 is whitespace to JavaScript but an ordinary identifier character to
+  // CSS, so a `\s`-based name class ended early here and reported `family`.
+  const varNbsp = auditAts(buildCleanHtml({ font: 'var(--font family), Arial, sans-serif' }));
+  check('U+00A0 inside a custom-property name is not a separator', !hasIssue(varNbsp.issues, 'non-standard font'));
+
+  // …while real CSS whitespace around the name is still skipped.
+  const varSpaced = auditAts(buildCleanHtml({ font: 'var( --font-family ), Arial, sans-serif' }));
+  check('CSS whitespace around a custom-property name is skipped', !hasIssue(varSpaced.issues, 'non-standard font'));
+
+  // The same JS-vs-CSS disagreement at the ENDS of a family name. `.trim()`
+  // strips U+00A0, so the quoted family " Arial" — which is not Arial and
+  // resolves to nothing — trimmed onto the allowlist and passed silently. A
+  // false negative: the check said a CV was fine when its font was broken.
+  const nbspFont = auditAts(buildCleanHtml({ font: "' Arial', sans-serif" }));
+  check('a leading U+00A0 does not trim a family onto the safe list', hasIssue(nbspFont.issues, 'non-standard font'));
+
+  // …and the warning has to name it in a form the reader can act on, or it
+  // reports a font that looks exactly like the one they meant to use.
+  check('an invisible character in a flagged font is shown as an escape', hasIssue(nbspFont.issues, '\\u00a0arial'));
+
+  // Real CSS whitespace around a family name is still trimmed, so the ordinary
+  // `'  Arial  '` spelling gains no warning from the above.
+  const paddedFont = auditAts(buildCleanHtml({ font: "'  Arial  ', sans-serif" }));
+  check('CSS whitespace around a family name is still trimmed', !hasIssue(paddedFont.issues, 'non-standard font'));
+
+  // A font that was already flagged must now be named correctly rather than
+  // under the plain name its invisible prefix trimmed onto.
+  const nbspUnsafe = auditAts(buildCleanHtml({ font: "' Comic Sans MS', sans-serif" }));
+  check('a flagged font keeps its real name', hasIssue(nbspUnsafe.issues, '\\u00a0comic sans ms'));
+
+  // Above the BMP a bare `\uXXXXX` does not say where it ends: U+E0001 printed
+  // as `1` reads as `` then "1", which is a different character.
+  const astralFont = auditAts(buildCleanHtml({ font: "'\u{E0001}Arial', sans-serif" }));
+  check('a format character above the BMP is escaped in braces', hasIssue(astralFont.issues, '\\u{e0001}arial'));
+
+  // …and the BMP spelling stays the familiar four-digit one, so the common
+  // case is not churned for the sake of the rare one.
+  check('a BMP character keeps the bare four-digit escape', hasIssue(nbspFont.issues, '\\u00a0arial'));
+
+  // The Korean and Traditional Chinese stacks the template declares
+  // unconditionally must not penalise a CV that never renders them.
+  const cjkFallbacks = auditAts(buildCleanHtml({
+    font: "var(--font-family), 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans CJK KR', " +
+      "'Noto Sans KR', 'Nanum Gothic', 'PingFang TC', 'Microsoft JhengHei', " +
+      "'Noto Sans CJK TC', 'Noto Sans TC', 'Source Han Sans TC', sans-serif",
+  }));
+  check('Korean/Traditional Chinese fallbacks are not flagged', !hasIssue(cjkFallbacks.issues, 'non-standard font'));
 
   // No email anywhere ⇒ critical.
   const noEmail = auditAts(buildCleanHtml({ email: 'San Francisco' }));
