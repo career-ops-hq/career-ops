@@ -418,6 +418,17 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Agent:** Use `select_option` directly by value or visible label. Never snapshot the full option list. If the exact label is unknown, ask the candidate for the value instead of dumping options into context.
 - **Candidate:** Provides the correct label when the agent cannot infer it from `config/profile.yml`.
 
+### Repeated-entry sections ("Add Another") — scope fields to each entry
+
+- **Symptom:** Work Experience, Education, and Languages/Skills sections repeat labels such as "Job Title", "Company", "Month", and "Year" in multiple blocks. A page-wide role + label lookup can match the wrong entry; even within one entry, start and end dates may share labels. Confirmed on Workday; apply this pattern wherever a form repeats entries.
+- **Agent:**
+  1. Count and inspect existing blocks, including prefilled entries and blank placeholders. Map them to the source-backed entries intended for this application, preserve correct existing values, and reuse suitable blank blocks. Add only the missing blocks, never one click per intended entry regardless of what is already present.
+  2. Check whether the form permits another blank entry before the current one is complete. If it does, create the missing blocks before filling; otherwise fill and verify the current entry before adding the next. Target the correct section's add-entry control (such as "Add Another" or its localized equivalent), wait for each addition to finish, and confirm the new block exists before another click. Recount after an uncertain click instead of retrying blindly and creating duplicates.
+  3. From a fresh page read, map each intended entry and field to a unique element ref, or use a locator scoped to that entry and field group that resolves to exactly one control. Distinguish start/end date groups as well as entries. Never use role + label alone across the page or pick the first match to silence ambiguity. If the target cannot be identified uniquely, stop and ask the candidate rather than guess.
+  4. After any add, remove, reorder, or form re-render (including conditional fields appearing), re-read the affected section and rebuild the entry-to-field map before using refs again, including the add/remove controls. Do not reuse cached refs or positional indexes from an earlier DOM state. Batch filling never overrides a widget's stricter refresh rule.
+  5. Fill in small batches of at most 2–3 entries, then re-read and compare every field's value/selection with its intended entry before continuing; verify a smaller final batch too. Check required fields within each block and correct any misplaced value before proceeding. On Workday, combine this with the set-value quirk below so values register through real keystrokes or explicit verification.
+- **Candidate:** Reviews all entries at the final Review step and makes the final submission decision. The agent still stops before clicking Submit/Send/Apply.
+
 ### Job-board host ≠ application host — re-check the URL after "Apply"
 
 - **Symptom:** The posting is discovered on one ATS, but clicking **Apply** hands off to a *different* ATS for the actual form. Enterprise career sites (commonly Phenom-, iCIMS-, or Radancy-hosted) frequently redirect into a Workday, Greenhouse, or SmartRecruiters application flow. Choosing fill tactics from the *board* URL applies the wrong quirks.

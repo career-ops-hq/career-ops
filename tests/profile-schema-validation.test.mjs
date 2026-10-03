@@ -49,8 +49,8 @@ test('the real shipped example validates clean against itself', () => {
 });
 
 test('keys the code reads but the example omits are not called unknown', () => {
-  // rejection_latency and table_freshness have real readers. Warning on
-  // them would flag a correct profile — the failure mode that makes a validator
+  // rejection_latency and table_freshness have real readers. Warning on them
+  // would flag a correct profile — the failure mode that makes a validator
   // something users learn to ignore.
   for (const key of Object.keys(UNDOCUMENTED_KEYS)) {
     const { findings } = validateProfile(`${key}:\n  x: 1\n`, EXAMPLE);
@@ -76,28 +76,71 @@ test('the known-key set is derived from the example, not hardcoded here', () => 
   assert.ok(knownKeysFromExample(widened).includes('brand_new_section'));
 });
 
-test('opt-in keys the example ships commented out are not called unknown (#4736)', () => {
-  // Every optional section in the example is a commented-out block, and the
-  // YAML parser drops comments. "Validates clean against itself" above passes
-  // only because those blocks stay commented; a user who enables one exactly as
-  // shown was told the setting "has no effect" while it was in fact being read.
-  // These two have readers in modes/pipeline.md and modes/_shared.md.
-  for (const key of ['auto_pdf_score_threshold', 'culture_screen', 'page_format', 'style', 'scan']) {
-    assert.match(EXAMPLE, new RegExp(`^# ?${key}:`, 'm'), `${key} is no longer a commented block in the example`);
+test('a section the example ships commented out is known, not "no effect"', () => {
+  // style (#1837) and page_format (#4405) are documented only as commented-out
+  // blocks, and theme-style.mjs / lib/page-format.mjs read them. Deriving keys
+  // from the parsed example alone told a user who set them that the setting had
+  // no effect. scan is the same case: the example shows `# scan:`.
+  const profile = [
+    'candidate:', '  full_name: X',
+    'page_format: a4',
+    'style:', '  accent_color: "#2563eb"',
+    'scan:', '  extractor: cli',
+    '',
+  ].join('\n');
+  assert.deepEqual(validateProfile(profile, EXAMPLE).findings, []);
+});
+
+test('prose comments and keys nested in a commented block are not top-level keys', () => {
+  // Lines taken from the shipped example. A looser rule (`#`, any spaces, then
+  // `word:`) also matches every nested key there, so a misplaced top-level
+  // `margin:`, which theme-style.mjs never reads, would pass as known.
+  const example = [
+    'candidate:',
+    '  full_name: x',
+    '  # title: "Senior Backend Engineer"',
+    '# Controls which model tier evaluates your offers. Valid values:',
+    '# Default (key absent OR commented out): 3.0',
+    '# greeting_max_chars is the hard character budget for that message. Default when',
+    '# style:',
+    '#   accent_color:    "#2563eb"           # section headings, competency tags, project badges',
+    '#   margin:          "0.5in"             # page margin (@page)',
+    '',
+  ].join('\n');
+  assert.deepEqual(knownKeysFromExample(example), ['candidate', 'style']);
+  const { findings } = validateProfile('margin: "0.5in"\n', example);
+  assert.equal(findings.find((f) => f.code === 'unknown-key')?.key, 'margin');
+});
+
+test('a misspelled commented-out section still gets its suggestion', () => {
+  const { findings } = validateProfile('styel:\n  accent_color: "#2563eb"\npage_fromat: a4\n', EXAMPLE);
+  const unknown = findings.filter((f) => f.code === 'unknown-key');
+  assert.equal(unknown.length, 2, `expected both typos: ${JSON.stringify(findings)}`);
+  assert.equal(unknown.find((f) => f.key === 'styel')?.suggestion, 'style');
+  assert.equal(unknown.find((f) => f.key === 'page_fromat')?.suggestion, 'page_format');
+});
+
+test('every opt-in key the example ships commented out is known, including mode-read ones (#4736)', () => {
+  // auto_pdf_score_threshold (modes/pipeline.md) and culture_screen
+  // (modes/_shared.md) have no .mjs reader, so a grep for readers misses them;
+  // they were reported "no effect" exactly like style and page_format.
+  for (const key of ['auto_pdf_score_threshold', 'culture_screen']) {
+    assert.match(EXAMPLE, new RegExp(`^# ${key}:`, 'm'), `${key} is no longer a commented block in the example`);
     const { findings } = validateProfile(`${key}: 1\n`, EXAMPLE);
     assert.deepEqual(findings, [], `${key} was reported: ${JSON.stringify(findings)}`);
   }
 });
 
-test('the shipped example with every opt-in block uncommented still validates clean', () => {
-  // The strongest form of the self-validation guard: un-comment each column-0
-  // `# key:` block (and its indented `#   ...` body) and re-validate.
-  const lines = EXAMPLE.split('\n');
+test('the shipped example with every opt-in block uncommented still validates clean (#4736)', () => {
+  // "Validates clean against itself" above passes whether or not commented
+  // sections are understood, because they stay commented. Un-comment each
+  // column-0 `# key:` block (and its indented `#   ...` body) and re-validate,
+  // so the next opt-in block added to the example is covered with no edit here.
   const out = [];
   let inBlock = false;
-  for (const line of lines) {
-    if (/^# ?[a-z_][a-z0-9_]*:(\s|$)/.test(line)) { out.push(line.replace(/^# ?/, '')); inBlock = true; continue; }
-    if (inBlock && /^#\s{2,}\S/.test(line)) { out.push(line.replace(/^# ?/, '')); continue; }
+  for (const line of EXAMPLE.split('\n')) {
+    if (/^# [a-z][a-z0-9_]*:(\s|$)/.test(line)) { out.push(line.slice(2)); inBlock = true; continue; }
+    if (inBlock && /^#\s{2,}\S/.test(line)) { out.push(line.slice(2)); continue; }
     inBlock = false;
     out.push(line);
   }
@@ -107,12 +150,6 @@ test('the shipped example with every opt-in block uncommented still validates cl
   // parsing would otherwise pass this test vacuously.
   const { findings } = validateProfile(uncommented, EXAMPLE);
   assert.deepEqual(findings, [], `the uncommented example produced findings: ${JSON.stringify(findings)}`);
-});
-
-test('commented prose and nested commented keys are not mistaken for top-level keys', () => {
-  const example = 'candidate:\n  full_name: x\n# Optional. Note: this is prose\n#   nested_only: 1\n#e.g.: nope\n';
-  const keys = knownKeysFromExample(example);
-  assert.deepEqual(keys.sort(), ['candidate'], `unexpected keys: ${keys}`);
 });
 
 test('empty, comment-only and absent profiles are not errors', () => {
@@ -151,7 +188,10 @@ test('a clean profile adds no doctor noise', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-profile-clean-'));
   try {
     mkdirSync(join(dir, 'config'), { recursive: true });
-    writeFileSync(join(dir, 'config', 'profile.yml'), 'language:\n  output: ja\n');
+    // page_format and style are documented as commented-out sections, so a
+    // profile that sets them is as clean as one that does not.
+    writeFileSync(join(dir, 'config', 'profile.yml'),
+      'language:\n  output: ja\npage_format: a4\nstyle:\n  accent_color: "#2563eb"\n');
     const r = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--target', dir], {
       cwd: dir, encoding: 'utf-8', timeout: 60_000,
       env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' },

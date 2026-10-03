@@ -19,9 +19,9 @@
 // already pins that it keeps checking the targeted directory. Here the split
 // is the ambient one a real installation hits — CAREER_OPS_ROOT set, no
 // --target — so codeRoot must fall back to doctor.mjs's own directory.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 

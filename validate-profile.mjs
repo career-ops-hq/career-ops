@@ -65,29 +65,22 @@ export const UNDOCUMENTED_KEYS = {
 };
 
 /**
- * A top-level key the example documents as a commented-out opt-in block:
- * `# culture_screen:` or `# auto_pdf_score_threshold: 4.0` at column 0.
+ * Top-level keys from the shipped example — the documented schema.
  *
- * Every optional section in the example is shipped this way, and a YAML parser
- * drops comments, so parsing alone sees none of them — enabling one exactly as
- * the example shows was then reported as "unknown ... has no effect" (#4736).
- * At most one space after `#` and a lowercase snake_case name, so nested
- * commented keys (`#   accent_color:`) and prose (`# Optional. Note: ...`) do
- * not match.
+ * Optional sections ship commented out (`# style:`, `# page_format: letter`),
+ * so parsing alone misses them, and a profile that set one was told the setting
+ * had no effect while theme-style.mjs / lib/page-format.mjs were reading it.
+ * Each one is written `# key:` at column 0 with a single space. A key nested in
+ * such a block is indented past the `#`, and no prose line in the example opens
+ * with a bare lowercase word and a colon, so neither is taken for a top-level
+ * key: that would accept `margin:` at the top level, where nothing reads it.
  */
-const COMMENTED_KEY_RE = /^#\s?([a-z_][a-z0-9_]*):(?:\s|$)/;
-
-/** Top-level keys from the shipped example — the documented schema. */
 export function knownKeysFromExample(exampleText) {
   const text = String(exampleText ?? '');
   const doc = yaml.load(text) || {};
   if (typeof doc !== 'object' || Array.isArray(doc)) return [];
-  const keys = new Set(Object.keys(doc));
-  for (const line of text.split('\n')) {
-    const m = line.match(COMMENTED_KEY_RE);
-    if (m) keys.add(m[1]);
-  }
-  return [...keys];
+  const commented = [...text.matchAll(/^# ([a-z][a-z0-9_]*):(?=\s|$)/gm)].map((m) => m[1]);
+  return [...new Set([...Object.keys(doc), ...commented])];
 }
 
 /**
@@ -224,10 +217,12 @@ function runSelfTest() {
   const widened = validateProfile('brand_new_section:\n  x: 1\n', `${EXAMPLE}brand_new_section:\n  x: 0\n`);
   check(widened.findings.length === 0, 'a key added to the example is understood without editing this file');
 
-  // Opt-in blocks ship commented out; the parser drops them, so they are read
-  // from the comment lines (#4736).
-  const optIn = validateProfile('culture_screen:\n  require: []\n', `${EXAMPLE}# culture_screen:\n#   require: []\n`);
-  check(optIn.findings.length === 0, 'a commented-out opt-in key in the example is understood');
+  // Optional sections ship commented out, and are still documented. A key
+  // nested in one, or a prose comment, is not a top-level key.
+  const COMMENTED = `${EXAMPLE}# Paper size: "letter" or "a4".\n# page_format: letter\n# style:\n#   accent_color: "#2563eb"\n`;
+  check(validateProfile('page_format: a4\nstyle:\n  accent_color: "#000"\n', COMMENTED).findings.length === 0, 'a key the example ships commented out is known');
+  check(knownKeysFromExample(COMMENTED).join() === 'candidate,language,spend_tier,cv,page_format,style', 'prose and nested commented keys are not top-level keys');
+  check(validateProfile('styel:\n  x: 1\n', COMMENTED).findings[0]?.suggestion === 'style', 'a typo of a commented key gets its suggestion');
 
   console.log(`\n  validate-profile self-test: ${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);
