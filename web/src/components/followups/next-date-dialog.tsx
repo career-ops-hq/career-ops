@@ -20,7 +20,8 @@ export function NextDateDialog({
   onClose,
   onChanged,
 }: {
-  entry: CadenceEntry;
+  entry: Pick<CadenceEntry, "num" | "company"> &
+    Partial<Pick<CadenceEntry, "role" | "nextFollowupDate" | "nextOverride">>;
   onClose: () => void;
   onChanged: () => void;
 }) {
