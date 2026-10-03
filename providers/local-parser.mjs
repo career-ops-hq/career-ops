@@ -182,7 +182,7 @@ function firstPostedAt(...candidates) {
   return undefined;
 }
 
-function normalizeParserJob(job, entry) {
+export function normalizeParserJob(job, entry) {
   if (!job || typeof job !== 'object') return null;
 
   const title = String(job.title || job.name || '').trim();
@@ -192,7 +192,26 @@ function normalizeParserJob(job, entry) {
   );
   if (!title || !url) return null;
 
+  // Carry through any other key the parser emitted (#3438), so a jobs-json-v1
+  // parser can publish an occupation code, a department or a req id for a
+  // non-title filter_on to read. The normalized keys are destructured out,
+  // along with the aliases they are built from, so rest cannot overwrite
+  // them; a parser that emits only those keys gets the same object as before.
+  // Every posting-date alias is taken out too: postedAt is set below only when
+  // it parses, and a raw unparseable date must not ride along in rest.
+  const {
+    title: _title, name: _name,
+    url: _url, jobUrl: _jobUrl, job_url: _jobUrlSnake,
+    applyUrl: _applyUrl, apply_url: _applyUrlSnake,
+    company: _company, location: _location, locations: _locations,
+    postedAt: _postedAt, posted_at: _postedAtSnake,
+    publishedAt: _publishedAt, published_at: _publishedAtSnake,
+    published_date: _publishedDate, datePosted: _datePosted, date_posted: _datePostedSnake,
+    ...rest
+  } = job;
+
   const out = {
+    ...rest,
     title,
     url,
     company: String(job.company || entry.name || '').trim(),
