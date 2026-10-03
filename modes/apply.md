@@ -22,6 +22,7 @@ Interactive mode for when the candidate is filling out an application form in Ch
 5d. STATUS     → Warn if a form question screens for a specific immigration status rather than work authorization (warn-only; candidate decides)
 
 5c. PROHIBITED → Warn if a form field asks for content the candidate's jurisdiction prohibits (warn-only; candidate decides)
+5e. FIXED TERM → Surface any explicit fixed-term disclosure before drafting (warn-only; continue)
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 7b. SWEEP      → Enumerate the step's required controls and assert each is non-empty before Save/Next/Continue/Submit
@@ -113,6 +114,19 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 - **Warn-only.** Never auto-answer the field, never auto-skip it, never block or discourage the application because of it — the candidate decides how to handle the field, and their decision is final.
 - **Phrasing discipline:** describe the form field and what the jurisdiction's law prohibits — never assert that the employer is breaking the law or committing a violation; exemptions and scope are not verifiable from the form.
 - This step adds a warning before the answer is drafted; it changes nothing about the existing prepare-don't-submit flow, the Step 6 `needs_candidate_confirmation` contract, or the Step 5b knock-out handling.
+
+## Step 5e — Fixed-term contract disclosure (#4534)
+
+Before drafting answers, read the matched report's Block G fixed-term finding and any visible JD text. If either explicitly describes the role as fixed-term — for example `18 month contract`, `6-month contract`, `fixed-term`, `fixed-term contract position`, `temporary position/role/assignment`, or `term position` — surface one reminder before the first answer:
+
+> ℹ️ **Fixed-term role reminder:** [Render in {language.output}: quote the exact fixed-term phrase and preserve any stated duration verbatim. State that the role is explicitly time-limited, then suggest confirming renewal expectations, benefits, end-of-term/notice terms, and whether the total package reflects the finite term. If compensation comes up, say only that fixed-term roles can use different compensation structures and that current benchmarks for this market and role should be verified before choosing an anchor.]
+
+**Hard rules:**
+
+- Presence-based only: never infer a fixed term from a bare "contract" or unqualified `contract position`, including uses for customer contracts, contract management, contract law, or contractor-status language.
+- Warn once and continue immediately. Never auto-answer or alter a form field, never block or discourage the application, and never require acknowledgment.
+- Never invent a duration, percentage premium, market rate, entitlement, severance/notice rule, or legal conclusion. This is a role-term reminder and a negotiation prompt, not legal advice.
+- If the report already contains the same reminder, do not duplicate its full prose; surface a one-line apply-time reminder with a link/reference to that report section.
 
 **Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially against scanner entries marked `**Verification:** unconfirmed (batch mode)` — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
 
