@@ -270,7 +270,7 @@ function resolveNow(now) {
 
 // --- Source loaders (each returns {rows|clusters, loaded}; missing file -> empty + loaded:false) ---
 
-export function loadTrackerRows(rootDir = CAREER_OPS) {
+export function loadTrackerRows(rootDir = DATA_ROOT) {
   const path = resolveTrackerPath(rootDir);
   if (!existsSync(path)) return { rows: [], loaded: false };
   const content = readFileSync(path, 'utf-8');
@@ -284,7 +284,7 @@ export function loadTrackerRows(rootDir = CAREER_OPS) {
   return { rows, loaded: true };
 }
 
-export function loadFollowupRows(rootDir = CAREER_OPS, overridePath) {
+export function loadFollowupRows(rootDir = DATA_ROOT, overridePath) {
   const path = overridePath || join(rootDir, 'data/follow-ups.md');
   if (!existsSync(path)) return { rows: [], loaded: false };
   return { rows: parseFollowups(readFileSync(path, 'utf-8')), loaded: true };
@@ -294,7 +294,7 @@ export function loadFollowupRows(rootDir = CAREER_OPS, overridePath) {
 // the clusters to report, and the Set to explain why a given company has none.
 // Without the Set an aggregator would render as `none-detected`, which claims a
 // negative result from a check that never ran.
-export function loadRepostClusters(rootDir = CAREER_OPS, overridePath, portalsPath) {
+export function loadRepostClusters(rootDir = DATA_ROOT, overridePath, portalsPath) {
   const path = overridePath || join(rootDir, 'data/scan-history.tsv');
   // Same override scan.mjs and detect-reposts.mjs honour, so a sandboxed run
   // points all three at one config instead of silently reading the real one.
@@ -1751,9 +1751,14 @@ if (isMainModule(import.meta.url)) {
     });
   } else {
     const run = async () => {
-      const tracker = loadTrackerRows(CAREER_OPS);
-      const followups = loadFollowupRows(CAREER_OPS, followupsOverride);
-      const scanHistory = loadRepostClusters(CAREER_OPS, scanHistoryOverride);
+      // DATA_ROOT, not CAREER_OPS: these three read data/applications.md,
+      // data/follow-ups.md and data/scan-history.tsv, which are USER layer and
+      // move with CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
+      // resolveDefaultSilenceWindow() below stays on CAREER_OPS on purpose —
+      // templates/benchmarks.yml is SYSTEM layer and ships with the code.
+      const tracker = loadTrackerRows(DATA_ROOT);
+      const followups = loadFollowupRows(DATA_ROOT, followupsOverride);
+      const scanHistory = loadRepostClusters(DATA_ROOT, scanHistoryOverride);
       const statusLog = await loadStatusLogSource();
 
       // parseArgs already validated the flag as a positive integer.

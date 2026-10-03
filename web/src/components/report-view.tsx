@@ -21,6 +21,7 @@ import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { ReportMarkdown } from "@/components/report-markdown";
+import { CompanyEvidence } from "@/components/company-evidence";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 
 // Progressive disclosure of the report. Current oferta.md writes letter F as
@@ -254,6 +255,10 @@ export function ReportView({
               </div>
             );
           })()}
+          {/* Only with a tracker row: the card is keyed on a company name, and
+              a report with no row has none to look up — guessing one from the
+              report would surface another company's history. */}
+          {app?.company && <CompanyEvidence company={app.company} />}
           <ScoreMethodology />
         </>
       ) : (
