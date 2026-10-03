@@ -244,33 +244,69 @@ test('a claim past its TTL (no live pid recorded) is not active, and can be recl
   }
 });
 
-test('gcStaleActivity removes a stale sentinel but leaves a live one alone', () => {
+test('a live PID does not keep an advisory claim active past its TTL', () => {
   const activityDir = mkdtempSync(join(tmpdir(), 'session-activity-'));
   try {
-    // Live claim: real pid (this process), retained even after TTL expiry.
-    const live = claimActivity('report:live', { activityDir });
-    assert.equal(live.claimed, true);
-
-    // Stale claim: no process identity, so GC must use the TTL path. An
-    // explicitly old mtime makes expiry independent of filesystem timestamp
-    // precision; process-bound dead-PID cleanup is covered
-    // separately above with a real exited child process.
-    const stalePath = sentinelPathFor(activityDir, 'report:stale');
-    writeFileSync(stalePath, JSON.stringify({
-      key: 'report:stale',
-      token: 'stale-token',
-      pid: null,
+    const path = sentinelPathFor(activityDir, 'report:reused-pid');
+    writeFileSync(path, JSON.stringify({
+      key: 'report:reused-pid',
+      token: 'old-token',
+      pid: process.pid, // A live process stands in for an unrelated PID reuse.
       process_bound: false,
       label: null,
-      claimed_at: new Date().toISOString(),
+      claimed_at: new Date(Date.now() - 60_000).toISOString(),
     }));
-
     const staleTime = new Date(Date.now() - 60_000);
-    utimesSync(stalePath, staleTime, staleTime);
-    utimesSync(sentinelPathFor(activityDir, 'report:live'), staleTime, staleTime);
+    utimesSync(path, staleTime, staleTime);
+
+    assert.equal(checkActivity('report:reused-pid', { activityDir, ttlMs: 1_000 }).active, false);
+    const reclaim = claimActivity('report:reused-pid', { activityDir, ttlMs: 1_000 });
+    assert.equal(reclaim.claimed, true);
+    assert.notEqual(reclaim.token, 'old-token');
+  } finally {
+    rmSync(activityDir, { recursive: true, force: true });
+  }
+});
+
+test('a live PID keeps an advisory claim active within its TTL', () => {
+  const activityDir = mkdtempSync(join(tmpdir(), 'session-activity-'));
+  try {
+    const claim = claimActivity('report:live-within-ttl', { activityDir, ttlMs: 60_000 });
+    assert.equal(claim.claimed, true);
+    const check = checkActivity('report:live-within-ttl', { activityDir, ttlMs: 60_000 });
+    assert.equal(check.active, true);
+    assert.equal(check.owner.token, claim.token);
+    assert.equal(claimActivity('report:live-within-ttl', { activityDir, ttlMs: 60_000 }).claimed, false);
+  } finally {
+    rmSync(activityDir, { recursive: true, force: true });
+  }
+});
+
+test('gcStaleActivity removes TTL-expired live-PID and dead claims but keeps a fresh live claim', () => {
+  const activityDir = mkdtempSync(join(tmpdir(), 'session-activity-'));
+  try {
+    // Fresh live claim: this process stays within TTL and must be retained.
+    const live = claimActivity('report:live', { activityDir, ttlMs: 1_000 });
+    assert.equal(live.claimed, true);
+
+    // These are both old enough to expire: one has a live (reused) PID and
+    // one has a dead PID. This covers GC's age-ceiling and dead-owner paths.
+    for (const [key, pid] of [['report:reused', process.pid], ['report:dead', 999_999_999]]) {
+      const path = sentinelPathFor(activityDir, key);
+      writeFileSync(path, JSON.stringify({
+        key,
+        token: `${key}-token`,
+        pid,
+        process_bound: false,
+        label: null,
+        claimed_at: new Date(Date.now() - 60_000).toISOString(),
+      }));
+      const staleTime = new Date(Date.now() - 60_000);
+      utimesSync(path, staleTime, staleTime);
+    }
 
     const removed = gcStaleActivity({ activityDir, ttlMs: 1_000 });
-    assert.equal(removed, 1);
+    assert.equal(removed, 2);
 
     const remaining = readdirSync(activityDir).filter((f) => f.endsWith('.json'));
     assert.equal(remaining.length, 1);
