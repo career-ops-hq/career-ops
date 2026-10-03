@@ -10,6 +10,8 @@
  *   4. `resolve N` ticks the N-th item and appends a one-line result.
  *   4b. resolve holds the same lock as add for its full read/modify/write, so a
  *       request accepted concurrently cannot be overwritten by a stale view.
+ *   4c. resolve replaces the queue file (temp file + rename) instead of
+ *       truncating it in place, and leaves no temp file behind.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
@@ -37,7 +39,7 @@
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -195,6 +197,26 @@ console.log('4b. resolve waits for the queue lock before rewriting');
   check('the selected item is resolved from the locked snapshot', /^- \[x\].*alpha.*→ result: done alpha/m.test(md), md);
   check('the sibling pending item survives the rewrite', /^- \[ \].*beta/m.test(md), md);
   check('resolve reports the selected item after committing', /Resolved #1: .*alpha/.test(stdout), stdout.trim());
+}
+
+// ---------------------------------------------------------------------------
+console.log('4c. resolve replaces the queue file atomically');
+{
+  const dir = tmp('inbox-resolve-atomic-');
+  const inbox = join(dir, 'agent-inbox.md');
+  run(inbox, ['add', 'alpha']);
+  run(inbox, ['add', 'beta']);
+  // A rename swaps in a new inode; an in-place writeFileSync keeps the old one.
+  // Windows reports ino as 0 without bigint, so compare there only if it is set.
+  const before = statSync(inbox).ino;
+  run(inbox, ['resolve', '1', '--result', 'done alpha']);
+  const after = statSync(inbox).ino;
+  check('the queue file was replaced, not rewritten in place', !before || before !== after, `ino ${before} → ${after}`);
+  const md = readFileSync(inbox, 'utf8');
+  check('the replaced file carries the resolved item', /^- \[x\].*alpha → result: done alpha$/m.test(md), md);
+  check('the replaced file keeps the header and the sibling item', /^# Agent Inbox/.test(md) && /^- \[ \].*beta$/m.test(md), md);
+  const leftovers = readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+  check('no temp file is left behind', leftovers.length === 0, leftovers.join(', '));
 }
 
 // ---------------------------------------------------------------------------

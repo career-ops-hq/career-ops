@@ -38,6 +38,7 @@ import {
 } from 'fs';
 import { dirname } from 'path';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 
 const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
 
@@ -262,7 +263,12 @@ async function resolve() {
     let updated = lines[target.line].replace('[ ]', '[x]');
     if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
     lines[target.line] = updated;
-    writeFileSync(PATH, lines.join('\n'));
+    // Replace, don't rewrite in place. The lock serialises writers, but `list`
+    // and anything reading the file by hand do not take it, and writeFileSync
+    // truncates before it writes: a reader in that window, or a crash inside
+    // it, sees a queue with items missing. A same-directory temp file renamed
+    // over the original is the repo's existing helper for exactly this.
+    writeFileAtomic(PATH, lines.join('\n'));
     return { target };
   }, { timeoutMs: 30_000 });
   // Fail only after withPipelineLock has released. process.exit() inside the
