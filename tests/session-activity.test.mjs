@@ -282,15 +282,15 @@ test('a live PID keeps an advisory claim active within its TTL', () => {
   }
 });
 
-test('gcStaleActivity removes TTL-expired live-PID and dead claims but keeps a fresh live claim', () => {
+test('gcStaleActivity respects the TTL ceiling and immediately removes process-bound dead claims', () => {
   const activityDir = mkdtempSync(join(tmpdir(), 'session-activity-'));
   try {
-    // Fresh live claim: this process stays within TTL and must be retained.
-    const live = claimActivity('report:live', { activityDir, ttlMs: 1_000 });
+    // A wide margin keeps the fresh live claim within TTL even on a slow runner.
+    const live = claimActivity('report:live', { activityDir, ttlMs: 60_000 });
     assert.equal(live.claimed, true);
 
-    // These are both old enough to expire: one has a live (reused) PID and
-    // one has a dead PID. This covers GC's age-ceiling and dead-owner paths.
+    // These claims are well past TTL: one has a live (reused) PID and one a
+    // dead PID. A separate fresh process-bound dead claim covers immediate GC.
     for (const [key, pid] of [['report:reused', process.pid], ['report:dead', 999_999_999]]) {
       const path = sentinelPathFor(activityDir, key);
       writeFileSync(path, JSON.stringify({
@@ -299,14 +299,24 @@ test('gcStaleActivity removes TTL-expired live-PID and dead claims but keeps a f
         pid,
         process_bound: false,
         label: null,
-        claimed_at: new Date(Date.now() - 60_000).toISOString(),
+        claimed_at: new Date(Date.now() - 120_000).toISOString(),
       }));
-      const staleTime = new Date(Date.now() - 60_000);
+      const staleTime = new Date(Date.now() - 120_000);
       utimesSync(path, staleTime, staleTime);
     }
 
-    const removed = gcStaleActivity({ activityDir, ttlMs: 1_000 });
-    assert.equal(removed, 2);
+    const deadBoundPath = sentinelPathFor(activityDir, 'report:dead-bound');
+    writeFileSync(deadBoundPath, JSON.stringify({
+      key: 'report:dead-bound',
+      token: 'dead-bound-token',
+      pid: exitedProcessPid(),
+      process_bound: true,
+      label: null,
+      claimed_at: new Date().toISOString(),
+    }));
+
+    const removed = gcStaleActivity({ activityDir, ttlMs: 60_000 });
+    assert.equal(removed, 3);
 
     const remaining = readdirSync(activityDir).filter((f) => f.endsWith('.json'));
     assert.equal(remaining.length, 1);
