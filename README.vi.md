@@ -133,7 +133,7 @@ career-ops miễn phí cho ứng viên, mãi mãi. Các công ty sau tài trợ 
   <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
 </p>
 
-<p align="center"><strong>SerpApi</strong> · Xây một dự án portfolio với dữ liệu tìm kiếm trực tiếp. SerpApi cung cấp cho lập trình viên JSON/Markdown có cấu trúc từ Google Search, Maps, Shopping và các công cụ tìm kiếm khác qua một lệnh gọi API đơn giản.</p>
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
 
 > Tài trợ chỉ mua được sự hiển thị có gắn nhãn rõ ràng, không bao giờ mua được ảnh hưởng: không khoản tiền nào thay đổi lộ trình hay đặt bất cứ thứ gì vào sản phẩm. Nhà tài trợ không bao giờ xuất hiện trong đánh giá, xếp hạng hay đề xuất.
 
