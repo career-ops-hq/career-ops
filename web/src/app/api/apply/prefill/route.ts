@@ -3,6 +3,8 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
+import { resolveSessionCv } from "@/lib/apply/cv";
+import { applyCvSource } from "@/lib/apply/cv-source.mjs";
 import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
 import { runPlanner } from "@/lib/apply/planner";
 import { extractJsonObject } from "@/lib/extract-json-object.mjs";
@@ -17,13 +19,21 @@ export const maxDuration = 320;
 // exit code/signal, parse outcome) so a stuck/empty prefill is observable on the
 // page AND written to <root>/.career-ops-web/apply-prefill.log for debugging.
 export async function POST(req: Request) {
-  let body: { sessionId?: string; cliId?: string };
+  let body: { sessionId?: string; cliId?: string; company?: string; application?: string };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId } = body;
+  const { sessionId, cliId, company, application } = body;
+  // Same two identifiers the fill route takes, validated the same way: they
+  // reach a filesystem resolver, so a non-string is refused before it gets there.
+  if (company !== undefined && typeof company !== "string") {
+    return Response.json({ error: "company must be a string" }, { status: 400 });
+  }
+  if (application !== undefined && typeof application !== "string") {
+    return Response.json({ error: "application must be a string" }, { status: 400 });
+  }
   const t0 = Date.now();
   const encoder = new TextEncoder();
   const logPath = path.join(careerOpsRoot(), ".career-ops-web", "apply-prefill.log");
@@ -79,9 +89,15 @@ export async function POST(req: Request) {
       const { spec, binPath } = resolved;
 
       const mem = readMemory().trim();
-      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem });
+      // Draft from the SAME tailored CV the fill route uploads to this form,
+      // resolved through the one shared call so the answers and the resume
+      // stapled to them cannot describe different documents.
+      const cvPath = await resolveSessionCv({ company, application, title: s.title });
+      const cvSource = cvPath ? applyCvSource(careerOpsRoot(), cvPath) : null;
+      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cvSource });
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
+      log(`CV source: ${cvSource ?? "none found — answers will come from cv.md"}`);
       log(`Planner: ${cliId} (${binPath})`);
       const result = await runPlanner({
         cliId,
