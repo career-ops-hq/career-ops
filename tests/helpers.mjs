@@ -14,6 +14,17 @@ export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one leve
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
 
+/**
+ * A merge-tracker fixture must not consult the install's batch history.
+ * Keep the default state path beside the fixture additions directory; tests
+ * that exercise explicit batch-state behavior should pass their own path.
+ * @param {string} additionsDir - Fixture additions directory.
+ * @returns {string} Fixture-local batch-state path.
+ */
+export function isolatedBatchStatePath(additionsDir) {
+  return join(dirname(additionsDir), 'batch-state.tsv');
+}
+
 // Windows keeps a handle open on a just-exited child's files for a short
 // window (antivirus widens it), so a cleanup rmSync can fail with EPERM even
 // though every assertion passed — `force: true` suppresses ENOENT, not EPERM.
@@ -200,6 +211,11 @@ export function run(cmd, args = [], opts = {}) {
   // executable is still allowlisted and the arguments are still an argv vector.
   lastFailure = null;
   const exe = resolveAllowedExecutable(cmd);
+  const env = opts.env ?? process.env;
+  const isolatedOpts = args.includes('merge-tracker.mjs') && env.CAREER_OPS_ADDITIONS
+    ? { ...opts, env: { ...env, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.CAREER_OPS_ADDITIONS) } }
+    : opts;
+  opts = isolatedOpts;
   try {
     return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {

@@ -52,6 +52,7 @@ function runScript(script, args, sandbox) {
     ...process.env,
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_ADDITIONS: sandbox.additions,
+    CAREER_OPS_BATCH_STATE: join(sandbox.dir, 'batch-state.tsv'),
     CAREER_OPS_TRACKER_LOCK: sandbox.lock,
     // The derived SQLite index defaults to sitting beside the tracker it was
     // built from — pin it into the sandbox so a test run can never create one
@@ -838,6 +839,7 @@ function runCaptured(script, sandbox) {
       ...process.env,
       CAREER_OPS_TRACKER: sandbox.tracker,
       CAREER_OPS_ADDITIONS: sandbox.additions,
+      CAREER_OPS_BATCH_STATE: join(sandbox.dir, 'batch-state.tsv'),
       CAREER_OPS_TRACKER_LOCK: sandbox.lock,
       ...(sandbox.reports ? { CAREER_OPS_REPORTS: sandbox.reports } : {}),
     },
