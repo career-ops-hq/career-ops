@@ -2,7 +2,8 @@
 /**
  * keyword-match.mjs — ATS keyword coverage check for career-ops
  *
- * Closes the evaluation loop: given a report's `## Keywords extracted` block and
+ * Closes the evaluation loop: given a report's keyword section (`## Keywords
+ * extracted`, or the translated heading a localized evaluation mode writes) and
  * a CV, reports which JD keywords the CV actually covers — the way an ATS parser
  * would — so gaps can be closed before applying.
  *
@@ -164,10 +165,78 @@ export function analyzeCoverage(keywords, cvText) {
 }
 
 /**
- * Pull keywords out of a report's `## Keywords extracted` block. Liberal:
- * accepts bulleted, comma-separated, or one-per-line entries; stops at the next
- * level-2 heading; skips an empty/placeholder parenthetical line. Returns [] if
- * the block is absent.
+ * The keyword section's heading as each evaluation mode writes it. Only
+ * modes/oferta.md, modes/ar/fursah.md and modes/ja/kyujin.md use the English
+ * title; the other sixteen modes translate it, so their reports had no block
+ * this reader could find and the coverage check modes/pdf.md runs on the
+ * tailored CV exited 1 on every one of them.
+ *
+ * Each title is copied from the mode that writes it, never translated here, the
+ * sourcing rule ARCHETYPE_LABELS in analyze-patterns.mjs follows. A title stays
+ * after its mode changes, because reports already on disk carry it.
+ * tests/keyword-match-localized-headings.test.mjs reads every evaluation mode
+ * and fails on a keyword heading that is missing here.
+ */
+export const KEYWORDS_HEADINGS = [
+  'Keywords extracted',             // en, ar, ja — modes/oferta.md, modes/ar/fursah.md, modes/ja/kyujin.md
+  'Udtrukne nøgleord',              // da — modes/da/oferta.md
+  'Extrahierte Keywords',           // de — modes/de/angebot.md
+  'Palabras clave extraídas',       // es — modes/es/oferta.md
+  'Mots-cles extraits',             // fr — modes/fr/offre.md
+  'निकाले गए Keywords',             // hi — modes/hi/naukri.md
+  'Kata kunci terekstraksi',        // id — modes/id/lowongan.md
+  'Parole chiave estratte',         // it — modes/it/annuncio.md
+  '추출한 키워드',                  // ko — modes/ko/gonggo.md
+  'Geextraheerde trefwoorden',      // nl — modes/nl/vacature.md
+  'Wyekstrahowane słowa kluczowe',  // pl — modes/pl/oferta.md
+  'Keywords extraídas',             // pt — modes/pt/oferta.md
+  'Извлечённые ключевые слова',     // ru — modes/ru/oferta.md
+  'Çıkarılan Anahtar Kelimeler',    // tr — modes/tr/is-ilani.md
+  'Витягнуті ключові слова',        // ua — modes/ua/oferta.md
+  'ATS 关键词提取',                 // zh — modes/zh/oferta.md
+  'ATS 關鍵字擷取',                 // zh-TW — modes/zh-TW/oferta.md
+];
+
+/**
+ * Comparison key for a heading title: case, runs of whitespace and Latin or
+ * Cyrillic accents are ignored. Accents matter in practice: modes/fr/offre.md
+ * writes `Mots-cles`, which French spells with an accent that agents restore
+ * (analyze-patterns.mjs meets the same slip as `Archétype`), and Russian is
+ * often typed with `е` for `ё`. Only U+0300–U+036F is removed after NFD;
+ * Devanagari vowel signs and Hangul jamo lie outside that block, so those
+ * titles still compare exactly.
+ *
+ * @param {string} title - Heading text after the `##`.
+ * @returns {string} Comparison key.
+ */
+function headingKey(title) {
+  return normalizeText(title).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+const KEYWORDS_HEADING_KEYS = KEYWORDS_HEADINGS.map(headingKey);
+
+/**
+ * Whether a trimmed line opens the keyword section: a level-2 heading whose
+ * title is one of KEYWORDS_HEADINGS and does not run on into a longer word, so
+ * a suffix such as `(18)` is still accepted, as it always was for the English
+ * title.
+ *
+ * @param {string} line - Trimmed markdown line.
+ * @returns {boolean} True for a keyword-section heading.
+ */
+function isKeywordsHeading(line) {
+  const m = /^##\s+(\S.*)$/.exec(line);
+  if (!m) return false;
+  const title = headingKey(m[1]);
+  return KEYWORDS_HEADING_KEYS.some((key) =>
+    title.startsWith(key) && !/^[\p{L}\p{N}]/u.test(title.slice(key.length)));
+}
+
+/**
+ * Pull keywords out of a report's keyword section, opened by any heading in
+ * KEYWORDS_HEADINGS. Liberal: accepts bulleted, comma-separated, or
+ * one-per-line entries; stops at the next level-2 heading; skips an
+ * empty/placeholder parenthetical line. Returns [] if the block is absent.
  *
  * @param {string} reportText - Full report markdown.
  * @returns {string[]} Extracted keywords in order.
@@ -178,7 +247,7 @@ export function extractKeywords(reportText) {
   let inBlock = false;
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (/^##\s+keywords\s+extracted\b/i.test(line)) { inBlock = true; continue; }
+    if (isKeywordsHeading(line)) { inBlock = true; continue; }
     if (!inBlock) continue;
     if (/^##\s+/.test(line)) break;
     if (!line) continue;
