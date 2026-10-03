@@ -63,13 +63,24 @@ test('present report under an external data root (cwd = code root): no warning',
 }));
 
 test('no-report sentinels do not warn', withRoot((root) => {
-  for (const cell of ['—', 'N/A', '-']) {
+  for (const cell of ['—', 'N/A', '-', '']) {
     addTsv(root, cell);
     const r = run(root);
     assert.equal(r.status, 0, r.out);
     assert.doesNotMatch(r.out, WARN, `sentinel ${cell}`);
     assert.doesNotMatch(r.out, /not on disk/, `sentinel ${cell}`);
   }
+}));
+
+test('a ../../ link that only resolves after leading ../ are stripped still warns (matches verify-pipeline)', withRoot((root) => {
+  // A file sitting at the data root, reached by a link that escapes it. verify-pipeline
+  // resolves from the tracker dir and the data root and flags this link, so merge-tracker must too.
+  writeFileSync(join(root, 'stray.md'), '# not a report\n');
+  addTsv(root, '[1](../../stray.md)');
+  const r = run(root);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, WARN);
+  assert.match(r.out, /\.\.\/\.\.\/stray\.md/);
 }));
 
 test('--dry-run reports the warning and writes nothing', withRoot((root) => {

@@ -1508,11 +1508,16 @@ for (const file of tsvFiles) {
   // later in verify-pipeline. Warn, but still merge: the application record is
   // the user's data and must not be lost or rewritten because a report is
   // missing. Cells with no link (—, N/A, empty) are the documented "no report"
-  // convention and are not flagged. Resolved against REPORTS_ROOT (the data
-  // root), via the same helper the Pass 0.5 dedup uses.
-  if (/\]\([^)]+\)/.test(addition.report || '') && !resolveReportPath(addition.report)) {
-    const linked = (addition.report.match(/\]\(([^)]+)\)/) || [])[1].trim();
-    console.warn(`⚠️  ${file}: ${addition.company} — ${addition.role}: report link "${linked}" does not resolve to a file under ${REPORTS_ROOT} — the row is not rewritten; verify-pipeline will flag it until the report exists`);
+  // convention and are not flagged. Checked against the same two bases
+  // verify-pipeline's Check 3 uses (the tracker's own directory, then the data
+  // root for legacy root-relative links), so a link warned about here is
+  // exactly one verify-pipeline would flag later. resolveReportPath() is NOT
+  // used: it strips leading `../` and so can accept a link verify-pipeline
+  // rejects (e.g. `../../stray.md`).
+  const reportLink = (addition.report || '').match(/\]\(([^)]+)\)/);
+  if (reportLink && !existsSync(join(TRACKER_DIR, reportLink[1])) && !existsSync(join(DATA_ROOT, reportLink[1]))) {
+    const linked = reportLink[1].trim();
+    console.warn(`⚠️  ${file}: ${addition.company} — ${addition.role}: report link "${linked}" does not resolve to a file (checked from ${TRACKER_DIR} and ${DATA_ROOT}) — the row is not rewritten; verify-pipeline will flag it until the report exists`);
     missingReports++;
   }
 
