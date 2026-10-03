@@ -168,3 +168,24 @@ public commit with a stated reason.
 - @E-Lucid-At0r | Ashwin Ravikumar | 2026-09-09 | id:95267475 | src:https://github.com/career-ops-hq/career-ops/discussions/4044 | n:120
 - @7datawin-arch | 2026-09-10 | id:292077187 | src:https://github.com/career-ops-hq/career-ops/discussions/4061 | n:121
 - @colincomstock | Colin Comstock | 2026-09-10 | id:95597475 | src:https://github.com/career-ops-hq/career-ops/discussions/4063 | n:122
+- @ddroid | Ahmad Munir | 2026-09-13 | id:142005659 | src:https://github.com/career-ops-hq/career-ops/discussions/4140 | n:123
+- @ttiimmothy | Timothy | 2026-09-13 | "Thanks for oss" | id:80472344 | src:https://github.com/career-ops-hq/career-ops/discussions/4141 | n:124
+- @wpu3325 | Wilson Pu | 2026-09-13 | "wpu3325 I want hiring processes to be as intentional, unbiased, and fair as possible." | id:22037720 | src:https://github.com/career-ops-hq/career-ops/discussions/4163 | n:125
+- @jcalcan | 2026-09-15 | id:149669723 | src:https://github.com/career-ops-hq/career-ops/discussions/4196 | n:126
+- @manueldejodar | 2026-09-15 | id:329440006 | src:https://github.com/career-ops-hq/career-ops/discussions/4213 | n:127
+- @khushibansal0999-lang | Khushi Bansal | 2026-09-15 | id:291288340 | src:https://github.com/career-ops-hq/career-ops/discussions/4225 | n:128
+- @KaustubhTrivedi | Kaustubh Trivedi | 2026-09-16 | "Career ops simplifies a job search and reduces labor-intensive tasks." | id:41857947 | src:https://github.com/career-ops-hq/career-ops/discussions/4231 | n:129
+- @ktavabi | Kambiz Tavabi | 2026-09-17 | "AI is a tool and I am using it to work smarter." | id:4381290 | src:https://github.com/career-ops-hq/career-ops/discussions/4243 | n:130
+- @xucian | 2026-09-17 | id:5688727 | src:https://github.com/career-ops-hq/career-ops/discussions/4268 | n:131
+- @PrinceGarth | 2026-09-18 | id:279495077 | src:https://github.com/career-ops-hq/career-ops/discussions/4294 | n:132
+- @abirislam910 | Abir Islam | 2026-09-19 | "The hiring process needs to be revolutionized, plain and simple" | id:68037470 | src:https://github.com/career-ops-hq/career-ops/discussions/4327 | n:133
+- @Hoodliife | 2026-09-20 | "Smooth like butta" | id:239451005 | src:https://github.com/career-ops-hq/career-ops/discussions/4344 | n:134
+- @bravely | Jake Demarest-Mays | 2026-09-23 | id:301293 | src:https://github.com/career-ops-hq/career-ops/discussions/4424 | n:135
+- @samayoade10 | 2026-09-24 | "I want to explore the best way to find opportunities that ordinarily I won’t look at exploring." | id:42525188 | src:https://github.com/career-ops-hq/career-ops/discussions/4447 | n:136
+- @JAYPHARMA | 2026-09-27 | id:187297453 | src:https://github.com/career-ops-hq/career-ops/discussions/4512 | n:137
+- @michelle-toftely | 2026-09-27 | "I want hiring to become an evaluation of capability and future impact, rather than a checklist of historical titles." | id:334648826 | src:https://github.com/career-ops-hq/career-ops/discussions/4520 | n:138
+- @juanpabloescamilla-ing | 2026-09-28 | "Si puede servir para encontar un empleo mejor, me parece una interesante practica" | id:321902910 | src:https://github.com/career-ops-hq/career-ops/discussions/4568 | n:139
+- @faizhameed | Faiz Hameed | 2026-09-30 | id:41015883 | src:https://github.com/career-ops-hq/career-ops/discussions/4637 | n:140
+- @sec-js | 2026-09-30 | id:54868859 | src:https://github.com/career-ops-hq/career-ops/discussions/4654 | n:141
+- @nguyentuanngoc21 | 2026-10-01 | "I am trying with it, it looks good" | id:82352476 | src:https://github.com/career-ops-hq/career-ops/discussions/4662 | n:142
+- @Krandheer | Randheer | 2026-10-02 | id:37265128 | src:https://github.com/career-ops-hq/career-ops/discussions/4712 | n:143

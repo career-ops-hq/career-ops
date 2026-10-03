@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles } from "lucide-react";
+import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
 import { usePipeline } from "@/components/pipeline/pipeline-provider";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { dispatch, type ActionCtx, type DoneInfo } from "@/app/actions/registry";
 import { scoreNum } from "@/lib/format";
 import { pendingActOpenerStart } from "@/lib/act-envelope.mjs";
+import { cleanMessages } from "@/lib/assistant-history.mjs";
 import { cn } from "@/lib/cn";
 
 // ── message model: messages are PART arrays so a live worker card can render
@@ -30,6 +31,23 @@ type Msg = { role: "user" | "assistant"; parts: Part[] };
 
 const CONFIG_KEY = "career-ops:config";
 const CHAT_KEY = "career-ops:chat";
+const SIZE_KEY = "career-ops:assistant-size";
+
+// Panel size. The 400×600 default is fine for a question; an onboarding
+// conversation or a long evaluation debrief is not a 400px-wide affair. Three
+// fixed steps rather than free drag: predictable on touch and small screens,
+// one click to cycle, remembered per browser.
+type PanelSize = "compact" | "wide" | "full";
+const SIZE_ORDER: PanelSize[] = ["compact", "wide", "full"];
+const PANEL_CLASS: Record<PanelSize, string> = {
+  compact: "bottom-5 right-5 h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)]",
+  wide: "bottom-5 right-5 h-[85vh] w-[720px] max-w-[calc(100vw-2.5rem)]",
+  full: "inset-4 h-auto w-auto",
+};
+// The composer grows with its content (a pasted CV, a long answer) up to a cap
+// that scales with the panel, instead of staying a one-line box that scrolls.
+const INPUT_MAX_PX: Record<PanelSize, number> = { compact: 128, wide: 240, full: 360 };
+const SIZE_LABEL: Record<PanelSize, string> = { compact: "Wider", wide: "Full screen", full: "Compact" };
 // back-compat shims — the old directives still work, mapped onto the registry
 const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
 const REMEMBER_RE = /<<\s*remember:\s*([^>]+?)\s*>>/gi;
@@ -101,7 +119,7 @@ function describePage(p: string): string {
   const m = p.match(/^\/pipeline\/([^/]+)$/);
   if (m)
     return `The user is viewing the EVALUATION REPORT for application #${m[1]}. If they say "this offer", "apply", "evaluate it", "draft a cover letter", they mean application #${m[1]} — read reports/${m[1]}-*.md or the matching data/applications.md row and act on THAT one.`;
-  if (p === "/analytics") return "Analytics — funnel, score distribution, top companies.";
+  if (p === "/analytics") return "Analytics — pipeline Sankey, funnel, score distribution, top companies.";
   if (p === "/cv") return "CV editor (cv.md).";
   if (p === "/config") return "Config — CLI / engine setup.";
   if (p === "/apply") return "Apply — the form-proxy: the user is reviewing a job application re-rendered in plain language, pre-filled from their CV. You can write/revise answers via setApplyField.";
@@ -110,24 +128,6 @@ function describePage(p: string): string {
 }
 
 // ── persistence migration: old {role,content:string} → parts[] ────────────────
-function migrate(raw: unknown): Msg[] | null {
-  if (!Array.isArray(raw)) return null;
-  return raw
-    .map((m): Msg | null => {
-      if (!m || typeof m !== "object") return null;
-      const role = (m as { role?: string }).role === "user" ? "user" : "assistant";
-      if (Array.isArray((m as { parts?: unknown }).parts)) {
-        // keep only serializable parts (drop transient pending confirms)
-        const parts = ((m as { parts: Part[] }).parts).filter(
-          (p) => p.type !== "confirm" || p.state !== "pending",
-        );
-        return { role, parts };
-      }
-      const content = (m as { content?: string }).content;
-      return { role, parts: [{ type: "text", text: typeof content === "string" ? content : "" }] };
-    })
-    .filter((x): x is Msg => !!x);
-}
 function msgText(m: Msg): string {
   return m.parts.filter((p): p is Extract<Part, { type: "text" }> => p.type === "text").map((p) => p.text).join(" ").trim();
 }
@@ -136,6 +136,16 @@ export function AssistantConsole() {
   const [open, setOpen] = useState(false);
   const [cliId, setCliId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [chats, setChats] = useState<{ id: string; title: string; revision: number }[]>([]);
+  const [chatReady, setChatReady] = useState(false);
+  const [chatPending, setChatPending] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [chatWarnings, setChatWarnings] = useState<{ id: string; error: string }[]>([]);
+  const activeChat = useRef<{ id: string; revision: number; title?: string }>({ id: "", revision: 0 });
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const savedSnapshot = useRef("");
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const router = useRouter();
@@ -159,6 +169,39 @@ export function AssistantConsole() {
   const handledRef = useRef<Set<string>>(new Set());
   const confirmRuns = useRef<Map<string, () => DoneInfo>>(new Map());
 
+  // panel size: restored on mount (client-only, so SSR markup never mismatches),
+  // persisted on change
+  const [size, setSize] = useState<PanelSize>("compact");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SIZE_KEY) as PanelSize | null;
+      if (raw && SIZE_ORDER.includes(raw)) setSize(raw);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function cycleSize() {
+    const next = SIZE_ORDER[(SIZE_ORDER.indexOf(size) + 1) % SIZE_ORDER.length];
+    setSize(next);
+    try {
+      localStorage.setItem(SIZE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // composer auto-grow: height follows content up to the per-size cap; clearing
+  // the input (after send) shrinks it back to one line. Done in an effect, AFTER
+  // React has applied the style prop — an imperative height set inside onChange
+  // is wiped by the very next render.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    if (input) el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_PX[size])}px`;
+  }, [input, size, open]);
+
   // selected CLI from Config (reacts to changes in other tabs)
   useEffect(() => {
     function read() {
@@ -174,27 +217,171 @@ export function AssistantConsole() {
     return () => window.removeEventListener("storage", read);
   }, []);
 
-  // restore + persist conversation
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CHAT_KEY);
-      const m = raw ? migrate(JSON.parse(raw)) : null;
-      if (m && m.length) setMessages(m);
-    } catch {
-      /* ignore */
+  async function chatRequest(url: string, init?: RequestInit) {
+    const response = await fetch(url, init);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Conversation request failed");
+    return data;
+  }
+  async function refreshChats() {
+    const data = await chatRequest("/api/assistant/chats");
+    setChats(data.chats);
+    setChatWarnings(data.errors);
+  }
+  function flushChat(title?: string): Promise<void> {
+    const current = activeChat.current;
+    let snapshot: Msg[];
+    try { snapshot = cleanMessages(messagesRef.current) as Msg[]; }
+    catch (e) {
+      const error = e instanceof Error ? e : new Error("Conversation could not be saved");
+      setSaveError(error.message);
+      return Promise.reject(error);
     }
+    if (!snapshot.some(m => m.role === "user")) return Promise.resolve();
+    const encoded = JSON.stringify(snapshot);
+    const operation = saveQueue.current.catch(() => {}).then(async () => {
+      if (encoded === savedSnapshot.current && title === undefined) return;
+      try {
+        const chat = await chatRequest("/api/assistant/chats", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...current, ...(title ? { title } : {}), messages: snapshot }),
+        });
+        current.revision = chat.revision;
+        current.title = chat.title;
+        savedSnapshot.current = encoded;
+        setSaveError("");
+        await refreshChats();
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : "Conversation was not saved");
+        throw e;
+      }
+    });
+    saveQueue.current = operation;
+    return operation;
+  }
+  const flushRef = useRef(flushChat);
+  flushRef.current = flushChat;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function restore() {
+      try {
+        const data = await chatRequest("/api/assistant/chats");
+        let restored;
+        const legacy = localStorage.getItem(CHAT_KEY);
+        if (legacy) {
+          const migrated = cleanMessages(JSON.parse(legacy));
+          if (migrated.some(m => m.role === "user")) {
+            // A stable migration id makes retrying a lost response safe.
+            const key = `${CHAT_KEY}:migration-id`;
+            const id = localStorage.getItem(key) || crypto.randomUUID();
+            localStorage.setItem(key, id);
+            if (data.chats.some((c: { id: string }) => c.id === id)) {
+              restored = await chatRequest(`/api/assistant/chats?id=${id}`);
+            } else {
+              restored = await chatRequest("/api/assistant/chats", {
+                method: "PUT", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, revision: 0, messages: migrated }),
+              });
+            }
+          }
+          localStorage.removeItem(CHAT_KEY); // only after a successful disk write
+        }
+        if (!restored && data.chats.length) restored = await chatRequest(`/api/assistant/chats?id=${data.chats[0].id}`);
+        if (cancelled) return;
+        activeChat.current = restored ? { id: restored.id, revision: restored.revision, title: restored.title } : { id: crypto.randomUUID(), revision: 0 };
+        const next = restored ? cleanMessages(restored.messages) as Msg[] : [];
+        savedSnapshot.current = JSON.stringify(next);
+        messagesRef.current = next;
+        setMessages(next);
+        await refreshChats();
+        setChatReady(true);
+      } catch (e) { if (!cancelled) setSaveError(e instanceof Error ? e.message : "Could not load conversations"); }
+    }
+    void restore();
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
-    if (!messages.length) return;
+    if (!chatReady || chatPending || busy) return;
+    const timer = setTimeout(() => { void flushRef.current().catch(() => {}); }, 400);
+    return () => clearTimeout(timer);
+  }, [messages, chatReady, chatPending, busy]);
+  useEffect(() => {
+    if (!chatReady || chatPending || busy) return;
+    void flushRef.current().catch(() => {});
+  }, [busy, chatReady, chatPending]);
+  useEffect(() => {
+    if (!chatReady || chatPending) return;
+    const save = () => { if (document.visibilityState === "hidden") void flushRef.current().catch(() => {}); };
+    document.addEventListener("visibilitychange", save);
+    return () => document.removeEventListener("visibilitychange", save);
+  }, [chatReady, chatPending]);
+
+  async function selectChat(id?: string) {
+    if (busy || chatPending || !chatReady) return;
+    setChatPending(true);
     try {
-      const serializable = messages
-        .slice(-30)
-        .map((m) => ({ role: m.role, parts: m.parts.filter((p) => p.type !== "confirm" || p.state !== "pending") }));
-      localStorage.setItem(CHAT_KEY, JSON.stringify(serializable));
-    } catch {
-      /* ignore */
-    }
-  }, [messages]);
+      await flushChat();
+      const chat = id ? await chatRequest(`/api/assistant/chats?id=${id}`) : null;
+      activeChat.current = chat ? { id: chat.id, revision: chat.revision, title: chat.title } : { id: crypto.randomUUID(), revision: 0 };
+      const next = chat ? cleanMessages(chat.messages) as Msg[] : [];
+      savedSnapshot.current = JSON.stringify(next);
+      messagesRef.current = next;
+      setMessages(next);
+      setInput("");
+      confirmRuns.current.clear();
+    } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not switch conversations"); }
+    finally { setChatPending(false); }
+  }
+  function exportChat() {
+    // Export the live draft even if it exceeds the storage limits.
+    const blob = new Blob([JSON.stringify({ ...activeChat.current, messages: messagesRef.current, draft: input }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `conversation-${activeChat.current.id}.json`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function discardAndStartChat() {
+    if (busy || chatPending || !chatReady) return;
+    if (!window.confirm("Discard unsaved changes and start a new conversation? Saved conversations stay on disk. Export this conversation first if you want to keep the unsaved text.")) return;
+    setChatPending(true);
+    try {
+      // Let writes already in flight finish before changing the active id.
+      await saveQueue.current.catch(() => {});
+      activeChat.current = { id: crypto.randomUUID(), revision: 0 };
+      savedSnapshot.current = "";
+      messagesRef.current = [];
+      setMessages([]);
+      setInput("");
+      confirmRuns.current.clear();
+      setSaveError("");
+    } finally { setChatPending(false); }
+  }
+  async function renameChat() {
+    const title = window.prompt("Conversation name", activeChat.current.title || "");
+    if (!title?.trim()) return;
+    setChatPending(true);
+    try { await flushChat(title.trim()); } catch { /* shown by flushChat */ }
+    finally { setChatPending(false); }
+  }
+  async function removeChat() {
+    if (!window.confirm("Delete this conversation?")) return;
+    setChatPending(true);
+    try {
+      await flushChat();
+      const { id, revision } = activeChat.current;
+      await chatRequest(`/api/assistant/chats?id=${id}&revision=${revision}`, { method: "DELETE" });
+      activeChat.current = { id: crypto.randomUUID(), revision: 0 };
+      savedSnapshot.current = "";
+      messagesRef.current = [];
+      setMessages([]);
+      confirmRuns.current.clear();
+      await refreshChats();
+    } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not delete conversation"); }
+    finally { setChatPending(false); }
+  }
 
   useEffect(() => {
     if (open && messages.length === 0) setMessages([{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
@@ -341,14 +528,17 @@ export function AssistantConsole() {
 
   async function send(forced?: string) {
     const text = (forced ?? input).trim();
-    if (!text || busy || !cliId) return;
+    if (!text || busy || !cliId || !chatReady || chatPending) return;
     if (forced === undefined) setInput("");
     const history = messages.filter((m) => msgText(m) && msgText(m) !== GREETING).map((m) => ({ role: m.role, content: msgText(m) }));
-    setMessages((m) => [...m, { role: "user", parts: [{ type: "text", text }] }, { role: "assistant", parts: [{ type: "text", text: "" }] }]);
+    const next: Msg[] = [...messages, { role: "user", parts: [{ type: "text", text }] }, { role: "assistant", parts: [{ type: "text", text: "" }] }];
+    messagesRef.current = next;
+    setMessages(next);
     setBusy(true);
     handledRef.current = new Set();
     const shimsDone = new Set<string>();
     try {
+      await flushChat();
       const res = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -422,16 +612,6 @@ export function AssistantConsole() {
     }
   }
 
-  function resetChat() {
-    setMessages([{ role: "assistant", parts: [{ type: "text", text: GREETING }] }]);
-    confirmRuns.current.clear();
-    try {
-      localStorage.removeItem(CHAT_KEY);
-    } catch {
-      /* ignore */
-    }
-  }
-
   // Other surfaces (e.g. the onboarding banner) can open the assistant and kick
   // off a turn via a window event.
   const sendRef = useRef<(m?: string) => void>(() => {});
@@ -490,14 +670,17 @@ export function AssistantConsole() {
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-50 flex h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className={cn("fixed z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl", PANEL_CLASS[size])}>
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <CoMark size={26} />
             <div className="flex-1">
               <div className="text-sm font-semibold tracking-tight">Assistant</div>
               <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
             </div>
-            <Button variant="ghost" size="icon" onClick={resetChat} className="text-muted" aria-label="New chat" title="New chat">
+            <Button variant="ghost" size="icon" onClick={cycleSize} className="text-muted" aria-label={SIZE_LABEL[size]} title={SIZE_LABEL[size]}>
+              {size === "full" ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => void selectChat()} disabled={busy || chatPending || !chatReady} className="text-muted" aria-label="New chat" title="New chat">
               <RotateCcw className="size-4" />
             </Button>
             <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="text-muted" aria-label="Close assistant">
@@ -505,6 +688,23 @@ export function AssistantConsole() {
             </Button>
           </header>
 
+          <div className="flex gap-2 border-b border-border px-4 py-2">
+            <select aria-label="Conversation history" className="min-w-0 flex-1 bg-surface text-sm" value={chats.some(c => c.id === activeChat.current.id) ? activeChat.current.id : ""} disabled={busy || chatPending || !chatReady} onChange={e => void selectChat(e.target.value || undefined)}>
+              <option value="">New chat</option>
+              {chats.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </select>
+            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void renameChat()}>Rename</button>
+            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Delete</button>
+          </div>
+          {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-600">{warning.error}. Other conversations are still available.</div>)}
+          {saveError && <div role="alert" className="space-y-2 px-4 py-2 text-sm text-amber-600">
+            <p>{saveError}</p>
+            {chatReady ? <div className="flex flex-wrap gap-3">
+              <button className="underline" disabled={busy || chatPending} onClick={() => void flushChat().catch(() => {})}>Retry save</button>
+              <button className="underline" disabled={busy || chatPending} onClick={exportChat}>Export conversation</button>
+              <button className="underline" disabled={busy || chatPending} onClick={() => void discardAndStartChat()}>Discard unsaved changes and start new chat</button>
+            </div> : <button className="underline" onClick={() => window.location.reload()}>Reload</button>}
+          </div>}
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {messages.map((m, i) => {
               const hasVisible = m.parts.some((p) => (p.type === "text" && p.text.trim()) || p.type !== "text");
@@ -563,6 +763,7 @@ export function AssistantConsole() {
           <div className="border-t border-border p-3">
             <div className="flex items-end gap-2">
               <textarea
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -574,11 +775,12 @@ export function AssistantConsole() {
                 placeholder={cliId ? "Ask anything…" : "Configure a CLI first"}
                 rows={1}
                 disabled={!cliId}
-                className="max-h-32 flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
+                style={{ maxHeight: INPUT_MAX_PX[size] }}
+                className="flex-1 resize-none rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 disabled:opacity-50"
               />
               <button
                 onClick={() => send()}
-                disabled={busy || !input.trim() || !cliId}
+                disabled={busy || chatPending || !chatReady || !input.trim() || !cliId}
                 className="rounded-xl bg-brand p-2 text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-40"
                 aria-label="Send"
               >

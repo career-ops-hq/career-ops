@@ -74,7 +74,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { flagValue } from './lib/cli-flags.mjs';
@@ -355,6 +355,65 @@ export function classifyReportsByTrackerState(trackerPath, statesPath) {
   return classification;
 }
 
+/**
+ * Map reportNum -> an existing `jds/` capture named by a tracker row.
+ *
+ * `findCaptureForReport` resolves a capture only by its FILENAME — a report-number
+ * prefix (`276-…`) or the report's company slug. A capture named freely
+ * (`xr-bug-triage-sunnyvale-agency-2026-08-19.md`) is invisible to it even when a
+ * tracker row links it explicitly, so a genuinely archived application read as
+ * unarchived. The tracker's own link is the authoritative statement that THIS
+ * capture belongs to THIS application, so consult it before reporting a miss.
+ *
+ * Only captures that exist on disk are mapped: a dangling link is not an archive.
+ * Paths are resolved against the data root (the parent of `jdsDir`) because the
+ * link is written root-relative (`jds/foo.md`).
+ *
+ * @param {string|null} trackerPath
+ * @param {string} jdsDir
+ * @returns {Map<number, string>} reportNum -> absolute capture path
+ */
+export function mapTrackerCaptureLinks(trackerPath, jdsDir) {
+  const map = new Map();
+  if (!trackerPath || !existsSync(trackerPath)) return map;
+
+  let lines;
+  try {
+    lines = readFileSync(trackerPath, 'utf-8').split('\n');
+  } catch {
+    return map; // unreadable tracker — fail soft, exactly like classifyReportsByTrackerState
+  }
+
+  const dataRoot = dirname(jdsDir);
+  const colmap = resolveColumns(lines);
+
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    const cell = `${row.report ?? ''} ${row.notes ?? ''}`;
+    const match = cell.match(JDS_PATH_RE);
+    if (!match) continue;
+    // The link is written root-relative (`jds/foo.md`), but the captures
+    // directory is overridable with --jds-dir, so the literal `jds/` segment is
+    // not guaranteed to be where they live. Try the root-relative path first,
+    // then the same basename inside the directory actually in use.
+    const abs = [join(dataRoot, match[0]), join(jdsDir, basename(match[0]))]
+      .find((candidate) => existsSync(candidate));
+    if (!abs) continue; // dangling link is not an archive
+    // extractTrackerReportNumbers only recognizes `reports/` links, so a row
+    // whose Report cell points straight at a capture — `[276](jds/foo.md)` —
+    // yields no number at all. Fall back to the row's own id so such a row is
+    // still keyed; without this the capture is found and then dropped.
+    const keys = extractTrackerReportNumbers(row.report, row.notes);
+    if (!keys.length && Number.isInteger(row.num)) keys.push(row.num);
+    for (const num of keys) {
+      if (!map.has(num)) map.set(num, abs);
+    }
+  }
+
+  return map;
+}
+
 // --- Core check ---
 // Pure function over an already-resolved reports/jds directory pair, so the
 // self-test runs entirely on its own fixtures. `trackerPath`/`statesPath` are
@@ -371,8 +430,11 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
   }
 
   const classification = classifyReportsByTrackerState(trackerPath, statesPath);
+  const trackerCaptures = mapTrackerCaptureLinks(trackerPath, jdsDir);
 
-  const files = readdirSync(reportsDir).filter((f) => f.endsWith('.md')).sort();
+  const files = readdirSync(reportsDir)
+    .filter((f) => f.endsWith('.md') && !/^\d+-RESERVED\.md$/.test(f))
+    .sort();
 
   for (const file of files) {
     reportsScanned += 1;
@@ -395,6 +457,10 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
     if (capture !== null) continue;
 
     const reportNum = meta ? meta.reportNum : null;
+    // The tracker may name a capture this report's own filename cannot resolve
+    // (freely-named capture, no number prefix, different slug). That link is an
+    // explicit statement of ownership, so honor it before reporting a miss.
+    if (reportNum !== null && trackerCaptures.has(reportNum)) continue;
     // No tracker joined at all -> legacy hard behavior (going-forward /
     // fresh-install case: nothing to classify against, so full enforcement).
     // Tracker joined -> 'terminal' skips entirely; anything else (explicit
@@ -441,6 +507,80 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
 
 export const hasMissingArchive = (findings) => findings.some((f) => f.type === 'missing-jd-archive');
 
+// States that mean an application was actually SENT. A row in one of these has
+// a real counterparty and a real history, so having no record of what the role
+// asked for is a hole in the candidate's own archive — distinct from `SKIP` /
+// `Evaluated`, which were never applied to and are out of scope here.
+const SUBMITTED_LABELS = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+
+/**
+ * Applications that were SENT but have no archive of any kind.
+ *
+ * `checkJdArchive` iterates `reports/*.md`, so an application recorded as a
+ * tracker row with no report file is invisible to it — never flagged, never
+ * counted, even though it is the case where the record is *most* incomplete.
+ * Agency-sourced roles land here routinely: they arrive as a pasted description
+ * with no posting URL, so no report is ever written.
+ *
+ * Soft by design — these are returned separately and never set a non-zero exit,
+ * matching how `jd-archive-review-due` behaves.
+ *
+ * @returns {Array<{type: string, row: string, company: string, role: string, status: string, detail: string}>}
+ */
+export function findUnarchivedApplications(trackerPath, reportsDir, jdsDir, statesPath = STATES_FILE) {
+  if (!trackerPath || !existsSync(trackerPath)) return [];
+
+  let lines;
+  let states;
+  try {
+    lines = readFileSync(trackerPath, 'utf-8').split('\n');
+    states = loadCanonicalStates(statesPath);
+  } catch {
+    return []; // unreadable tracker or states.yml — fail soft, never crash a health check
+  }
+
+  const trackerCaptures = mapTrackerCaptureLinks(trackerPath, jdsDir);
+  const reportFiles = existsSync(reportsDir)
+    ? readdirSync(reportsDir).filter((f) => f.endsWith('.md'))
+    : [];
+  const reportsByNum = new Map();
+  for (const f of reportFiles) {
+    const meta = parseReportFilename(f);
+    if (meta) reportsByNum.set(meta.reportNum, f);
+  }
+
+  const colmap = resolveColumns(lines);
+  const out = [];
+
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (!row) continue;
+    const label = resolveCanonicalState(row.status, states);
+    if (!label || !SUBMITTED_LABELS.has(label)) continue;
+
+    // Same fallback as mapTrackerCaptureLinks: a Report cell pointing straight
+    // at a capture carries no `reports/` link to extract a number from.
+    const nums = extractTrackerReportNumbers(row.report, row.notes);
+    const keys = nums.length ? nums : (Number.isInteger(row.num) ? [row.num] : []);
+    // Any linked capture, or any report file that exists, counts as a record.
+    const hasCapture = keys.some((n) => trackerCaptures.has(n));
+    const hasReport = keys.some((n) => reportsByNum.has(n));
+    if (hasCapture || hasReport) continue;
+
+    out.push({
+      type: 'application-no-archive',
+      row: row.num ?? '?',
+      company: row.company ?? '?',
+      role: row.role ?? '?',
+      status: label,
+      detail: 'application was sent but has no report file and no jds/ capture — '
+        + 'nothing records what the role asked for',
+    });
+  }
+
+  return out;
+}
+
 // --- Summary mode ---
 function printSummary(result) {
   const { reportsScanned, findings, warnings } = result;
@@ -473,6 +613,24 @@ function printSummary(result) {
     }
     console.log('');
   }
+}
+
+function printUnarchivedApplications(rows) {
+  if (!rows.length) return;
+  console.log('  Applications sent with no archive at all (soft — never blocks):');
+  console.log('  ' + 'Row'.padEnd(8) + 'Status'.padEnd(12) + 'Company'.padEnd(28) + 'Role');
+  console.log('  ' + '-'.repeat(90));
+  for (const r of rows) {
+    console.log('  '
+      + String(r.row).padEnd(8)
+      + r.status.padEnd(12)
+      + String(r.company).substring(0, 26).padEnd(28)
+      + String(r.role).substring(0, 44));
+  }
+  console.log('\n  These were applied to, so the posting had real consequences, but nothing');
+  console.log('  on disk records what the role asked for. Capture one with:');
+  console.log('    node archive-posting.mjs --report=<N>   (live posting)');
+  console.log('  or save the original description to jds/ and link it from the tracker row.\n');
 }
 
 // --- Self-test (fixtures only — never reads the real reports/ for findings) ---
@@ -771,6 +929,57 @@ function runSelfTest() {
     check(!hasMissingArchive(trackerResult.findings),
       'a tracker-joined run touching only terminal/live/unresolved rows never trips the hard-blocking hasMissingArchive/exit-1 path');
 
+    // --- Tracker-named jds/ captures + un-archived applications ---
+    // findCaptureForReport resolves a capture only by FILENAME (number prefix or
+    // company slug). A freely-named capture the tracker links explicitly was
+    // invisible to it, so an archived application read as unarchived.
+    const linkReportsDir = join(tmpDir, 'reports-capturelink');
+    const linkJdsDir = join(tmpDir, 'jds-capturelink');
+    mkdirSync(linkReportsDir, { recursive: true });
+    mkdirSync(linkJdsDir, { recursive: true });
+    // 201's capture is named nothing like the report: no number prefix, different slug.
+    writeFileSync(join(linkReportsDir, '201-cyberdyne-2026-02-01.md'), '# Evaluation: Cyberdyne — Analyst\n\n**URL:** https://example.com\n');
+    writeFileSync(join(linkJdsDir, 'freely-named-agency-posting-2026-02-01.md'), 'Posted: 2026-02-01\n\n' + 'A'.repeat(200));
+    // 202's linked capture does not exist -> dangling link, must NOT be credited.
+    writeFileSync(join(linkReportsDir, '202-tyrell-2026-02-02.md'), '# Evaluation: Tyrell — Analyst\n\n**URL:** https://example.com\n');
+
+    const linkTracker = join(tmpDir, 'applications-capturelink.md');
+    writeFileSync(linkTracker, [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|',
+      '| 201 | 2026-02-01 | Cyberdyne | Analyst | 4.0/5 | Applied | ✅ | [201](reports/201-cyberdyne-2026-02-01.md) | see jds/freely-named-agency-posting-2026-02-01.md |',
+      '| 202 | 2026-02-02 | Tyrell | Analyst | 4.0/5 | Applied | ✅ | [202](reports/202-tyrell-2026-02-02.md) | see jds/does-not-exist.md |',
+      // 203: Report cell points STRAIGHT at a capture, so there is no reports/
+      // link to extract a number from — the row's own id is the only key.
+      '| 203 | 2026-02-03 | Wonka | Analyst | N/A | Interview | ❌ | [203](jds/freely-named-agency-posting-2026-02-01.md) | |',
+      // 204: applied, nothing on disk at all -> the un-archived application case.
+      '| 204 | 2026-02-04 | Soylent | Analyst | N/A | Applied | ❌ | — | |',
+      // 205: never applied to -> out of scope, must not be reported.
+      '| 205 | 2026-02-05 | Initrode | Analyst | 2.0/5 | SKIP | ❌ | — | |',
+    ].join('\n'));
+
+    const linkMap = mapTrackerCaptureLinks(linkTracker, linkJdsDir);
+    check(linkMap.has(201), 'mapTrackerCaptureLinks resolves a freely-named capture via the tracker row that links it');
+    check(!linkMap.has(202), 'mapTrackerCaptureLinks refuses a dangling jds/ link — a missing file is not an archive');
+    check(linkMap.has(203), "mapTrackerCaptureLinks keys by the row's own id when the Report cell links a capture instead of a report");
+
+    const linkResult = checkJdArchive(linkReportsDir, linkJdsDir, { trackerPath: linkTracker });
+    const linkTypes = new Map(linkResult.findings.map((f) => [f.file, f.type]));
+    check(!linkTypes.has('201-cyberdyne-2026-02-01.md'),
+      'a report whose tracker row names an existing jds/ capture is NOT flagged, even though the filename cannot resolve it');
+    check(linkTypes.get('202-tyrell-2026-02-02.md') === 'jd-archive-review-due',
+      'a report whose tracker row names a MISSING capture is still flagged — the link is not taken on faith');
+
+    const unarchived = findUnarchivedApplications(linkTracker, linkReportsDir, linkJdsDir);
+    const unarchivedRows = new Set(unarchived.map((r) => String(r.row)));
+    check(unarchivedRows.has('204'), 'findUnarchivedApplications reports an applied-to row with no report and no capture');
+    check(!unarchivedRows.has('203'), 'findUnarchivedApplications does not report a row whose Report cell links an existing capture');
+    check(!unarchivedRows.has('201'), 'findUnarchivedApplications does not report a row that has a report file');
+    check(!unarchivedRows.has('205'), 'findUnarchivedApplications ignores never-applied states (SKIP) — only sent applications count');
+    check(unarchived.every((r) => r.type === 'application-no-archive'), 'every un-archived-application row carries the application-no-archive type');
+    check(findUnarchivedApplications(null, linkReportsDir, linkJdsDir).length === 0,
+      'findUnarchivedApplications fails soft to an empty list when no tracker is available');
+
     // Going-forward / no-tracker enforcement is unaffected: the SAME 4
     // fixtures, with the tracker join disabled, are the pre-existing hard
     // blocker — the retroactive softening only ever activates when there IS
@@ -814,15 +1023,18 @@ if (isMainModule(import.meta.url)) {
   const trackerPath = noTrackerMode ? null : (trackerArg || DEFAULT_TRACKER_PATH);
 
   const result = checkJdArchive(reportsDir, jdsDir, { trackerPath });
+  const unarchivedApplications = findUnarchivedApplications(trackerPath, reportsDir, jdsDir);
 
   if (summaryMode) {
     printSummary(result);
+    printUnarchivedApplications(unarchivedApplications);
   } else {
     console.log(JSON.stringify({
       generatedAt: new Date().toISOString(),
       reportsScanned: result.reportsScanned,
       findings: result.findings,
       warnings: result.warnings,
+      unarchivedApplications,
     }, null, 2));
   }
 

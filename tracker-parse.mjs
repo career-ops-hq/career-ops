@@ -306,7 +306,37 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
   };
   if (colmap.location != null) row.location = at('location');
   if (colmap.via != null) row.via = at('via');
+  if (colmap.url != null) row.url = at('url');
   return row;
+}
+
+// Matches the req/job-number labels actually seen in this tracker's free-text
+// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
+// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
+// `Ref R2857957`. The label is required so we don't grab an unrelated number
+// (a salary figure, a date fragment) — only text explicitly tagged as a
+// req/job/posting/reference id counts.
+export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+
+/**
+ * Extract a req/job/posting number from a tracker Notes cell, if present.
+ *
+ * Tier-3 duplicate detection (company + fuzzy role match) has no awareness of
+ * req numbers on its own, which lets two distinct postings at the same company
+ * with similarly-worded titles collapse into one row (#1524 — e.g. two TD Bank
+ * L&D postings distinguished only by `R_1494379` vs `R_1488728`). This helper
+ * pulls out that number so the caller can treat a confirmed mismatch as proof
+ * the rows are NOT duplicates, without touching cases where no number is
+ * present on either side. Shared by merge-tracker.mjs (tracker merge) and
+ * scan.mjs (company+role scan dedupe).
+ *
+ * @param {string} notes - Raw Notes cell from a tracker row or TSV addition.
+ * @returns {string|null} Uppercased req/job number, or null when none is found.
+ */
+export function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(REQ_NUMBER_RE);
+  return m ? m[1].toUpperCase() : null;
 }
 
 /**
@@ -395,46 +425,78 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
-export function extractTrackerReportNumbers(reportCell, notesCell = '') {
+function reportNumberFromTarget(rawTarget) {
+  const target = String(rawTarget).trim().replace(/^<|>$/g, '');
+  if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
+  const pathname = target.split(/[?#]/, 1)[0];
+  const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
+    || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  return Number.isInteger(num) && num > 0 ? num : null;
+}
+
+/**
+ * Report links a tracker row names, with the two numbers kept apart: the one
+ * the link *points at* and the one the link *says*.
+ *
+ * `extractTrackerReportNumbers` below flattens both into one list on purpose —
+ * for a membership test ("does this row reference report N?") a mismatched link
+ * genuinely references both numbers, and collapsing them would hide the
+ * collision that `find.mjs` and `set-status.mjs` exist to surface.
+ *
+ * A caller that needs report *identity* rather than membership needs the
+ * opposite: `[5](../reports/006-globex-...md)` names one report, and it is the
+ * target, because the target is the file whose contents the row will be joined
+ * against. Treating both numbers as linked reports let salary-gap.mjs attach
+ * two different companies' advertised figures to one row (#4368 review).
+ *
+ * The label is returned alongside so the disagreement can be reported instead
+ * of silently discarded — a wrong label is a tracker typo worth fixing, and
+ * only the caller knows whether it matters.
+ *
+ * @param {string} reportCell - Report cell, markdown link or bare path.
+ * @param {string} [notesCell] - Free-form Notes cell, used when Report is empty.
+ * @returns {{target: number, label: number|null}[]} One entry per resolvable
+ *   link, in cell order. `label` is null when absent or non-numeric.
+ */
+export function extractTrackerReportLinks(reportCell, notesCell = '') {
   const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return scanNotesForReportNumbers(notesCell);
+  if (!value || value === '-' || value === '—') return scanNotesForReportLinks(notesCell);
 
-  const numbers = new Set();
-  const numberFromTarget = (rawTarget) => {
-    const target = String(rawTarget).trim().replace(/^<|>$/g, '');
-    if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
-    const pathname = target.split(/[?#]/, 1)[0];
-    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
-      || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
-    if (!match) return null;
-    const num = parseInt(match[1], 10);
-    return Number.isInteger(num) && num > 0 ? num : null;
-  };
-
+  const links = [];
   const markdownLinks = parseMarkdownLinks(value);
   for (const link of markdownLinks) {
-    const pathNum = numberFromTarget(link.target);
-    if (pathNum == null) continue;
-    const label = link.label.trim();
-    if (/^\d+$/.test(label)) {
-      const labelNum = parseInt(label, 10);
-      if (labelNum > 0) numbers.add(labelNum);
-    }
-    numbers.add(pathNum);
+    const target = reportNumberFromTarget(link.target);
+    if (target == null) continue;
+    const rawLabel = link.label.trim();
+    const labelNum = /^\d+$/.test(rawLabel) ? parseInt(rawLabel, 10) : null;
+    links.push({ target, label: labelNum != null && labelNum > 0 ? labelNum : null });
   }
 
   if (markdownLinks.length === 0) {
-    const pathNum = numberFromTarget(value);
-    if (pathNum != null) numbers.add(pathNum);
+    const target = reportNumberFromTarget(value);
+    if (target != null) links.push({ target, label: null });
   }
   // A layout with a Report column that simply has no link yet still falls back
   // to Notes, so a customized tracker behaves the same whether its Report cell
   // is absent or empty.
-  return numbers.size > 0 ? [...numbers] : scanNotesForReportNumbers(notesCell);
+  return links.length > 0 ? links : scanNotesForReportLinks(notesCell);
+}
+
+export function extractTrackerReportNumbers(reportCell, notesCell = '') {
+  const numbers = new Set();
+  for (const { target, label } of extractTrackerReportLinks(reportCell, notesCell)) {
+    // Label first, then target: a mismatched link reports the number it claims
+    // before the number it points at, which is the order callers already saw.
+    if (label != null) numbers.add(label);
+    numbers.add(target);
+  }
+  return [...numbers];
 }
 
 /**
- * Report numbers named by a report link inside a free-form Notes cell.
+ * Report links inside a free-form Notes cell.
  *
  * Customized trackers with no dedicated Report column embed the link in Notes
  * prose instead — the layout merge-tracker.mjs learned to read in 8668ac1, via
@@ -451,12 +513,14 @@ export function extractTrackerReportNumbers(reportCell, notesCell = '') {
  * claiming to be a report number.
  *
  * @param {string} [notesCell] - Free-form Notes cell.
- * @returns {number[]} Report numbers, or [] when the cell names none.
+ * @returns {{target: number, label: null}[]} One entry per report link found.
+ *   `label` is always null: a number in prose is not a link label.
  */
-function scanNotesForReportNumbers(notesCell) {
+function scanNotesForReportLinks(notesCell) {
   const notes = String(notesCell ?? '').trim();
   if (!notes) return [];
-  const numbers = new Set();
+  const seen = new Set();
+  const links = [];
   for (const link of parseMarkdownLinks(notes)) {
     const target = String(link.target).trim().replace(/^<|>$/g, '');
     // Absolute URLs are never a local report path, and a posting URL is the
@@ -467,9 +531,11 @@ function scanNotesForReportNumbers(notesCell) {
     const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i);
     if (!match) continue;
     const num = parseInt(match[1], 10);
-    if (Number.isInteger(num) && num > 0) numbers.add(num);
+    if (!Number.isInteger(num) || num <= 0 || seen.has(num)) continue;
+    seen.add(num);
+    links.push({ target: num, label: null });
   }
-  return [...numbers];
+  return links;
 }
 
 /**
