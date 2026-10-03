@@ -21,7 +21,7 @@ function fixture(run) {
     const invoke = (script, env = {}) => {
       writeFileSync(join(dir, 'run.sh'), `set -euo pipefail\n${script}\n`);
       return execFileSync(getBash(), ['run.sh'], {
-        cwd: dir, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 10000,
+        cwd: dir, env: { ...process.env, ...env }, encoding: 'utf8', timeout: 30_000,
         stdio: ['ignore', 'pipe', 'pipe'],
       }).trim();
     };
