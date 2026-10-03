@@ -5,7 +5,7 @@ import { config } from 'dotenv';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as yaml from 'js-yaml';
 
@@ -27,12 +27,12 @@ if (process.env.CAREER_OPS_GEMINI_GATE_CHILD !== '1') {
   test('a Gemini key loaded from .env does not trigger a live request without opt-in', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'career-ops-gemini-gate-'));
     const fetchMarker = join(tempDir, 'fetch-called');
-    const preloadPath = join(tempDir, 'block-network.mjs');
+    const preloadPath = join(tempDir, 'block-network.cjs');
 
     try {
       writeFileSync(join(tempDir, '.env'), 'GEMINI_API_KEY=synthetic-test-key\n');
       writeFileSync(preloadPath, `
-        import { writeFileSync } from 'node:fs';
+        const { writeFileSync } = require('node:fs');
         globalThis.fetch = (...args) => {
           writeFileSync(process.env.CAREER_OPS_GEMINI_FETCH_MARKER, String(args[0]));
           throw new Error('Unexpected network request in Gemini opt-in regression test');
@@ -44,7 +44,7 @@ if (process.env.CAREER_OPS_GEMINI_GATE_CHILD !== '1') {
       delete env.CAREER_OPS_LIVE_GEMINI;
       delete env.NODE_TEST_CONTEXT;
 
-      const result = spawnSync(process.execPath, ['--import', pathToFileURL(preloadPath).href, '--test', '--test-reporter=tap', fileURLToPath(import.meta.url)], {
+      const result = spawnSync(process.execPath, ['--require', preloadPath, fileURLToPath(import.meta.url)], {
         cwd: tempDir,
         encoding: 'utf8',
         env,
@@ -52,7 +52,7 @@ if (process.env.CAREER_OPS_GEMINI_GATE_CHILD !== '1') {
       });
 
       assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-      assert.match(result.stdout, /Gemini AI Integration Smoke Test.*SKIP/s);
+      assert.match(result.stdout, /Gemini AI Integration Smoke Test.*skip/is);
       assert.equal(existsSync(fetchMarker), false, 'the Gemini client must not make a request without explicit opt-in');
     } finally {
       rmSync(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
