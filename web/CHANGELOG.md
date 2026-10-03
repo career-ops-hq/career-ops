@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.13.0...web-v0.14.0) (2026-10-03)
+
+
+### Features
+
+* **cv-templates:** add atsLint, with the ATS rules as data in templates/ats-rules.yml ([#3900](https://github.com/career-ops-hq/career-ops/issues/3900)) ([6f1a74e](https://github.com/career-ops-hq/career-ops/commit/6f1a74e8e37119f01a68a397187025e7dacc804a))
+* **i18n:** support language.modes_dir as a list of declared markets ([#3798](https://github.com/career-ops-hq/career-ops/issues/3798)) ([d31a138](https://github.com/career-ops-hq/career-ops/commit/d31a138e8b3dc1971a43e15931623112c8a83246))
+* **web:** add local scheduled scans ([#2628](https://github.com/career-ops-hq/career-ops/issues/2628)) ([85b67f5](https://github.com/career-ops-hq/career-ops/commit/85b67f527c14ebd08c8aa00bedeff28182499978))
+* **web:** add route-aware loading feedback ([#4338](https://github.com/career-ops-hq/career-ops/issues/4338)) ([e049608](https://github.com/career-ops-hq/career-ops/commit/e04960897029429c2dd23cc0a3bd3a8996d26ef1))
+* **web:** preserve assistant conversations and earlier context ([#4495](https://github.com/career-ops-hq/career-ops/issues/4495)) ([f9e9139](https://github.com/career-ops-hq/career-ops/commit/f9e91394657a229b351df7ff451f6b6d59b08967))
+
+
+### Bug Fixes
+
+* **funnel:** retain replies and historical stages across surfaces ([#4374](https://github.com/career-ops-hq/career-ops/issues/4374)) ([ead56e8](https://github.com/career-ops-hq/career-ops/commit/ead56e8c158ea8353636f85600062b0b1102cdb4))
+* **pipeline:** break sort ties on the row number, so newest-first reorders a date ([#4333](https://github.com/career-ops-hq/career-ops/issues/4333)) ([c4f2c3f](https://github.com/career-ops-hq/career-ops/commit/c4f2c3fcbd22979143a0e6115bd2718a820ac41b))
+* **web:** fall back from a stale saved cliId on every AI route, not just Run ([#4638](https://github.com/career-ops-hq/career-ops/issues/4638)) ([431f593](https://github.com/career-ops-hq/career-ops/commit/431f5933bcb14d178cdff47cc6faa2bcc600407b))
+* **web:** validate profile updates before writing ([#4500](https://github.com/career-ops-hq/career-ops/issues/4500)) ([b208464](https://github.com/career-ops-hq/career-ops/commit/b2084646acdc2bc34ad48ed8b7292d48c3aa3561))
+
 ## [0.13.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.12.0...web-v0.13.0) (2026-10-01)
 
 
