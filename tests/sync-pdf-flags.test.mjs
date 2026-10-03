@@ -440,3 +440,77 @@ try {
     rmSync(outOfBounds, { recursive: true, force: true });
   }
 }
+
+// ── #3893: a deleted PDF leaves a stale manifest row that re-asserts ✅ ───────
+//
+// sync-pdf-flags.mjs:64-68 keeps only the report number when it parses
+// data/pdf-index.tsv and throws the pdf path away, so from that point it cannot
+// tell a live artifact from a deleted one. The decision at :108 degenerates to
+// "is this report number mentioned in the manifest", and the only write is a
+// monotonic ✅ at :110-118.
+//
+// Nothing prunes the manifest either. generate-pdf.mjs:1240-1244 evicts a row
+// only on RE-generation, so `rm output/*.pdf` leaves every row standing. That is
+// why neither half is fixable alone: correcting the tracker cell by hand is
+// reverted on the next run by the row that outlived its file.
+//
+// Scope, per the maintainer in the issue thread: the kind-agnostic half only.
+// Writing ❌ when no CV-kind row exists is unsayable until #3887 gives the
+// manifest a kind-aware key, and is deliberately a follow-on.
+console.log('\nsync-pdf-flags.mjs — a deleted PDF leaves a stale manifest row (#3893)');
+
+{
+  const work = mkdtempSync(join(tmpdir(), 'cops-sync-stale-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    mkdirSync(join(work, 'output'), { recursive: true });
+
+    // Report 1's PDF is on disk. Report 2's is not: the file was deleted and
+    // the operator corrected the tracker cell to ❌ by hand.
+    writeFileSync(join(work, 'output', '1-acme-cv.pdf'), '%PDF-1.4\n');
+
+    writeFileSync(tracker, [
+      '# Applications Tracker',
+      '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|',
+      '| 1 | 2026-01-01 | Acme | ML Eng | 4.5/5 | Evaluated | ❌ | [1](reports/1-acme.md) | |',
+      '| 2 | 2026-01-02 | Globex | Data Eng | 4.0/5 | Evaluated | ❌ | [2](reports/2-globex.md) | |',
+      '',
+    ].join('\n'));
+
+    writeFileSync(pdfIndex, [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      '2\toutput/2-globex-cv.pdf\toutput/2-globex.html\ta4\t2026-01-02',
+      '',
+    ].join('\n'));
+
+    execFileSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: work,
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+
+    const rows = readFileSync(tracker, 'utf-8').split('\n');
+    const rowOf = (n) => rows.find((l) => l.startsWith(`| ${n} |`)) || '';
+
+    // Positive control. Without it a script that simply stopped writing would
+    // satisfy the assertion below while doing nothing.
+    if (rowOf(1).includes('✅')) {
+      pass('a manifest row whose PDF is on disk still flips the tracker cell to ✅');
+    } else {
+      fail(`a live PDF did not flip its tracker cell: ${rowOf(1)}`);
+    }
+
+    if (rowOf(2).includes('❌')) {
+      pass('a manifest row whose PDF is gone leaves the corrected ❌ alone');
+    } else {
+      fail(`the corrected ❌ was reverted from a manifest row whose PDF is gone: ${rowOf(2)}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
