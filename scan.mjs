@@ -2748,17 +2748,40 @@ export function markOfferSeen(offer, seenUrls, { includeIdentity = true } = {}) 
  * Keep the first live offer for each strong ATS identity and add its token to
  * the run's seen set. Call only with offers accepted by liveness verification.
  */
-export function retainVerifiedListingIdentities(offers, seenUrls) {
-  const retained = new Set();
-  return offers.filter((offer) => {
+export function retainVerifiedListingIdentities(offers, seenUrls, verificationStatusByOffer = new Map()) {
+  const selectedByIdentity = new Map();
+  const withoutIdentity = [];
+  for (const offer of offers) {
     const token = listingIdentityToken(offer);
-    if (!token) return true;
-    if (retained.has(token)) return false;
-    retained.add(token);
+    if (!token) {
+      withoutIdentity.push(offer);
+      continue;
+    }
+    const status = verificationStatusByOffer.get(offer);
+    const rank = status === 'active' ? 1 : 0;
+    const current = selectedByIdentity.get(token);
+    if (!current || rank > current.rank) selectedByIdentity.set(token, { offer, rank });
+  }
+  const retained = [...selectedByIdentity.values()].map(({ offer }) => offer);
+  const retainedSet = new Set(retained);
+  // Keep input order for unrelated offers while replacing an uncertain alias
+  // with an active one for the same identity, regardless of which was fetched
+  // first.
+  const ordered = offers.filter((offer) => !listingIdentityToken(offer) || retainedSet.has(offer));
+  const uniqueOrdered = [];
+  const seenObjects = new Set();
+  for (const offer of ordered) {
+    if (seenObjects.has(offer)) continue;
+    seenObjects.add(offer);
+    uniqueOrdered.push(offer);
+  }
+  for (const offer of [...withoutIdentity, ...retained]) {
+    const token = listingIdentityToken(offer);
+    if (!token) continue;
     seenUrls.add(token);
     offer.listingKey = token.slice('listing:'.length);
-    return true;
-  });
+  }
+  return uniqueOrdered;
 }
 
 /**
@@ -3312,6 +3335,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
   //               opt-in stricter filter; keeping these defeats the purpose.
   //   invalid   → up-front URL guard rejections (malformed / non-http / private)
   const verified = [];
+  const verificationStatusByOffer = new Map();
   const expired = [];
   const dropped = [];
   const invalid = [];
@@ -3346,7 +3370,9 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
             // 'uncertain' (timeout/DNS/5xx) must not commit an unverified URL —
             // fall through to expired (the original 404/410 is a real closure).
             if (recheck.result === 'active') {
-              migrated.push({ ...offer, url: newUrl, previousUrl: offer.url });
+              const migratedOffer = { ...offer, url: newUrl, previousUrl: offer.url };
+              migrated.push(migratedOffer);
+              verificationStatusByOffer.set(migratedOffer, 'active');
               console.log(`  🔄 migrated  ${offer.company} | ${offer.title} → ${newUrl}`);
               continue;
             }
@@ -3369,6 +3395,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
       } else {
         // 'active' or 'uncertain' due to navigation_error (transient — retry next scan)
         verified.push(offer);
+        verificationStatusByOffer.set(offer, result);
         const icon = result === 'active' ? '✅' : '⚠️';
         console.log(`  ${icon} ${result.padEnd(9)} ${offer.company} | ${offer.title}`);
       }
@@ -3381,7 +3408,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
     await browser.close();
   }
 
-  return { verified, expired, dropped, invalid, migrated };
+  return { verified, expired, dropped, invalid, migrated, verificationStatusByOffer };
 }
 
 // Stable codes from liveness-browser's up-front URL guard. Routing dispatches
@@ -3670,6 +3697,7 @@ async function main() {
   let totalFilteredVisa = 0;
   let totalDupes = 0;
   const newOffers = [];
+  const verifyDedupKeys = new Map();
   const errors = [...resolveErrors];
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
@@ -3757,7 +3785,7 @@ async function main() {
 
       for (const job of jobs) {
         const listingToken = listingIdentityToken(job);
-        if (listingToken) job.listingKey = listingToken.slice('listing:'.length);
+        job.listingKey = listingToken ? listingToken.slice('listing:'.length) : '';
         // Trust enrichment — runs before filters, never drops
         const trustResult = trustValidator(job);
         job.trustScore = trustResult.score;
@@ -3863,7 +3891,7 @@ async function main() {
         // URL now for same-run URL dedup, but wait to pin its cross-URL identity
         // until liveness verification accepts an offer.
         markOfferSeen(job, seenUrls, { includeIdentity: !verify });
-        if (key !== null) {
+        if (key !== null && !verify) {
           seenCompanyRoles.add(key);
           recordRequisition(seenCompanyRoleRequisitions, key, requisition);
           if (key !== baseKey) recordRequisition(locatedRequisitionsByBase, baseKey, requisition);
@@ -3872,12 +3900,14 @@ async function main() {
         // rediscovery fallback. A null domain (no careers_url) marks the offer
         // as broad-discovery — ineligible for the fallback, per the issue scope.
         const careersUrlDomain = extractCareersUrlDomain(company.careers_url);
-        newOffers.push({
+        const offerForVerification = {
           ...job,
           source: sourceName,
           tracked: Boolean(careersUrlDomain),
           careersUrlDomain,
-        });
+        };
+        newOffers.push(offerForVerification);
+        if (verify) verifyDedupKeys.set(offerForVerification, { key, baseKey, requisition });
       }
     } catch (err) {
       errors.push({
@@ -3908,14 +3938,40 @@ async function main() {
     // Migrated offers re-enter the pipeline at their newly discovered URL.
     if (migratedOffers.length > 0) {
       verifiedOffers = [...verifiedOffers, ...migratedOffers];
+      for (const migrated of migratedOffers) {
+        const previous = newOffers.find((offer) => offer.url === migrated.previousUrl);
+        const priorKeys = previous && verifyDedupKeys.get(previous);
+        if (priorKeys) verifyDedupKeys.set(migrated, { ...priorKeys, requisition: requisitionIdsForDedup({ url: migrated.url, text: migrated.title }) });
+      }
     }
     // Several URL aliases can reach verification before liveness is known.
     // Keep the first accepted offer for each strong identity, and only then
     // publish the identity token to this run's dedup set. Rejected aliases do
     // not hide a later live URL.
     const countBeforeIdentityDedup = verifiedOffers.length;
-    verifiedOffers = retainVerifiedListingIdentities(verifiedOffers, seenUrls);
+    verifiedOffers = retainVerifiedListingIdentities(verifiedOffers, seenUrls, result.verificationStatusByOffer);
     totalDupes += countBeforeIdentityDedup - verifiedOffers.length;
+    const acceptedOffers = [];
+    for (const offer of verifiedOffers) {
+      const keys = verifyDedupKeys.get(offer);
+      if (keys?.key !== null && keys?.key !== undefined && matchesSeenCompanyRole({
+        key: keys.key,
+        baseKey: keys.baseKey,
+        seen: seenCompanyRoles,
+        requisitions: seenCompanyRoleRequisitions,
+        locatedRequisitions: locatedRequisitionsByBase,
+      }, keys.requisition)) {
+        totalDupes++;
+        continue;
+      }
+      if (keys?.key !== null && keys?.key !== undefined) {
+        seenCompanyRoles.add(keys.key);
+        recordRequisition(seenCompanyRoleRequisitions, keys.key, keys.requisition);
+        if (keys.key !== keys.baseKey) recordRequisition(locatedRequisitionsByBase, keys.baseKey, keys.requisition);
+      }
+      acceptedOffers.push(offer);
+    }
+    verifiedOffers = acceptedOffers;
   }
 
   // 5.7. Cross-listing check (#1597): fingerprint each new offer's JD body and

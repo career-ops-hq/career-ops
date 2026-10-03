@@ -106,8 +106,16 @@ try {
       const live = retainVerifiedListingIdentities([alias], verifySeen);
       if (live.length === 1 && verifySeen.has(`listing:${expectedKey}`)) {
         pass('verification retains identity only after a live alias is accepted');
-      } else fail('a verified live alias did not retain its identity token');
+  } else fail('a verified live alias did not retain its identity token');
     } else fail('a rejected URL claimed the identity before verification');
+
+    const uncertainAlias = { ...first, url: 'https://jobs.example.test/uncertain', listingKey: '' };
+    const activeAlias = { ...first, url: 'https://jobs.example.test/active', listingKey: '' };
+    const verificationStates = new Map([[uncertainAlias, 'uncertain'], [activeAlias, 'active']]);
+    const verified = retainVerifiedListingIdentities([uncertainAlias, activeAlias], new Set(), verificationStates);
+    if (verified.length === 1 && verified[0] === activeAlias) {
+      pass('an active alias wins over a transiently uncertain alias regardless of fetch order');
+    } else fail('a transiently uncertain alias took precedence over an active alias');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
