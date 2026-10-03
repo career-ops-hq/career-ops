@@ -14,7 +14,7 @@
  * faithful install.
  */
 
-import { mkdtempSync, writeFileSync, copyFileSync, existsSync, realpathSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync, copyFileSync, existsSync, realpathSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -173,3 +173,37 @@ function runUpdater(cwd, args, env) {
   }
 }
 
+// ── 5. CLI: a dirty main checkout is refused, untracked files are not ──
+{
+  const fx = makeFixture();
+  try {
+    // An untracked user-layer file sits beside the tracked edit throughout;
+    // the last case below pins that it is not what trips the refusal.
+    writeFileSync(join(fx.main, 'cv.md'), '# CV\n');
+    const before = 'edited locally\n';
+    writeFileSync(join(fx.main, 'VERSION'), before);
+
+    for (const cmd of [['apply', '--confirm'], ['rollback']]) {
+      const res = runUpdater(fx.wt, cmd, fx.env);
+      const branches = fx.g(fx.main, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/backup-pre-update-*');
+      const version = readFileSync(join(fx.main, 'VERSION'), 'utf-8');
+      if (res.status !== 0 && res.stderr.includes('uncommitted changes to tracked files') && branches === '' && version === before) {
+        pass(`${cmd[0]} from a worktree refuses a main checkout with tracked edits and touches nothing`);
+      } else {
+        fail(`${cmd[0]} with a dirty main checkout exited ${res.status}, backups ${JSON.stringify(branches)}, stderr ${JSON.stringify(res.stderr.slice(0, 300))}`);
+      }
+    }
+
+    // Only the tracked edit is the trigger: restore it, keep the untracked
+    // file, and the guard lets apply through to its own confirmation gate.
+    fx.g(fx.main, 'checkout', '--', 'VERSION');
+    const res = runUpdater(fx.wt, ['apply'], fx.env);
+    if (res.status !== 0 && res.stderr.includes('explicit confirmation') && !res.stderr.includes('uncommitted changes')) {
+      pass('untracked files in the main checkout do not trip the dirty-checkout refusal');
+    } else {
+      fail(`apply with only untracked files exited ${res.status}, stderr ${JSON.stringify(res.stderr.slice(0, 300))}`);
+    }
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+}

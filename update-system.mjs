@@ -1299,6 +1299,19 @@ function redirectToMainCheckout(cmd, argv = process.argv, env = process.env) {
     throw new Error(target.error);
   }
 
+  // apply and rollback commit into a checkout the user is not looking at from
+  // here, so refuse while it carries tracked edits rather than build on them.
+  // Untracked files are left out: the user layer lives there, and a direct
+  // run in that checkout never refuses over them either.
+  if (cmd === 'apply' || cmd === 'rollback') {
+    const dirty = gitIn(target.path, 'status', '--porcelain', '--untracked-files=no');
+    if (dirty) {
+      throw new Error(
+        `The ${UPDATE_BRANCH} checkout at ${target.path} has uncommitted changes to tracked files. Nothing was changed. Commit or stash them there, then re-run ${cmd} from this worktree.`,
+      );
+    }
+  }
+
   // check's stdout is one JSON object; keep it that way.
   const chatty = cmd === 'apply' || cmd === 'rollback';
   if (chatty) {
