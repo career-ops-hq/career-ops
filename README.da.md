@@ -82,7 +82,7 @@ Den tilpasser dit CV og skriver udkast til dine&nbsp;svar. <strong>Du&nbsp;trykk
 </p>
 
 <p align="center">
-  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
+  <a href="https://vercel.com/open-source-program"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/vercel-oss-badge-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/vercel-oss-badge-light.svg"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></picture></a>
 </p>
 
 <p align="center">
