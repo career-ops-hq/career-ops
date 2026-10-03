@@ -55,9 +55,10 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runAcrossUtcDay, lastRunFailure, formatRunFailure, fileExists, finish, results, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
+import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -291,6 +292,38 @@ async function runDiscovered(filter = null) {
   }
 }
 
+// A scratch copy left by a killed run used to poison every walker that follows:
+// `.gitignore` hides it and the copy carries no `.git`, so neither `git status`
+// nor `isNestedCheckout()` could see it, and the layout guards read a second
+// copy of `tests/` as several hundred misplaced suites (#3940).
+//
+// What makes the run correct is `isScratchDir` in the walkers, not this sweep —
+// they skip a leftover whether it gets removed or not. This only reclaims the
+// disk, which is why it can afford the age gate that keeps it off a scratch a
+// concurrent run is still writing into.
+//
+// Placed before the `--only` exit below: the 264-failure run is exactly the one
+// a developer then re-runs with `--only core-test-layout` to look closer, and a
+// sweep they skip past would leave that second run behaving differently again.
+{
+  const { removed, failed } = sweepScratchDirs(ROOT);
+  // Only speak when there was something to say. A sweep is silent on the
+  // overwhelming majority of runs, and a line reporting that nothing happened
+  // would be noise at the top of every one of them. `kept` is deliberately not
+  // reported: a young scratch is somebody else's live run, and it is none of
+  // this run's business.
+  for (const name of removed) {
+    console.log(`  🧹 removed a stale scratch copy from an interrupted run: ${name}/`);
+  }
+  for (const { name, error } of failed) {
+    // Not fatal — the walkers skip it, so every guard below still grades the
+    // real tree — but not silent either: something is holding a directory this
+    // run tried to delete, and that is worth knowing before it becomes a
+    // disk-space question.
+    warn(`could not remove the stale scratch copy ${name}/ (${error}) — the guards skip it, so this run is unaffected`);
+  }
+}
+
 // `--only=providers/x` must not read as "no filter": the discovered-test
 // runner exits 1 when a filter matches nothing, precisely so a path typo can
 // never turn CI green — and a silently dropped filter runs the whole suite
@@ -442,6 +475,7 @@ const scripts = [
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
   { name: 'verify-ats.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
@@ -469,6 +503,7 @@ const scripts = [
   { name: 'agent-inbox-tests.mjs', expectExit: 0 },
   { name: 'followup-seed-tests.mjs', expectExit: 0 },
   { name: 'paste-reply-tests.mjs', expectExit: 0 },
+  { name: 'contact-extract-tests.mjs', expectExit: 0 },
   { name: 'set-status-tests.mjs', expectExit: 0 },
   // The one script in this list that genuinely needs longer than the shared
   // budget. It spawns competing writer processes for 27 contention cases, and
@@ -509,8 +544,11 @@ const scripts = [
   { name: 'archive-posting.mjs --help', expectExit: 0 },
 ];
 
-const scriptTmp = mkdtempSync(join(ROOT, '.tmp-script-test-'));
+const scriptTmp = mkdtempSync(join(ROOT, SCRATCH_PREFIX));
 try {
+  // Claim before copying or running scripts. If this fails, stop and let the
+  // finally below remove the unused directory rather than run without an owner.
+  markScratchOwner(scriptTmp);
   // Never copied, at any depth: dependency trees and git metadata. Nothing run
   // from the throwaway copy reads them (module resolution walks up into the
   // real ROOT/node_modules, which is how the root-level exclusion already
@@ -526,6 +564,25 @@ try {
     // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
     if (dirname(src) === ROOT && exclude.includes(name)) return;
     const stat = statSync(src);
+    // A leftover from an earlier interrupted run is not repository source, and
+    // copying one nests it inside this run's scratch — which is how #3940's
+    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
+    // run's OWN scratch is already excluded by name just above; what this adds
+    // is the stale one the startup sweep could not remove, and — since that
+    // sweep deliberately leaves a live run's directory alone — the one a
+    // concurrent run is writing into right now.
+    //
+    // Directories only, which is why this reads `stat` rather than sitting with
+    // the name-based exclusions above: the prefix can name a FILE too, and
+    // dropping a source file from the copy would make a script check pass by
+    // not running it.
+    //
+    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
+    // level. The two are asymmetric because their costs are: skipping a
+    // directory that turns out to be someone's oddly-named fixture loses a copy
+    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
+    // expensive to over-delete.
+    if (stat.isDirectory() && isScratchDir(name)) return;
     if (stat.isDirectory()) {
       // A linked worktree is a whole second checkout of this repo and carries a
       // `.git` FILE, not a directory, so the name-based exclusion above never
@@ -1325,6 +1382,76 @@ try {
     pass('a page object without frames()/mainFrame() still returns a top-level verdict');
   } else {
     fail(`frame aggregation broke a frameless page object: ${JSON.stringify(legacyDouble)}`);
+  }
+
+  // --- BambooHR reload retry -----------------------------------------------
+  // BambooHR's client bundle can crash mid-render and leave the page stuck on
+  // a bare loading spinner — the posting is untouched, but the page reads as
+  // insufficient_content (see BAMBOOHR_HOSTS in liveness-browser.mjs).
+  // This must never surface as `expired`, whether or not the retry succeeds.
+  // Synthetic — checkUrlLiveness never makes a real request in this test
+  // (goto/reload are faked below), so this only needs to be *shaped* like a
+  // bamboohr.com posting URL, not point at a real, permanently-live one.
+  const BAMBOO_URL = 'https://example-co.bamboohr.com/careers/1';
+  const bambooRetryPage = ({ reloadBodyText, reloadApplyControls = [] }) => {
+    let evalCall = 0;
+    return {
+      async goto() { return { status: () => 200 }; },
+      async waitForTimeout() {},
+      url() { return BAMBOO_URL; },
+      async evaluate() {
+        evalCall += 1;
+        // 1st/2nd calls: initial (empty) render. 3rd/4th: post-reload render.
+        if (evalCall === 1) return '';
+        if (evalCall === 2) return [];
+        if (evalCall === 3) return reloadBodyText;
+        return reloadApplyControls;
+      },
+      async reload() { return { status: () => 200 }; },
+    };
+  };
+
+  const bambooRecovered = await checkUrlLiveness(
+    bambooRetryPage({ reloadBodyText: 'Senior QA Automation Engineer. '.repeat(20), reloadApplyControls: ['Apply for This Job'] }),
+    BAMBOO_URL
+  );
+  if (bambooRecovered.result === 'active' && bambooRecovered.reason.includes('after BambooHR reload retry')) {
+    pass('a BambooHR render-race is cleared by a reload retry');
+  } else {
+    fail(`BambooHR reload retry did not recover a live posting: ${JSON.stringify(bambooRecovered)}`);
+  }
+
+  const bambooStillEmpty = await checkUrlLiveness(
+    bambooRetryPage({ reloadBodyText: '', reloadApplyControls: [] }),
+    BAMBOO_URL
+  );
+  if (bambooStillEmpty.result === 'uncertain' && bambooStillEmpty.code === 'bamboohr_render_retry_failed') {
+    pass('a BambooHR page still empty after reload is uncertain, never expired');
+  } else {
+    fail(`BambooHR retry-still-empty should be uncertain, not expired: ${JSON.stringify(bambooStillEmpty)}`);
+  }
+
+  // A reload that lands on the generic job-list route (not the specific
+  // posting) is the same "didn't find the posting" category as an empty
+  // body — never trusted as expired either.
+  const bambooReloadToListing = await checkUrlLiveness(
+    bambooRetryPage({ reloadBodyText: '12 jobs found', reloadApplyControls: [] }),
+    BAMBOO_URL
+  );
+  if (bambooReloadToListing.result === 'uncertain' && bambooReloadToListing.code === 'bamboohr_render_retry_failed') {
+    pass('a BambooHR reload landing on the job-list page is uncertain, never expired');
+  } else {
+    fail(`BambooHR retry-to-listing-page should be uncertain, not expired: ${JSON.stringify(bambooReloadToListing)}`);
+  }
+
+  let nonBambooReloadCalled = false;
+  const nonBambooPage = fakePage({ status: 200, finalUrl: URL, bodyText: '', applyControls: [] });
+  nonBambooPage.reload = async () => { nonBambooReloadCalled = true; return { status: () => 200 }; };
+  const nonBambooInsufficient = await checkUrlLiveness(nonBambooPage, URL);
+  if (nonBambooInsufficient.result === 'expired' && nonBambooInsufficient.code === 'insufficient_content' && !nonBambooReloadCalled) {
+    pass('the reload retry is scoped to BambooHR hosts only');
+  } else {
+    fail(`reload retry leaked to a non-BambooHR host: ${JSON.stringify(nonBambooInsufficient)}, reloadCalled=${nonBambooReloadCalled}`);
   }
 
   if (isChallengeResult({ result: 'uncertain', code: 'bot_challenge' }) &&
@@ -4714,9 +4841,15 @@ try {
 
 let fixtureRoot = null;
 let originalCwd = process.cwd();
+const priorPipelineEnv = process.env.CAREER_OPS_PIPELINE;
 try {
   fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-missing-pipeline-'));
   process.env.CAREER_OPS_ROOT = fixtureRoot;
+  // CAREER_OPS_PIPELINE outranks the root pinned above, and scan.mjs also loads
+  // .env at import, so a developer's own value received this fixture row. An
+  // empty value keeps the default path (PIPELINE_PATH reads it with ||), and
+  // dotenv never overwrites a variable that is already set.
+  process.env.CAREER_OPS_PIPELINE = '';
   const { appendToPipeline } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href + '?cachebust=' + Date.now());
   try {
     mkdirSync(join(fixtureRoot, 'data'), { recursive: true });
@@ -4739,6 +4872,8 @@ try {
   fail(`scan.mjs fresh-install pipeline test crashed: ${err.message}`);
 } finally {
   delete process.env.CAREER_OPS_ROOT;
+  if (priorPipelineEnv === undefined) delete process.env.CAREER_OPS_PIPELINE;
+  else process.env.CAREER_OPS_PIPELINE = priorPipelineEnv;
   if (fixtureRoot) {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
@@ -5079,16 +5214,18 @@ if (!fileExists('scripts/parsers/cohere_jobs.py')) {
   fail('Cohere parser example is still bundled as a runtime script');
 }
 
+// templates/portals.example.yml is copied verbatim by new users — its local-parser
+// example must point the script at a gitignored path, not the Git-tracked
+// scripts/parsers/ (see docs/local-parser-cookbook.md).
 const portalExample = readFile('templates/portals.example.yml');
 if (
-  !portalExample.includes('cohere_jobs.py') &&
-  portalExample.includes('scripts/parsers/example-js-company-jobs.js') &&
-  portalExample.includes('scripts/parsers/example_python_company_jobs.py') &&
-  portalExample.includes('already know their target careers URL')
+  portalExample.includes('script: local/example-js-company-jobs.js') &&
+  portalExample.includes('script: local/example_python_company_jobs.py') &&
+  !/^\s*#?\s*script:\s*['"]?scripts\/parsers\//m.test(portalExample)
 ) {
-  pass('portals example documents a generic local parser contract');
+  pass('portals example points the local-parser script at a gitignored path');
 } else {
-  fail('portals example still points at a bundled Cohere parser');
+  fail('portals example local-parser script is under the Git-tracked scripts/parsers/');
 }
 
 // Security hardening: command allowlist, in-repo script containment, careers_url/company validation.
@@ -7148,9 +7285,13 @@ overrideOut?.includes('Acme') && overrideOut?.includes('staff-engineer')
 // dry-run: output always contains a local:jds/ reference and today's date.
 // The date the child prints is its own clock read, so it is compared against
 // the day(s) spanning the call rather than one captured up-section — see
-// runAcrossUtcDay() for why a single capture fails a run that crosses
-// midnight UTC (#3816).
-const { out: refOut, days: refDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+// runAcrossLocalDay() for why a single capture fails a run that crosses
+// midnight (#3816).
+//
+// LOCAL day, not UTC: archive-posting names its capture with localToday(), so
+// asserting the UTC day here passed only where the two agree — which is most of
+// the day in most zones, and never in the evening west of Greenwich.
+const { out: refOut, days: refDays } = runAcrossLocalDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
 refOut?.includes('local:jds/') && refDays.some((day) => refOut?.includes(day))
   ? pass('dry-run: local:jds/ reference and date emitted')
   : fail('dry-run: reference or date missing from output');
@@ -7198,8 +7339,9 @@ reportSpaceOut?.includes('jds/042-') && reportSpaceOut?.toLowerCase().includes('
   ? pass('--report N: value consumed, URL still parsed')
   : fail('--report N: swallowed the URL or dropped the report number');
 
-// omitting --report leaves the historical filename shape untouched
-const { out: noReportOut, days: noReportDays } = runAcrossUtcDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
+// omitting --report leaves the historical filename shape untouched — the date
+// in it is the LOCAL calendar day (localToday()), the day the user was working.
+const { out: noReportOut, days: noReportDays } = runAcrossLocalDay(NODE, ['archive-posting.mjs', '--dry-run', 'https://boards.greenhouse.io/openai/jobs/123']);
 noReportDays.some((day) => noReportOut?.includes(`jds/${day}_`))
   ? pass('no --report: filename shape unchanged')
   : fail('no --report: filename shape regressed');
@@ -8330,6 +8472,51 @@ try {
     fail('visa_filter should honor custom positive keyword lists');
   }
 
+  // ── visa_filter international vocabulary ──
+  // Strict mode must recognize Singapore (Employment Pass / S Pass / ONE Pass /
+  // Work Pass), EU Blue Card, and UK Skilled Worker sponsorship wording —
+  // not just US visas.
+  const intlVisa = buildVisaFilter({ enabled: true, require_mention: true });
+  if (
+    intlVisa('We will sponsor your Employment Pass application via MOM') === true &&
+    intlVisa('S Pass sponsorship available for foreign candidates') === true &&
+    intlVisa('We assist with your ONE Pass application') === true &&
+    intlVisa('Work Pass sponsorship provided for this role') === true &&
+    intlVisa('We support EU Blue Card applications for non-EU hires') === true &&
+    intlVisa('Skilled Worker visa sponsorship available') === true
+  ) {
+    pass('visa_filter strict recognizes international sponsorship vocabulary');
+  } else {
+    fail('visa_filter strict should recognize SG/EU/UK sponsorship wording');
+  }
+
+  // Hazardous short forms are deliberately absent from the defaults: bare
+  // 's pass' would fire on "Class Pass", bare 'one pass' on ordinary English.
+  if (
+    intlVisa('Free Class Pass to the downtown yoga studio each month') === false &&
+    intlVisa('The compiler makes one pass over the syntax tree') === false
+  ) {
+    pass('visa_filter strict has no false positives on pass-adjacent wording');
+  } else {
+    fail('visa_filter strict must not treat Class Pass / one pass as sponsorship');
+  }
+
+  // Default mode must reject unambiguous international no-sponsorship phrasing.
+  const intlNegVisa = buildVisaFilter({ enabled: true });
+  if (intlNegVisa('Singapore citizens and permanent residents only') === false) {
+    pass('visa_filter rejects international no-sponsorship phrasing');
+  } else {
+    fail('visa_filter should reject citizens/PR-only postings');
+  }
+
+  // "Local candidates only" usually rules out relocation, not sponsorship
+  // (relocation != sponsorship), so the minimal mode keeps those postings.
+  if (intlNegVisa('Local candidates only') === true) {
+    pass('visa_filter default keeps "local candidates only" postings');
+  } else {
+    fail('visa_filter default should not treat "local candidates only" as a sponsorship refusal');
+  }
+
   // ── country_eligibility_filter (#2093) ──
   // Absent config → all jobs pass, regardless of candidate country.
   const noCountryFilter = buildCountryEligibilityFilter(null, 'Canada');
@@ -9162,7 +9349,7 @@ try {
   // the value must match how the date was actually obtained. The unit tests above
   // only cover the helper — this pins the field on the JSON consumers read, which
   // is where a silently-inferred age would actually do damage.
-  {
+  cadenceAppDateSourceE2e: {
     // NOT realpathed, deliberately. This used to be, because followup-cadence's
     // hand-rolled CLI guard compared a realpath-resolved import.meta.url against
     // a lexical argv[1], so macOS's symlinked tmpdir silently suppressed main()
@@ -9203,17 +9390,21 @@ try {
       copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(e2eTmp, 'lib', 'is-main-module.mjs'));
       mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
       copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
-      // 'junction' on Windows, not 'dir': a directory symlink needs
-      // SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless
-      // Developer Mode is on, so this threw EPERM and failed the test on an
-      // ordinary Windows checkout. Junctions need no privilege, and the two
-      // constraints they add are already met — the target is absolute and is a
-      // directory on a local volume. The type argument is ignored off Windows.
-      symlinkSync(
-        join(ROOT, 'node_modules'),
-        join(e2eTmp, 'node_modules'),
-        process.platform === 'win32' ? 'junction' : 'dir',
-      );
+      // The sandbox resolves js-yaml (and the rest of followup-cadence's
+      // package imports) through the repo's own installed tree. linkNodeModules
+      // junction-links on Windows, where a directory symlink would need
+      // SeCreateSymbolicLinkPrivilege and threw EPERM on an ordinary checkout.
+      // It also refuses to link blind against a tree that was never installed:
+      // symlinkSync succeeds on a missing target, the dangling link killed the
+      // child with ERR_MODULE_NOT_FOUND, and the catch below reported that as a
+      // crash of the appDateSource contract, which is innocent. This suite is
+      // meant to run on a fresh clone with only Node, so an absent tree is a
+      // skip that names itself.
+      const depsReason = linkNodeModules(e2eTmp);
+      if (depsReason) {
+        warn(`analyze() appDateSource end-to-end check skipped: ${depsReason}`);
+        break cadenceAppDateSourceE2e;
+      }
       mkdirSync(join(e2eTmp, 'data'), { recursive: true });
       writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
         '# Applications Tracker',
@@ -13204,7 +13395,7 @@ try {
   rmSync(ready, { recursive: true, force: true });
 
   // Auto-copy template: when modes/_profile.md or modes/_custom.md is missing but template exists,
-  // doctor --json auto-copies them, records them in autoCopied, and does not report them as missing (#1369).
+  // doctor --json --init-templates copies them, records them in autoCopied, and does not report them as missing (#1369).
   const autoCopy = mkdtempSync(join(tmpdir(), 'co-autocopy-'));
   mkdirSync(join(autoCopy, 'config'), { recursive: true });
   mkdirSync(join(autoCopy, 'modes'), { recursive: true });
@@ -13213,7 +13404,7 @@ try {
   }
   writeFileSync(join(autoCopy, 'modes/_profile.template.md'), '# profile template\n');
   writeFileSync(join(autoCopy, 'modes/_custom.template.md'), '# custom template\n');
-  const ac = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', autoCopy]) || '{}');
+  const ac = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--init-templates', '--target', autoCopy]) || '{}');
   if (
     ac.onboardingNeeded === false &&
     Array.isArray(ac.missing) &&
@@ -13226,9 +13417,9 @@ try {
     existsSync(join(autoCopy, 'modes/_custom.md')) &&
     readFileSync(join(autoCopy, 'modes/_custom.md'), 'utf-8') === '# custom template\n'
   ) {
-    pass('Auto-copy template → modes/_profile.md and modes/_custom.md copied silently in --json mode (#1369)');
+    pass('Explicit onboarding → modes/_profile.md and modes/_custom.md copied with --init-templates (#1369)');
   } else {
-    fail(`Auto-copy template failed in --json mode: ${JSON.stringify(ac)}`);
+    fail(`Template initialization failed: ${JSON.stringify(ac)}`);
   }
   rmSync(autoCopy, { recursive: true, force: true });
 
@@ -13394,9 +13585,11 @@ try {
   const doctorEnv = { env: { ...process.env, CLAUDE_CONFIG_DIR: emptyClaudeCfg } };
 
   // No project MCP config → doctor surfaces a (non-fatal) warning instead of
-  // letting SPA job boards fail silently.
+  // letting SPA job boards fail silently. doctor reads project MCP config from
+  // its launch directory, not --target, so this runs from the empty fixture:
+  // run()'s default cwd is the checkout, whose own .mcp.json would answer.
   const noMcp = mkdtempSync(join(tmpdir(), 'co-nomcp-'));
-  const a = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', noMcp], doctorEnv) || '{}');
+  const a = JSON.parse(run(NODE, [join(ROOT, 'doctor.mjs'), '--json', '--target', noMcp], { ...doctorEnv, cwd: noMcp }) || '{}');
   if (Array.isArray(a.warnings) && a.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('No Playwright MCP config → warning surfaced');
   } else {
@@ -16591,10 +16784,15 @@ try {
       // next, and this section previously covered 4 of the 6 files present.
       let webUnits = [];
       try {
-        webUnits = readdirSync(join(ROOT, 'web', 'tests', 'lib'))
+        const webLibRoot = join(ROOT, 'web', 'tests', 'lib');
+        webUnits = readdirSync(webLibRoot, { recursive: true })
           .filter((f) => f.endsWith('.test.mjs'))
+          // A checkout under web/tests/lib holds another tree's suites; the
+          // parity walk below skips those the same way (#3762), so the gate
+          // must not run them.
+          .filter((f) => !isUnderNestedCheckout(webLibRoot, f))
           .sort()
-          .map((f) => `web/tests/lib/${f}`);
+          .map((f) => join('web', 'tests', 'lib', f));
       } catch (err) {
         // Fail rather than throw to the outer catch, which would skip every value
         // assertion below while reporting only "freeze section crashed".
@@ -18896,12 +19094,36 @@ try {
     const descriptions = [
       ['entity', entity.description || ''],
       ...projects.map((pr) => [`project ${pr.guid}`, pr.description || '']),
+      // Plans are read by funders too: a six-month plan quoting "72,400+ stars"
+      // with no date went stale the same way an entity description would.
+      ...plans.map((pl) => [`plan ${pl.guid}`, pl.description || '']),
     ];
     const undated = descriptions.filter(([, text]) => METRIC_RE.test(text) && !COUNTED_RE.test(text));
     if (undated.length === 0) {
       pass('every funding.json description that quotes a count also states when it was counted');
     } else {
       fail(`funding.json ${undated.map(([w]) => w).join(', ')}: quotes a metric with no "counted <date>"`);
+    }
+
+    // A repository wellKnown is the proof the directory asks for: it fetches that
+    // file and looks for the manifest URL in it. The repo moved to the org on
+    // 31-Aug and the listing kept flagging it as unproven until this file existed,
+    // so the check is that the file ships AND names the manifest's own URL.
+    const repoProofs = projects.filter((pr) => pr.repositoryUrl?.wellKnown);
+    if (repoProofs.length > 0) {
+      const WELL_KNOWN = '.well-known/funding-manifest-urls';
+      const MANIFEST_URL = 'https://github.com/career-ops-hq/career-ops/raw/main/funding.json';
+      let proof = null;
+      try { proof = readFile(WELL_KNOWN); } catch { proof = null; }
+      const listed = proof ? proof.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+      const pointsHere = repoProofs.every((pr) => pr.repositoryUrl.wellKnown.endsWith(`/${WELL_KNOWN}`));
+      if (proof !== null && listed.includes(MANIFEST_URL) && pointsHere) {
+        pass(`${WELL_KNOWN} ships and lists ${MANIFEST_URL}, and repositoryUrl.wellKnown points at it`);
+      } else {
+        fail(proof === null ? `repositoryUrl.wellKnown is set but ${WELL_KNOWN} is missing`
+          : !pointsHere ? `repositoryUrl.wellKnown does not point at ${WELL_KNOWN}`
+          : `${WELL_KNOWN} does not list ${MANIFEST_URL}`);
+      }
     }
   }
 } catch (e) {

@@ -93,6 +93,26 @@ Decide the Global Score once from these dimensions, applying any user-specific S
 - 3.5-3.9 → Decent but not ideal, apply only if specific reason
 - Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
 
+### Evidence confidence for the Global Score
+
+The Machine Summary `confidence` describes the **evidence supporting this evaluation**, not the chance of an interview or hire. It does not change the 1–5 Global Score. Block G's posting-legitimacy tier is a different judgment; `/calibrate` compares scores with recorded outcomes across applications.
+
+Before assigning `confidence`, classify evidence for each scoring dimension (CV match, North Star alignment, compensation, cultural signals, red flags):
+
+| Status | Meaning |
+|--------|---------|
+| `supported` | The conclusion traces to current JD text, primary candidate files, or a verifiable current source relevant to this dimension. |
+| `partial` | Some direct evidence exists, but a decision-relevant detail is inferred, unverified, or incomplete. |
+| `unknown` | Decision-relevant evidence is missing, contradictory, or stale; a clean finding cannot be established. |
+
+Show a short evidence table in the report with each dimension's status, its source or observation, and any unresolved question. Do not call an unchecked dimension `supported` merely because no problem was found. Apply these tier rules in order:
+
+1. **Low** if the JD is inaccessible or too incomplete to assess, CV match or North Star evidence is `unknown`, a material work-eligibility or work-model contradiction is unresolved, or at least two dimensions are `unknown`.
+2. **Medium** if no Low condition holds but any dimension is `partial` or `unknown`, or a material question remains unresolved.
+3. **High** only when all five dimensions are `supported` and no material question remains unresolved.
+
+Name up to three concrete checks that could change the decision; use an empty list only when none remain. Never convert this tier into a numeric probability or silently treat missing evidence as a neutral score. In the Machine Summary, mirror the five statuses under `score_evidence` and the checks under `confidence_gaps`; the human-readable explanation and `confidence` tier must agree.
+
 **How to score the "Cultural signals" dimension:**
 1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
 2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage).
@@ -167,7 +187,39 @@ When a JD publishes a salary figure, distinguish advertised range, likely guaran
 
 ## Archetype Detection
 
-Classify every offer into one of these types (or hybrid of 2):
+Classify the offer by archetype. `modes/_profile.md` → *Your Target Roles* is
+authoritative: where it defines archetypes, detect against **that** table and
+use the one below only as a fallback for what it does not cover. This mirrors
+the precedence already stated above — user customizations in `_profile.md`
+override the defaults in this file. If `_profile.md` is missing, has no
+*Your Target Roles* section, or that table has no rows, the default table below
+is the target set: classify against it, and a match there counts as targeted.
+
+The table below is a default, not a closed set. It reflects one particular
+search (see AGENTS.md → Origin) and will not describe every user's field: a
+silicon design-verification engineer, a quant, a clinician have no archetype
+here at all.
+
+**If an offer matches no archetype the user actually targets, say so plainly
+and score North Star alignment 1.** That is a real and useful signal.
+Forcing it into the nearest available label — or into a "hybrid" of two —
+manufactures a confident fit narrative for a job the user is not applying for,
+which is worse than a low score because it reads as analysis.
+
+**A match against the default table below is not a match against the user's
+targets.** Where `_profile.md` defines archetypes, "targeted" means one of
+those. An offer that lands cleanly on a default row and on nothing in
+`_profile.md` is still an unmatched offer: name the default archetype if it
+helps explain the role, and score North Star as unmatched anyway. Reading the
+fallback as a target is the exact failure this section exists to stop.
+
+**On the number: an unmatched offer scores North Star 1.** `modes/ofertas.md`
+anchors this dimension at `5 = exact target role, 1 = unrelated`, and unmatched
+is the `1` end of that scale, not the middle — the offer is not one the user is
+looking for, and a 2 or 3 reads as a partial fit that does not exist. An offer
+that does match one of the user's targets, fully or as a hybrid of two, is
+scored on the rest of that same scale as usual; this section adds no second
+scale beside it.
 
 | Archetype | Key signals in JD |
 |-----------|-------------------|

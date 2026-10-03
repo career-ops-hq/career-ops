@@ -288,7 +288,6 @@ npm i -g @santifer/career-ops
 /career-ops interview    → مقابلة تفاعلية لإعداد الملف والسيرة الذاتية
 /career-ops master-profile → استيراد ملفك المهني الرئيسي (Master Career Profile) ومراجعته والتحقق منه
 /career-ops eu-swe    → معايرة طلب SWE أوروبي قبل السيرة الذاتية أو التقديم أو المقابلة
-/career-ops eu-fintech → فحص 21 بوابة تقنية مالية أوروبية لأدوار Product Manager (بدون رموز)
 /career-ops interview/plan → خطة تحضير بكتل زمنية لمقابلة قادمة
 /career-ops interview/practice → مقابلة تدريبية، سؤال واحد في كل مرة مع ملاحظات
 /career-ops interview/debrief → مراجعة ما بعد المقابلة: سد الثغرات وتوقع الجولة التالية

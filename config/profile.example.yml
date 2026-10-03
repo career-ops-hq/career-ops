@@ -115,6 +115,16 @@ language:
   # vocabulary/rules, while output selects the prose language.
   output: en
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+  # modes_dir can also be a LIST of declared candidate markets, for a
+  # candidate genuinely running parallel campaigns in more than one market at
+  # once (e.g. applying in both DACH and China simultaneously) — not for
+  # switching sequentially. The FIRST entry is primary (drives the
+  # evaluation-mode file); every declared market's _shared.md is loaded into
+  # context, and which one applies to a given JD is judged from the JD's own
+  # market signals (hiring-entity jurisdiction, currency, benefits/legal
+  # vocabulary), never from the JD's language alone. See AGENTS.md "Output
+  # Language vs Market Modes" for the full contract.
+  # modes_dir: [modes/de, modes/zh]
 
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
@@ -142,13 +152,15 @@ spend_tier: standard
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
 # Each token is injected as a CSS custom property that overrides the template
 # default — omit the block (or any key) to keep the built-in look unchanged.
-# Only these five keys are recognized; anything else is ignored.
+# Only these six keys are recognized; anything else is ignored.
 # style:
-#   accent_color:    "#2563eb"           # section headings, competency tags, project badges
-#   secondary_color: "#111827"           # company/institution names, header gradient's 2nd stop
-#   font_family:     "Outfit, Inter, sans-serif"
-#   font_size:       "10pt"              # base body text size
-#   margin:          "0.5in"             # page margin (@page)
+#   accent_color:     "#2563eb"           # section headings, competency tags, project badges
+#   secondary_color:  "#111827"           # company/institution names, header gradient's 2nd stop
+#   font_family:      "Outfit, Inter, sans-serif"
+#   font_size:        "10pt"              # base body text size
+#   margin:           "0.5in"             # page margin (@page)
+#   job_break_inside: "avoid"             # keep each role whole (one taller than a page still splits);
+#                                         # "auto" lets roles split. Unset: the template's own default
 
 cv:
   output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)

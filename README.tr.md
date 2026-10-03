@@ -288,7 +288,6 @@ career-ops ortak bir komut yönlendiricisi kullanır. Eğik çizgi komutlarını
 /career-ops interview    → Etkileşimli profil/CV tanışma mülakatı
 /career-ops master-profile → Master Career Profile'ını içe aktar, gözden geçir ve doğrula
 /career-ops eu-swe    → CV/başvuru/mülakat öncesinde bir Avrupa SWE başvurusunu kalibre et
-/career-ops eu-fintech → 21 AB fintech portalını Product Manager rolleri için tara (token harcamaz)
 /career-ops interview/plan → Yaklaşan bir mülakat için zaman bloklu hazırlık planı
 /career-ops interview/practice → Pratik mülakat, geri bildirimle her seferinde bir soru
 /career-ops interview/debrief → Mülakat sonrası değerlendirme: açıkları kapat, sonraki turu öngör

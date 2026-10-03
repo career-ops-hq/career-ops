@@ -4,7 +4,22 @@ Aday bir ilan yapıştırdığında (metin veya URL) HER ZAMAN 7 bloğun tamamı
 
 ## Adım 0 — Arketip Tespiti
 
-İlanı `_shared.md`'deki arketiplerden birine sınıflandır. Hibrit ise en yakın ikisini belirt. Bu tespite göre:
+İlanı `_shared.md`'deki arketiplere göre sınıflandır — yani, tanımlı olduğu
+yerde, kullanıcının `modes/_profile.md` → *Your Target Roles* altındaki kendi
+arketiplerine göre. `_profile.md` yoksa, *Your Target Roles* bölümü yoksa ya da
+o tabloda hiç satır yoksa, `_shared.md`'deki varsayılan tabloya göre sınıflandır
+ve oradaki bir eşleşmeyi hedef say. Kullanıcının hedeflerinden ikisinin hibritiyse
+ikisini de belirt.
+
+**"Hiçbiri" geçerli bir sonuçtur ve öyle raporlanmalıdır.** Rol, kullanıcının
+hedeflediği hiçbir şeyle eşleşmiyorsa en yakın etiketi seçme ve hibrit deme:
+bunu açıkça söyle, North Star'a 1 ver ve değerlendirmeye diğer boyutlarda devam
+et — raporun geri kalanı yine de işe yarar; dürüst bir gerekçeyle verilmiş düşük
+bir uyum puanı, kullanıcının başvurmadığı bir iş için kendinden emin bir uyum
+anlatısından daha faydalıdır. `_profile.md`'de hedefler tanımlıysa, yalnızca
+`_shared.md`'deki varsayılan tabloyla eşleşmek onlarla eşleşmek demek değildir.
+
+Bu tespite göre:
 - B bloğunda hangi kanıt noktalarını öne çıkaracağın belirlenir
 - E bloğunda CV özeti nasıl yeniden yazılacağı belirlenir
 - F bloğunda hangi STAR hikayeleri hazırlanacağı belirlenir
@@ -112,6 +127,15 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 
 **Tarih:** {YYYY-MM-DD}
 **Arketip:** {tespit edilen}
+<!-- Rol kullanıcının hedeflerinden biriyle eşleşiyorsa onun adını yaz. Hiçbiriyle
+     eşleşmiyorsa bu alan boş BIRAKILMAZ ve muğlak geçilmez — boş bir alan aracın
+     çalışmadığı gibi okunur, "muhtemelen X ile Y'nin hibriti" ise burada önlenmek
+     istenen zorlamanın ta kendisidir. Şunlardan birini yaz:
+       Hedef değil — en yakın varsayılan: {_shared.md tablosundaki satır}
+       Hedef değil — yakın eşleşme yok
+     Varsayılan satırı adlandırmak okuyucunun rolü konumlandırmasına yine yardım
+     eder; yapmaması gereken, kullanıcının gerçekten sahip olduğu bir hedefin yerine
+     geçmektir. -->
 **Puan:** {X.X}/5
 **URL:** {ilan URL'si}
 **PDF:** ✅/❌

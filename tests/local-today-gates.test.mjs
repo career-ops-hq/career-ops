@@ -22,11 +22,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
 import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { codeMask, isCodeRange } from './helpers.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
 import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
 
@@ -312,154 +314,6 @@ test('rejection-latency still flags once the local window HAS elapsed', () => {
 // evening run rather than only at midnight.
 
 /**
- * Whether the `/` at `i` opens a regex literal rather than being division.
- *
- * The classic heuristic — look at the last significant token before it. A regex
- * can only appear where a VALUE is expected, so an operator, an opening
- * bracket, a comma, a semicolon or a value-position keyword before it means
- * regex; an identifier, a number or a closing paren/bracket means division.
- * `}` is genuinely ambiguous (block end vs object literal end) and is read as
- * regex, the usual choice: over-reading here masks a few characters, while
- * under-reading lets a regex's contents open a phantom string frame, which is
- * the failure that hides code.
- */
-function startsRegex(src, i) {
-  let j = i - 1;
-  while (j >= 0 && /\s/.test(src[j])) j--;
-  if (j < 0) return true;
-  const prev = src[j];
-  if ('=(,:[!&|?{};+-*%~^<>'.includes(prev)) return true;
-  // A `)` normally ends an expression, so `/` after it is division — except
-  // when it closes a CONTROL condition, where a statement (and so a regex) may
-  // follow: `if (enabled) /"/.test(value);`. Walk back to the matching `(` and
-  // look at the keyword in front of it.
-  if (prev === ')') {
-    let depth = 0;
-    let k = j;
-    for (; k >= 0; k--) {
-      if (src[k] === ')') depth++;
-      else if (src[k] === '(' && --depth === 0) break;
-    }
-    if (k < 0) return false;
-    let w = k - 1;
-    while (w >= 0 && /\s/.test(src[w])) w--;
-    let e = w;
-    while (w >= 0 && /[A-Za-z0-9_$]/.test(src[w])) w--;
-    return ['if', 'while', 'for', 'switch', 'catch', 'with'].includes(src.slice(w + 1, e + 1));
-  }
-  if (/[A-Za-z0-9_$]/.test(prev)) {
-    let k = j;
-    while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k])) k--;
-    const word = src.slice(k + 1, j + 1);
-    return ['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
-      'case', 'do', 'else', 'yield', 'await'].includes(word);
-  }
-  return false;
-}
-
-/**
- * A per-character map of which positions in `src` are CODE — string and
- * template TEXT and comments are not, but a template's `${...}` substitution
- * is, recursively.
- *
- * Not a JavaScript lexer, and deliberately not one: `test-all.mjs` states the
- * suite runs "on a fresh clone with only Node", so there is no parser
- * dependency available to a test here. This covers the constructs a
- * scan-history call is actually written with — the status string argument
- * (`'added'`, `'skipped_title'`), a commented-out call, and the template-string
- * child snippet the repo already uses to drive these writers
- * (web/src/lib/core/pipeline.ts builds one).
- *
- * Regex literals are NOT distinguished from division. A `/.../ ` argument to
- * appendToScanHistory would make the gate fail LOUDLY, which is the safe
- * direction for a sentinel and a signal to revisit this — never a silent pass.
- *
- * @param {string} src
- * @returns {boolean[]} isCode[i] for every index in src.
- */
-function codeMask(src) {
-  const mask = new Array(src.length).fill(true);
-  // Bottom frame is the file itself. A `${` pushes a code frame whose parent is
-  // the template it interpolates into; `braces` tracks object/block nesting so
-  // the `}` that CLOSES the substitution is told apart from an inner one.
-  const stack = [{ template: false, braces: 0 }];
-  let i = 0;
-
-  while (i < src.length) {
-    const top = stack[stack.length - 1];
-    const c = src[i];
-    const n = src[i + 1];
-
-    if (top.template) {
-      if (c === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
-      if (c === '`') { mask[i++] = false; stack.pop(); continue; }
-      if (c === '$' && n === '{') {
-        mask[i++] = false;
-        mask[i++] = false;
-        stack.push({ template: false, braces: 0 });
-        continue;
-      }
-      mask[i++] = false;
-      continue;
-    }
-
-    if (c === '/' && n === '/') {
-      while (i < src.length && src[i] !== '\n') mask[i++] = false;
-      continue;
-    }
-    if (c === '/' && n === '*') {
-      const close = src.indexOf('*/', i + 2);
-      const stop = close === -1 ? src.length : close + 2;
-      while (i < stop) mask[i++] = false;
-      continue;
-    }
-    if (c === "'" || c === '"') {
-      mask[i++] = false;                                  // opening quote
-      while (i < src.length) {
-        if (src[i] === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
-        const closing = src[i] === c;
-        mask[i++] = false;
-        if (closing) break;
-      }
-      continue;
-    }
-    if (c === '`') { mask[i++] = false; stack.push({ template: true }); continue; }
-    if (c === '/' && startsRegex(src, i)) {
-      // A regex literal's contents are DATA. Not masking them let a quote or a
-      // backtick inside one open a phantom string or template frame that then
-      // swallowed real code — scan-hn.mjs carries `/```yaml|```/g`, six
-      // backticks, which is that hazard live in a writer file today.
-      mask[i++] = false;                                  // opening slash
-      let inClass = false;
-      while (i < src.length) {
-        const ch = src[i];
-        if (ch === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
-        if (ch === '\n') break;                            // unterminated; stop rather than run away
-        if (ch === '[') inClass = true;
-        else if (ch === ']') inClass = false;
-        else if (ch === '/' && !inClass) { mask[i++] = false; break; }
-        mask[i++] = false;
-      }
-      while (i < src.length && /[a-z]/.test(src[i])) mask[i++] = false;   // flags
-      continue;
-    }
-    if (c === '{') { top.braces++; i++; continue; }
-    if (c === '}') {
-      const closesSubstitution = top.braces === 0 && stack.length > 1 && stack[stack.length - 2].template;
-      if (closesSubstitution) { mask[i++] = false; stack.pop(); continue; }
-      if (top.braces > 0) top.braces--;
-      i++;
-      continue;
-    }
-    i++;
-  }
-  return mask;
-}
-
-/** Whether every character of `src.slice(from, to)` is code. */
-const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Boolean);
-
-/**
  * The argument list of every `appendToScanHistory(...)` CALL in `src`,
  * paren-matched over CODE positions only.
  *
@@ -561,7 +415,9 @@ test('the call scanner sees code and only code', () => {
 test('the scanner resolves every call the four known writers contain', () => {
   // The shapes above are synthetic. This is the real files, and it is what
   // would catch masking that is correct in miniature and wrong at scale.
-  for (const [file, expected] of [['scan.mjs', 5], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+  // scan.mjs went 5 → 7 when the location and posting-age cuts started
+  // recording what they drop (`skipped_location`, `skipped_age`).
+  for (const [file, expected] of [['scan.mjs', 7], ['scan-ats-full.mjs', 1], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const naive = [...src.matchAll(/(?<!function )\bappendToScanHistory\s*\(/g)].length;
     assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);
@@ -648,4 +504,39 @@ test('two dates for one posting is all detect-reposts needs to call it a repost'
   // cluster. This is the assertion that makes the census mean something.
   const sameDay = tsv.replaceAll('2026-08-23', '2026-08-22');
   assert.deepEqual(detectReposts(parseScanHistory(sameDay), 90, 1, null), [], 'one evening, one date, no repost');
+});
+test('stats.mjs and analyze-patterns.mjs stamp the local day in report headers, not UTC', () => {
+  // At INSTANT (01:30 UTC), UTC_DAY is 2026-08-18 but NY_DAY is 2026-08-17.
+  // Both report headers must reflect the local day (NY_DAY).
+  //
+  // stats.mjs resolves its data files from the data root when it is imported,
+  // and followup-cadence.mjs, which it imports, reads config/profile.yml there.
+  // So the child gets an empty data root, with the two overrides that outrank
+  // it cleared, and the sources check shows it never read the user's files.
+  const dataRoot = mkdtempSync(join(tmpdir(), 'career-ops-localtoday-stats-'));
+  try {
+    const statsOut = inFrozenTz('America/New_York',
+      `process.env.CAREER_OPS_ROOT = ${JSON.stringify(dataRoot)};` +
+      `delete process.env.CAREER_OPS_TRACKER;` +
+      `delete process.env.CAREER_OPS_PROFILE;` +
+      `const { computeAllStats } = await import('${spec('stats.mjs')}');` +
+      `const s = computeAllStats();` +
+      `process.stdout.write(JSON.stringify(s.metadata));`
+    );
+    const { generatedAt, sources } = JSON.parse(statsOut);
+    assert.deepEqual(Object.keys(sources).filter((k) => sources[k]), [], 'stats.mjs read data files outside its empty data root');
+    assert.equal(generatedAt, NY_DAY, `stats.mjs stamped ${generatedAt}, expected local day ${NY_DAY}`);
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10 });
+  }
+
+  const mockEntries = JSON.stringify(
+    Array(5).fill({ date: '2026-08-01', status: 'Applied', report: '', score: '85', notes: '' })
+  );
+  const patternsOut = inFrozenTz('America/New_York',
+    `const { analyze } = await import('${spec('analyze-patterns.mjs')}');` +
+    `const p = analyze(${mockEntries});` +
+    `process.stdout.write(p.metadata.analysisDate);`
+  );
+  assert.equal(patternsOut, NY_DAY, `analyze-patterns.mjs stamped ${patternsOut}, expected local day ${NY_DAY}`);
 });

@@ -49,8 +49,8 @@ test('the real shipped example validates clean against itself', () => {
 });
 
 test('keys the code reads but the example omits are not called unknown', () => {
-  // rejection_latency, table_freshness and scan have real readers. Warning on
-  // them would flag a correct profile — the failure mode that makes a validator
+  // rejection_latency and table_freshness have real readers. Warning on them
+  // would flag a correct profile — the failure mode that makes a validator
   // something users learn to ignore.
   for (const key of Object.keys(UNDOCUMENTED_KEYS)) {
     const { findings } = validateProfile(`${key}:\n  x: 1\n`, EXAMPLE);
@@ -74,6 +74,50 @@ test('the known-key set is derived from the example, not hardcoded here', () => 
   const widened = `${EXAMPLE}\nbrand_new_section:\n  x: 0\n`;
   assert.deepEqual(validateProfile('brand_new_section:\n  x: 1\n', widened).findings, []);
   assert.ok(knownKeysFromExample(widened).includes('brand_new_section'));
+});
+
+test('a section the example ships commented out is known, not "no effect"', () => {
+  // style (#1837) and page_format (#4405) are documented only as commented-out
+  // blocks, and theme-style.mjs / lib/page-format.mjs read them. Deriving keys
+  // from the parsed example alone told a user who set them that the setting had
+  // no effect. scan is the same case: the example shows `# scan:`.
+  const profile = [
+    'candidate:', '  full_name: X',
+    'page_format: a4',
+    'style:', '  accent_color: "#2563eb"',
+    'scan:', '  extractor: cli',
+    '',
+  ].join('\n');
+  assert.deepEqual(validateProfile(profile, EXAMPLE).findings, []);
+});
+
+test('prose comments and keys nested in a commented block are not top-level keys', () => {
+  // Lines taken from the shipped example. A looser rule (`#`, any spaces, then
+  // `word:`) also matches every nested key there, so a misplaced top-level
+  // `margin:`, which theme-style.mjs never reads, would pass as known.
+  const example = [
+    'candidate:',
+    '  full_name: x',
+    '  # title: "Senior Backend Engineer"',
+    '# Controls which model tier evaluates your offers. Valid values:',
+    '# Default (key absent OR commented out): 3.0',
+    '# greeting_max_chars is the hard character budget for that message. Default when',
+    '# style:',
+    '#   accent_color:    "#2563eb"           # section headings, competency tags, project badges',
+    '#   margin:          "0.5in"             # page margin (@page)',
+    '',
+  ].join('\n');
+  assert.deepEqual(knownKeysFromExample(example), ['candidate', 'style']);
+  const { findings } = validateProfile('margin: "0.5in"\n', example);
+  assert.equal(findings.find((f) => f.code === 'unknown-key')?.key, 'margin');
+});
+
+test('a misspelled commented-out section still gets its suggestion', () => {
+  const { findings } = validateProfile('styel:\n  accent_color: "#2563eb"\npage_fromat: a4\n', EXAMPLE);
+  const unknown = findings.filter((f) => f.code === 'unknown-key');
+  assert.equal(unknown.length, 2, `expected both typos: ${JSON.stringify(findings)}`);
+  assert.equal(unknown.find((f) => f.key === 'styel')?.suggestion, 'style');
+  assert.equal(unknown.find((f) => f.key === 'page_fromat')?.suggestion, 'page_format');
 });
 
 test('empty, comment-only and absent profiles are not errors', () => {
@@ -112,7 +156,10 @@ test('a clean profile adds no doctor noise', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-profile-clean-'));
   try {
     mkdirSync(join(dir, 'config'), { recursive: true });
-    writeFileSync(join(dir, 'config', 'profile.yml'), 'language:\n  output: ja\n');
+    // page_format and style are documented as commented-out sections, so a
+    // profile that sets them is as clean as one that does not.
+    writeFileSync(join(dir, 'config', 'profile.yml'),
+      'language:\n  output: ja\npage_format: a4\nstyle:\n  accent_color: "#2563eb"\n');
     const r = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--target', dir], {
       cwd: dir, encoding: 'utf-8', timeout: 60_000,
       env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' },
