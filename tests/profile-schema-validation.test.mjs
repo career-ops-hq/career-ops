@@ -49,7 +49,7 @@ test('the real shipped example validates clean against itself', () => {
 });
 
 test('keys the code reads but the example omits are not called unknown', () => {
-  // rejection_latency, table_freshness and scan have real readers. Warning on
+  // rejection_latency and table_freshness have real readers. Warning on
   // them would flag a correct profile — the failure mode that makes a validator
   // something users learn to ignore.
   for (const key of Object.keys(UNDOCUMENTED_KEYS)) {
@@ -74,6 +74,45 @@ test('the known-key set is derived from the example, not hardcoded here', () => 
   const widened = `${EXAMPLE}\nbrand_new_section:\n  x: 0\n`;
   assert.deepEqual(validateProfile('brand_new_section:\n  x: 1\n', widened).findings, []);
   assert.ok(knownKeysFromExample(widened).includes('brand_new_section'));
+});
+
+test('opt-in keys the example ships commented out are not called unknown (#4736)', () => {
+  // Every optional section in the example is a commented-out block, and the
+  // YAML parser drops comments. "Validates clean against itself" above passes
+  // only because those blocks stay commented; a user who enables one exactly as
+  // shown was told the setting "has no effect" while it was in fact being read.
+  // These two have readers in modes/pipeline.md and modes/_shared.md.
+  for (const key of ['auto_pdf_score_threshold', 'culture_screen', 'page_format', 'style', 'scan']) {
+    assert.match(EXAMPLE, new RegExp(`^# ?${key}:`, 'm'), `${key} is no longer a commented block in the example`);
+    const { findings } = validateProfile(`${key}: 1\n`, EXAMPLE);
+    assert.deepEqual(findings, [], `${key} was reported: ${JSON.stringify(findings)}`);
+  }
+});
+
+test('the shipped example with every opt-in block uncommented still validates clean', () => {
+  // The strongest form of the self-validation guard: un-comment each column-0
+  // `# key:` block (and its indented `#   ...` body) and re-validate.
+  const lines = EXAMPLE.split('\n');
+  const out = [];
+  let inBlock = false;
+  for (const line of lines) {
+    if (/^# ?[a-z_][a-z0-9_]*:(\s|$)/.test(line)) { out.push(line.replace(/^# ?/, '')); inBlock = true; continue; }
+    if (inBlock && /^#\s{2,}\S/.test(line)) { out.push(line.replace(/^# ?/, '')); continue; }
+    inBlock = false;
+    out.push(line);
+  }
+  const uncommented = out.join('\n');
+  assert.notEqual(uncommented, EXAMPLE, 'the example no longer has commented opt-in blocks to exercise');
+  // All findings, not just unknown-key: an uncommented example that stopped
+  // parsing would otherwise pass this test vacuously.
+  const { findings } = validateProfile(uncommented, EXAMPLE);
+  assert.deepEqual(findings, [], `the uncommented example produced findings: ${JSON.stringify(findings)}`);
+});
+
+test('commented prose and nested commented keys are not mistaken for top-level keys', () => {
+  const example = 'candidate:\n  full_name: x\n# Optional. Note: this is prose\n#   nested_only: 1\n#e.g.: nope\n';
+  const keys = knownKeysFromExample(example);
+  assert.deepEqual(keys.sort(), ['candidate'], `unexpected keys: ${keys}`);
 });
 
 test('empty, comment-only and absent profiles are not errors', () => {

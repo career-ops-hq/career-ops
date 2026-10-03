@@ -62,14 +62,32 @@ export const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE
 export const UNDOCUMENTED_KEYS = {
   rejection_latency: 'rejection-latency.mjs (courtesy_days)',
   table_freshness: 'check-table-freshness.mjs (max_age_months)',
-  scan: 'browser-extract.mjs / doctor.mjs (extractor)',
 };
+
+/**
+ * A top-level key the example documents as a commented-out opt-in block:
+ * `# culture_screen:` or `# auto_pdf_score_threshold: 4.0` at column 0.
+ *
+ * Every optional section in the example is shipped this way, and a YAML parser
+ * drops comments, so parsing alone sees none of them — enabling one exactly as
+ * the example shows was then reported as "unknown ... has no effect" (#4736).
+ * At most one space after `#` and a lowercase snake_case name, so nested
+ * commented keys (`#   accent_color:`) and prose (`# Optional. Note: ...`) do
+ * not match.
+ */
+const COMMENTED_KEY_RE = /^#\s?([a-z_][a-z0-9_]*):(?:\s|$)/;
 
 /** Top-level keys from the shipped example — the documented schema. */
 export function knownKeysFromExample(exampleText) {
-  const doc = yaml.load(String(exampleText ?? '')) || {};
+  const text = String(exampleText ?? '');
+  const doc = yaml.load(text) || {};
   if (typeof doc !== 'object' || Array.isArray(doc)) return [];
-  return Object.keys(doc);
+  const keys = new Set(Object.keys(doc));
+  for (const line of text.split('\n')) {
+    const m = line.match(COMMENTED_KEY_RE);
+    if (m) keys.add(m[1]);
+  }
+  return [...keys];
 }
 
 /**
@@ -205,6 +223,11 @@ function runSelfTest() {
   // here with no edit to this file.
   const widened = validateProfile('brand_new_section:\n  x: 1\n', `${EXAMPLE}brand_new_section:\n  x: 0\n`);
   check(widened.findings.length === 0, 'a key added to the example is understood without editing this file');
+
+  // Opt-in blocks ship commented out; the parser drops them, so they are read
+  // from the comment lines (#4736).
+  const optIn = validateProfile('culture_screen:\n  require: []\n', `${EXAMPLE}# culture_screen:\n#   require: []\n`);
+  check(optIn.findings.length === 0, 'a commented-out opt-in key in the example is understood');
 
   console.log(`\n  validate-profile self-test: ${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);
