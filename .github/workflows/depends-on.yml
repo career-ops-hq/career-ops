@@ -1,0 +1,55 @@
+name: Depends on
+
+# Required check that fails while a PR listed under a `Depends on` heading is still open (#3880).
+# Ordering used to live in a reviewer's memory: #3528 merged while #3513, which it describes as
+# landed, was still open, so the guide documented helpers that were not on main.
+#
+# Permissions are read-only by necessity, not by preference. A `pull_request` workflow from a fork
+# gets a read-only token whatever this block says, and 281 of the repo's 294 open PRs come from
+# forks. Writing a status onto a dependent PR's head is therefore unavailable exactly where it
+# would be needed. The check clears on the dependent PR's next push or edit, which in practice is
+# the rebase onto the landed dependency.
+#
+# merge_group: the script re-reads the number from the queue head_ref and re-checks the body, so an
+# edit made after queueing still blocks. Unreadable number passes.
+# Never checks out the PR's code: it reads .github/scripts from the base branch only.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions:
+  pull-requests: read
+  contents: read
+
+concurrency:
+  group: depends-on-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  depends-on:
+    name: depends-on
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # On pull_request the default checkout is the merge commit carrying fork code. Force main.
+          ref: main
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      # The checkout is `main`, so on the PR that introduces this check the script is
+      # not there yet. Missing means pass, which is also the right failure mode later:
+      # a check whose implementation went missing should not block every PR in the repo.
+      - name: depends-on
+        run: |
+          if [ ! -f .github/scripts/depends-on.mjs ]; then
+            echo "depends-on.mjs is not on main yet. Passing."
+            exit 0
+          fi
+          node .github/scripts/depends-on.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
