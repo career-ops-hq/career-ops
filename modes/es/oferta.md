@@ -301,6 +301,26 @@ Ejecutar `node company-history.mjs --company <empresa>` pasando el nombre como a
 
 ---
 
+## Veredicto (lead)
+
+Escribir un bloque `## Veredicto (lead)` justo después del Bloque G y antes de `## Risk Summary`. Responde a la única pregunta con la que el lector abrió el report: ¿me presento?
+
+**Derivado, nunca originador.** `final_decision` en `## Machine Summary` es la fuente de verdad. Este bloque repite esa misma decisión en una frase humana y nunca introduce otra distinta: si la frase y el campo discrepan, manda el campo y la frase es el defecto. La decisión en negrita es el valor de ese campo: Apply, Consider, Research first o Skip.
+
+**La marca `(lead)` es funcional, e invariante entre idiomas a propósito.** La vista web del report promueve a destacado de cabecera el bloque que lleva la marca, y lo identifica por la marca, no por la palabra del encabezado ni por la letra del bloque. Cada traducción conserva su propio sustantivo y el mismo paréntesis: `## Veredicto (lead)`, `## Verdict (lead)`. Nunca traducir `(lead)`, y nunca asignar letra a este bloque: queda fuera de la secuencia A–H.
+
+**Sin juicio nuevo.** Cuando se escribe este bloque ya están todas las entradas. Dar la decisión más un motivo tomado de lo que el report ya estableció. No repuntuar, no añadir evidencia.
+
+Formato del bloque:
+
+```markdown
+## Veredicto (lead)
+
+**Apply.** Match alto en el eje central del rol, sin bloqueos duros, y el Bloque G devolvió High Confidence.
+```
+
+---
+
 ## Risk Summary (después del Bloque G)
 
 Cerrar el report con un bloque `## Risk Summary` después del Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
@@ -390,6 +410,9 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 
 ## G) Legitimidad de la publicación
 (contenido completo del bloque G)
+
+## Veredicto (lead)
+(la decisión de presentarse o no, en una frase — repite `final_decision`, ver la sección Veredicto arriba)
 
 ## Risk Summary
 (una fila por señal de riesgo, orden fijo — ver la sección Risk Summary arriba)
