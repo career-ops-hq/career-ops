@@ -192,6 +192,15 @@ const SYSTEM_PATHS = [
   'modes/upskill.md',
   'modes/intake.md',
   'documents/.gitkeep',
+  // Empty scaffolds are system-owned exceptions inside otherwise user-owned
+  // directories. Ship only these exact files; the data they sit beside stays
+  // in USER_PATHS and is never checked out by the updater.
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
   'documents/README.md',
   'modes/update.md',
   'modes/agent-inbox.md',
@@ -1230,7 +1239,11 @@ export function parsePorcelainStatus(status) {
 }
 
 export function gitStatusEntries(root = ROOT) {
-  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z'));
+  // Git collapses an untracked directory to a single entry by default. When
+  // apply() checks out a tracked scaffold there, the next snapshot expands it
+  // to the scaffold plus each user file. Comparing snapshots would report the
+  // unchanged user files as new updater output, so keep the granularity stable.
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z', '--untracked-files=all'));
 }
 
 export function extractArrayFromSource(source, name) {

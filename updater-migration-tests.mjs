@@ -561,6 +561,14 @@ const allowedSystemUserOverlap = new Set([
   // updater ships the scaffold, never the user's source documents.
   'documents/.gitkeep',
   'documents/README.md',
+  // Exact empty placeholders may ship inside user directories, while the
+  // updater continues to protect every other file below those paths (#4708).
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
 ]);
 let hasSystemUserCollision = false;
 for (const systemPath of systemPaths) {

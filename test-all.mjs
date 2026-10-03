@@ -620,6 +620,19 @@ try {
 
   mkdirSync(join(scriptTmp, 'data'), { recursive: true });
   mkdirSync(join(scriptTmp, 'reports'), { recursive: true });
+  // The throwaway copy excludes user data, but these exact empty scaffolds are
+  // system-owned updater files. Keep them in the fixture so the migration
+  // check can validate every SYSTEM_PATHS entry without copying user content.
+  mkdirSync(join(scriptTmp, 'data', 'offers'), { recursive: true });
+  mkdirSync(join(scriptTmp, 'data', 'parser-output'), { recursive: true });
+  for (const file of [
+    'data/.gitkeep',
+    'data/offers/.gitkeep',
+    'data/parser-output/.gitkeep',
+    'reports/.gitkeep',
+  ]) {
+    writeFileSync(join(scriptTmp, file), '', 'utf-8');
+  }
   writeFileSync(
     join(scriptTmp, 'data', 'applications.md'),
     '# Applications\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n',
