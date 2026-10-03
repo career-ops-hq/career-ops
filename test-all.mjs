@@ -13258,6 +13258,7 @@ try {
             ...process.env,
             CAREER_OPS_TRACKER: join(mergeTmp, 'data', 'applications.md'),
             CAREER_OPS_ADDITIONS: additionsDir,
+            CAREER_OPS_BATCH_STATE: join(mergeTmp, 'batch-state.tsv'),
             CAREER_OPS_TRACKER_LOCK: join(mergeTmp, 'career-ops-merge-tracker-fixture.lock'),
             CAREER_OPS_MERGE_HOLD_MS: String(holdMs),
             CAREER_OPS_MERGE_READY_IPC: '1',
