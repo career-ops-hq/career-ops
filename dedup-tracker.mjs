@@ -16,7 +16,8 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import {
-  openTrackerTransaction, rebuildRow, normalizeCompany,
+  openTrackerTransaction, rebuildRow, normalizeCompany, companiesMatchIgnoringCorporateForm,
+  MIN_STEM_CHARS,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -326,11 +327,42 @@ console.log(`📊 ${entries.length} entries loaded`);
 // Identical value at runtime, and the file stays greppable.
 // Pinned by tests/source-no-nul-bytes.test.mjs.
 const BLIND_KEY = '\u0000blind-via:';
+
+// Pre-filter bucket for the pair-wise company gate below. Rows that could name
+// one employer under a different corporate form ("Acme Widgets, APC" vs "Acme
+// Widgets") must land together so they are compared at all — normalizeCompany()
+// keeps the suffix, so keying groups on it split those pairs into two groups and
+// a duplicate re-scan survived every cleanup run (#4421 defect 4).
+// The key is the first MIN_STEM_CHARS characters of the normalized name, the
+// narrowest width that provably holds every pair sameCompany() accepts: the
+// corporate-form rule refuses a stem shorter than that, and an exact match
+// shares the whole string. A first-TOKEN key is too narrow — "Foo-Bar" and
+// "FooBar" are one employer under normalizeCompany() but tokenize to "foo" and
+// "foobar", so tokenizing split two rows that used to group and made them
+// unmergeable. Widening is free and narrowing is not: this key only decides
+// which pairs get compared, never whether they merge, so an over-wide bucket
+// costs a few extra comparisons while an over-narrow one leaves a duplicate
+// row in applications.md forever.
+function companyBucketKey(name) {
+  return normalizeCompany(name).slice(0, MIN_STEM_CHARS);
+}
+
+// True when two rows name the same employer: identical under normalizeCompany,
+// or one is the other with a corporate-form tail ("Acme Widgets" / "Acme
+// Widgets, APC"). companiesMatchIgnoringCorporateForm() is OR-ed with the
+// exact check because it returns false for two IDENTICAL names (equal token
+// length) — that is the exact tier's business. Deletion is still decided by
+// roleMatch + the status-rank guard; this only widens which pairs reach them.
+function sameCompany(a, b) {
+  return normalizeCompany(a) === normalizeCompany(b)
+    || companiesMatchIgnoringCorporateForm(a, b);
+}
+
 const groups = new Map();
 for (const entry of entries) {
   const key = String(entry.company).trim() === '?'
     ? BLIND_KEY + normalizeVia(entry.via || '')
-    : normalizeCompany(entry.company);
+    : companyBucketKey(entry.company);
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(entry);
 }
@@ -364,8 +396,20 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
-      if (roleMatch(companyEntries[i], companyEntries[j])
-          && (!isBlindGroup || withinBlindWindow(companyEntries[i].date, companyEntries[j].date))) {
+      // Named rows share a bucket, not an employer: gate the pair on the
+      // corporate-form-aware identity so suffix variants merge but two distinct
+      // employers sharing a prefix do not. The gate is against EVERY existing
+      // cluster member, not just the anchor, because corporate-form matching is
+      // not transitive: a bare "Acme" matches both "Acme Solutions" and "Acme
+      // Technologies", so anchor-only gating pulled all three into one cluster
+      // and deleted a real row even though the two tails never match each other.
+      // Requiring the whole cluster to agree leaves "Acme Technologies" in its
+      // own cluster, where it survives. Blind rows already share the Via bucket
+      // and are gated on the re-post window instead.
+      const companyOk = isBlindGroup
+        ? withinBlindWindow(companyEntries[i].date, companyEntries[j].date)
+        : cluster.every((m) => sameCompany(m.company, companyEntries[j].company));
+      if (companyOk && roleMatch(companyEntries[i], companyEntries[j])) {
         cluster.push(companyEntries[j]);
         processed.add(j);
       }
