@@ -107,8 +107,11 @@ for (const template of templates) {
         expect.soft(pdfLayout.clipped).toEqual([]);
         expect.soft(pdfLayout.orphanHeadings).toEqual([]);
         expect.soft(pdfLayout.missingText).toEqual([]);
+        const expectedPageCount = BASELINES[template.name]?.[fixture.id];
+        expect(expectedPageCount, `missing numeric page-count baseline for ${template.name}/${fixture.id}`)
+          .toEqual(expect.any(Number));
         expect.soft(pages.length, `review the exact page count in baselines.json for ${artifactBase}`)
-          .toBe(BASELINES[template.name]?.[fixture.id]);
+          .toBe(expectedPageCount);
         expect.soft(text).not.toMatch(/[□�\uFB00-\uFB06]/u);
         expect.soft(text.toLowerCase()).toContain(fixture.payload.candidate.name.toLowerCase());
         expect.soft(text).toContain(fixture.payload.candidate.email);
