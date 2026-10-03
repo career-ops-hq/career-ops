@@ -72,11 +72,13 @@ export function countOccurrences(term, text) {
 }
 
 /**
- * Conservative singular/plural variants of a term. Skips short tokens and
- * acronyms (length <= 3) because stripping or appending an "s" there yields
- * noisy, meaningless search tokens (aws -> aw, k8s -> k8, js -> j). For longer
- * terms it only ever ADDS a candidate form; boundary-aware counting keeps these
- * from creating false positives (the "kubernete" form never hits "kubernetes").
+ * Conservative singular/plural variants of a term. An "s" is never stripped
+ * from a token of three characters or fewer (aws -> aw, k8s -> k8, js -> j are
+ * meaningless), and one is appended only from three characters up: that is
+ * where the acronyms a CV pluralizes sit (llm -> llms, api -> apis, gpu ->
+ * gpus), while a two-letter "+s" is often another word (it -> its, hr -> hrs).
+ * It only ever ADDS a candidate form; boundary-aware counting keeps these from
+ * creating false positives (the "kubernete" form never hits "kubernetes").
  *
  * @param {string} term - Keyword or synonym.
  * @returns {string[]} Distinct candidate forms.
@@ -84,24 +86,26 @@ export function countOccurrences(term, text) {
 export function variantForms(term) {
   const t = normalizeText(term);
   const forms = new Set([t]);
-  if (t.length <= 3) return [...forms];
-  if (t.endsWith('s')) forms.add(t.slice(0, -1));
-  else forms.add(t + 's');
+  if (t.length < 3) return [...forms];
+  if (!t.endsWith('s')) forms.add(t + 's');
+  else if (t.length > 3) forms.add(t.slice(0, -1));
   return [...forms];
 }
 
 /**
  * All surface forms to search for a keyword: its own plural variants plus the
- * variants of every member of any synonym group it belongs to.
+ * variants of every member of any synonym group one of those forms belongs to,
+ * so `LLMs` reaches the group that `LLM` is in.
  *
  * @param {string} keyword - JD keyword.
  * @returns {string[]} Distinct surface forms.
  */
 export function expandTerms(keyword) {
   const k = normalizeText(keyword);
-  const terms = new Set(variantForms(k));
+  const forms = variantForms(k);
+  const terms = new Set(forms);
   for (const group of SYNONYMS) {
-    if (!group.includes(k)) continue;
+    if (!forms.some((form) => group.includes(form))) continue;
     for (const member of group) {
       if (member === k) continue;
       for (const v of variantForms(member)) terms.add(v);
