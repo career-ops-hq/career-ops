@@ -236,6 +236,21 @@ function checkTrackedBakFiles(root) {
 // up to date, so a fresh clone never reaches it and nothing else says why
 // /career-ops does nothing. Read-only on purpose (doctor must not write): it
 // names the stubs and the one command that materializes them.
+function quoteForShell(value) {
+  if (process.platform === 'win32') return `"${value}"`;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function materializeCommand(root) {
+  const url = pathToFileURL(join(root, 'scaffolder', 'bin', 'skill-entrypoints.mjs')).href;
+  // The script's own string quotes must differ from the shell's: double on
+  // Windows (cmd wraps -e in double quotes), single on POSIX would end the
+  // single-quoted -e, so use JSON's double quotes there.
+  const lit = process.platform === 'win32' ? `'${url}'` : JSON.stringify(url);
+  const script = `import(${lit}).then(m => console.log(m.materializeSkillEntrypoints(process.argv[1])))`;
+  return `node -e ${quoteForShell(script)} ${quoteForShell(root)}`;
+}
+
 function checkSkillEntrypoints(root) {
   const stubs = [];
   for (const entry of SKILL_ENTRYPOINTS) {
@@ -259,15 +274,18 @@ function checkSkillEntrypoints(root) {
     // warning is most likely for, one that is already up to date, where apply
     // returns before reaching ensureSkillEntrypoints. Both commands are built
     // from the root the check just inspected, so they act on that checkout from
-    // whatever directory the user pastes them into. The root is a separate
-    // argv word, not interpolated into the -e script, so a path with spaces or
-    // backslashes needs no escaping in sh, cmd or PowerShell.
+    // whatever directory the user pastes them into. The root is a separate argv
+    // word, never interpolated into the -e script. POSIX single-quotes
+    // everything, so a root holding $(...), $HOME or a backtick (--target takes
+    // any path) is not expanded when pasted into sh. Windows paths cannot hold
+    // a double quote, so double quotes are exact there and are the one form
+    // cmd and PowerShell both parse.
     fix: [
       ...stubs,
       'Repair them now, no update needed:',
-      `node -e "import('${pathToFileURL(join(root, 'scaffolder', 'bin', 'skill-entrypoints.mjs')).href}').then(m => console.log(m.materializeSkillEntrypoints(process.argv[1])))" "${root}"`,
+      materializeCommand(root),
       'Or update (this only repairs them when an update is actually applied):',
-      `node "${join(root, 'update-system.mjs')}" apply --confirm`,
+      `node ${quoteForShell(join(root, 'update-system.mjs'))} apply --confirm`,
     ],
   };
 }

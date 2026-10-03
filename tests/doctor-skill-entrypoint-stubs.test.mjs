@@ -58,7 +58,7 @@ function skillWarning(state) {
     } else {
       fail(`stub was not surfaced: ${JSON.stringify(state.warnings)}`);
     }
-    if (warning && /materializeSkillEntrypoints/.test(warning) && /update-system\.mjs"? apply/.test(warning)) {
+    if (warning && /materializeSkillEntrypoints/.test(warning) && /update-system\.mjs["']? apply/.test(warning)) {
       pass('the warning names both remedies');
     } else {
       fail(`remedy missing from warning: ${JSON.stringify(warning)}`);
@@ -86,7 +86,7 @@ function skillWarning(state) {
 // 1b. The printed materialize command works as pasted, from a different
 //     directory, against the checkout that was checked.
 {
-  const dir = mkdtempSync(join(tmpdir(), 'co-skill stub 1b-'));
+  const dir = mkdtempSync(join(tmpdir(), process.platform === 'win32' ? 'co-skill stub 1b-' : "co-skill $HOME $(echo pwned) 'q' 1b-"));
   const elsewhere = mkdtempSync(join(tmpdir(), 'co-skill-elsewhere-'));
   try {
     const canonical = '---\nname: career-ops\n---\nrouter body\n';
@@ -105,7 +105,7 @@ function skillWarning(state) {
         cwd: elsewhere, stdio: 'ignore',
       });
       if (readFileSync(stub, 'utf-8') === canonical) {
-        pass('the printed materialize command repairs the checked checkout from another directory (path with a space)');
+        pass('the printed materialize command repairs the checked checkout from another directory (path with a space, and on POSIX $HOME, $(...) and a quote, none expanded)');
       } else {
         fail(`stub still holds: ${JSON.stringify(readFileSync(stub, 'utf-8').slice(0, 60))}`);
       }
