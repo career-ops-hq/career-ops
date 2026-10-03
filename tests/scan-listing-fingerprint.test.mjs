@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
 import { computeListingFingerprint } from '../listing-fingerprint.mjs';
-import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities } from '../scan.mjs';
+import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl } from '../scan.mjs';
 
 console.log('\nscan.mjs — listing fingerprint participates in scan dedup');
 
@@ -116,6 +116,11 @@ try {
     if (verified.length === 1 && verified[0] === activeAlias) {
       pass('an active alias wins over a transiently uncertain alias regardless of fetch order');
     } else fail('a transiently uncertain alias took precedence over an active alias');
+
+    const migrated = migrateOfferToUrl({ ...first, listingKey: expectedKey }, 'https://boards.greenhouse.io/acme/jobs/5012345');
+    if (migrated.previousUrl === first.url && !('listingIdentity' in migrated) && !('listingKey' in migrated)) {
+      pass('rediscovered URLs do not inherit the source posting identity');
+    } else fail('a rediscovered URL inherited unresolved source identity fields');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

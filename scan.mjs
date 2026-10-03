@@ -2785,6 +2785,15 @@ export function retainVerifiedListingIdentities(offers, seenUrls, verificationSt
 }
 
 /**
+ * Move a verified posting to a rediscovered URL. The source URL's ATS identity
+ * cannot describe the target until its provider resolves that target explicitly.
+ */
+export function migrateOfferToUrl(offer, url) {
+  const { listingIdentity: _sourceIdentity, listingKey: _sourceKey, ...sourceFields } = offer;
+  return { ...sourceFields, url, previousUrl: offer.url };
+}
+
+/**
  * Parse scan-history.tsv rows that carry a fingerprint, for the cross-listing
  * check. Older rows without the 8th column simply never match. Takes the file
  * text ('' for an absent file), like its `collect*` siblings.
@@ -3370,7 +3379,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
             // 'uncertain' (timeout/DNS/5xx) must not commit an unverified URL —
             // fall through to expired (the original 404/410 is a real closure).
             if (recheck.result === 'active') {
-              const migratedOffer = { ...offer, url: newUrl, previousUrl: offer.url };
+              const migratedOffer = migrateOfferToUrl(offer, newUrl);
               migrated.push(migratedOffer);
               verificationStatusByOffer.set(migratedOffer, 'active');
               console.log(`  🔄 migrated  ${offer.company} | ${offer.title} → ${newUrl}`);
