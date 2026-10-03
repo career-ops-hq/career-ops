@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { SkillGaps } from "@/components/skill-gaps";
 import remarkGfm from "remark-gfm";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -92,6 +93,10 @@ export function CvEditor() {
           </article>
         </div>
       )}
+
+      {/* Below the editor: the gaps are context for what to write next, and they
+          belong after the document rather than competing with it. */}
+      <SkillGaps />
     </div>
   );
 }

@@ -79,6 +79,15 @@ const CALL_SITES = [
     probe: 'flags-only',
   },
   {
+    source: 'web/src/app/api/upskill/route.ts',
+    script: 'upskill.mjs',
+    // No flags: upskill.mjs prints JSON by default and rejects a --json flag,
+    // the same convention stats.mjs and company-history.mjs follow while the
+    // follow-up routes pass one. The empty argv is the assertion.
+    args: [],
+    probe: 'run',
+  },
+  {
     source: 'web/src/lib/core/pipeline.ts',
     script: null,
     args: [],
