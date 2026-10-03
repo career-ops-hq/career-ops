@@ -25,8 +25,11 @@ guidance for the GENERATE step.
   authorized to work in Singapore? Yes/No" with no sponsorship nuance,
   answer from the profile status and add the sponsorship need in a free-text
   field.
-- **Require sponsorship (now or in the future)?** Yes — plainly and always.
-  This is the field that decides EP feasibility; never soften it.
+- **Require sponsorship (now or in the future)?** Answer from the same
+  profile status, never from a default the profile contradicts:
+  `citizen` or `pr` → No. `pass-holder` → ask the candidate, because the
+  answer depends on the pass they hold. `foreign`, or a silent profile → Yes,
+  plainly: this is the field that decides EP feasibility; never soften it.
 - **Expected salary:** monthly base in SGD from `profile.yml`
   (e.g. "S$20,000/month base"). If the form asks annual, annualise explicitly:
   monthly x 12, and note AWS/variable separately. Never enter a US-annual
@@ -85,7 +88,7 @@ refresh it from `filled` to `submitted`.
 
 ## After applying (optional)
 
-If the candidate confirms submission:
-1. Update status to "Applied" with the canonical CLI: `node set-status.mjs <report#> Applied` (never hand-edit `applications.md`).
-2. Update the report's Block H with the answers actually submitted.
-3. Suggest next step: `/career-ops contacto` for hiring-manager outreach.
+If the candidate confirms submission, follow `modes/apply.md` → Step 9
+(Post-apply) as written: status via `set-status.mjs`, the follow-up seed via
+`followup-seed.mjs`, the `## Application Answers` refresh to `submitted`, and
+the `contacto` suggestion. Nothing Singapore-specific changes in that step.
