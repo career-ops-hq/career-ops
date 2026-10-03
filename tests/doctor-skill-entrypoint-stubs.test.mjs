@@ -8,9 +8,10 @@
 // CLI just loads an empty skill. This pins the doctor check that says so.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, symlinkSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
+import { pathToFileURL } from 'url';
 
 console.log('\ndoctor.mjs — skill entrypoint stubs');
 
@@ -57,10 +58,20 @@ function skillWarning(state) {
     } else {
       fail(`stub was not surfaced: ${JSON.stringify(state.warnings)}`);
     }
-    if (warning && /materializeSkillEntrypoints/.test(warning) && /update-system\.mjs apply/.test(warning)) {
+    if (warning && /materializeSkillEntrypoints/.test(warning) && /update-system\.mjs"? apply/.test(warning)) {
       pass('the warning names both remedies');
     } else {
       fail(`remedy missing from warning: ${JSON.stringify(warning)}`);
+    }
+    if (warning && warning.indexOf('materializeSkillEntrypoints') < warning.indexOf('update-system.mjs')) {
+      pass('direct materialization is listed before apply, which no-ops on an up-to-date clone');
+    } else {
+      fail(`apply listed before materialization: ${JSON.stringify(warning)}`);
+    }
+    if (warning && warning.includes(join(dir, 'update-system.mjs')) && warning.includes(pathToFileURL(join(dir, 'scaffolder', 'bin', 'skill-entrypoints.mjs')).href)) {
+      pass('both commands are built from the checked root, not the current directory');
+    } else {
+      fail(`remedy commands are not rooted at the checked checkout: ${JSON.stringify(warning)}`);
     }
     if (readFileSync(stub, 'utf-8') === POINTER) {
       pass('doctor stays read-only: the stub is left untouched');
@@ -69,6 +80,39 @@ function skillWarning(state) {
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// 1b. The printed materialize command works as pasted, from a different
+//     directory, against the checkout that was checked.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'co-skill stub 1b-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'co-skill-elsewhere-'));
+  try {
+    const canonical = '---\nname: career-ops\n---\nrouter body\n';
+    put(dir, '.agents/skills/career-ops/SKILL.md', canonical);
+    const mod = join(dir, 'scaffolder', 'bin', 'skill-entrypoints.mjs');
+    mkdirSync(dirname(mod), { recursive: true });
+    copyFileSync(join(ROOT, 'scaffolder', 'bin', 'skill-entrypoints.mjs'), mod);
+    const stub = put(dir, CLAUDE, POINTER);
+    const state = runDoctor(dir);
+    const warning = state._error ? null : skillWarning(state);
+    const cmd = warning && warning.split('\n').map((l) => l.replace(/^\s*→\s*/, '').trim()).find((l) => l.startsWith('node -e'));
+    if (!cmd) {
+      fail(`no materialize command in warning: ${JSON.stringify(warning)}`);
+    } else {
+      execFileSync(process.platform === 'win32' ? 'cmd' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
+        cwd: elsewhere, stdio: 'ignore',
+      });
+      if (readFileSync(stub, 'utf-8') === canonical) {
+        pass('the printed materialize command repairs the checked checkout from another directory (path with a space)');
+      } else {
+        fail(`stub still holds: ${JSON.stringify(readFileSync(stub, 'utf-8').slice(0, 60))}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
   }
 }
 

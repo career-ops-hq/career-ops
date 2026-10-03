@@ -9,7 +9,7 @@ import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync,
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
@@ -255,10 +255,19 @@ function checkSkillEntrypoints(root) {
   return {
     warn: true,
     label: `${stubs.length} CLI skill entrypoint${stubs.length === 1 ? ' is' : 's are'} a symlink-target stub, not the skill — this checkout has no symlink support, so that CLI loads an empty /career-ops`,
+    // Materializing first: it is the repair that works on the clone this
+    // warning is most likely for, one that is already up to date, where apply
+    // returns before reaching ensureSkillEntrypoints. Both commands are built
+    // from the root the check just inspected, so they act on that checkout from
+    // whatever directory the user pastes them into. The root is a separate
+    // argv word, not interpolated into the -e script, so a path with spaces or
+    // backslashes needs no escaping in sh, cmd or PowerShell.
     fix: [
       ...stubs,
-      'node update-system.mjs apply --confirm   # or, without updating:',
-      `node -e "import('./scaffolder/bin/skill-entrypoints.mjs').then(m => console.log(m.materializeSkillEntrypoints(process.cwd())))"`,
+      'Repair them now, no update needed:',
+      `node -e "import('${pathToFileURL(join(root, 'scaffolder', 'bin', 'skill-entrypoints.mjs')).href}').then(m => console.log(m.materializeSkillEntrypoints(process.argv[1])))" "${root}"`,
+      'Or update (this only repairs them when an update is actually applied):',
+      `node "${join(root, 'update-system.mjs')}" apply --confirm`,
     ],
   };
 }
