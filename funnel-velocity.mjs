@@ -665,7 +665,7 @@ function selfTest() {
   check(led.calibration.basis === 'ledger', 'ledger-funnel: log present → ledger basis');
   check(led.calibration.everApplied === 25, `ledger-funnel: everApplied still 25, got ${led.calibration.everApplied}`);
   check(led.calibration.interviewRate.ownPct === 8, `ledger-funnel: 2/25 reached Interview → 8%, got ${led.calibration.interviewRate.ownPct}`);
-  check(led.calibration.responseRate.ownPct === 12, `ledger-funnel: 3/25 reached Responded → 12%, got ${led.calibration.responseRate.ownPct}`);
+  check(led.calibration.responseRate.ownPct === 16, `ledger-funnel: 4/25 received a reply including rejection → 16%, got ${led.calibration.responseRate.ownPct}`);
   check(renderSummary(led, TODAY).includes('rates fold status-log history'), 'ledger-funnel: summary flags the folded basis');
   check(!renderSummary(snap, TODAY).includes('rates fold status-log history'), 'ledger-funnel: snapshot summary carries no fold note');
 

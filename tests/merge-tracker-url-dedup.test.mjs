@@ -1,9 +1,10 @@
 // tests/merge-tracker-url-dedup.test.mjs — URL-keyed deterministic dedup.
 //
-// Unit-tests normalizeUrl (pure), then drives the REAL merge-tracker.mjs CLI
-// end-to-end against a temp tracker via the CAREER_OPS_TRACKER /
-// CAREER_OPS_ADDITIONS env hooks — the merge path is where the bug lived, so
-// asserting on the resulting tracker rows is what actually proves the fix.
+// Drives the REAL merge-tracker.mjs CLI end-to-end against a temp tracker via
+// the CAREER_OPS_TRACKER / CAREER_OPS_ADDITIONS env hooks — the merge path is
+// where the bug lived, so asserting on the resulting tracker rows is what
+// actually proves the fix. normalizeUrl's own unit cases live in
+// tests/url-key.test.mjs.
 import { pass, fail } from './helpers.mjs';
 import assert from 'node:assert';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -11,58 +12,10 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { normalizeUrl } from '../url-key.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
-
-// ───────────────────────── normalizeUrl (unit) ─────────────────────────
-console.log('normalizeUrl()');
-ok('strips utm_* and gh_src, keeps gh_jid', () => {
-  const a = normalizeUrl('https://careers.airbnb.com/positions/8028783?gh_jid=8028783&utm_source=x&gh_src=abc');
-  assert.equal(a, 'https://careers.airbnb.com/positions/8028783?gh_jid=8028783');
-});
-ok('lowercases host, forces https, drops trailing slash + fragment', () => {
-  assert.equal(normalizeUrl('HTTP://Jobs.Lever.co/Stripe/123/#apply'), 'https://jobs.lever.co/Stripe/123');
-});
-ok('query order does not matter (sorted)', () => {
-  assert.equal(normalizeUrl('https://x.com/j?b=2&a=1'), normalizeUrl('https://x.com/j?a=1&b=2'));
-});
-ok('two genuinely different postings stay different', () => {
-  assert.notEqual(
-    normalizeUrl('https://job-boards.greenhouse.io/doordashusa/jobs/8027044'),
-    normalizeUrl('https://job-boards.greenhouse.io/doordashusa/jobs/8026972'));
-});
-ok('recognized hash-route job IDs stay distinct', () => {
-  assert.notEqual(
-    normalizeUrl('https://jobs.example.com/careers#/jobs/123'),
-    normalizeUrl('https://jobs.example.com/careers#/jobs/456'));
-});
-ok('pre-existing internal fragment key is preserved beside promoted hash job ID', () => {
-  assert.equal(
-    normalizeUrl('https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id'),
-    'https://jobs.example.com/careers?_career_ops_fragment_job_id=hash-id&_career_ops_fragment_job_id=query-id');
-});
-ok('cosmetic fragments still collapse onto the fragment-free key', () => {
-  assert.equal(
-    normalizeUrl('https://jobs.example.com/careers#apply'),
-    normalizeUrl('https://jobs.example.com/careers'));
-});
-ok('idempotent', () => {
-  const once = normalizeUrl('https://X.com/a/?utm_source=y');
-  assert.equal(once, normalizeUrl(once));
-});
-ok('anything that is not an http(s) posting yields NO key', () => {
-  assert.equal(normalizeUrl(''), '');
-  assert.equal(normalizeUrl(null), '');
-  // Non-http references and placeholders must not become comparable values.
-  // The earlier lowercased-string fallback gave every one of these a key, so
-  // two unrelated employers whose report said "N/A" matched each other.
-  for (const v of ['local:jds/foo.md', 'N/A', 'n/a', 'TBD', '—', '-', 'none', 'see email']) {
-    assert.equal(normalizeUrl(v), '', `${JSON.stringify(v)} must yield no key`);
-  }
-});
 
 // ───────────────────────── merge-tracker (integration) ─────────────────────────
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |';
@@ -86,10 +39,21 @@ function addTsv(env, name, cols) {
   writeFileSync(join(env.addDir, name), cols.join('\t'));
 }
 function runMerge(env, args = []) {
-  return execFileSync('node', [MERGE, ...args], {
-    encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir },
-  });
+  // Pin the data root to the fixture and drop every other CAREER_OPS_* override,
+  // the way merge-tracker-cli-roots.test.mjs does. Spreading process.env alone
+  // let CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR, CAREER_OPS_BATCH_STATE and
+  // CAREER_OPS_CODE_ROOT through from whoever ran the suite, so a developer's
+  // real batch-state could decide whether a fixture row merged.
+  const childEnv = {
+    ...process.env,
+    CAREER_OPS_ROOT: env.base,
+    CAREER_OPS_TRACKER: env.tracker,
+    CAREER_OPS_ADDITIONS: env.addDir,
+  };
+  delete childEnv.CAREER_OPS_DATA_DIR;
+  delete childEnv.CAREER_OPS_BATCH_STATE;
+  delete childEnv.CAREER_OPS_CODE_ROOT;
+  return execFileSync('node', [MERGE, ...args], { encoding: 'utf-8', env: childEnv });
 }
 function trackerRows(env) {
   // Exclude the markdown separator PRECISELY (not any `---`) so rows whose URL
@@ -366,6 +330,150 @@ ok('--backfill-urls resolves a ROOT-relative reports/ link (the P0 regression)',
   } finally { cleanup(env); }
 });
 
+// ─────────────── aggregator URLs are not requisition identities ───────────────
+//
+// The four cases below are one controlled contrast: same company, same role
+// title, different row and report numbers, so the fuzzy company+role tier is
+// the ONLY tier that can fire and the URL pair is the single variable. An
+// aggregator re-lists a requisition the employer hosts elsewhere, so a mismatch
+// involving one says nothing about whether the rows are the same opening.
+function mergeTwoWithUrls(existingUrl, additionUrl, existingStatus = 'Evaluated') {
+  const env = makeEnv();
+  try {
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | ${existingStatus} | ❌ | [1](reports/1-acme.md) | n |${existingUrl ? ` ${existingUrl} ` : '  '}|`,
+    ]);
+    const cols = ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌', '[2](reports/2-acme.md)', 'n'];
+    if (additionUrl) cols.push(additionUrl);
+    addTsv(env, '2-acme.tsv', cols);
+    runMerge(env);
+    return trackerRows(env);
+  } finally { cleanup(env); }
+}
+
+// A merge is not a row count. `rows.length === 1` alone is satisfied just as
+// well by merge-tracker SKIPPING the addition outright — the one surviving row
+// is then the ORIGINAL, and the case passes while asserting nothing about the
+// behaviour it exists to pin. The addition's own score and report link are what
+// only a real merge can produce, so assert those too. Cells are read by index
+// rather than searched for in the row: `2-acme.md` sitting in the Notes cell
+// would satisfy a row-wide match and mean nothing.
+function assertMerged(rows, why) {
+  assert.equal(rows.length, 1, `${why}: expected the row to be UPDATED, got ${rows.length} rows (duplicate)`);
+  const cells = rows[0].split('|').map(s => s.trim());
+  assert.equal(cells[5], '4.1/5',
+    `${why}: merged row must carry the ADDITION's score 4.1/5, not the original's 4.0/5 — a skipped addition also leaves exactly one row`);
+  // Substring, not equality: merge-tracker rewrites the link relative to the
+  // tracker's own directory, so this reads `[2](../reports/2-acme.md)` here.
+  assert.ok(cells[8].includes('2-acme.md'),
+    `${why}: merged row must carry the addition's report link 2-acme.md, got ${cells[8]}`);
+}
+
+ok('aggregator vs aggregator: one requisition, two boards, stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.indeed.com/viewjob?jk=abc123');
+  assertMerged(rows, 'one requisition re-listed on two aggregator boards');
+});
+
+ok('aggregator vs employer board: same requisition, stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://boards.greenhouse.io/acme/jobs/7001');
+  assertMerged(rows, 'aggregator vs employer board, same requisition');
+});
+
+// The domains list is only as good as its coverage of the boards this repo
+// actually scans. It named thirteen hosts that no provider emits, so every row
+// arriving through scan then pipeline then evaluate still hit #3652. These two
+// pin the scanner's own multi-employer boards, keyed on hosts that
+// providers/remoteok.mjs, providers/himalayas.mjs and providers/remotive.mjs
+// really produce.
+ok('scanner board vs scanner board: one requisition on two of our own boards stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://remoteok.com/remote-jobs/4001',
+    'https://himalayas.app/jobs/acme-director-of-marketing');
+  assertMerged(rows, 'one requisition re-listed on two boards this repo scans');
+});
+
+ok('scanner board vs employer board: same requisition, stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://remotive.com/remote-jobs/marketing/director-of-marketing-4001',
+    'https://boards.greenhouse.io/acme/jobs/7001');
+  assertMerged(rows, 'scanner board vs employer board, same requisition');
+});
+
+ok('REGRESSION: two employer-board URLs are still proof of two distinct openings', () => {
+  const rows = mergeTwoWithUrls(
+    'https://boards.greenhouse.io/acme/jobs/7001',
+    'https://boards.greenhouse.io/acme/jobs/7002');
+  assert.equal(rows.length, 2, 'employer-controlled URLs still block the fuzzy tier');
+});
+
+ok('UNCHANGED: an addition with no URL cannot claim a row whose posting is known', () => {
+  const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', '');
+  assert.equal(rows.length, 2, 'an absent key stays UNKNOWN, so the unkeyed addition inserts');
+});
+
+// ─────────────── …but the POSTING ID on one aggregator still is ───────────────
+//
+// "Aggregator on either side → unknown" was too coarse. Two DIFFERENT job IDs
+// on the SAME aggregator are not two spellings of one requisition: they are two
+// requisitions, and folding them rewrites an Applied row's URL to a posting the
+// user never applied to and orphans the report it was applied from — the silent,
+// unrecoverable direction merge-tracker exists to avoid. So the evidence is the
+// extracted posting ID, not the host: same ID (or none extractable) stays
+// UNKNOWN and the fuzzy tier decides, preserving #3652.
+
+ok('THE OVER-MERGE: two different LinkedIn job IDs stay TWO rows, Applied row intact', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/view/4002', 'Applied');
+  assert.equal(rows.length, 2, 'two job IDs on one aggregator are two requisitions');
+  const applied = rows.find(r => urlCell(r) === 'https://www.linkedin.com/jobs/view/4001');
+  assert.ok(applied, 'the posting actually applied to keeps its own URL');
+  assert.ok(applied.includes('Applied'), 'its status is untouched');
+  assert.ok(applied.includes('1-acme.md'), 'its report is not orphaned');
+});
+
+ok('different IDs across the /jobs/view and ?currentJobId= shapes stay TWO rows', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/search/?currentJobId=4002&keywords=marketing');
+  assert.equal(rows.length, 2, 'the id is the evidence, not the URL shape it arrived in');
+});
+
+ok('slug-vs-id spellings of ONE LinkedIn posting still collapse to ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://www.linkedin.com/jobs/view/4001',
+    'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4001');
+  assertMerged(rows, 'same posting id → not evidence → fuzzy tier decides');
+});
+
+ok('uk. vs www. host variants of ONE Indeed posting still collapse to ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://uk.indeed.com/viewjob?jk=abc123',
+    'https://www.indeed.com/viewjob?jk=abc123');
+  assertMerged(rows, 'same posting id across regional hosts');
+});
+
+ok('KNOWN LIMITATION: an unmapped aggregator id shape over-merges two requisitions', () => {
+  // This pins today's behaviour; it does not endorse it. JV_1 and JV_2 are two
+  // DIFFERENT listings, and with no extractable id they fold into ONE row — the
+  // over-merge direction, which loses the second posting. It is accepted here
+  // only because the alternative available today is a guessed regex, whose own
+  // failure mode is splitting one posting into two rows: the outcome the
+  // cross-host gate was rejected for. url-key.mjs extracts only ids it can
+  // point at a verified shape for, so the fix is a verified Glassdoor shape,
+  // and the workaround meanwhile is the req-id-in-notes rule (#1524). Pinned so
+  // that adding that shape is a deliberate change with a failing test behind it
+  // rather than a silent behavioural flip.
+  const rows = mergeTwoWithUrls(
+    'https://www.glassdoor.com/job-listing/director-of-marketing-acme-JV_1.htm',
+    'https://www.glassdoor.com/job-listing/director-of-marketing-acme-JV_2.htm');
+  assertMerged(rows, 'no id rule for this board yet → fuzzy tier still decides');
+});
+
 ok('row with `---` in its URL (Workday slug) stays visible to dedup', () => {
   const env = makeEnv();
   try {
@@ -381,4 +489,40 @@ ok('row with `---` in its URL (Workday slug) stays visible to dedup', () => {
     assert.equal(rows.length, 1, 'updated in place, not duplicated, despite --- in the URL');
     assert.ok(rows[0].includes('4.0/5'), 'the row was found and LWW-updated');
   } finally { cleanup(env); }
+});
+
+// runMerge spreads process.env and overrides only CAREER_OPS_TRACKER and
+// CAREER_OPS_ADDITIONS, so CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR,
+// CAREER_OPS_BATCH_STATE and CAREER_OPS_CODE_ROOT leak in from whatever shell
+// runs the suite. merge-tracker.mjs:68 says CAREER_OPS_BATCH_STATE exists "used
+// by tests", and this suite was the one not using it.
+//
+// The leak is observable because a batch-state row marked `failed` for a report
+// number blocks that TSV from merging at all, by design: the worker's JSON
+// status is the authority on whether an offer was really read. So an inherited
+// batch-state can make a correct merge fail, for a reason nothing in the
+// fixture explains.
+ok('the merge ignores a batch-state inherited from the environment', () => {
+  const env = makeEnv();
+  const canary = join(env.base, '..', `leaked-batch-state-${process.pid}.tsv`);
+  const saved = process.env.CAREER_OPS_BATCH_STATE;
+  try {
+    // Six columns, status 'failed' at index 2 and the report number at index 5,
+    // which is the shape loadFailedReportNumbers() reads.
+    writeFileSync(canary, ['id\tx\tstatus\tx\tx\treport', 'w1\t-\tfailed\t-\t-\t7'].join('\n'));
+    process.env.CAREER_OPS_BATCH_STATE = canary;
+
+    writeTracker(env, []);
+    addTsv(env, '7-acme.tsv', ['7', '2026-06-25', 'Acme', 'Head of Marketing', 'Evaluated', '4.0/5', '❌',
+      '[7](reports/7-acme-2026-06-25.md)', 'n', 'https://boards.greenhouse.io/acme/jobs/7']);
+    runMerge(env);
+
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, 'the row merged, so the inherited batch-state was not consulted');
+  } finally {
+    if (saved === undefined) delete process.env.CAREER_OPS_BATCH_STATE;
+    else process.env.CAREER_OPS_BATCH_STATE = saved;
+    rmSync(canary, { force: true });
+    cleanup(env);
+  }
 });
