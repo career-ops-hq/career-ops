@@ -592,6 +592,7 @@ Possible JSON responses:
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
 | `offline` | Could not reach GitHub |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release |
+| `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
 
@@ -632,6 +633,8 @@ Applies the upstream update. Creates a timestamped backup branch (`backup-pre-up
 ```bash
 npm run update
 ```
+
+**From a linked git worktree** (the default session layout of agents such as Claude Code), `check`, `update`, `rollback` and `dismiss` re-run themselves in the checkout that has `main` checked out, so the update is committed to `main` rather than the worktree's throwaway branch. Afterwards, `git merge main` inside the worktree picks it up. If no checkout has `main`, or that checkout has uncommitted changes to tracked files, `update` and `rollback` refuse without changing anything. Set `CAREER_OPS_UPDATE_IN_WORKTREE=1` to update the worktree's own branch instead.
 
 **Exit codes:** `0` success, `1` lock conflict or safety violation.
 
