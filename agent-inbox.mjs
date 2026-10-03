@@ -147,8 +147,17 @@ function opt(name, def = '') {
   return v && !v.startsWith('--') ? v : def;
 }
 
-function hasOpt(name) {
-  return process.argv.includes('--' + name);
+// Every value given for a repeatable flag, in argv order. An occurrence with no
+// value yields '' rather than being dropped, so the caller can reject it:
+// opt() reads only the first occurrence and would never see a later bare one.
+function optAll(name) {
+  const values = [];
+  process.argv.forEach((arg, i) => {
+    if (arg !== '--' + name) return;
+    const v = process.argv[i + 1];
+    values.push(v && !v.startsWith('--') ? v : '');
+  });
+  return values;
 }
 
 async function add() {
@@ -251,12 +260,14 @@ async function resolve() {
     if (target.done) return { error: `item #${n} is already resolved — refusing to overwrite it:\n  #${n}: ${target.text}` };
     // Optional caller-side guard: abort unless the target says what the caller
     // thinks it says. Catches "right command, wrong target" generally.
-    if (hasOpt('expect')) {
-      const expect = opt('expect');
-      if (!expect) return { error: '--expect needs a substring, e.g. --expect "Dana-Farber"' };
-      if (!target.text.toLowerCase().includes(expect.toLowerCase())) {
-        return { error: `item #${n} does not contain --expect ${JSON.stringify(expect)} — refusing to resolve:\n  #${n}: ${target.text}` };
-      }
+    // Every --expect given must hold, and every one must carry a value: a bare
+    // --expect anywhere on the line is a guard the caller meant to set and did
+    // not, so it fails instead of being skipped behind an earlier valid one.
+    const expects = optAll('expect');
+    if (expects.includes('')) return { error: '--expect needs a substring, e.g. --expect "Dana-Farber"' };
+    const missing = expects.find((expect) => !target.text.toLowerCase().includes(expect.toLowerCase()));
+    if (missing !== undefined) {
+      return { error: `item #${n} does not contain --expect ${JSON.stringify(missing)} — refusing to resolve:\n  #${n}: ${target.text}` };
     }
     const result = oneLine(opt('result'));
     const lines = readFileSync(PATH, 'utf8').split('\n');

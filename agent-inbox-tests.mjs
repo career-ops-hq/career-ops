@@ -32,7 +32,8 @@
  *      stamping results onto the wrong items.)
  *  11. Re-resolving an already-done item fails loudly instead of re-stamping.
  *  12. `--expect` aborts when the target doesn't contain the substring, and a
- *      valueless `--expect` fails rather than silently disabling the guard.
+ *      valueless `--expect` fails rather than silently disabling the guard —
+ *      every occurrence, not only the first.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
  * touches real user data.
@@ -646,6 +647,17 @@ console.log('12. --expect guards the target');
   const bare = runFail(inbox, ['resolve', '2', '--expect', '--result', 'oops']);
   check('valueless --expect exits 1 (guard never silently disabled)', bare.status === 1, `exit=${bare.status}`);
   check('still nothing written', !readFileSync(inbox, 'utf8').includes('oops'));
+
+  // opt() reads only the FIRST occurrence, so a valid --expect used to hide a
+  // bare one after it and the command resolved.
+  const trailing = runFail(inbox, ['resolve', '2', '--expect', 'Change.org', '--expect', '--result', 'oops']);
+  check('a bare --expect after a valid one still exits 1', trailing.status === 1, `exit=${trailing.status}`);
+  check('error names the missing substring', /--expect needs a substring/.test(trailing.stderr), trailing.stderr.trim());
+  const last = runFail(inbox, ['resolve', '2', '--result', 'oops', '--expect', 'Change.org', '--expect']);
+  check('a bare --expect at the end of the line exits 1', last.status === 1, `exit=${last.status}`);
+  const both = runFail(inbox, ['resolve', '2', '--expect', 'Change.org', '--expect', 'Dana-Farber', '--result', 'oops']);
+  check('every --expect must match, not just the first', both.status === 1 && /Dana-Farber/.test(both.stderr), both.stderr.trim());
+  check('nothing written by any rejected --expect', !readFileSync(inbox, 'utf8').includes('oops'));
 
   run(inbox, ['resolve', '2', '--expect', 'change.org', '--result', 'ok']);
   check('matching --expect (case-insensitive) resolves', /^- \[x\] .*Change\.org → result: ok$/m.test(readFileSync(inbox, 'utf8')));
