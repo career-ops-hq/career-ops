@@ -83,6 +83,12 @@ for (const template of templates) {
         const text = execFileSync('pdftotext', ['-layout', pdfPath, '-'], { encoding: 'utf8' });
         const xml = execFileSync('pdftotext', ['-bbox-layout', pdfPath, '-'], { encoding: 'utf8' });
         const pages = parsePdfLayout(xml);
+        for (const [index, pdfPage] of pages.entries()) {
+          expect.soft(Math.abs(pdfPage.width - 595.28), `page ${index + 1} width should be A4`)
+            .toBeLessThanOrEqual(1);
+          expect.soft(Math.abs(pdfPage.height - 841.89), `page ${index + 1} height should be A4`)
+            .toBeLessThanOrEqual(1);
+        }
         const pdfLayout = inspectPdfLayout(pages, geometry.headingPairs);
         writeFileSync(join(artifactDir, 'ats.txt'), text);
         writeFileSync(join(artifactDir, 'layout.json'), JSON.stringify({ template: template.name,

@@ -19,8 +19,10 @@
  *   suite. Always run the full suite (no flags) before pushing.
  *
  * NEW TESTS GO IN A FILE OF THEIR OWN, NOT IN A SECTION HERE.
- * Anything matching tests/**\/*.test.mjs is auto-discovered — no registration,
- * no section number. Provider tests are one case of this
+ * Node tests matching tests/**\/*.test.mjs are auto-discovered — no
+ * registration, no section number. The CV visual Playwright suite is the
+ * exception: its dedicated workflow discovers tests/cv-visual/cv-visual.test.mjs.
+ * Provider tests are one case of Node test auto-discovery
  * (tests/providers/{name}.test.mjs), not the only one.
  *
  * Why it matters beyond tidiness: a numbered section means editing the end of
@@ -124,7 +126,11 @@ function discoverTests(dir) {
       // a case that cannot arise here.
       if (isNestedCheckout(full)) continue;
       out.push(...discoverTests(full));
-    } else if (entry.name.endsWith('.test.mjs')) out.push(full);
+    } else if (entry.name.endsWith('.test.mjs')
+      // This is a Playwright suite, run by the dedicated CV visual job. It is
+      // named .test.mjs for the repository convention, but node --test cannot
+      // execute Playwright's test registration API.
+      && full !== join(TESTS_DIR, 'cv-visual', 'cv-visual.test.mjs')) out.push(full);
   }
   return out;
 }
