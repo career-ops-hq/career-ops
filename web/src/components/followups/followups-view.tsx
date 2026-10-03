@@ -7,6 +7,7 @@ import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { LogDialog } from "@/components/followups/log-dialog";
+import { QuietCompanies } from "@/components/followups/quiet-companies";
 import { NextDateDialog } from "@/components/followups/next-date-dialog";
 import { scoreTone } from "@/lib/format";
 import {
@@ -287,6 +288,10 @@ export function FollowupsView() {
           </table>
         </div>
       )}
+
+      {/* Below the due list: a follow-up you can still send outranks a company
+          that has already stopped replying. */}
+      <QuietCompanies />
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}

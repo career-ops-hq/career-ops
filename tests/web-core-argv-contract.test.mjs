@@ -79,6 +79,15 @@ const CALL_SITES = [
     probe: 'flags-only',
   },
   {
+    source: 'web/src/app/api/quiet-companies/route.ts',
+    script: 'rejection-latency.mjs',
+    // No flags: it prints JSON by default, like stats.mjs and upskill.mjs. With
+    // no data/active-interviews.md in the fixture it reports zero rows checked
+    // and still exits 0, which is the shape the route reads.
+    args: [],
+    probe: 'run',
+  },
+  {
     source: 'web/src/lib/core/pipeline.ts',
     script: null,
     args: [],
