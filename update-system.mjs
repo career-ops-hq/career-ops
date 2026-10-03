@@ -301,6 +301,7 @@ const SYSTEM_PATHS = [
   'i18n-drift.mjs',
   'verify-cv-facts.mjs',
   'verify-ats.mjs',
+  'ats-payload.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
   'ats-vendor.mjs',
