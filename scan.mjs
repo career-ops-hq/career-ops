@@ -1745,13 +1745,17 @@ function extractPipelineCompanyRole(line) {
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
-  const identityPromotableUrls = new Set();
+  const identityPromotableUrls = new Map();
   // Rows the age policy has released. Held rather than counted here: the two
   // sources parsed below carry no age policy of their own, so a row the TTL has
   // just freed can be re-pinned a few lines later. The count is taken at the end,
   // against the finished set, so it reports what is actually rescannable.
   const recheckCandidates = new Set();
   const recheckListingTokens = new Map();
+  const addIdentityPromotableUrl = (urlToken, listingKey = '') => {
+    if (!identityPromotableUrls.has(urlToken)) identityPromotableUrls.set(urlToken, new Set());
+    identityPromotableUrls.get(urlToken).add(listingKey || null);
+  };
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
@@ -1768,8 +1772,8 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       // Only an accepted posting row can teach this scan a strong identity.
       // URL-specific failures (for example blocked hosts) must not suppress a
       // different URL that happens to carry the same provider identity.
-      if (status === 'added') identityPromotableUrls.add(urlToken);
-      if (extraTokensFor && status === 'added') {
+      if (!PERMANENT_SCAN_HISTORY_STATUSES.has(status)) addIdentityPromotableUrl(urlToken, listingKey);
+      if (extraTokensFor && !PERMANENT_SCAN_HISTORY_STATUSES.has(status)) {
         for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
         }
@@ -1833,7 +1837,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     const listingToken = recheckListingTokens.get(key);
     if (listingToken) {
       seen.add(listingToken);
-      identityPromotableUrls.add(key);
+      addIdentityPromotableUrl(key, recheckListingTokens.get(key)?.slice('listing:'.length));
     }
   }
 
@@ -2721,20 +2725,40 @@ export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
   const urlToken = normalizeUrlForDedup(offer?.url);
   const identityToken = listingIdentityToken(offer);
   if (seenUrls.has(urlToken)) {
-    if (identityToken && identityPromotableUrls?.has(urlToken)) seenUrls.add(identityToken);
+    const historicalKeys = identityPromotableUrls?.get(urlToken);
+    const currentKey = identityToken?.slice('listing:'.length);
+    if (identityToken && historicalKeys
+        && (historicalKeys.has(null) || historicalKeys.has(currentKey))) seenUrls.add(identityToken);
     return true;
   }
   return Boolean(identityToken && seenUrls.has(identityToken));
 }
 
-export function markOfferSeen(offer, seenUrls) {
+export function markOfferSeen(offer, seenUrls, { includeIdentity = true } = {}) {
   const urlToken = normalizeUrlForDedup(offer?.url);
   const identityToken = listingIdentityToken(offer);
   seenUrls.add(urlToken);
-  if (identityToken) {
+  if (identityToken && includeIdentity) {
     offer.listingKey = identityToken.slice('listing:'.length);
     seenUrls.add(identityToken);
   }
+}
+
+/**
+ * Keep the first live offer for each strong ATS identity and add its token to
+ * the run's seen set. Call only with offers accepted by liveness verification.
+ */
+export function retainVerifiedListingIdentities(offers, seenUrls) {
+  const retained = new Set();
+  return offers.filter((offer) => {
+    const token = listingIdentityToken(offer);
+    if (!token) return true;
+    if (retained.has(token)) return false;
+    retained.add(token);
+    seenUrls.add(token);
+    offer.listingKey = token.slice('listing:'.length);
+    return true;
+  });
 }
 
 /**
@@ -3835,7 +3859,10 @@ async function main() {
         // same breath as the set it indexes, so a role first surfaced with a
         // city THIS run also suppresses a locationless twin later in the run —
         // not only across runs.
-        markOfferSeen(job, seenUrls);
+        // Verify mode can reject this URL as expired or invalid later. Pin the
+        // URL now for same-run URL dedup, but wait to pin its cross-URL identity
+        // until liveness verification accepts an offer.
+        markOfferSeen(job, seenUrls, { includeIdentity: !verify });
         if (key !== null) {
           seenCompanyRoles.add(key);
           recordRequisition(seenCompanyRoleRequisitions, key, requisition);
@@ -3882,6 +3909,13 @@ async function main() {
     if (migratedOffers.length > 0) {
       verifiedOffers = [...verifiedOffers, ...migratedOffers];
     }
+    // Several URL aliases can reach verification before liveness is known.
+    // Keep the first accepted offer for each strong identity, and only then
+    // publish the identity token to this run's dedup set. Rejected aliases do
+    // not hide a later live URL.
+    const countBeforeIdentityDedup = verifiedOffers.length;
+    verifiedOffers = retainVerifiedListingIdentities(verifiedOffers, seenUrls);
+    totalDupes += countBeforeIdentityDedup - verifiedOffers.length;
   }
 
   // 5.7. Cross-listing check (#1597): fingerprint each new offer's JD body and

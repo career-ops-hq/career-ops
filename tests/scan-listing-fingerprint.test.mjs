@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
 import { computeListingFingerprint } from '../listing-fingerprint.mjs';
-import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls } from '../scan.mjs';
+import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities } from '../scan.mjs';
 
 console.log('\nscan.mjs — listing fingerprint participates in scan dedup');
 
@@ -78,6 +78,15 @@ try {
       pass('a match to an accepted historical URL promotes current identity for later aliases');
     } else fail('a historical URL match did not promote the current listing identity');
 
+    const reusedIdentity = { ...identity, posting_id: '4012346' };
+    const reusedUrlOffer = { ...first, listingIdentity: reusedIdentity, listingKey: '' };
+    const storedIdentity = new Map([[acceptedUrl, new Set([expectedKey])]]);
+    const reusedUrlSeen = new Set(accepted.seen);
+    if (isOfferSeen(reusedUrlOffer, reusedUrlSeen, storedIdentity)
+        && !reusedUrlSeen.has(`listing:${computeListingFingerprint({ strong: reusedIdentity }).listing_key}`)) {
+      pass('a reused historical URL does not promote a different stored listing identity');
+    } else fail('a reused URL promoted an identity that disagrees with its accepted history row');
+
     // URL-specific failures still pin only that URL and cannot promote an ATS
     // key onto aliases.
     const blocked = collectSeenUrls({
@@ -86,7 +95,19 @@ try {
     if (blocked.seen.has(acceptedUrl) && !blocked.seen.has(`listing:${expectedKey}`)
         && !isOfferSeen(alias, blocked.seen, blocked.identityPromotableUrls)) {
       pass('URL-specific history failures do not promote listing identity to aliases');
-    } else fail('a URL-specific history failure promoted its listing identity');
+  } else fail('a URL-specific history failure promoted its listing identity');
+
+    // Verification mode pins URLs during collection but delays identity tokens
+    // until the verifier returns live offers. A rejected alias therefore leaves
+    // a following URL free to be retained after it verifies successfully.
+    const verifySeen = new Set();
+    markOfferSeen(first, verifySeen, { includeIdentity: false });
+    if (!isOfferSeen(alias, verifySeen)) {
+      const live = retainVerifiedListingIdentities([alias], verifySeen);
+      if (live.length === 1 && verifySeen.has(`listing:${expectedKey}`)) {
+        pass('verification retains identity only after a live alias is accepted');
+      } else fail('a verified live alias did not retain its identity token');
+    } else fail('a rejected URL claimed the identity before verification');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
