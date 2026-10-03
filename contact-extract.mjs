@@ -76,8 +76,8 @@ const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 
 // Kept in sync by hand with contacts.mjs's own VALID_TYPES — both are small,
 // stable enums describing the same TSV column, and contacts.mjs does not
-// export its copy.
-const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'other']);
+// export its copy. internal-referral (#4691) added to both at the same time.
+const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
 
 const KNOWN_FLAGS = ['--file', '--yes', '--company', '--tracker', '--type', '--help', '-h'];
 const USAGE = `Usage:

@@ -359,6 +359,7 @@ const SYSTEM_PATHS = [
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
+  'contact-lookup.mjs',
   'linkedin-join.mjs',
   'weekly-digest.mjs',
   'tracker-sync-check.mjs',
