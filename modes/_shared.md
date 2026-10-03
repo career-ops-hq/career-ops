@@ -93,6 +93,26 @@ Decide the Global Score once from these dimensions, applying any user-specific S
 - 3.5-3.9 → Decent but not ideal, apply only if specific reason
 - Below 3.5 → Recommend against applying (see Ethical Use in AGENTS.md)
 
+### Evidence confidence for the Global Score
+
+The Machine Summary `confidence` describes the **evidence supporting this evaluation**, not the chance of an interview or hire. It does not change the 1–5 Global Score. Block G's posting-legitimacy tier is a different judgment; `/calibrate` compares scores with recorded outcomes across applications.
+
+Before assigning `confidence`, classify evidence for each scoring dimension (CV match, North Star alignment, compensation, cultural signals, red flags):
+
+| Status | Meaning |
+|--------|---------|
+| `supported` | The conclusion traces to current JD text, primary candidate files, or a verifiable current source relevant to this dimension. |
+| `partial` | Some direct evidence exists, but a decision-relevant detail is inferred, unverified, or incomplete. |
+| `unknown` | Decision-relevant evidence is missing, contradictory, or stale; a clean finding cannot be established. |
+
+Show a short evidence table in the report with each dimension's status, its source or observation, and any unresolved question. Do not call an unchecked dimension `supported` merely because no problem was found. Apply these tier rules in order:
+
+1. **Low** if the JD is inaccessible or too incomplete to assess, CV match or North Star evidence is `unknown`, a material work-eligibility or work-model contradiction is unresolved, or at least two dimensions are `unknown`.
+2. **Medium** if no Low condition holds but any dimension is `partial` or `unknown`, or a material question remains unresolved.
+3. **High** only when all five dimensions are `supported` and no material question remains unresolved.
+
+Name up to three concrete checks that could change the decision; use an empty list only when none remain. Never convert this tier into a numeric probability or silently treat missing evidence as a neutral score. In the Machine Summary, mirror the five statuses under `score_evidence` and the checks under `confidence_gaps`; the human-readable explanation and `confidence` tier must agree.
+
 **How to score the "Cultural signals" dimension:**
 1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
 2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage).
@@ -101,6 +121,7 @@ Decide the Global Score once from these dimensions, applying any user-specific S
 5. **If evidence contradicts the `require` criteria** → **cap this dimension at 2/5**, and add an explicit line to Block A's Culture Screen field (see `oferta.md`) naming what's missing or contradicted. Do not let a strong CV-match score silently compensate for this — surface it, don't bury it.
 6. **If no evidence exists for any `require` criterion** → score 3 by default, unless `culture_screen.deprioritize_if_absent: true` is set, in which case **cap this dimension at 2/5**.
 7. A role scoring 4.5+ overall but 2 or below on Cultural signals must carry an explicit warning in the report: "High technical fit, unconfirmed/poor culture fit — verify before applying."
+8. If `modes/oferta.md`'s Block A "PcD-quota check" fired a match (🟢 PcD-Quota flag line present), treat it as a positive contributor to this dimension, worth at most +1 — a legally mandated quota opening is a genuine hiring-process advantage. It never overrides a `culture_screen` contradiction (rule 5 above still caps the dimension at 2/5 if evidence contradicts required criteria); it only adds weight when the dimension isn't otherwise capped.
 
 ## Posting Legitimacy (Block G)
 
@@ -166,7 +187,39 @@ When a JD publishes a salary figure, distinguish advertised range, likely guaran
 
 ## Archetype Detection
 
-Classify every offer into one of these types (or hybrid of 2):
+Classify the offer by archetype. `modes/_profile.md` → *Your Target Roles* is
+authoritative: where it defines archetypes, detect against **that** table and
+use the one below only as a fallback for what it does not cover. This mirrors
+the precedence already stated above — user customizations in `_profile.md`
+override the defaults in this file. If `_profile.md` is missing, has no
+*Your Target Roles* section, or that table has no rows, the default table below
+is the target set: classify against it, and a match there counts as targeted.
+
+The table below is a default, not a closed set. It reflects one particular
+search (see AGENTS.md → Origin) and will not describe every user's field: a
+silicon design-verification engineer, a quant, a clinician have no archetype
+here at all.
+
+**If an offer matches no archetype the user actually targets, say so plainly
+and score North Star alignment 1.** That is a real and useful signal.
+Forcing it into the nearest available label — or into a "hybrid" of two —
+manufactures a confident fit narrative for a job the user is not applying for,
+which is worse than a low score because it reads as analysis.
+
+**A match against the default table below is not a match against the user's
+targets.** Where `_profile.md` defines archetypes, "targeted" means one of
+those. An offer that lands cleanly on a default row and on nothing in
+`_profile.md` is still an unmatched offer: name the default archetype if it
+helps explain the role, and score North Star as unmatched anyway. Reading the
+fallback as a target is the exact failure this section exists to stop.
+
+**On the number: an unmatched offer scores North Star 1.** `modes/ofertas.md`
+anchors this dimension at `5 = exact target role, 1 = unrelated`, and unmatched
+is the `1` end of that scale, not the middle — the offer is not one the user is
+looking for, and a 2 or 3 reads as a partial fit that does not exist. An offer
+that does match one of the user's targets, fully or as a hybrid of two, is
+scored on the rest of that same scale as usual; this section adds no second
+scale beside it.
 
 | Archetype | Key signals in JD |
 |-----------|-------------------|
@@ -215,7 +268,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 |------|-----|
 | WebSearch | Comp research, trends, company culture, LinkedIn contacts, fallback for JDs |
 | WebFetch | Fallback for extracting JDs from static pages |
-| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER 2+ agents with Playwright in parallel.** |
+| Playwright | Verify offers (browser_navigate + browser_snapshot). **NEVER let 2+ agents drive the same Playwright/MCP browser session concurrently.** This is a per-session rule, not a per-agent-count one: agents each holding their own isolated browser session are fine in parallel; agents sharing one interactive MCP browser session are not — they race for control and can silently read or act on each other's page state. |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
 | Write | Temporary HTML for PDF, applications.md, reports .md |
 | Edit | Update tracker |
@@ -227,6 +280,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 A mode may tell you to run work in a background subagent (e.g. `scan`, or parallel `pipeline` URLs) to spare the main agent's context. Any subagent you spawn for career-ops is a **single-pass worker**:
 
 - It MUST NOT spawn further subagents, and MUST NOT invoke other skills — especially open-ended or recursive research skills (e.g. a `deep-research` skill). Those fan out into nested agents and can burn tens of millions of tokens on one run.
+- If the work involves Playwright (e.g. parallel `pipeline` workers each verifying a posting), the Playwright rule above still applies in full: parallel subagents must never share one interactive Playwright/MCP browser session. Each worker needs its own isolated session, or the Playwright-touching step must run sequentially.
 - Company, role, and compensation research is ALWAYS done **inline**, with the small explicit set of WebSearch/WebFetch queries the mode names (e.g. `oferta` Blocks C/D) — never delegated to a recursive research harness.
 - One `/career-ops <JD>` evaluates one role; it must never explode into a self-replicating swarm of agents. If you are about to delegate research or nest agents, stop and do it inline, bounded.
 

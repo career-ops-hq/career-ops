@@ -28,10 +28,12 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   write back through the core's own scripts.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
+- **Scheduled scans** — save local zero-token or full-dataset scans and run due
+  jobs through an optional Windows Task Scheduler worker.
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
-- **Today / Analytics / CV / Config** — action queue, funnel, CV editing with
-  preview, settings.
+- **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
+  CV editing with preview, settings.
 
 ## Safety
 
@@ -52,6 +54,22 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
 - **Additive:** the web is isolated from the core's packaging, CI and release
   automation. The CLI works exactly the same without it.
 
+## Scheduled scans on Windows
+
+Automatic recurring scans through Task Scheduler are Windows-only. On macOS and Linux,
+saved scans run only when you choose **Run now** on the Scheduled scans page.
+The web UI can save scan definitions without installing an OS task. To check and
+run due jobs every 15 minutes, install the local worker from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1
+```
+
+Remove it with `web/scripts/uninstall-scan-schedule.ps1`. It runs in the current user's interactive session, so the user must be logged in. The task runs only
+`web/scripts/scheduled-jobs-runner.mjs`; it never evaluates roles, applies, or invokes
+an AI model. Job definitions and run history stay in the gitignored `data/`
+directory.
+
 ## Development
 
 ```bash
@@ -63,6 +81,8 @@ npm run build        # production build
 
 Set `CAREER_OPS_ROOT=/path/to/checkout` in `web/.env.local` to point the app at
 a different career-ops directory (useful for testing against sample data).
+Root scripts such as `doctor.mjs` run from the checkout that holds `web/`, not
+from `CAREER_OPS_ROOT`; set `CAREER_OPS_CODE_ROOT` when the app runs outside it.
 
 `/api` is gated by the same-origin + loopback guard in `src/lib/origin-guard.mjs`.
 Two opt-ins widen it, both unset by default and both in `web/.env.local`:

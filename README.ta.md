@@ -1,41 +1,67 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-<table align="center">
-<tr>
-<td align="center" valign="middle"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="72" height="72" alt="santifer"></a></td>
-<td valign="middle">
-<strong>மாதக்கணக்கில் CV அனுப்பினேன், பதில் மௌனம் மட்டுமே.</strong> அதனால் எனக்குத் தேவையான வடிகட்டியை நானே கட்டினேன்.<br>
-<strong>740 வேலை அறிவிப்புகள். 68 விண்ணப்பங்கள். 12 நேர்காணல்கள். 1 ஆஃபர்.</strong><br>
-இதன் முதல் பயனர் நான்தான். <strong>எனக்கு வேலை கிடைத்தது.</strong> பிறகு இதை ஓப்பன் சோர்ஸ் ஆக்கினேன்.
-</td>
-</tr>
-</table>
-
-<div align="center">
-<details>
-<summary>🌍 17 மொழிகளில் படிக்க</summary>
-<div align="center">
-
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
-
-</div>
-</details>
-</div>
+<p align="center">வேலை தேடலுக்கான ஓப்பன் சோர்ஸ் AI ஏஜென்ட்.</p>
 
 <p align="center">
-  நிறுவனங்கள் விண்ணப்பதாரர்களை வடிகட்ட AI-ஐ பயன்படுத்துகின்றன. <strong>நான் வேலை தேடுபவர்களுக்கு நிறுவனங்களை <em>தேர்ந்தெடுக்க</em> AI-ஐ வழங்கினேன்.</strong><br>
-  உங்கள் கணினியிலேயே, எந்த வேலைகள் உண்மையானவை, எவை உங்களுக்குப் பொருந்தும் என்று சொல்கிறது, மேலும் <strong>உங்கள் பெயரில் ஒருபோதும் விண்ணப்பிக்காது.</strong>
+  <a href="README.md">English</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.pt-BR.md">Português (Brasil)</a> |
+  <a href="README.ko-KR.md">한국어</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.cn.md">简体中文</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.ua.md">Українська</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ta.md">தமிழ்</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.hi.md">हिन्दी</a> |
+  <a href="README.tr.md">Türkçe</a>
+</p>
+
+<!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
+
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+
+<p align="center">
+<strong>மாதக்கணக்கில் CV அனுப்பினேன், பதில் மௌனம்&nbsp;மட்டுமே.</strong><br>
+அதனால் எனக்குத் தேவையான வடிகட்டியை நானே&nbsp;கட்டினேன்.
 </p>
 
 <p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="ஆசிரியரின் சொந்த வேலைத் தேடல்: ஒரு CV கூட அனுப்பப்படும் முன்பே சிவப்பில் "விண்ணப்பிக்க வேண்டாம்" எனக் குறிக்கப்பட்ட அறிவிப்புகள்" width="800"></a>
+<strong>740&nbsp;வேலை&nbsp;அறிவிப்புகள் மதிப்பிடப்பட்டன. 68&nbsp;விண்ணப்பங்கள். 12&nbsp;நேர்காணல்கள்.&nbsp;1&nbsp;ஆஃபர்.</strong><br>
+இதன் முதல் பயனர் நான்தான். எனக்கு வேலை&nbsp;கிடைத்தது. பிறகு&nbsp;இதை ஓப்பன்&nbsp;சோர்ஸ்&nbsp;ஆக்கினேன்.
 </p>
 
-<p align="center"><sub>அந்தச் சிவப்புத் தாவலே தயாரிப்பு. <em>விண்ணப்பிக்க வேண்டாம்.</em> <a href="https://santifer.io/career-ops-system">முழுக் கதை →</a></sub></p>
+<p align="center">
+ஒரு வேலையை ஒட்டுங்கள். உங்கள் கணினியிலேயே, அது இன்னும் திறந்திருக்கிறதா, உங்களுக்குப் பொருந்துகிறதா என்று&nbsp;சொல்கிறது.<br>
+உங்கள் CV-ஐத் தனிப்பயனாக்கி, உங்கள் பதில்களுக்கு வரைவு&nbsp;எழுதுகிறது. <strong>நீங்கள்&nbsp;Submit-ஐ&nbsp;அழுத்துகிறீர்கள்.</strong>
+</p>
+
+<p align="center">
+  <img src="docs/demo.gif" alt="career-ops dashboard-இல் ஆசிரியரின் சொந்த வேலைத் தேடல்: மதிப்பெண் இடப்பட்ட அறிவிப்புகள், ‘விண்ணப்பிக்க வேண்டாம்’ எனக் குறிக்கப்பட்டவற்றின் சிவப்பு எண்ணிக்கை, பிறகு ஒரு முழு மதிப்பீட்டு அறிக்கை" width="800">
+</p>
+
+<p align="center"><sub>என் சொந்தத் தேடல், பாதியில் இருந்தபோது, UI&nbsp;ஸ்பானிஷ்&nbsp;மொழியில்.</sub></p>
+
+<p align="center">
+  நிறுவனங்கள் விண்ணப்பதாரர்களை வடிகட்ட AI-ஐ பயன்படுத்துகின்றன.<br>
+  <strong>நான் வேலை தேடுபவர்களுக்கு நிறுவனங்களை&nbsp;<em>தேர்ந்தெடுக்க</em>&nbsp;AI-ஐ&nbsp;வழங்கினேன்.</strong>
+</p>
+
+<p align="center">
+  ஆறு மாதங்கள் கழித்து, <strong>அந்த வேலையை விட்டு&nbsp;விலகினேன்.</strong><br>
+  இப்போது நாங்கள் career-ops-ஐ உருவாக்குகிறோம், நீங்களும்&nbsp;உங்கள்&nbsp;வேலையைப்&nbsp;பெற.
+</p>
+
+<p align="center"><a href="#இப்போது-உங்கள்-முறை">ஒரு வேலையை வைத்து முயன்று&nbsp;பாருங்கள்&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">முழுக் கதையையும்&nbsp;படியுங்கள்&nbsp;→</a></p>
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops மூலம் வேலை கிடைத்தவர்கள்: சரிபார்க்கப்பட்ட எண்ணிக்கை"></a></p>
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">எனக்குப் பிறகு வந்தவர்கள், தங்களுக்கு எப்படி வேலை கிடைத்தது என்பதை எழுதி வைத்தார்கள்.</p>
 
@@ -45,16 +71,24 @@
 
 <p align="center"><sub>ஒவ்வொரு கார்டும் நீங்கள் திறக்கக்கூடிய பொது issue. உங்களுக்கும் கிடைத்ததா? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">உங்கள் கார்டை விடுங்கள் →</a></sub></p>
 
+<p align="center">⭐ <strong>career-ops உங்களுக்கு உதவியிருந்தால், ஒரு ஸ்டார் அடுத்தவர் இதைக் கண்டுபிடிக்க&nbsp;உதவும்.</strong></p>
+
 <br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
+</p>
+
+<p align="center">
+  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
+</p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
 </p>
 
 ## இப்போது உங்கள் முறை
@@ -92,7 +126,7 @@ npx @santifer/career-ops init
 
 ## ஆதரவாளர்கள்
 
-career-ops விண்ணப்பதாரர்களுக்கு எப்போதும் இலவசம். கீழே உள்ள நிறுவனங்கள் பராமரிப்பாளரின் நேரத்திற்கு நிதியளித்து, அதை அப்படியே வைத்திருக்கின்றன.
+career-ops விண்ணப்பதாரர்களுக்கு எப்போதும் இலவசம். இந்த நிறுவனங்கள் இந்தத் திட்டத்திற்கு நிதியுதவி அளிக்கின்றன:
 
 <p align="center">
   <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
@@ -106,7 +140,7 @@ career-ops விண்ணப்பதாரர்களுக்கு எப�
 
 ஒரு வேலையை ஒட்டுங்கள். அந்த இரவு அதற்குத் தகுமா என்று சொல்கிறது.
 
-- **போலியா அல்லது காலாவதியா?** நீங்கள் ஒரு வார்த்தை எழுதும் முன்பே பேய் வேலைகளையும் மோசடிகளையும் குறிக்கிறது.
+- **இன்னும் திறந்திருக்கிறதா?** நீங்கள் ஒரு வார்த்தை எழுதும் முன்பே, அந்த அறிவிப்பு இன்னும் செயலில் இருக்கிறதா என்று சரிபார்க்கிறது.
 - **உங்களுக்கானது இல்லையா?** உங்கள் உண்மையான CV-க்கு எதிராகப் பணியை மதிப்பிட்டு, பொருத்தம் குறைவென்றால் தவிர்க்கச் சொல்கிறது. நீங்கள் அதை மீறலாம்.
 - **தகுமா?** CV, கவர் லெட்டர், பதில்கள் ஆகியவற்றின் வரைவை எழுதுகிறது. நீங்கள் படிக்கிறீர்கள். நீங்கள் அனுப்புகிறீர்கள்.
 - **யாரிடம் பேசுவது?** அந்த நபரைக் கண்டுபிடித்து, செய்தியின் வரைவை எழுதுகிறது. அதை ஒருபோதும் அனுப்புவதில்லை.
@@ -124,18 +158,18 @@ career-ops விண்ணப்பதாரர்களுக்கு எப�
 - **வெளியே தரவு அனுப்புவது.** டெலிமெட்ரி இல்லை, எங்கள் பேக்எண்ட் இல்லை. உங்கள் CV உங்கள் கணினியிலிருந்து நீங்கள் தேர்ந்தெடுத்த AI வழங்குநருக்கு மட்டுமே செல்லும், வேறு எங்கும் இல்லை. ஒரே பொதுப் பதிவு இந்த ரெப்போ தான்: `HIRED.md` மற்றும் அதன் issues.
 - **4.0/5-க்குக் கீழே விண்ணப்பிக்கத் தூண்டுவது.** வேண்டாம் என்று சொல்லும். நீங்கள் மீறலாம், அதையும் அது சொல்லும்.
 
-உங்கள் CV-ஐ மறுவடிவமைக்கும்; ஒருபோதும் புனையக்கூடாது. இன்று இந்த விதி ப்ராம்ப்ட்களில் இருக்கிறது, இன்னும் கோடில் கட்டாயப்படுத்தும் சோதனையாக இல்லை. அனுப்பும் முன் ஒவ்வொரு CV-ஐயும் படியுங்கள். விவரங்கள் [FAQ](#அடிக்கடி-கேட்கப்படும்-கேள்விகள்-faq)-இல்.
+உங்கள் CV-ஐ மறுவடிவமைக்கும்; ஒருபோதும் புனையக்கூடாது. உங்கள் CV-இலும் article digest-இலும் இல்லாத எண்களோ தகவல்களோ கொண்ட PDF-ஐ கோடில் உள்ள ஒரு சோதனை தடுக்கிறது, ஆனால் மாற்றி எழுதப்பட்ட ஒவ்வொரு வரியையும் அந்தச் சோதனையால் இன்னும் மதிப்பிட முடியாது. அனுப்பும் முன் ஒவ்வொரு CV-ஐயும் படியுங்கள். விவரங்கள் [FAQ](#அடிக்கடி-கேட்கப்படும்-கேள்விகள்-faq)-இல்.
 
 ## Features
 
 | Feature                  | விளக்கம்                                                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **A-H மதிப்பீடு**        | பதவிச் சுருக்கம், CV பொருத்தம் (இந்த விளம்பரத்திற்கு ஒவ்வொரு தேவையும் எவ்வளவு முக்கியம், அந்த எடை JD-யின் சொற்களிலிருந்தா, அதன் கட்டமைப்பிலிருந்தா அல்லது ஒரு மதிப்பீட்டிலிருந்தா என்பது தேவைவாரியாகக் குறிக்கப்படும்; ஒரு மதிப்பீடு ஒருபோதும் உச்ச நிலையில் இருக்காது), நிலை உத்தி, சம்பள ஆய்வு, தனிப்பயனாக்கம், நேர்காணல் தயாரிப்பு (STAR+R), மேலும் மோசடிகளையும் போலி வேலைகளையும் கண்டறியும் பகுதி G நம்பகத்தன்மை சோதனை, மற்றும் விசா ஸ்பான்சர்ஷிப் இல்லை என வெளிப்படையாகக் கூறும் JD-ஐ கடுமையான தடையாகக் குறிக்கும் பணி அனுமதி சமிக்ஞை |
+| **A-H மதிப்பீடு**        | பதவிச் சுருக்கம், CV பொருத்தம் (இந்த விளம்பரத்திற்கு ஒவ்வொரு தேவையும் எவ்வளவு முக்கியம், அந்த எடை JD-யின் சொற்களிலிருந்தா, அதன் கட்டமைப்பிலிருந்தா அல்லது ஒரு மதிப்பீட்டிலிருந்தா என்பது தேவைவாரியாகக் குறிக்கப்படும்; ஒரு மதிப்பீடு ஒருபோதும் உச்ச நிலையில் இருக்காது), நிலை உத்தி, சம்பள ஆய்வு, தனிப்பயனாக்கம், நேர்காணல் தயாரிப்பு (STAR+R), மேலும் பகுதி G நம்பகத்தன்மை சோதனை (இன்னும் திறந்திருக்கிறதா, இது மறுபதிவா: கவனிப்புகள், தீர்ப்புகள் அல்ல), மற்றும் விசா ஸ்பான்சர்ஷிப் இல்லை என வெளிப்படையாகக் கூறும் JD-ஐ கடுமையான தடையாகக் குறிக்கும் பணி அனுமதி சமிக்ஞை |
 | **Human-in-the-Loop**    | AI மதிப்பிட்டுப் பரிந்துரைக்கிறது, நீங்கள் முடிவெடுத்துச் செயல்படுகிறீர்கள். அமைப்பு ஒருபோதும் விண்ணப்பத்தைச் சமர்ப்பிக்காது: இறுதி முடிவு எப்போதும் உங்களுடையது <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
-| **ATS PDF உருவாக்கம்**   | Space Grotesk + DM Sans வடிவமைப்புடன் keyword-injected CV-கள்                                                                             |
+| **ATS PDF உருவாக்கம்**   | ATS படிக்கக்கூடிய CV-கள், உங்கள் சொந்த அனுபவத்திலிருந்து ஒவ்வொரு JD-க்கும் ஏற்பத் தனிப்பயனாக்கப்பட்டவை, Space Grotesk + DM Sans வடிவமைப்பில் |
 | **Cover Letter உருவாக்கி** | ஆய்வு அடிப்படையிலான cover letter-கள்: keyword பிரதிபலிப்பு, நான்கு ஊடாடும் கோணக் கேள்விகள் (ஏன்/சிக்கல்கள்/அணுகுமுறை/தொனி), சாட்டில் வரைவு ஒப்புதல், CV-களுக்கான அதே HTML + Playwright பைப்லைன் மூலம் A4 PDF. ஒவ்வொரு மதிப்பீட்டிலும் தானாக வரைவு; `/career-ops cover` மூலம் தேவைப்படும்போது முடித்து உருவாக்குங்கள் |
 | **CV-க்கு அப்பால்**      | நிறுவன ஆய்வு ([`deep`](modes/deep.md)) AI உத்தி, சமீபத்திய நகர்வுகள், பொறியியல் கலாச்சாரம், உங்கள் சுயவிவரம் எடுக்க வேண்டிய கோணம் ஆகியவற்றை வெளிக்கொணர்கிறது. தொடர்பு கண்டறிதல் ([`contacto`](modes/contacto.md)) தொடர்புகொள்ளத் தகுந்த hiring manager, ரிக்ரூட்டர் அல்லது குழு உறுப்பினரை அடையாளம் கண்டு, ஒவ்வொரு தொடர்பு வகைக்கும் ஏற்ப ≤300 எழுத்துகளிலான LinkedIn செய்தியை வரைகிறது. முறையான விண்ணப்ப மின்னஞ்சல் வரைவுகள் ([`email`](modes/email.md)) மதிப்பிடப்பட்ட அறிக்கையையோ ஒட்டப்பட்ட JD-ஐயோ தலைப்பு, உடல், இணைப்புப் பட்டியலாக மாற்றுகின்றன; எதையும் அனுப்பாமல், சமர்ப்பிக்காமல், கிளிக் செய்யாமல். விண்ணப்பம் உங்களை வரிசையில் சேர்க்கும்; ஆய்வு உங்களுக்கு ஒரு உரையாடலைப் பெற்றுத் தரும். |
-| **முறை பகுப்பாய்வு**     | நிராகரிப்பு முறைகளும் ATS சேனல்வாரி முன்னேற்ற விகிதங்களும் (`analyze-patterns.mjs`), முழுத் தேடலின் funnel புள்ளிவிவரங்கள் (`stats.mjs`), மறுபதிவு/போலி வேலை கண்டறிதல் (`detect-reposts.mjs`) |
+| **முறை பகுப்பாய்வு**     | நிராகரிப்பு முறைகளும் ATS சேனல்வாரி முன்னேற்ற விகிதங்களும் (`analyze-patterns.mjs`), முழுத் தேடலின் funnel புள்ளிவிவரங்கள் (`stats.mjs`), மறுபதிவுகளைக் கண்டறிதல், அவை ghost job-இன் அறிகுறியாக இருக்கலாம் (`detect-reposts.mjs`) |
 
 <details>
 <summary><b>இது செய்யும் மற்ற அனைத்தும்</b></summary>
@@ -143,7 +177,7 @@ career-ops விண்ணப்பதாரர்களுக்கு எப�
 | Feature                  | விளக்கம்                                                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | **Auto-Pipeline**        | ஒரு URL-ஐ ஒட்டுங்கள்; முழு மதிப்பீடு + PDF + tracker பதிவு பெறுங்கள்                                                                       |
-| **நேர்காணல் கதை வங்கி**  | மதிப்பீடுகள் முழுவதும் STAR+Reflection கதைகளைச் சேகரிக்கிறது: எந்த நடத்தை சார்ந்த கேள்விக்கும் பதிலளிக்கும் 5-10 முதன்மைக் கதைகள்            |
+| **நேர்காணல் கதை வங்கி**  | மதிப்பீடுகள் முழுவதும் STAR+Reflection கதைகளைச் சேகரிக்கிறது: உங்களிடம் கேட்கப்படும் நடத்தை சார்ந்த கேள்விகளுக்கு ஏற்ப நீங்கள் மாற்றியமைக்கக்கூடிய 5-10 முதன்மைக் கதைகள் |
 | **பேச்சுவார்த்தை ஸ்கிரிப்ட்கள்** | சம்பளப் பேச்சுவார்த்தை கட்டமைப்புகள், புவியியல் தள்ளுபடிக்கு எதிர்வாதம், போட்டி வாய்ப்புகளை நெம்புகோலாகப் பயன்படுத்துதல்                  |
 | **விண்ணப்ப மின்னஞ்சல் வரைவுகள்** | அறிக்கை அல்லது ஒட்டப்பட்ட JD-யிலிருந்து ரிக்ரூட்டர்/பரிந்துரை/நேரடி விண்ணப்பத்திற்கான முறையான மின்னஞ்சல்கள்: தலைப்பு, இணைப்புகள் சரிபார்ப்புப் பட்டியல், ஆதாரத்துடன் கூடிய பொருத்தப் புள்ளிகள், சுயவிவர அடிப்படையிலான தொடர்புத் தகவல். வரைவு மட்டுமே: career-ops ஒருபோதும் அனுப்பாது, சமர்ப்பிக்காது, எதையும் கிளிக் செய்யாது. |
 | **தள ஸ்கேனர்**           | 100+ நிறுவனங்கள் முன்கூட்டியே அமைக்கப்பட்டுள்ளன (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound முழுவதும் தனிப்பயன் வினவல்கள் |
@@ -160,7 +194,7 @@ career-ops விண்ணப்பதாரர்களுக்கு எப�
 
 ## Quick Start
 
-**விரைவான வழி: ஒரே கட்டளை:**
+**விரைவான வழி, ஒரே கட்டளையில்:**
 
 ```bash
 npx @santifer/career-ops init
@@ -186,6 +220,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -248,8 +286,8 @@ career-ops ஒரு பகிரப்பட்ட command router-ஐப் ப
 /career-ops deep      → நிறுவனம் பற்றிய ஆழமான ஆய்வு ப்ராம்ப்ட்
 /career-ops interview-prep → நிறுவனத்திற்கே உரிய நேர்காணல் தயாரிப்பு ஆவணத்தை உருவாக்கு
 /career-ops interview    → ஊடாடும் சுயவிவர/CV onboarding நேர்காணல்
+/career-ops master-profile → உங்கள் Master Career Profile-ஐ இறக்குமதி செய், மதிப்பாய்வு செய், சரிபார்
 /career-ops eu-swe    → CV/apply/interview-க்கு முன் ஐரோப்பிய SWE விண்ணப்பத்தை அளவீடு செய்
-/career-ops eu-fintech → Product Manager பதவிகளுக்காக 21 EU fintech தளங்களை ஸ்கேன் செய் (token இல்லை)
 /career-ops interview/plan → வரவிருக்கும் நேர்காணலுக்கு நேரப் பிரிவுகளிலான தயாரிப்புத் திட்டம்
 /career-ops interview/practice → பயிற்சி நேர்காணல், பின்னூட்டத்துடன் ஒரு நேரத்தில் ஒரு கேள்வி
 /career-ops interview/debrief → நேர்காணலுக்குப் பிந்தைய ஆய்வு: இடைவெளிகளை மூடு, அடுத்த சுற்றைக் கணி
@@ -382,6 +420,35 @@ grok
 
 Headless batch workers-க்கு `grok -p "prompt"` பயன்படுத்துங்கள் (கருவி இயக்கங்களைத் தானாக அனுமதிக்க `--yolo` சேர்க்கவும்).
 
+## Pi Integration
+
+career-ops [Pi](https://github.com/earendil-works/pi)-ஐ நேரடியாக ஆதரிக்கிறது, பராமரிக்க எந்த wrapper கோப்பும் தேவையில்லை: Pi, repo root-இல் உள்ள `AGENTS.md`-ஐ project context-ஆகப் படித்து, `.agents/skills/career-ops/SKILL.md`-இல் உள்ள பகிரப்பட்ட skill-ஐத் தானாகவே கண்டறிகிறது. அதன் பிறகு router `/skill:career-ops` ஆகக் கிடைக்கிறது.
+
+### Native Pi
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+pi
+
+# 2. Use the shared skill with subcommands:
+/skill:career-ops "Senior AI Engineer at Anthropic..."
+/skill:career-ops pipeline
+/skill:career-ops scan
+/skill:career-ops pdf
+/skill:career-ops tracker
+```
+
+### ஒரே முறை Pi (`pi -p`)
+
+```bash
+pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p "Run career-ops scan mode and summarize new matches."
+pi -p "Run career-ops tracker mode and summarize the current statuses."
+```
+
+ஒரு Pi build, project resources-ஐ ஒரு நம்பிக்கை முடிவுக்குப் பின்னால் வைத்திருந்தால், repo-க்குள் ஒரு முறை `/trust` இயக்கி, project skill ஏறும்படி `pi`-ஐ மறுதொடக்கம் செய்யுங்கள் (`/trust` இனி வரும் Pi processes-க்குப் பொருந்தும்), அல்லது `-a` உடன் தொடங்குங்கள்; அது ஒரே ஒரு இயக்கத்தை மட்டும் நம்புகிறது, மறுதொடக்கம் தேவையில்லை.
+
 ### தனித்த Gemini API ஸ்கிரிப்ட் (CLI நிறுவல் தேவையில்லை)
 
 ```bash
@@ -403,7 +470,7 @@ npm run gemini:eval -- "JD text here"
 
 ## முன்கூட்டியே அமைக்கப்பட்ட வேலைவாய்ப்பு தளங்கள்
 
-ஸ்கேனர் ஸ்கேன் செய்யத் தயாராக **100+ நிறுவனங்களுடனும்**, முக்கிய job boards முழுவதும் **45+ தேடல் வினவல்களுடனும்** வருகிறது. `templates/portals.example.yml`-ஐ `portals.yml`-ஆக நகலெடுத்து உங்களுடையதைச் சேர்க்கவும்:
+ஸ்கேனர் ஸ்கேன் செய்யத் தயாராக **100+ நிறுவனங்களுடனும்**, முக்கிய job boards முழுவதும் **35+ தேடல் வினவல்களுடனும்** வருகிறது. `templates/portals.example.yml`-ஐ `portals.yml`-ஆக நகலெடுத்து உங்களுடையதைச் சேர்க்கவும்:
 
 **AI Labs:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
 **Voice AI:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
@@ -435,7 +502,7 @@ npm run build:dashboard   # optional: build the standalone binary
 
 Features: 6 வடிகட்டி tabs, 4 வரிசைப்படுத்தும் முறைகள், grouped/flat view, lazy-loaded previews, inline நிலை மாற்றங்கள்.
 
-**சோதனை web UI**-யும் உள்ளது (alpha, opt-in: நீங்கள் தொடங்காதவரை எதுவும் இயங்காது): [`web/README.md`](web/README.md) பார்க்கவும்.
+**சோதனை web UI**-யும் உள்ளது (alpha மற்றும் opt-in: நீங்கள் தொடங்காதவரை எதுவும் இயங்காது): [`web/README.md`](web/README.md) பார்க்கவும்.
 
 ## Project Structure
 
@@ -492,6 +559,10 @@ career-ops/
 
 - **Tracker Override:** விண்ணப்ப tracker கோப்பின் பாதையை நேரடியாக மாற்ற `CAREER_OPS_TRACKER`-ஐயும் அமைக்கலாம்.
 - **Writes:** அனைத்து எழுதும் செயல்பாடுகளும் (merges போன்றவை) நியமப்படி `{DATA_ROOT}/data/applications.md`-ஐ இலக்காகக் கொள்ளும்.
+- **Scanner config:** `portals.yml` கோப்பு `{DATA_ROOT}/portals.yml`-இல் படிக்கப்பட்டுச் சரிபார்க்கப்படுகிறது, எனவே `scan.mjs` படிக்கும் அதே கோப்பையே `node validate-portals.mjs` சரிபார்க்கிறது.
+- **உருவாக்கப்பட்ட ஆவணங்கள்:** தனிப்பயனாக்கப்பட்ட CV-களும் cover letter-களும் `{DATA_ROOT}/output/`-இன் கீழ் எழுதப்படுகின்றன; அவற்றை ஒரு அறிக்கையுடன் இணைக்கும் PDF manifest `{DATA_ROOT}/data/pdf-index.tsv`-இல் இருக்கும். `CAREER_OPS_TRACKER` அமைக்கப்படாதவரை, அந்த எழுதுதல்களுக்கு எல்லை வகுக்கும் tracker workspace என்பது data root தான், checkout அல்ல.
+- **Tracker override-இன் கீழ் PDF-கள்:** `generate-pdf.mjs` workspace-ஐத் தீர்மானிக்கும் முன் `CAREER_OPS_TRACKER`-ஐத் தீர்க்கிறது, எனவே override அமைக்கப்பட்டிருந்தால் workspace என்பது அந்த tracker உள்ள folder (அல்லது tracker ஒரு `data/` folder-இல் இருந்தால், அதற்கு மேலே உள்ள folder). அப்போது CV-யின் HTML-உம் ஒவ்வொரு PDF-உம் அந்த workspace-க்குள்ளேயே இருக்க வேண்டும், manifest அதன் `data/pdf-index.tsv`-க்கு நகரும். Cover letter-கள் இன்னும் `{DATA_ROOT}/output/`-ஐயே இலக்காகக் கொள்வதால், அந்த folder tracker-இன் workspace-க்கு வெளியே இருந்தால் அவை மறுக்கப்படும்.
+- **கோடு அடுக்கு இடம் மாறாது:** `node_modules/`, `providers/`, `modes/` மற்றும் ஸ்கிரிப்ட்கள் எப்போதும் repository-ஐ ஒட்டியே தீர்க்கப்படுகின்றன, data root-ஐ ஒட்டி ஒருபோதும் அல்ல.
 
 Go dashboard TUI, Node.js ஸ்கிரிப்ட்கள், AI ஏஜென்ட் modes அனைத்தும் இந்தத் தீர்வு வரிசையைத் தானாகவே பின்பற்றுகின்றன.
 
@@ -529,6 +600,7 @@ Go dashboard TUI, Node.js ஸ்கிரிப்ட்கள், AI ஏஜெ�
   <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
   <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
   <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
   <br>
   <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
   <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
@@ -548,7 +620,7 @@ Go dashboard TUI, Node.js ஸ்கிரிப்ட்கள், AI ஏஜெ�
 career-ops ([career-ops.org](https://career-ops.org), **careerops** என்றும் அழைக்கப்படுகிறது) என்பது உங்கள் AI கோடிங் CLI-யில் (Claude Code, Codex, OpenCode மற்றும் பிற) உங்கள் கணினியிலேயே இயங்கும், ஒவ்வொரு முடிவையும் உங்களிடம் விட்டுவிடும் ஓப்பன் சோர்ஸ் AI வேலை தேடல் அமைப்பு. உங்கள் CV-ஐ வைத்து வேலை வாய்ப்புகளை மதிப்பிடுகிறது, ATS-க்கு ஏற்ற PDF-களை உருவாக்குகிறது, தொடர்புகொள்ள வேண்டிய சரியான நபரைக் கண்டறிகிறது, அனைத்தையும் ஒரே இடத்தில் கண்காணிக்கிறது: இறுதி முடிவு எப்போதும் உங்களுடையது. இது [CareerOps அறிக்கையின்](https://career-ops.org/manifesto) முதல் குறிப்பு செயலாக்கம்.
 
 **தனிப்பயனாக்கப்பட்ட CV எதையாவது புனையுமா?**
-புனையக்கூடாது, ப்ராம்ப்ட்களும் அதையே சொல்கின்றன: மறுவடிவமைக்கலாம், ஒருபோதும் புனையக்கூடாது. இந்த விதி இன்னும் கோடில் ஒரு சோதனையால் கட்டாயப்படுத்தப்படவில்லை. இரண்டு திறந்த issues இதைக் கண்காணிக்கின்றன: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (பதவிப் பெயர்கள் cv.md உடன் பொருந்த வேண்டும்) மற்றும் [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (பொருந்தாவிட்டால் தடுக்கும் உண்மைத்தன்மைச் சோதனை). அவை இணைக்கப்படும் வரை, அனுப்பும் முன் ஒவ்வொரு CV-ஐயும் படியுங்கள். [சட்டப்பூர்வ மறுப்பு](LEGAL_DISCLAIMER.md) இதையே அதிக வார்த்தைகளில் சொல்கிறது.
+புனையக்கூடாது, ப்ராம்ப்ட்களும் அதையே சொல்கின்றன: மறுவடிவமைக்கலாம், ஒருபோதும் புனையக்கூடாது. உங்கள் மூலங்களில் இல்லாத எண்களோ தகவல்களோ கொண்ட CV-ஐ `generate-pdf` தடுக்கிறது, நீங்கள் `--skip-fact-check` கொடுத்தால் தவிர. அது இன்னும் பதவிப் பெயர்களைச் சரிபார்ப்பதில்லை, மாற்றி எழுதியதை மதிப்பிடுவதுமில்லை. இரண்டு திறந்த issues இதைக் கண்காணிக்கின்றன: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (பதவிப் பெயர்கள் cv.md உடன் பொருந்த வேண்டும்) மற்றும் [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (பொருந்தாவிட்டால் தடுக்கும் உண்மைத்தன்மைச் சோதனை). அவை இணைக்கப்படும் வரை, அனுப்பும் முன் ஒவ்வொரு CV-ஐயும் படியுங்கள். [சட்டப்பூர்வ மறுப்பு](LEGAL_DISCLAIMER.md) இதையே அதிக வார்த்தைகளில் சொல்கிறது.
 
 **career-ops-ஐ இலவசமாகவோ, மலிவான / லோக்கல் மாடலிலோ இயக்க முடியுமா?**
 ஆம். career-ops CLI-agnostic; இலவச மற்றும் லோக்கல் மாடல்களில் (OpenRouter இலவச மாடல்கள், Ollama, அல்லது எந்த OpenAI-compatible endpoint) இயங்கும், எனவே நீங்கள் கட்டணச் சந்தாவுடன் கட்டுப்படவில்லை. முழு அமைப்பிற்கு [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) பார்க்கவும்.
@@ -563,16 +635,16 @@ career-ops திறந்த Agent Skill Standard வழியாக எந்�
 career-ops Windows-இல் இயங்கும். தளம் சார்ந்த அமைப்பும் அறியப்பட்ட சிக்கல்களும் (Git Bash கண்டறிதல், line endings, Task Scheduler) [docs/WINDOWS.md](docs/WINDOWS.md)-இல் உள்ளன. நிறுவலின்போது symlink பிழையால் skills ஏறாவிட்டால், தீர்வு [docs/FAQ.md](docs/FAQ.md)-இல் உள்ளது. முழு படிகள் [docs/SETUP.md](docs/SETUP.md)-இல்.
 
 **career-ops எனக்காக வேலைகளுக்குத் தானாக விண்ணப்பிக்குமா?**
-இல்லை. career-ops ஒரு வடிகட்டி, கண்மூடித்தனமாக விண்ணப்பிக்கும் auto-applier அல்ல. AI மதிப்பிட்டு, தரவரிசைப்படுத்தி, வரைவு எழுதுகிறது; நீங்கள் மதிப்பாய்வு செய்து முடிவெடுக்கிறீர்கள். அது ஒருபோதும் சமர்ப்பிக்காது, அனுப்பாது, எதையும் கிளிக் செய்யாது: இறுதி முடிவு எப்போதும் உங்களுடையது. இந்த human-in-the-loop வடிவமைப்பே முழு நோக்கம்.
+இல்லை. career-ops ஒரு வடிகட்டி, கண்மூடித்தனமாக விண்ணப்பிக்கும் auto-applier அல்ல. AI மதிப்பிட்டு, தரவரிசைப்படுத்தி, வரைவு எழுதுகிறது; நீங்கள் மதிப்பாய்வு செய்து முடிவெடுக்கிறீர்கள். அது வரைவு எழுதி, படிவங்களை நிரப்புகிறது; ஒருபோதும் சமர்ப்பிப்பதில்லை. நீங்கள் Submit-ஐ அழுத்துகிறீர்கள். இந்த human-in-the-loop வடிவமைப்பே முழு நோக்கம்.
 
 **career-ops இலவசமா, ஓப்பன் சோர்ஸா?**
-ஆம். career-ops இலவசம் மற்றும் ஓப்பன் சோர்ஸ், விண்ணப்பதாரருக்கு எப்போதும் அப்படியே இருக்கும்: இது [CareerOps அறிக்கையின்](https://career-ops.org/manifesto) முதல் குறிப்பு செயலாக்கம். படியுங்கள், நீங்கள் நம்புவதை அது சொல்கிறது என்றால், கையொப்பமிடுங்கள்.
+ஆம். career-ops இலவசம் மற்றும் ஓப்பன் சோர்ஸ், விண்ணப்பதாரருக்கு எப்போதும் அப்படியே இருக்கும். இது [CareerOps அறிக்கையின்](https://career-ops.org/manifesto) முதல் குறிப்பு செயலாக்கம். படியுங்கள், நீங்கள் நம்புவதை அது சொல்கிறது என்றால், கையொப்பமிடுங்கள்.
 
 ## ஆசிரியரைப் பற்றி
 
-நான் [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer): Head of Applied AI, முன்னாள் நிறுவனர் (இன்றும் என் பெயரில் இயங்கும் ஒரு தொழிலை உருவாக்கி விற்றேன்). என் சொந்த வேலை தேடலை நிர்வகிக்க career-ops-ஐ உருவாக்கினேன். அது வேலை செய்தது: இதன் மூலமே என் தற்போதைய பதவியைப் பெற்றேன்.
+நான் [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer), முன்னாள் நிறுவனர்: இன்றும் என் பெயரில் இயங்கும் ஒரு தொழிலை உருவாக்கி விற்றேன். என் சொந்த வேலை தேடலை நிர்வகிக்க career-ops-ஐ உருவாக்கினேன், அது வேலை செய்தது: அதன் மூலம் எனக்கு Head of Applied AI பதவி கிடைத்தது. ஆறு மாதங்கள் கழித்து, career-ops-ஐ முழு நேரமாக உருவாக்குவதில் கவனம் செலுத்த அந்தப் பதவியை விட்டு விலகினேன்.
 
-இந்த repository வாரத்திற்குச் சுமார் 4 மணிநேரத்தில் எப்படிப் பராமரிக்கப்படுகிறது என்று அறிய ஆர்வமா? [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) படியுங்கள்.
+இவ்வளவு பெரிய repository, AI ஏஜென்ட்களின் ஒரு படையாலும் ஒவ்வொரு merge-ஐயும் முடிவு செய்யும் ஒரு மனிதராலும் எப்படிப் பராமரிக்கப்படுகிறது என்று அறிய ஆர்வமா? [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) படியுங்கள்.
 
 என் portfolio மற்றும் பிற open source திட்டங்கள் → [santifer.io](https://santifer.io)
 

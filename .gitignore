@@ -2,10 +2,17 @@
 cv.md
 article-digest.md
 local/
+# Data-root marker (DATA_CONTRACT.md "Custom Data Directory"). It holds a path
+# on this machine only, so committing it would point every other clone at a
+# directory that does not exist there.
+/.career-ops-data
 # Everything under data/ is generated or personal at runtime — only .gitkeep
 # placeholders are tracked (verify with `git ls-files data/`). A blanket rule
 # means a new generated file (e.g. a future log/cache addition) is covered
 # for every user automatically, with no per-filename .gitignore update needed.
+# Match the root entry itself as well as its contents: the user data root may
+# be a symlink to storage outside the checkout, which child globs cannot reach.
+/data
 data/*
 !data/.gitkeep
 !data/offers/
@@ -23,8 +30,36 @@ reports/*.md
 # re-append the original pattern as "missing".
 reports/**/*.md
 !reports/.gitkeep
+/output
 output/*
 !output/.gitkeep
+# batch/ holds generated worker output. Ignore the directory and allowlist the
+# tracked scaffolding, so a filename a future generator picks is covered by
+# default. AGENTS.md already states the intent this way: "Batch in batch/
+# (gitignored except scripts and prompt)". Enumerating the outputs instead only
+# covers the names that existed when the list was written, which left
+# batch/cv-*.json and batch/cover-*.json stageable, and those carry the
+# candidate's CV content.
+batch/*
+!batch/README.md
+!batch/aggregate-tokens.mjs
+!batch/batch-prompt.md
+!batch/batch-runner.sh
+# No trailing slash, so git descends into the two keeper directories. A slashed
+# pattern matches only a real directory and would miss a symlink.
+!batch/logs
+!batch/tracker-additions
+# tracker-additions never had a blanket child rule, only the **/*.tsv one below,
+# so a non-.tsv file dropped straight into it was stageable. The .gitkeep
+# negations further down still win over this on an already-updated install, not
+# only in a fresh clone: reconcileGitignore() re-emits a negation the install
+# already has after the patterns it appends, which is what #4142 added.
+batch/tracker-additions/*
+# The enumerated rules below are now redundant in a fresh clone, and are kept
+# rather than deleted. The reconciler only ever appends, so deleting them here
+# would not remove them from an existing install; it would only drop them from
+# fresh clones, where batch/logs/* is still what re-ignores that directory's
+# contents once !batch/logs has let git descend into it.
 batch/logs/*
 !batch/logs/.gitkeep
 batch/batch-state.tsv
@@ -32,6 +67,10 @@ batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+# Worker scratch: prefetched JD text plus whatever compile cache the worker CLI
+# drops here. Fetched postings are user data — never stage them.
+batch/tmp/
+/jds
 jds/*
 !jds/.gitkeep
 
@@ -207,9 +246,11 @@ plan/
 
 # Profile intake sources (master CV / LinkedIn export / diplomas / references
 # — user PII, never commit). Ship only the system-owned scaffold. #1723
+/documents
 documents/*
 !documents/.gitkeep
 !documents/README.md
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+data/agent-inbox.md

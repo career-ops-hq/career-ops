@@ -54,6 +54,7 @@
  *                               salary_filter and rendered into pipeline.md's
  *                               compensation column via formatCompensation(); an
  *                               empty/absent value always passes the filter.
+ *                               `adp-workforcenow.mjs` is another producer.
  * @property {string} [externalId] The ATS's own stable id for this POSTING
  *                               (Greenhouse `id`, Ashby posting uuid, Lever
  *                               `id`). Unique within that ATS, not across

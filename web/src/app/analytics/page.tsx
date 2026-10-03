@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { pipelineSummary } from "@/lib/career-ops";
+import { pipelineSummary, readApplicationStatusLog, readStatusLog } from "@/lib/career-ops";
+import { PipelineSankey } from "@/components/analytics/pipeline-sankey";
 import { canonStatus, scoreNum } from "@/lib/format";
-import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
+import { cumulativeTilesWithHistory } from "@/lib/funnel-tiles.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,9 @@ const STAGES: { key: string; label: string }[] = [
   { key: "DISCARDED", label: "Discarded" },
 ];
 
-export default function Analytics() {
+export default async function Analytics() {
   const { applications } = pipelineSummary();
+  const statusLog = readStatusLog();
   const total = applications.length;
 
   const stageCounts = STAGES.map((s) => ({
@@ -45,11 +47,14 @@ export default function Analytics() {
   // counters whose zero-state shows a coaching nudge, so a candidate who has
   // already advanced past a stage must not read 0 for it (an offer-holder was
   // told "Interviews follow replies — keep follow-ups warm"). Mirrors
-  // everInterview/everOffer in stats.mjs's computeFunnel().
-  const { interviews, offers } = cumulativeTiles(applications.map((a) => canonStatus(a.status)));
+  // everInterview/everOffer in stats.mjs, including stages recovered from history.
+  const { interviews, offers } = await cumulativeTilesWithHistory(
+    applications.map((a) => ({ n: a.n, status: canonStatus(a.status) })),
+    readApplicationStatusLog(),
+  );
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="mx-auto max-w-5xl px-6 py-10">
       <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
       <p className="mt-1 text-sm text-muted">Across {total} tracked evaluation{total === 1 ? "" : "s"}.</p>
 
@@ -68,6 +73,8 @@ export default function Analytics() {
           hint={offers === 0 ? "Offers follow interviews — keep the conversations going →" : undefined}
         />
       </div>
+
+      <PipelineSankey applications={applications} statusLog={statusLog} />
 
       <Section title="Pipeline by stage">
         {stageCounts.map((s) => (

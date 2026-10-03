@@ -30,10 +30,12 @@ These files contain your personal data, customizations, and work product. Update
 | `plugins.local/` | Your own / private plugins (never auto-updated) |
 | `plugins.lock` | Integrity pins + recorded consent for your enabled plugins (generated; never auto-updated) |
 | `data/applications.md` | Your application tracker (source of truth) |
+| `data/career-profile.yml` | Your source-backed Master Career Profile; written only after explicit review of imported CV facts |
 | `data/applications.db` | Derived query index over `applications.md` (SQLite, rebuilt by `node tracker.mjs sync` — safe to delete) |
 | `data/pipeline.md` | Your URL inbox |
 | `data/scan-history.tsv` | Your scan history (tab-separated, append-only trailing columns; col 8: local SimHash JD fingerprint for cross-listing detection, col 9: posting date, cols 10-11: trust score/flags, col 12: normalized company key for repost/name matching). Older rows may have fewer columns — readers index by position and tolerate the absence. |
 | `data/scan-runs.tsv` | Your per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
+| `data/scheduled-jobs.json` | Your local scheduled-scan definitions, queue, and bounded run history (written by the web UI and `web/scripts/scheduled-jobs-runner.mjs`) |
 | `data/portal-health.tsv` | Consecutive reachability status for scanned portals (appended by `scan.mjs`; statuses: `reachable`, `empty`, `slug_gone`, `network`, `auth`, `server`, `unknown`, `unverified_zero` — the last four joined the vocabulary later, so older files carry only the first four; `unverified_zero` means a provider returned no jobs without any observed successful HTTP response and counts toward the failure streak) |
 | `data/dead-boards.tsv` | Boards that returned three consecutive 404s during mass reverse ATS sweeps (written by `scan-ats-full.mjs`; unlike `data/portal-health.tsv`, this does not track the user's configured portals; re-probed after 30 days — safe to delete, the next sweep rebuilds it) |
 | `data/follow-ups.md` | Your follow-up history |
@@ -43,7 +45,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/pdf-index.tsv` | PDF↔report linkage manifest (written by `generate-pdf.mjs`, read by `find.mjs`, the dashboard, and the `email` mode) |
 | `data/offers/*` | Your received offers/contracts, promise notes, prep reports, and reply drafts (PII — gitignored, written by the `offer-prep` mode) |
 | `data/outcomes/*` | Your application outcome logs and archived application artifacts (written by the `outcome` mode) |
-| `data/salary-observations.tsv` | Your append-only compensation observation log: `{tracker#}\t{date}\t{desired\|advertised\|actual}\t{amount}\t{currency}\t{source}\t{note}`. Written by interactive modes when a figure is stated/confirmed; never edited in place. Advertised figures come from reports' `advertised_comp` instead — reports are themselves observation sources. Read by `salary-gap.mjs` |
+| `data/salary-observations.tsv` | Your append-only compensation observation log: `{tracker#}\t{date}\t{desired\|advertised\|actual}\t{amount}\t{currency}\t{source}\t{note}`. Written by interactive modes when a figure is stated/confirmed; never edited in place. Column 1 is a **tracker#** — the `#` of the row in the active tracker file (`data/applications.md` in the default layout), not a report number. The two counters diverge permanently once any row exists without a report, so a number copied off a `reports/{###}-*.md` filename can name a different application; padding is not identity, so `29` and `029` are the same row. Advertised figures come from reports' `advertised_comp` instead — reports are themselves observation sources, reached through the tracker row's Report link rather than by matching numbers. Read by `salary-gap.mjs` |
 | `status-log.tsv` (sibling of the active tracker file — `data/status-log.tsv` in the default layout) | Your append-only status transition ledger: `{tracker#}\t{date}\t{from}\t{to}\t{source}\t{note}`. Appended by `set-status.mjs` next to wherever the tracker lives, on every real status change (the tracker stays the source of truth for *state*; the ledger records *when* transitions happened); never edited in place — corrections are new `correction`-source lines. An unknown from- or to-state is the sentinel `-`, never an empty cell; the two columns then diverge, with a from of `-` parsing to null (no prior state) and a to of `-` preserved as the literal unknown-target sentinel, while an empty cell is rejected as `unknown from-state ""` or `unknown to-state ""` for its own column. The source column is a closed set whose members are `VALID_SOURCES` in `funnel-velocity.mjs` — that declaration is the authority, so this contract points at it rather than restating a list that goes stale the next time a writer is added. Any value outside the set parses but is counted as an unknown source and excluded from the funnel, so per-writer detail belongs in the note column rather than namespaced onto the source. Read by `funnel-velocity.mjs` and `company-history.mjs` |
 | `data/upskill/*` | Your skill-gap analysis reports (written by the `upskill` mode) |
 | `data/blacklist.md` | Your do-not-apply list (opt-in — absence = no filtering; never auto-populated: only you, or the agent on your explicit instruction, write to it. Its `Scope` is `company` (default: normalized feed company name) or `domain` (the Company cell is a hostname suffix matched to the posting URL); no parent/subsidiary relationship is inferred. Respected by `scan.mjs` and the `auto-pipeline`/`oferta`/`apply` gates; never a scoring input) |
@@ -55,12 +57,13 @@ These files contain your personal data, customizations, and work product. Update
 | `output/*` | Your generated PDFs |
 | `jds/*` | Your saved job descriptions |
 | `templates/cv-{candidate}-{company-slug}.html`, `templates/cover-{candidate}-{company-slug}.html` | Your per-application generated CVs/cover letters, for installs that save the HTML twin under `templates/` instead of `output/` (#3636). `templates/` is otherwise system-owned (base CV/cover templates), so these are recognized by name rather than directory: anything under `templates/` starting with `cv-` or `cover-` that is NOT one of the shipped `cv-template*.html` / `cover-letter-template*.html` files is treated as your data — see `isGeneratedTemplateArtifact()` in `update-system.mjs` |
+| `templates/cv-template.{name}.html` / `.tex`, `templates/cover-letter-template.{name}.html` / `.tex` | Your own named CV/cover-letter template variant, when `{name}` matches `config/profile.yml`'s `cv.template` / `cover_letter.template` (the convention `cv-templates.mjs`'s `resolveTemplate()` reads — see its `KINDS`). `templates/` is otherwise system-owned, and a variant file this install created shares that directory and naming shape with the real shipped variants (`cv-template.zh-minimal.html`, ...), so it is recognized by cross-referencing the configured template name rather than by directory — see `isUserConfiguredTemplateVariant()` in `update-system.mjs`. An unconfigured or differently-named `cv-template.*.html` file is not covered by this carve-out and is still managed as a system file (updated or pruned normally). This is distinct from `templates/cv-{candidate}-{company-slug}.html` / `templates/cover-{candidate}-{company-slug}.html`, which is generated per-application *output*, not an authored template *variant*. |
 
 ### Fork-local paths
 
 The two lists above describe *this project*. A fork usually carries files the project has never heard of — a nightly runner, an `.mcp.json`, a private fixtures directory. Those files are in the user layer by every definition that matters, but they cannot be added to `USER_PATHS`: that array lives in `update-system.mjs`, which `apply` overwrites and which git re-merges on every sync. The declaration would be erased by the process it exists to constrain.
 
-`config/local-paths.txt` moves the declaration outside that blast radius. It is gitignored, read at runtime, and merged into the user layer for both the updater's safety check and `validate-system-paths-coverage.mjs`:
+`config/local-paths.txt` moves the declaration outside that blast radius. It is gitignored by default, read at runtime, and merged into the user layer for both the updater's safety check and `validate-system-paths-coverage.mjs`:
 
 ```text
 # one repo-relative path per line; blank lines and # comments ignored
@@ -77,7 +80,7 @@ Three declarations are refused, loudly, naming the entry:
 |---------|-----|
 | An absolute path, or one containing `..` | Would extend "never touch" over files outside the checkout |
 | A path the system layer already ships | The file would silently stop receiving updates, with no other signal that it had been frozen |
-| `config/local-paths.txt` itself | It is gitignored, so nothing updates it; listing it protects against a threat that does not exist and reads as though it did |
+| `config/local-paths.txt` itself | It is gitignored by default, so nothing updates it; listing it protects against a threat that does not exist and reads as though it did. A fork whose CI runs the suite un-ignores and commits it (see `config/local-paths.example.txt`); it is then tracked and not ignored, which both guards accept |
 
 ## System Layer (safe to auto-update)
 
@@ -193,4 +196,3 @@ When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.y
 - **`CAREER_OPS_TRACKER`** can be set to override the applications tracker file path directly (relative paths are resolved relative to the repository root).
 - **Read Resolution:** If no tracker override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
 - **Write Resolution:** All writes (including merge operations and first-run creation) target the canonical location `{DATA_ROOT}/data/applications.md`.
-

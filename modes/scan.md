@@ -50,10 +50,12 @@ Recommended Contract:
   scan_method: local_parser
   parser:
     command: node
-    script: scripts/parsers/example-company-jobs.js
+    script: local/example-company-jobs.js
     format: jobs-json-v1
   enabled: true
 ```
+
+The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `scripts/parsers/` is for a parser you intend to upstream. See `docs/local-parser-cookbook.md`.
 
 Typically, the parser is company-specific and already knows the URL, selectors, and pagination. `args` is optional: use it however it helps the script author, for example, to reuse it across companies, pass `{careers_url}` or `{company}`, activate a debug flag, save a JSON snapshot, or control any parser-specific behavior.
 
@@ -88,6 +90,14 @@ Object format with `results`:
 ```
 
 `company` is optional; if not provided, `scan.mjs` uses the name from `tracked_companies`.
+
+A posting date is optional too, and worth emitting when the source exposes one: without it the offer has no `postedAt`, so `max_posting_age_days`, `--posted-after`/`--posted-before` and `--since` all pass it through (the same "don't penalize missing data" convention the filters use everywhere else). Epoch milliseconds or any string `Date.parse` accepts, under `postedAt`, `posted_at`, `publishedAt`, `published_at`, `published_date`, `datePosted` or `date_posted` — the last spelling is what a page's JSON-LD `JobPosting` block already calls it:
+
+```json
+[
+  { "title": "Senior AI Engineer", "url": "https://example.com/jobs/123", "location": "Remote", "postedAt": "2026-02-08" }
+]
+```
 
 The scanner does not need to persist the full JSON after reading stdout. If a parser also generates an artifact for auditing or debugging, save it under `data/parser-output/{company}/` and keep it out of git (JSON files in `.gitignore`; `.gitkeep` files are kept in git to preserve the directory structure).
 
@@ -238,7 +248,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
-   - `scan-history.tsv` → exact URL already seen
+   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_location` or `skipped_age`, which never count as seen; see Scan History)
    - `applications.md` → normalized company + role already evaluated
    - `pipeline.md` → exact URL already in pending or processed list
 
@@ -303,7 +313,7 @@ If a non-publicly accessible URL is found:
 | 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
 | 4 | `title` | `PM AI` | Job title as returned by the ATS |
 | 5 | `company` | `Acme` | Company name |
-| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired` |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_invalid_url`, `skipped_blocked_host`, `cooldown:{company}:{until}` |
 | 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
 | 8 | `fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
 | 9 | `posted_at` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
@@ -312,6 +322,10 @@ If a non-publicly accessible URL is found:
 | 12 | `normalized_company` | `acme` | Canonical company key (`normalizeCompanyName`) so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all match; col 5 stays faithful to what the provider returned |
 
 Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
+
+`skipped_location` and `skipped_age` record what `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed threshold is visible in the data rather than only as a summary counter, and they carry no dedup weight: both name a setting the user edits, so a row written under the old threshold must not suppress the same posting once it moves. Each posting gets one such row per status, not one per scan.
+
+The scanner writes the other statuses in that list itself: `skipped_no_apply_control` for a page that loaded without an Apply control, `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.
 
 ```tsv
 url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company

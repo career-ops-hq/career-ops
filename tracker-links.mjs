@@ -24,7 +24,7 @@ import { join, relative, sep } from 'path';
  * @returns {string} The same text with report links normalized.
  */
 export function normalizeReportLink(reportField, trackerDir, repoRoot) {
-  return reportField.replace(/\]\(([^)]+)\)/g, (whole, linkPath) => {
+  return reportField.replace(/\]\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g, (whole, linkPath) => {
     const m = linkPath.match(/^(?:\.\.\/)*(reports\/.+)$/);
     if (!m) return whole; // not a report path — leave untouched
     const reportAbs = join(repoRoot, m[1]);

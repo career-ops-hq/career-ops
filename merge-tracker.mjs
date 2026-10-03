@@ -17,7 +17,7 @@
  * Run: node merge-tracker.mjs [--dry-run] [--verify]
  */
 
-import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync, statSync } from 'fs';
 import { join, basename, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -30,14 +30,13 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolve
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
-import { normalizeUrl } from './url-key.mjs';
+import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from './url-key.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
-const MERGE_TRACKER_HELP_REQUESTED = process.argv.includes('--help') || process.argv.includes('-h');
-if (MERGE_TRACKER_HELP_REQUESTED) {
-  console.log(`Usage: node merge-tracker.mjs [options]
+const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
 Options:
   --dry-run        Preview the merge without writing files
@@ -45,9 +44,13 @@ Options:
   --migrate        Rewrite legacy report links relative to the tracker
   --migrate-via    Add the Via column to a legacy tracker
   --backfill-urls  Add the URL column and populate it from report metadata
-  -h, --help       Show this help and exit`);
-  process.exit(0);
-}
+  -h, --help       Show this help and exit`;
+// The flags below are read with process.argv.includes(), so a flag this script
+// does not know was dropped without a word: `--dryrun` ran the real merge,
+// rewrote applications.md and moved the TSVs into merged/ -- the one outcome
+// --dry-run exists to prevent. Reject it before anything is read or written.
+const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--backfill-urls', '--help', '-h'];
+validateFlags(process.argv.slice(2), MERGE_TRACKER_KNOWN_FLAGS, MERGE_TRACKER_USAGE);
 
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
@@ -88,8 +91,11 @@ function loadFailedReportNumbers(path) {
     const status = cols[2];
     const reportNum = cols[5];
     if (status === 'failed' && reportNum && reportNum !== '-') {
-      const n = parseInt(reportNum, 10);
-      if (!isNaN(n)) failed.add(n);
+      // Digits only, positive, safe: parseInt would accept "12abc" and
+      // 9007199254740992, and an unsafe number in the occupied set makes
+      // reserveReportNumbers throw "No safe report-number range remains".
+      const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
+      if (Number.isSafeInteger(n) && n > 0) failed.add(n);
     }
   }
   return failed;
@@ -161,8 +167,24 @@ try {
   process.exit(1);
 }
 
-// Canonical states and aliases
-const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
+// Canonical states — loaded from templates/states.yml, the single source of truth.
+// Adding a state or alias there is all that is needed; no code change required here.
+const _CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const _STATES_FILE = existsSync(join(_CODE_ROOT, 'templates/states.yml'))
+  ? join(_CODE_ROOT, 'templates/states.yml')
+  : join(_CODE_ROOT, 'states.yml');
+// A missing or unreadable states file is a broken install, not a reason to abort
+// the merge on a raw ENOENT. Say so once, then merge each status as written:
+// validateStatus() only rewrites to "Evaluated" when it has states to check.
+let _canonicalStates = [];
+try {
+  _canonicalStates = loadCanonicalStates(_STATES_FILE);
+} catch (err) {
+  console.warn(`⚠️  Cannot read canonical states (${err.message}): statuses are merged as written. Restore templates/states.yml, then run node normalize-statuses.mjs`);
+}
+const _aliasMap = Object.fromEntries(
+  _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.label]))
+);
 
 /**
  * Convert raw addition status text into one canonical tracker state.
@@ -179,29 +201,20 @@ function validateStatus(status) {
   const clean = status.replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
   const lower = clean.toLowerCase();
 
-  for (const valid of CANONICAL_STATES) {
-    if (valid.toLowerCase() === lower) return valid;
+  // Label match (case-insensitive)
+  for (const s of _canonicalStates) {
+    if (s.label.toLowerCase() === lower) return s.label;
   }
 
-  // Aliases
-  const aliases = {
-    // Spanish → English
-    'evaluada': 'Evaluated', 'condicional': 'Evaluated', 'hold': 'Evaluated', 'evaluar': 'Evaluated', 'verificar': 'Evaluated',
-    'aplicado': 'Applied', 'enviada': 'Applied', 'aplicada': 'Applied', 'applied': 'Applied', 'sent': 'Applied',
-    'respondido': 'Responded',
-    'entrevista': 'Interview',
-    'oferta': 'Offer',
-    'rechazado': 'Rejected', 'rechazada': 'Rejected',
-    'contratado': 'Hired', 'contratada': 'Hired', 'accepted': 'Hired', 'accept': 'Hired',
-    'descartado': 'Discarded', 'descartada': 'Discarded', 'cerrada': 'Discarded', 'cancelada': 'Discarded',
-    'no aplicar': 'SKIP', 'no_aplicar': 'SKIP', 'skip': 'SKIP', 'monitor': 'SKIP',
-    'geo blocker': 'SKIP',
-  };
-
-  if (aliases[lower]) return aliases[lower];
+  // Alias match
+  if (_aliasMap[lower]) return _aliasMap[lower];
 
   // DUPLICADO/Repost → Discarded
   if (/^(duplicado|dup|repost)/i.test(lower)) return 'Discarded';
+
+  // No states loaded (see above): keep the row's own status rather than record
+  // an "Evaluated" it never claimed.
+  if (!_canonicalStates.length && clean) return clean;
 
   console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
   return 'Evaluated';
@@ -250,15 +263,34 @@ function extractReportNum(reportStr, notesStr = '') {
  * @returns {{url: string, reason: 'ok'|'no-report'|'no-url'}} The URL plus why
  *   it is empty, so the backfill can report the two cases separately.
  */
-function resolveReportUrl(reportField) {
+/**
+ * Resolve a report cell to the absolute path of the report file it links to,
+ * or null when the link is missing, escapes REPORTS_ROOT, or the file doesn't
+ * exist. Factored out of resolveReportUrl() so the merge loop's dedup tiers
+ * can compare two report cells for literal same-file identity (#4506)
+ * without also needing to read and parse the file's `**URL:**` header.
+ *
+ * @param {string} reportField - Report cell, e.g. `[42](reports/042-acme.md)`.
+ * @returns {string|null} The resolved absolute path, or null.
+ */
+function resolveReportPath(reportField) {
   const linkMatch = (reportField || '').match(/\]\(([^)]+)\)/);
-  if (!linkMatch) return { url: '', reason: 'no-report' };
+  if (!linkMatch) return null;
   // Containment, not cosmetics: resolve and assert the path stays under
   // REPORTS_ROOT. Stripping leading `../` alone still let an embedded
   // `reports/../../..` walk out of the tree, and the tracker is user-editable.
   const reportPath = resolve(REPORTS_ROOT, linkMatch[1].trim().replace(/^(\.\.\/)+/, ''));
-  if (!reportPath.startsWith(REPORTS_ROOT + sep)) return { url: '', reason: 'no-report' };
-  if (!existsSync(reportPath)) return { url: '', reason: 'no-report' };
+  if (!reportPath.startsWith(REPORTS_ROOT + sep)) return null;
+  // existsSync alone accepts a directory, which would let the new Pass 0.5
+  // dedup tier treat two additions whose report link happens to resolve to
+  // the same directory as report-identical without ever reading a file.
+  if (!existsSync(reportPath) || !statSync(reportPath).isFile()) return null;
+  return reportPath;
+}
+
+function resolveReportUrl(reportField) {
+  const reportPath = resolveReportPath(reportField);
+  if (!reportPath) return { url: '', reason: 'no-report' };
   // [ \t]* NOT \s*: \s matches newlines, so an empty `**URL:**` header swallowed
   // the line break and captured the NEXT header's text. Every such report then
   // minted the same bogus key (`**Legitimacy:**`), and the backfill counted it
@@ -525,6 +557,76 @@ let COLMAP = LEGACY_COLMAP;
 // data" marker instead of being dropped. Null until detected; falls back to the
 // width implied by COLMAP.
 let HEADER_WIDTH = null;
+
+/**
+ * Append one cell to a Markdown table line without reparsing its existing
+ * cells. The URL schema migration is user-data work, so preserving every byte
+ * before the old closing delimiter keeps custom columns and hand-tuned values
+ * out of the migration's reach.
+ *
+ * @param {string} line - Header, separator, or data row with a closing pipe.
+ * @param {string} value - New cell value (empty for data rows).
+ * @param {boolean} separator - Whether this is the table separator row.
+ * @returns {string|null} The widened line, or null when it cannot be widened safely.
+ */
+function appendTrailingTableCell(line, value = '', separator = false) {
+  const eol = line.endsWith('\r') ? '\r' : '';
+  const body = eol ? line.slice(0, -1) : line;
+  const match = body.match(/^(.*\|)([ \t]*)$/);
+  if (!match) return null;
+  const cellText = separator ? '-----' : value ? ` ${value} ` : ' ';
+  return `${match[1]}${cellText}|${match[2]}${eol}`;
+}
+
+/**
+ * Explicitly add a trailing URL column to a recognized tracker table. Only
+ * --backfill-urls calls this; ordinary merges retain the legacy no-URL layout.
+ * The caller writes the widened table together with the backfilled values in
+ * one atomic write.
+ *
+ * @param {string[]} lines - applications.md split into lines.
+ * @returns {{added: boolean, reason?: string}}
+ */
+function addMissingUrlColumn(lines) {
+  const headerIdx = lines.findIndex(line => isHeaderRow(line));
+  if (headerIdx < 0) return { added: false, reason: 'no recognizable header row' };
+
+  const currentMap = detectColumns(lines);
+  if (currentMap?.url != null) return { added: false };
+
+  const separatorIdx = headerIdx + 1;
+  if (!SEPARATOR_ROW_RE.test(lines[separatorIdx] || '')) {
+    return { added: false, reason: 'no separator row directly after the tracker header' };
+  }
+
+  const expectedCellCount = lines[headerIdx].split('|').length;
+  if (lines[separatorIdx].split('|').length !== expectedCellCount) {
+    return { added: false, reason: `table separator row ${separatorIdx + 1} has the wrong number of cells` };
+  }
+
+  const widenedHeader = appendTrailingTableCell(lines[headerIdx], 'URL');
+  const widenedSeparator = appendTrailingTableCell(lines[separatorIdx], '', true);
+  if (widenedHeader == null || widenedSeparator == null) {
+    return { added: false, reason: 'the tracker table is missing a closing pipe' };
+  }
+
+  const widenedRows = [];
+  for (let i = separatorIdx + 1; i < lines.length && lines[i].startsWith('|'); i++) {
+    const widened = appendTrailingTableCell(lines[i]);
+    if (widened == null) return { added: false, reason: `table row ${i + 1} is missing a closing pipe` };
+    if (lines[i].split('|').length !== expectedCellCount) {
+      return { added: false, reason: `table row ${i + 1} has the wrong number of cells` };
+    }
+    widenedRows.push([i, widened]);
+  }
+
+  // Apply only after every line has been validated. A malformed row must not
+  // leave the in-memory document half-migrated, even during a dry run.
+  lines[headerIdx] = widenedHeader;
+  lines[separatorIdx] = widenedSeparator;
+  for (const [i, widened] of widenedRows) lines[i] = widened;
+  return { added: true };
+}
 
 // Build a tracker row string matching the detected layout. Every field
 // career-ops knows about is placed at ITS OWN detected index, and any column
@@ -1123,6 +1225,16 @@ function sortTrackerRowsInPlace(lines) {
 }
 
 const appLines = appContent.split('\n');
+let urlColumnAdded = false;
+if (BACKFILL_URLS) {
+  const migration = addMissingUrlColumn(appLines);
+  if (migration.reason) {
+    console.error(`❌ --backfill-urls: cannot add the URL column safely (${migration.reason}).`);
+    trackerLock.release();
+    process.exit(1);
+  }
+  urlColumnAdded = migration.added;
+}
 // Detect the tracker's column layout via header names so parsing and writing
 // both work whether the table uses the original 9-column layout or a customized
 // one (e.g. with a Location column after Role). Falls back to the legacy layout.
@@ -1174,7 +1286,7 @@ for (const line of appLines) {
 // Run with: node merge-tracker.mjs --backfill-urls [--dry-run]
 if (BACKFILL_URLS) {
   if (COLMAP.url == null) {
-    console.error('❌ --backfill-urls: this tracker has no URL column. Add a `URL` header column first (additive), then re-run.');
+    console.error('❌ --backfill-urls: could not detect a URL column after migration.');
     trackerLock.release();
     process.exit(1);
   }
@@ -1219,10 +1331,13 @@ if (BACKFILL_URLS) {
   });
   const summary = `${filled} filled, ${already} already set, ${noReport} no/missing report, ${noUrl} report has no **URL:**`;
   if (DRY_RUN) {
-    console.log(`🔎 Backfill URLs (dry-run): would fill ${filled} row(s). (${summary})`);
+    const action = urlColumnAdded
+      ? `would add the URL column and fill ${filled} row(s)`
+      : `would fill ${filled} row(s)`;
+    console.log(`🔎 Backfill URLs (dry-run): ${action}. (${summary})`);
   } else {
     writeFileAtomic(APPS_FILE, backfilled.join('\n'));
-    console.log(`✅ Backfill URLs: ${summary}.`);
+    console.log(`✅ Backfill URLs: ${urlColumnAdded ? 'added the URL column; ' : ''}${summary}.`);
   }
   trackerLock.release();
   process.exit(0);
@@ -1408,10 +1523,39 @@ for (const file of tsvFiles) {
   // rows pointing at the same report. Record-linkage practice names this
   // directly — treating missing as disagreement is a known bias, not a safe
   // default.
-  // Two present-and-different keys are PROOF the rows are distinct postings.
+  // Two present-and-different keys are PROOF the rows are distinct postings —
+  // but only while both name an EMPLOYER-CONTROLLED board, where one URL is one
+  // requisition. An aggregator re-lists a requisition the employer hosts
+  // elsewhere, so a single opening routinely carries a LinkedIn URL on the row
+  // it entered by and an Indeed or employer-ATS URL on the row a later sighting
+  // brought in. Those two keys differ because the two BOARDS differ, which is
+  // not information about the posting: it is the same UNKNOWN as an absent key,
+  // and must let the tier decide on company and title instead. The project
+  // already holds this for the mirror-image case — detect-reposts skips
+  // `aggregator: true` companies because "same company + same title" stops
+  // meaning "same opening" there (#2703).
+  //
+  // WITH ONE EXCEPTION, AND IT IS THE POSTING ID. Reading the whole URL as
+  // unknown also swallowed two DIFFERENT requisitions listed on the SAME board:
+  // LinkedIn 4001 (already Applied) and LinkedIn 4002 folded into one row that
+  // still said Applied while pointing at a posting nobody had applied to, with
+  // the first report orphaned and no marker — the silent, unrecoverable
+  // direction. The narrower and correct signal is the requisition identity the
+  // URL carries: two IDs extracted from the SAME aggregator that differ are two
+  // postings. Same ID, one side unextractable, or two different aggregators all
+  // stay UNKNOWN, so slug-vs-id spellings and uk./www. region hosts keep
+  // collapsing and #3652 is preserved. Gating on the HOST instead was measured
+  // to split one posting across two rows, which is why the ID is the gate.
   const urlDiffers = (cand) => {
     const candUrl = normalizeUrl(cand.url);
     if (!candUrl || !addUrl) return false;   // unknown → not evidence
+    if (isAggregatorUrl(cand.url) || isAggregatorUrl(addition.url)) {
+      const candId = aggregatorPostingId(cand.url);
+      const addId = aggregatorPostingId(addition.url);
+      // Comparable only on one board: a LinkedIn id and an Indeed id differing
+      // says the two BOARDS differ, which is the non-signal above.
+      return Boolean(candId && addId && candId.domain === addId.domain && candId.id !== addId.id);
+    }
     return candUrl !== addUrl;
   };
 
@@ -1427,6 +1571,38 @@ for (const file of tsvFiles) {
     if (urlDiffers(cand)) return true;
     return Boolean(normalizeUrl(cand.url)) && !addUrl;
   };
+
+  const additionReqNum = extractReqNumber(addition.notes);
+  // Req IDs are evidence against a heuristic match only when both sides carry
+  // one and they disagree. Missing on either side stays unknown, matching the
+  // existing tier-3 guard and the URL guard above.
+  const reqNumDiffers = (cand) => {
+    const appReqNum = extractReqNumber(cand.notes);
+    return Boolean(additionReqNum && appReqNum && additionReqNum !== appReqNum);
+  };
+
+  // Pass 0.5 — the addition's own report link and an existing row's report
+  // link resolve to the LITERAL SAME FILE on disk. This is unambiguous proof
+  // of identity, stronger than tier 1 below (bracket-number equality): a
+  // report file is written once, for one specific posting, so two additions
+  // that reference the identical reports/*.md path cannot be two distinct
+  // postings that happen to share a number — unlike a bare number match,
+  // there is no "report-file sequence vs. tracker-row sequence drifted"
+  // explanation available here (#912's reason for tier 1's company guard).
+  // So this tier, unlike tier 1, does not require the company to also match.
+  //
+  // Closes #4506: two concurrent sessions each wrote a TSV addition for the
+  // same report, one spelled the company "Revera" and the other "Revera
+  // (Cogir Senior Living)" — different enough that tier 1's company guard
+  // refused the match, so a second tracker row was appended pointing at the
+  // exact same report file. A same-file match here needs no such guard.
+  if (!duplicate) {
+    const addPath = resolveReportPath(addition.report);
+    if (addPath) {
+      duplicate = existingApps.find(app => !urlDiffers(app) && resolveReportPath(app.report) === addPath);
+      if (duplicate) { dupReason = 'report-file'; reportNumMatched = true; }
+    }
+  }
 
   if (!duplicate && reportNum) {
     // Report-number match must also confirm company (#912). Report-file
@@ -1452,6 +1628,7 @@ for (const file of tsvFiles) {
     // alone silently merges a brand-new role into an unrelated existing row.
     duplicate = existingApps.find(app =>
       !urlBlocksHeuristic(app) && app.num === addition.num && companiesMatch(app.company, addition.company)
+      && !reqNumDiffers(app)
       // Same-run num collisions are reservation races, not row-id references:
       // two TSVs that both claimed num=5 for DIFFERENT roles at one company
       // are two distinct evaluations, and folding them keeps the first title
@@ -1466,7 +1643,6 @@ for (const file of tsvFiles) {
 
   if (!duplicate) {
     // Company + role fuzzy match
-    const additionReqNum = extractReqNumber(addition.notes);
     // Two passes, exact company first. With a single find() the wider
     // corporate-form comparison (#3665) let an EARLIER "Acme Technologies" row
     // claim an addition for "Acme" while an exact "Acme" row sat further down
@@ -1533,15 +1709,28 @@ for (const file of tsvFiles) {
       if (COLMAP.via == null
           && (String(addition.company).trim() === '?' || String(app.company).trim() === '?')
           && normalizeVia(addition.via || '') !== normalizeVia(app.via || '')) return false;
-      // Req/job-number guard (#1524): a similarly-worded title at the same
-      // company can still be a genuinely distinct posting when a req/job
-      // number in the Notes column proves it (employers like TD commonly run
-      // concurrent near-identical L&D/HR titles distinguished only by req#).
-      // Only treat this as evidence the rows differ when BOTH sides carry an
-      // extractable number and they disagree — if either side has none, fall
-      // back to today's fuzzy-match-only behavior unchanged.
+      // Req/job-number guard (#1524, widened by #4275): a similarly-worded
+      // title at the same company can still be a genuinely distinct posting
+      // when a req/job number in the Notes column proves it (employers like
+      // TD commonly run concurrent near-identical L&D/HR titles distinguished
+      // only by req#). Originally this only counted when BOTH sides carried
+      // an extractable number and they disagreed — an existing row written
+      // before req numbers were consistently captured has none, so a new
+      // addition FOR A GENUINELY DIFFERENT POSTING that happens to have a req
+      // number fell through to "not proven distinct" and got silently merged,
+      // corrupting the old row's date/score/report/notes.
+      //
+      // The fix is direction-sensitive, not symmetric: only block when the
+      // ADDITION carries a number the existing row can't confirm or deny.
+      // The other direction — existing row has a req number, addition does
+      // not — is the ordinary re-evaluation shape (a fresh TSV re-scoring the
+      // same posting typically writes new commentary like "re-scored: JD
+      // refreshed" without repeating the req number already sitting in the
+      // row's Notes) and must keep merging; blocking that direction too would
+      // turn every such re-eval into a spurious duplicate row instead.
       const appReqNum = extractReqNumber(app.notes);
-      if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
+      if (reqNumDiffers(app)) return false;
+      if (additionReqNum && !appReqNum) return false;
       return true;
     };
     duplicate = existingApps.find(app => fuzzyTierMatch(app, false))

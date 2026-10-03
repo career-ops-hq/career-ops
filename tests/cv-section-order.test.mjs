@@ -998,8 +998,9 @@ ${sections.join('\n')}</div>
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
-      'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
+      'generate-pdf.mjs', 'cv-experience-order.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
       'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+      'cv-sections-core.mjs',
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
@@ -1138,8 +1139,9 @@ export const chromium = {
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
-      'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
+      'generate-pdf.mjs', 'cv-experience-order.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
       'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+      'cv-sections-core.mjs',
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }

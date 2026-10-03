@@ -27,6 +27,8 @@ version: 1.0.0
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
     --page-margin: 0.6in;
+    /* #3242: unchanged default — see templates/cv-template.html. */
+    --job-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -86,6 +88,16 @@ version: 1.0.0
     text-transform: uppercase;
     color: var(--accent-color);
     line-height: 1.15;
+  }
+
+  .header-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #555;
+    margin-top: 3px;
+    line-height: 1.2;
   }
 
   .contact-row {
@@ -169,6 +181,14 @@ version: 1.0.0
     font-size: 9.5px;
     color: #6b7684;
     margin-top: 1px;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 10px;
+    line-height: 1.5;
+    color: #55606d;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -271,10 +291,17 @@ version: 1.0.0
     page-break-inside: avoid;
   }
 
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    page-break-inside: var(--job-break-inside, auto);
+    break-inside: var(--job-break-inside, auto);
+  }
+
   .section-title,
   .job-company,
   .job-role,
   .job-location,
+  .job-context,
   .edu-location,
   .project-title {
     break-after: avoid;
@@ -322,6 +349,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
       <span class="separator">|</span>

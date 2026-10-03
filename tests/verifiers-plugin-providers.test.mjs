@@ -31,10 +31,10 @@ function stripJsComments(source) {
 }
 
 // A throwaway checkout that verify-pipeline/verify-portals run FROM, so the
-// test never reads, writes, or deletes the developer's real config/plugins.yml
-// (mergeProviderPlugins resolves plugins/ and config/plugins.yml from the
-// script's own CODE_ROOT). Copies the flat scripts plus the four dirs the
-// verifiers reach into; node_modules is symlinked.
+// test never reads, writes, or deletes the developer's real files. Plugin code
+// resolves from this CODE_ROOT while config/plugins.yml resolves from the
+// separate Data Root, matching a split checkout. Copies the flat scripts plus
+// the four dirs the verifiers reach into; node_modules is symlinked.
 function prepareFixtureCodeRoot(tmp) {
   const codeRoot = join(tmp, 'code-root');
   mkdirSync(codeRoot, { recursive: true });
@@ -81,8 +81,6 @@ const MINIMAL_TRACKER =
   const tmp = mkdtempSync(join(tmpdir(), 'co-4026-'));
   try {
     const codeRoot = prepareFixtureCodeRoot(tmp);
-    mkdirSync(join(codeRoot, 'config'), { recursive: true });
-    writeFileSync(join(codeRoot, 'config', 'plugins.yml'), 'plugins:\n  apify: { enabled: true }\n');
 
     // verify-pipeline.mjs resolves CAREER_OPS via getCareerOpsRoot() and, past
     // the tracker, mkdir's/reads real-looking data/reports paths under it
@@ -90,7 +88,8 @@ const MINIMAL_TRACKER =
     // inherits the full process.env, so a developer's own CAREER_OPS_ROOT
     // would otherwise leak in and the check would touch their real checkout.
     const dataRoot = join(tmp, 'data-root');
-    mkdirSync(dataRoot, { recursive: true });
+    mkdirSync(join(dataRoot, 'config'), { recursive: true });
+    writeFileSync(join(dataRoot, 'config', 'plugins.yml'), 'plugins:\n  apify: { enabled: true }\n');
 
     const tracker = join(tmp, 'applications.md');
     writeFileSync(tracker, MINIMAL_TRACKER);

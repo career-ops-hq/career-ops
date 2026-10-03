@@ -73,6 +73,34 @@ try {
   if (vNoClass && vNoClass.title === 'Director Platform Engineering') pass('parseArticles falls back to a JobDetail anchor without class="link" (Rohde & Schwarz)');
   else fail(`parseArticles missed the no-class-link variant: ${JSON.stringify(vArts.map((a) => a.id))}`);
 
+  // careers.avature.net (the vendor's own board, seen 2026-09-28) renders
+  // `article--jobs` cards: the title anchor sits in the h3 header with no class,
+  // and the only class="link" anchor is a "View more" button in the footer, so
+  // preferring class="link" would title every job "View more". Location is a
+  // footer <p> after an `icon-address` span.
+  const jobsCard = `
+    <article class="article article--jobs js_collapsible js_collapsible--enabled">
+      <div class="article__header js_collapsible__header"><div class="article__header__text">
+        <h3 class="article__header__text__title article__header__text__title--8">
+          <a href="https://careers.avature.net/en_US/main/JobDetail/Argentina-Cloud-Engineer-Argentina/7739">
+            Cloud Engineer
+          </a>
+        </h3>
+      </div></div>
+      <div class="article__footer"><div class="article__footer__info">
+        <p><span class="icon icon-tag" aria-hidden="true"></span> Cloud Services</p>
+        <p><span class="icon icon-address" aria-hidden="true"></span> Argentina</p>
+      </div><div class="article__footer__actions">
+        <a class="link" href="https://careers.avature.net/en_US/main/JobDetail/Argentina-Cloud-Engineer-Argentina/7739" aria-label="View more of job:Cloud Engineer">View more</a>
+      </div></div>
+    </article>`;
+  const jArts = parseArticles(jobsCard, 'https://careers.avature.net');
+  const j1 = jArts.find((a) => a.id === '7739');
+  if (jArts.length === 1 && j1 && j1.title === 'Cloud Engineer') pass('parseArticles reads the h3 title of an "article--jobs" card, not the "View more" link');
+  else fail(`parseArticles article--jobs card wrong: ${JSON.stringify(jArts)}`);
+  if (j1 && j1.location === 'Argentina') pass('parseArticles extracts the icon-address location of an "article--jobs" card');
+  else fail(`parseArticles article--jobs location wrong: ${JSON.stringify(j1 && j1.location)}`);
+
   // Pagination key — default `jobOffset`, self-heals to `offset` for tenants
   // that ignore it (Siemens). Mock fetchText with an article-less page so
   // fetch() stops after one request and we can read the URL it built.

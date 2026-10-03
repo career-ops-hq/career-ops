@@ -842,11 +842,18 @@ process_offer() {
   fi
   local date
   date=$(date +%Y-%m-%d)
-  # Use mktemp instead of a predictable /tmp path: a fixed name like
+  # Use mktemp instead of a predictable path: a fixed name like
   # /tmp/batch-jd-${id}.txt is guessable, so an attacker on a shared machine
   # could pre-create it as a symlink and redirect or clobber the write.
+  # Always project-local, never ${TMPDIR}: the worker CLI has to be able to read
+  # this file, and CLIs that auto-reject external_directory (/tmp/*) — opencode
+  # does — cannot read anything outside the project. Honouring TMPDIR here would
+  # re-open that hole whenever TMPDIR is the usual /tmp. mktemp still randomizes
+  # the name, so the symlink-guessability property above is unchanged.
+  local jd_tmp_dir="$PROJECT_DIR/batch/tmp"
+  mkdir -p "$jd_tmp_dir"
   local jd_file
-  jd_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-${id}.XXXXXX")"
+  jd_file="$(mktemp "$jd_tmp_dir/batch-jd-${id}.XXXXXX")"
   # The worker is a native process. Under Git Bash / MSYS the path above is a
   # POSIX one (/tmp/... or /c/...) that a Windows binary cannot open, so every
   # worker read "JD source unavailable" even when curl had filled the file.
@@ -902,6 +909,10 @@ process_offer() {
         : > "$jd_file"
         break
       else
+        # Headers are read by curl/bash only — never by the worker — so this one
+        # stays on ${TMPDIR:-/tmp} and the expression stays self-contained (the
+        # prefetch block is extracted and run in isolation by
+        # tests/batch-runner-jd-prefetch.test.mjs, where $jd_tmp_dir is not set).
         redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
         curl_status=0
         curl --silent --show-error --location --max-redirs 0 \
@@ -990,24 +1001,19 @@ process_offer() {
 
   # Prepare system prompt with placeholders resolved
   local resolved_prompt="$BATCH_DIR/.resolved-prompt-${id}.md"
-  # Escape sed delimiter characters in variables to prevent substitution breakage
-  local esc_url esc_jd_file esc_report_num esc_date esc_id
-  esc_url="${url//\\/\\\\}"
-  esc_url="${esc_url//|/\\|}"
-  # In a sed replacement, & means "the whole match", so an unescaped & in a
-  # query-string URL splices {{URL}} back in and corrupts the interpolation.
-  esc_url="${esc_url//&/\\&}"
-  esc_jd_file="${jd_file//\\/\\\\}"
-  esc_jd_file="${esc_jd_file//|/\\|}"
-  esc_report_num="${report_num//|/\\|}"
-  esc_date="${date//|/\\|}"
-  esc_id="${id//|/\\|}"
+  # Resolve placeholders to STABLE labels, not per-offer values: the concrete
+  # URL / JD file / report number / date / batch ID travel in the per-job user
+  # prompt built above. Keeping the system prompt byte-identical across offers
+  # lets prompt caching reuse the whole prefix instead of breaking at the first
+  # substituted value (~4 KB into a ~41 KB prompt). This also means the URL
+  # never enters a sed replacement, so it needs no delimiter/metacharacter
+  # escaping (no more esc_url/esc_jd_file/&-in-query-string concerns).
   sed \
-    -e "s|{{URL}}|${esc_url}|g" \
-    -e "s|{{JD_FILE}}|${esc_jd_file}|g" \
-    -e "s|{{REPORT_NUM}}|${esc_report_num}|g" \
-    -e "s|{{DATE}}|${esc_date}|g" \
-    -e "s|{{ID}}|${esc_id}|g" \
+    -e "s|{{URL}}|<URL from the job message>|g" \
+    -e "s|{{JD_FILE}}|<JD file from the job message>|g" \
+    -e "s|{{REPORT_NUM}}|<report number from the job message>|g" \
+    -e "s|{{DATE}}|<date from the job message>|g" \
+    -e "s|{{ID}}|<batch ID from the job message>|g" \
     "$PROMPT_FILE" > "$resolved_prompt"
 
   # Inject user-layer personalization into the temporary worker prompt.
@@ -1269,7 +1275,13 @@ process_offer() {
     # no file on disk, silently freeing that number for a second, unrelated
     # offer to claim (a real collision). Verify the file before trusting
     # "completed" -- fail closed, not open.
-    if [[ -z "$(compgen -G "$REPORTS_DIR/${report_num}-*.md")" ]]; then
+    # The reservation sentinel ({num}-RESERVED.md) must NOT count as the
+    # report: it is created before the worker runs, so an unfiltered glob
+    # matches it and the guard is defeated every single time (found 2026-09-22:
+    # 16 no-op workers recorded as "completed" with score "-").
+    local report_files
+    report_files=$(compgen -G "$REPORTS_DIR/${report_num}-*.md" 2>/dev/null | grep -vE -- '-RESERVED\.md$' || true)
+    if [[ -z "$report_files" ]]; then
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi

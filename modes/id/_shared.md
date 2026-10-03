@@ -36,6 +36,8 @@
 
 **ATURAN: JANGAN PERNAH menuliskan metrik dari proof point secara hardcode.** Baca metrik dari `cv.md` dan `article-digest.md` pada saat evaluasi.
 **ATURAN: Untuk metrik artikel/proyek, `article-digest.md` lebih diutamakan daripada `cv.md`** (`cv.md` bisa memuat angka yang lebih lama).
+**ATURAN: JANGAN PERNAH menyatakan bahwa kandidat adalah pembuat/pencipta suatu proyek, repositori, pustaka, alat, framework, atau artefak open-source, kecuali hal itu secara eksplisit dikaitkan dengannya di `cv.md` atau `article-digest.md`.** Menyamakan "memakai sebuah alat" dengan "menciptakannya" (memakai X bukan berarti menciptakan X) adalah pola fabrikasi yang paling umum, dan dilarang.
+**ATURAN: Kata kunci diformulasikan ulang, tidak pernah dikarang.** Susun ulang, bingkai ulang, tekankan — tetapi jangan pernah mengarang. Jika sebuah klaim tidak didukung oleh berkas dalam cakupan, tanyakan kepada kandidat; tanpa jawaban, hilangkan. Diam tentang suatu topik lebih baik daripada detail yang dikarang.
 
 ---
 
@@ -204,7 +206,7 @@ Dalam lowongan dan negosiasi di Indonesia, beberapa istilah tidak ada di pasar E
 7. Bersikap langsung dan konkret -- tanpa basa-basi
 8. Bahasa Indonesia teknis yang natural untuk teks yang dihasilkan. Kalimat pendek, kata kerja aktif, hindari kalimat pasif. Jangan memaksakan menerjemahkan istilah teknis (stack, pipeline, deployment, embedding)
 8b. **URL case study di Professional Summary pada PDF:** Jika PDF menyebut case study atau demo, URL-nya WAJIB muncul di paragraf pertama (Professional Summary). Recruiter sering hanya membaca summary. Semua URL dalam HTML dengan `white-space: nowrap`
-9. **Entri tracker dalam TSV** -- JANGAN PERNAH mengedit applications.md langsung untuk penambahan baru. Tulis TSV di `batch/tracker-additions/`, `merge-tracker.mjs` menangani penggabungan
+9. **Entri tracker dalam TSV** -- JANGAN PERNAH mengedit applications.md langsung untuk penambahan baru. Tulis TSV di `batch/tracker-additions/`, `merge-tracker.mjs` menangani penggabungan. Tulis satu baris **nama kolom** lebih dulu, lalu tepat satu baris data di bawahnya (lihat AGENTS.md, "TSV Format for Tracker Additions"). Baris nama itulah yang membuat `merge-tracker.mjs` menyelesaikan setiap field berdasarkan NAMA, bukan menebak kolom mana yang score dan mana yang status
 10. **`**URL:**` di setiap header report** -- di antara Score dan PDF
 
 ### Perkakas
