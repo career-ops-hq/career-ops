@@ -1678,6 +1678,14 @@ search_queries:
 #   careers_url: https://www.python.org/jobs/
 #   enabled: true
 #
+# - name: Startup Jobs                    # global startup/scale-up jobs (public RSS feed, ~50-item snapshot)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer    # optional role slug (confirmed live: platform-engineer,
+#                                 # site-reliability-engineer, devops-engineer, engineering, ...)
+#     workplace: remote          # optional free-text, e.g. "remote"
+#   enabled: true
+#
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
 #   provider: wttj
 #   wttj:
