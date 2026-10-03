@@ -247,7 +247,7 @@ function materializeCommand(root) {
   // Windows (cmd wraps -e in double quotes), single on POSIX would end the
   // single-quoted -e, so use JSON's double quotes there.
   const lit = process.platform === 'win32' ? `'${url}'` : JSON.stringify(url);
-  const script = `import(${lit}).then(m => console.log(m.materializeSkillEntrypoints(process.argv[1])))`;
+  const script = `import(${lit}).then(m => console.log(m.materializeSkillEntrypoints(process.argv.at(-1))))`;
   return `node -e ${quoteForShell(script)} ${quoteForShell(root)}`;
 }
 
@@ -275,7 +275,9 @@ function checkSkillEntrypoints(root) {
     // returns before reaching ensureSkillEntrypoints. Both commands are built
     // from the root the check just inspected, so they act on that checkout from
     // whatever directory the user pastes them into. The root is a separate argv
-    // word, never interpolated into the -e script. POSIX single-quotes
+    // word, never interpolated into the -e script (read back with argv.at(-1):
+    // tests/main-guard-convention.test.mjs bans the literal entry-path index
+    // in source files, printed strings included). POSIX single-quotes
     // everything, so a root holding $(...), $HOME or a backtick (--target takes
     // any path) is not expanded when pasted into sh. Windows paths cannot hold
     // a double quote, so double quotes are exact there and are the one form

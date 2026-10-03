@@ -7,7 +7,7 @@
 // already up to date, so a fresh Windows clone never reaches the repair and the
 // CLI just loads an empty skill. This pins the doctor check that says so.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, symlinkSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -101,9 +101,10 @@ function skillWarning(state) {
     if (!cmd) {
       fail(`no materialize command in warning: ${JSON.stringify(warning)}`);
     } else {
-      execFileSync(process.platform === 'win32' ? 'cmd' : 'sh', process.platform === 'win32' ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
-        cwd: elsewhere, stdio: 'ignore',
-      });
+      // execSync, not execFileSync: it is what pasting into a prompt does. The
+      // shell-string form hands the command to sh -c / cmd /d /s /c verbatim,
+      // where execFileSync re-escapes the quotes it was given on Windows.
+      execSync(cmd, { cwd: elsewhere, stdio: 'pipe' });
       if (readFileSync(stub, 'utf-8') === canonical) {
         pass('the printed materialize command repairs the checked checkout from another directory (path with a space, and on POSIX $HOME, $(...) and a quote, none expanded)');
       } else {
