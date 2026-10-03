@@ -471,6 +471,7 @@ const SYSTEM_PATHS = [
   'README.ua.md',
   'README.zh-TW.md',
   'README.tr.md',
+  'README.vi.md',
   'CHANGELOG.md',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTORS.md',
