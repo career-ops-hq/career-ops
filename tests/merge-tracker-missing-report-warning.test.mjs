@@ -83,6 +83,20 @@ test('a ../../ link that only resolves after leading ../ are stripped still warn
   assert.match(r.out, /\.\.\/\.\.\/stray\.md/);
 }));
 
+test('a link to a directory is not a report: merge-tracker warns and verify-pipeline flags the same row', withRoot((root) => {
+  // reports/ exists as a directory under the data root; an existence-only check would accept it.
+  addTsv(root, '[1](reports/)');
+  const merged = run(root);
+  assert.equal(merged.status, 0, merged.out);
+  assert.match(merged.out, WARN);
+
+  const env = { ...process.env, CAREER_OPS_ROOT: root };
+  for (const k of ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER']) delete env[k];
+  const v = spawnSync(process.execPath, [join(CODE_ROOT, 'verify-pipeline.mjs')], { cwd: CODE_ROOT, env, encoding: 'utf-8', timeout: 30_000 });
+  assert.equal(v.error, undefined);
+  assert.match(`${v.stdout}${v.stderr}`, /Report not found: (?:\.\.\/)?reports\//, 'verify-pipeline must agree with the merge-time warning');
+}));
+
 test('--dry-run reports the warning and writes nothing', withRoot((root) => {
   addTsv(root, '[1](reports/001-acme-widgets-2026-07-15.md)');
   const before = tracker(root);

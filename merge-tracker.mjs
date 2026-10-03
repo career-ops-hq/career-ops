@@ -1514,8 +1514,11 @@ for (const file of tsvFiles) {
   // exactly one verify-pipeline would flag later. resolveReportPath() is NOT
   // used: it strips leading `../` and so can accept a link verify-pipeline
   // rejects (e.g. `../../stray.md`).
+  // A directory (e.g. a link to `reports/`) is not a report, so require a
+  // regular file; verify-pipeline's Check 3 applies the same rule.
+  const isReportFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
   const reportLink = (addition.report || '').match(/\]\(([^)]+)\)/);
-  if (reportLink && !existsSync(join(TRACKER_DIR, reportLink[1])) && !existsSync(join(DATA_ROOT, reportLink[1]))) {
+  if (reportLink && !isReportFile(join(TRACKER_DIR, reportLink[1])) && !isReportFile(join(DATA_ROOT, reportLink[1]))) {
     const linked = reportLink[1].trim();
     console.warn(`⚠️  ${file}: ${addition.company} — ${addition.role}: report link "${linked}" does not resolve to a file (checked from ${TRACKER_DIR} and ${DATA_ROOT}) — the row is not rewritten; verify-pipeline will flag it until the report exists`);
     missingReports++;
