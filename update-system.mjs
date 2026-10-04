@@ -30,10 +30,15 @@
  *                                     # Don't ask again about this release;
  *                                     # a newer one asks again
  *
+ * From a linked git worktree (an agent's default session layout), every
+ * subcommand re-runs in the checkout that has `main` checked out, so the
+ * update lands on main rather than the worktree's branch. Set
+ * CAREER_OPS_UPDATE_IN_WORKTREE=1 to update the worktree's branch instead.
+ *
  * See DATA_CONTRACT.md for the full system/user layer definitions.
  */
 
-import { execFile, execFileSync, execSync } from 'child_process';
+import { execFile, execFileSync, execSync, spawnSync } from 'child_process';
 import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
@@ -220,6 +225,7 @@ const SYSTEM_PATHS = [
   'modes/pt/interview/',
   'modes/ru/',
   'modes/ru/interview/',
+  'modes/sg/',
   'modes/tr/',
   'modes/ua/',
   'modes/ua/interview/',
@@ -300,6 +306,7 @@ const SYSTEM_PATHS = [
   'cv-sync-check.mjs',
   'i18n-drift.mjs',
   'verify-cv-facts.mjs',
+  'verify-cv-structure.mjs',
   'verify-ats.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
@@ -360,6 +367,7 @@ const SYSTEM_PATHS = [
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
+  'contact-lookup.mjs',
   'linkedin-join.mjs',
   'weekly-digest.mjs',
   'tracker-sync-check.mjs',
@@ -395,6 +403,9 @@ const SYSTEM_PATHS = [
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
   'contact-extract.mjs',
+  // Retired 2026-10-04: the suite moved to tests/contact-extract.test.mjs. The
+  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
+  // drop it once a release has shipped past that move.
   'contact-extract-tests.mjs',
   'outcome.mjs',
   'batch/batch-prompt.md',
@@ -1145,6 +1156,185 @@ function assertOwnGitToplevel() {
       `career-ops at ${ROOT} is not a git checkout of its own, so git operations would land in the enclosing repository at ${foreignToplevel} — this happens when the install was unpacked from a ZIP or copied without its .git directory. Nothing was changed. To make updates work, clone career-ops fresh (git clone ${CANONICAL_REPO}) and move your user-layer files (cv.md, config/, data/, reports/ — see DATA_CONTRACT.md) into the new clone.`,
     );
   }
+}
+
+// ── WORKTREE REDIRECT ───────────────────────────────────────────
+
+// The branch an update is meant to land on. The canonical repo's default
+// branch, which is what a fresh clone checks out.
+const UPDATE_BRANCH = 'main';
+
+// Subcommands whose state lives in the checkout: the commit apply makes, the
+// branch rollback restores, the VERSION check reads and the marker dismiss
+// writes. All four have to agree on one checkout, or check keeps offering an
+// update that apply installed somewhere else.
+const REDIRECTED_COMMANDS = new Set(['check', 'apply', 'rollback', 'dismiss']);
+
+/**
+ * Parse `git worktree list --porcelain` into one record per worktree.
+ *
+ * @param {string} porcelain - The command's stdout.
+ * @returns {{path: string, branch: string|null, bare: boolean, prunable: boolean}[]}
+ *   `branch` is the full ref (`refs/heads/main`), or null when detached.
+ */
+export function parseWorktreeList(porcelain) {
+  const worktrees = [];
+  let current = null;
+  for (const line of String(porcelain).split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length), branch: null, bare: false, prunable: false };
+      worktrees.push(current);
+    } else if (!current) {
+      continue;
+    } else if (line.startsWith('branch ')) {
+      current.branch = line.slice('branch '.length);
+    } else if (line === 'bare') {
+      current.bare = true;
+    } else if (line === 'prunable' || line.startsWith('prunable ')) {
+      current.prunable = true;
+    }
+  }
+  return worktrees;
+}
+
+function samePath(a, b) {
+  const canonicalize = realpathSync.native ?? realpathSync;
+  try {
+    return canonicalize(a) === canonicalize(b);
+  } catch {
+    return resolve(a) === resolve(b);
+  }
+}
+
+/**
+ * Where an update run from `root` has to happen, when that is not `root`.
+ *
+ * Agents such as Claude Code run each session in a linked git worktree on a
+ * throwaway branch. Every git call here runs with `cwd: ROOT`, so an update
+ * started there committed to that branch: the user's `main` stayed on the old
+ * release, the next session's fresh worktree prompted for the same update, and
+ * the installed one vanished with the worktree. The update belongs on `main`,
+ * in whichever checkout has it.
+ *
+ * Returns null when `root` is not a linked worktree, or is one that already
+ * has `main` checked out: run here, exactly as before. A main checkout on
+ * some other branch is not redirected either; that is the user's own choice
+ * of where to run. Returns `{path}` for the checkout to run in instead, or
+ * `{error}` when no usable checkout has `main`.
+ *
+ * @param {string} [root=ROOT] - The install the updater was started from.
+ * @param {(...args: string[]) => string} [run] - git runner bound to `root`.
+ * @returns {null | {path: string, branch: string} | {error: string, branch: string}}
+ */
+export function worktreeUpdateTarget(root = ROOT, run = (...args) => gitIn(root, ...args)) {
+  let gitDir;
+  let commonDir;
+  try {
+    [gitDir, commonDir] = run('rev-parse', '--git-dir', '--git-common-dir').split(/\r?\n/);
+  } catch {
+    return null;
+  }
+  // Both come back relative to `root` unless git chose an absolute spelling.
+  if (!gitDir || !commonDir || samePath(resolve(root, gitDir), resolve(root, commonDir))) return null;
+
+  let branch = '(detached HEAD)';
+  try {
+    branch = run('rev-parse', '--abbrev-ref', 'HEAD') || branch;
+  } catch {
+    // Unborn or unreadable HEAD: keep the placeholder for the message.
+  }
+
+  let worktrees;
+  try {
+    worktrees = parseWorktreeList(run('worktree', 'list', '--porcelain'));
+  } catch {
+    return null;
+  }
+  const primary = worktrees.find(wt => !wt.bare)?.path || worktrees[0]?.path || '';
+  const target = worktrees.find(wt => wt.branch === `refs/heads/${UPDATE_BRANCH}` && !wt.bare);
+
+  if (target && samePath(target.path, root)) return null;
+
+  const override = 'set CAREER_OPS_UPDATE_IN_WORKTREE=1 to update this worktree\'s branch instead';
+  if (!target || target.prunable || !existsSync(target.path)) {
+    return {
+      branch,
+      error: `This is a linked git worktree on branch '${branch}', and no checkout has '${UPDATE_BRANCH}' checked out, so there is no main checkout to update. Nothing was changed. Check out ${UPDATE_BRANCH} in your main checkout${primary ? ` (git -C "${primary}" checkout ${UPDATE_BRANCH})` : ''} and re-run, or ${override}.`,
+    };
+  }
+  if (!existsSync(join(target.path, 'update-system.mjs'))) {
+    return {
+      branch,
+      error: `This is a linked git worktree on branch '${branch}'. The checkout with '${UPDATE_BRANCH}' (${target.path}) has no update-system.mjs, so it cannot be updated from here. Nothing was changed. Run the update from that checkout, or ${override}.`,
+    };
+  }
+  return { path: target.path, branch };
+}
+
+/**
+ * Re-run this command in the checkout that has `main`, when started from a
+ * linked worktree (see worktreeUpdateTarget()).
+ *
+ * The child is that checkout's own update-system.mjs, so every ROOT-bound path
+ * in it — lock file, backup branch, VERSION, dismiss marker — resolves there
+ * with no changes to the rest of this file. That copy may be an older release
+ * without this redirect; it still runs against its own checkout, which is the
+ * point.
+ *
+ * @param {string} cmd - The subcommand.
+ * @param {string[]} [argv]
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number|null} The child's exit status, or null to run here.
+ */
+function redirectToMainCheckout(cmd, argv = process.argv, env = process.env) {
+  if (!REDIRECTED_COMMANDS.has(cmd)) return null;
+  // The user's explicit opt-out, and the loop guard for the child below.
+  if (env.CAREER_OPS_UPDATE_IN_WORKTREE === '1' || env.CAREER_OPS_UPDATE_REDIRECTED === '1') return null;
+  // A nested .git-less install has its own guards and messages (#3334);
+  // its enclosing repo's worktrees are not ours to pick from.
+  if (gitToplevelMismatch()) return null;
+
+  const target = worktreeUpdateTarget();
+  if (!target) return null;
+  if (target.error) {
+    if (cmd === 'check') {
+      // Agents stay quiet on unknown statuses (AGENTS.md); `apply` carries the
+      // actionable message.
+      console.log(JSON.stringify({ status: 'worktree-without-main', local: localVersion(), worktree_branch: target.branch }));
+      return 0;
+    }
+    throw new Error(target.error);
+  }
+
+  // apply and rollback commit into a checkout the user is not looking at from
+  // here, so refuse while it carries tracked edits rather than build on them.
+  // Untracked files are left out: the user layer lives there, and a direct
+  // run in that checkout never refuses over them either.
+  if (cmd === 'apply' || cmd === 'rollback') {
+    const dirty = gitIn(target.path, 'status', '--porcelain', '--untracked-files=no');
+    if (dirty) {
+      throw new Error(
+        `The ${UPDATE_BRANCH} checkout at ${target.path} has uncommitted changes to tracked files. Nothing was changed. Commit or stash them there, then re-run ${cmd} from this worktree.`,
+      );
+    }
+  }
+
+  // check's stdout is one JSON object; keep it that way.
+  const chatty = cmd === 'apply' || cmd === 'rollback';
+  if (chatty) {
+    console.log(`This is a linked git worktree on branch '${target.branch}'. Running ${cmd} in the ${UPDATE_BRANCH} checkout at ${target.path} instead.`);
+  }
+  const res = spawnSync(process.execPath, ['update-system.mjs', ...argv.slice(2)], {
+    cwd: target.path,
+    stdio: 'inherit',
+    env: { ...env, CAREER_OPS_UPDATE_REDIRECTED: '1' },
+  });
+  if (res.error) throw res.error;
+  const status = res.status ?? 1;
+  if (chatty && status === 0) {
+    console.log(`To bring this worktree up to date: git merge ${UPDATE_BRANCH} (or git rebase ${UPDATE_BRANCH}) from inside it.`);
+  }
+  return status;
 }
 
 /**
@@ -4109,6 +4299,10 @@ if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {
+    // From a linked worktree the update belongs on main, not this branch.
+    const redirected = redirectToMainCheckout(cmd);
+    if (redirected !== null) process.exit(redirected);
+
     switch (cmd) {
       case 'check': await check(); break;
       case 'status': console.log(`career-ops v${formatLocalVersion()}`); break;

@@ -42,6 +42,24 @@ export const SKILL_TOKENS = [
   'Airflow', 'dbt', 'MLOps', 'MLflow', 'LangChain', 'LlamaIndex',
   'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering', 'Fine-?tuning',
   'Computer Vision', 'NLP',
+  // Other spellings of the AI/ML tokens above (2026-10-04), each aliased to its
+  // display name in CANONICAL. jd-skill-gap and upskill compare a CV with a JD
+  // only through that name, so a spelling missing here turns a skill the CV
+  // lists into a reported gap: the shipped example CV
+  // examples/dual-track-engineer-instructor/cv.md writes "HuggingFace
+  // Transformers" under Skills, and jd-skill-gap listed Hugging Face as a gap.
+  // The spelled-out NLP and LLM forms are the pairs keyword-match.mjs's
+  // SYNONYMS already treats as one skill.
+  //
+  // Left out on purpose: 'Fine tuning' with a space and the verb forms
+  // ('fine-tune', 'fine-tuned'). All three are ordinary prose in GTM and ops
+  // writing ("fine tuning the funnel"), so a match says nothing about models:
+  // in a posting it mints the phantom gap the 'CSM' note below describes, and
+  // in a CV it reads as knowing Fine-tuning, the silent "no gap found" the
+  // Demandbase note calls worse than a visible gap.
+  'HuggingFace', 'sklearn',
+  'Retrieval-Augmented Generation', 'Retrieval Augmented Generation',
+  'Large Language Models?', 'Natural Language Processing',
   // Analytics / enterprise
   'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
   // Testing / QA (added 2026-09-20). The vocabulary had NO testing term at all,
@@ -238,6 +256,14 @@ export const CANONICAL = {
   'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
   'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
   'otel': 'OpenTelemetry',
+  // AI / ML (2026-10-04): the other spellings listed after the Data / ML / AI
+  // tokens. Each lands on the display name its sibling token already resolves
+  // to, so the known-skills set and the gap list meet however the CV spells it.
+  'huggingface': 'Hugging Face',
+  'sklearn': 'scikit-learn',
+  'large language model': 'LLMs', 'large language models': 'LLMs',
+  'retrieval-augmented generation': 'RAG', 'retrieval augmented generation': 'RAG',
+  'natural language processing': 'NLP',
   // Certifications / methodologies (2026-08-07). Uppercase display forms, since
   // DISPLAY lowercases its keys and these are acronyms rather than title-case
   // words — without these, "pmp" in a JD would canonicalize to "Pmp" and miss

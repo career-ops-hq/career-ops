@@ -5,7 +5,7 @@
 // where the bug lived, so asserting on the resulting tracker rows is what
 // actually proves the fix. normalizeUrl's own unit cases live in
 // tests/url-key.test.mjs.
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, isolatedBatchStatePath } from './helpers.mjs';
 import assert from 'node:assert';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -49,6 +49,7 @@ function runMerge(env, args = []) {
     CAREER_OPS_ROOT: env.base,
     CAREER_OPS_TRACKER: env.tracker,
     CAREER_OPS_ADDITIONS: env.addDir,
+    CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir),
   };
   delete childEnv.CAREER_OPS_DATA_DIR;
   delete childEnv.CAREER_OPS_BATCH_STATE;

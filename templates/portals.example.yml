@@ -368,6 +368,7 @@ title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
   # 2-3 letter keyword ("AI", "ML", "VP"), which is matched on word boundaries
   # so it does not fire inside another word ("AI" will not match "Maintenance").
+  # A CJK character counts as a boundary, so "AI" does match "AI工程师".
   # Either way an entry expresses the exact spelling you write, and nothing
   # else: real titles vary in separator and word order, and every variant your
   # list does not literally contain is dropped in silence.
@@ -622,6 +623,40 @@ title_filter:
 #       - "Program Administrator"
 #       - "Registrar"
 #       - "Student Services"
+
+# -- Declared-field whitelists (optional, scan.mjs) --
+# title_filter judges a posting by its TITLE. Some boards publish a better
+# discriminator as a field of its own — an occupation code, a department —
+# which no title list can stand in for: one title spans several occupations,
+# and one occupation is advertised under countless titles.
+#
+# field_filters holds one whitelist per field, in the same keyword language as
+# title_filter (plain substring, `word:`, `stem:`). A target opts in with
+# `filter_on`; a target without it gates on title exactly as before.
+#
+#   filter_on: noc             # judge this target by `noc` instead of title
+#   filter_on: [title, noc]    # both must match (AND)
+#
+# The provider has to emit the field: e.g. a local_parser script adding
+# "noc": "22221" to each job object it prints. A posting without the field
+# PASSES rather than being dropped, and is counted as "Passed, field absent" in
+# the scan summary; a target that never supplies the field at all gets an
+# end-of-run warning that its whitelist is effectively off. `title` cannot be
+# a key here — title keywords belong in title_filter above.
+#
+# field_filters:
+#   noc:
+#     positive: ["stem:22", "stem:13"]   # occupation codes starting 22 or 13
+#
+# and, as an entry under the tracked_companies: key further down:
+#   - name: Example Occupation-Coded Board
+#     careers_url: https://example.com/jobs
+#     scan_method: local_parser
+#     filter_on: noc
+#     parser:
+#       command: node
+#       script: local/example-board-jobs.js
+#       format: jobs-json-v1
 
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
@@ -1367,7 +1402,7 @@ search_queries:
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
 #   enabled: true                         # ~445 English postings (zero-token XML)
 #
-# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+# - name: Deutsche Bahn                   # single-company; db.jobs search front
 #   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true
@@ -1676,6 +1711,14 @@ search_queries:
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
 #   provider: pythonorg
 #   careers_url: https://www.python.org/jobs/
+#   enabled: true
+#
+# - name: Startup Jobs                    # global startup/scale-up jobs (public RSS feed, ~50-item snapshot)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer    # optional role slug (confirmed live: platform-engineer,
+#                                 # site-reliability-engineer, devops-engineer, engineering, ...)
+#     workplace: remote          # optional free-text, e.g. "remote"
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
