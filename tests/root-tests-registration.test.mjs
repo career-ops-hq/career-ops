@@ -7,8 +7,8 @@
 // them was deleted, and tests/no-root-suites.test.mjs now asserts the root
 // stays empty of that pattern.
 //
-// The `*-tests.mjs` half was never in scope for that series. Three such suites
-// remain at the root (eight before #3765 moved five into tests/), two of them
+// The `*-tests.mjs` half was never in scope for that series. A handful of such
+// suites remain at the root (#3765 moved four more into tests/), most of them
 // named one by one in the `scripts` list in
 // test-all.mjs — the same hand-maintained list #3306 set out to remove, which
 // survived because `scripts` also carries ~40 `--self-test` CLI invocations
@@ -18,9 +18,9 @@
 //
 // Why this is a second guard and not a widening of no-root-suites.test.mjs:
 // that file asks "is there a root suite at all?", and the answer for
-// *-tests.mjs is a permanent yes. All three that remain have concrete reasons
-// to stay (a flag-driven CI harness, a suite that asserts on its own filename, and
-// one carrying a per-script timeout the discovery path cannot express), so a
+// *-tests.mjs is a permanent yes. Several have concrete reasons to stay (a
+// flag-driven CI harness, a suite that asserts on its own filename, and two
+// carrying a per-script timeout the discovery path cannot express), so a
 // pattern widened to `-tests.mjs` would redden on files that are fine — the
 // precise failure that file's own header rejects. The property here is not
 // location but reachability.

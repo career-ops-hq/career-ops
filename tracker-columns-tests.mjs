@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * tests/tracker-columns.test.mjs — regression tests for header-name column mapping.
+ * tracker-columns-tests.mjs — regression tests for header-name column mapping.
  *
  * merge-tracker.mjs and verify-pipeline.mjs used to parse applications.md by
  * fixed column position. Inserting a column (e.g. a Location column after Role)
@@ -20,27 +20,12 @@
 import { spawnSync } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, utimesSync } from 'fs';
 import { createHash } from 'crypto';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { resolveTsvColumns } from '../tracker-parse.mjs';
+import { resolveTsvColumns } from './tracker-parse.mjs';
+import { fileURLToPath } from 'url';
 
-import { pass, fail, ROOT } from './helpers.mjs';
-
-// Runtime note, carried from the `scripts` entry this suite used to have
-// (#4010, added on main while this move was in review). As a root script it was
-// the SLOWEST entry in test-all.mjs's script section on windows-latest —
-// 10.9/11.7/11.9/12.0/12.4/13.8s across six green runs — and a seventh run
-// crossed the 30s default and was killed mid-suite (`exit null, signal
-// SIGTERM`), which is why it had been given `timeoutMs: 180_000`.
-//
-// That budget does not come along, and does not need to: the 30s ceiling was
-// the scripts-list default, and discovered suites have no per-suite timeout at
-// all, so the kill this suite was dying from cannot happen here. The cost is
-// the other side of the same coin — a hang is now unbounded rather than
-// reported, the #2828 shape — so if this suite ever stops terminating, that is
-// the first thing to suspect rather than a slow machine.
-
-console.log('\ntracker columns — header-name mapping');
+const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
 
 // web/ lives deliberately OUTSIDE the auto-updater's world (its own
@@ -52,6 +37,10 @@ const NODE = process.execPath;
 const HAS_WEB = existsSync(join(ROOT, 'web', 'src', 'lib', 'tracker-table.mjs'));
 function skipWeb(m) { console.log(`SKIP ${m} — web/ not present (core-only install; web/ is excluded from the auto-updater by design)`); }
 
+let passed = 0;
+let failed = 0;
+function pass(m) { console.log(`PASS ${m}`); passed++; }
+function fail(m) { console.error(`FAIL ${m}`); failed++; }
 
 // Run a script with tracker/additions redirected to a sandbox. Returns
 // { code, stdout, stderr } — code is 0 on success, the process exit code
@@ -114,7 +103,7 @@ function makeSandbox(trackerContent, additions = {}) {
   // it verify-pipeline scans the REAL reports/ dir and emits one "Orphan report"
   // warning per report not referenced by this fixture's tracker -- 213 of them
   // at 256 reports. That made Test 2 slow enough to trip its own 30s timeout
-  // under full-suite load, failing ~2 runs in 5 as "tests/tracker-columns.test.mjs
+  // under full-suite load, failing ~2 runs in 5 as "tracker-columns-tests.mjs
   // crashed" while passing 8/8 in isolation. Same fixture bug as the #1704 block
   // in test-all.mjs (see PATCHES.md patch 10).
   const reportsDir = join(dir, 'reports');
@@ -240,7 +229,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 
 // ── Test 5: removeRowByNum resolves the Report column by header ─────────────
 {
-  const { removeRowByNum } = await import('../tracker.mjs');
+  const { removeRowByNum } = await import('./tracker.mjs');
   const tenCol = HEADER_10.replace('| — | seed row |', '| [1](reports/001-acme-2026-01-01.md) | seed row |');
   const res = removeRowByNum(tenCol, 1);
   if (res.removed && res.report === '[1](reports/001-acme-2026-01-01.md)') {
@@ -254,7 +243,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 // loadSeenCompanyRoles used a positional regex, so a 10-col tracker produced
 // keys like "engineer::remote" and scan dedup missed real matches.
 {
-  const { loadSeenCompanyRoles } = await import('../scan.mjs');
+  const { loadSeenCompanyRoles } = await import('./scan.mjs');
   const sb = makeSandbox(HEADER_10);
   const seen = loadSeenCompanyRoles(sb.tracker, undefined, sandboxSources(sb));
   if (seen.has('acme::engineer')) pass('scan.mjs: seen-set keys company::role on 10-col tracker');
@@ -332,7 +321,7 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
     fail(`contract: tracker.mjs on unknown-column tracker — got ${JSON.stringify(row)}`);
   }
 
-  const { loadSeenCompanyRoles } = await import('../scan.mjs');
+  const { loadSeenCompanyRoles } = await import('./scan.mjs');
   const seen = loadSeenCompanyRoles(sb.tracker, undefined, sandboxSources(sb));
   if (seen.has('acme::engineer') && seen.size === 1) {
     pass('contract: scan.mjs seen-set skips an unknown extra column');
@@ -364,8 +353,8 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 if (!HAS_WEB) {
   skipWeb('web reader: shared alias table tests');
 } else {
-  const { parseApplications, loadHeaderAliases } = await import('../web/src/lib/tracker-table.mjs');
-  const { HEADER_ALIASES } = await import('../tracker-parse.mjs');
+  const { parseApplications, loadHeaderAliases } = await import('./web/src/lib/tracker-table.mjs');
+  const { HEADER_ALIASES } = await import('./tracker-parse.mjs');
   const WEB_10COL = `# Applications Tracker
 
 | # | Date | Company | Role | Location | Score | Status | PDF | Report | Priority | Notes |
@@ -496,7 +485,7 @@ const HEADER_VIA = `# Applications Tracker
 
 // ── Test 9: parseTrackerRow surfaces the Via column ─────────────────────────
 {
-  const { resolveColumns, parseTrackerRow } = await import('../tracker-parse.mjs');
+  const { resolveColumns, parseTrackerRow } = await import('./tracker-parse.mjs');
   const lines = HEADER_VIA.split('\n');
   const colmap = resolveColumns(lines);
   const rows = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
@@ -691,7 +680,7 @@ const HEADER_VIA = `# Applications Tracker
 if (!HAS_WEB) {
   skipWeb('web reader: alias cache refresh tests');
 } else {
-  const { loadHeaderAliases } = await import('../web/src/lib/tracker-table.mjs');
+  const { loadHeaderAliases } = await import('./web/src/lib/tracker-table.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'co-alias-'));
   const aliasFile = join(dir, 'tracker-aliases.json');
   // Force distinct mtimes between rewrites — same-ms writes are otherwise
@@ -772,8 +761,8 @@ if (!HAS_WEB) {
 if (!HAS_WEB) {
   skipWeb('web reader: row-shape contract tests');
 } else {
-  const { parseApplications } = await import('../web/src/lib/tracker-table.mjs');
-  const { resolveColumns, parseTrackerRow } = await import('../tracker-parse.mjs');
+  const { parseApplications } = await import('./web/src/lib/tracker-table.mjs');
+  const { resolveColumns, parseTrackerRow } = await import('./tracker-parse.mjs');
   const VIA_HEADER = [
     '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |',
     '|---|------|---------|-----|------|-------|--------|-----|--------|-------|',
@@ -1173,7 +1162,7 @@ if (!HAS_WEB) {
     // Relative specifier, like the other web imports in this file: an absolute
     // path is not a valid ESM specifier on Windows (`D:\...` reads as a URL
     // scheme), which is how this test passed on ubuntu/macos and failed there.
-    const { buildPrompt } = await import('../web/src/lib/run-prompts.mjs');
+    const { buildPrompt } = await import('./web/src/lib/run-prompts.mjs');
     const prompt = buildPrompt({ kind: 'evaluate', input: 'https://example.com/jobs/2', memory: '', today: '2026-02-02' });
     const tabLines = prompt.split('\n').filter(l => l.includes('\t'));
 
@@ -1590,3 +1579,6 @@ Last reviewed 2026-09-01.
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
+
+console.log(`\n${passed} passed, ${failed} failed`);
+process.exit(failed > 0 ? 1 : 0);

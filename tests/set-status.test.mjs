@@ -11,7 +11,7 @@
  *
  * Tests provision a throwaway tracker via the CAREER_OPS_TRACKER /
  * CAREER_OPS_TRACKER_LOCK env overrides (same sandbox pattern as
- * tests/tracker-columns.test.mjs).
+ * tracker-columns-tests.mjs).
  *
  * Exit-code contract under test:
  *   0 — success (including no-op re-runs)

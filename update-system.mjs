@@ -334,7 +334,8 @@ const SYSTEM_PATHS = [
   'tests/',
 
   // ── Retired paths ─────────────────────────────────────────────────────────
-  // These files no longer exist upstream: #3765 moved them into tests/. They
+  // These files no longer exist upstream: #3765 moved four root suites into
+  // tests/ (tracker-columns-tests.mjs stayed, for its timeout). They
   // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
   // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
   // file that is gone from the remote tree AND matches an entry here. Drop the
@@ -343,8 +344,8 @@ const SYSTEM_PATHS = [
   // unregistered suite and turns `node test-all.mjs` red on a healthy install.
   //
   // Probe on this list vs. the pre-#3765 one, with a local tree holding the
-  // five and a remote tree without them: without these entries the prune
-  // returns nothing at all; with them it returns all five.
+  // four and a remote tree without them: without these entries the prune
+  // returns nothing at all; with them it returns all four.
   //
   // NB: keep square brackets out of every comment in this array. Several
   // assertions in test-all.mjs extract the manifest with a NON-GREEDY regex
@@ -360,7 +361,6 @@ const SYSTEM_PATHS = [
   'followup-seed-tests.mjs',
   'paste-reply-tests.mjs',
   'set-status-tests.mjs',
-  'tracker-columns-tests.mjs',
   // ── end retired paths ─────────────────────────────────────────────────────
   'user-agent.mjs',
   'doctor.mjs',
@@ -413,6 +413,7 @@ const SYSTEM_PATHS = [
   'openrouter-runner.mjs',
   'jd-similarity.mjs',
   'test-all.mjs',
+  'tracker-columns-tests.mjs',
   'tracker-writer-lock-tests.mjs',
   'validate-portals.mjs',
   'validate-profile.mjs',
@@ -561,7 +562,7 @@ const BOOTSTRAP_PATHS = [
   'reserve-report-num.mjs',
   'updater-migration-tests.mjs',
   'validate-portals.mjs',
-  'tests/tracker-columns.test.mjs',
+  'tracker-columns-tests.mjs',
   'plugins/',
   'plugins.mjs',
   'plugins-registry/',

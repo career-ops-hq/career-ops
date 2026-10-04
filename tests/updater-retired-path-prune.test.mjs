@@ -8,10 +8,10 @@
 // change that deletes the file is precisely backwards: the file stops shipping
 // to new installs and becomes permanent on existing ones.
 //
-// #3765 hit this. Moving five root suites into tests/ made their SYSTEM_PATHS
+// #3765 hit this. Moving four root suites into tests/ made their SYSTEM_PATHS
 // entries look redundant — `tests/` already covers the destination — so they
 // were dropped. Probed against the production function, that left an upgrading
-// install holding all five forever, where tests/root-tests-registration.test.mjs
+// install holding all four forever, where tests/root-tests-registration.test.mjs
 // reports them as unregistered suites and turns a healthy install's
 // `node test-all.mjs` red. Found in review by @nikitacometa.
 import { readFileSync } from 'fs';
@@ -26,7 +26,6 @@ const RETIRED = [
   'followup-seed-tests.mjs',
   'paste-reply-tests.mjs',
   'set-status-tests.mjs',
-  'tracker-columns-tests.mjs',
 ];
 
 const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
