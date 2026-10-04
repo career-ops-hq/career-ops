@@ -34,7 +34,7 @@
 
 import {
   readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync,
-  openSync, fstatSync, readSync, closeSync,
+  openSync, fstatSync, readSync, closeSync, realpathSync, statSync,
 } from 'fs';
 import { dirname } from 'path';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -279,7 +279,14 @@ async function resolve() {
     // truncates before it writes: a reader in that window, or a crash inside
     // it, sees a queue with items missing. A same-directory temp file renamed
     // over the original is the repo's existing helper for exactly this.
-    writeFileAtomic(PATH, lines.join('\n'));
+    //
+    // A rename replaces the directory entry it is given and installs a new
+    // file, so two things the in-place write got for free have to be asked
+    // for: write THROUGH a symlinked inbox (rename over the link would swap it
+    // for a regular file and leave its target stale), and keep the queue's
+    // permissions (a 0600 inbox must not come back 0644 under the umask).
+    const real = realpathSync(PATH);
+    writeFileAtomic(real, lines.join('\n'), { mode: statSync(real).mode & 0o7777 });
     return { target };
   }, { timeoutMs: 30_000 });
   // Fail only after withPipelineLock has released. process.exit() inside the

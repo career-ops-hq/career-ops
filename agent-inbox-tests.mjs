@@ -11,7 +11,8 @@
  *   4b. resolve holds the same lock as add for its full read/modify/write, so a
  *       request accepted concurrently cannot be overwritten by a stale view.
  *   4c. resolve replaces the queue file (temp file + rename) instead of
- *       truncating it in place, and leaves no temp file behind.
+ *       truncating it in place, leaves no temp file behind, keeps the file's
+ *       permissions, and writes through a symlinked inbox.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
@@ -40,7 +41,10 @@
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync, statSync } from 'fs';
+import {
+  readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync, statSync,
+  lstatSync, chmodSync, symlinkSync,
+} from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -218,6 +222,23 @@ console.log('4c. resolve replaces the queue file atomically');
   check('the replaced file keeps the header and the sibling item', /^# Agent Inbox/.test(md) && /^- \[ \].*beta$/m.test(md), md);
   const leftovers = readdirSync(dir).filter((f) => f.endsWith('.tmp'));
   check('no temp file is left behind', leftovers.length === 0, leftovers.join(', '));
+
+  // Replacing the file must not cost what the in-place write gave for free.
+  // POSIX only: Windows has no permission bits to lose, and creating a symlink
+  // there needs a privilege the runners do not grant.
+  if (process.platform !== 'win32') {
+    chmodSync(inbox, 0o600);
+    run(inbox, ['resolve', '2', '--result', 'done beta']);
+    const mode = statSync(inbox).mode & 0o7777;
+    check('the replaced file keeps the queue\'s permissions', mode === 0o600, `mode=${mode.toString(8)}`);
+
+    const link = join(dir, 'linked-inbox.md');
+    symlinkSync(inbox, link);
+    run(link, ['add', 'gamma']);
+    run(link, ['resolve', '3', '--result', 'done gamma']);
+    check('a symlinked inbox is still a symlink after resolve', lstatSync(link).isSymbolicLink());
+    check('the write went through the link to its target', /^- \[x\].*gamma → result: done gamma$/m.test(readFileSync(inbox, 'utf8')), readFileSync(inbox, 'utf8'));
+  }
 }
 
 // ---------------------------------------------------------------------------
