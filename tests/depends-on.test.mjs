@@ -132,6 +132,32 @@ test('a commented-out command is not counted as an invocation', () => {
   );
 });
 
+test('a list-item fence measures indentation in columns, and a new item can reopen it', () => {
+  // Two gaps in the list-item boundary. Indentation was counted with /^ */, so a
+  // TAB read as zero columns and a tab-indented line looked like it had left the
+  // item; GFM advances a tab to the next four-column stop, so it is still inside.
+  assert.deepEqual(parseDependsOn('- ```\n\tDepends on #42\n  ```\n'), []);
+  // And the boundary line was kept as text without being retested, so a second
+  // list item opening its own fence never opened one.
+  assert.deepEqual(parseDependsOn('- ```\n  sample\n- ```\n  Depends on #42\n  ```\n'), []);
+  // Controls: the boundary still ends the fence when the line is ordinary prose,
+  // a declaration inside the item stays hidden, and the margin case is unchanged.
+  assert.deepEqual(parseDependsOn('- ```\n  sample\n\nDepends on #42\n'), [42]);
+  assert.deepEqual(parseDependsOn('- ```\n  Depends on #42\n'), []);
+  assert.deepEqual(parseDependsOn('```\nDepends on #42\n'), []);
+});
+
+test('a margin fence after a list item is a new block, not the item\'s closer', () => {
+  // Checked against commonmark 0.31 and marked with gfm, not from reading the
+  // spec: both render `Depends on #80` inside <pre><code> and `Depends on #81`
+  // as a paragraph. The column-0 run ends the list item, then opens a fresh
+  // document-level block, so the first ref is hidden and the second is not.
+  assert.deepEqual(
+    parseDependsOn('- ```\n  x\n```\nDepends on #80\n```\nDepends on #81\n'),
+    [81],
+  );
+});
+
 test('a code span ending in a backslash still closes', () => {
   // GFM applies backslash escapes OUTSIDE code spans only. Inside one a
   // backslash is literal, so it cannot stop the span closing. Neutralising

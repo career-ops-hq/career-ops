@@ -57,18 +57,33 @@ const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 // declared nothing. The marker's width becomes the column the closing run is
 // measured from, since the closer is indented to the same content column.
 const LIST_MARKER = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+/;
+
+// GFM advances a TAB to the next four-column tab stop. Measuring indentation
+// with /^ */ counted a tab as zero columns, so a tab-indented line inside a
+// list-item fence looked like it had left the item and its sample leaked out.
+function columnsOf(s) {
+  let w = 0;
+  for (const ch of s) w += ch === '\t' ? 4 - (w % 4) : 1;
+  return w;
+}
+function leadColumns(line) {
+  return columnsOf(/^[ \t]*/.exec(line)[0]);
+}
+
 function stripFences(text) {
   const kept = [];
+  const lines = text.split('\n');
   let open = null;
   let openIndent = 0;
-  for (const line of text.split('\n')) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
     if (open === null) {
       const marker = LIST_MARKER.exec(line);
-      const indent = marker ? marker[0].length : 0;
-      const m = FENCE_OPEN.exec(indent ? line.slice(indent) : line);
+      const indent = marker ? columnsOf(marker[0]) : 0;
+      const m = FENCE_OPEN.exec(marker ? line.slice(marker[0].length) : line);
       // A BACKTICK fence's info string may not contain a backtick (GFM), so
       // ```js`sample is ordinary text, not an opener. Treating it as one opened
-      // a fence that never closed and hid every declaration beneath it — the
+      // a fence that never closed and hid every declaration beneath it, and the
       // check then passes while the dependency is still open, which is the
       // failure direction that actually lets a bad merge through.
       if (m && !(m[1][0] === '`' && m[2].includes('`'))) { open = m[1]; openIndent = indent; continue; }
@@ -76,22 +91,25 @@ function stripFences(text) {
       continue;
     }
     // A fence opened in a list item ends WITH the list item (GFM), so a
-    // non-blank line indented less than the item's content column has left the
-    // item and is outside the block. Running such a fence to the end of the
+    // non-blank line indented fewer columns than the item's content has left
+    // the item and is outside the block. Running such a fence to the end of the
     // document instead swallowed every declaration after the list, hiding a
     // dependency rather than inventing one. Blank lines do not end an item, so
-    // they are not a boundary. A fence at the margin (openIndent 0) still runs
-    // to the end of the document.
-    if (openIndent > 0 && line.trim() !== '' && /^ */.exec(line)[0].length < openIndent) {
+    // they are not a boundary, and a fence at the margin (openIndent 0) still
+    // runs to the end of the document.
+    if (openIndent > 0 && line.trim() !== '' && leadColumns(line) < openIndent) {
       open = null;
       openIndent = 0;
-      kept.push(line);
+      // Step back rather than keeping the line: it ended the item, but it may
+      // itself open the next one's fence. Keeping it unexamined let a second
+      // list item's fence never open and exposed its sample.
+      i -= 1;
       continue;
     }
-    // Drop up to the opener's content column before testing the closer, so a
-    // fence opened in a list item closes at that column; FENCE_CLOSE's own
-    // 0-3 allowance still applies to whatever indentation is left.
-    const body = line.replace(/^ */, (s) => ' '.repeat(Math.max(0, s.length - openIndent)));
+    // Drop the opener's content column before testing the closer, so a fence
+    // opened in a list item closes at that column; FENCE_CLOSE's own 0-3
+    // allowance still applies to whatever indentation is left.
+    const body = ' '.repeat(Math.max(0, leadColumns(line) - openIndent)) + line.replace(/^[ \t]*/, '');
     const close = FENCE_CLOSE.exec(body);
     if (close && close[1][0] === open[0] && close[1].length >= open.length) { open = null; openIndent = 0; }
   }
