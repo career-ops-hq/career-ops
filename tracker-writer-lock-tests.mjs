@@ -73,13 +73,18 @@ const HARNESS_WAIT_MS = 30_000;
  */
 async function waitForContentionMarker(markerPath, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  while (!existsSync(markerPath) && Date.now() < deadline) await sleep(10);
-  if (!existsSync(markerPath)) return null;
-  try {
-    return JSON.parse(readFileSync(markerPath, 'utf-8'));
-  } catch {
-    return null;
+  while (Date.now() < deadline) {
+    if (existsSync(markerPath)) {
+      try {
+        return JSON.parse(readFileSync(markerPath, 'utf-8'));
+      } catch {
+        // A concurrent writer may have created the file but not finished its
+        // synchronous JSON write yet; retry until the bounded deadline.
+      }
+    }
+    await sleep(10);
   }
+  return null;
 }
 
 function trackerTable(rows) {
