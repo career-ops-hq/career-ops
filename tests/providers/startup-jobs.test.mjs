@@ -125,6 +125,43 @@ try {
     fail('the unattributed-employer item should have been dropped, not kept');
   }
 
+  // An entity-encoded "&amp;" in the TITLE itself (not just the company) must
+  // decode before title_filter sees it — an undecoded "&amp;" would read as
+  // literal text and could drop a job a plain "&" title_filter query should match.
+  const entityInTitleXml = [
+    '<rss><channel>',
+    '<item>',
+    '  <title>R&amp;D Engineer at Acme</title>',
+    '  <link>https://startup.jobs/r-and-d-engineer-acme-10260832</link>',
+    '</item>',
+    '</channel></rss>',
+  ].join('\n');
+  const entityTitleJobs = parseStartupJobsFeed(entityInTitleXml);
+  if (entityTitleJobs[0]?.title === 'R&D Engineer' && entityTitleJobs[0]?.company === 'Acme') {
+    pass('parseStartupJobsFeed decodes an entity-encoded "&amp;" in the title, not just the company');
+  } else {
+    fail(`entity-in-title row = ${JSON.stringify(entityTitleJobs[0])}`);
+  }
+
+  // The feed sometimes glues a German "bei" preposition onto the company
+  // name (source data, not a parsing artifact). Left in, "bei PROLOGA" would
+  // silently bypass a data/blacklist.md row for "PROLOGA" and company-based
+  // dedup against the same employer's own ATS.
+  const beiPrefixXml = [
+    '<rss><channel>',
+    '<item>',
+    '  <title>Quality Assurance Engineer (m/w/d) - remote DE at bei PROLOGA</title>',
+    '  <link>https://startup.jobs/qa-engineer-prologa-10260833</link>',
+    '</item>',
+    '</channel></rss>',
+  ].join('\n');
+  const beiJobs = parseStartupJobsFeed(beiPrefixXml);
+  if (beiJobs[0]?.company === 'PROLOGA') {
+    pass('parseStartupJobsFeed strips a leading "bei " from the company so blacklist/dedup matching sees the plain name');
+  } else {
+    fail(`bei-prefix company = ${JSON.stringify(beiJobs[0]?.company)}`);
+  }
+
   // description: the <description> text ships in the same payload, so it is
   // carried as plain text for content_filter / visa_filter (whitespace
   // collapsed, markup stripped by the shared htmlToText helper).

@@ -1713,12 +1713,33 @@ search_queries:
 #   careers_url: https://www.python.org/jobs/
 #   enabled: true
 #
-# - name: Startup Jobs                    # global startup/scale-up jobs (public RSS feed, ~50-item snapshot)
+# Startup Jobs: global startup/scale-up jobs (public RSS feed). Each query
+# returns only the ~50 most recent postings, so cover a search with several
+# narrow entries rather than one broad one: one per role slug, plus a
+# `workplace: remote` variant (for a broad slug the unscoped entry fills up
+# within hours, while the remote one stays under the cap longer).
+#   role: slug = last segment of a https://startup.jobs/roles/<slug> page;
+#     full list: bare /roles/<slug> entries in
+#     https://cdn.startup.jobs/sitemaps/startupjobs/roles.xml.gz
+#   workplace: optional; "remote" is the only accepted value, anything else → HTTP 404
+#
+# - name: Startup Jobs — Platform Engineer
 #   provider: startup-jobs
 #   startup_jobs:
-#     role: platform-engineer    # optional role slug (confirmed live: platform-engineer,
-#                                 # site-reliability-engineer, devops-engineer, engineering, ...)
-#     workplace: remote          # optional free-text, e.g. "remote"
+#     role: platform-engineer
+#   enabled: true
+#
+# - name: Startup Jobs — Platform Engineer (remote)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#     workplace: remote
+#   enabled: true
+#
+# - name: Startup Jobs — Site Reliability Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: site-reliability-engineer
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
