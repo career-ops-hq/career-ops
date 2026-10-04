@@ -99,7 +99,37 @@ try {
     },
   };
 
-  const jobs = await bwi.fetch({ name: 'BWI GmbH' }, ctx);
+  // Default path: no config switch, so the scan is the listing request alone.
+  const plainRequested = [];
+  const plainJobs = await bwi.fetch({ name: 'BWI GmbH' }, {
+    transport: 'http',
+    fetchJson: async () => ({}),
+    fetchText: async url => {
+      plainRequested.push(url);
+      return url.endsWith('/stellenangebote') ? LISTING : DETAIL;
+    },
+  });
+  if (plainJobs.length === 2 && plainRequested.length === 1 && plainJobs.every(j => j.title && j.location === '')) {
+    pass('bwi.fetch() without bwi.fetchDetails makes one listing request and no detail request');
+  } else {
+    fail(`bwi.fetch() default path: ${plainJobs.length} jobs, requests ${JSON.stringify(plainRequested)}`);
+  }
+
+  // A detailLimit alone is a cap, never the switch.
+  const capOnlyRequested = [];
+  await bwi.fetch({ name: 'BWI GmbH', bwi: { detailLimit: 10 } }, {
+    transport: 'http',
+    fetchJson: async () => ({}),
+    fetchText: async url => {
+      capOnlyRequested.push(url);
+      return url.endsWith('/stellenangebote') ? LISTING : DETAIL;
+    },
+  });
+  if (capOnlyRequested.length === 1) pass('bwi.fetch() does not enrich on bwi.detailLimit alone');
+  else fail(`bwi.fetch() with detailLimit only requested ${JSON.stringify(capOnlyRequested)}`);
+
+  const DETAILS_ON = { name: 'BWI GmbH', bwi: { fetchDetails: true } };
+  const jobs = await bwi.fetch(DETAILS_ON, ctx);
 
   if (jobs.length === 2 && jobs.every(j => j.company === 'BWI GmbH' && j.url && j.title)) {
     pass('bwi.fetch() returns one normalized Job per listing entry');
@@ -145,7 +175,7 @@ try {
       throw new Error('detail page down');
     },
   };
-  const resilient = await bwi.fetch({ name: 'BWI GmbH' }, flaky);
+  const resilient = await bwi.fetch(DETAILS_ON, flaky);
   if (resilient.length === 2 && resilient.every(j => j.title)) {
     pass('bwi.fetch() survives a failing detail page and keeps the slug-derived title');
   } else {
@@ -198,7 +228,8 @@ try {
       return url.endsWith('/stellenangebote') ? HOSTILE_LISTING : DETAIL;
     },
   };
-  const spoofJobs = await bwi.fetch({ name: 'BWI GmbH' }, spoofCtx);
+  // With detail enrichment on: that is the path that fetches URLs taken from the listing.
+  const spoofJobs = await bwi.fetch(DETAILS_ON, spoofCtx);
   const onHost = u => u.startsWith('https://www.bwi.de/');
 
   if (spoofJobs.length === 1 && spoofJobs.every(j => onHost(j.url))) {
@@ -229,11 +260,19 @@ try {
       return DETAIL;
     },
   };
-  const bigJobs = await bwi.fetch({ name: 'BWI GmbH' }, bigCtx);
+  const bigJobs = await bwi.fetch(DETAILS_ON, bigCtx);
   if (bigJobs.length === 46 && bigDetails === 45) {
     pass('bwi.fetch() stops enriching at the 45-request detail budget and still returns every job');
   } else {
     fail(`bwi.fetch() budget: ${bigJobs.length} jobs, ${bigDetails} detail requests`);
+  }
+
+  bigDetails = 0;
+  const cappedJobs = await bwi.fetch({ name: 'BWI GmbH', bwi: { fetchDetails: true, detailLimit: 3 } }, bigCtx);
+  if (cappedJobs.length === 46 && bigDetails === 3) {
+    pass('bwi.fetch() honors bwi.detailLimit as the cap on detail requests');
+  } else {
+    fail(`bwi.fetch() detailLimit 3: ${cappedJobs.length} jobs, ${bigDetails} detail requests`);
   }
 
   // ── Health probe: ctx.maxPages means "listing only" ─────────────────────
@@ -247,9 +286,9 @@ try {
       return url.endsWith('/stellenangebote') ? LISTING : DETAIL;
     },
   };
-  const probeJobs = await bwi.fetch({ name: 'BWI GmbH' }, probeCtx);
+  const probeJobs = await bwi.fetch(DETAILS_ON, probeCtx);
   if (probeJobs.length === 2 && probeRequested.length === 1) {
-    pass('bwi.fetch() skips detail enrichment when the health probe sets ctx.maxPages');
+    pass('bwi.fetch() skips detail enrichment under a health probe even with bwi.fetchDetails: true');
   } else {
     fail(`bwi.fetch() under probe: ${probeJobs.length} jobs, requests ${JSON.stringify(probeRequested)}`);
   }
