@@ -1246,6 +1246,9 @@ Refusing rather than coercing is deliberate: there is no honest place to put a
 string `skills` value inside `skills[]`, and inventing the structure to hold it
 is the same authoring the lints exist to avoid.
 
+Reachable from a mode as the payload stage of `ats` — see [`modes/ats.md`](../modes/ats.md) for the agent-facing
+workflow, including the rule that the three lints are relayed to the user and never applied by the agent.
+
 Self-test: `node ats-payload.mjs --self-test`.
 
 ---

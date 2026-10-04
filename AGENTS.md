@@ -388,7 +388,7 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Wants to check if a company is safe to join (red-flag analysis) | `interview-redflag` |
 | Wants to generate CV/PDF | `pdf` |
 | Wants to build, import, review, or validate a Master Career Profile | `master-profile` — source-backed CV import with explicit approval; profile selection and PDF integration are not yet implemented |
-| Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |
+| Wants to check if a generated CV is ATS-friendly (parseability score + issues), or to prepare a render payload for an ATS parser before building the HTML | `ats` — two stages: `ats-payload.mjs` on the payload (one safe fold, three lints it only reports), then `verify-ats.mjs` on the generated HTML (score + issues) |
 | Wants a hiring-manager's read on a tailored CV before sending | `pdf --hm-audit` — opt-in pass (`modes/pdf/hm-audit.md`), off by default: researches the likely reviewer, dispatches a separate agent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict |
 | Wants the LaTeX/Overleaf CV path | `latex` |
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |

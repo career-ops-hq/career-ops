@@ -97,6 +97,8 @@ The bullets above are the rules. `templates/ats-rules.yml` is the same rules as 
 
 **Optional parseability check:** after generating the HTML you can score it for ATS-friendliness with `node verify-ats.mjs output/cv-{candidate}-{company}.html` (see `modes/ats.md`). This is deterministic, read-only, and advisory — it reports a 0-100 score plus concrete issues but never blocks generation (unlike the `verify-cv-facts.mjs` fact gate in Step 18).
 
+The `ats` mode also has an earlier, **payload**-level stage (`ats-payload.mjs`), which necessarily runs before the HTML exists and so before the step above. It is **not** a step of this pipeline — whether `pdf` should emit an ATS variant in the same pass is still open in #3202 — but if a user asks for the `ats` mode, read `modes/ats.md` for both stages rather than only the score.
+
 ## Recruiter Review Gates
 
 - The summary should answer: "What role is this person targeting, and why this one?"
