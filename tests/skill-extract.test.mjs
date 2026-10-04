@@ -383,6 +383,47 @@ try {
   if (wanted.every(x => jd.has(x))) pass('extractSkills recovers the JUnit/Cucumber/TDD/BDD + log-stack gaps from a real gap row');
   else fail(`report-463 gap row => ${[...jd].join(',')}`);
 
+  // AI / ML spellings (2026-10-04). Same two halves as the tables above, for
+  // the other ways a CV writes an AI/ML skill the vocabulary already has.
+  const aiCases = [
+    ['huggingface', 'Hugging Face'], ['sklearn', 'scikit-learn'],
+    ['fine tuning', 'Fine-tuning'],
+    ['large language model', 'LLMs'], ['large language models', 'LLMs'],
+    ['retrieval-augmented generation', 'RAG'], ['retrieval augmented generation', 'RAG'],
+    ['natural language processing', 'NLP'],
+  ];
+  const aiFailures = [];
+  for (const [raw, display] of aiCases) {
+    const found = extractSkills(`Requires ${raw} experience.`);
+    if (!found.has(display)) aiFailures.push(`extract "${raw}" => ${[...found].join(',') || '(none)'}`);
+    if (canonicalize(raw) !== display) aiFailures.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (aiFailures.length === 0) pass(`extractSkills covers all ${aiCases.length} AI/ML alternate spellings (recognition + canonical form)`);
+  else fail(`AI/ML spelling coverage => ${aiFailures.join(' | ')}`);
+
+  // None of them reaches past the skill it names: not the verb form, not a
+  // smaller model class, not "natural language" as an everyday phrase.
+  const aiNegatives = [
+    ['Fine-tune campaign spend across paid channels', 'Fine-tuning'],
+    ['Experience with small language models on edge devices', 'LLMs'],
+    ['Answer natural language questions over the warehouse', 'NLP'],
+  ];
+  const aiLeaks = aiNegatives.filter(([text, skill]) => extractSkills(text).has(skill));
+  if (aiLeaks.length === 0) pass('the AI/ML spellings stay off verb forms, small language models and "natural language" prose');
+  else fail(`AI/ML spelling over-match => ${aiLeaks.map(([text, skill]) => `${skill} in "${text}"`).join(' | ')}`);
+
+  // End to end, on the Skills line of the shipped example CV
+  // (examples/dual-track-engineer-instructor/cv.md), which jd-skill-gap used to
+  // answer with Hugging Face as a gap.
+  const { classifySkillGaps } = await import(pathToFileURL(join(ROOT, 'jd-skill-gap.mjs')).href);
+  const exampleCv = '## Skills\n\nEngineering: TypeScript, Python (daily), SQL. LangChain, LangGraph, Anthropic SDK, HuggingFace Transformers.\n';
+  const classified = classifySkillGaps(['Hugging Face', 'LangChain'], exampleCv);
+  if (classified.existing.includes('Hugging Face') && classified.gap.length === 0) {
+    pass('jd-skill-gap reads "HuggingFace Transformers" on a CV as the Hugging Face skill, not a gap');
+  } else {
+    fail(`example-CV Hugging Face => ${JSON.stringify(classified)}`);
+  }
+
   // empty / falsy input
   if (extractSkills('').size === 0 && extractSkills(null).size === 0) pass('extractSkills returns an empty set for empty/null input');
   else fail('extractSkills should return {} for empty/null');
