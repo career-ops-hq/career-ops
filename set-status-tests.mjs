@@ -10,8 +10,8 @@
  * codes, and layout tolerance (9-col and 10-col Location trackers).
  *
  * Tests provision a throwaway tracker via the CAREER_OPS_TRACKER /
- * CAREER_OPS_TRACKER_LOCK env overrides (same sandbox pattern as
- * tracker-columns-tests.mjs).
+ * CAREER_OPS_TRACKER_LOCK env overrides (same sandbox pattern as the CLI cases
+ * in tests/tracker-columns.test.mjs).
  *
  * Exit-code contract under test:
  *   0 — success (including no-op re-runs)

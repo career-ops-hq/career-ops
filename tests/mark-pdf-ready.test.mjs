@@ -3,7 +3,7 @@
 // mark-pdf-ready.mjs is the canonical write path for the tracker's PDF column
 // (❌→✅), used by the web dashboard's "pdf" mode after the backend confirms a
 // successful render. Same sandboxing pattern as set-status-tests.mjs /
-// tracker-columns-tests.mjs: a throwaway tracker via the CAREER_OPS_TRACKER /
+// tracker-columns.test.mjs: a throwaway tracker via the CAREER_OPS_TRACKER /
 // CAREER_OPS_TRACKER_LOCK env overrides tracker-utils.mjs already respects.
 //
 // Auto-discovered by test-all.mjs (tests/**/*.test.mjs, #1440) — imported

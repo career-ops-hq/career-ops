@@ -249,9 +249,10 @@ try {
 // inside it. Add an entry to ALLOWED_MISSING_ENTRIES only with a comment
 // justifying why it may legitimately be absent.
 const ALLOWED_MISSING_ENTRIES = new Set([
-  // Kept in SYSTEM_PATHS for one release so staleSystemFiles() prunes the
+  // Kept in SYSTEM_PATHS for one release so staleSystemFiles() prunes each
   // retired suite during upgrades after it moved into tests/.
   'lib/context-budget.test.mjs',
+  'tracker-columns-tests.mjs', // → tests/tracker-columns.test.mjs (#4758)
 ]);
 for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
   for (const entry of entries) {
@@ -285,7 +286,6 @@ const requiredSystemPaths = [
   '.antigravitycli/skills/',
   '.grok/skills/',
   '.cursor/skills/',
-  'tracker-columns-tests.mjs',
   'updater-migration-tests.mjs',
   'README.ar.md',
   'README.de.md',
@@ -312,7 +312,6 @@ const requiredBootstrapPaths = [
   'tracker-utils.mjs',
   'tracker-parse.mjs',
   'updater-migration-tests.mjs',
-  'tracker-columns-tests.mjs',
 ];
 
 for (const path of requiredSystemPaths) {

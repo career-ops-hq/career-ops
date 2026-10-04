@@ -385,6 +385,9 @@ const SYSTEM_PATHS = [
   'openrouter-runner.mjs',
   'jd-similarity.mjs',
   'test-all.mjs',
+  // Retired 2026-10-04: the suite moved to tests/tracker-columns.test.mjs
+  // (#4758). The entry stays so staleSystemFiles() prunes the orphan on an
+  // upgraded install; drop it once a release has shipped past that move.
   'tracker-columns-tests.mjs',
   'tracker-writer-lock-tests.mjs',
   'agent-inbox-tests.mjs',
@@ -536,7 +539,6 @@ const BOOTSTRAP_PATHS = [
   'reserve-report-num.mjs',
   'updater-migration-tests.mjs',
   'validate-portals.mjs',
-  'tracker-columns-tests.mjs',
   'plugins/',
   'plugins.mjs',
   'plugins-registry/',

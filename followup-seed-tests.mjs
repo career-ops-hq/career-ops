@@ -5,8 +5,8 @@
  *
  * Marking a tracker row Applied used to leave data/follow-ups.md untouched
  * until the user ran the `followup` mode by hand — the seed step never ran on
- * its own. These tests drive followup-seed.mjs's CLI (via execFileSync, like
- * tracker-columns-tests.mjs) end-to-end against sandboxed fixtures, plus a few
+ * its own. These tests drive followup-seed.mjs's CLI (via execFileSync)
+ * end-to-end against sandboxed fixtures, plus a few
  * direct unit-level imports of the exported functions.
  *
  * Run: node followup-seed-tests.mjs
