@@ -363,6 +363,26 @@ function sameLockDirectory(left, right) {
     && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
+/**
+ * Test-only synchronization hook: tell a parent test that this process has
+ * tried the tracker lock and found it held, i.e. that it is now waiting.
+ *
+ * Env-gated and IPC-only, like merge-tracker.mjs's CAREER_OPS_MERGE_READY_IPC:
+ * without both the env flag and an IPC channel it does nothing, so no real run
+ * ever sees it. tests/tracker-writer-lock.test.mjs uses it to commit its
+ * concurrent row after a writer's pre-lock work and before its locked read.
+ * It used to sample the recover guard for that instead, and the guard lives
+ * for well under a millisecond, so on Windows the sampler missed it often and
+ * every miss idled two seconds (#4759). A message cannot be missed.
+ *
+ * The callback form keeps a closed channel from throwing or emitting 'error':
+ * the hook must never be able to fail the writer it reports on.
+ */
+function announceLockWait(lockDir) {
+  if (process.env.CAREER_OPS_TRACKER_LOCK_WAIT_IPC !== '1' || typeof process.send !== 'function') return;
+  process.send({ type: 'tracker-lock-waiting', lockDir }, () => {});
+}
+
 // The recovery judgment comes from pipeline-lock rather than a second copy of
 // it. "Mirrors pipeline-lock" was the previous arrangement, and mirroring is
 // precisely what drifts: this copy still answered a bare boolean, so "the
@@ -399,6 +419,7 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   const startedAt = Date.now();
   let attempts = 0;
   let staleRecovered = false;
+  let announcedWait = false;
 
   // Jitter and the progress rule come from pipeline-lock rather than a fourth
   // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
@@ -522,6 +543,10 @@ export async function acquireTrackerLock(lockDir, options = {}) {
       // its write is lost (#2777, measured on windows-latest).
       if (!isMkdirContention(err)) throw err;
       noteWaiting();
+      if (!announcedWait) {
+        announcedWait = true;
+        announceLockWait(lockDir);
+      }
 
       let hasRecoverGuard = false;
       try {

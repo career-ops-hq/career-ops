@@ -388,6 +388,9 @@ const SYSTEM_PATHS = [
   'jd-similarity.mjs',
   'test-all.mjs',
   'tracker-columns-tests.mjs',
+  // Retired 2026-10-04: the suite moved to tests/tracker-writer-lock.test.mjs
+  // (#4759). The entry stays so staleSystemFiles() prunes the orphan on an
+  // upgraded install; drop it once a release has shipped past that move.
   'tracker-writer-lock-tests.mjs',
   'agent-inbox-tests.mjs',
   'validate-portals.mjs',

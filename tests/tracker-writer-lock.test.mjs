@@ -1,106 +1,98 @@
-#!/usr/bin/env node
+/**
+ * Regression tests for the shared applications.md writer lock.
+ *
+ * A node:test suite, so test-all.mjs runs it as a child process under the
+ * shared 30s cap like every other suite in tests/. It used to sit at the root
+ * as tracker-writer-lock-tests.mjs with a 180s budget of its own (#2906),
+ * because on Windows it spent most of its time idling: each writer case waited
+ * up to 2s to SEE a recover guard that lives for well under a millisecond, and
+ * every miss burned the full 2s. The writers now announce that they are
+ * waiting on the lock, so there is nothing to miss (#4759).
+ */
 
-/** Regression tests for the shared applications.md writer lock. */
-
-import { spawn } from 'child_process';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync,
   utimesSync, writeFileSync,
-} from 'fs';
-import { basename, dirname, join } from 'path';
-import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
-import { acquireTrackerLock, openTrackerTransaction } from './tracker-utils.mjs';
+} from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { acquireTrackerLock, openTrackerTransaction } from '../tracker-utils.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
 const CONCURRENT_ROW = '| 99 | 2026-01-03 | ConcurrentCo | Keeper | 4.3/5 | Applied | ❌ | [99](reports/099-concurrent.md) | preserve me |';
-let passed = 0;
-let failed = 0;
-// Run-level evidence that acquireTrackerLock still emits its recover guard.
-// See the consumer inside runWhileLocked for why this is counted per run
-// rather than asserted per case (#2436).
-let contentionWatchedCases = 0;
-let contentionObservedCases = 0;
+// Run-level evidence that the matrix still orders a fixture mutation on the
+// lock-wait signal. See the last test in this file (#2436).
+let lockWaitWatchedCases = 0;
+// The first writer case whose writer never reported waiting, if any. Learning
+// that costs the writer's whole 3s lock timeout, because "not yet" and "never"
+// look the same until it gives up. When the hook is gone every case pays it,
+// which put a red run at 28s locally against a 30s cap, so on a slower runner
+// the regression would arrive as an unexplained suite kill. One case pays
+// instead, and the rest fail straight away, naming it.
+let lockWaitFirstMissed = null;
 
-function pass(message) { console.log(`PASS ${message}`); passed++; }
-function fail(message) { console.error(`FAIL ${message}`); failed++; }
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// A harness deadline raced against a child. Unref'd, because the race usually
+// ends the other way and node:test waits for the event loop to drain before
+// the file finishes: a pending 10s timer per case kept this suite alive for
+// seconds after its last test. The child being waited on keeps the loop alive
+// for as long as the deadline matters.
+const deadline = (ms) => new Promise(resolve => setTimeout(resolve, ms).unref());
 
 // How long the HARNESS waits for a spawned Node process to start, print, or
 // exit. This is not a value under test: it encodes only how fast the machine
-// is, and every other suite that spawns a child budgets 30s for the same work
-// (followup-seed-tests.mjs, set-status-tests.mjs, run() in tests/helpers.mjs).
-// A Windows CI runner under load routinely needs more than the 2s this file
-// used to allow, which made a correctness test fail for want of a faster host.
+// is. A Windows CI runner under load routinely needs more than the 2s this
+// file once allowed, which made a correctness test fail for want of a faster
+// host, so it is generous. It is also well under the 30s test-all gives the
+// whole suite: a writer that hangs is killed here and reported as the case
+// that hung, rather than taking the suite down with the outer cap and naming
+// nothing.
 //
-// Every SEMANTIC timeout stays exactly as it was: the argument to
-// launchWriter() is the child's CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS, and
-// timeoutMs / staleMs / retryMs are the lock's own parameters. Those are what
-// the tests assert on, so widening them would change what is being tested.
-const HARNESS_WAIT_MS = 30_000;
+// The SEMANTIC timeouts are the argument to launchWriter() (the child's
+// CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) and the lock's own timeoutMs / staleMs /
+// retryMs. Those are what the tests assert on.
+const HARNESS_WAIT_MS = 10_000;
 
-// How long to wait for evidence that the spawned writer has reached the lock
-// before committing the concurrent row. Bounded, and not a value under test:
-// see watchForContention() for why the wait exists and what happens when the
-// evidence never arrives.
-const CONTENTION_WAIT_MS = 2_000;
+// The probe's lock timeout. The probe only has to time out while the lock is
+// held, and the deadline starts inside acquireTrackerLock, after the module has
+// loaded and the writer's pre-lock work is done, so a short one cannot race
+// process startup. It was 200ms, which nine probes paid in full (#4759).
+const PROBE_LOCK_TIMEOUT_MS = 50;
 
-/**
- * Watch for evidence that a spawned writer has attempted the tracker lock and
- * lost — i.e. that it is now sitting in the retry loop.
- *
- * WHY THIS EXISTS: the fixture mutation below is what a writer with a stale
- * pre-lock snapshot erases, so it only discriminates if it lands AFTER that
- * writer's read. Committing it immediately after spawn() does not: a fresh
- * Node process needs tens of milliseconds just to boot, so the row is already
- * on disk before a buggy writer reads, and the buggy writer then reads the
- * post-mutation file and passes. That was verified, not assumed — hoisting
- * set-status.mjs's readFileSync above its acquireTrackerLockForCli call left
- * this suite fully green until this wait was added.
- *
- * The signal is the lock's recover-guard directory: acquireTrackerLock creates
- * and removes `${lockDir}.recover` on every contended pass, so its first
- * appearance means "this child has tried the lock and someone else holds it".
- * That instant sits after a pre-lock read and before a post-lock one, which is
- * exactly the discrimination the mutation needs.
- *
- * This POLLS rather than using fs.watch. On Windows, fs.watch aborts the whole
- * process with a libuv assertion (`!_wcsnicmp(filename, dir, dirlen)`,
- * src\win\fs-event.c) when the watched directory is reached through an 8.3
- * short path — which is exactly what CI runners use (C:\Users\RUNNER~1\...),
- * so the watcher version killed this suite with exit 3221226505 on
- * windows-latest while passing locally. The guard is created and removed on
- * every contended retry, not once, so a poll gets many chances to observe it.
- *
- * It is a bounded wait, never a barrier. If no guard ever appears — a lock
- * implementation that stops using the guard, or a writer that legitimately
- * does other work first — the mutation proceeds anyway once
- * CONTENTION_WAIT_MS elapses and the test degrades to its previous
- * timing-dependent behaviour instead of hanging.
- *
- * @param {string} dir - Directory containing the lock.
- * @param {string} lockDir - The lock directory whose recover guard signals contention.
- * @returns {{wait: (timeoutMs: number) => Promise<boolean>, close: () => void}}
- */
-function watchForContention(dir, lockDir) {
-  const guardPrefix = `${basename(lockDir)}.recover`;
-  const guardPresent = () => {
-    try {
-      return readdirSync(dir).some((name) => name.startsWith(guardPrefix));
-    } catch {
-      return false; // directory vanished mid-run; the timed fallback stands in
-    }
-  };
-  return {
-    async wait(timeoutMs) {
-      const deadline = Date.now() + timeoutMs;
-      let seen = false;
-      while (!(seen = guardPresent()) && Date.now() < deadline) await sleep(2);
-      return seen;
-    },
-    close() {},
-  };
+// Every writer this file starts, until it closes. test-all caps a node:test
+// suite by killing `node --test`; the runner forwards SIGTERM to this process,
+// which then dies without running any per-case cleanup, and a writer it was
+// waiting on is left running. Killing them here keeps a timeout from leaving
+// strays. Best effort: Windows delivers no SIGTERM to listen for, though a
+// writer orphaned there still exits on its own lock timeout.
+const liveChildren = new Set();
+
+function startNode(args, options) {
+  const child = spawn(NODE, args, options);
+  liveChildren.add(child);
+  child.once('close', () => liveChildren.delete(child));
+  return child;
+}
+
+function killLiveChildren() {
+  for (const child of liveChildren) {
+    try { child.kill('SIGKILL'); } catch { /* already gone */ }
+  }
+}
+
+process.once('exit', killLiveChildren);
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  // Re-raised once the children are gone: `once` has removed this listener by
+  // then, so the signal's default action ends the process as it would have.
+  process.once(signal, () => {
+    killLiveChildren();
+    process.kill(process.pid, signal);
+  });
 }
 
 function trackerTable(rows) {
@@ -112,6 +104,13 @@ ${rows.join('\n')}
 `;
 }
 
+/**
+ * Hold the tracker lock, prove a writer contends on it, then let the writer
+ * run and report what it left behind. Collects evidence only: the assertions
+ * live in writerCase(), one subtest per claim. The verify callbacks run here
+ * because some resolve the tracker's real path, which needs the fixture
+ * directory still on disk.
+ */
 async function runWhileLocked({
   name,
   script,
@@ -120,10 +119,9 @@ async function runWhileLocked({
   stdin = '',
   candidates = null,
   verify,
+  verifyConcurrent,
+  verifyOutput,
   mutateWhileLocked,
-  verifyConcurrent = after => after.includes(CONCURRENT_ROW),
-  verifyOutput = () => true,
-  completion = 'completes the intended update after lock release',
   beforeMutationOutput = null,
 }) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-writer-lock-'));
@@ -150,33 +148,47 @@ async function runWhileLocked({
     CAREER_OPS_TRACKER_DB: db,
     CAREER_OPS_TRACKER_LOCK: lockDir,
     CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
+    // Test-only: acquireTrackerLock sends a 'tracker-lock-waiting' message the
+    // first time it finds the lock held. See announceLockWait in tracker-utils.
+    CAREER_OPS_TRACKER_LOCK_WAIT_IPC: '1',
   };
   const launchWriter = (timeoutMs) => {
     let stdout = '';
     let stderr = '';
     const resolvedArgs = args.map(arg => arg === '{tracker}' ? tracker : arg);
-    const child = spawn(NODE, [join(ROOT, script), ...resolvedArgs], {
+    const child = startNode([join(ROOT, script), ...resolvedArgs], {
       cwd: ROOT,
       env: {
         ...childEnv,
         CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: String(timeoutMs),
       },
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
+    // True once the writer reports waiting on THIS lock; false if it closes
+    // without ever doing so.
+    const lockWait = new Promise(resolve => {
+      child.on('message', msg => {
+        if (msg?.type === 'tracker-lock-waiting' && basename(String(msg.lockDir)) === basename(lockDir)) {
+          resolve(true);
+        }
+      });
+      closePromise.then(() => resolve(false));
+    });
     child.stdin.end(stdin);
     return {
       child,
       closePromise,
+      lockWait,
       output: () => ({ stdout, stderr }),
     };
   };
   const waitForWriter = async (run, timeoutMs) => {
     let result = await Promise.race([
       run.closePromise,
-      sleep(timeoutMs).then(() => null),
+      deadline(timeoutMs).then(() => null),
     ]);
     if (result === null) {
       run.child.kill('SIGKILL');
@@ -186,89 +198,146 @@ async function runWhileLocked({
     return { ...result, timedOut: false };
   };
 
-  const lock = await acquireTrackerLock(lockDir, {
-    timeoutMs: 2_000,
-    retryMs: 20,
-    staleMs: 5_000,
-    tracker,
-  });
-
-  const probe = launchWriter(200);
-  const probeResult = await waitForWriter(probe, HARNESS_WAIT_MS);
-  const probeOutput = probe.output();
-  if (!probeResult.timedOut && probeResult.code !== 0
-      && `${probeOutput.stdout}${probeOutput.stderr}`.includes('Timed out waiting for tracker lock')
-      && readFileSync(tracker, 'utf-8') === content) {
-    pass(`${name}: contends on the shared lock before reading or writing`);
-  } else {
-    fail(`${name}: lock contention probe failed (exit=${probeResult.code}, timedOut=${probeResult.timedOut})\n${probeOutput.stdout}${probeOutput.stderr}`);
-  }
-
-  // Watching starts before the real writer launches and after the probe has
-  // exited, so the only guard events it can see are the writer's own.
-  const contention = beforeMutationOutput ? null : watchForContention(dir, lockDir);
-  const run = launchWriter(3_000);
-
+  const evidence = { probe: null, reachedPrompt: null, lockWaitSeen: null, lockWaitNotAwaited: null, run: null };
   try {
-    if (beforeMutationOutput) {
-      const deadline = Date.now() + HARNESS_WAIT_MS;
-      while (!run.output().stdout.includes(beforeMutationOutput) && Date.now() < deadline) {
-        await sleep(10);
+    const lock = await acquireTrackerLock(lockDir, {
+      timeoutMs: 2_000,
+      retryMs: 20,
+      staleMs: 5_000,
+      tracker,
+    });
+
+    const probe = launchWriter(PROBE_LOCK_TIMEOUT_MS);
+    const probeResult = await waitForWriter(probe, HARNESS_WAIT_MS);
+    const probeOutput = probe.output();
+    evidence.probe = {
+      ...probeResult,
+      output: `${probeOutput.stdout}${probeOutput.stderr}`,
+      trackerAfter: readFileSync(tracker, 'utf-8'),
+    };
+
+    const run = launchWriter(3_000);
+    try {
+      if (beforeMutationOutput) {
+        const promptDeadline = Date.now() + HARNESS_WAIT_MS;
+        while (!run.output().stdout.includes(beforeMutationOutput) && Date.now() < promptDeadline) {
+          await sleep(10);
+        }
+        evidence.reachedPrompt = run.output().stdout.includes(beforeMutationOutput);
+      } else {
+        // Order the mutation after the writer's own read.
+        //
+        // WHY THIS EXISTS: the fixture mutation below is what a writer with a
+        // stale pre-lock snapshot erases, so it only discriminates if it lands
+        // AFTER that writer's read. Committing it immediately after spawn()
+        // does not: a fresh Node process needs tens of milliseconds just to
+        // boot, so the row is already on disk before a buggy writer reads, and
+        // the buggy writer then reads the post-mutation file and passes. That
+        // was verified, not assumed — hoisting set-status.mjs's readFileSync
+        // above its acquireTrackerLockForCli call left this suite fully green
+        // until a wait was added.
+        //
+        // The signal is the writer's own report that it has tried the lock
+        // and found it held. That instant sits after a pre-lock read and
+        // before a post-lock one, which is exactly the discrimination the
+        // mutation needs. It replaces sampling the lock's recover guard with
+        // readdirSync: the guard exists for well under a millisecond per
+        // retry, Windows CI missed it in 3 of 8 cases and 0 of 8 on another
+        // leg, and each miss idled 2s before falling back to timing-dependent
+        // ordering (#4759). A message is not sampled, so it cannot be missed,
+        // and its absence is now a real failure rather than bad luck.
+        //
+        // beforeMutationOutput entries have a stronger, script-specific
+        // ordering signal (their pre-lock review prompt), and a writer parked
+        // at that prompt has not reached the lock yet, so they skip this.
+        lockWaitWatchedCases++;
+        if (lockWaitFirstMissed) {
+          evidence.lockWaitSeen = false;
+          evidence.lockWaitNotAwaited = lockWaitFirstMissed;
+        } else {
+          evidence.lockWaitSeen = await Promise.race([
+            run.lockWait,
+            deadline(HARNESS_WAIT_MS).then(() => false),
+          ]);
+          if (!evidence.lockWaitSeen) lockWaitFirstMissed = name;
+        }
       }
-      if (!run.output().stdout.includes(beforeMutationOutput)) {
-        fail(`${name}: did not reach the pre-lock review prompt before the fixture mutation`);
-      }
+      // Simulate the current lock owner committing another row. The waiting
+      // writer must read this fresh version after acquiring the lock; a writer
+      // that reads before locking will erase row #99 with its stale snapshot.
+      const nextContent = mutateWhileLocked
+        ? mutateWhileLocked(content, CONCURRENT_ROW)
+        : `${content.trimEnd()}\n${CONCURRENT_ROW}\n`;
+      writeFileSync(tracker, nextContent);
+    } finally {
+      lock.release();
     }
-    // Order the mutation after the writer's own read. beforeMutationOutput
-    // entries already have a stronger, script-specific ordering signal (their
-    // pre-lock review prompt), and a writer parked at that prompt has not
-    // reached the lock yet, so the guard wait is skipped for them.
-    //
-    // The boolean IS the discrimination signal, so it is consumed rather than
-    // discarded (#2436) — but at RUN level, not per case, and the difference
-    // is not a softening. `acquireTrackerLock` creates the guard and removes
-    // it in a `finally` around one `lockCanRecover()` call, so it exists for
-    // well under a millisecond, re-created on each ~retryMs attempt. The
-    // watcher samples with readdirSync, so a single miss means "the sampler
-    // was unlucky", not "the guard is gone" — and on Windows CI it misses
-    // often enough that a per-case failure would be red on a healthy tree
-    // (measured: 3 of 8 observed).
-    //
-    // Across a whole run the two causes separate cleanly: a sampling miss
-    // still leaves other cases observing the guard, while the regression this
-    // must catch — the guard renamed, removed, or made conditional — takes
-    // every case to zero. That is asserted after the matrix.
-    if (contention) {
-      contentionWatchedCases++;
-      if (await contention.wait(CONTENTION_WAIT_MS)) contentionObservedCases++;
-      else console.log(`NOTE ${name}: recover guard not sampled within ${CONTENTION_WAIT_MS}ms — fell back to timing-dependent ordering for this case`);
-    }
-    // Simulate the current lock owner committing another row. The waiting
-    // writer must read this fresh version after acquiring the lock; a writer
-    // that reads before locking will erase row #99 with its stale snapshot.
-    const nextContent = mutateWhileLocked
-      ? mutateWhileLocked(content, CONCURRENT_ROW)
-      : `${content.trimEnd()}\n${CONCURRENT_ROW}\n`;
-    writeFileSync(tracker, nextContent);
+
+    const result = await waitForWriter(run, HARNESS_WAIT_MS);
+    const { stdout, stderr } = run.output();
+    const after = existsSync(tracker) ? readFileSync(tracker, 'utf-8') : '';
+    evidence.run = {
+      ...result,
+      stdout,
+      stderr,
+      after,
+      updated: verify(after),
+      concurrentKept: verifyConcurrent(after),
+      outputMatches: verifyOutput(stdout, stderr, tracker),
+    };
+    return evidence;
   } finally {
-    contention?.close();
-    lock.release();
+    rmSync(dir, { recursive: true, force: true });
   }
-
-  const result = await waitForWriter(run, HARNESS_WAIT_MS);
-  const { stdout, stderr } = run.output();
-
-  const after = existsSync(tracker) ? readFileSync(tracker, 'utf-8') : '';
-  if (!result.timedOut && result.code === 0 && verify(after)
-      && verifyConcurrent(after) && verifyOutput(stdout, stderr, tracker)) {
-    pass(`${name}: ${completion}`);
-  } else {
-    fail(`${name}: update failed after lock release (exit=${result.code})\n${stdout}${stderr}\n${after}`);
-  }
-  rmSync(dir, { recursive: true, force: true });
 }
 
-await runWhileLocked({
+/**
+ * One writer in the matrix: a test per writer, with a subtest for each of the
+ * two claims it makes (it contends on the shared lock; it completes against
+ * the fresh tracker once the lock is released).
+ */
+function writerCase({
+  verifyConcurrent = after => after.includes(CONCURRENT_ROW),
+  verifyOutput = () => true,
+  completion = 'completes the intended update after lock release',
+  ...options
+}) {
+  const { name, content } = options;
+  test(name, async (t) => {
+    const outcome = runWhileLocked({ ...options, verifyConcurrent, verifyOutput });
+    // Both subtests read the one run; an error in it fails both, by name.
+    outcome.catch(() => {});
+
+    await t.test('contends on the shared lock before reading or writing', async () => {
+      const { probe } = await outcome;
+      const detail = `exit=${probe.code}, timedOut=${probe.timedOut}\n${probe.output}`;
+      assert.equal(probe.timedOut, false, `lock contention probe hung (${detail})`);
+      assert.notEqual(probe.code, 0, `lock contention probe exited 0 while the lock was held (${detail})`);
+      assert.ok(probe.output.includes('Timed out waiting for tracker lock'),
+        `lock contention probe did not time out on the lock (${detail})`);
+      assert.equal(probe.trackerAfter, content, 'lock contention probe changed the tracker without the lock');
+    });
+
+    await t.test(completion, async () => {
+      const { run, reachedPrompt, lockWaitSeen, lockWaitNotAwaited } = await outcome;
+      assert.notEqual(reachedPrompt, false, 'did not reach the pre-lock review prompt before the fixture mutation');
+      assert.equal(lockWaitNotAwaited, null,
+        `not waited for: the writer in ${lockWaitNotAwaited} never reported waiting on the tracker lock, `
+        + 'so this case did not spend 3s learning the same thing (see that case for the cause)');
+      assert.notEqual(lockWaitSeen, false,
+        'the writer never reported waiting on the tracker lock, so the fixture mutation was not ordered after '
+        + 'its read — announceLockWait in tracker-utils.mjs is gone, renamed, or no longer reached on contention');
+      const detail = `exit=${run.code}, timedOut=${run.timedOut}\n${run.stdout}${run.stderr}\n${run.after}`;
+      assert.equal(run.timedOut, false, `writer hung after lock release (${detail})`);
+      assert.equal(run.code, 0, `writer failed after lock release (${detail})`);
+      assert.ok(run.updated, `writer did not make its update (${detail})`);
+      assert.ok(run.concurrentKept, `writer lost the row committed while it waited (${detail})`);
+      assert.ok(run.outputMatches, `writer output is not what was expected (${detail})`);
+    });
+  });
+}
+
+writerCase({
   name: 'normalize-statuses',
   script: 'normalize-statuses.mjs',
   content: trackerTable([
@@ -279,7 +348,7 @@ await runWhileLocked({
     && stdout.includes(`${realpathSync(tracker)}.bak`),
 });
 
-await runWhileLocked({
+writerCase({
   name: 'dedup-tracker',
   script: 'dedup-tracker.mjs',
   content: trackerTable([
@@ -291,7 +360,7 @@ await runWhileLocked({
     && stdout.includes(`${realpathSync(tracker)}.bak`),
 });
 
-await runWhileLocked({
+writerCase({
   name: 'tracker-delete',
   script: 'tracker.mjs',
   args: ['delete', '--num', '1'],
@@ -302,7 +371,7 @@ await runWhileLocked({
   verify: content => !content.includes('| 1 | 2026-01-01 | Acme |') && content.includes('| 2 | 2026-01-02 | Beta |'),
 });
 
-await runWhileLocked({
+writerCase({
   name: 'tracker-export',
   script: 'tracker.mjs',
   args: ['export', '--out', '{tracker}'],
@@ -326,7 +395,7 @@ await runWhileLocked({
 // optimisation ("resolve the row before paying for the lock"), and the file
 // already does real pre-lock work validating the state against states.yml, so
 // the shape is inviting. This test is what makes that refactor fail.
-await runWhileLocked({
+writerCase({
   name: 'set-status',
   script: 'set-status.mjs',
   args: ['--row', '1', 'Applied', '--note', 'sent CV'],
@@ -343,7 +412,7 @@ await runWhileLocked({
 // tracker-utils.mjs). It rewrites one cell of one line and keeps the rest of
 // the file, so a pre-lock read costs the same concurrent rows here as anywhere
 // else in this matrix.
-await runWhileLocked({
+writerCase({
   name: 'mark-pdf-ready',
   script: 'mark-pdf-ready.mjs',
   args: ['1'],
@@ -354,7 +423,7 @@ await runWhileLocked({
   verifyOutput: stdout => stdout.includes('marked PDF ready'),
 });
 
-await runWhileLocked({
+writerCase({
   name: 'reply-watch',
   script: 'reply-watch.mjs',
   stdin: 'y\n',
@@ -365,7 +434,7 @@ await runWhileLocked({
   verifyOutput: (stdout, _stderr, tracker) => stdout.includes(`to ${realpathSync(tracker)}?`),
 });
 
-await runWhileLocked({
+writerCase({
   name: 'reply-watch-identical',
   script: 'reply-watch.mjs',
   stdin: 'y\n',
@@ -393,7 +462,7 @@ await runWhileLocked({
   completion: 'groups identical reply transitions without losing their count',
 });
 
-await runWhileLocked({
+writerCase({
   name: 'reply-watch-stale-status',
   script: 'reply-watch.mjs',
   stdin: 'y\n',
@@ -440,7 +509,7 @@ await runWhileLocked({
 // the tracker byte-for-byte as the tracker-lock holder left it, concurrent row
 // included. Give followup-seed the tracker lock and (a) fails; give it a
 // tracker write and (c) fails.
-async function testFollowupSeedUsesASeparateLockNamespace() {
+test('followup-seed: seeds follow-ups under its own lock while the tracker lock is held, and writes no tracker bytes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-followup-seed-lock-'));
   const tracker = join(dir, 'applications.md');
   const followups = join(dir, 'follow-ups.md');
@@ -451,71 +520,70 @@ async function testFollowupSeedUsesASeparateLockNamespace() {
   ]);
   writeFileSync(tracker, content);
 
-  const lock = await acquireTrackerLock(trackerLockDir, {
-    timeoutMs: 2_000,
-    retryMs: 20,
-    staleMs: 5_000,
-    tracker,
-  });
+  try {
+    const lock = await acquireTrackerLock(trackerLockDir, {
+      timeoutMs: 2_000,
+      retryMs: 20,
+      staleMs: 5_000,
+      tracker,
+    });
 
-  // Stand in for the tracker-lock holder committing a row: if followup-seed
-  // ever wrote the tracker from a snapshot, this row is what it would erase.
-  const lockedContent = `${content.trimEnd()}\n${CONCURRENT_ROW}\n`;
-  writeFileSync(tracker, lockedContent);
-  // Content alone would miss a writer that replaces the tracker with bytes it
-  // happens to have read a moment earlier. writeFileAtomic renames a temp file
-  // over the target, so the mtime moves even when the bytes do not.
-  const lockedMtimeMs = statSync(tracker).mtimeMs;
+    // Stand in for the tracker-lock holder committing a row: if followup-seed
+    // ever wrote the tracker from a snapshot, this row is what it would erase.
+    const lockedContent = `${content.trimEnd()}\n${CONCURRENT_ROW}\n`;
+    writeFileSync(tracker, lockedContent);
+    // Content alone would miss a writer that replaces the tracker with bytes it
+    // happens to have read a moment earlier. writeFileAtomic renames a temp file
+    // over the target, so the mtime moves even when the bytes do not.
+    const lockedMtimeMs = statSync(tracker).mtimeMs;
 
-  let stdout = '';
-  let stderr = '';
-  const child = spawn(NODE, [join(ROOT, 'followup-seed.mjs'), '1', '--json'], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      CAREER_OPS_TRACKER: tracker,
-      CAREER_OPS_FOLLOWUPS: followups,
-      CAREER_OPS_FOLLOWUPS_LOCK: followupsLockDir,
-      CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS: '20',
-      CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '3000',
-      // Short enough that a followup-seed which DID reach for the shared
-      // tracker lock would time out and fail loudly inside the harness wait,
-      // instead of hanging until the suite's own timeout.
-      CAREER_OPS_TRACKER_LOCK: trackerLockDir,
-      CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '500',
-      CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
-    },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  child.stdout.on('data', chunk => { stdout += chunk; });
-  child.stderr.on('data', chunk => { stderr += chunk; });
-  child.stdin.end();
-  const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
-  let result = await Promise.race([closePromise, sleep(HARNESS_WAIT_MS).then(() => null)]);
-  if (result === null) {
-    child.kill('SIGKILL');
-    result = await closePromise;
+    let stdout = '';
+    let stderr = '';
+    const child = startNode([join(ROOT, 'followup-seed.mjs'), '1', '--json'], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        CAREER_OPS_TRACKER: tracker,
+        CAREER_OPS_FOLLOWUPS: followups,
+        CAREER_OPS_FOLLOWUPS_LOCK: followupsLockDir,
+        CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS: '20',
+        CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '3000',
+        // Short enough that a followup-seed which DID reach for the shared
+        // tracker lock would time out and fail loudly inside the harness wait,
+        // instead of hanging until the suite's own timeout.
+        CAREER_OPS_TRACKER_LOCK: trackerLockDir,
+        CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '500',
+        CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdin.end();
+    const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
+    let result = await Promise.race([closePromise, deadline(HARNESS_WAIT_MS).then(() => null)]);
+    if (result === null) {
+      child.kill('SIGKILL');
+      result = await closePromise;
+    }
+
+    // Released only after the child is done, so "completed" means "completed
+    // while the tracker lock was held by someone else".
+    lock.release();
+
+    const after = readFileSync(tracker, 'utf-8');
+    const trackerUntouched = after === lockedContent && statSync(tracker).mtimeMs === lockedMtimeMs;
+    const seeded = existsSync(followups) ? readFileSync(followups, 'utf-8') : '';
+    const detail = `exit=${result.code}\n${stdout}${stderr}\n${after}`;
+    assert.equal(result.code, 0, `followup-seed did not complete while the tracker lock was held (${detail})`);
+    assert.ok(trackerUntouched, `followup-seed wrote tracker bytes (${detail})`);
+    assert.ok(seeded.includes('- next #1 '), `followup-seed did not seed follow-ups.md (${detail})`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
+});
 
-  // Released only after the child is done, so "completed" means "completed
-  // while the tracker lock was held by someone else".
-  lock.release();
-
-  const after = readFileSync(tracker, 'utf-8');
-  const trackerUntouched = after === lockedContent && statSync(tracker).mtimeMs === lockedMtimeMs;
-  const seeded = existsSync(followups) ? readFileSync(followups, 'utf-8') : '';
-  if (result.code === 0 && trackerUntouched
-      && seeded.includes('- next #1 ')) {
-    pass('followup-seed: seeds follow-ups under its own lock while the tracker lock is held, and writes no tracker bytes');
-  } else {
-    fail(`followup-seed: separate-namespace contract broken (exit=${result.code})\n${stdout}${stderr}\n${after}`);
-  }
-  rmSync(dir, { recursive: true, force: true });
-}
-
-await testFollowupSeedUsesASeparateLockNamespace();
-
-async function testTrackerLockReleaseRetriesPartialCleanup() {
+test('tracker lock release retries after owner.json was removed by partial cleanup', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-lock-release-'));
   const lockDir = join(dir, 'tracker.lock');
   let removeAttempts = 0;
@@ -544,22 +612,16 @@ async function testTrackerLockReleaseRetriesPartialCleanup() {
     const partialCleanupPreservedDir = existsSync(lockDir)
       && !existsSync(join(lockDir, 'owner.json'));
     lock.release();
-    if (firstError?.message.includes('transient cleanup failure')
-        && partialCleanupPreservedDir && removeAttempts === 2 && !existsSync(lockDir)) {
-      pass('tracker lock release retries after owner.json was removed by partial cleanup');
-    } else {
-      fail(`tracker lock partial-cleanup retry failed (error=${firstError?.message}, attempts=${removeAttempts})`);
-    }
-  } catch (err) {
-    fail(`tracker lock partial-cleanup test crashed: ${err.message}`);
+    assert.match(firstError?.message ?? '', /transient cleanup failure/);
+    assert.ok(partialCleanupPreservedDir, 'partial cleanup should leave the lock directory without owner.json');
+    assert.equal(removeAttempts, 2);
+    assert.ok(!existsSync(lockDir), 'the retried release should remove the lock directory');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
 
-await testTrackerLockReleaseRetriesPartialCleanup();
-
-async function testTrackerLockReleasePreservesReplacementAfterPartialCleanup() {
+test('stale tracker lock handle preserves a replacement after partial cleanup', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-lock-replacement-'));
   const lockDir = join(dir, 'tracker.lock');
   let removeAttempts = 0;
@@ -586,21 +648,14 @@ async function testTrackerLockReleasePreservesReplacementAfterPartialCleanup() {
     lock.release();
 
     const owner = JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-    if (owner.token === 'replacement-owner' && removeAttempts === 1) {
-      pass('stale tracker lock handle preserves a replacement after partial cleanup');
-    } else {
-      fail(`stale tracker lock handle touched replacement (attempts=${removeAttempts})`);
-    }
-  } catch (err) {
-    fail(`tracker lock replacement test crashed: ${err.message}`);
+    assert.equal(owner.token, 'replacement-owner', 'the stale handle touched the replacement lock');
+    assert.equal(removeAttempts, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
 
-await testTrackerLockReleasePreservesReplacementAfterPartialCleanup();
-
-async function testTrackerTransactionCloseReportsCleanupFailure() {
+test('tracker transaction close preserves completed writes and reports cleanup failure', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-transaction-close-'));
   const tracker = join(dir, 'applications.md');
   const lockDir = join(dir, 'tracker.lock');
@@ -619,26 +674,19 @@ async function testTrackerTransactionCloseReportsCleanupFailure() {
     let rejectedClosedRead = false;
     try { transaction.read(); } catch { rejectedClosedRead = true; }
 
-    if (readFileSync(tracker, 'utf-8') === 'after'
-        && closeError?.message === 'injected cleanup failure'
-        && repeatedCloseError === closeError
-        && rejectedClosedRead
-        && warning.includes('lock cleanup failed')) {
-      pass('tracker transaction close preserves completed writes and reports cleanup failure');
-    } else {
-      fail(`tracker transaction close lost cleanup state (warning=${JSON.stringify(warning)})`);
-    }
-  } catch (err) {
-    fail(`tracker transaction close test crashed: ${err.message}`);
+    console.error = originalConsoleError;
+    assert.equal(readFileSync(tracker, 'utf-8'), 'after');
+    assert.equal(closeError?.message, 'injected cleanup failure');
+    assert.equal(repeatedCloseError, closeError);
+    assert.ok(rejectedClosedRead, 'a closed transaction must refuse to read');
+    assert.ok(warning.includes('lock cleanup failed'), `missing cleanup warning (warning=${JSON.stringify(warning)})`);
   } finally {
     console.error = originalConsoleError;
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
 
-await testTrackerTransactionCloseReportsCleanupFailure();
-
-async function testReplyWatchConflictingRecommendations() {
+test('reply-watch surfaces conflicting replies without applying an arbitrary last status', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-reply-conflict-'));
   const tracker = join(dir, 'applications.md');
   const candidatesPath = join(dir, 'candidates.json');
@@ -667,7 +715,7 @@ async function testReplyWatchConflictingRecommendations() {
 
     let stdout = '';
     let stderr = '';
-    const child = spawn(NODE, [join(ROOT, 'reply-watch.mjs'), candidatesPath], {
+    const child = startNode([join(ROOT, 'reply-watch.mjs'), candidatesPath], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -683,25 +731,21 @@ async function testReplyWatchConflictingRecommendations() {
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.stdin.end();
     const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
-    let result = await Promise.race([closePromise, sleep(HARNESS_WAIT_MS).then(() => null)]);
+    let result = await Promise.race([closePromise, deadline(HARNESS_WAIT_MS).then(() => null)]);
     if (result === null) {
       child.kill('SIGKILL');
       result = await closePromise;
     }
     const output = `${stdout}${stderr}`;
-    if (result.code === 0 && readFileSync(tracker, 'utf-8') === initial
-        && output.includes('Conflicting status recommendations')
-        && output.includes('Interview') && output.includes('Rejected')) {
-      pass('reply-watch surfaces conflicting replies without applying an arbitrary last status');
-    } else {
-      fail(`reply-watch conflict handling failed (exit=${result.code})\n${output}\n${readFileSync(tracker, 'utf-8')}`);
-    }
+    const detail = `exit=${result.code}\n${output}\n${readFileSync(tracker, 'utf-8')}`;
+    assert.equal(result.code, 0, detail);
+    assert.equal(readFileSync(tracker, 'utf-8'), initial, `reply-watch applied a status (${detail})`);
+    assert.ok(output.includes('Conflicting status recommendations'), detail);
+    assert.ok(output.includes('Interview') && output.includes('Rejected'), detail);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
-
-await testReplyWatchConflictingRecommendations();
+});
 
 // --- Ownerless-directory grace period (#2306) -------------------------------
 //
@@ -737,7 +781,7 @@ const ONE_PASS = { timeoutMs: 150, retryMs: 200 };
 const INSIDE_GRACE_MS = 100;   // ownerless for 100ms: past staleMs, well inside the 1s floor
 const SMALL_STALE_MS = 10;
 
-async function testFreshOwnerlessLockIsNotStolen() {
+test('ownerless lock inside the grace period is not stolen by a small staleMs', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-ownerless-'));
   const lockDir = join(dir, 'tracker.lock');
   try {
@@ -754,18 +798,16 @@ async function testFreshOwnerlessLockIsNotStolen() {
     } catch (e) {
       err = e;
     }
-    if (err?.code === 'LOCK_TIMEOUT' && existsSync(lockDir)) {
-      pass('ownerless lock inside the grace period is not stolen by a small staleMs');
-    } else {
-      fail(`ownerless lock inside the grace period was stolen (staleRecovered=${acquired?.staleRecovered}, err=${err?.code})`);
-    }
     acquired?.release();
+    assert.equal(err?.code, 'LOCK_TIMEOUT',
+      `ownerless lock inside the grace period was stolen (staleRecovered=${acquired?.staleRecovered}, err=${err?.code})`);
+    assert.ok(existsSync(lockDir), 'ownerless lock inside the grace period was removed');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
 
-async function testAgedOwnerlessLockStillRecovers() {
+test('ownerless lock older than the grace period is still recovered', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-ownerless-aged-'));
   const lockDir = join(dir, 'tracker.lock');
   try {
@@ -775,20 +817,14 @@ async function testAgedOwnerlessLockStillRecovers() {
     const lock = await acquireTrackerLock(lockDir, {
       timeoutMs: 1_000, retryMs: 20, staleMs: 1, tracker: join(dir, 'applications.md'),
     });
-    if (lock.staleRecovered) {
-      pass('ownerless lock older than the grace period is still recovered');
-    } else {
-      fail('aged ownerless lock was not recovered — the grace period must not disable recovery');
-    }
     lock.release();
-  } catch (e) {
-    fail(`aged ownerless lock was not recovered (${e.code ?? e.message})`);
+    assert.ok(lock.staleRecovered, 'aged ownerless lock was not recovered — the grace period must not disable recovery');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
 
-async function testLiveRecoverGuardIsNotEvicted() {
+test('recover guard held by a live caller is not evicted by a small staleMs', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-guard-live-'));
   const lockDir = join(dir, 'tracker.lock');
   const guardDir = `${lockDir}.recover`;
@@ -811,48 +847,24 @@ async function testLiveRecoverGuardIsNotEvicted() {
     } catch (e) {
       err = e;
     }
-    if (err?.code === 'LOCK_TIMEOUT' && existsSync(guardDir)) {
-      pass('recover guard held by a live caller is not evicted by a small staleMs');
-    } else {
-      fail(`live recover guard was evicted (staleRecovered=${acquired?.staleRecovered}, err=${err?.code}, guard=${existsSync(guardDir)})`);
-    }
+    const guardSurvived = existsSync(guardDir);
     acquired?.release();
+    assert.equal(err?.code, 'LOCK_TIMEOUT',
+      `live recover guard was evicted (staleRecovered=${acquired?.staleRecovered}, err=${err?.code}, guard=${guardSurvived})`);
+    assert.ok(guardSurvived, 'live recover guard was removed');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-}
+});
 
-await testFreshOwnerlessLockIsNotStolen();
-await testAgedOwnerlessLockStillRecovers();
-await testLiveRecoverGuardIsNotEvicted();
-
-// #2436: the guard-watched cases depend on the recover guard to order the
-// fixture mutation after the writer's own read. If it stops being emitted they
-// all silently fall back to timing, each burning CONTENTION_WAIT_MS first — the
-// suite stays green (or returns to flaking) with nothing pointing at the cause.
-// One observation is enough to prove the signal exists; zero across the whole
-// matrix is the regression.
-if (contentionWatchedCases === 0) {
-  // Skipping the assertion when nothing was watched would reproduce the very
-  // defect this file is fixing: a matrix change that drops every guard-watched
-  // case leaves the suite green while nothing validates the recover guard at
-  // all. Zero watched cases is itself the regression (CodeRabbit review).
-  fail('no guard-watched case ran — the matrix no longer exercises the recover guard, so nothing validates the mutation ordering signal');
-} else if (contentionObservedCases > 0) {
-  pass(`recover guard observed in ${contentionObservedCases}/${contentionWatchedCases} guard-watched cases — the mutation ordering signal is live`);
-} else if (process.platform === 'win32') {
-  // The signal is SAMPLED: acquireTrackerLock removes the guard in a `finally`
-  // around one lockCanRecover() call, so it exists for well under a
-  // millisecond, and the watcher looks for it with readdirSync. On Windows
-  // that sampling is unreliable enough to miss every window in a run — one CI
-  // leg observed 3 of 8, another 0 of 8 on the same commit — so failing here
-  // reports the sampler's luck, not the guard's existence, and turns a healthy
-  // tree red at random. Reported, not enforced, on this platform.
-  console.log(`NOTE recover guard not sampled in any of the ${contentionWatchedCases} guard-watched cases on win32 — the ordering signal could not be observed here; the assertion is enforced on platforms where sampling is reliable`);
-  passed++;
-} else {
-  fail(`recover guard never observed in any of the ${contentionWatchedCases} guard-watched cases — acquireTrackerLock has stopped emitting it, so every one of them fell back to timing-dependent ordering`);
-}
-
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);
+// #2436: the writer cases order their fixture mutation on the lock-wait
+// signal. Each one now fails on its own when the signal does not arrive, so
+// what is left to guard is the matrix itself: a change that drops every
+// signal-watched case would leave nothing exercising the signal at all, and
+// the suite green while it did (CodeRabbit review). Zero watched cases is the
+// regression. Declared last, and node:test runs a file's top-level tests in
+// order, so every writer case has run by the time this reads the count.
+test('the writer matrix orders its fixture mutation on the lock-wait signal', () => {
+  assert.ok(lockWaitWatchedCases > 0,
+    'no writer case waited on the lock-wait signal — the matrix no longer exercises it, so nothing validates the mutation ordering');
+});
