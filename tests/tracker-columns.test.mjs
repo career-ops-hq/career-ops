@@ -53,6 +53,13 @@ const WEB = HAS_WEB ? {} : { skip: 'web/ not present (core-only install; web/ is
 // Windows (`D:\...` reads as a URL scheme).
 const webTable = () => import('../web/src/lib/tracker-table.mjs');
 
+// tracker.mjs's index is node:sqlite, which needs Node >= 22.5 while
+// package.json allows 18.17. Same gate as test-all's own tracker index
+// section: every case that syncs, queries or exports through the index (or
+// builds one directly) skips on an older runtime instead of failing.
+const HAS_SQLITE = await import('node:sqlite').then(() => true, () => false);
+const SQLITE = HAS_SQLITE ? {} : { skip: 'node:sqlite unavailable (Node < 22.5) — tracker index cases skipped' };
+
 // ── child processes ────────────────────────────────────────────────────────
 // The few cases that need a real process. Spawned async, never spawnSync:
 // test-all caps this suite at 30s and on timeout SIGTERMs `node --test`, which
@@ -304,7 +311,7 @@ describe('legacy 9-column tracker', () => {
 // ── Test 4: tracker.mjs maps a 10-column tracker by header (#1596) ──────────
 // tracker.mjs used a fixed 9-cell destructure, so a Location column shifted
 // Score into Status and folded the real Notes cell away.
-describe('tracker.mjs: 10-column tracker', () => {
+describe('tracker.mjs: 10-column tracker', SQLITE, () => {
   let sb, got;
   before(async () => {
     sb = makeSandbox(HEADER_10);
@@ -426,7 +433,7 @@ describe('contract: an unknown extra column', () => {
     assert.equal(verify.code, 0, verify.stdout);
     assert.match(verify.stdout, /0 errors/);
   });
-  test('contract: tracker.mjs skips an unknown extra column', () => {
+  test('contract: tracker.mjs skips an unknown extra column', SQLITE, () => {
     assert.equal(got.sync.code, 0, got.sync.stderr);
     assert.ok(got.row, got.query.stdout);
     assert.deepEqual(
@@ -1216,7 +1223,7 @@ async function syncThenExport(content) {
 }
 
 // ── a Location + URL layout survives sync → export byte-for-byte ────────────
-test('tracker.mjs export: Location/URL layout round-trips byte-for-byte', async (t) => {
+test('tracker.mjs export: Location/URL layout round-trips byte-for-byte', SQLITE, async (t) => {
   const CUSTOM = `# Applications Tracker
 
 | # | Date | Company | Location | Role | Score | Status | PDF | Report | Notes | URL |
@@ -1231,7 +1238,7 @@ test('tracker.mjs export: Location/URL layout round-trips byte-for-byte', async 
 });
 
 // ── Test 17: an unknown user column keeps its own values, not just its header ─
-test('tracker.mjs export: unknown extra column keeps its per-row values', async (t) => {
+test('tracker.mjs export: unknown extra column keeps its per-row values', SQLITE, async (t) => {
   const CUSTOM = `# Applications Tracker
 
 | # | Date | Company | Priority | Role | Score | Status | PDF | Report | Notes |
@@ -1246,7 +1253,7 @@ test('tracker.mjs export: unknown extra column keeps its per-row values', async 
 });
 
 // ── Test 18: the legacy 9-column layout is unchanged ────────────────────────
-test('tracker.mjs export: legacy 9-column layout round-trips unchanged', async (t) => {
+test('tracker.mjs export: legacy 9-column layout round-trips unchanged', SQLITE, async (t) => {
   const { sb, exported } = await syncThenExport(HEADER_9);
   t.after(() => removeSandbox(sb));
   assert.equal(exported.code, 0, exported.stderr);
@@ -1256,7 +1263,7 @@ test('tracker.mjs export: legacy 9-column layout round-trips unchanged', async (
 // ── Test 19: --out over the tracker preserves the custom columns ────────────
 // The adoption path from the issue: export a repaired copy back over
 // applications.md. Adopting it used to cost the user Location, Via and URL.
-describe('tracker.mjs export --out over the tracker', () => {
+describe('tracker.mjs export --out over the tracker', SQLITE, () => {
   const CUSTOM = `# Applications Tracker
 
 | # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes | URL |
@@ -1290,7 +1297,7 @@ describe('tracker.mjs export --out over the tracker', () => {
 // decision the user makes, not a silent drop under a "backed up to .bak" line.
 // The refusal goes through the CLI: it is an exit code, and it is decided while
 // export holds the tracker lock.
-describe('tracker.mjs export: unplaceable cells', () => {
+describe('tracker.mjs export: unplaceable cells', SQLITE, () => {
   const WIDE = `# Applications Tracker
 
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
@@ -1329,7 +1336,7 @@ describe('tracker.mjs export: unplaceable cells', () => {
 // the PRE-#3703 schema by hand rather than by mutating a current index: a test
 // that assumes the new `extras` column exists cannot fail cleanly against the
 // old code, it aborts on "no such column" (PR #3794 review).
-describe('tracker.mjs export: pre-#3703 index', () => {
+describe('tracker.mjs export: pre-#3703 index', SQLITE, () => {
   const CUSTOM = `# Applications Tracker
 
 | # | Date | Company | Location | Role | Score | Status | PDF | Report | Notes |
@@ -1394,7 +1401,7 @@ describe('tracker.mjs openDb: failed schema setup', () => {
   });
   // The real shape, end to end: runTracker reports the SQLite error itself
   // rather than a TypeError from a half-initialized handle.
-  test('runTracker surfaces the schema error from a foreign applications table', async (t) => {
+  test('runTracker surfaces the schema error from a foreign applications table', SQLITE, async (t) => {
     const sb = makeSandbox(HEADER_9);
     t.after(() => removeSandbox(sb));
     const { DatabaseSync } = await import('node:sqlite');
@@ -1409,7 +1416,7 @@ describe('tracker.mjs openDb: failed schema setup', () => {
 // `export` emitted a fixed skeleton, so `--out` over the tracker deleted a
 // localized title, a legend, an archive section and a trailing note — and the
 // drop gate never saw it, because it counted only cells past the header width.
-test('tracker.mjs export: title, preamble and trailing note survive the round-trip', async (t) => {
+test('tracker.mjs export: title, preamble and trailing note survive the round-trip', SQLITE, async (t) => {
   const RICH = `# Seguimiento de candidaturas
 
 Legend: ✅ sent · ❌ not sent.
@@ -1430,7 +1437,7 @@ Last reviewed 2026-09-01.
 // A second table's rows are indexed against the FIRST table's columns, so
 // replaying its heading and header would frame a shifted row as intact. It is
 // reported as a loss instead, and `--out` refuses.
-describe('tracker.mjs export: a second table', () => {
+describe('tracker.mjs export: a second table', SQLITE, () => {
   const ARCHIVED = `# Applications Tracker
 
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
@@ -1478,7 +1485,7 @@ describe('tracker.mjs export: a second table', () => {
 // The lines around the table are prose the export COPIES. Trimming them edited
 // a user's indentation and trailing spaces with nothing in the loss list able
 // to see it (PR #3794 review).
-describe('tracker.mjs export: prose whitespace', () => {
+describe('tracker.mjs export: prose whitespace', SQLITE, () => {
   const INDENTED_PROSE = [
     '# Applications Tracker',
     '',
@@ -1511,7 +1518,7 @@ describe('tracker.mjs export: prose whitespace', () => {
 // ── Test 28: a cell the render had to rewrite is a reported loss ────────────
 // A stray pipe is folded into Notes at sync time and comes back as '│' — the
 // VALUE changed, so a silent `--out` edits the tracker (PR #3794 review).
-describe('tracker.mjs export: a sanitized cell', () => {
+describe('tracker.mjs export: a sanitized cell', SQLITE, () => {
   const STRAY = `# Applications Tracker
 
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes |
@@ -1540,7 +1547,7 @@ describe('tracker.mjs export: a sanitized cell', () => {
 // resolveColumns needs `startsWith('|')` and detectLayout trimmed on its own,
 // so an indented header gave the LEGACY map on read and the real map on write:
 // Berlin moved into Role and Applied into PDF (PR #3794 review).
-test('tracker.mjs export: an indented table keeps every cell in its own column', async (t) => {
+test('tracker.mjs export: an indented table keeps every cell in its own column', SQLITE, async (t) => {
   const INDENTED = [
     '# Applications Tracker',
     '',
@@ -1560,7 +1567,7 @@ test('tracker.mjs export: an indented table keeps every cell in its own column',
 // isHeaderRow only fires when the alias table resolves the FULL schema, so a
 // Spanish header (puntuación/estado are unmapped) recorded no layout at all and
 // exported as the English default, exit 0 (PR #3794 review).
-test('tracker.mjs export: an unresolvable localized header round-trips verbatim', async (t) => {
+test('tracker.mjs export: an unresolvable localized header round-trips verbatim', SQLITE, async (t) => {
   const SPANISH = `# Seguimiento
 
 | # | Fecha | Empresa | Puesto | Puntuación | Estado | PDF | Informe | Notas |
@@ -1574,7 +1581,7 @@ test('tracker.mjs export: an unresolvable localized header round-trips verbatim'
 });
 
 // ── Test 26: CRLF line endings survive ─────────────────────────────────────
-test('tracker.mjs export: CRLF line endings are not rewritten to LF', async (t) => {
+test('tracker.mjs export: CRLF line endings are not rewritten to LF', SQLITE, async (t) => {
   const CRLF = [
     '# Applications Tracker',
     '',
