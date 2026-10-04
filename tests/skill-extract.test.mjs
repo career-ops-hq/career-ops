@@ -387,7 +387,6 @@ try {
   // the other ways a CV writes an AI/ML skill the vocabulary already has.
   const aiCases = [
     ['huggingface', 'Hugging Face'], ['sklearn', 'scikit-learn'],
-    ['fine tuning', 'Fine-tuning'],
     ['large language model', 'LLMs'], ['large language models', 'LLMs'],
     ['retrieval-augmented generation', 'RAG'], ['retrieval augmented generation', 'RAG'],
     ['natural language processing', 'NLP'],
@@ -401,15 +400,17 @@ try {
   if (aiFailures.length === 0) pass(`extractSkills covers all ${aiCases.length} AI/ML alternate spellings (recognition + canonical form)`);
   else fail(`AI/ML spelling coverage => ${aiFailures.join(' | ')}`);
 
-  // None of them reaches past the skill it names: not the verb form, not a
-  // smaller model class, not "natural language" as an everyday phrase.
+  // None of them reaches past the skill it names: not funnel prose that says
+  // "fine tuning" or "fine-tune", not a smaller model class, not "natural
+  // language" as an everyday phrase.
   const aiNegatives = [
+    ['Fine tuning the funnel to lift ROAS', 'Fine-tuning'],
     ['Fine-tune campaign spend across paid channels', 'Fine-tuning'],
     ['Experience with small language models on edge devices', 'LLMs'],
     ['Answer natural language questions over the warehouse', 'NLP'],
   ];
   const aiLeaks = aiNegatives.filter(([text, skill]) => extractSkills(text).has(skill));
-  if (aiLeaks.length === 0) pass('the AI/ML spellings stay off verb forms, small language models and "natural language" prose');
+  if (aiLeaks.length === 0) pass('the AI/ML spellings stay off "fine tuning"/"fine-tune" prose, small language models and "natural language" prose');
   else fail(`AI/ML spelling over-match => ${aiLeaks.map(([text, skill]) => `${skill} in "${text}"`).join(' | ')}`);
 
   // End to end, on the Skills line of the shipped example CV

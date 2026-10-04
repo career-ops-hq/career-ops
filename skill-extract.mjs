@@ -51,10 +51,13 @@ export const SKILL_TOKENS = [
   // The spelled-out NLP and LLM forms are the pairs keyword-match.mjs's
   // SYNONYMS already treats as one skill.
   //
-  // Verb forms ('fine-tune', 'fine-tuned') stay out on purpose. "Fine-tune the
-  // funnel" is ordinary prose in GTM and ops postings, and a token there would
-  // mint the phantom gap the 'CSM' note below describes.
-  'HuggingFace', 'sklearn', 'Fine tuning',
+  // Left out on purpose: 'Fine tuning' with a space and the verb forms
+  // ('fine-tune', 'fine-tuned'). All three are ordinary prose in GTM and ops
+  // writing ("fine tuning the funnel"), so a match says nothing about models:
+  // in a posting it mints the phantom gap the 'CSM' note below describes, and
+  // in a CV it reads as knowing Fine-tuning, the silent "no gap found" the
+  // Demandbase note calls worse than a visible gap.
+  'HuggingFace', 'sklearn',
   'Retrieval-Augmented Generation', 'Retrieval Augmented Generation',
   'Large Language Models?', 'Natural Language Processing',
   // Analytics / enterprise
@@ -258,7 +261,6 @@ export const CANONICAL = {
   // to, so the known-skills set and the gap list meet however the CV spells it.
   'huggingface': 'Hugging Face',
   'sklearn': 'scikit-learn',
-  'fine tuning': 'Fine-tuning',
   'large language model': 'LLMs', 'large language models': 'LLMs',
   'retrieval-augmented generation': 'RAG', 'retrieval augmented generation': 'RAG',
   'natural language processing': 'NLP',
