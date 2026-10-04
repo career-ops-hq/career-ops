@@ -180,7 +180,10 @@ for (const e of entries) {
   const match = e.report.match(/\]\(([^)]+)\)/);
   if (!match) continue;
   const link = match[1];
-  if (!existsSync(join(TRACKER_DIR, link)) && !existsSync(join(CAREER_OPS, link))) {
+  // A directory is not a report: require a regular file (same rule as the
+  // merge-time warning in merge-tracker.mjs, #4748).
+  const isReportFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
+  if (!isReportFile(join(TRACKER_DIR, link)) && !isReportFile(join(CAREER_OPS, link))) {
     error(`#${e.num}: Report not found: ${link}`);
     brokenReports++;
   }

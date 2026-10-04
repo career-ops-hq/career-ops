@@ -890,8 +890,8 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that drive git
- * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`). Only
+ * Build a throwaway git repository for the two updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`). Only
  * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
  * and then asks about index membership, which is a different question.
  *
@@ -925,11 +925,16 @@ export async function captureConsoleErrors(fn) {
  * pins nothing. They are different fixtures that share a name, not copies of
  * this one.
  *
- * `gitIn` is injected rather than imported so this module keeps depending on
- * nothing but Node builtins — 57 of the 62 suites import it, and none of them
- * should pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
+ * The pins above are the FILE layer. They do not hold against the runtime layer:
+ * an ambient GIT_CONFIG_COUNT pair is applied after every config file, so a
+ * `core.excludesFile` injected that way overrode the one pinned here, the seed
+ * file was never staged, and the base commit died before the first assertion
+ * (#3801). So the fixture runs git through `hermeticGitRunner` rather than
+ * through the updater's own `gitIn`, which inherits the environment as a real
+ * install must. That also keeps this module on Node builtins alone: most suites
+ * import it, and none of them should pull in update-system.mjs as a side effect
+ * of asking for `pass`/`fail`.
  *
- * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
  * @param {object} [options]
  * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
  *   temp dir names the suite that made it.
@@ -939,9 +944,9 @@ export async function captureConsoleErrors(fn) {
  *   fixture. `isTracked` never reads it.
  * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
  */
-export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  const g = (...args) => gitIn(dir, ...args);
+  const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
@@ -998,6 +1003,45 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG_PARAMETERS;
   delete env.GIT_CONFIG;
   return env;
+}
+
+const REPO_LOCATION_ENV = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_GRAFT_FILE', 'GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+];
+
+/**
+ * A git runner bound to one fixture repository and to `hermeticGitEnv`.
+ *
+ * Same shape as the updater's `gitIn(dir, ...args)` with the directory already
+ * applied: trimmed stdout, a throw on a non-zero exit. It can stand in for it
+ * wherever a function under test takes its runner as `{ git }`. The difference
+ * is the environment. `gitIn` passes none, so it inherits the contributor's,
+ * and a fixture built with it is only as isolated as their shell (#3801).
+ *
+ * The environment is built once, here, and held for the life of the runner: a
+ * fixture hands its `g` back to the suite, which keeps calling it long after
+ * the fixture was built, so sealing only the setup calls would leave the rest
+ * exposed. The config path does not have to exist; a missing global file is
+ * simply an empty one.
+ *
+ * Config is not the only way in. A runner is bound to ONE directory, so every
+ * variable that tells git where a repository is has to go as well: with an
+ * ambient GIT_DIR, `cwd` stops deciding which repository a command touches.
+ * Measured before this was closed: the fixture's `git config user.name Test`
+ * rewrote the user.name of the repository GIT_DIR pointed at. A git hook is
+ * the ordinary way to inherit one. The list is git's own, the rest of
+ * `git rev-parse --local-env-vars` after the three hermeticGitEnv handles.
+ *
+ * @param {string} dir - The fixture repository.
+ * @returns {(...args: string[]) => string}
+ */
+export function hermeticGitRunner(dir) {
+  const env = hermeticGitEnv(join(dir, '.git', 'co-hermetic-gitconfig'));
+  for (const name of REPO_LOCATION_ENV) delete env[name];
+  return (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf-8', env }).trim();
 }
 
 /**
