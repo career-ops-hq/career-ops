@@ -239,7 +239,11 @@ const MODEL_FINE_TUNING =
   /(?<!\w)models?\s+fine[- ]?tuning(?!\w)|(?<!\w)fine[- ]?tuning\s+(?:of\s+)?models?(?!\w)/i;
 
 // What separates the entries of a skills list, a table row or a parenthetical.
-const LIST_ENTRY_SEPARATOR = /[,;:|/()[\]"•·]/;
+// Captured, so split() keeps each separator after its piece: a colon only
+// closes a label, and the piece in front of one is not an entry ("AI/ML:
+// PyTorch, Fine-tuning" lists it; "Fine-tuning: dbt models to cut warehouse
+// spend" is a label over prose).
+const LIST_ENTRY_SEPARATOR = /([,;:|/()[\]"•·])/;
 
 // An entry that is the skill and nothing else, give or take a bullet marker,
 // emphasis and a closing period.
@@ -383,6 +387,20 @@ export function canonicalize(token) {
 }
 
 /**
+ * Whether `line` lists fine-tuning as an entry of its own (see
+ * LIST_ENTRY_SEPARATOR for why a piece closed by a colon is skipped).
+ * @param {string} line
+ * @returns {boolean}
+ */
+function listsFineTuning(line) {
+  const parts = line.split(LIST_ENTRY_SEPARATOR);
+  for (let i = 0; i < parts.length; i += 2) {
+    if (parts[i + 1] !== ':' && FINE_TUNING_ENTRY.test(parts[i].trim())) return true;
+  }
+  return false;
+}
+
+/**
  * Whether any line of `text` mentions fine-tuning as the ML skill: as a list
  * entry of its own, or in model context (see FINE_TUNING_PATTERN).
  * @param {string} text
@@ -392,7 +410,7 @@ function mentionsFineTuning(text) {
   for (const line of text.split('\n')) {
     if (!FINE_TUNING_PATTERN.test(line)) continue;
     if (MODEL_FINE_TUNING.test(line)) return true;
-    if (line.split(LIST_ENTRY_SEPARATOR).some(entry => FINE_TUNING_ENTRY.test(entry.trim()))) return true;
+    if (listsFineTuning(line)) return true;
     for (const m of line.matchAll(SKILL_PATTERN)) {
       if (MODEL_SKILLS.has(canonicalize(m[0]))) return true;
     }

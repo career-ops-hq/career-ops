@@ -433,6 +433,7 @@ try {
   const fineTuningNamed = [
     'Fine-tuning', 'finetuning', 'fine tuning',
     'AI/ML: PyTorch, Hugging Face, Fine-tuning, RAG',
+    'Techniques: Fine-tuning, distillation, quantization',
     '- **Fine-tuning** (LoRA, QLoRA)',
     '| Fine-tuning | Medium | No production runs yet |',
     'Experience fine-tuning LLMs for classification',
@@ -451,8 +452,9 @@ try {
 
   // Everywhere else it is tuning something that is not a model. A skill on the
   // same line is context only when it is a model skill (not Google Ads, not
-  // PostgreSQL, not Spark, a data tool from the Data / ML / AI block), and the
-  // word "models" only when it is what is being tuned.
+  // PostgreSQL, not Spark, a data tool from the Data / ML / AI block), the word
+  // "models" only when it is what is being tuned, and a label in front of a
+  // colon is not a list entry (its pair is the "Techniques:" line above).
   const fineTuningProse = [
     'Fine-tuning the funnel to lift ROAS',
     'Owned paid acquisition, fine-tuning bids and budgets across Google Ads and Meta',
@@ -460,9 +462,10 @@ try {
     'Fine-tuning Spark jobs for cost on Databricks',
     'Fine-tuning dbt models to cut warehouse spend',
     'Fine-tuning attribution models in GA4',
+    'Fine-tuning: dbt models to cut warehouse spend',
   ];
   const ftLeaks = fineTuningProse.filter(text => extractSkills(text).has('Fine-tuning'));
-  if (ftLeaks.length === 0) pass('extractSkills does not read fine-tuning of funnels, bids, queries, Spark jobs or dbt and attribution models as the ML skill');
+  if (ftLeaks.length === 0) pass('extractSkills does not read fine-tuning of funnels, bids, queries, Spark jobs, dbt and attribution models, or a label over prose as the ML skill');
   else fail(`Fine-tuning prose leak => ${ftLeaks.join(' | ')}`);
 
   // empty / falsy input
