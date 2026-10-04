@@ -1832,11 +1832,13 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = normalizeUrlForDedup(url);
       seen.add(urlToken);
-      // Only an accepted posting row can teach this scan a strong identity.
-      // URL-specific failures (for example blocked hosts) must not suppress a
-      // different URL that happens to carry the same provider identity.
-      if (!PERMANENT_SCAN_HISTORY_STATUSES.has(status)) addIdentityPromotableUrl(urlToken, listingKey);
-      if (extraTokensFor && !PERMANENT_SCAN_HISTORY_STATUSES.has(status)) {
+      // Only accepted or intentionally deferred posting rows can teach this
+      // scan a strong identity. Verification rejections such as expired or
+      // missing-apply-control URLs may pin that URL, but must not suppress a
+      // different live alias with the same provider identity.
+      const identityMayPromote = status === 'added' || status.startsWith('cooldown:');
+      if (identityMayPromote) addIdentityPromotableUrl(urlToken, listingKey);
+      if (extraTokensFor && identityMayPromote) {
         for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
         }

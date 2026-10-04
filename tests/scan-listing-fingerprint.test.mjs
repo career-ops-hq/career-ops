@@ -97,6 +97,16 @@ try {
       pass('URL-specific history failures do not promote listing identity to aliases');
   } else fail('a URL-specific history failure promoted its listing identity');
 
+    for (const status of ['skipped_expired', 'skipped_no_apply_control']) {
+      const rejected = collectSeenUrls({
+        scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\t${status}\tRemote\t\t\t\t\tacme\t${expectedKey}\n`,
+      }, {}, { extraTokensFor: (_url, _portal, key) => key ? `listing:${key}` : null });
+      if (rejected.seen.has(acceptedUrl) && !rejected.seen.has(`listing:${expectedKey}`)
+          && !isOfferSeen(alias, rejected.seen, rejected.identityPromotableUrls)) {
+        pass(`${status} history pins only its rejected URL, leaving a live identity alias eligible`);
+      } else fail(`${status} history suppressed a different URL through rejected listing identity`);
+    }
+
     // Verification mode pins URLs during collection but delays identity tokens
     // until the verifier returns live offers. A rejected alias therefore leaves
     // a following URL free to be retained after it verifies successfully.
