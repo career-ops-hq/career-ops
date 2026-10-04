@@ -40,7 +40,7 @@ export const SKILL_TOKENS = [
   // Data / ML / AI
   'PyTorch', 'TensorFlow', 'scikit-learn', 'Pandas', 'NumPy', 'Spark',
   'Airflow', 'dbt', 'MLOps', 'MLflow', 'LangChain', 'LlamaIndex',
-  'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering', 'Fine-?tuning',
+  'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering',
   'Computer Vision', 'NLP',
   // Other spellings of the AI/ML tokens above (2026-10-04), each aliased to its
   // display name in CANONICAL. jd-skill-gap and upskill compare a CV with a JD
@@ -51,12 +51,14 @@ export const SKILL_TOKENS = [
   // The spelled-out NLP and LLM forms are the pairs keyword-match.mjs's
   // SYNONYMS already treats as one skill.
   //
-  // Left out on purpose: 'Fine tuning' with a space and the verb forms
-  // ('fine-tune', 'fine-tuned'). All three are ordinary prose in GTM and ops
-  // writing ("fine tuning the funnel"), so a match says nothing about models:
-  // in a posting it mints the phantom gap the 'CSM' note below describes, and
-  // in a CV it reads as knowing Fine-tuning, the silent "no gap found" the
-  // Demandbase note calls worse than a visible gap.
+  // Left out on purpose: the verb forms ('fine-tune', 'fine-tuned'). Both are
+  // ordinary prose in GTM and ops writing ("fine-tune campaign spend"), so a
+  // match says nothing about models: in a posting it mints the phantom gap the
+  // 'CSM' note below describes, and in a CV it reads as knowing Fine-tuning, the
+  // silent "no gap found" the Demandbase note calls worse than a visible gap.
+  // The noun is just as common in that prose, but it is also the skill's name,
+  // so it is matched outside this list, and only where it names the skill: see
+  // FINE_TUNING_PATTERN.
   'HuggingFace', 'sklearn',
   'Retrieval-Augmented Generation', 'Retrieval Augmented Generation',
   'Large Language Models?', 'Natural Language Processing',
@@ -219,6 +221,39 @@ export const SKILL_PATTERN = new RegExp(
 // language (punctuation like "Go," "Go/Rust" "(Go)" still counts).
 const GO_SKILL_PATTERN = /(?<!\w)Go(?![\w-])/;
 
+// 'Fine-tuning' is not in the list either, and case can't separate it from
+// prose the way it does for 'Go': "fine-tuning LLMs" is the skill, while
+// "Fine-tuning the funnel" and "fine-tuning Postgres queries" are everyday
+// work. Matched anywhere, a backend CV that tuned its queries holds the skill
+// an ML posting asks for, and upskill files that gap as known. So a mention
+// counts only where it names the skill: as an entry of its own in a list or
+// table row ("PyTorch, Fine-tuning, RAG", "- Fine-tuning (LoRA)", or the bare
+// name jd-skill-gap passes in to ask whether a skill is known), or in model
+// context, meaning the word "model" right beside it ("model fine-tuning",
+// "fine-tuning models") or a model skill on the same line (MODEL_SKILLS).
+const FINE_TUNING_PATTERN = /(?<!\w)fine[- ]?tuning(?!\w)/i;
+
+// Right beside it only: "fine-tuning dbt models" and "fine-tuning attribution
+// models" are analytics work.
+const MODEL_FINE_TUNING =
+  /(?<!\w)models?\s+fine[- ]?tuning(?!\w)|(?<!\w)fine[- ]?tuning\s+(?:of\s+)?models?(?!\w)/i;
+
+// What separates the entries of a skills list, a table row or a parenthetical.
+const LIST_ENTRY_SEPARATOR = /[,;:|/()[\]"•·]/;
+
+// An entry that is the skill and nothing else, give or take a bullet marker,
+// emphasis and a closing period.
+const FINE_TUNING_ENTRY = /^(?:[-*+]\s+)?[*_]*fine[- ]?tuning[*_.]*$/i;
+
+// The skills that put a fine-tuning mention on their line in model territory.
+// The block's data tools (Pandas, NumPy, Spark, Airflow, dbt) are left out:
+// "fine-tuning Spark jobs" is performance work.
+const MODEL_SKILLS = new Set([
+  'PyTorch', 'TensorFlow', 'scikit-learn', 'MLOps', 'MLflow', 'LangChain',
+  'LlamaIndex', 'Hugging Face', 'RAG', 'LLMs', 'Prompt Engineering',
+  'Computer Vision', 'NLP',
+]);
+
 // lowercase → canonical display casing, derived from SKILL_TOKENS by stripping
 // regex syntax ('Vue\\.?js' → 'Vue.js'). Keeps case-insensitive matches like
 // "graphql" resolving to the same key ("GraphQL") as the CV-known-skills set.
@@ -243,6 +278,7 @@ export const CANONICAL = {
   'nextjs': 'Next.js', 'next.js': 'Next.js',
   'llm': 'LLMs', 'llms': 'LLMs',
   'finetuning': 'Fine-tuning', 'fine-tuning': 'Fine-tuning',
+  'fine tuning': 'Fine-tuning',
   'power bi': 'Power BI',
   'github actions': 'GitHub Actions',
   'gitlab ci': 'GitLab CI',
@@ -347,6 +383,24 @@ export function canonicalize(token) {
 }
 
 /**
+ * Whether any line of `text` mentions fine-tuning as the ML skill: as a list
+ * entry of its own, or in model context (see FINE_TUNING_PATTERN).
+ * @param {string} text
+ * @returns {boolean}
+ */
+function mentionsFineTuning(text) {
+  for (const line of text.split('\n')) {
+    if (!FINE_TUNING_PATTERN.test(line)) continue;
+    if (MODEL_FINE_TUNING.test(line)) return true;
+    if (line.split(LIST_ENTRY_SEPARATOR).some(entry => FINE_TUNING_ENTRY.test(entry.trim()))) return true;
+    for (const m of line.matchAll(SKILL_PATTERN)) {
+      if (MODEL_SKILLS.has(canonicalize(m[0]))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Extract the set of canonical skill names present in a free-text blob.
  * @param {string} text
  * @returns {Set<string>}
@@ -359,5 +413,6 @@ export function extractSkills(text) {
   }
   if (GO_SKILL_PATTERN.test(text)) found.add('Go');
   if (SAFE_CERT_PATTERN.test(text)) found.add('SAFe');
+  if (mentionsFineTuning(text)) found.add('Fine-tuning');
   return found;
 }
