@@ -157,6 +157,18 @@ test('a cell with extra text or several links is skipped and reported, not rewri
   assert.equal(tracker(root), before);
 }));
 
+test('a live first link cannot hide a dead later link from manual review', withRoot((root) => {
+  report(root, '001-acme-widgets-2026-07-15.md');
+  const mixed = `${DEAD} [missing](../reports/missing.md)`;
+  writeTracker(root, [...HEADER, row(1, 'Acme Widgets', mixed)]);
+  const before = tracker(root);
+  const r = run(root);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /1 row\(s\) skipped, please check by hand/);
+  assert.match(r.out, /missing\.md/);
+  assert.equal(tracker(root), before, 'ambiguous multi-link cell is never rewritten');
+}));
+
 test('idempotent: a second run changes nothing and says so', withRoot((root) => {
   writeTracker(root, [...HEADER, row(1, 'Acme Widgets', DEAD)]);
   assert.equal(run(root).status, 0);

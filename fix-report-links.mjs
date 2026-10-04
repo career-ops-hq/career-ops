@@ -55,6 +55,18 @@ export function fixReportLinks(lines, trackerDir, dataRoot, options = {}) {
     const row = parseTrackerRow(lines[i], COLS);
     if (!row) continue; // header, separator, non-row, or a row missing cells
 
+    const firstLink = String(row.report).match(/\]\(([^)]+)\)/)?.[1] ?? null;
+    // Any Report cell that contains a link but is not exactly one bare link is
+    // ambiguous by contract. Surface it for manual review before inspecting the
+    // first target: otherwise a live first link hides a dead later link.
+    if (firstLink !== null && !SINGLE_LINK_RE.test(row.report)) {
+      skipped.push({
+        num: row.num, company: row.company, role: row.role,
+        link: firstLink, cell: row.report, line: i + 1,
+      });
+      continue;
+    }
+
     let inspectionFailure = null;
     const link = findDeadReportLink(row.report, trackerDir, dataRoot, {
       stat: options.stat,
@@ -70,10 +82,6 @@ export function fixReportLinks(lines, trackerDir, dataRoot, options = {}) {
     if (link === null) continue; // no link (—, N/A, empty) or it resolves
 
     const info = { num: row.num, company: row.company, role: row.role, link, cell: row.report, line: i + 1 };
-    if (!SINGLE_LINK_RE.test(row.report)) {
-      skipped.push(info);
-      continue;
-    }
 
     // Replace just this cell in the raw (untrimmed) split, keeping its padding,
     // so no other byte of the line moves. parseTrackerRow trims the same split.
