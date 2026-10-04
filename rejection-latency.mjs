@@ -51,22 +51,20 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { parseActiveInterviews } from './process-quality.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
   ? join(DATA_ROOT, 'data/active-interviews.md')
   : join(DATA_ROOT, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
+export const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
@@ -162,12 +160,29 @@ function isoDay(date) {
 }
 
 // --- Company key ---
-// Case-folded, punctuation-free, script-preserving (NFKC first) — the same
-// normalization idea as tracker-parse.mjs's normalizeVia, applied to company
-// names so "Acme Corp." in active-interviews.md matches "Acme Corp" in the
-// tracker without depending on the candidate's punctuation habits.
+// Case-folded, punctuation-free, script-preserving — so "Acme Corp." in
+// active-interviews.md matches "Acme Corp" in the tracker without depending on
+// the candidate's punctuation habits.
+//
+// Delegates to tracker-parse.mjs's normalizeTextKey rather than keeping a local
+// regex. The local one was `[^\p{L}\p{N}]` — no \p{M} — which strips COMBINING
+// MARKS. Latin survives that because NFKC precomposes its accents, which is why
+// it read as correct; scripts whose vowel signs have no precomposed form do not:
+//
+//     कंपनी लिमिटेड  ->  कपनलमटड     (every vowel sign and the anusvara gone)
+//     บริษัท          ->  บรษท         (Thai for "company")
+//
+// So two distinct Hindi employers differing only in vowel signs keyed the same,
+// and one employer spelled identically on both sides could key differently from
+// itself. career-ops ships modes/hi and modes/ar as supported markets.
+//
+// normalizeTextKey is the version that has been paid for. It keeps \p{M}, and
+// it strips the U+0307 that lowercasing a Turkish dotted İ leaves behind
+// (#2705/#2736) while deliberately NOT using NFD — decomposing first would
+// collapse Żubr/Zubr, Ėmė/Eme and Ġenerali/Generali. The local regex got
+// İstanbul right only by accident, because it threw away every mark.
 export function companyKey(name) {
-  return String(name || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return normalizeTextKey(name);
 }
 
 /**
@@ -246,10 +261,10 @@ export function parseTrackerInterviewRows(content) {
  * Interview-state tracker rows this signal CANNOT see, because their employer
  * cell is a placeholder rather than a name.
  *
- * companyKey() strips everything that is not a letter or a digit, so `?` — the
- * documented marker for an undisclosed end employer (#1596) — normalizes to the
- * empty string and parseTrackerInterviewRows' `if (!key) continue` discards the
- * row. The same goes for the `—`/`-` no-data sentinels.
+ * companyKey() keeps only letters, marks and digits, so `?` — the documented
+ * marker for an undisclosed end employer (#1596) — normalizes to the empty
+ * string and parseTrackerInterviewRows' `if (!key) continue` discards the row.
+ * The same goes for the `—`/`-` no-data sentinels.
  *
  * Dropping them is defensible; dropping them SILENTLY is not. This check exists
  * to flag applications that have gone quiet, and agency-brokered roles — the

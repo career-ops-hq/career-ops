@@ -19,6 +19,7 @@
  * 14. data/follow-ups.md table schema (see #2971)
  * 15. portals.yml entries no provider claims (see #3251)
  * 16. No invisible control characters in tracker cells (error — see #3892)
+ * 17. JD archive coverage — check-jd-archive.mjs's findings (warning/error — see #4525)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -32,8 +33,12 @@ import {
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
 import { CONTROL_CHARS } from './tracker-utils.mjs';
+import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
+import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
+import { loadCanonicalStates } from './tracker-utils.mjs';
+import { checkJdArchive } from './check-jd-archive.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
@@ -46,6 +51,10 @@ const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
 const REPORTS_DIR = process.env.CAREER_OPS_REPORTS
   ? resolve(CAREER_OPS, process.env.CAREER_OPS_REPORTS)
   : join(CAREER_OPS, 'reports');
+// CAREER_OPS_JDS overrides the jds/ dir (used by tests, mirrors CAREER_OPS_REPORTS).
+const JDS_DIR = process.env.CAREER_OPS_JDS
+  ? resolve(CAREER_OPS, process.env.CAREER_OPS_JDS)
+  : join(CAREER_OPS, 'jds');
 const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
   ? join(CODE_ROOT, 'templates/states.yml')
   : join(CODE_ROOT, 'states.yml');
@@ -54,22 +63,12 @@ const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
 mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
 mkdirSync(REPORTS_DIR, { recursive: true });
 
-const CANONICAL_STATUSES = [
-  'evaluated', 'applied', 'responded', 'interview',
-  'offer', 'rejected', 'discarded', 'skip', 'hired',
-];
-
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated', 'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied', 'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded', 'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-  'contratado': 'hired', 'contratada': 'hired', 'hired': 'hired', 'accepted': 'hired', 'accept': 'hired',
-};
+// Canonical states — loaded from templates/states.yml, the single source of truth.
+const _canonicalStates = loadCanonicalStates(STATES_FILE);
+const CANONICAL_STATUSES = new Set(_canonicalStates.map(s => s.id));
+const ALIASES = Object.fromEntries(
+  _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.id]))
+);
 
 let errors = 0;
 let warnings = 0;
@@ -132,7 +131,7 @@ for (const e of entries) {
   // Strip trailing dates
   const statusOnly = clean.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
 
-  if (!CANONICAL_STATUSES.includes(statusOnly) && !ALIASES[statusOnly]) {
+  if (!CANONICAL_STATUSES.has(statusOnly) && !ALIASES[statusOnly]) {
     error(`#${e.num}: Non-canonical status "${e.status}"`);
     badStatuses++;
   }
@@ -293,6 +292,20 @@ function extractRole(reportContent) {
   return null;
 }
 
+// Canonical posting-URL key of a report, or '' when it carries none.
+// Same extraction as merge-tracker.mjs resolveReportUrl(): `**URL:**` is
+// matched anywhere on the line, not from column 0, because the documented
+// header is inline (`**Score:** 4.1/5 | **URL:** https://… | **PDF:** …`);
+// `[ \t]*` and `\S+` cannot cross a newline, so an empty header cannot
+// capture the next header's text. What comes back is the normalizeUrl() key,
+// never the raw text: `**URL:** N/A` (a recruiter-sourced role) has no key and
+// must stay "unknown", not become a value that two reports can differ on.
+function extractReportUrlKey(reportContent) {
+  const m = reportContent.match(/\*\*URL:\*\*[ \t]*(\S+)/);
+  if (!m) return '';
+  return normalizeUrl(m[1].replace(/^<|>$/g, '').replace(/[),.;]+$/, ''));
+}
+
 const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
@@ -302,21 +315,30 @@ const reportsByRole = new Map();
 for (const name of reportFiles) {
   const companySlug = name.match(REPORT_FILE_RE)[2];
   let role = null;
+  let urlKey = '';
   try {
-    role = extractRole(readFileSync(join(REPORTS_DIR, name), 'utf-8'));
+    const content = readFileSync(join(REPORTS_DIR, name), 'utf-8');
+    role = extractRole(content);
+    urlKey = extractReportUrlKey(content);
   } catch {
     // Unreadable report — the orphan check below still sees it.
   }
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push(name);
+  reportsByRole.get(key).push({ name, urlKey });
 }
 for (const group of reportsByRole.values()) {
-  if (group.length > 1) {
-    warn(`Duplicate reports for same company+role: ${group.join(', ')}`);
-    dupReports++;
-  }
+  if (group.length < 2) continue;
+  // Two present-and-different posting URLs are proof of two openings (one
+  // title posted per city, two reqs a recruiter opened with the same title),
+  // the same rule merge-tracker.mjs applies before it merges a row. A missing
+  // URL proves nothing, so the group is exempt only when EVERY report carries
+  // a key and no two share one.
+  const keys = group.map(r => r.urlKey);
+  if (keys.every(Boolean) && new Set(keys).size === keys.length) continue;
+  warn(`Duplicate reports for same company+role: ${group.map(r => r.name).join(', ')}`);
+  dupReports++;
 }
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
 
@@ -395,11 +417,31 @@ for (const e of entries) {
 // channel while リクルート and パーソル stay two; the raw spelling is kept for
 // the message. Before this, both non-Latin agencies normalized to '' and fell
 // back to 'direct', hiding exactly the double-submission this check exists for.
+//
+// A SKIP row is not a channel (#3978). The canonical way to RESOLVE a
+// cross-channel collision is the one states.yml already provides: apply
+// through one channel, mark the other SKIP ("Doesn't fit, don't apply").
+// Counting that row as a channel warned forever about the double submission
+// the user had just avoided, with no "resolve by hand" action left that could
+// clear it — so the only ways out were ignoring the check permanently or
+// falsifying the Via/Company to silence it. A check correct behaviour cannot
+// satisfy is worse than no check.
+//
+// Deliberately narrow — skip only. `discarded` is ambiguous ("Discarded by
+// candidate or offer closed") and can follow a real application; `rejected`
+// implies one was sent; `evaluated` is pre-decision, and warning BEFORE a
+// second submission is this check's most valuable moment. All three stay
+// channels. Status is read through the shared states.yml-driven
+// normalizeStatus() for the same reason the column layout comes from
+// tracker-parse: a local alias table here would miss the states.yml spellings
+// it never got told about (geo_blocker, uygun değil) and drift from Check 1.
+const isNeverSubmitted = (status) => normalizeStatus(String(status || '')) === 'skip';
 const normalizeChannel = (v) => normalizeVia(v ?? '') || 'direct';
 const channelsByRole = new Map();
 for (const e of entries) {
   const company = String(e.company || '').trim();
   if (!company || company === '?') continue;
+  if (isNeverSubmitted(e.status)) continue;
   const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
   if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
   const channels = channelsByRole.get(key);
@@ -549,7 +591,7 @@ if (!existsSync(PORTALS_FILE)) {
     // install: mergeProviderPlugins returns before any work when
     // config/plugins.yml is absent.
     const providers = await loadProviders(join(CODE_ROOT, 'providers'));
-    await mergeProviderPlugins(providers, { root: CODE_ROOT });
+    await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: CAREER_OPS });
     const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
     // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
@@ -608,6 +650,28 @@ for (let i = 0; i < lines.length; i++) {
   controlByteRows++;
 }
 if (controlByteRows === 0) ok('No control characters in tracker cells');
+
+// --- Check 17: JD archive coverage (#4525) ---
+// check-jd-archive.mjs is a plain local filesystem scan — no network, no cost
+// reason to keep it as a command a user has to remember to run separately the
+// way audit-portals.mjs's live half justifiably is. Its own CLI already
+// distinguishes two severities and this mirrors that split exactly:
+// `missing-jd-archive` is what its own exit code treats as hard (a SENT
+// application with no archived JD and no terminal status to excuse it), so it
+// reports here as an error; `jd-archive-review-due` is explicitly soft in its
+// own source (a still-live/unresolved row, not yet a confirmed miss), so it
+// reports as a warning, same as this file's own Check 9/10 warnings.
+const jdArchiveResult = checkJdArchive(REPORTS_DIR, JDS_DIR, { trackerPath: APPS_FILE, statesPath: STATES_FILE });
+const jdArchiveMissing = jdArchiveResult.findings.filter(f => f.type === 'missing-jd-archive');
+const jdArchiveReviewDue = jdArchiveResult.findings.filter(f => f.type === 'jd-archive-review-due');
+for (const f of jdArchiveMissing) error(`${f.file}: ${f.detail}`);
+for (const f of jdArchiveReviewDue) warn(`${f.file}: ${f.detail}`);
+for (const w of jdArchiveResult.warnings) warn(`${w.file}: ${w.detail}`);
+if (jdArchiveMissing.length === 0 && jdArchiveReviewDue.length === 0 && jdArchiveResult.warnings.length === 0) {
+  ok(jdArchiveResult.reportsScanned === 0
+    ? 'No reports yet — nothing to check for JD archives'
+    : `All ${jdArchiveResult.reportsScanned} report(s) have an archived JD or a resolvable jds/ capture`);
+}
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

@@ -1,120 +1,200 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
+<p align="center">नौकरी की तलाश के लिए ओपन सोर्स AI एजेंट।</p>
+
 <p align="center">
-  <em>मैंने महीनों मुश्किल तरीके से नौकरी के लिए apply किया। इसलिए मैंने वह system बनाया जो काश मेरे पास होता।</em><br>
-  कंपनियाँ candidates को filter करने के लिए AI use करती हैं। <strong>मैंने candidates को कंपनियाँ <em>चुनने</em> के लिए AI दे दिया।</strong><br>
-  यह मूल्यांकन करता है, रैंक करता है और ड्राफ़्ट बनाता है। <strong>यह कभी सबमिट नहीं करता: सबमिट आप करते हैं।</strong> ओपन सोर्स, लोकल, आपका।
+  <a href="README.md">English</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.pt-BR.md">Português (Brasil)</a> |
+  <a href="README.ko-KR.md">한국어</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.cn.md">简体中文</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.ua.md">Українська</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ta.md">தமிழ்</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.hi.md">हिन्दी</a> |
+  <a href="README.tr.md">Türkçe</a>
+</p>
+
+<!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
+
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+
+<p align="center">
+<strong>महीनों तक CV भेजता रहा, जवाब में सिर्फ़&nbsp;खामोशी।</strong><br>
+तो मैंने वह फ़िल्टर खुद बना लिया जिसकी मुझे ज़रूरत&nbsp;थी।
 </p>
 
 <p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="career-ops पाइपलाइन: स्कोर की गई नौकरियाँ, 219 को आवेदन न करें चिह्नित, फिर एक पूरा मूल्यांकन" width="800"></a>
+<strong>740&nbsp;लिस्टिंग&nbsp;का&nbsp;मूल्यांकन। 68&nbsp;आवेदन&nbsp;भेजे। 12&nbsp;इंटरव्यू।&nbsp;1&nbsp;ऑफ़र।</strong><br>
+इसका पहला यूज़र मैं था। मुझे नौकरी मिल&nbsp;गई। फिर&nbsp;मैंने इसे ओपन&nbsp;सोर्स कर&nbsp;दिया।
 </p>
-
-<p align="center"><sub>खोज के बीच का एक स्नैपशॉट: पाइपलाइन, फिर एक नौकरी खोलकर शुरू से अंत तक मूल्यांकन।</sub></p>
-
-<p align="center"><strong>740 नौकरियों में से 68 आवेदन के लायक थीं। 12 इंटरव्यू। 1 ऑफ़र।</strong></p>
-<p align="center"><sub>एक खोज, लेखक की, 2026। जो संख्या मायने रखती है वह छँटाई है, गिनती नहीं। सारे आँकड़े <a href="https://santifer.io/career-ops-system">केस स्टडी</a> में।</sub></p>
-
-<p align="center"><sub>कभी सबमिट नहीं करता, कभी ईमेल नहीं भेजता, कभी बाहर डेटा नहीं भेजता: <a href="#career-ops-क्या-नहीं-करता">यह क्या नहीं करता</a> · उसी AI CLI में चलता है जो आप पहले से इस्तेमाल करते हैं, <a href="docs/RUNNING_ON_A_BUDGET.md">मुफ़्त और लोकल मॉडल भी शामिल</a>।</sub></p>
-
-<details>
-<summary>17 भाषाओं में पढ़ें</summary>
-<div align="center">
-
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
-
-</div>
-</details>
-
-<hr>
 
 <p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops से नौकरी मिली: सत्यापित संख्या"></a>
+एक नौकरी पेस्ट करें। आपकी अपनी मशीन पर, यह बताता है कि वह अभी भी खुली है या&nbsp;नहीं, और आप पर फ़िट बैठती है या&nbsp;नहीं।<br>
+यह आपका CV अनुकूलित करता है और आपके जवाबों का ड्राफ़्ट&nbsp;बनाता&nbsp;है। <strong>आप&nbsp;Submit&nbsp;दबाते&nbsp;हैं।</strong>
 </p>
-
-<p align="center"><sub>आपको नौकरी मिल गई? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">साझा करें →</a> · आपका कार्ड खोज में लगे किसी को दिखाता है कि रास्ता है।</sub></p>
 
 <p align="center">
-  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="सबसे हाल की तीन नियुक्ति कहानियाँ" width="800"></a>
+  <img src="docs/demo.gif" alt="career-ops डैशबोर्ड में लेखक की अपनी खोज: स्कोर की गई लिस्टिंग, ‘अप्लाई न करें’ मार्क की गई लिस्टिंग की लाल गिनती, और फिर एक पूरी मूल्यांकन रिपोर्ट" width="800">
 </p>
 
-<p align="center"><sub>हर संख्या एक सार्वजनिक कहानी है जिसे आप <a href="HIRED.md">जाँच सकते हैं →</a> · हर एक वहीं से शुरू हुई जहाँ आप अभी हैं।</sub></p>
+<p align="center"><sub>मेरी अपनी खोज, बीच रास्ते पर, UI&nbsp;स्पेनिश&nbsp;में।</sub></p>
 
-<p align="center"><sub>यहाँ छपा</sub></p>
+<p align="center">
+  कंपनियाँ candidates को filter करने के लिए AI use करती हैं।<br>
+  <strong>मैंने candidates को कंपनियाँ&nbsp;<em>चुनने</em>&nbsp;के&nbsp;लिए AI&nbsp;दे&nbsp;दिया।</strong>
+</p>
+
+<p align="center">
+  छह महीने बाद, <strong>मैंने वह नौकरी छोड़&nbsp;दी।</strong><br>
+  अब हम career-ops बनाते हैं, ताकि&nbsp;आप&nbsp;अपनी&nbsp;नौकरी&nbsp;पा&nbsp;सकें।
+</p>
+
+<p align="center"><a href="#अब-आपकी-बारी">एक नौकरी पर आज़माएँ&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">पूरी कहानी&nbsp;पढ़ें&nbsp;→</a></p>
+
+<br>
+
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+
+<p align="center">मेरे बाद आए लोगों ने लिखा कि उन्हें नौकरी कैसे मिली।</p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="नौकरी मिलने की कहानियाँ, जिन्हें आप खोलकर पढ़ सकते हैं" width="800"></a>
+</p>
+
+<p align="center"><sub>हर कार्ड एक सार्वजनिक issue है जिसे आप खोल सकते हैं। आपको भी मिल गई? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">अपना कार्ड छोड़ें →</a></sub></p>
+
+<p align="center">⭐ <strong>अगर career-ops से आपकी मदद हुई, तो एक स्टार अगले व्यक्ति को इसे खोजने में मदद करता&nbsp;है।</strong></p>
+
+<br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
-  &nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
 </p>
 
-<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) द्वारा बनाया और मेंटेन किया गया</sub></p>
+<p align="center">
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
+</p>
 
-## यह क्या है
+## अब आपकी बारी
 
-career-ops ([career-ops.org](https://career-ops.org), जिसे **careerops** भी कहते हैं) एक ओपन सोर्स AI जॉब सर्च है जो किसी भी AI कोडिंग CLI के अंदर लोकल चलती है: यह ऑफ़र का मूल्यांकन करती है, आपका CV अनुकूलित करती है और हर आवेदन को ट्रैक करती है, और अंतिम फ़ैसला हमेशा आपका होता है। स्प्रेडशीट में आवेदन हाथ से ट्रैक करने के बजाय, आपको एक AI-संचालित पाइपलाइन मिलती है जो:
+वह एक नौकरी पेस्ट करें जिस पर आप आज रात अप्लाई करने वाले थे। अगर जवाब <em>अप्लाई न करें</em> आया, तो आपने अभी-अभी अपनी रात वापस पा ली। अगर जवाब एक प्लान के साथ आया, तो आपको पता है कि आगे क्या करना है।
 
-- **ऑफ़र का मूल्यांकन** करके एक संरचित रिपोर्ट बनाती है: ब्लॉक A से H तक, और 1 से 5 का एक कुल स्कोर जो अंकगणितीय फ़ॉर्मूले से नहीं, बल्कि पाँच आयामों पर समग्र निर्णय से आता है। ब्लॉक B का प्रति-आवश्यकता महत्व कॉलम और ब्लॉक G का पोस्टिंग-वैधता आकलन दोनों अलग, स्कोर-निरपेक्ष संकेत हैं जो स्कोर को कभी प्रभावित नहीं करते; ब्लॉक H सिर्फ़ 4.5 या उससे ऊपर ही लिखा जाता है
-- **अनुकूलित PDF बनाती है**: हर जॉब डिस्क्रिप्शन के हिसाब से ATS-अनुकूलित CV
-- **पोर्टल स्कैन करती है** अपने आप (Greenhouse, Ashby, Lever, कंपनी पेज)
-- **बैच में प्रोसेस करती है**: सब-एजेंट्स के साथ 10+ ऑफ़र समानांतर में
-- **सब कुछ ट्रैक करती है** एक ही सत्य-स्रोत में, इंटीग्रिटी चेक के साथ
-- **कंपनियों पर रिसर्च करती है और संपर्क के लिए सही व्यक्ति ढूँढती है**: आवेदन आपको कतार में लगाता है; रिसर्च आपको बातचीत दिलाती है
+```bash
+npx @santifer/career-ops init
+```
 
-> **ज़रूरी: यह अंधाधुंध आवेदन भेजने वाला टूल नहीं है।** career-ops एक फ़िल्टर है: यह सैकड़ों ऑफ़र में से उन चंद को ढूँढने में मदद करता है जो आपके समय के लायक हैं। सिस्टम 4.0/5 से कम स्कोर वाली किसी भी चीज़ पर आवेदन न करने की पुरज़ोर सलाह देता है। आपका समय कीमती है, और रिक्रूटर का भी। भेजने से पहले हमेशा जाँचें।
+<p align="center"><sub>ओपन सोर्स। लोकल। उसी AI CLI में जो आप पहले से इस्तेमाल करते हैं। <a href="docs/RUNNING_ON_A_BUDGET.md">मुफ़्त और लोकल मॉडल शामिल।</a></sub></p>
 
-career-ops एजेंटिक है: आप जो भी AI कोडिंग CLI चुनें, वह Playwright से करियर पेज ब्राउज़ करती है, आपके CV की तुलना जॉब डिस्क्रिप्शन से तर्क करके (कीवर्ड मैचिंग से नहीं) फ़िट का मूल्यांकन करती है, और हर लिस्टिंग के लिए आपका रिज़्यूमे ढालती है।
 
-> **ध्यान दें: पहले कुछ मूल्यांकन बढ़िया नहीं होंगे।** सिस्टम अभी आपको नहीं जानता। इसे संदर्भ दें: आपका CV, आपकी करियर कहानी, आपके प्रमाणित नतीजे, आपकी पसंद, आप किसमें अच्छे हैं, किससे बचना चाहते हैं। जितना ज़्यादा आप इसे सिखाएँगे, यह उतना बेहतर होगा। इसे नए रिक्रूटर की ऑनबोर्डिंग की तरह देखें: पहले हफ़्ते उसे आपको जानना पड़ता है, फिर वह अमूल्य हो जाता है।
+## आपको अकेले खोजने की ज़रूरत नहीं
 
-इसे उसने बनाया जिसने इससे 740 नौकरियों का मूल्यांकन किया, 68 में आवेदन किया, और Head of Applied AI की भूमिका पाई। [पूरी केस स्टडी पढ़ें](https://santifer.io/career-ops-system)।
+भेजने के बाद की खामोशी आपके बारे में नहीं है। इतने लोगों ने यही देखा कि उन्होंने इस अभ्यास को छह पंक्तियों में लिख दिया:
+
+> कम जगह, बेहतर अप्लाई करें। तादाद नहीं, संकेत। कीवर्ड नहीं, सबूत। फ़ैसला इंसान करता है। पहले लोकल। मेज़ के दोनों ओर गरिमा।
+
+<p align="center"><a href="https://career-ops.org/manifesto?utm_source=readme"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2FSIGNATURES.md&search=n%3A(%5Cd%2B)%5Cs*%24&replace=%241%20signatories&label=THE%20CAREEROPS%20MANIFESTO&color=DD7627&style=for-the-badge&labelColor=2b3137" alt="CareerOps घोषणापत्र: हस्ताक्षरकर्ताओं की लाइव संख्या"></a></p>
+
+<p align="center">उनमें से कुछ, उन्हीं के शब्दों में।</p>
+
+<p align="center">
+  <a href="https://career-ops.org/manifesto?utm_source=readme"><img src="docs/manifesto-wall.svg" alt="CareerOps घोषणापत्र पर तीन हस्ताक्षर, उन्हीं के शब्दों में" width="800"></a>
+</p>
+
+<p align="center"><sub>हर हस्ताक्षर एक commit है जिसे आप जाँच सकते हैं। <a href="https://career-ops.org/manifesto?utm_source=readme">सब पढ़ें, या अपना जोड़ें →</a></sub></p>
+
+<br>
+
+हायरिंग अपने आप ठीक नहीं होगी। जो लोग इससे गुज़र रहे हैं, वे इसे ठीक कर सकते हैं, और वे पहले से उस कमरे में हैं: नोट्स मिला रहे हैं और एक-दूसरे का सेटअप ठीक कर रहे हैं। [समाधान यहीं लिखा जाता है](CONTRIBUTING.md)। एक कमरा, कोई क्लब नहीं। **आइए, मिलकर बनाएँ।**
+
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops सर्वर के सदस्यों की लाइव संख्या"></a></p>
+
+## प्रायोजक
+
+career-ops उम्मीदवारों के लिए हमेशा मुफ़्त है। ये कंपनियाँ इस प्रोजेक्ट को प्रायोजित करती हैं:
+
+<p align="center">
+  <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
+</p>
+
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
+
+> प्रायोजन साफ़ तौर पर चिह्नित दृश्यता खरीदता है, प्रभाव कभी नहीं: कोई भी रकम रोडमैप नहीं बदलती और न ही प्रोडक्ट में कुछ रखती है। प्रायोजक कभी भी मूल्यांकन, रैंकिंग या सिफ़ारिशों में नहीं आते।
+
+## career-ops आपके लिए क्या करता है
+
+एक नौकरी पेस्ट करें। यह बताता है कि वह रात लगाने लायक है या नहीं।
+
+- **अभी भी खुली है?** आपके एक शब्द लिखने से पहले ही यह जाँच लेता है कि पोस्टिंग अभी भी लाइव है।
+- **आप नहीं?** यह आपके असली CV के मुकाबले रोल को स्कोर करता है और कमज़ोर फ़िट को छोड़ने को कहता है। आप इसे ओवरराइड कर सकते हैं।
+- **करने लायक?** यह CV, कवर लेटर और जवाबों का ड्राफ़्ट बनाता है। आप उन्हें पढ़ते हैं। आप उन्हें भेजते हैं।
+- **किससे बात करूँ?** यह सही व्यक्ति ढूँढता है और संदेश का ड्राफ़्ट बनाता है। इसे कभी भेजता नहीं।
+- **यह सब जाता कहाँ है?** हर आवेदन आपकी मशीन पर रहता है। हमारे पास कुछ भी अपलोड नहीं होता।
+- **मुझे क्या सीखना चाहिए?** लगातार कई "ना" के बाद, यह कमी का नाम बताता है।
+
+शुरुआती रन खुरदुरे होते हैं। यह अभी आपको जानता नहीं। इससे बात करें: आपका CV, आप क्या चाहते हैं, क्या नहीं। इसे एक रिक्रूटर का पहला हफ़्ता समझें।
+
+पहली बार चलाने पर यह सब कुछ चैट में पूछ लेता है। हाथ से कुछ भी कॉन्फ़िगर नहीं करना।
 
 ## career-ops क्या नहीं करता
 
-- **आवेदन सबमिट करना।** यह जवाब तैयार करता है; फ़ॉर्म आप खोलते हैं और Submit आप दबाते हैं। स्क्रिप्ट कभी POST नहीं करती (`prepare-application.mjs`)।
+- **आवेदन अपने आप सबमिट करना।** यह हर फ़ील्ड के जवाब का ड्राफ़्ट बनाता है; आप जाँचते हैं और Submit दबाते हैं। स्क्रिप्ट कभी POST नहीं करती (`prepare-application.mjs`)।
 - **ईमेल भेजना।** सिर्फ़ ड्राफ़्ट। इस पूरे कोडबेस में कहीं भी मेल भेजने का कोई ज़रिया नहीं है।
 - **बाहर डेटा भेजना।** कोई टेलीमेट्री नहीं, हमारा कोई बैकएंड नहीं। आपका CV आपकी मशीन से सीधे आपके चुने हुए AI प्रोवाइडर तक जाता है, और कहीं नहीं। एकमात्र सार्वजनिक रिकॉर्ड यही रिपॉज़िटरी है: `HIRED.md` और इसके issues।
 - **4.0/5 से नीचे आवेदन के लिए धकेलना।** यह आपको मना करेगा। आप इसे नज़रअंदाज़ कर सकते हैं, और यह बता देगा।
 
-यह आपके CV को दोबारा लिखता है; उसे कभी गढ़ना नहीं चाहिए। आज यह नियम प्रॉम्प्ट में है, अभी कोड में लागू करने वाली जाँच में नहीं। भेजने से पहले हर CV पढ़ें। विवरण [FAQ](#अक्सर-पूछे-जाने-वाले-प्रश्न-faq) में।
-
-## CareerOps घोषणापत्र
-
-career-ops [CareerOps घोषणापत्र](https://career-ops.org/manifesto?utm_source=readme) का पहला संदर्भ कार्यान्वयन है। इसे पढ़ें। अगर यह वही कहता है जो आप मानते हैं, तो हस्ताक्षर करें। आपका हस्ताक्षर एक commit बन जाता है।
+यह आपके CV को दोबारा लिखता है; उसे कभी गढ़ना नहीं चाहिए। कोड में एक जाँच ऐसी PDF को रोक देती है जिसके आँकड़े या तथ्य न आपके CV में हैं, न आपके article digest में, लेकिन दोबारा लिखे गए हर वाक्य को यह अभी नहीं परख सकती। भेजने से पहले हर CV पढ़ें। विवरण [FAQ](#अक्सर-पूछे-जाने-वाले-प्रश्न-faq) में।
 
 ## Features
 
 | Feature                  | विवरण                                                                                                                                    |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Auto-Pipeline**        | एक URL पेस्ट करें, पूरा मूल्यांकन + PDF + ट्रैकर एंट्री पाएँ                                                                              |
-| **A-H मूल्यांकन**        | भूमिका सारांश, CV मैच (इस पोस्टिंग के लिए हर आवश्यकता कितनी मायने रखती है, और वह वज़न JD के अपने शब्दों से आया, उसकी संरचना से या अनुमान से, हर आवश्यकता पर लेबल के साथ; अनुमान कभी सबसे ऊपरी बैंड में नहीं हो सकता), लेवल रणनीति, वेतन रिसर्च, व्यक्तिगतकरण, इंटरव्यू तैयारी (STAR+R), साथ में ब्लॉक G की पोस्टिंग-वैधता जाँच जो धोखाधड़ी और ghost jobs को चिह्नित करती है, और एक वर्क-ऑथ संकेत जो स्पष्ट रूप से नो-स्पॉन्सरशिप वाली JD को हार्ड ब्लॉकर के रूप में चिह्नित करता है |
-| **इंटरव्यू स्टोरी बैंक** | मूल्यांकनों के दौरान STAR+Reflection कहानियाँ जमा करता है: 5-10 मास्टर कहानियाँ जो किसी भी व्यवहारिक सवाल का जवाब देती हैं                 |
-| **नेगोशिएशन स्क्रिप्ट**  | वेतन बातचीत के फ़्रेमवर्क, भौगोलिक कटौती का जवाब, प्रतिस्पर्धी ऑफ़र का लाभ                                                                |
-| **ATS PDF जनरेशन**       | Space Grotesk + DM Sans डिज़ाइन के साथ कीवर्ड-इंजेक्टेड CV                                                                               |
+| **A-H मूल्यांकन**        | भूमिका सारांश, CV मैच (इस पोस्टिंग के लिए हर आवश्यकता कितनी मायने रखती है, और वह वज़न JD के अपने शब्दों से आया, उसकी संरचना से या अनुमान से, हर आवश्यकता पर लेबल के साथ; अनुमान कभी सबसे ऊपरी बैंड में नहीं हो सकता), लेवल रणनीति, वेतन रिसर्च, व्यक्तिगतकरण, इंटरव्यू तैयारी (STAR+R), साथ में ब्लॉक G की पोस्टिंग-वैधता जाँच (क्या यह अभी भी खुली है, क्या यह रीपोस्ट है: अवलोकन, फ़ैसले नहीं), और एक वर्क-ऑथ संकेत जो स्पष्ट रूप से नो-स्पॉन्सरशिप वाली JD को हार्ड ब्लॉकर के रूप में चिह्नित करता है |
+| **Human-in-the-Loop**    | AI मूल्यांकन और सिफ़ारिश करता है, आप फ़ैसला लेते और काम करते हैं। सिस्टम कभी आवेदन सबमिट नहीं करता: अंतिम फ़ैसला हमेशा आपका है <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
+| **ATS PDF जनरेशन**       | ATS के पढ़ने लायक CV, आपके अपने अनुभव से हर JD के हिसाब से ढाले गए, Space Grotesk + DM Sans डिज़ाइन में                                   |
 | **कवर लेटर जनरेटर**      | रिसर्च-आधारित कवर लेटर: कीवर्ड मिररिंग, चार इंटरैक्टिव एंगल प्रॉम्प्ट (क्यों/समस्याएँ/तरीक़ा/लहजा), चैट में ड्राफ़्ट अप्रूवल गेट, और CV वाली ही HTML + Playwright पाइपलाइन से A4 PDF। हर मूल्यांकन पर अपने आप ड्राफ़्ट बनाता है; `/career-ops cover` से ज़रूरत पर पूरा करें और जनरेट करें |
+| **CV से आगे**            | कंपनी रिसर्च ([`deep`](modes/deep.md)) AI रणनीति, हाल के क़दम, इंजीनियरिंग संस्कृति और वह कोण सामने लाती है जो आपकी प्रोफ़ाइल को लेना चाहिए। कॉन्टैक्ट डिस्कवरी ([`contacto`](modes/contacto.md)) उस हायरिंग मैनेजर, रिक्रूटर या टीम साथी की पहचान करती है जिससे संपर्क करना सार्थक है और हर संपर्क-प्रकार के हिसाब से ≤300 अक्षरों का LinkedIn संदेश ड्राफ़्ट करती है। औपचारिक आवेदन ईमेल ड्राफ़्ट ([`email`](modes/email.md)) मूल्यांकित रिपोर्ट या पेस्ट की गई JD को विषय पंक्ति, मुख्य भाग और अटैचमेंट चेकलिस्ट में बदलते हैं, बिना कुछ भेजे, सबमिट किए या क्लिक किए। आवेदन आपको कतार में लगाता है; रिसर्च आपको बातचीत दिलाती है। |
+| **पैटर्न विश्लेषण**      | रिजेक्शन पैटर्न और प्रति-ATS-चैनल आगे बढ़ने की दर (`analyze-patterns.mjs`), पूरी खोज के फ़नल आँकड़े (`stats.mjs`), रीपोस्ट हुई नौकरियों की पहचान, जो ghost job का संकेत हो सकती हैं (`detect-reposts.mjs`) |
+
+<details>
+<summary><b>बाकी सब जो यह करता है</b></summary>
+
+| Feature                  | विवरण                                                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Auto-Pipeline**        | एक URL पेस्ट करें, पूरा मूल्यांकन + PDF + ट्रैकर एंट्री पाएँ                                                                              |
+| **इंटरव्यू स्टोरी बैंक** | मूल्यांकनों के दौरान STAR+Reflection कहानियाँ जमा करता है: 5-10 मास्टर कहानियाँ, जिन्हें आप सामने आने वाले व्यवहारिक सवालों के हिसाब से ढाल सकते हैं |
+| **नेगोशिएशन स्क्रिप्ट**  | वेतन बातचीत के फ़्रेमवर्क, भौगोलिक कटौती का जवाब, प्रतिस्पर्धी ऑफ़र का लाभ                                                                |
 | **आवेदन ईमेल ड्राफ़्ट**  | रिपोर्ट या पेस्ट की गई JD से रिक्रूटर/रेफ़रल/कोल्ड आवेदन के औपचारिक ईमेल, विषय पंक्ति, अटैचमेंट चेकलिस्ट, स्रोत-समर्थित फ़िट पॉइंट और प्रोफ़ाइल-आधारित संपर्क ब्लॉक के साथ। सिर्फ़ ड्राफ़्ट: career-ops कभी कुछ भेजता, सबमिट करता या क्लिक नहीं करता। |
 | **पोर्टल स्कैनर**        | 100+ कंपनियाँ पहले से कॉन्फ़िगर (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound पर कस्टम क्वेरी      |
 | **फ़ंडेड कंपनी डिस्कवरी** | रिव्यू-फ़र्स्ट `company:funded` कमांड संरचित सार्वजनिक फ़ीड से हाल में फ़ंड पाई कंपनियाँ और स्रोत डायग्नोस्टिक्स दिखाता है, आपका डेटा छुए बिना |
 | **बैच प्रोसेसिंग**       | हेडलेस CLI वर्कर्स (`claude -p` / `opencode run`) के साथ समानांतर मूल्यांकन                                                               |
 | **Dashboard TUI**        | अपनी पाइपलाइन ब्राउज़, फ़िल्टर और सॉर्ट करने के लिए टर्मिनल UI                                                                            |
-| **Human-in-the-Loop**    | AI मूल्यांकन और सिफ़ारिश करता है, आप फ़ैसला लेते और काम करते हैं। सिस्टम कभी आवेदन सबमिट नहीं करता: अंतिम फ़ैसला हमेशा आपका है <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **पाइपलाइन इंटीग्रिटी**  | स्वचालित मर्ज, डीडुप, स्टेटस नॉर्मलाइज़ेशन, हेल्थ चेक                                                                                     |
 | **इंटरव्यू सूट**         | समय-खंडों में तैयारी योजनाएँ, फ़ीडबैक के साथ अभ्यास सत्र, इंटरव्यू के बाद डीब्रीफ़ ([`interview/`](modes/interview/README.md)), और कंपनी रेड-फ़्लैग डिटेक्टर ([`interview-redflag`](modes/interview-redflag.md)) |
 | **ऑफ़र स्टेज**           | कॉन्ट्रैक्ट पढ़ने का साथी: धारा-दर-धारा समीक्षा और वकील के लिए सवालों की सूची ([`offer-prep`](modes/offer-prep.md)), और वांछित/विज्ञापित/वास्तविक वेतन-अंतर विश्लेषक (`salary-gap.mjs`) |
 | **फ़ॉलो-अप और जवाब**     | फ़ॉलो-अप कैडेंस कैलकुलेटर और पहले से तय रिमाइंडर (`followup-cadence.mjs`, `followup-seed.mjs`); नियोक्ता के जवाबों को ट्रैकर अपडेट में वर्गीकृत करना ([`reply-watch`](modes/reply-watch.md)) |
-| **पैटर्न विश्लेषण**      | रिजेक्शन पैटर्न और प्रति-ATS-चैनल आगे बढ़ने की दर (`analyze-patterns.mjs`), पूरी खोज के फ़नल आँकड़े (`stats.mjs`), रीपोस्ट/ghost-job पहचान (`detect-reposts.mjs`) |
 | **प्लगइन सिस्टम**        | वैकल्पिक इंटीग्रेशन (Gmail, Notion, Apify + एक कम्युनिटी रजिस्ट्री), डिफ़ॉल्ट रूप से बंद; देखें [docs/PLUGINS.md](docs/PLUGINS.md)         |
-| **CV से आगे**            | कंपनी रिसर्च ([`deep`](modes/deep.md)) AI रणनीति, हाल के क़दम, इंजीनियरिंग संस्कृति और वह कोण सामने लाती है जो आपकी प्रोफ़ाइल को लेना चाहिए। कॉन्टैक्ट डिस्कवरी ([`contacto`](modes/contacto.md)) उस हायरिंग मैनेजर, रिक्रूटर या टीम साथी की पहचान करती है जिससे संपर्क करना सार्थक है और हर संपर्क-प्रकार के हिसाब से ≤300 अक्षरों का LinkedIn संदेश ड्राफ़्ट करती है। औपचारिक आवेदन ईमेल ड्राफ़्ट ([`email`](modes/email.md)) मूल्यांकित रिपोर्ट या पेस्ट की गई JD को विषय पंक्ति, मुख्य भाग और अटैचमेंट चेकलिस्ट में बदलते हैं, बिना कुछ भेजे, सबमिट किए या क्लिक किए। आवेदन आपको कतार में लगाता है; रिसर्च आपको बातचीत दिलाती है। |
+
+</details>
 
 ## Quick Start
 
-**सबसे तेज़ तरीक़ा: एक कमांड:**
+**सबसे तेज़ तरीक़ा, एक ही कमांड से:**
 
 ```bash
 npx @santifer/career-ops init
@@ -140,6 +220,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -187,6 +271,79 @@ npm i -g @santifer/career-ops
 > **यह सिस्टम इसलिए बना है कि आपकी AI कोडिंग CLI ख़ुद इसे अनुकूलित करे।** मोड, आर्कटाइप, स्कोरिंग वज़न, नेगोशिएशन स्क्रिप्ट: बस उससे बदलने को कहें। यह वही फ़ाइलें पढ़ती है जो इस्तेमाल करती है, इसलिए उसे ठीक पता है कि क्या संपादित करना है।
 
 पूरी सेटअप गाइड के लिए [docs/SETUP.md](docs/SETUP.md) देखें, कस्टम या लोकल मॉडल से career-ops को सस्ते में चलाने के निर्देशों के लिए [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) (और Antigravity CLI के फ़्री टियर पर बिना लागत चलाने के लिए [docs/FREE_TIER.md](docs/FREE_TIER.md)), बार-बार स्कैन शेड्यूल करने और ज़ीरो-टोकन ट्राइएज-से-शॉर्टलिस्ट रेसिपी के लिए [docs/AUTOMATION.md](docs/AUTOMATION.md), ATS ऑटो-फ़िल फ़्लो के विवरण के लिए [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md), अपने LinkedIn कनेक्शन एक्सपोर्ट को फ़नल की कंपनियों से मिलाने के लिए [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md), और आम सेटअप सवालों के जवाबों के लिए [docs/FAQ.md](docs/FAQ.md), जिसमें [स्टोरी प्रोवेनेंस कैसे गढ़ी हुई संख्याओं को रोकती है](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank) भी शामिल है। डिज़ाइन सिद्धांत [ARCHITECTURE.md](ARCHITECTURE.md) में हैं; रनटाइम फ़्लो [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) में।
+
+## Usage
+
+career-ops एक साझा कमांड राउटर इस्तेमाल करता है। जो CLI स्लैश कमांड रजिस्टर करती हैं, उनमें यह ऐसा दिखता है:
+
+```
+/career-ops           → सभी उपलब्ध कमांड दिखाएँ
+/career-ops {JD}      → AUTO-PIPELINE: मूल्यांकन + रिपोर्ट + PDF + ट्रैकर (टेक्स्ट या URL पेस्ट करें)
+/career-ops pipeline  → इनबॉक्स के लंबित URL प्रोसेस करें (data/pipeline.md)
+/career-ops oferta    → सिर्फ़ मूल्यांकन, ब्लॉक A से H (ऑटो PDF नहीं)
+/career-ops ofertas   → कई ऑफ़र की तुलना और रैंकिंग
+/career-ops contacto  → LinkedIn पावर मूव: संपर्क ढूँढें + संदेश ड्राफ़्ट करें
+/career-ops deep      → कंपनी पर गहन रिसर्च प्रॉम्प्ट
+/career-ops interview-prep → कंपनी-विशिष्ट इंटरव्यू तैयारी दस्तावेज़ बनाएँ
+/career-ops interview    → इंटरैक्टिव प्रोफ़ाइल/CV ऑनबोर्डिंग इंटरव्यू
+/career-ops master-profile → अपना Master Career Profile इम्पोर्ट करें, उसकी समीक्षा करें और उसे सत्यापित करें
+/career-ops eu-swe    → CV/apply/interview से पहले यूरोपीय SWE आवेदन कैलिब्रेट करें
+/career-ops interview/plan → आने वाले इंटरव्यू के लिए समय-खंडों में तैयारी योजना
+/career-ops interview/practice → अभ्यास इंटरव्यू, फ़ीडबैक के साथ एक बार में एक सवाल
+/career-ops interview/debrief → इंटरव्यू के बाद डीब्रीफ़: कमियाँ भरें, अगले राउंड का अनुमान लगाएँ
+/career-ops interview-redflag → कंपनी जॉइन करने से पहले नियोक्ता के चेतावनी संकेत जाँचें
+/career-ops pdf       → सिर्फ़ PDF, ATS-अनुकूलित CV
+/career-ops text      → अनुकूलित markdown CV (cv.md को दर्शाता है, PDF नहीं)
+/career-ops latex     → CV को LaTeX/Overleaf .tex में एक्सपोर्ट करें
+/career-ops latex-tex → अपनी resume.tex को वहीं अनुकूलित करें (वैकल्पिक; cv.md डिफ़ॉल्ट रहता है)
+/career-ops cover     → कवर लेटर: अकेली JD पेस्ट या /career-ops cover {slug}
+/career-ops email     → औपचारिक आवेदन ईमेल ड्राफ़्ट (सिर्फ़ ड्राफ़्ट; कभी भेजता, सबमिट या क्लिक नहीं करता)
+/career-ops add       → अपने CV में प्रोजेक्ट/पेपर/भूमिका जोड़ें (फ़ेच + प्रीव्यू + पुष्टि)
+/career-ops expand    → प्रोफ़ाइल लिंक से छूटी हुई दक्षताएँ अपने आप खोजें और जोड़ें
+/career-ops training  → कोर्स/सर्टिफ़िकेट को North Star के मुक़ाबले परखें
+/career-ops project   → पोर्टफ़ोलियो प्रोजेक्ट आइडिया परखें
+/career-ops tracker   → आवेदन स्थिति का सारांश
+/career-ops agent-inbox → अगले सत्र के लिए अनुरोध कतार में डालें/निकालें (data/agent-inbox.md)
+/career-ops apply     → लाइव आवेदन सहायक (फ़ॉर्म पढ़ता है + जवाब बनाता है)
+/career-ops scan      → पोर्टल स्कैन करें और नए ऑफ़र खोजें
+/career-ops discover  → कंपनी सूची को स्कैन योग्य ATS बोर्ड में बदलें + portals.yml में जोड़ें (ज़ीरो-टोकन)
+/career-ops batch     → समानांतर वर्कर्स के साथ बैच प्रोसेसिंग
+/career-ops patterns  → रिजेक्शन पैटर्न जाँचें और टार्गेटिंग सुधारें
+/career-ops offer-prep → मिले हुए ऑफ़र/कॉन्ट्रैक्ट को उम्मीदवार के साथ पढ़ें: धारा-दर-धारा + वकील के लिए सवाल (क़ानूनी सलाह नहीं)
+/career-ops titles    → खोज बढ़ाने के लिए आपके CV से मिलते-जुलते जॉब टाइटल सुझाएँ
+/career-ops upskill   → आपकी मूल्यांकित रिपोर्टों से समग्र स्किल-गैप विश्लेषण
+/career-ops followup  → फ़ॉलो-अप कैडेंस ट्रैकर: लंबित चिह्नित करें, ड्राफ़्ट बनाएँ
+/career-ops reply-watch → नियोक्ता के जवाब वर्गीकृत करें और ट्रैकर अपडेट सुझाएँ
+/career-ops outcome   → आवेदन का नतीजा दर्ज करें और आर्टिफ़ैक्ट संग्रहित करें
+/career-ops calibrate → सलाहकारी रिपोर्ट: क्या आपके मूल्यांकन स्कोर असली नतीजों की भविष्यवाणी करते हैं? /outcome डेटा पढ़ता है; स्कोरिंग कभी नहीं बदलता
+/career-ops update    → diff प्रीव्यू + संगतता जाँच के साथ career-ops सिस्टम फ़ाइलें अपडेट करें
+```
+
+या बस कोई जॉब URL या विवरण सीधे पेस्ट करें: career-ops उसे अपने आप पहचान लेता है और पूरी पाइपलाइन चलाता है।
+
+Codex में स्लैश कमांड की गारंटी नहीं है। इसके बजाय प्रॉम्प्ट में वही मोड नाम इस्तेमाल करें, या उन्हें `codex exec` से कॉल करें।
+
+## यह कैसे काम करता है
+
+```
+You paste a job URL or description
+        │
+        ▼
+┌──────────────────┐
+│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
+│  Detection       │
+└────────┬─────────┘
+         │
+┌────────▼─────────┐
+│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
+│  (reads cv.md)   │
+└────────┬─────────┘
+         │
+    ┌────┼────┐
+    ▼    ▼    ▼
+ Report  PDF  Tracker
+  .md   .pdf  entry
+```
 
 ## Antigravity CLI Integration
 
@@ -263,6 +420,35 @@ grok
 
 हेडलेस बैच वर्कर्स के लिए `grok -p "prompt"` इस्तेमाल करें (टूल एक्ज़ीक्यूशन को अपने आप मंज़ूर करने के लिए `--yolo` जोड़ें)।
 
+## Pi Integration
+
+career-ops [Pi](https://github.com/earendil-works/pi) को नेटिव रूप से सपोर्ट करता है, और कोई रैपर फ़ाइल मेंटेन नहीं करनी पड़ती: Pi रिपॉज़िटरी रूट की `AGENTS.md` को प्रोजेक्ट संदर्भ के रूप में पढ़ता है और `.agents/skills/career-ops/SKILL.md` में मौजूद साझा स्किल को ख़ुद खोज लेता है। इसके बाद राउटर `/skill:career-ops` के रूप में उपलब्ध होता है।
+
+### नेटिव Pi
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+pi
+
+# 2. Use the shared skill with subcommands:
+/skill:career-ops "Senior AI Engineer at Anthropic..."
+/skill:career-ops pipeline
+/skill:career-ops scan
+/skill:career-ops pdf
+/skill:career-ops tracker
+```
+
+### वन-शॉट Pi (`pi -p`)
+
+```bash
+pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p "Run career-ops scan mode and summarize new matches."
+pi -p "Run career-ops tracker mode and summarize the current statuses."
+```
+
+अगर Pi का कोई बिल्ड प्रोजेक्ट संसाधनों को भरोसे के फ़ैसले के पीछे रखता है, तो रिपॉज़िटरी के अंदर एक बार `/trust` चलाएँ और `pi` को दोबारा शुरू करें ताकि प्रोजेक्ट स्किल लोड हो जाए (`/trust` आगे के Pi प्रोसेस पर लागू होता है), या `-a` के साथ शुरू करें, जो सिर्फ़ एक रन पर भरोसा करता है और उसमें रीस्टार्ट की ज़रूरत नहीं होती।
+
 ### स्टैंडअलोन Gemini API स्क्रिप्ट (CLI इंस्टॉल की ज़रूरत नहीं)
 
 ```bash
@@ -282,82 +468,9 @@ npm run gemini:eval -- "JD text here"
 
 > **फ़्री टियर:** दोनों विकल्प बिना बिलिंग के काम करते हैं। नेटिव CLI Google OAuth इस्तेमाल करती है; API स्क्रिप्ट `gemini-3.6-flash` इस्तेमाल करती है (रेट लिमिट मॉडल और टियर पर निर्भर है; मौजूदा कोटा के लिए Google AI दस्तावेज़ देखें)।
 
-## Usage
-
-career-ops एक साझा कमांड राउटर इस्तेमाल करता है। जो CLI स्लैश कमांड रजिस्टर करती हैं, उनमें यह ऐसा दिखता है:
-
-```
-/career-ops           → सभी उपलब्ध कमांड दिखाएँ
-/career-ops {JD}      → AUTO-PIPELINE: मूल्यांकन + रिपोर्ट + PDF + ट्रैकर (टेक्स्ट या URL पेस्ट करें)
-/career-ops pipeline  → इनबॉक्स के लंबित URL प्रोसेस करें (data/pipeline.md)
-/career-ops oferta    → सिर्फ़ मूल्यांकन, ब्लॉक A से G (ऑटो PDF नहीं)
-/career-ops ofertas   → कई ऑफ़र की तुलना और रैंकिंग
-/career-ops contacto  → LinkedIn पावर मूव: संपर्क ढूँढें + संदेश ड्राफ़्ट करें
-/career-ops deep      → कंपनी पर गहन रिसर्च प्रॉम्प्ट
-/career-ops interview-prep → कंपनी-विशिष्ट इंटरव्यू तैयारी दस्तावेज़ बनाएँ
-/career-ops interview    → इंटरैक्टिव प्रोफ़ाइल/CV ऑनबोर्डिंग इंटरव्यू
-/career-ops eu-swe    → CV/apply/interview से पहले यूरोपीय SWE आवेदन कैलिब्रेट करें
-/career-ops eu-fintech → Product Manager भूमिकाओं के लिए 21 EU फ़िनटेक पोर्टल स्कैन करें (ज़ीरो-टोकन)
-/career-ops interview/plan → आने वाले इंटरव्यू के लिए समय-खंडों में तैयारी योजना
-/career-ops interview/practice → अभ्यास इंटरव्यू, फ़ीडबैक के साथ एक बार में एक सवाल
-/career-ops interview/debrief → इंटरव्यू के बाद डीब्रीफ़: कमियाँ भरें, अगले राउंड का अनुमान लगाएँ
-/career-ops interview-redflag → कंपनी जॉइन करने से पहले नियोक्ता के चेतावनी संकेत जाँचें
-/career-ops pdf       → सिर्फ़ PDF, ATS-अनुकूलित CV
-/career-ops text      → अनुकूलित markdown CV (cv.md को दर्शाता है, PDF नहीं)
-/career-ops latex     → CV को LaTeX/Overleaf .tex में एक्सपोर्ट करें
-/career-ops latex-tex → अपनी resume.tex को वहीं अनुकूलित करें (वैकल्पिक; cv.md डिफ़ॉल्ट रहता है)
-/career-ops cover     → कवर लेटर: अकेली JD पेस्ट या /career-ops cover {slug}
-/career-ops email     → औपचारिक आवेदन ईमेल ड्राफ़्ट (सिर्फ़ ड्राफ़्ट; कभी भेजता, सबमिट या क्लिक नहीं करता)
-/career-ops add       → अपने CV में प्रोजेक्ट/पेपर/भूमिका जोड़ें (फ़ेच + प्रीव्यू + पुष्टि)
-/career-ops expand    → प्रोफ़ाइल लिंक से छूटी हुई दक्षताएँ अपने आप खोजें और जोड़ें
-/career-ops training  → कोर्स/सर्टिफ़िकेट को North Star के मुक़ाबले परखें
-/career-ops project   → पोर्टफ़ोलियो प्रोजेक्ट आइडिया परखें
-/career-ops tracker   → आवेदन स्थिति का सारांश
-/career-ops agent-inbox → अगले सत्र के लिए अनुरोध कतार में डालें/निकालें (data/agent-inbox.md)
-/career-ops apply     → लाइव आवेदन सहायक (फ़ॉर्म पढ़ता है + जवाब बनाता है)
-/career-ops scan      → पोर्टल स्कैन करें और नए ऑफ़र खोजें
-/career-ops discover  → कंपनी सूची को स्कैन योग्य ATS बोर्ड में बदलें + portals.yml में जोड़ें (ज़ीरो-टोकन)
-/career-ops batch     → समानांतर वर्कर्स के साथ बैच प्रोसेसिंग
-/career-ops patterns  → रिजेक्शन पैटर्न जाँचें और टार्गेटिंग सुधारें
-/career-ops offer-prep → मिले हुए ऑफ़र/कॉन्ट्रैक्ट को उम्मीदवार के साथ पढ़ें: धारा-दर-धारा + वकील के लिए सवाल (क़ानूनी सलाह नहीं)
-/career-ops titles    → खोज बढ़ाने के लिए आपके CV से मिलते-जुलते जॉब टाइटल सुझाएँ
-/career-ops upskill   → आपकी मूल्यांकित रिपोर्टों से समग्र स्किल-गैप विश्लेषण
-/career-ops followup  → फ़ॉलो-अप कैडेंस ट्रैकर: लंबित चिह्नित करें, ड्राफ़्ट बनाएँ
-/career-ops reply-watch → नियोक्ता के जवाब वर्गीकृत करें और ट्रैकर अपडेट सुझाएँ
-/career-ops outcome   → आवेदन का नतीजा दर्ज करें और आर्टिफ़ैक्ट संग्रहित करें
-/career-ops calibrate → सलाहकारी रिपोर्ट: क्या आपके मूल्यांकन स्कोर असली नतीजों की भविष्यवाणी करते हैं? /outcome डेटा पढ़ता है; स्कोरिंग कभी नहीं बदलता
-/career-ops update    → diff प्रीव्यू + संगतता जाँच के साथ career-ops सिस्टम फ़ाइलें अपडेट करें
-```
-
-या बस कोई जॉब URL या विवरण सीधे पेस्ट करें: career-ops उसे अपने आप पहचान लेता है और पूरी पाइपलाइन चलाता है।
-
-Codex में स्लैश कमांड की गारंटी नहीं है। इसके बजाय प्रॉम्प्ट में वही मोड नाम इस्तेमाल करें, या उन्हें `codex exec` से कॉल करें।
-
-## यह कैसे काम करता है
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
-
 ## Pre-configured Portals
 
-स्कैनर **100+ कंपनियों** के साथ आता है जो स्कैन के लिए तैयार हैं और प्रमुख जॉब बोर्ड्स पर **45+ सर्च क्वेरी** के साथ। `templates/portals.example.yml` को `portals.yml` में कॉपी करें और अपनी जोड़ें:
+स्कैनर **100+ कंपनियों** के साथ आता है जो स्कैन के लिए तैयार हैं और प्रमुख जॉब बोर्ड्स पर **35+ सर्च क्वेरी** के साथ। `templates/portals.example.yml` को `portals.yml` में कॉपी करें और अपनी जोड़ें:
 
 **AI Labs:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
 **Voice AI:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
@@ -389,7 +502,7 @@ npm run build:dashboard   # optional: build the standalone binary
 
 Features: 6 फ़िल्टर टैब, 4 सॉर्ट मोड, ग्रुप्ड/फ़्लैट व्यू, लेज़ी-लोडेड प्रीव्यू, इनलाइन स्टेटस बदलाव।
 
-एक **प्रायोगिक वेब UI** भी है (अल्फ़ा, वैकल्पिक: जब तक आप शुरू न करें, कुछ नहीं चलता): [`web/README.md`](web/README.md) देखें।
+एक **प्रायोगिक वेब UI** भी है (अल्फ़ा और वैकल्पिक: जब तक आप शुरू न करें, कुछ नहीं चलता): [`web/README.md`](web/README.md) देखें।
 
 ## Project Structure
 
@@ -446,6 +559,10 @@ career-ops/
 
 - **ट्रैकर ओवरराइड:** आप `CAREER_OPS_TRACKER` सेट करके आवेदन ट्रैकर फ़ाइल का पाथ सीधे भी बदल सकते हैं।
 - **लेखन:** सभी लेखन ऑपरेशन (जैसे मर्ज) प्रामाणिक रूप से `{DATA_ROOT}/data/applications.md` को लक्षित करते हैं।
+- **स्कैनर कॉन्फ़िग:** `portals.yml` को `{DATA_ROOT}/portals.yml` पर पढ़ा और सत्यापित किया जाता है, इसलिए `node validate-portals.mjs` वही फ़ाइल जाँचता है जो `scan.mjs` पढ़ता है।
+- **बनाए गए दस्तावेज़:** अनुकूलित CV और कवर लेटर `{DATA_ROOT}/output/` के अंदर लिखे जाते हैं, और उन्हें किसी रिपोर्ट से जोड़ने वाला PDF मैनिफ़ेस्ट `{DATA_ROOT}/data/pdf-index.tsv` में रहता है। जब तक `CAREER_OPS_TRACKER` सेट नहीं है, इन लेखनों की सीमा तय करने वाला ट्रैकर वर्कस्पेस डेटा रूट है, चेकआउट नहीं।
+- **ट्रैकर ओवरराइड के साथ PDF:** `generate-pdf.mjs` वर्कस्पेस तय करने से पहले `CAREER_OPS_TRACKER` को रिज़ॉल्व करता है, इसलिए ओवरराइड सेट होने पर वर्कस्पेस वह फ़ोल्डर होता है जिसमें वह ट्रैकर है (या उसके ऊपर वाला फ़ोल्डर, जब ट्रैकर किसी `data/` फ़ोल्डर में हो)। तब CV का HTML और हर PDF उसी वर्कस्पेस के अंदर होने चाहिए, और मैनिफ़ेस्ट उसकी `data/pdf-index.tsv` में चला जाता है। कवर लेटर अब भी `{DATA_ROOT}/output/` को ही लक्षित करते हैं, इसलिए जब वह फ़ोल्डर ट्रैकर के वर्कस्पेस से बाहर हो, तो उन्हें अस्वीकार कर दिया जाता है।
+- **कोड लेयर अपनी जगह रहती है:** `node_modules/`, `providers/`, `modes/` और ख़ुद स्क्रिप्ट हमेशा रिपॉज़िटरी के सापेक्ष रिज़ॉल्व होते हैं, डेटा रूट के सापेक्ष कभी नहीं।
 
 Go डैशबोर्ड TUI, Node.js स्क्रिप्ट और AI एजेंट मोड सभी इस रेज़ोल्यूशन क्रम का अपने आप पालन करते हैं।
 
@@ -465,6 +582,34 @@ Go डैशबोर्ड TUI, Node.js स्क्रिप्ट और AI �
 - **डैशबोर्ड**: Go + Bubble Tea + Lipgloss (Catppuccin Mocha थीम)
 - **डेटा**: Markdown तालिकाएँ + YAML कॉन्फ़िग + TSV बैच फ़ाइलें
 
+<p align="center">
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>एजेंट स्किल मानक वाले किसी भी CLI पर भी चलता है। देखें <a href="docs/SUPPORTED_CLIS.md">समर्थित CLI</a>।</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
+
 ## Also Open Source
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)**: पोर्टफ़ोलियो वेबसाइट (santifer.io) AI चैटबॉट, LLMOps डैशबोर्ड और केस स्टडी के साथ। अगर आपको अपनी जॉब सर्च के साथ दिखाने के लिए पोर्टफ़ोलियो चाहिए, तो इसे fork करें और अपना बना लें।
@@ -472,10 +617,10 @@ Go डैशबोर्ड TUI, Node.js स्क्रिप्ट और AI �
 ## अक्सर पूछे जाने वाले प्रश्न (FAQ)
 
 **career-ops क्या है?**
-career-ops एक ओपन सोर्स AI जॉब सर्च है जो आपकी AI कोडिंग CLI (Claude Code, Codex, OpenCode और अन्य) में लोकल चलती है और हर फ़ैसला आप पर छोड़ती है। यह आपके CV के मुक़ाबले जॉब ऑफ़र का मूल्यांकन करती है, ATS-अनुकूलित PDF बनाती है, संपर्क के लिए सही व्यक्ति ढूँढती है, और सब कुछ एक जगह ट्रैक करती है: अंतिम फ़ैसला हमेशा आपका है। यह CareerOps घोषणापत्र का पहला संदर्भ कार्यान्वयन है। अधिक [career-ops.org](https://career-ops.org) पर।
+career-ops ([career-ops.org](https://career-ops.org), जिसे **careerops** भी कहा जाता है) एक ओपन सोर्स AI जॉब सर्च है जो आपकी AI कोडिंग CLI (Claude Code, Codex, OpenCode और अन्य) में लोकल चलती है और हर फ़ैसला आप पर छोड़ती है। यह आपके CV के मुक़ाबले जॉब ऑफ़र का मूल्यांकन करती है, ATS-अनुकूलित PDF बनाती है, संपर्क के लिए सही व्यक्ति ढूँढती है, और सब कुछ एक जगह ट्रैक करती है: अंतिम फ़ैसला हमेशा आपका है। यह [CareerOps घोषणापत्र](https://career-ops.org/manifesto) का पहला संदर्भ कार्यान्वयन है।
 
 **क्या अनुकूलित CV कुछ गढ़ सकता है?**
-नहीं गढ़ना चाहिए, और प्रॉम्प्ट यही कहते हैं: दोबारा लिखो, कभी गढ़ो मत। यह नियम अभी कोड की किसी जाँच से लागू नहीं होता। दो खुले issues इसे ट्रैक करते हैं: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (पद के नाम cv.md से मेल खाने चाहिए) और [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (सत्यता जाँच जो विफल होने पर रोक दे)। जब तक वे मर्ज नहीं होते, भेजने से पहले हर CV पढ़ें। [क़ानूनी अस्वीकरण](LEGAL_DISCLAIMER.md) यही बात ज़्यादा शब्दों में कहता है।
+नहीं गढ़ना चाहिए, और प्रॉम्प्ट यही कहते हैं: दोबारा लिखो, कभी गढ़ो मत। `generate-pdf` ऐसे CV को रोक देता है जिसके आँकड़े या तथ्य आपके स्रोतों में नहीं हैं, जब तक आप `--skip-fact-check` न दें। यह अभी पद के नाम नहीं जाँचता और न ही दोबारा लिखे गए शब्दों को परखता है। दो खुले issues इसे ट्रैक करते हैं: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (पद के नाम cv.md से मेल खाने चाहिए) और [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (सत्यता जाँच जो विफल होने पर रोक दे)। जब तक वे मर्ज नहीं होते, भेजने से पहले हर CV पढ़ें। [क़ानूनी अस्वीकरण](LEGAL_DISCLAIMER.md) यही बात ज़्यादा शब्दों में कहता है।
 
 **क्या मैं career-ops मुफ़्त में, या सस्ते / लोकल मॉडल पर चला सकता हूँ?**
 हाँ। career-ops CLI-निरपेक्ष है और मुफ़्त और लोकल मॉडल पर चलता है (OpenRouter के मुफ़्त मॉडल, Ollama, या कोई भी OpenAI-संगत एंडपॉइंट), इसलिए आप किसी पेड सब्सक्रिप्शन से बँधे नहीं हैं। पूरे सेटअप के लिए [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) देखें।
@@ -490,16 +635,16 @@ career-ops ओपन Agent Skill Standard के ज़रिए किसी �
 career-ops Windows पर चलता है। प्लेटफ़ॉर्म-विशिष्ट सेटअप और ज्ञात दिक़्क़तें (Git Bash खोज, लाइन एंडिंग, Task Scheduler) [docs/WINDOWS.md](docs/WINDOWS.md) में हैं। अगर इंस्टॉल के दौरान symlink त्रुटि से स्किल लोड न हों, तो समाधान [docs/FAQ.md](docs/FAQ.md) में है। पूरे चरण [docs/SETUP.md](docs/SETUP.md) में हैं।
 
 **क्या career-ops मेरे लिए नौकरियों में अपने आप आवेदन करता है?**
-नहीं। career-ops एक फ़िल्टर है, अंधाधुंध ऑटो-आवेदन करने वाला टूल नहीं। AI मूल्यांकन, रैंकिंग और ड्राफ़्ट करता है; आप समीक्षा और फ़ैसला करते हैं। यह कभी कुछ सबमिट, भेजता या क्लिक नहीं करता: अंतिम फ़ैसला हमेशा आपका है। यही human-in-the-loop डिज़ाइन पूरी बात है।
+नहीं। career-ops एक फ़िल्टर है, अंधाधुंध ऑटो-आवेदन करने वाला टूल नहीं। AI मूल्यांकन, रैंकिंग और ड्राफ़्ट करता है; आप समीक्षा और फ़ैसला करते हैं। यह ड्राफ़्ट बनाता है और फ़ॉर्म भरता है; सबमिट कभी नहीं करता। आप Submit दबाते हैं। यही human-in-the-loop डिज़ाइन पूरी बात है।
 
 **क्या career-ops मुफ़्त और ओपन सोर्स है?**
-हाँ। career-ops मुफ़्त और ओपन सोर्स है, और उम्मीदवार के लिए हमेशा रहेगा: यह [CareerOps घोषणापत्र](https://career-ops.org/manifesto) का पहला संदर्भ कार्यान्वयन है। इसे पढ़ें, और अगर यह वही कहता है जो आप मानते हैं, तो हस्ताक्षर करें।
+हाँ। career-ops मुफ़्त और ओपन सोर्स है, और उम्मीदवार के लिए हमेशा रहेगा। यह [CareerOps घोषणापत्र](https://career-ops.org/manifesto) का पहला संदर्भ कार्यान्वयन है। इसे पढ़ें, और अगर यह वही कहता है जो आप मानते हैं, तो हस्ताक्षर करें।
 
 ## Author के बारे में
 
-मैं [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer) हूँ: Head of Applied AI, पूर्व फ़ाउंडर (एक व्यवसाय बनाया और बेचा जो आज भी मेरे नाम से चलता है)। मैंने अपनी जॉब सर्च संभालने के लिए career-ops बनाया। यह काम आया: मैंने इससे अपनी मौजूदा भूमिका पाई।
+मैं [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer) हूँ, एक पूर्व फ़ाउंडर: मैंने एक व्यवसाय बनाया और बेचा जो आज भी मेरे नाम से चलता है। मैंने अपनी जॉब सर्च संभालने के लिए career-ops बनाया, और यह काम आया: इसी की बदौलत मुझे Head of Applied AI की भूमिका मिली। छह महीने बाद मैंने वह भूमिका छोड़ दी, ताकि पूरा समय career-ops बनाने में लगा सकूँ।
 
-जानना चाहते हैं कि यह रिपॉज़िटरी हफ़्ते में क़रीब 4 घंटे में कैसे मेंटेन होती है? [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) पढ़ें।
+जानना चाहते हैं कि इतनी बड़ी रिपॉज़िटरी AI एजेंटों के एक बेड़े और हर मर्ज का फ़ैसला करने वाले एक इंसान के साथ कैसे मेंटेन होती है? [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) पढ़ें।
 
 मेरा पोर्टफ़ोलियो और अन्य ओपन सोर्स प्रोजेक्ट → [santifer.io](https://santifer.io)
 
@@ -535,7 +680,7 @@ career-ops से नौकरी मिली? [अपनी कहानी �
 उदार, व्यावसायिक उत्पाद नामकरण और समर्थन के लिए
 आरक्षित।
 
-## मान्यता
+## स्टार इतिहास
 
 <p align="center">
   <a href="https://warpchart.dev/hq">
@@ -546,36 +691,7 @@ career-ops से नौकरी मिली? [अपनी कहानी �
   </a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
-</p>
-
-<p align="center">
-  <sub>किसी भी agent-skill-standard CLI पर भी चलता है। <a href="docs/SUPPORTED_CLIS.md">Supported CLIs</a> देखें।</sub><br>
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
-  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
-  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
-  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
-  <br>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
-</p>
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) द्वारा बनाया और मेंटेन किया गया</sub></p>
 
 ## Connect करें
 

@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.11.0",
+  "version": "0.13.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
@@ -8,18 +8,18 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"tests/**/*.test.mjs\""
+    "test": "node --experimental-strip-types --test \"tests/**/*.test.mjs\""
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.6.0"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.80",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "js-yaml": "^5.0.0",
+    "js-yaml": "^5.4.1",
     "lucide-react": "^1.8.0",
-    "next": "16.3.3",
+    "next": "16.3.8",
     "playwright-core": "^1.61.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
@@ -30,15 +30,15 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.0",
+    "@types/node": "25.9.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.18",
     "tailwindcss": "^4.2.2",
-    "typescript": "^7.0.0"
+    "typescript": "7.0.2"
   },
   "overrides": {
     "postcss": "$postcss",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.4"
   }
 }
