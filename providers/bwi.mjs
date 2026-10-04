@@ -41,7 +41,7 @@ const ALLOWED_HOST = 'www.bwi.de';
  * validated before being fetched (see assertGreenhouseUrl for the pattern).
  * @param {string} url
  */
-function assertBwiUrl(url) {
+export function assertBwiUrl(url) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -136,6 +136,10 @@ export default {
     const jobs = urls
       .map(url => ({ title: slugToTitle(url), url, company: entry.name, location: '' }))
       .filter(j => j.title);
+
+    // verify-portals' health probe passes ctx.maxPages (= 1): the listing alone
+    // tells a live board from a broken one, so no detail page is requested.
+    if (Number(ctx?.maxPages) > 0) return jobs;
 
     let spent = 0;
     for (const job of jobs) {
