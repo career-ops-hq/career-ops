@@ -10,6 +10,7 @@ try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/startup-jobs.mjs')).href);
   const startupJobs = mod.default;
   const { parseStartupJobsFeed } = mod;
+  const { buildTitleFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   if (startupJobs.id === 'startup-jobs') pass('startup-jobs.id is "startup-jobs"');
   else fail(`startup-jobs.id is ${JSON.stringify(startupJobs.id)}`);
@@ -141,6 +142,17 @@ try {
     pass('parseStartupJobsFeed decodes an entity-encoded "&amp;" in the title, not just the company');
   } else {
     fail(`entity-in-title row = ${JSON.stringify(entityTitleJobs[0])}`);
+  }
+  // The end-to-end claim (#2921): the decoded title has to survive the
+  // user's own title_filter, not just look right in isolation. An
+  // undecoded "R&amp;D Engineer" would fail a positive "r&d" keyword match
+  // and the posting would be silently dropped before it ever reaches
+  // pipeline.md — scan.mjs's buildTitleFilter lowercases and substring-matches.
+  const keepsRnD = buildTitleFilter({ positive: ['r&d'], negative: [] });
+  if (keepsRnD(entityTitleJobs[0]?.title)) {
+    pass('the decoded title survives a positive "r&d" title_filter keyword match');
+  } else {
+    fail(`decoded title ${JSON.stringify(entityTitleJobs[0]?.title)} was dropped by positive "r&d"`);
   }
 
   // The feed sometimes glues a German "bei" preposition onto the company
