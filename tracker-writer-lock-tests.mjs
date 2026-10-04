@@ -7,7 +7,7 @@ import {
   existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync,
   utimesSync, writeFileSync,
 } from 'fs';
-import { basename, dirname, join } from 'path';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { acquireTrackerLock, openTrackerTransaction } from './tracker-utils.mjs';
@@ -17,11 +17,36 @@ const NODE = process.execPath;
 const CONCURRENT_ROW = '| 99 | 2026-01-03 | ConcurrentCo | Keeper | 4.3/5 | Applied | ❌ | [99](reports/099-concurrent.md) | preserve me |';
 let passed = 0;
 let failed = 0;
-// Run-level evidence that acquireTrackerLock still emits its recover guard.
-// See the consumer inside runWhileLocked for why this is counted per run
-// rather than asserted per case (#2436).
-let contentionWatchedCases = 0;
-let contentionObservedCases = 0;
+const activeChildren = new Set();
+
+function trackChild(child) {
+  activeChildren.add(child);
+  child.once('close', () => activeChildren.delete(child));
+  return child;
+}
+
+// test-all.mjs enforces this suite's process-wide cap. If that cap sends a
+// termination signal, stop every CLI child first so a timed-out suite cannot
+// leave writers running against its temporary fixtures.
+let shutdownPromise = null;
+function stopChildrenOnSignal(signal) {
+  if (shutdownPromise) return;
+  const children = [...activeChildren];
+  for (const child of children) child.kill('SIGTERM');
+  const hardStop = setTimeout(() => {
+    for (const child of children) child.kill('SIGKILL');
+  }, 1_000);
+  hardStop.unref();
+  shutdownPromise = Promise.all(children.map(child => new Promise(resolve => {
+    if (child.exitCode !== null || child.signalCode !== null) resolve();
+    else child.once('close', resolve);
+  }))).finally(() => {
+    clearTimeout(hardStop);
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  });
+}
+process.once('SIGTERM', () => stopChildrenOnSignal('SIGTERM'));
+process.once('SIGINT', () => stopChildrenOnSignal('SIGINT'));
 
 function pass(message) { console.log(`PASS ${message}`); passed++; }
 function fail(message) { console.error(`FAIL ${message}`); failed++; }
@@ -40,67 +65,21 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // the tests assert on, so widening them would change what is being tested.
 const HARNESS_WAIT_MS = 30_000;
 
-// How long to wait for evidence that the spawned writer has reached the lock
-// before committing the concurrent row. Bounded, and not a value under test:
-// see watchForContention() for why the wait exists and what happens when the
-// evidence never arrives.
-const CONTENTION_WAIT_MS = 2_000;
-
 /**
- * Watch for evidence that a spawned writer has attempted the tracker lock and
- * lost — i.e. that it is now sitting in the retry loop.
- *
- * WHY THIS EXISTS: the fixture mutation below is what a writer with a stale
- * pre-lock snapshot erases, so it only discriminates if it lands AFTER that
- * writer's read. Committing it immediately after spawn() does not: a fresh
- * Node process needs tens of milliseconds just to boot, so the row is already
- * on disk before a buggy writer reads, and the buggy writer then reads the
- * post-mutation file and passes. That was verified, not assumed — hoisting
- * set-status.mjs's readFileSync above its acquireTrackerLockForCli call left
- * this suite fully green until this wait was added.
- *
- * The signal is the lock's recover-guard directory: acquireTrackerLock creates
- * and removes `${lockDir}.recover` on every contended pass, so its first
- * appearance means "this child has tried the lock and someone else holds it".
- * That instant sits after a pre-lock read and before a post-lock one, which is
- * exactly the discrimination the mutation needs.
- *
- * This POLLS rather than using fs.watch. On Windows, fs.watch aborts the whole
- * process with a libuv assertion (`!_wcsnicmp(filename, dir, dirlen)`,
- * src\win\fs-event.c) when the watched directory is reached through an 8.3
- * short path — which is exactly what CI runners use (C:\Users\RUNNER~1\...),
- * so the watcher version killed this suite with exit 3221226505 on
- * windows-latest while passing locally. The guard is created and removed on
- * every contended retry, not once, so a poll gets many chances to observe it.
- *
- * It is a bounded wait, never a barrier. If no guard ever appears — a lock
- * implementation that stops using the guard, or a writer that legitimately
- * does other work first — the mutation proceeds anyway once
- * CONTENTION_WAIT_MS elapses and the test degrades to its previous
- * timing-dependent behaviour instead of hanging.
- *
- * @param {string} dir - Directory containing the lock.
- * @param {string} lockDir - The lock directory whose recover guard signals contention.
- * @returns {{wait: (timeoutMs: number) => Promise<boolean>, close: () => void}}
+ * Wait for the test-only durable marker written after a CLI writer loses the
+ * lock mkdir race. Unlike the recover guard, it survives until fixture cleanup,
+ * so this still orders the mutation correctly when every old guard poll would
+ * have missed its sampling window.
  */
-function watchForContention(dir, lockDir) {
-  const guardPrefix = `${basename(lockDir)}.recover`;
-  const guardPresent = () => {
-    try {
-      return readdirSync(dir).some((name) => name.startsWith(guardPrefix));
-    } catch {
-      return false; // directory vanished mid-run; the timed fallback stands in
-    }
-  };
-  return {
-    async wait(timeoutMs) {
-      const deadline = Date.now() + timeoutMs;
-      let seen = false;
-      while (!(seen = guardPresent()) && Date.now() < deadline) await sleep(2);
-      return seen;
-    },
-    close() {},
-  };
+async function waitForContentionMarker(markerPath, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(markerPath) && Date.now() < deadline) await sleep(10);
+  if (!existsSync(markerPath)) return null;
+  try {
+    return JSON.parse(readFileSync(markerPath, 'utf-8'));
+  } catch {
+    return null;
+  }
 }
 
 function trackerTable(rows) {
@@ -151,7 +130,7 @@ async function runWhileLocked({
     CAREER_OPS_TRACKER_LOCK: lockDir,
     CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
   };
-  const launchWriter = (timeoutMs) => {
+  const launchWriter = (timeoutMs, markerPath = null) => {
     let stdout = '';
     let stderr = '';
     const resolvedArgs = args.map(arg => arg === '{tracker}' ? tracker : arg);
@@ -159,10 +138,15 @@ async function runWhileLocked({
       cwd: ROOT,
       env: {
         ...childEnv,
+        ...(markerPath ? {
+          NODE_ENV: 'test',
+          CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER: markerPath,
+        } : {}),
         CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: String(timeoutMs),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    trackChild(child);
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
@@ -204,10 +188,11 @@ async function runWhileLocked({
     fail(`${name}: lock contention probe failed (exit=${probeResult.code}, timedOut=${probeResult.timedOut})\n${probeOutput.stdout}${probeOutput.stderr}`);
   }
 
-  // Watching starts before the real writer launches and after the probe has
-  // exited, so the only guard events it can see are the writer's own.
-  const contention = beforeMutationOutput ? null : watchForContention(dir, lockDir);
-  const run = launchWriter(3_000);
+  // A per-process marker stays on disk after the writer enters the retry loop.
+  // This preserves the read-before-mutation ordering while simulating the old
+  // sampler missing every short-lived recover-guard window.
+  const markerPath = beforeMutationOutput ? null : join(dir, `${name}.lock-waiting.json`);
+  const run = launchWriter(3_000, markerPath);
 
   try {
     if (beforeMutationOutput) {
@@ -219,29 +204,17 @@ async function runWhileLocked({
         fail(`${name}: did not reach the pre-lock review prompt before the fixture mutation`);
       }
     }
-    // Order the mutation after the writer's own read. beforeMutationOutput
-    // entries already have a stronger, script-specific ordering signal (their
-    // pre-lock review prompt), and a writer parked at that prompt has not
-    // reached the lock yet, so the guard wait is skipped for them.
-    //
-    // The boolean IS the discrimination signal, so it is consumed rather than
-    // discarded (#2436) — but at RUN level, not per case, and the difference
-    // is not a softening. `acquireTrackerLock` creates the guard and removes
-    // it in a `finally` around one `lockCanRecover()` call, so it exists for
-    // well under a millisecond, re-created on each ~retryMs attempt. The
-    // watcher samples with readdirSync, so a single miss means "the sampler
-    // was unlucky", not "the guard is gone" — and on Windows CI it misses
-    // often enough that a per-case failure would be red on a healthy tree
-    // (measured: 3 of 8 observed).
-    //
-    // Across a whole run the two causes separate cleanly: a sampling miss
-    // still leaves other cases observing the guard, while the regression this
-    // must catch — the guard renamed, removed, or made conditional — takes
-    // every case to zero. That is asserted after the matrix.
-    if (contention) {
-      contentionWatchedCases++;
-      if (await contention.wait(CONTENTION_WAIT_MS)) contentionObservedCases++;
-      else console.log(`NOTE ${name}: recover guard not sampled within ${CONTENTION_WAIT_MS}ms — fell back to timing-dependent ordering for this case`);
+    // Order the mutation after the writer's own read. Scripts with a
+    // pre-lock review prompt have a stronger ordering signal: while parked at
+    // the prompt, they have not reached the lock yet.
+    if (markerPath) {
+      const marker = await waitForContentionMarker(markerPath, HARNESS_WAIT_MS);
+      if (marker?.lockDir === lockDir && marker.guardCreated === true
+          && marker.pid === run.child.pid) {
+        pass(`${name}: recover-guard creation signaled durably with all polling windows missed`);
+      } else {
+        fail(`${name}: writer did not emit its test-only contention marker before fixture mutation`);
+      }
     }
     // Simulate the current lock owner committing another row. The waiting
     // writer must read this fresh version after acquiring the lock; a writer
@@ -251,7 +224,6 @@ async function runWhileLocked({
       : `${content.trimEnd()}\n${CONCURRENT_ROW}\n`;
     writeFileSync(tracker, nextContent);
   } finally {
-    contention?.close();
     lock.release();
   }
 
@@ -469,7 +441,7 @@ async function testFollowupSeedUsesASeparateLockNamespace() {
 
   let stdout = '';
   let stderr = '';
-  const child = spawn(NODE, [join(ROOT, 'followup-seed.mjs'), '1', '--json'], {
+  const child = trackChild(spawn(NODE, [join(ROOT, 'followup-seed.mjs'), '1', '--json'], {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -486,7 +458,7 @@ async function testFollowupSeedUsesASeparateLockNamespace() {
       CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  }));
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
   child.stdin.end();
@@ -667,7 +639,7 @@ async function testReplyWatchConflictingRecommendations() {
 
     let stdout = '';
     let stderr = '';
-    const child = spawn(NODE, [join(ROOT, 'reply-watch.mjs'), candidatesPath], {
+    const child = trackChild(spawn(NODE, [join(ROOT, 'reply-watch.mjs'), candidatesPath], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -678,7 +650,7 @@ async function testReplyWatchConflictingRecommendations() {
         CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    }));
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.stdin.end();
@@ -825,34 +797,6 @@ async function testLiveRecoverGuardIsNotEvicted() {
 await testFreshOwnerlessLockIsNotStolen();
 await testAgedOwnerlessLockStillRecovers();
 await testLiveRecoverGuardIsNotEvicted();
-
-// #2436: the guard-watched cases depend on the recover guard to order the
-// fixture mutation after the writer's own read. If it stops being emitted they
-// all silently fall back to timing, each burning CONTENTION_WAIT_MS first — the
-// suite stays green (or returns to flaking) with nothing pointing at the cause.
-// One observation is enough to prove the signal exists; zero across the whole
-// matrix is the regression.
-if (contentionWatchedCases === 0) {
-  // Skipping the assertion when nothing was watched would reproduce the very
-  // defect this file is fixing: a matrix change that drops every guard-watched
-  // case leaves the suite green while nothing validates the recover guard at
-  // all. Zero watched cases is itself the regression (CodeRabbit review).
-  fail('no guard-watched case ran — the matrix no longer exercises the recover guard, so nothing validates the mutation ordering signal');
-} else if (contentionObservedCases > 0) {
-  pass(`recover guard observed in ${contentionObservedCases}/${contentionWatchedCases} guard-watched cases — the mutation ordering signal is live`);
-} else if (process.platform === 'win32') {
-  // The signal is SAMPLED: acquireTrackerLock removes the guard in a `finally`
-  // around one lockCanRecover() call, so it exists for well under a
-  // millisecond, and the watcher looks for it with readdirSync. On Windows
-  // that sampling is unreliable enough to miss every window in a run — one CI
-  // leg observed 3 of 8, another 0 of 8 on the same commit — so failing here
-  // reports the sampler's luck, not the guard's existence, and turns a healthy
-  // tree red at random. Reported, not enforced, on this platform.
-  console.log(`NOTE recover guard not sampled in any of the ${contentionWatchedCases} guard-watched cases on win32 — the ordering signal could not be observed here; the assertion is enforced on platforms where sampling is reliable`);
-  passed++;
-} else {
-  fail(`recover guard never observed in any of the ${contentionWatchedCases} guard-watched cases — acquireTrackerLock has stopped emitting it, so every one of them fell back to timing-dependent ordering`);
-}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

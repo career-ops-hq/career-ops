@@ -548,6 +548,26 @@ export async function acquireTrackerLock(lockDir, options = {}) {
       }
 
       if (hasRecoverGuard) {
+        // Test-only ordering signal for the cross-process writer-lock suite.
+        // It is emitted only after this process successfully creates the
+        // recover guard, and remains on disk after that short-lived directory
+        // is removed. The parent can therefore prove both contention and
+        // guard creation without sampling a sub-millisecond window. Production
+        // callers have no marker path and keep the existing lock behavior.
+        const testWaitingMarker = process.env.NODE_ENV === 'test'
+          ? process.env.CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER
+          : undefined;
+        if (testWaitingMarker) {
+          try {
+            writeFileSync(testWaitingMarker, JSON.stringify({
+              pid: process.pid, lockDir, guardCreated: true,
+            }), { flag: 'wx' });
+          } catch {
+            // The hook is observational only; the bounded test wait reports a
+            // marker-write failure without changing lock acquisition behavior.
+          }
+        }
+
         try {
           // STALE only. VANISHED means the lock was absent when we looked, and
           // by the time this line runs another acquirer may have won the mkdir
