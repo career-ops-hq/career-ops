@@ -22,7 +22,7 @@ import { join, relative } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { isNestedCheckout } from '../lib/mjs-files.mjs';
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, isolatedBatchStatePath } from './helpers.mjs';
 
 console.log('\nLocalized tracker-addition templates (#3702)');
 
@@ -329,7 +329,7 @@ for (const rel of [...seen].sort()) {
     try {
       out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
         encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds },
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(adds) },
       });
     } catch (e) { out = String(e.stdout ?? '') + String(e.stderr ?? ''); }
 

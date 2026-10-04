@@ -11,7 +11,7 @@
 // "Posted 5 Days Ago", "Posted 30+ Days Ago"); postedAt is derived from it
 // and omitted for the unbounded "30+ Days Ago" form.
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
 
 // Why one paginated pass (the unfaceted root crawl, or one facet-split slice)
 // stopped. COMPLETE covers both "ran out of pages" and "hit the offset
@@ -106,6 +106,56 @@ function resolveMaxPages(entry) {
   const v = entry?.max_pages;
   if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
   return DEFAULT_MAX_PAGES;
+}
+
+// ── Dead-tenant detection ────────────────────────────────────────
+//
+// The CXS API's 422/401/403 bodies carry no marker of their own (a bare
+// `{"errorCode":"HTTP_422",...}`, identical whether the board is genuinely
+// gone or just hit a transient WAF blip), so raw status alone isn't safe to
+// hand to dead-boards.mjs — a spread sample of 1200 tenants (2026-09) found
+// HTTP 500 failures whose careers page loads fine (live tenant, unrelated
+// hiccup), and even 2 of 614 raw-422 tenants with a clean careers page.
+// Two signals held across a repeat pass days later, always the same result:
+// - 422, careers page bounces to `community.workday.com/maintenance-page`
+//   (612 of 614 raw 422s, ~99.7%).
+// - 401/403, careers page redirects to `*.myworkday.com/wday/drs/outage`
+//   ("Workday is currently unavailable") — this is a per-board signal, not a
+//   per-tenant one: a restricted/retired board on an otherwise-live tenant
+//   (other boards on the same tenant answering normally) still redirects here
+//   every time it's checked.
+// Only page-0's request is checked — a tenant that fails mid-pagination
+// already has this file's own transient/structural handling and isn't
+// touched here.
+const WORKDAY_MAINTENANCE_MARKER = 'community.workday.com/maintenance-page';
+const WORKDAY_OUTAGE_REDIRECT_RE = /^https:\/\/[a-z0-9.-]+\.myworkday\.com\/wday\/drs\/outage(?:[/?]|$)/i;
+const CONFIRMED_DEAD_API_STATUSES = new Set([422, 401, 403]);
+
+/**
+ * A page-0 CXS failure with one of these statuses is worth the one extra
+ * careers-page fetch to check for Workday's own dead-board signals. Errors
+ * are swallowed here (a failed probe proves nothing) — the caller rethrows
+ * the original error either way, this only decides whether to relabel it as
+ * a synthetic 404 so dead-boards.mjs's existing 404 path (shared with every
+ * other provider) picks it up.
+ */
+async function confirmDeadViaCareersPage(ep, ctx) {
+  try {
+    const body = await ctx.fetchText(ep.jobBase, {
+      redirect: 'manual',
+      headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, 'accept-language': 'en-US,en;q=0.9' },
+    });
+    // Every confirmed case so far reaches the marker through the catch below
+    // (a non-2xx status) — this only guards the shape where a tenant serves
+    // it on a 200 instead. Safe to check unconditionally: a known-live tenant
+    // (tempus, 2026-09) does NOT carry this string on its 200 response, unlike
+    // the outage-page URL, which is boilerplate present on every Workday page
+    // regardless of health and is deliberately never checked on a 200 body.
+    return typeof body === 'string' && body.includes(WORKDAY_MAINTENANCE_MARKER);
+  } catch (err) {
+    if (err.status >= 300 && err.status < 400) return WORKDAY_OUTAGE_REDIRECT_RE.test(err.location || '');
+    return typeof err.body === 'string' && err.body.includes(WORKDAY_MAINTENANCE_MARKER);
+  }
 }
 
 // ── Facet split ───────────────────────────────────────────────────
@@ -266,11 +316,6 @@ export function chooseSplitFacet(facets, { exclude = [], locationHints } = {}) {
   return best ? { facetParameter: best.facetParameter, values: best.values } : null;
 }
 
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * True once a page's oldest unambiguously-dated posting is past the --since window.
  *
@@ -298,6 +343,11 @@ const CAREERS_RE = /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z
 // reports zero jobs and then reads as unreachable (#3498). Matched first so a
 // hand-verified CXS `api:` is honored as written instead of corrupting the entry.
 const CXS_RE = /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/([\w-]+)\/([^/?#]+)(?:\/jobs)?(?:[/?#]|$)/;
+// A myworkdaysite tenant: `https://{instance}.myworkdaysite.com/recruiting/{tenant}/{site}`.
+// Same Workday product, but the tenant lives in the PATH, not the hostname —
+// so neither CAREERS_RE nor CXS_RE matches it and every such board silently
+// threw "cannot derive CXS endpoint".
+const SITE_RE = /^https:\/\/([\w-]+)\.myworkdaysite\.com\/recruiting\/([\w-]+)\/([^/?#]+)/;
 
 function makeEndpoint(origin, tenant, site) {
   return {
@@ -309,6 +359,19 @@ function makeEndpoint(origin, tenant, site) {
     // returns the posting's DETAIL document (GET, no body). That is the only
     // place a multi-location posting's real places exist — see
     // MULTI_LOCATION_PLACEHOLDER_RE.
+    cxsBase: `${origin}/wday/cxs/${tenant}/${site}`,
+    origin,
+  };
+}
+
+// myworkdaysite's public posting path is /recruiting/{tenant}/{site}{externalPath},
+// unlike myworkdayjobs' /{site}{externalPath} — so jobBase differs even though
+// the CXS shape is identical.
+function makeSiteEndpoint(host, tenant, site) {
+  const origin = `https://${host}`;
+  return {
+    api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
+    jobBase: `${origin}/recruiting/${tenant}/${site}`,
     cxsBase: `${origin}/wday/cxs/${tenant}/${site}`,
     origin,
   };
@@ -330,6 +393,11 @@ function resolveEndpoint(entry) {
     if (cxs) {
       const [, host, instance, tenant, site] = cxs;
       return makeEndpoint(`https://${host}.${instance}.myworkdayjobs.com`, tenant, site);
+    }
+    const siteMatch = url.match(SITE_RE);
+    if (siteMatch) {
+      const [, instance, tenant, siteName] = siteMatch;
+      return makeSiteEndpoint(`${instance}.myworkdaysite.com`, tenant, siteName);
     }
     const m = url.match(CAREERS_RE);
     if (!m) continue;
@@ -382,13 +450,23 @@ function locationFromPath(externalPath) {
 // URLs would each key to a different requisition ID and never collapse.
 /**
  * Lowercase a raw requisition token and drop Workday's cross-site repost
- * disambiguator (a trailing `-N`, one or two digits).
+ * disambiguator, a trailing `-N`. The suffix is a disambiguator only when two
+ * things hold (credit: ronanime-arch, PR #3446):
+ *   - N is one or two digits. This is what keeps Walmart's "R-2593225" whole:
+ *     a seven-digit tail never splits, so the base check never runs.
+ *   - What precedes it is requisition-ID-shaped on its own: a digit, then 2+
+ *     trailing digits, underscores allowed. This is what keeps a short "R-25"
+ *     whole — its base "r" has no digit.
  *
- * Only treat the suffix as a disambiguator when what precedes it is already
- * requisition-ID-shaped on its own (a leading digit, 2+ trailing digits,
- * underscores allowed in between) — otherwise the hyphen digits ARE the
- * requisition ID and must be kept, e.g. Walmart's "R-2593225" (credit:
- * ronanime-arch, PR #3446).
+ * A hyphenated base ("req-271559-1", "jr-017459-2") is admitted too (#3882),
+ * but only with a single-digit 1-9 counter, the only values Workday was seen
+ * to emit. A tenant numbering its own IDs "req-2026-01".."-12" must not start
+ * folding into one key: "-01".."-09" are zero-padded and "-10".."-12" are two
+ * digits, so all twelve stay distinct. An unpadded "req-2026-1".."-9" sibling
+ * set cannot be told apart from a republish by the ID string alone and does
+ * fold — an accepted limitation, see #3882. Bases without a hyphen keep
+ * exactly the rule they had, so no key they produced before moves (scan
+ * history is re-keyed through workdayDedupKey).
  *
  * Shared with scan.mjs's `requisitionIdForDedup` so that a tracker note which
  * copied the URL tail (`req JR25919-1`) and the URL itself name the same
@@ -402,7 +480,12 @@ function locationFromPath(externalPath) {
 export function stripWorkdayRepostSuffix(raw) {
   const token = raw == null ? '' : String(raw).toLowerCase();
   const m = token.match(/^(.*?)-(\d{1,2})$/);
-  return m && /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(m[1]) ? m[1] : token;
+  if (!m) return token;
+  const base = m[1];
+  const isDisambiguator = base.includes('-')
+    ? /^[a-z-]*\d[a-z0-9_-]*\d{2,}$/.test(base) && /^[1-9]$/.test(m[2])
+    : /^[a-z]*\d[a-z0-9_]*\d{2,}$/.test(base);
+  return isDisambiguator ? base : token;
 }
 
 /**
@@ -419,7 +502,7 @@ export function isWorkdayJobUrl(url) {
   } catch {
     return null;
   }
-  return parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com');
+  return /\.myworkday(jobs|site)\.com$/.test(parsed.hostname.toLowerCase());
 }
 
 export function workdayDedupKey(job) {
@@ -436,7 +519,16 @@ export function workdayDedupKey(job) {
   if (underscoreIdx === -1) return null; // no title/requisition-ID separator — nothing to key on
   const reqId = stripWorkdayRepostSuffix(lastSegment.slice(underscoreIdx + 1));
   if (!reqId) return null;
-  return `workday:${parsed.hostname.toLowerCase()}:${reqId}`;
+  let scope = parsed.hostname.toLowerCase();
+  // One myworkdaysite.com host serves many tenants (/recruiting/{tenant}/{site}):
+  // scope by the path tenant but not {site}, so one tenant's cross-site reposts
+  // still collapse. Colon-free: scan.mjs reads the ID after the second colon.
+  if (scope.endsWith('.myworkdaysite.com')) {
+    const tenant = parsed.pathname.match(/^\/recruiting\/([\w-]+)\//)?.[1];
+    if (!tenant) return null;
+    scope += `/recruiting/${tenant.toLowerCase()}`;
+  }
+  return `workday:${scope}:${reqId}`;
 }
 
 // Workday's LIST endpoint answers a posting attached to more than one location
@@ -773,7 +865,17 @@ export default {
       return { jobs, total, facets, stopReason, clamped };
     };
 
-    const root = await runQuery({});
+    let root;
+    try {
+      root = await runQuery({});
+    } catch (err) {
+      if (CONFIRMED_DEAD_API_STATUSES.has(err.status) && await confirmDeadViaCareersPage(ep, ctx)) {
+        const notFound = new Error(`workday: ${entry.name} confirmed dead (maintenance page)`);
+        notFound.status = 404;
+        throw notFound;
+      }
+      throw err;
+    }
     const { total, stopReason } = root;
 
     // Set when the split ran out of depth, slices, or splittable facets with

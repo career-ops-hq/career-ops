@@ -19,7 +19,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, isolatedBatchStatePath } from './helpers.mjs';
 import { looksLikeScoreCell } from '../tracker-parse.mjs';
 import { normalizedTrackerScore } from '../lib/tracker-addition.mjs';
 
@@ -83,7 +83,7 @@ try {
   try {
     output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
       encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
     });
   } catch (e) {
     output = String(e.stdout ?? '') + String(e.stderr ?? '');
@@ -110,7 +110,7 @@ try {
     try {
       out2 = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
         encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, CAREER_OPS_TRACKER: t2, CAREER_OPS_ADDITIONS: a2 },
+        env: { ...process.env, CAREER_OPS_TRACKER: t2, CAREER_OPS_ADDITIONS: a2, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(a2) },
       });
     } catch (e) { out2 = String(e.stdout ?? '') + String(e.stderr ?? ''); }
     const { row: row2, cells: cells2 } = mergedRow(readFileSync(t2, 'utf-8'));

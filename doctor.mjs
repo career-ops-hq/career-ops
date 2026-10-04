@@ -5,7 +5,7 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
@@ -14,6 +14,7 @@ import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { validateProfile, EXAMPLE_PATH } from './validate-profile.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -23,21 +24,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 
 // CLIs the doctor recognises.
-const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
+const VALID_CLIS = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini', 'hermes'];
 
 // --help ran the full diagnostic and printed the report at exit 0 (#2856), so
 // a mistyped flag was indistinguishable from a clean run — and --targe
 // silently diagnosed THIS checkout instead of the one asked for. Handled via
 // lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
 // flags before --help so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--target', '--json', '--strict', '--cli', '--help', '-h'];
+const KNOWN_FLAGS = ['--target', '--json', '--init-templates', '--strict', '--cli', '--help', '-h'];
 
 // Both take their value as the next argv token.
 const VALUE_FLAGS = ['--target', '--cli'];
 
 const USAGE = `Usage:
   node doctor.mjs                    # run the setup diagnostic
-  node doctor.mjs --json             # machine-readable onboarding state
+  node doctor.mjs --json             # read-only machine-readable onboarding state
+  node doctor.mjs --json --init-templates # create missing personalization files for onboarding
   node doctor.mjs --strict           # also probe portals.yml entries (network)
   node doctor.mjs --target <path>    # diagnose another career-ops checkout
   node doctor.mjs --cli <name>       # check a specific CLI's integration
@@ -54,9 +56,22 @@ CLIs: ${VALID_CLIS.join(', ')}`;
 validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
 const targetIdx = argv.indexOf('--target');
-const projectRoot =
-  targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : getCareerOpsRoot();
+const explicitTarget = targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : null;
+const projectRoot = explicitTarget || getCareerOpsRoot();
+// node_modules and .git belong to the CODE checkout, not the resolved data
+// root — under a split checkout (CAREER_OPS_ROOT/CAREER_OPS_DATA_DIR or the
+// .career-ops-data marker) those are two different directories, and neither
+// ever holds the other's artifacts (career-ops#3867 finding 6). --target is
+// the one case that means "diagnose this whole other checkout" — code layer
+// included — so it keeps pointing both roots at the same place, matching how
+// tests/doctor-tracked-bak-files.test.mjs already exercises it.
+const codeRoot = explicitTarget || __dirname;
 const JSON_OUT = argv.includes('--json');
+const INIT_TEMPLATES = argv.includes('--init-templates');
+if (INIT_TEMPLATES && !JSON_OUT) {
+  console.error('Error: --init-templates requires --json');
+  process.exit(1);
+}
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
@@ -145,7 +160,7 @@ function checkBillingSource() {
 }
 
 function checkDependencies() {
-  if (existsSync(join(projectRoot, 'node_modules'))) {
+  if (existsSync(join(codeRoot, 'node_modules'))) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
@@ -169,6 +184,9 @@ function checkTrackedBakFiles(root) {
       cwd: root,
       encoding: 'utf-8',
       timeout: 5000,
+      // The non-checkout classification below reads Git's diagnostic. Keep
+      // this subprocess deterministic without changing the user's locale.
+      env: { ...process.env, LC_ALL: 'C', LANGUAGE: 'C' },
       // stderr PIPED, not inherited. execFileSync's default hands the child our
       // own stderr, so outside a checkout git printed
       //   fatal: not a git repository (or any of the parent directories): .git
@@ -241,8 +259,8 @@ async function checkPlaywright() {
 }
 
 // Per-CLI MCP config registry. `plugins: true` marks a CLI whose MCP servers
-// can also arrive from an installed plugin, i.e. from outside the project root
-// (see isPlaywrightMcpFromPlugin).
+// can also arrive from outside the project root: from .claude.json or from an
+// installed plugin (see isPlaywrightMcpFromClaudeJson, isPlaywrightMcpFromPlugin).
 const MCP_CONFIGS = [
   { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'], plugins: true },
   // opencode.jsonc is JSONC: OpenCode accepts comments and trailing commas
@@ -331,6 +349,28 @@ function isPlaywrightMcpFromPlugin(root) {
   });
 }
 
+// `claude mcp add` writes to .claude.json, not to any file in the checkout
+// (#4392): user scope under the top-level `mcpServers`, local scope (the
+// default) under `projects[<dir>].mcpServers`. The file lives in
+// CLAUDE_CONFIG_DIR when that is set, otherwise directly in the home dir -
+// beside ~/.claude/, not inside it.
+//
+// Claude Code on Windows can store one directory under both C:\... and C:/...
+// with the server under only one of them, while process.cwd() returns the
+// backslash form. So keys are compared with slashes and case folded, and every
+// matching key counts, not just the first.
+function isPlaywrightMcpFromClaudeJson(root) {
+  const dir = process.env.CLAUDE_CONFIG_DIR || homedir();
+  const cfg = readConfigIfPresent(join(dir, '.claude.json'));
+  if (!cfg || typeof cfg !== 'object') return false;
+  if (hasPlaywrightIn(cfg)) return true;
+  if (!root || !cfg.projects || typeof cfg.projects !== 'object') return false;
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const target = norm(root);
+  return Object.entries(cfg.projects)
+    .some(([key, project]) => norm(key) === target && hasPlaywrightIn(project));
+}
+
 function isPlaywrightMcpConfigured(root, activeCli) {
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
   if (!entry) return false; // known CLI but no MCP file mapping; caller warns
@@ -341,7 +381,8 @@ function isPlaywrightMcpConfigured(root, activeCli) {
   if (inProject) return true;
   // Gated behind the project scan, so an already-configured project pays no
   // extra I/O and non-plugin CLIs never touch the user config dir.
-  return entry.plugins === true && isPlaywrightMcpFromPlugin(root);
+  return entry.plugins === true
+    && (isPlaywrightMcpFromClaudeJson(root) || isPlaywrightMcpFromPlugin(root));
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
@@ -399,7 +440,7 @@ function checkPlaywrightMcp(root, activeCli) {
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
       entry.plugins
-        ? `No project-level MCP config, and no enabled plugin providing one, was detected for ${activeCli}.`
+        ? `No project-level MCP config, no server in .claude.json (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json when set), and no enabled plugin providing one, was detected for ${activeCli}.`
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
@@ -640,6 +681,34 @@ function checkPlugins(root) {
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
 }
 
+// profile.yml steers scoring targets, output language, spend tier, CV format and
+// location policy — and the existence check above is all that ever looked at it.
+// Every reader does `profile?.language?.output` and takes the fallback when the
+// key is missing, which is indistinguishable from the key being MISSPELLED. So
+// `langauge: {output: ja}` produces English output and no signal anywhere.
+//
+// WARN, never FAIL, like the plugin check below it: an unknown key is a typo,
+// not a broken install, and refusing to run would be a worse answer than naming
+// it.
+function checkProfileShape(root) {
+  const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
+  if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  let findings;
+  try {
+    const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+  } catch (err) {
+    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+  }
+  const actionable = findings.filter((f) => f.level !== 'info');
+  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  return {
+    warn: true,
+    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    fix: actionable.map((f) => f.message),
+  };
+}
+
 async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
@@ -653,13 +722,14 @@ async function main() {
     geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
-    checkTrackedBakFiles(projectRoot),
+    checkTrackedBakFiles(codeRoot),
     await checkPlaywright(),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
     checkPersonalization(projectRoot),
+    checkProfileShape(projectRoot),
     checkAutoDir('data'),
     checkPipelineFile(),
     checkAutoDir('output'),
@@ -721,8 +791,8 @@ async function main() {
 //     into every A-F evaluation, so offers are scored against a stranger.
 //   _brief.md unedited hands the triage first pass literal `{placeholders}`
 //     instead of the candidate's archetypes, comp floor and hard DQ criteria.
-// doctor auto-copies both from their templates on first run, so "the file
-// exists" is guaranteed and tells us nothing — only its CONTENT does.
+// Explicit onboarding copies both from their templates, so existence alone
+// tells us nothing about personalization — only the CONTENT does.
 const PERSONALIZATION_FILES = [
   {
     path: 'modes/_profile.md',
@@ -749,7 +819,8 @@ function unpersonalizedFiles(root) {
   const out = [];
   for (const { path, template, impact } of PERSONALIZATION_FILES) {
     const targetPath = join(root, ...path.split('/'));
-    const templatePath = join(root, ...template.split('/'));
+    const rootTemplatePath = join(root, ...template.split('/'));
+    const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
     if (!existsSync(targetPath) || !existsSync(templatePath)) continue;
     let target, tpl;
     try {
@@ -803,9 +874,11 @@ function onboardingState(root) {
     const targetPath = join(root, ...target.split('/'));
     const rootTemplatePath = join(root, ...template.split('/'));
     const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
-    if (!existsSync(targetPath) && existsSync(templatePath)) {
+    // Diagnosis must not create user files. Copy only during explicit onboarding.
+    if (INIT_TEMPLATES && !existsSync(targetPath) && existsSync(templatePath)) {
       try {
-        copyFileSync(templatePath, targetPath);
+        mkdirSync(dirname(targetPath), { recursive: true });
+        copyFileSync(templatePath, targetPath, constants.COPYFILE_EXCL);
         autoCopied.push(target);
       } catch {
         // Gracefully handle read-only filesystems (e.g., CI/CD or containerized environments)
@@ -823,7 +896,12 @@ function onboardingState(root) {
   // user-data layer and may point elsewhere under split-checkout installs.
   const mcpCheck = checkPlaywrightMcp(process.cwd(), activeCli);
   const unpersonalized = unpersonalizedFiles(root);
-  const bakCheck = checkTrackedBakFiles(root);
+  // Every other check in this function is data-layer and correctly uses this
+  // function's own `root` parameter. The tracked-.bak check is the one
+  // code-layer exception (#3867 finding 6) — it must read the module-level
+  // codeRoot (the code checkout), which only differs from `root` when a real
+  // split-checkout data root is in play and no --target was given.
+  const bakCheck = checkTrackedBakFiles(codeRoot);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),

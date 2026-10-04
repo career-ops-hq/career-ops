@@ -38,11 +38,52 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { isIP } from 'net';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
+
+// The portal probes are the one place that keeps following redirects: they hit
+// the ATS vendors' own hosts, and a moved board answers with a 3xx. `_http.mjs`
+// refuses redirects by default (#4079), so the probes follow them here, one hop
+// at a time under redirect:'manual', and each hop is checked like the first
+// request. A hostname is checked where it resolves (providers/_ip-guard.mjs),
+// but a literal address is dialled without a lookup, so it is checked here.
+const MAX_PROBE_REDIRECTS = 5;
+
+/** Where a refused 3xx points, or null when the probe must not go there. */
+function probeRedirectTarget(err, from) {
+  const status = err?.status;
+  if (typeof status !== 'number' || status < 300 || status >= 400 || !err.location) return null;
+  let next;
+  try {
+    next = new URL(err.location, from);
+  } catch {
+    return null;
+  }
+  if (next.protocol !== 'https:' && next.protocol !== 'http:') return null;
+  const host = next.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host) && isBlockedAddress(host)) return null;
+  return next.href;
+}
+
+const followRedirects = (fetchFn) => async (url, opts = {}) => {
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    try {
+      return await fetchFn(current, { ...opts, redirect: 'manual' });
+    } catch (err) {
+      const next = hop < MAX_PROBE_REDIRECTS ? probeRedirectTarget(err, current) : null;
+      if (next === null) throw err;
+      current = next;
+    }
+  }
+};
+const probeFetchJson = followRedirects(defaultFetchJson);
+const probeFetchText = followRedirects(defaultFetchText);
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
@@ -251,7 +292,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson, eu = false } = {},
+  { fetchJson = probeFetchJson, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -601,7 +642,7 @@ export async function probeProvider(entry, provider, baseCtx) {
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, fetchText = probeFetchText, providers = null, httpCtx = null } = {},
 ) {
   const list = Array.isArray(companies) ? companies : [];
   const results = [];
@@ -660,7 +701,7 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, providers = null, httpCtx = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
   const config = yaml.load(readFileSync(filePath, 'utf-8'));
@@ -800,7 +841,7 @@ async function main() {
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   const strict = hasFlag(args, '--strict');
-  const fetchJson = defaultFetchJson;
+  const fetchJson = probeFetchJson;
 
   if (hasFlag(args, '--add')) {
     await runAdd(flagValue(args, '--add') || '', { fetchJson });
@@ -832,7 +873,7 @@ async function main() {
   // plugin-free install (mergeProviderPlugins returns before config/plugins.yml
   // is read when it is absent).
   const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
-  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
+  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR), dataRoot: DATA_ROOT });
   const httpCtx = makeHttpCtx();
   const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
   if (!found) {
