@@ -82,6 +82,20 @@ test('a fence opened inside a list item is still a fence', () => {
   assert.deepEqual(parseDependsOn('- ```\n  sample\n  ```\n\nDepends on #42\n'), [42]);
 });
 
+test('a fence opened in a list item ends with the list item', () => {
+  // GFM closes an unclosed fence at the end of its enclosing list item. Running
+  // it to the end of the document instead swallowed every declaration after the
+  // list, which hides a dependency rather than inventing one: the direction that
+  // lets a bad merge through. A line that is non-blank and indented less than the
+  // item's content column has left the item.
+  assert.deepEqual(parseDependsOn('- ```\n  sample\n\nDepends on #42\n'), [42]);
+  assert.deepEqual(parseDependsOn('- ```\n  sample\nDepends on #42\n'), [42]);
+  // Still inside the item, so still inside the block.
+  assert.deepEqual(parseDependsOn('- ```\n  Depends on #42\n'), []);
+  // A fence at the margin keeps running to the end of the document, per GFM.
+  assert.deepEqual(parseDependsOn('```\nDepends on #42\n'), []);
+});
+
 test('a code span cannot open at a backslash-escaped backtick', () => {
   // GFM: a backslash-escaped backtick is literal text, never a delimiter.
   // CODE_SPAN matched between two escaped backticks and masked everything
@@ -116,6 +130,24 @@ test('a commented-out command is not counted as an invocation', () => {
     paths(INVOKES, stripShellComments('echo "a # b" && node a.mjs\n')),
     ['a.mjs'],
   );
+});
+
+test('a code span ending in a backslash still closes', () => {
+  // GFM applies backslash escapes OUTSIDE code spans only. Inside one a
+  // backslash is literal, so it cannot stop the span closing. Neutralising
+  // every escape pair before the scan ate the closer of a span ending in a
+  // backslash, and the span ran on to the next backtick and swallowed the
+  // declaration between them. Windows paths make `C:\\` an everyday body.
+  assert.deepEqual(
+    parseDependsOn('Writes to `C:\\` on Windows.\n\n**Depends on #4076** first.\n\nSee `set-status.mjs`.\n'),
+    [4076],
+  );
+  // The opening side of the rule still holds: an escaped backtick opens nothing.
+  assert.deepEqual(parseDependsOn('Note \\`sample\n\nDepends on #42\n\nand \\`more\n'), [42]);
+  // An escaped BACKSLASH leaves the backtick after it free to open a span.
+  assert.deepEqual(parseDependsOn('a \\\\`Depends on #42`\n'), []);
+  // Control: an ordinary span still masks its contents.
+  assert.deepEqual(parseDependsOn('`Depends on #42`\n'), []);
 });
 
 test('an unclosed fence runs to the end of the body', () => {

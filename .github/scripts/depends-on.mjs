@@ -75,6 +75,19 @@ function stripFences(text) {
       kept.push(line);
       continue;
     }
+    // A fence opened in a list item ends WITH the list item (GFM), so a
+    // non-blank line indented less than the item's content column has left the
+    // item and is outside the block. Running such a fence to the end of the
+    // document instead swallowed every declaration after the list, hiding a
+    // dependency rather than inventing one. Blank lines do not end an item, so
+    // they are not a boundary. A fence at the margin (openIndent 0) still runs
+    // to the end of the document.
+    if (openIndent > 0 && line.trim() !== '' && /^ */.exec(line)[0].length < openIndent) {
+      open = null;
+      openIndent = 0;
+      kept.push(line);
+      continue;
+    }
     // Drop up to the opener's content column before testing the closer, so a
     // fence opened in a list item closes at that column; FENCE_CLOSE's own
     // 0-3 allowance still applies to whatever indentation is left.
@@ -87,35 +100,57 @@ function stripFences(text) {
 
 // A code span of any delimiter length, so ``#99`` documents the format the same
 // way `#99` does. GFM also permits a newline inside a span, so this crosses
-// lines; a run with no matching partner simply never matches, which is what
-// keeps a lone stray backtick from swallowing the rest of the body.
-// The lookarounds make each delimiter a WHOLE run: without them the
-// backreference could match the first two backticks of a three-backtick run,
-// ending a span early and exposing the text inside it.
-const CODE_SPAN = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
-
+// lines; a run with no matching partner is literal text, which is what keeps a
+// lone stray backtick from swallowing the rest of the body. The closing run
+// must be exactly as long as the opening one.
+//
+// Scanned rather than matched with one regex, because the escape rule is
+// ASYMMETRIC and a single pattern could not express it. GFM applies backslash
+// escapes only OUTSIDE a code span: `\`` cannot OPEN one, but inside a span a
+// backslash is literal and cannot stop one CLOSING. Neutralising every escape
+// pair before a regex scan got the opening half right and the closing half
+// wrong: it ate the closer of a span ending in a backslash, so `C:\` ran on to
+// the next backtick and masked a real declaration between them. Hiding a
+// declaration is the failure direction that lets a bad merge through, and
+// Windows paths make that body an everyday one here.
+//
 // MASK rather than delete, replacing every non-newline character with a space.
 // Deleting a span joins the text around it and shifts the lines beneath it, and
 // the line rules below are anchored to the start of a line: ``Depends on #99``
 // would collapse to an unquoted line and become a real declaration. Masking
 // preserves both the line count and the column positions.
-// A backslash escape makes the next character literal (GFM), so an escaped
-// backtick can neither open nor close a span. Neutralise every escape pair
-// before the scan rather than after it: CODE_SPAN was matching BETWEEN two
-// escaped backticks and masking a real declaration lying between them, which
-// is the failure direction that lets a bad merge through. The substitution is
-// length-preserving, so the ranges still line up with the original column for
-// column, and an escaped BACKSLASH correctly leaves the backtick after it free
-// to delimit.
-const ESCAPE_PAIR = /\\[\s\S]/g;
-
 function maskCodeSpans(text) {
-  const scannable = text.replace(ESCAPE_PAIR, '\0\0');
   const chars = text.split('');
-  for (const m of scannable.matchAll(CODE_SPAN)) {
-    for (let i = m.index; i < m.index + m[0].length; i += 1) {
-      if (chars[i] !== '\n') chars[i] = ' ';
+  // An odd run of backslashes escapes the character after it; an even run is
+  // escaped backslashes and leaves it free.
+  const isEscaped = (at) => {
+    let n = 0;
+    for (let j = at - 1; j >= 0 && text[j] === '\\'; j -= 1) n += 1;
+    return n % 2 === 1;
+  };
+  const runAt = (at) => {
+    let n = 0;
+    while (text[at + n] === '`') n += 1;
+    return n;
+  };
+
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== '`' || isEscaped(i)) { i += 1; continue; }
+    const open = runAt(i);
+    let j = i + open;
+    let close = -1;
+    while (j < text.length) {
+      if (text[j] !== '`') { j += 1; continue; }
+      const run = runAt(j);
+      // No isEscaped() here, deliberately: inside the span the backslash is
+      // literal, so it cannot stop this run from closing.
+      if (run === open) { close = j; break; }
+      j += run;
     }
+    if (close === -1) { i += open; continue; }
+    for (let k = i; k < close + open; k += 1) if (chars[k] !== '\n') chars[k] = ' ';
+    i = close + open;
   }
   return chars.join('');
 }
