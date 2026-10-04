@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync, chmodSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -699,14 +699,27 @@ export function renameSyncWithRetry(tmpPath, path, rename = renameSync) {
  * `renameSyncWithRetry`). If the write or rename ultimately fails, the temporary
  * file is cleaned up before the original error is rethrown.
  *
+ * The replacement is a NEW file, so it takes the process umask rather than the
+ * original's permissions. Pass `mode` to carry them over: it is applied to the
+ * temporary file before the rename, so the destination is never observable with
+ * wider permissions than it had.
+ *
  * @param {string} path - Final file path to replace.
  * @param {string} content - Complete file content to write.
+ * @param {{mode?: number}} [options] - `mode`: permission bits for the replacement.
  * @returns {void}
  */
-export function writeFileAtomic(path, content) {
+export function writeFileAtomic(path, content, { mode } = {}) {
   const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(tmpPath, content);
+    if (mode === undefined) {
+      writeFileSync(tmpPath, content);
+    } else {
+      // Creation honours the umask, so it can only narrow `mode`; chmod then
+      // sets it exactly.
+      writeFileSync(tmpPath, content, { mode });
+      chmodSync(tmpPath, mode);
+    }
     renameSyncWithRetry(tmpPath, path);
   } catch (err) {
     rmSync(tmpPath, { force: true });
