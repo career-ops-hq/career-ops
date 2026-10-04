@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { pipelineSummary, readStatusLog } from "@/lib/career-ops";
+import { pipelineSummary, readApplicationStatusLog, readStatusLog } from "@/lib/career-ops";
 import { PipelineSankey } from "@/components/analytics/pipeline-sankey";
 import { canonStatus, scoreNum } from "@/lib/format";
-import { cumulativeTiles } from "@/lib/funnel-tiles.mjs";
+import { cumulativeTilesWithHistory } from "@/lib/funnel-tiles.mjs";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +17,7 @@ const STAGES: { key: string; label: string }[] = [
   { key: "DISCARDED", label: "Discarded" },
 ];
 
-export default function Analytics() {
+export default async function Analytics() {
   const { applications } = pipelineSummary();
   const statusLog = readStatusLog();
   const total = applications.length;
@@ -47,8 +47,11 @@ export default function Analytics() {
   // counters whose zero-state shows a coaching nudge, so a candidate who has
   // already advanced past a stage must not read 0 for it (an offer-holder was
   // told "Interviews follow replies — keep follow-ups warm"). Mirrors
-  // everInterview/everOffer in stats.mjs's computeFunnel().
-  const { interviews, offers } = cumulativeTiles(applications.map((a) => canonStatus(a.status)));
+  // everInterview/everOffer in stats.mjs, including stages recovered from history.
+  const { interviews, offers } = await cumulativeTilesWithHistory(
+    applications.map((a) => ({ n: a.n, status: canonStatus(a.status) })),
+    readApplicationStatusLog(),
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">

@@ -11,7 +11,7 @@ career-ops is a great place to make your **first open-source contribution** — 
 - **We answer fast.** Open an issue or PR and you'll hear back, usually within a day or two. No black holes.
 - **Tiny on-ramps.** Browse [`good first issue`](https://github.com/career-ops-hq/career-ops/contribute) — each is scoped small, with a time estimate, the pattern to copy, and a clear "done", so your first PR is a win, not a maze.
 - **Your human work gets a real review.** We read every PR. We don't drown contributors in bot noise, and we don't merge AI-slop — put thought in, get thought back.
-- **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (reviewer, then maintainer).
+- **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (see the [ladder](GOVERNANCE.md#contributor-ladder)).
 
 New to all this? That's the point. Claim a good-first-issue by commenting `/assign` on it, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
 
@@ -66,14 +66,7 @@ Comment `/assign` on any [`good first issue`](https://github.com/career-ops-hq/c
 
 ## The contribution ladder
 
-There's a clear path here — we promote people who show up:
-
-1. **First-time contributor** — you landed a PR. Welcome aboard.
-2. **Trusted contributor** — a few solid merges; we fast-track your PRs and tag you on related work.
-3. **Reviewer** — you help triage and review others' PRs. We invite you.
-4. **Maintainer** — you help steer the project.
-
-We credit contributors publicly and invite high-signal folks up the ladder. Want to help more? Just say so in an issue.
+There's a clear path here, written down in one place: [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder). We credit contributors publicly, and the [`help wanted`](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) board is open to everyone.
 
 ## Adopting an abandoned PR
 

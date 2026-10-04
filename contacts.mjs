@@ -12,7 +12,10 @@
  * vCard 3.0 property or a tracker join. Minimum valid row: >= 4 cells with
  * non-empty name + company; all channels optional; `-` for tracker# when the
  * contact precedes an application. type: recruiter|hiring-manager|peer|
- * interviewer|other (contacto taxonomy). Lines are updated in place when a
+ * interviewer|internal-referral|other (contacto taxonomy; internal-referral
+ * is a saved contact with a REAL prior relationship — a past interviewer, or
+ * a contact from an earlier application at the same company — distinct from
+ * peer's cold, no-prior-relationship assumption). Lines are updated in place when a
  * contact's details change — unlike the append-only salary-observations log.
  * If two lines share the same name + company (same UID), the LAST line wins
  * the --vcf export — in an update-in-place store the freshest line is the
@@ -32,6 +35,16 @@
  * Malformed rows (too few cells, missing name/company, off-enum type) are
  * collected into a `quality` object — reported loudly, never dropped
  * silently, never throwing.
+ *
+ * Saved contacts at a company are looked up by contact-lookup.mjs (#4691),
+ * which the `contacto` mode runs before a cold WebSearch — see that file for
+ * the matching logic (it reuses tracker-utils.mjs's normalizeCompany(), the
+ * same key merge-tracker.mjs/set-status.mjs/company-history.mjs use for
+ * same-company lookups). Kept out of THIS file deliberately: contacts.mjs is
+ * zero-dep by design (its CLI test suite copies just this script + lib/ +
+ * path-resolver.mjs into an isolated temp dir — see tests/contacts.test.mjs
+ * §9), and tracker-utils.mjs pulls in tracker-parse.mjs's tracker-aliases.json
+ * and the js-yaml package, which that isolation deliberately does not carry.
  *
  * Run: node contacts.mjs                     (JSON: contacts + quality + total)
  *      node contacts.mjs --summary           (human-readable table)
@@ -83,7 +96,12 @@ const vcfPathArg = (() => {
   return val === undefined || val.startsWith('--') ? null : val || null;
 })();
 
-const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'other']);
+// `peer` (contacto taxonomy): no prior relationship — a cold, warm-intro-style
+// outreach where a job ask would be premature. `internal-referral` (#4691) is
+// its opposite: a REAL prior relationship already exists (a saved contact from
+// an earlier application at this same company, or a past interviewer), so the
+// outreach can name that history directly and ask for a referral outright.
+const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
 
 // --- Phonebook parsing (TSV) ---
 export function escapeFormulaCell(value) {

@@ -288,7 +288,6 @@ career-ops 使用共用的指令路由。在會註冊斜線指令的 CLI 裡，�
 /career-ops interview    → 互動式的個人資料／履歷入門訪談
 /career-ops master-profile → 匯入、審閱並驗證你的主職涯檔案（Master Career Profile）
 /career-ops eu-swe    → 在履歷／申請／面試前校準一份歐洲 SWE 申請
-/career-ops eu-fintech → 掃描 21 個歐洲金融科技求職平台的 Product Manager 職缺（零 token）
 /career-ops interview/plan → 為即將到來的面試制定按時間區塊安排的準備計畫
 /career-ops interview/practice → 模擬面試，一次一個問題並給出回饋
 /career-ops interview/debrief → 面試後檢討：補上短板，預測下一輪

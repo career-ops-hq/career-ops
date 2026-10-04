@@ -13,6 +13,11 @@ version: 1.0.0
      Keep each surface's existing font and color as its fallback: this template
      has different defaults from the standard CV, including within its own
      typography and palette. With no profile override those defaults stay put. */
+  :root {
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
+  }
 
   /* ATS-safe typography (#font-extraction fix):
      The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
@@ -182,11 +187,11 @@ version: 1.0.0
     font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -267,7 +272,7 @@ version: 1.0.0
     font-size: 9px;
     font-weight: 500;
     color: hsl(187, 74%, 32%);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
@@ -446,6 +451,16 @@ version: 1.0.0
   .skill-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in, unchanged default (see templates/cv-template.html). This
+     template's :root block (its --zhm-* palette) does not declare
+     --job-break-inside, so the fallback below is the only default; a
+     config/profile.yml style.job_break_inside override still reaches it via
+     the injected :root block. */
+  .job {
+    page-break-inside: var(--job-break-inside, auto);
+    break-inside: var(--job-break-inside, auto);
   }
 
   /* Keep a heading attached to the content that follows it, so headings are not

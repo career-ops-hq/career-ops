@@ -24,6 +24,7 @@ import * as yaml from 'js-yaml';
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
   runHook, filterResultsForId, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
+  warnConfigLeftInCodeRoot,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
@@ -100,7 +101,9 @@ function buildSnapshot() {
 }
 
 async function cmdList() {
-  const cfg = await loadPluginConfig(ROOT);
+  warnConfigLeftInCodeRoot(ROOT, DATA_ROOT);
+  const cfg = await loadPluginConfig(DATA_ROOT);
+  await loadDotenvOnce(DATA_ROOT);
   const overridden = resolveSuccessorIds(ROOT); // ids where an installed successor is active
   const manifests = discoverPlugins(pluginRoots(ROOT), overridden);
   if (manifests.length === 0) {
@@ -131,7 +134,8 @@ async function cmdRun(args) {
   const id = positional[0];
   if (!id) { console.error('Usage: node plugins.mjs run <id> [hook] [args…] [--dry-run]'); process.exit(1); }
 
-  const cfg = await loadPluginConfig(ROOT);
+  warnConfigLeftInCodeRoot(ROOT, DATA_ROOT);
+  const cfg = await loadPluginConfig(DATA_ROOT);
   const manifest = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id);
   if (!manifest) { console.error(`Unknown plugin "${id}". Run \`node plugins.mjs list\`.`); process.exit(1); }
 
@@ -151,17 +155,19 @@ async function cmdRun(args) {
   }
   if (!manifest.hooks.includes(hook)) { console.error(`Plugin "${id}" does not expose a "${hook}" hook (has: ${manifest.hooks.join(', ')}).`); process.exit(1); }
 
+  // The user-layer .env belongs beside config/plugins.yml under DATA_ROOT.
+  // Load it before the gate so a configured key is not reported as missing.
+  await loadDotenvOnce(DATA_ROOT);
+
   // Two-gate check with an actionable message before doing any work.
   const status = pluginStatus(manifest, cfg);
   if (!status.configured) { console.error(`Plugin "${id}" is not enabled. Set plugins.${id}.enabled: true in config/plugins.yml.`); process.exit(1); }
   if (status.missingEnv.length) { console.error(`Plugin "${id}" is missing ${status.missingEnv.join(', ')} in .env. See .env.example.`); process.exit(1); }
 
-  await loadDotenvOnce();
-
   if (hook === 'ingest' || hook === 'search') {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
-    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dryRun, pluginId: id }), id);
+    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     // Additive de-dup: never re-add a URL already in the pipeline.
     const known = existingPipelineUrls();
@@ -180,7 +186,7 @@ async function cmdRun(args) {
     // Scale with tracker size so a growing applications.md doesn't age out.
     const rowCount = snapshot.applications.length;
     const timeoutMs = Math.min(120_000, Math.max(15_000, rowCount * 3_000));
-    const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dryRun, timeoutMs, pluginId: id }), id);
+    const results = filterResultsForId(await runHook('export', snapshot, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs, pluginId: id }), id);
     for (const r of results) {
       if (r.ok) console.log(`${r.id} export: pushed ${r.result?.pushed ?? 0} record(s).`);
       else console.log(`${r.id} export: failed — ${r.error}`);
@@ -190,7 +196,7 @@ async function cmdRun(args) {
 
   if (hook === 'notify') {
     const message = positional.slice(hookArgStart).join(' ') || '(career-ops notification)';
-    const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dryRun, pluginId: id }), id);
+    const results = filterResultsForId(await runHook('notify', { message }, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
     for (const r of results) console.log(r.ok ? `${r.id} notify: sent.` : `${r.id} notify: failed — ${r.error}`);
     return;
   }
@@ -257,15 +263,17 @@ export function parsePluginConfig(raw, file) {
 
 // Write enabled:true/false into config/plugins.yml, merging (never clobbering
 // the user's other plugins or non-secret settings).
-function setEnabled(id, on, settings) {
-  const file = path.join(ROOT, 'config', 'plugins.yml');
+export function setPluginEnabled(root, id, on, settings) {
+  const file = path.join(root, 'config', 'plugins.yml');
   const cfg = parsePluginConfig(existsSync(file) ? readFileSync(file, 'utf8') : null, file);
   if (!cfg.plugins || typeof cfg.plugins !== 'object') cfg.plugins = {};
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
-  mkdirSync(path.join(ROOT, 'config'), { recursive: true });
+  mkdirSync(path.join(root, 'config'), { recursive: true });
   writeFileSync(file, '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg), 'utf8');
 }
+
+const setEnabled = (id, on, settings) => setPluginEnabled(DATA_ROOT, id, on, settings);
 
 // The capability card a user must consent to before a plugin runs.
 function capabilityCard(manifest, source) {

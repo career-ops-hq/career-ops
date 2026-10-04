@@ -288,7 +288,6 @@ career-ops bruger en fælles kommandorouter. I CLI'er, der registrerer slash-kom
 /career-ops interview    → Interaktivt onboarding-interview om profil og CV
 /career-ops master-profile → Importér, gennemgå og validér din Master Career Profile
 /career-ops eu-swe    → Kalibrér en europæisk SWE-ansøgning før CV, ansøgning eller samtale
-/career-ops eu-fintech → Scan 21 europæiske fintech-portaler for Product Manager-roller (uden tokens)
 /career-ops interview/plan → Tidsblokket forberedelsesplan til en kommende samtale
 /career-ops interview/practice → Øvesamtale, ét spørgsmål ad gangen med feedback
 /career-ops interview/debrief → Debrief efter samtalen: luk huller, forudsig næste runde

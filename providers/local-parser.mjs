@@ -192,9 +192,10 @@ export function normalizeParserJob(job, entry) {
   );
   if (!title || !url) return null;
 
-  // Carry through any other key the parser emitted (#3438), so a jobs-json-v1
-  // parser can publish an occupation code, a department or a req id for a
-  // non-title filter_on to read. The normalized keys are destructured out,
+  // Carry through any other key the parser emitted, so a jobs-json-v1 parser
+  // can publish an occupation code, a department or a req id for the scan to
+  // read — the prerequisite for #3438's declared-field whitelists. The
+  // normalized keys are destructured out,
   // along with the aliases they are built from, so rest cannot overwrite
   // them; a parser that emits only those keys gets the same object as before.
   // Every posting-date alias is taken out too: postedAt is set below only when
