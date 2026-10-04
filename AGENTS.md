@@ -322,6 +322,7 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 | Chinese, Traditional | `modes/zh-TW/` | `oferta` / `apply` | 勞保, 試用期, 年終獎金, 勞動契約, 特休 |
 | Korean (South Korea) | `modes/ko/` | `gonggo` / `jiwon` | 정규직, 계약직, 퇴직금, 연봉 |
 | Indonesian (Indonesia) | `modes/id/` | `lowongan` / `melamar` | THR, BPJS, PKWT, pesangon, UMR |
+| Singapore (English) | `modes/sg/` | `offer` / `apply` | Employment Pass, COMPASS, S Pass, CPF, AWS, monthly SGD |
 
 ### Output Language vs Market Modes
 
