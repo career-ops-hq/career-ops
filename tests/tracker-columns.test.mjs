@@ -1370,6 +1370,41 @@ describe('tracker.mjs export: pre-#3703 index', () => {
   });
 });
 
+// ── Test 21b: a schema step that throws still closes the handle ─────────────
+// runTracker closes every index it was handed, but openDb() can throw before
+// handing one over — an `applications` table some other tool left without a
+// `status` column fails the CREATE INDEX — and that handle used to stay open.
+// A stand-in DatabaseSync, because a leaked handle is only observable on
+// Windows (the file cannot be deleted); this pins the close itself.
+describe('tracker.mjs openDb: failed schema setup', () => {
+  test('openDb closes the database when schema setup throws, then rethrows', async () => {
+    const { openDb } = await import('../tracker.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'co-opendb-'));
+    try {
+      let closed = 0;
+      class ThrowingDb {
+        exec(sql) { if (/CREATE INDEX/.test(sql)) throw new Error('no such column: status'); }
+        close() { closed++; }
+      }
+      assert.throws(() => openDb(ThrowingDb, join(dir, 'applications.db')), /no such column: status/);
+      assert.equal(closed, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  // The real shape, end to end: runTracker reports the SQLite error itself
+  // rather than a TypeError from a half-initialized handle.
+  test('runTracker surfaces the schema error from a foreign applications table', async (t) => {
+    const sb = makeSandbox(HEADER_9);
+    t.after(() => removeSandbox(sb));
+    const { DatabaseSync } = await import('node:sqlite');
+    const foreign = new DatabaseSync(sb.db);
+    foreign.exec('CREATE TABLE applications (id INTEGER PRIMARY KEY, company TEXT)');
+    foreign.close();
+    await assert.rejects(runTrackerIn(sb, 'sync'), /status/);
+  });
+});
+
 // ── Test 22: content around and inside the table (PR #3794 review) ──────────
 // `export` emitted a fixed skeleton, so `--out` over the tracker deleted a
 // localized title, a legend, an archive section and a trailing note — and the

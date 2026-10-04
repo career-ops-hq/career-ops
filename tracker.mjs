@@ -146,49 +146,59 @@ async function loadSqlite(ctx) {
 export function openDb(DatabaseSync, path = defaultDbPath()) {
   mkdirSync(dirname(path) || '.', { recursive: true });
   const db = new DatabaseSync(path);
-  // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
-  // contention. The index is read by concurrent callers — a CLI query, a
-  // `set-status` write and the Go TUI dashboard can all hit the same db at
-  // once — and the default busy_timeout of 0 makes any overlap fail instantly.
-  db.exec('PRAGMA busy_timeout = 5000');
-  db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS applications (
-      id      INTEGER PRIMARY KEY,
-      pos     INTEGER NOT NULL,
-      date    TEXT NOT NULL,
-      company TEXT NOT NULL,
-      role    TEXT NOT NULL,
-      score   TEXT NOT NULL DEFAULT '—',
-      status  TEXT NOT NULL,
-      pdf     TEXT NOT NULL DEFAULT '❌',
-      report  TEXT NOT NULL DEFAULT '—',
-      notes   TEXT NOT NULL DEFAULT '',
-      -- Cells of columns the schema has no field for, keyed by their index in
-      -- the source row's split by pipe. JSON object, '{}' when the layout is
-      -- the canonical nine columns.
-      extras  TEXT NOT NULL DEFAULT '{}'
-    );
-    CREATE TABLE IF NOT EXISTS status_events (
-      id     INTEGER PRIMARY KEY AUTOINCREMENT,
-      app_id INTEGER NOT NULL REFERENCES applications(id),
-      status TEXT NOT NULL,
-      date   TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS meta (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
-    CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
-    CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
-  `);
-  // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
-  // a column added after the fact has to be migrated in explicitly. Cheap and
-  // idempotent; the rows are refilled by the next sync either way.
-  const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
-  if (!columns.includes('extras')) {
-    db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+  // A schema step can throw against a db some other version or tool left
+  // behind (an `applications` table without `status` fails the index below).
+  // The caller never receives the handle then, so close it here: in-process,
+  // an open handle outlives the failure, and on Windows it also keeps the
+  // file from being deleted.
+  try {
+    // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
+    // contention. The index is read by concurrent callers — a CLI query, a
+    // `set-status` write and the Go TUI dashboard can all hit the same db at
+    // once — and the default busy_timeout of 0 makes any overlap fail instantly.
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS applications (
+        id      INTEGER PRIMARY KEY,
+        pos     INTEGER NOT NULL,
+        date    TEXT NOT NULL,
+        company TEXT NOT NULL,
+        role    TEXT NOT NULL,
+        score   TEXT NOT NULL DEFAULT '—',
+        status  TEXT NOT NULL,
+        pdf     TEXT NOT NULL DEFAULT '❌',
+        report  TEXT NOT NULL DEFAULT '—',
+        notes   TEXT NOT NULL DEFAULT '',
+        -- Cells of columns the schema has no field for, keyed by their index in
+        -- the source row's split by pipe. JSON object, '{}' when the layout is
+        -- the canonical nine columns.
+        extras  TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE TABLE IF NOT EXISTS status_events (
+        id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL REFERENCES applications(id),
+        status TEXT NOT NULL,
+        date   TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
+      CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
+      CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
+    `);
+    // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
+    // a column added after the fact has to be migrated in explicitly. Cheap and
+    // idempotent; the rows are refilled by the next sync either way.
+    const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
+    if (!columns.includes('extras')) {
+      db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+    }
+  } catch (err) {
+    db.close();
+    throw err;
   }
   return db;
 }
