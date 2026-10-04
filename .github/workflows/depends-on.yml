@@ -23,9 +23,11 @@ permissions:
   pull-requests: read
   contents: read
 
-concurrency:
-  group: depends-on-${{ github.event.pull_request.number || github.event.merge_group.head_ref || github.ref }}
-  cancel-in-progress: true
+# No concurrency block, deliberately. With cancel-in-progress, two near-simultaneous events leave a
+# CANCELLED run on the head, and GitHub counts every run of a required check: the PR stays BLOCKED
+# even while another run is green. direction-gate.yml hit exactly that and removed its block for the
+# same reason (#3974 and 10 more, 24-Sep; see the comment at the top of that file). Each run here
+# re-reads the body and the dependency states in seconds, so running two in parallel is harmless.
 
 jobs:
   depends-on:

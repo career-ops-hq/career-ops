@@ -69,6 +69,55 @@ test('a fence longer than three characters is still a fence', () => {
   assert.deepEqual(parseDependsOn('```\nsample\n```\n\nDepends on #42\n'), [42]);
 });
 
+test('a fence opened inside a list item is still a fence', () => {
+  // GFM lets a fence open at a list item's content column, not only at the
+  // document margin. FENCE_OPEN anchored to 0-3 spaces missed the opener, so
+  // the sample inside the block leaked out and read as a declaration: a
+  // required check blocking a PR that declared no dependency at all.
+  assert.deepEqual(parseDependsOn('- ```\n  Depends on #42\n  ```\n'), []);
+  assert.deepEqual(parseDependsOn('1. ~~~\n   Depends on #42\n   ~~~\n'), []);
+  // Controls: the margin form still works, and a declaration after the list
+  // item is still found, so "handles list items" is not "swallows the body".
+  assert.deepEqual(parseDependsOn('```\nDepends on #42\n```\n'), []);
+  assert.deepEqual(parseDependsOn('- ```\n  sample\n  ```\n\nDepends on #42\n'), [42]);
+});
+
+test('a code span cannot open at a backslash-escaped backtick', () => {
+  // GFM: a backslash-escaped backtick is literal text, never a delimiter.
+  // CODE_SPAN matched between two escaped backticks and masked everything
+  // between them, including a real declaration. That is the failure direction
+  // that lets a bad merge through, not merely a false block.
+  assert.deepEqual(parseDependsOn('Note \\`sample\n\nDepends on #42\n\nand \\`more\n'), [42]);
+  // An escaped BACKSLASH does not escape the backtick after it, so this pair
+  // is a real span and still masks what it contains.
+  assert.deepEqual(parseDependsOn('a \\\\`Depends on #42`\n'), []);
+  // Control: an ordinary span still masks its contents.
+  assert.deepEqual(parseDependsOn('`Depends on #42`\n'), []);
+});
+
+test('a commented-out command is not counted as an invocation', () => {
+  // The sweeps below read run blocks as text. Without this, commenting a step
+  // out still satisfied them, so they stayed green for a check that no longer
+  // ran. A `#` inside quotes stays data, or a real command after it would be
+  // dropped and the sweep would pass for the opposite reason.
+  assert.deepEqual(
+    paths(INVOKES, stripShellComments('# node .github/scripts/depends-on.mjs\necho hi\n')),
+    [],
+  );
+  assert.deepEqual(
+    paths(INVOKES, stripShellComments('  # node a.mjs\nnode b.mjs\n')),
+    ['b.mjs'],
+  );
+  assert.deepEqual(
+    paths(INVOKES, stripShellComments('node a.mjs # see node b.mjs\n')),
+    ['a.mjs'],
+  );
+  assert.deepEqual(
+    paths(INVOKES, stripShellComments('echo "a # b" && node a.mjs\n')),
+    ['a.mjs'],
+  );
+});
+
 test('an unclosed fence runs to the end of the body', () => {
   // GFM: a fence with no closing line extends to the end of the document.
   assert.deepEqual(parseDependsOn('```\nDepends on #99\n'), []);
@@ -223,6 +272,32 @@ const WORKFLOWS = join(ROOT, '.github', 'workflows');
 
 /** `node <path>.mjs` inside a run block. */
 const INVOKES = /\bnode\s+([^\s;&|)'"]+\.mjs)/g;
+/**
+ * Shell source with its comments removed.
+ *
+ * A regex cannot tell a command from a comment that mentions one. Commenting a
+ * run step out to `# node .github/scripts/depends-on.mjs` left INVOKES still
+ * matching it, so the guard, disk and sparse-checkout sweeps below kept passing
+ * while the required check no longer ran at all: green for a workflow that does
+ * nothing. Quote tracking matters because a `#` inside a quoted string is data,
+ * not a comment, and cutting there would drop a real invocation after it.
+ */
+function stripShellComments(script) {
+  return script.split('\n').map((line) => {
+    let quote = null;
+    for (let i = 0; i < line.length; i += 1) {
+      const c = line[i];
+      if (quote) {
+        if (c === quote) quote = null;
+      } else if (c === '"' || c === "'") {
+        quote = c;
+      } else if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+        return line.slice(0, i);
+      }
+    }
+    return line;
+  }).join('\n');
+}
 /** `[ ! -f <path>.mjs ]`, the absent-means-pass guard. */
 const GUARDS = /\[\s*!\s*-f\s+([^\s\]]+\.mjs)\s*\]/g;
 
@@ -247,7 +322,8 @@ function workflowJobs() {
       // A step with its own working directory resolves its paths somewhere else.
       // This sweep reads repo-root-relative paths only.
       const run = steps.filter((s) => s?.run && !s['working-directory']).map((s) => s.run).join('\n');
-      out.push({ file, job, sparse, invoked: paths(INVOKES, run), guarded: paths(GUARDS, run) });
+      const live = stripShellComments(run);
+      out.push({ file, job, sparse, invoked: paths(INVOKES, live), guarded: paths(GUARDS, live) });
     }
   }
   return out;

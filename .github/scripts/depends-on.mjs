@@ -50,23 +50,37 @@ const REF = /#(\d+)\b/g;
 // expose the text beneath it.
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+// GFM also lets a fence open inside a list item, where the marker sits at the
+// item's CONTENT column rather than at the document margin. Anchoring only to
+// 0-3 spaces from the margin missed that opener, so the sample inside the block
+// leaked out and read as a declaration: a required check blocking a PR that
+// declared nothing. The marker's width becomes the column the closing run is
+// measured from, since the closer is indented to the same content column.
+const LIST_MARKER = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+/;
 function stripFences(text) {
   const kept = [];
   let open = null;
+  let openIndent = 0;
   for (const line of text.split('\n')) {
     if (open === null) {
-      const m = FENCE_OPEN.exec(line);
+      const marker = LIST_MARKER.exec(line);
+      const indent = marker ? marker[0].length : 0;
+      const m = FENCE_OPEN.exec(indent ? line.slice(indent) : line);
       // A BACKTICK fence's info string may not contain a backtick (GFM), so
       // ```js`sample is ordinary text, not an opener. Treating it as one opened
       // a fence that never closed and hid every declaration beneath it — the
       // check then passes while the dependency is still open, which is the
       // failure direction that actually lets a bad merge through.
-      if (m && !(m[1][0] === '`' && m[2].includes('`'))) { open = m[1]; continue; }
+      if (m && !(m[1][0] === '`' && m[2].includes('`'))) { open = m[1]; openIndent = indent; continue; }
       kept.push(line);
       continue;
     }
-    const close = FENCE_CLOSE.exec(line);
-    if (close && close[1][0] === open[0] && close[1].length >= open.length) open = null;
+    // Drop up to the opener's content column before testing the closer, so a
+    // fence opened in a list item closes at that column; FENCE_CLOSE's own
+    // 0-3 allowance still applies to whatever indentation is left.
+    const body = line.replace(/^ */, (s) => ' '.repeat(Math.max(0, s.length - openIndent)));
+    const close = FENCE_CLOSE.exec(body);
+    if (close && close[1][0] === open[0] && close[1].length >= open.length) { open = null; openIndent = 0; }
   }
   return kept.join('\n');
 }
@@ -85,8 +99,25 @@ const CODE_SPAN = /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g;
 // the line rules below are anchored to the start of a line: ``Depends on #99``
 // would collapse to an unquoted line and become a real declaration. Masking
 // preserves both the line count and the column positions.
+// A backslash escape makes the next character literal (GFM), so an escaped
+// backtick can neither open nor close a span. Neutralise every escape pair
+// before the scan rather than after it: CODE_SPAN was matching BETWEEN two
+// escaped backticks and masking a real declaration lying between them, which
+// is the failure direction that lets a bad merge through. The substitution is
+// length-preserving, so the ranges still line up with the original column for
+// column, and an escaped BACKSLASH correctly leaves the backtick after it free
+// to delimit.
+const ESCAPE_PAIR = /\\[\s\S]/g;
+
 function maskCodeSpans(text) {
-  return text.replace(CODE_SPAN, (m) => m.replace(/[^\n]/g, ' '));
+  const scannable = text.replace(ESCAPE_PAIR, '\0\0');
+  const chars = text.split('');
+  for (const m of scannable.matchAll(CODE_SPAN)) {
+    for (let i = m.index; i < m.index + m[0].length; i += 1) {
+      if (chars[i] !== '\n') chars[i] = ' ';
+    }
+  }
+  return chars.join('');
 }
 
 export function parseDependsOn(body, self = null) {
