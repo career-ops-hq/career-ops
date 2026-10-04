@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * contact-extract-tests.mjs — regression tests for contact-extract.mjs (#4361).
+ * tests/contact-extract.test.mjs — regression tests for contact-extract.mjs (#4361).
  *
  * Locks in the local-only, no-Gmail path from a pasted interview-invite or
  * rejection email to a saved data/contacts.tsv row:
@@ -28,17 +28,17 @@ import { execFile, execFileSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+import { pass, fail, ROOT } from './helpers.mjs';
+
+console.log('\ncontact-extract.mjs — pasted reply to a saved contact');
 const NODE = process.execPath;
 const CLI = join(ROOT, 'contact-extract.mjs');
 
-let passed = 0;
-let failed = 0;
 function check(name, cond, detail = '') {
-  if (cond) { passed++; console.log(`  ✅ ${name}`); }
-  else { failed++; console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ''}`); }
+  if (cond) pass(name);
+  else fail(`${name}${detail ? ` — ${detail}` : ''}`);
 }
 
 function tmp(prefix) {
@@ -491,5 +491,3 @@ console.log('14. CLI: --company and --tracker must describe the same row (#4363 
   check('--tracker alone pulls company from that row (Globex, not Acme)', content.includes('Globex\trecruiter\t\t\tsomeone@example.com\t\t34\t'), content);
 }
 
-console.log(`\nResults: ${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);

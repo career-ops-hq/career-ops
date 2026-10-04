@@ -37,7 +37,11 @@ test('adaptive delays grow, saturate, honor small caps and remain within jitter 
     for RATE_LIMIT_SLEEP in 1 8 30 31 300 2147483647; do
       for retry in 0 1 2 3 4 1000000; do
         for sample in 1 2 3 4 5; do
-          printf '%s %s %s\n' "$RATE_LIMIT_SLEEP" "$retry" "$(rate_limit_delay worker.log "$retry")"
+          # Called in place, not captured: a $(...) per sample is a process per
+          # sample, and 180 of those alone outlasted this fixture's timeout on a
+          # Windows machine where a process start costs tens of milliseconds.
+          printf '%s %s ' "$RATE_LIMIT_SLEEP" "$retry"
+          rate_limit_delay worker.log "$retry"
         done
       done
     done`);

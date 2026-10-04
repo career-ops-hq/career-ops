@@ -305,7 +305,9 @@ const SYSTEM_PATHS = [
   'cv-sync-check.mjs',
   'i18n-drift.mjs',
   'verify-cv-facts.mjs',
+  'verify-cv-structure.mjs',
   'verify-ats.mjs',
+  'ats-payload.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
   'ats-vendor.mjs',
@@ -427,6 +429,9 @@ const SYSTEM_PATHS = [
   'reply-watch.mjs',
   'paste-reply.mjs',
   'contact-extract.mjs',
+  // Retired 2026-10-04: the suite moved to tests/contact-extract.test.mjs. The
+  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
+  // drop it once a release has shipped past that move.
   'contact-extract-tests.mjs',
   'outcome.mjs',
   'batch/batch-prompt.md',

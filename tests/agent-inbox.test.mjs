@@ -7,10 +7,12 @@
  *   1. A first `add` seeds the header + agent protocol and one pending item.
  *   2. `add` is append-only and multiline text collapses to a single bullet.
  *   3. `list` shows pending only; `list --all` shows resolved items too.
- *   4. `resolve N` ticks the N-th *pending* item and appends a one-line result,
- *      so `list` then `resolve N` line up.
+ *   4. `resolve N` ticks the N-th item and appends a one-line result.
  *   4b. resolve holds the same lock as add for its full read/modify/write, so a
  *       request accepted concurrently cannot be overwritten by a stale view.
+ *   4c. resolve replaces the queue file (temp file + rename) instead of
+ *       truncating it in place, leaves no temp file behind, keeps the file's
+ *       permissions, and writes through a symlinked inbox.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
@@ -25,13 +27,24 @@
  *   9. The lock underneath 7 is never held by two processes at once. 7 reports
  *      WHAT was lost; 9 reports whether the lock is WHY, so a red run separates
  *      "two writers got in" from "a write went missing" without a round trip.
+ *  10. Item numbers are stable file positions: a batch of resolves read off ONE
+ *      `list` all land on the item they named. (Numbering against the pending
+ *      view instead shifted every higher number down per resolve, silently
+ *      stamping results onto the wrong items.)
+ *  11. Re-resolving an already-done item fails loudly instead of re-stamping.
+ *  12. `--expect` aborts when the target doesn't contain the substring, and a
+ *      valueless `--expect` fails rather than silently disabling the guard —
+ *      every occurrence, not only the first.
  *
  * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
  * touches real user data.
  */
 
 import { execFileSync, spawn } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync } from 'fs';
+import {
+  readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync, statSync,
+  lstatSync, chmodSync, symlinkSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -96,6 +109,16 @@ function run(inbox, args, opts = {}) {
     stdio: ['pipe', 'pipe', 'pipe'],
     ...opts,
   });
+}
+
+// Run a command expected to fail; returns { status, stderr }.
+function runFail(inbox, args) {
+  try {
+    run(inbox, args);
+    return { status: 0, stderr: '' };
+  } catch (e) {
+    return { status: e.status, stderr: String(e.stderr || '') };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +202,43 @@ console.log('4b. resolve waits for the queue lock before rewriting');
   check('the selected item is resolved from the locked snapshot', /^- \[x\].*alpha.*→ result: done alpha/m.test(md), md);
   check('the sibling pending item survives the rewrite', /^- \[ \].*beta/m.test(md), md);
   check('resolve reports the selected item after committing', /Resolved #1: .*alpha/.test(stdout), stdout.trim());
+}
+
+// ---------------------------------------------------------------------------
+console.log('4c. resolve replaces the queue file atomically');
+{
+  const dir = tmp('inbox-resolve-atomic-');
+  const inbox = join(dir, 'agent-inbox.md');
+  run(inbox, ['add', 'alpha']);
+  run(inbox, ['add', 'beta']);
+  // A rename swaps in a new inode; an in-place writeFileSync keeps the old one.
+  // Windows reports ino as 0 without bigint, so compare there only if it is set.
+  const before = statSync(inbox).ino;
+  run(inbox, ['resolve', '1', '--result', 'done alpha']);
+  const after = statSync(inbox).ino;
+  check('the queue file was replaced, not rewritten in place', !before || before !== after, `ino ${before} → ${after}`);
+  const md = readFileSync(inbox, 'utf8');
+  check('the replaced file carries the resolved item', /^- \[x\].*alpha → result: done alpha$/m.test(md), md);
+  check('the replaced file keeps the header and the sibling item', /^# Agent Inbox/.test(md) && /^- \[ \].*beta$/m.test(md), md);
+  const leftovers = readdirSync(dir).filter((f) => f.endsWith('.tmp'));
+  check('no temp file is left behind', leftovers.length === 0, leftovers.join(', '));
+
+  // Replacing the file must not cost what the in-place write gave for free.
+  // POSIX only: Windows has no permission bits to lose, and creating a symlink
+  // there needs a privilege the runners do not grant.
+  if (process.platform !== 'win32') {
+    chmodSync(inbox, 0o600);
+    run(inbox, ['resolve', '2', '--result', 'done beta']);
+    const mode = statSync(inbox).mode & 0o7777;
+    check('the replaced file keeps the queue\'s permissions', mode === 0o600, `mode=${mode.toString(8)}`);
+
+    const link = join(dir, 'linked-inbox.md');
+    symlinkSync(inbox, link);
+    run(link, ['add', 'gamma']);
+    run(link, ['resolve', '3', '--result', 'done gamma']);
+    check('a symlinked inbox is still a symlink after resolve', lstatSync(link).isSymbolicLink());
+    check('the write went through the link to its target', /^- \[x\].*gamma → result: done gamma$/m.test(readFileSync(inbox, 'utf8')), readFileSync(inbox, 'utf8'));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -550,3 +610,76 @@ try {
   );
 }
 
+// ---------------------------------------------------------------------------
+console.log('10. numbers are stable: a batch of resolves off ONE list stays correct');
+{
+  const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+  ['alpha', 'bravo', 'charlie', 'delta', 'echo'].forEach((t) => run(inbox, ['add', t]));
+
+  // Snapshot the numbering once, exactly as an agent draining the queue would.
+  const listed = run(inbox, ['list']);
+  const numberOf = (text) => {
+    const m = new RegExp(`^\\s*(\\d+)\\. \\[ \\] .*${text}`, 'm').exec(listed);
+    return m ? Number(m[1]) : -1;
+  };
+  check('list numbers items 1..5 in file order',
+    [1, 2, 3, 4, 5].every((n, i) => numberOf(['alpha', 'bravo', 'charlie', 'delta', 'echo'][i]) === n), listed.trim());
+
+  // Fire the whole batch against that one snapshot — no re-listing between.
+  run(inbox, ['resolve', String(numberOf('bravo')), '--result', 'R-bravo']);
+  run(inbox, ['resolve', String(numberOf('charlie')), '--result', 'R-charlie']);
+  run(inbox, ['resolve', String(numberOf('delta')), '--result', 'R-delta']);
+  run(inbox, ['resolve', String(numberOf('echo')), '--result', 'R-echo']);
+
+  const md = readFileSync(inbox, 'utf8');
+  ['bravo', 'charlie', 'delta', 'echo'].forEach((t) => {
+    check(`${t} carries its own result`, new RegExp(`^- \\[x\\] .*${t} → result: R-${t}$`, 'm').test(md), md);
+  });
+  check('alpha untouched and still pending', /^- \[ \] .*alpha$/m.test(md), md);
+
+  const after = run(inbox, ['list']);
+  check('surviving item keeps its original number (1)', /^\s*1\. \[ \] .*alpha/m.test(after), after.trim());
+  check('list explains the hidden/resolved items', /resolved item\(s\) hidden/.test(after), after.trim());
+}
+// ---------------------------------------------------------------------------
+console.log('11. re-resolving a done item fails loudly instead of re-stamping');
+{
+  const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+  run(inbox, ['add', 'foxtrot']);
+  run(inbox, ['resolve', '1', '--result', 'first']);
+  const { status, stderr } = runFail(inbox, ['resolve', '1', '--result', 'second']);
+  check('non-zero exit on already-resolved item', status === 1, `exit=${status}`);
+  check('error says why', /already resolved/.test(stderr), stderr.trim());
+  const md = readFileSync(inbox, 'utf8');
+  check('original result preserved', md.includes('→ result: first') && !md.includes('second'), md);
+}
+// ---------------------------------------------------------------------------
+console.log('12. --expect guards the target');
+{
+  const inbox = join(tmp('inbox-'), 'agent-inbox.md');
+  run(inbox, ['add', 'inquire at Dana-Farber']);
+  run(inbox, ['add', 'apply at Change.org']);
+
+  const wrong = runFail(inbox, ['resolve', '2', '--expect', 'Dana-Farber', '--result', 'oops']);
+  check('mismatched --expect exits 1', wrong.status === 1, `exit=${wrong.status}`);
+  check('error shows the actual item', /Change\.org/.test(wrong.stderr), wrong.stderr.trim());
+  check('nothing written on mismatch', !readFileSync(inbox, 'utf8').includes('oops'));
+
+  const bare = runFail(inbox, ['resolve', '2', '--expect', '--result', 'oops']);
+  check('valueless --expect exits 1 (guard never silently disabled)', bare.status === 1, `exit=${bare.status}`);
+  check('still nothing written', !readFileSync(inbox, 'utf8').includes('oops'));
+
+  // opt() reads only the FIRST occurrence, so a valid --expect used to hide a
+  // bare one after it and the command resolved.
+  const trailing = runFail(inbox, ['resolve', '2', '--expect', 'Change.org', '--expect', '--result', 'oops']);
+  check('a bare --expect after a valid one still exits 1', trailing.status === 1, `exit=${trailing.status}`);
+  check('error names the missing substring', /--expect needs a substring/.test(trailing.stderr), trailing.stderr.trim());
+  const last = runFail(inbox, ['resolve', '2', '--result', 'oops', '--expect', 'Change.org', '--expect']);
+  check('a bare --expect at the end of the line exits 1', last.status === 1, `exit=${last.status}`);
+  const both = runFail(inbox, ['resolve', '2', '--expect', 'Change.org', '--expect', 'Dana-Farber', '--result', 'oops']);
+  check('every --expect must match, not just the first', both.status === 1 && /Dana-Farber/.test(both.stderr), both.stderr.trim());
+  check('nothing written by any rejected --expect', !readFileSync(inbox, 'utf8').includes('oops'));
+
+  run(inbox, ['resolve', '2', '--expect', 'change.org', '--result', 'ok']);
+  check('matching --expect (case-insensitive) resolves', /^- \[x\] .*Change\.org → result: ok$/m.test(readFileSync(inbox, 'utf8')));
+}

@@ -477,7 +477,9 @@ const scripts = [
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
   { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
   { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
+  { name: 'verify-cv-structure.mjs --self-test', expectExit: 0 },
   { name: 'verify-ats.mjs --self-test', expectExit: 0 },
+  { name: 'ats-payload.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'contact-lookup.mjs --self-test', expectExit: 0 },
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
@@ -501,7 +503,6 @@ const scripts = [
   // 30s this never reaches the 75% warning, so it goes from silent to killed
   // with nothing in between. The ceiling is the only signal it has.
   { name: 'tracker-columns-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
-  { name: 'contact-extract-tests.mjs', expectExit: 0 },
   // The one script in this list that genuinely needs longer than the shared
   // budget. It spawns competing writer processes for 27 contention cases, and
   // that cost is the behaviour under test rather than slack to be trimmed.
