@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 
 const HEADING = /^#{1,6}[ \t]*\**[ \t]*depends on\b/i;
-const LINE = /^[ \t]*(?:[-*+][ \t]+|\d+\.[ \t]+)?\**[ \t]*depends on\b/i;
+const LINE = /^[ \t]*(?:[-*+][ \t]+|\d{1,9}[.)][ \t]+)?\**[ \t]*depends on\b/i;
 // Scanned over the whole body, so the character class is the only thing keeping the
 // span on one line. Drop the \n from it and the match runs from one paragraph's
 // closing `**` to the next paragraph's opening `**`, swallowing an unrelated `#N`

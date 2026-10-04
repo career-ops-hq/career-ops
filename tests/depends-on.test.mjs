@@ -29,6 +29,18 @@ test('a list item `- Depends on #7` counts', () => {
   assert.deepEqual(parseDependsOn('- Depends on #7\n'), [7]);
 });
 
+// GFM accepts BOTH `1.` and `1)` as ordered list markers, and LIST_MARKER two
+// dozen lines below LINE already spells that `\d{1,9}[.)]`. LINE spelled only
+// `\d+\.`, so the same file disagreed with itself: `1)` opened a fence for
+// stripping purposes but did not anchor a declaration. A body numbering its
+// dependencies that way passed the check with the dependency still open.
+test('an ordered list item counts under either GFM marker', () => {
+  assert.deepEqual(parseDependsOn('1. Depends on #5\n'), [5]);
+  assert.deepEqual(parseDependsOn('1) Depends on #5\n'), [5]);
+  // The marker is a marker, not prose: no other punctuation stands in for it.
+  assert.deepEqual(parseDependsOn('1: Depends on #5\n'), []);
+});
+
 // This is the case that matters. Verbatim shapes taken from open PRs in this
 // repo that declare NO dependency.
 test('the phrase mid-sentence is prose and collects nothing', () => {
