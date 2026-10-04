@@ -6,7 +6,7 @@
 // tests/merge-tracker-url-dedup.test.mjs) — the merge path is where the bug
 // lived, so asserting on the resulting tracker rows is what actually proves
 // the fix.
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, isolatedBatchStatePath } from './helpers.mjs';
 import assert from 'node:assert';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -41,7 +41,7 @@ function addTsv(env, name, cols) {
 function runMerge(env, args = []) {
   return execFileSync('node', [MERGE, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir },
+    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir) },
   });
 }
 function trackerRows(env) {

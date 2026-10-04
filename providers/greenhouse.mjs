@@ -10,6 +10,8 @@
 
 import { htmlToText } from './_html-to-text.mjs';
 
+const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
+
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
   'boards.greenhouse.io',
@@ -40,6 +42,20 @@ function resolveApiUrl(entry) {
   const url = entry.careers_url || '';
   const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
   let slug = match ? match[1] : null;
+  // Legacy boards[.eu].greenhouse.io/<slug>, which still 301s to job-boards[.eu]
+  // with the same slug. Read from the PARSED url, never a regex over the raw
+  // string: that one also found "boards.greenhouse.io/acme" inside the path of
+  // a boards-api URL and returned acme's board.
+  if (!slug) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' && LEGACY_BOARD_HOSTS.has(parsed.hostname)) {
+        slug = parsed.pathname.split('/').find(Boolean) ?? null;
+      }
+    } catch {
+      // unparseable url: no board to read
+    }
+  }
   // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
   // The path segment is literally "embed", which resolves to a nonexistent
   // board and 404s — the token is the only usable slug.

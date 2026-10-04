@@ -48,7 +48,13 @@ function escapeForRegExp(s) {
 // String.raw, not a plain template literal: `\p` is not a recognised string
 // escape, so an ordinary template drops the backslash and the class degenerates
 // to the literal characters p, {, L, } — no error, and the anchor is simply off.
-const WORD_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
+//
+// Han, Hiragana, Katakana and Hangul are letters to \p{L}, but those scripts
+// glue a Latin acronym straight onto the next word ("AI全栈工程师", "AIエンジニア",
+// "AI엔지니어" — all "AI engineer"), so a CJK character next to a keyword is a
+// word EDGE, not a continuation: `ai` must match them exactly as it matches
+// "AI Engineer".
+const WORD_CHAR = String.raw`(?:(?![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])[\p{L}\p{M}\p{N}_])`;
 const anchoredPattern = (body) => new RegExp(`(?<!${WORD_CHAR})${body}(?!${WORD_CHAR})`, 'u');
 // Same left boundary, no right one: the keyword must start a word, and the word
 // may continue past it.

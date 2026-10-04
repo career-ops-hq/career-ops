@@ -28,6 +28,8 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   write back through the core's own scripts.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
+- **Scheduled scans** — save local zero-token or full-dataset scans and run due
+  jobs through an optional Windows Task Scheduler worker.
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
@@ -51,6 +53,22 @@ Open http://localhost:3000. The app reads the career-ops checkout it lives in
   the envelope, never a file an agent wrote behind it.
 - **Additive:** the web is isolated from the core's packaging, CI and release
   automation. The CLI works exactly the same without it.
+
+## Scheduled scans on Windows
+
+Automatic recurring scans through Task Scheduler are Windows-only. On macOS and Linux,
+saved scans run only when you choose **Run now** on the Scheduled scans page.
+The web UI can save scan definitions without installing an OS task. To check and
+run due jobs every 15 minutes, install the local worker from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1
+```
+
+Remove it with `web/scripts/uninstall-scan-schedule.ps1`. It runs in the current user's interactive session, so the user must be logged in. The task runs only
+`web/scripts/scheduled-jobs-runner.mjs`; it never evaluates roles, applies, or invokes
+an AI model. Job definitions and run history stay in the gitignored `data/`
+directory.
 
 ## Development
 
@@ -108,3 +126,28 @@ Three constraints follow from all this:
 `tests/web-test-layout.test.mjs` in the **root** suite enforces all of the above
 on every PR, including that `npm test` never goes back to listing suites by name
 ([#2360](https://github.com/career-ops-hq/career-ops/issues/2360)).
+
+### Assistant conversations
+
+The assistant saves conversations in `.career-ops-web/chats/` under the resolved
+user data root. New chat keeps the previous conversation; use the history picker
+to switch, rename, or delete it. Clearing browser storage does not delete saved
+conversations. The old `career-ops:chat` browser entry is migrated once and only
+removed after its disk write succeeds. Empty greetings are not saved.
+
+Writes are atomic and revision-checked: a stale tab cannot overwrite newer
+messages. Save failures stay visible, and switching waits for the current save.
+Files with invalid JSON are reported individually without blocking healthy
+conversations; damaged files are never overwritten. A crashed
+writer can leave a `.json.lock` file; after stopping the web server, remove that
+lock and restart to retry. Conversation files contain personal text and should
+stay local and gitignored. They are conversation history, not new verified CV
+facts or a replacement for the canonical profile files.
+
+Stored messages are not truncated. Model input is bounded to 24 recent messages
+(up to 24,000 characters) plus literal excerpts of earlier user messages (up to
+8,000 characters). Long excerpts may be shortened; this is not unlimited model
+memory. Conversations are limited to 2,000 messages and 1 MB; a larger save is
+rejected visibly without overwriting the previous file. On a save failure, export
+the live conversation (including unsaved text) or explicitly confirm discarding
+unsaved changes to start a new chat. Saved conversations remain on disk.

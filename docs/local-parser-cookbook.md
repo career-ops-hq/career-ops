@@ -1,10 +1,10 @@
 # Local Parser Cookbook
 
-Local parsers let `scan.mjs` read SSR or static career pages without asking an agent to browse the page. The parser runs as a local command, prints normalized jobs JSON to stdout, and lets the scanner keep using the same title filtering, deduplication, and pipeline output flow.
+Local parsers let `scan.mjs` read SSR, static, or user-saved career pages without asking an agent to browse the page. The parser runs as a local command, prints normalized jobs JSON to stdout, and lets the scanner keep using the same title filtering, deduplication, and pipeline output flow.
 
 ## When To Use This
 
-Use `scan_method: local_parser` when a company career page has stable HTML, a documented endpoint, or another deterministic source that is easier to parse locally than with Playwright. The parser can be written in JavaScript, Python, shell, Go, or any executable available on the user's machine. `career-ops` does not bundle company-specific parser scripts; users bring their own script and point `portals.yml` at it.
+Use `scan_method: local_parser` when a company career page has stable HTML, a documented endpoint, or another deterministic source that is easier to parse locally than with Playwright. The parser can be written in JavaScript, Python, shell, Go, or any executable available on the user's machine. Company-specific parsers are user-supplied and referenced from `portals.yml`; copy them into the gitignored `local/` directory so site-specific HTML can evolve independently from core.
 
 ## Portal Configuration
 
@@ -73,6 +73,16 @@ The parser must print one of these JSON shapes to stdout:
 ## Artifact Storage
 
 The scanner only needs stdout. If a parser also writes full JSON snapshots for debugging or audit, store them under `data/parser-output/{company}/`. Generated JSON artifacts must stay out of git; `.gitkeep` placeholders are the only committed exception for preserving directory structure.
+
+## Recipes
+
+Optional site-specific examples live under [`docs/recipes/`](recipes/). These
+recipes are documentation examples, not bundled core integrations; copy the
+parser you want into `local/`, review it, and point your private `portals.yml`
+entry at that local copy. The
+[Ontario GO Jobs recipe](recipes/gojobs/) demonstrates a deliberately offline
+workflow for HTML saved after a normal browser session; it never automates or
+bypasses the site's interactive challenge.
 
 ## Failure Handling
 

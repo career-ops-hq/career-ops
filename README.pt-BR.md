@@ -288,7 +288,6 @@ O career-ops usa um roteador de comandos compartilhado. Nas CLIs que registram c
 /career-ops interview    → Entrevista interativa de onboarding do perfil e do currículo
 /career-ops master-profile → Importa, revisa e valida seu Master Career Profile
 /career-ops eu-swe    → Calibra uma candidatura europeia de SWE antes do currículo, da candidatura ou da entrevista
-/career-ops eu-fintech → Escaneia 21 portais fintech europeus buscando vagas de Product Manager (sem tokens)
 /career-ops interview/plan → Plano de preparação por blocos de tempo para uma entrevista próxima
 /career-ops interview/practice → Entrevista de prática, uma pergunta por vez com feedback
 /career-ops interview/debrief → Debrief pós-entrevista: fecha lacunas, prevê a próxima rodada

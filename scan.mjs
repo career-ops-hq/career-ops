@@ -76,12 +76,18 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 try {
   const { config } = await import('dotenv');
   // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
-  // single JSON object (#1906).
-  config({ quiet: true });
+  // single JSON object (#1906). Secrets are user-layer data, so a split
+  // checkout reads them beside the configured data root rather than from the
+  // caller's cwd (which may be the code checkout or an unrelated directory).
+  config({ path: path.join(DATA_ROOT, '.env'), quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -89,9 +95,7 @@ try {
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
-import { getCareerOpsRoot } from './path-resolver.mjs';
-const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
+import { resolveTrackerPath } from './path-resolver.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
@@ -109,7 +113,7 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'con
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
 
-const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
+export const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
 const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 
 // No directory creation at import time (#3159). Every writer below creates its
@@ -179,6 +183,67 @@ export function emitJsonReceipt(receipt, exitCode) {
 // compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
 // the title filter's short-acronym auto-anchor (#3274).
 export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
+
+// ── Declared-field whitelists (#3438) ──────────────────────────────
+// A title whitelist cannot express "this posting is in an occupation I want"
+// on a board that publishes an occupation code, because one title maps to
+// several occupations and one occupation to unboundedly many titles.
+//
+// A target therefore declares WHICH FIELD its whitelist reads. Default is
+// `title`, so a portals.yml that says nothing behaves byte-for-byte as before.
+//
+//   field_filters:            # top level, optional
+//     noc:
+//       positive: ["stem:22", "stem:13"]
+//   job_boards:
+//     - name: Job Bank — help desk
+//       filter_on: noc        # string, or array (AND), default ["title"]
+//
+// No new matching semantics anywhere: each block is compiled by the same
+// buildTitleFilter() as title_filter, so `word:`/`stem:`/substring and the
+// word-boundary rules from #3103 stay identical across every field.
+//
+// `title` is deliberately not a key in field_filters: it routes to the
+// existing top-level config.title_filter, the same compiled object as before.
+
+/**
+ * @param {unknown} value - a target's `filter_on`: string, array, or absent.
+ * @returns {string[]} unique field names to gate on, in declared order,
+ *   defaulting to ["title"]. Unique, because presence is counted once per
+ *   field per job: a repeated field would double every count in the warning.
+ */
+export function normalizeFilterOn(value) {
+  const list = (Array.isArray(value) ? value : [value])
+    .filter(f => typeof f === 'string')
+    .map(f => f.trim())
+    .filter(Boolean);
+  return list.length > 0 ? [...new Set(list)] : ['title'];
+}
+
+// Key for the per-(target, field) presence counters. Keyed by the target's
+// index in `targets`, not its name: two enabled targets may share a name
+// (validate-portals only warns), and their counters must stay apart.
+export function declaredFieldKey(targetId, field) {
+  return JSON.stringify([targetId, field]);
+}
+
+/**
+ * Whether a posting lacks a declared field. The gate cannot judge such a
+ * posting, so it passes and is counted — dropping it would be the same silent
+ * loss this feature exists to end, with the sign flipped.
+ * @param {unknown} value - `job[field]`
+ * @returns {boolean}
+ */
+export function isFieldAbsent(value) {
+  return value === undefined || value === null || String(value).trim() === '';
+}
+
+// Own scalar properties only: `filter_on: constructor` must not read
+// Object.prototype, and an object value has no safe String() to judge.
+export function declaredFieldValue(job, field) {
+  const value = Object.hasOwn(job, field) ? job[field] : undefined;
+  return ['string', 'number', 'boolean'].includes(typeof value) ? value : undefined;
+}
 
 // ── Title filter overrides (per-company broadened title net) ───────
 // Optional. `title_filter_overrides` in portals.yml lets specific companies
@@ -861,12 +926,13 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 
 // ── Visa / work-authorization filter ────────────────────────────────
 // Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
-// Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
-// the generic "visa sponsorship" wording) and drops roles that explicitly
-// refuse sponsorship. Like content_filter it reads the job DESCRIPTION text, so
-// it only has signal for providers that populate job.description (see the
-// content_filter header above); jobs without one fall back to the
-// require_mention rule below.
+// Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1),
+// Singapore (Employment Pass / S Pass / ONE Pass / Work Pass), EU (Blue Card),
+// UK (Skilled Worker), plus the generic "visa sponsorship" wording — and drops
+// roles that explicitly refuse sponsorship. Like content_filter it reads the job
+// DESCRIPTION text, so it only has signal for providers that populate
+// job.description (see the content_filter header above); jobs without one fall
+// back to the require_mention rule below.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
@@ -877,9 +943,10 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 //     one `positive` keyword; a missing/empty description is rejected. Use this
 //     to surface *only* postings that actively advertise sponsorship.
 //
-// `positive` / `negative` default to a curated US-sponsorship vocabulary when
-// omitted, so `visa_filter: { enabled: true }` works out of the box; supplying
-// either list overrides that default.
+// `positive` / `negative` default to a curated sponsorship vocabulary (US,
+// Singapore, EU, UK work-visa wording) when omitted, so
+// `visa_filter: { enabled: true }` works out of the box; supplying either list
+// overrides that default.
 
 export const DEFAULT_VISA_POSITIVE = [
   'visa sponsorship',
@@ -897,6 +964,25 @@ export const DEFAULT_VISA_POSITIVE = [
   'h-1b1',
   'h1b1',
   'o-1 visa',
+  // Singapore (Ministry of Manpower work passes). Multi-word forms only:
+  // bare 's pass' / 'one pass' false-positive on ordinary English
+  // ("Class Pass", "makes one pass"), so they are deliberately absent.
+  'employment pass',
+  's pass sponsorship',
+  's pass application',
+  's pass holder',
+  'one pass scheme',
+  'one pass application',
+  'one pass holder',
+  'work pass sponsorship',
+  'work pass application',
+  // EU Blue Card. Bare 'blue card' is kept: in employment text it is the EU
+  // permit far more often than anything else.
+  'eu blue card',
+  'blue card',
+  // UK Skilled Worker route.
+  'skilled worker visa',
+  'skilled worker sponsorship',
 ];
 
 export const DEFAULT_VISA_NEGATIVE = [
@@ -913,6 +999,10 @@ export const DEFAULT_VISA_NEGATIVE = [
   'sponsorship is not available',
   'sponsorship not available',
   'not offer visa sponsorship',
+  // Unambiguous sponsorship refusals phrased for non-US postings.
+  // (Relocation wording is deliberately excluded: relocation != sponsorship.)
+  'citizens and permanent residents only',
+  'permanent residents only',
 ];
 
 export function buildVisaFilter(visaFilter) {
@@ -1353,6 +1443,56 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
   'skipped_blocked_host',
 ]);
 
+/**
+ * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
+ *
+ * Every other skipped status describes the posting: a dead URL stays dead, a
+ * blocked host stays blocked, so pinning it saves a later scan the work. These
+ * two describe the user's CONFIG instead — `location_filter` and
+ * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
+ * dropped under the old threshold never resurfaces under the new one, which is
+ * the opposite of what recording the drop is for.
+ *
+ * Pinning would also buy nothing: both cuts run on data the provider already
+ * returned, before any liveness verification, so a re-scan of one of these URLs
+ * costs no extra request.
+ *
+ * `collectSeenCompanyRoles` needs no companion change — it already seeds from
+ * `added` rows alone.
+ */
+const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_location',
+  'skipped_age',
+]);
+
+/**
+ * The offers not yet recorded under `status`, one per URL.
+ *
+ * The location and posting-age cuts run before dedup, and their rows never
+ * pin a URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so without this every scan
+ * appended the same rows again. A URL already carrying a row with the same
+ * status is skipped, and so is a second listing of one URL within this scan.
+ * A different status still writes, so a posting whose verdict changes is
+ * recorded again.
+ *
+ * @param {Array<{url: string}>} offers
+ * @param {string} status
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
+ */
+export function unrecordedOffers(offers, status, scanHistoryText = '') {
+  const recorded = new Set();
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, , , , , rowStatus] = line.split('\t');
+    if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
+  }
+  return offers.filter((offer) => {
+    const key = normalizeUrlForDedup(offer.url);
+    if (recorded.has(key)) return false;
+    recorded.add(key);
+    return true;
+  });
+}
+
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
@@ -1677,6 +1817,11 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
     const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
+    // Not pinned and not a recheck candidate either: the row records a config
+    // rejection, and the URL was never queued, so counting it as "eligible
+    // again" would overstate what the TTL released. See
+    // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
+    if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       seen.add(normalizeUrlForDedup(url));
       if (extraTokensFor) {
@@ -2178,9 +2323,8 @@ export const ANY_REQUISITION = '*';
  *   Guessing one form was wrong in both directions: stripping changed the
  *   Lever ID, while keeping only the suffix-bearing form missed Workday.
  *
- * The suffix rule (`stripWorkdayRepostSuffix`) only fires when the part before
- * the hyphen is already requisition-shaped, so Walmart's `R-2593225` is one
- * form on every path.
+ * The suffix rule (`stripWorkdayRepostSuffix`) only strips a one- or
+ * two-digit tail, so Walmart's `R-2593225` is one form on every path.
  *
  * Comparison ignores case only: prefixes and punctuation identify distinct
  * requisitions. Bare JR/R_ tokens retain the prefix consumed as a label by
@@ -3353,7 +3497,7 @@ async function main() {
   // Opt-in: merge enabled keyed/auth-gated provider plugins. Returns immediately
   // (no discovery, no dotenv, no process.env mutation) when config/plugins.yml is
   // absent — so a plain scan with no plugins configured stays byte-identical.
-  await mergeProviderPlugins(providers, { root: path.dirname(PROVIDERS_DIR) });
+  await mergeProviderPlugins(providers, { root: path.dirname(PROVIDERS_DIR), dataRoot: DATA_ROOT });
   if (providers.size === 0) {
     console.error('Error: no providers loaded from providers/');
     process.exit(1);
@@ -3443,13 +3587,85 @@ async function main() {
         continue;
       }
 
-      targets.push({ ...entry, _provider: resolved.provider, _isBoard: isBoard });
+      targets.push({ ...entry, _provider: resolved.provider, _isBoard: isBoard, _targetId: targets.length });
       if (isBoard) boardCount++;
     }
   }
 
   resolveEntries(companies);
   resolveEntries(boards, { isBoard: true });
+
+  // #3438. Startup checks for field_filters / filter_on, before any network
+  // call. scan.mjs does not run validatePortalsConfig, so every rule that
+  // decides whether a declared whitelist actually filters is enforced here as
+  // well; tests/scan-field-filters-parity.test.mjs holds the two rule sets
+  // together. Each shape rejected below would otherwise leave the whitelist
+  // narrower than written, or compile to "no positive constraint" and pass
+  // every posting while the config looks in force.
+  const exitOnConfigError = (message) => {
+    console.error(`Error: ${message}`);
+    process.exit(1);
+  };
+  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const FIELD_FILTER_KEYS = ['positive', 'negative'];
+  if (config.field_filters !== undefined && !isPlainObject(config.field_filters)) {
+    exitOnConfigError('field_filters must be an object keyed by field name');
+  }
+  for (const [name, block] of Object.entries(config.field_filters ?? {})) {
+    // `title` routes to the top-level title_filter, so a block under this key
+    // is never read — and with no title_filter present, the scan would pass
+    // every title while this list looks like a whitelist in force.
+    if (name === 'title') {
+      exitOnConfigError('field_filters.title is never read - filter_on "title" uses the top-level title_filter. Move these keywords there.');
+    }
+    if (!isPlainObject(block)) {
+      exitOnConfigError(`field_filters.${name} must be an object with positive and/or negative lists`);
+    }
+    for (const key of Object.keys(block)) {
+      if (!FIELD_FILTER_KEYS.includes(key)) {
+        exitOnConfigError(`field_filters.${name}.${key} is not a recognized key - expected one of ${FIELD_FILTER_KEYS.join(', ')}`);
+      }
+    }
+    // buildTitleFilter silently drops a list written as a bare string and any
+    // non-string or blank entry. title_filter keeps that leniency for existing
+    // configs; field_filters is new, so it has none to preserve.
+    let keywordCount = 0;
+    for (const key of FIELD_FILTER_KEYS) {
+      const list = block[key];
+      if (list === undefined || list === null) continue;
+      if (!Array.isArray(list)) {
+        exitOnConfigError(`field_filters.${name}.${key} must be a list of strings - a bare string is ignored`);
+      }
+      if (list.some(k => typeof k !== 'string' || k.trim() === '')) {
+        exitOnConfigError(`field_filters.${name}.${key} entries must be non-empty strings`);
+      }
+      keywordCount += list.length;
+    }
+    if (keywordCount === 0) {
+      exitOnConfigError(`field_filters.${name} has no usable keyword in positive or negative - it would match every posting`);
+    }
+  }
+  // One compiled predicate per declared field, built by the same compiler as
+  // titleFilter so no field gets its own matching dialect.
+  const fieldFilters = new Map(
+    Object.entries(config.field_filters ?? {}).map(([name, block]) => [name, buildTitleFilter(block)]),
+  );
+  for (const target of targets) {
+    if (target.filter_on !== undefined) {
+      const declared = Array.isArray(target.filter_on) ? target.filter_on : [target.filter_on];
+      if (declared.length === 0) {
+        exitOnConfigError(`${target.name}: filter_on must not be an empty list - omit the key to gate on title`);
+      }
+      if (declared.some(f => typeof f !== 'string' || f.trim() === '')) {
+        exitOnConfigError(`${target.name}: filter_on must be a non-empty string or a list of them`);
+      }
+    }
+    for (const field of normalizeFilterOn(target.filter_on)) {
+      if (field !== 'title' && !fieldFilters.has(field)) {
+        exitOnConfigError(`${target.name}: filter_on "${field}" has no field_filters.${field} block in portals.yml`);
+      }
+    }
+  }
 
   const localParserCount = targets.filter(t => t._provider.id === 'local-parser').length;
   const companyCount = targets.length - boardCount;
@@ -3485,9 +3701,22 @@ async function main() {
   const cooldownFilter = buildCooldownFilter(windows, date);
   let totalFilteredCooldown = 0;
   const cooldownOffers = [];
+  // Config-rejected offers, kept so the scan-history row can say what the
+  // summary counter only counts. Both lists stay empty under --dry-run, the
+  // same as every other history write below.
+  const locationFilteredOffers = [];
+  const ageFilteredOffers = [];
   let totalFound = 0;
   let totalFilteredTitle = 0;
   let totalFilteredTier = 0;
+  // #3438: rejections by a declared non-title field, kept apart from
+  // totalFilteredTitle so the summary says which whitelist did the work.
+  let totalFilteredDeclaredField = 0;
+  // Jobs that cleared the declared-field gate with a declared field absent,
+  // i.e. passed without that whitelist ever judging them.
+  let totalPassedFieldAbsent = 0;
+  const declaredFieldSeen = new Map();
+  const declaredFieldAbsent = new Map();
   let totalFilteredLocation = 0;
   let totalFilteredPostingAge = 0;
   let totalFilteredPostedDate = 0;
@@ -3584,7 +3813,21 @@ async function main() {
         else unverifiedZeroTargets.push(company.name);
       }
 
+      const declaredFields = normalizeFilterOn(company.filter_on);
       for (const job of jobs) {
+        // #3438. Presence accounting only — no verdict, no rejection. It runs
+        // before every filter below, including the blacklist skip, because it
+        // answers "does this provider publish this field at all", which no
+        // later filter's opinion can change.
+        for (const field of declaredFields) {
+          if (field === 'title') continue;
+          const key = declaredFieldKey(company._targetId, field);
+          declaredFieldSeen.set(key, (declaredFieldSeen.get(key) || 0) + 1);
+          if (isFieldAbsent(declaredFieldValue(job, field))) {
+            declaredFieldAbsent.set(key, (declaredFieldAbsent.get(key) || 0) + 1);
+          }
+        }
+
         // Trust enrichment — runs before filters, never drops
         const trustResult = trustValidator(job);
         job.trustScore = trustResult.score;
@@ -3611,10 +3854,31 @@ async function main() {
           }
         }
 
-        if (!titleFilter(job.title)) {
+        // #3438. Absent filter_on → normalizeFilterOn returns ["title"] and
+        // this is the same titleFilter(job.title) call as before, against the
+        // same compiled object. Declared fields are ANDed, and a rejection is
+        // booked to the field that failed: with filter_on: [title, noc], a
+        // matching title and a rejected noc is a field rejection.
+        let failedField = null;
+        let sawAbsentField = false;
+        for (const field of declaredFields) {
+          if (field === 'title') {
+            if (!titleFilter(job.title)) { failedField = field; break; }
+          } else {
+            const value = declaredFieldValue(job, field);
+            if (isFieldAbsent(value)) sawAbsentField = true;
+            else if (!fieldFilters.get(field)(String(value))) { failedField = field; break; }
+          }
+        }
+        if (failedField === 'title') {
           totalFilteredTitle++;
           continue;
         }
+        if (failedField !== null) {
+          totalFilteredDeclaredField++;
+          continue;
+        }
+        if (sawAbsentField) totalPassedFieldAbsent++;
         if (classifyTier && skipTiers.includes(classifyTier(job.title))) {
           totalFilteredTier++;
           continue;
@@ -3623,10 +3887,12 @@ async function main() {
         // ("Program Manager - Remote") isn't rejected for a city-only location.
         if (!locationFilter(job.location, job.url, job.title)) {
           totalFilteredLocation++;
+          if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
+          if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postedDateFilter(job.postedAt)) {
@@ -3771,6 +4037,19 @@ async function main() {
   if (!dryRun && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
+  // Offers the location and posting-age cuts removed: recorded for visibility,
+  // never added to pipeline.md. Both are OBSERVATIONAL_SCAN_HISTORY_STATUSES,
+  // so the rows carry no dedup weight — the threshold that rejected them is one
+  // the user edits, and a row written under the old threshold must not suppress
+  // the same posting once it moves.
+  // Each posting is recorded once per status, not once per scan.
+  if (!dryRun && (locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
+    const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const newLocationRows = unrecordedOffers(locationFilteredOffers, 'skipped_location', historyText);
+    const newAgeRows = unrecordedOffers(ageFilteredOffers, 'skipped_age', historyText);
+    if (newLocationRows.length > 0) await appendToScanHistory(newLocationRows, date, 'skipped_location');
+    if (newAgeRows.length > 0) await appendToScanHistory(newAgeRows, date, 'skipped_age');
+  }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.
   if (!dryRun && droppedOffers.length > 0) {
@@ -3801,6 +4080,10 @@ async function main() {
   console.log(`Total jobs found:      ${totalFound}`);
   if (config.title_filter || totalFilteredTitle > 0) {
     console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
+  }
+  if (fieldFilters.size > 0) {
+    console.log(`Filtered by field:     ${totalFilteredDeclaredField} removed`);
+    console.log(`Passed, field absent:  ${totalPassedFieldAbsent} ungated`);
   }
   if (skipTiers.length > 0) {
     console.log(`Filtered by tier:      ${totalFilteredTier} removed`);
@@ -3867,6 +4150,28 @@ async function main() {
       }
       console.log(`  Aggregators often scrape primary boards — consider applying directly on the employer's career site (#3577).`);
     }
+  }
+  // #3438. A declared field that never appeared on a single posting means
+  // the provider does not supply it: the whitelist silently passed everything
+  // for that target. That is precisely the failure this feature exists to
+  // surface, so it is reported even though nothing was dropped.
+  const deadDeclarations = [];
+  for (const target of targets) {
+    for (const field of normalizeFilterOn(target.filter_on)) {
+      if (field === 'title') continue;
+      const key = declaredFieldKey(target._targetId, field);
+      const seen = declaredFieldSeen.get(key) || 0;
+      const absent = declaredFieldAbsent.get(key) || 0;
+      if (seen > 0 && absent === seen) deadDeclarations.push({ name: target.name, field, seen });
+    }
+  }
+  if (deadDeclarations.length > 0) {
+    console.log(`
+⚠️  Declared field never observed — that whitelist is effectively OFF:`);
+    for (const d of deadDeclarations) {
+      console.log(`  ${d.name}: "${d.field}" absent on all ${d.seen} job(s) from this target`);
+    }
+    console.log(`  Check the field name and whether the provider supplies it.`);
   }
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);
@@ -4037,7 +4342,7 @@ async function main() {
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
 
   if (jsonMode) {
-    const filtered = totalFilteredTitle + totalFilteredTier + totalFilteredLocation
+    const filtered = totalFilteredTitle + totalFilteredDeclaredField + totalFilteredTier + totalFilteredLocation
       + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
       + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
       + totalFilteredVisa + totalFilteredCooldown;
