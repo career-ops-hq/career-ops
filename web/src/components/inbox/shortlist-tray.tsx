@@ -6,14 +6,9 @@ import { ChevronDown, Coins, Settings, Sparkles, X } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { cn } from "@/lib/cn";
+import { formatRunCostEstimate } from "@/lib/run-cost-estimate.mjs";
 
 export type ShortItem = { url: string; company: string; role: string };
-
-function fmtTokens(t: number): string {
-  if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`;
-  if (t >= 1_000) return `${Math.round(t / 1_000)}k`;
-  return `${t}`;
-}
 
 // The persistent shortlist tray — bottom-sheet on mobile (thumb-zone), floating card
 // on desktop. "Score shortlist" is the ONLY token spend in the whole inbox: cost is
@@ -38,9 +33,7 @@ export function ShortlistTray({
   if (items.length === 0) return null;
 
   const n = items.length;
-  const costText = estimate.tokens
-    ? `≈ ${fmtTokens(estimate.tokens)} tokens${estimate.usd != null ? ` · ≈ $${estimate.usd.toFixed(2)}` : ""}`
-    : "uses your tokens";
+  const costText = formatRunCostEstimate(estimate);
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-30 sm:bottom-4">

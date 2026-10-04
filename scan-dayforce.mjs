@@ -35,6 +35,11 @@
  * that tenant is done. On 403/429 the context is discarded and a fresh one
  * is bootstrapped for one retry rather than hammering the stale session.
  *
+ * No bypass (providers/ADDING_A_PROVIDER.md §2, rule 3): if the board is
+ * still showing an interactive challenge (Turnstile, "Just a moment...",
+ * hCaptcha) once the page settles, scanBoard() throws DayforceChallengeError
+ * and the board is skipped — never retried, never solved, never relayed.
+ *
  * Reads `dayforce_boards` from portals.yml:
  *   dayforce_boards:
  *     - name: Give & Go Prepared Foods
@@ -82,6 +87,7 @@ import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { htmlToText } from './providers/_html-to-text.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -102,6 +108,65 @@ const BOARD_CODE_RE = /^[A-Za-z0-9_-]+$/;
 const CULTURE_RE = /^[a-z]{2}-[A-Z]{2}$/;
 const JOB_BOARD_ID_RE = /^\d+$/;
 const JOB_POSTING_ID_RE = /^\d+$/;
+
+// Markup that only exists on Cloudflare's own interstitial challenge page.
+const INTERSTITIAL_SELECTORS = ['#challenge-form', '#challenge-stage'];
+
+// Widgets a normal page can embed, with the field each one fills in once
+// solved. A widget only blocks while it's visible and that field is empty:
+// invisible/non-interactive Turnstile, or one already completed, does not.
+const CHALLENGE_WIDGETS = [
+  { selector: '.cf-turnstile', response: 'cf-turnstile-response' },
+  { selector: '.h-captcha', response: 'h-captcha-response' },
+];
+
+// ── Challenge detection ──────────────────────────────────────────────
+
+/**
+ * The board answered with an interactive challenge instead of its listings,
+ * whether goto() settled on it or timed out on it.
+ * Never retriable: a fresh session would just meet the same wall, and working
+ * around it is exactly what the "No bypass" rule forbids.
+ */
+export class DayforceChallengeError extends Error {
+  /** @param {string} tenant @param {string} board @param {string} signal */
+  constructor(tenant, board, signal) {
+    super(`board ${tenant}/${board} is behind an interactive challenge (${signal}) — skipped, not retried`);
+    this.name = 'DayforceChallengeError';
+    this.tenant = tenant;
+    this.retriable = false;
+  }
+}
+
+/**
+ * Inspect the settled page for an interactive challenge. Runs after
+ * `waitUntil: 'networkidle'`, so a non-interactive JS check that clears on
+ * its own has already navigated to the real board and is not reported.
+ *
+ * @param {import('playwright').Page} page
+ * @returns {Promise<string | null>} the matching signal, or null for a normal board
+ */
+export async function detectChallenge(page) {
+  const title = await page.title().catch(() => '');
+  if (BOT_CHALLENGE_PATTERNS.some(re => re.test(title))) return `title "${title}"`;
+  for (const selector of INTERSTITIAL_SELECTORS) {
+    const count = await page.locator(selector).count().catch(() => 0);
+    if (count > 0) return `element ${selector}`;
+  }
+  for (const { selector, response } of CHALLENGE_WIDGETS) {
+    const widgets = page.locator(selector);
+    const count = await widgets.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const widget = widgets.nth(i);
+      if (!(await widget.isVisible().catch(() => false))) continue;
+      const token = await widget
+        .evaluate((el, name) => el.querySelector(`[name="${name}"]`)?.value ?? '', response)
+        .catch(() => '');
+      if (!token) return `unsolved ${selector} widget`;
+    }
+  }
+  return null;
+}
 
 // ── Validation ───────────────────────────────────────────────────────
 
@@ -408,7 +473,16 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
   const found = [];
   const boardUrl = buildBoardUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board);
 
-  await page.goto(boardUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  try {
+    await page.goto(boardUrl, { waitUntil: 'networkidle', timeout: 30000 });
+  } catch (err) {
+    // A live challenge page keeps polling Cloudflare, so the network never
+    // goes idle and goto times out (seen on real "Just a moment..." and
+    // Turnstile pages). Look at what's on screen before reporting the timeout.
+    const challenge = await detectChallenge(page);
+    if (challenge) throw new DayforceChallengeError(boardCfg.tenant, boardCfg.board, challenge);
+    throw err;
+  }
 
   if (debug) {
     const debugDir = join(DATA_ROOT, 'output');
@@ -418,6 +492,9 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
     console.log(`  [debug] screenshot → ${debugPng}`);
     console.log(`  [debug] url: ${page.url()}`);
   }
+
+  const challenge = await detectChallenge(page);
+  if (challenge) throw new DayforceChallengeError(boardCfg.tenant, boardCfg.board, challenge);
 
   const csrfToken = await fetchCsrfToken(page);
 
@@ -498,6 +575,51 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
   };
 }
 
+// ── Per-board retry ──────────────────────────────────────────────────
+
+/**
+ * Scan one board in a fresh browser context, retrying once with a new
+ * context on a retriable (403/429) error. A non-retriable error — including
+ * DayforceChallengeError — ends the board on the first attempt.
+ *
+ * `launch` and `retryDelayMs` are injectable for tests.
+ *
+ * @param {{ name: string, tenant: string, board: string, culture: string, jobBoardId: string }} boardCfg
+ * @param {any} filters
+ * @param {{ debug?: boolean, launch?: () => Promise<any>, retryDelayMs?: number }} [options]
+ * @returns {Promise<{ result: any, error: null } | { result: null, error: any }>}
+ */
+export async function scanBoardWithRetry(boardCfg, filters, {
+  debug = false,
+  launch = () => chromium.launch({ headless: true }),
+  retryDelayMs = RETRY_DELAY_MS,
+} = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    // Browser startup sits inside the try so a launch failure is reported
+    // for this board like any other error, instead of aborting the whole scan.
+    let browser = null;
+    let context = null;
+    try {
+      browser = await launch();
+      context = await browser.newContext();
+      const page = await context.newPage();
+      return { result: await scanBoard(page, boardCfg, filters, { debug }), error: null };
+    } catch (err) {
+      lastError = err;
+      // @ts-ignore
+      if (!(err && err.retriable) || attempt === 2) break;
+      if (debug) console.log(`\n  [debug] ${boardCfg.tenant}: ${err.message} — re-bootstrapping session and retrying once`);
+      await new Promise(r => setTimeout(r, retryDelayMs));
+    } finally {
+      // Close only what was opened; a failing close must not hide the real error.
+      await context?.close().catch(() => {});
+      await browser?.close().catch(() => {});
+    }
+  }
+  return { result: null, error: lastError };
+}
+
 // ── Main ─────────────────────────────────────────────────────────────
 
 async function main() {
@@ -530,32 +652,11 @@ async function main() {
   for (const boardCfg of boards) {
     process.stdout.write(`  Scanning ${boardCfg.tenant}/${boardCfg.board}... `);
 
-    let attempt = 0;
-    let result = null;
-    while (attempt < 2 && !result) {
-      attempt++;
-      const browser = await chromium.launch({ headless: true });
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      try {
-        result = await scanBoard(page, boardCfg, filters, { debug });
-      } catch (err) {
-        // @ts-ignore
-        if (err && err.retriable && attempt < 2) {
-          if (debug) console.log(`\n  [debug] ${boardCfg.tenant}: ${err.message} — re-bootstrapping session and retrying once`);
-          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-        } else {
-          errors.push({ tenant: boardCfg.tenant, error: err.message });
-          break;
-        }
-      } finally {
-        await context.close();
-        await browser.close();
-      }
-    }
+    const { result, error } = await scanBoardWithRetry(boardCfg, filters, { debug });
 
     if (!result) {
-      process.stdout.write('ERROR\n');
+      errors.push({ tenant: boardCfg.tenant, error: error?.message ?? String(error) });
+      process.stdout.write(error instanceof DayforceChallengeError ? 'SKIPPED (interactive challenge)\n' : 'ERROR\n');
       continue;
     }
 

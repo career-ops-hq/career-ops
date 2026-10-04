@@ -471,9 +471,30 @@ Contact line format (TSV, one per line, `#`-prefixed lines are comments):
 {name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}
 ```
 
-`type`: recruiter | hiring-manager | peer | interviewer | other — optional; when present it must be one of the enum, else it is flagged in `quality`. Only name + company are required (>= 4 cells); all channels are optional; `-` for the tracker number when the contact precedes an application. Lines are updated in place when a contact's details change — unlike the append-only salary log. If two lines resolve to the same generated UID (`careerops-{uidPart(name)}--{uidPart(company)}` — normally rows with the same name + company), the LAST one wins the `--vcf` export (JSON keeps all rows and reports the clash in `quality.duplicates`). Import: send the `.vcf` to your phone (AirDrop/email/messaging) and open it — iOS Contacts offers "Add All Contacts", Android imports via Contacts → Fix & manage → Import.
+`type`: recruiter | hiring-manager | peer | interviewer | internal-referral | other — optional; when present it must be one of the enum, else it is flagged in `quality`. `internal-referral` (#4691) is distinct from `peer`: `peer` assumes no prior relationship (do not ask for a job), `internal-referral` exists only because a real one already does (a past interviewer, or a contact saved from an earlier application at the same company) — see `contact-lookup.mjs` below and `modes/contacto.md`. Only name + company are required (>= 4 cells); all channels are optional; `-` for the tracker number when the contact precedes an application. Lines are updated in place when a contact's details change — unlike the append-only salary log. If two lines resolve to the same generated UID (`careerops-{uidPart(name)}--{uidPart(company)}` — normally rows with the same name + company), the LAST one wins the `--vcf` export (JSON keeps all rows and reports the clash in `quality.duplicates`). Import: send the `.vcf` to your phone (AirDrop/email/messaging) and open it — iOS Contacts offers "Add All Contacts", Android imports via Contacts → Fix & manage → Import.
 
 **Exit codes:** `0` always (an empty/missing store prints an explanatory message and writes no file), `1` self-test failure or a `--vcf` path escaping the project directory.
+
+## contact-lookup
+
+Saved-contact company lookup over `data/contacts.tsv`, run by the `contacto`
+mode (#4691) before any cold WebSearch — "do I already have a saved contact
+at this company?" A real prior relationship (a past interviewer, or a contact
+from an earlier, different-role application) is a far stronger outreach
+target than a fresh search, so a match is surfaced first and offered as an
+`internal-referral` ask. Matching is exact-key via `normalizeCompany()`
+(`tracker-utils.mjs`) — the same key `merge-tracker.mjs`/`set-status.mjs`/
+`company-history.mjs` use for same-company lookups — deliberately not
+`linkedin-join.mjs`'s fuzzy token matching, since `contacts.tsv`'s company
+column is normally written from the same string already in the tracker.
+
+```bash
+node contact-lookup.mjs --company "Acme"            # JSON: saved contacts at "Acme"
+node contact-lookup.mjs --company "Acme" --summary  # human-readable
+node contact-lookup.mjs --self-test
+```
+
+**Exit codes:** `0` on a successful lookup (including zero matches), `1` for a missing `--company`, self-test failure, or an unrecognized flag.
 
 ## contact-extract
 
@@ -488,7 +509,7 @@ node contact-extract.mjs --file email.txt --company "Acme Inc" --tracker 42
 ```
 
 The input format is `Subject:`, `From:`, a blank line, then the message body.
-Use `--type recruiter|hiring-manager|peer|interviewer|other` to override the
+Use `--type recruiter|hiring-manager|peer|interviewer|internal-referral|other` to override the
 inferred type. `--company` and `--tracker` are validated against the same
 tracker row, so a contact cannot be attached across companies.
 
@@ -592,6 +613,7 @@ Possible JSON responses:
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
 | `offline` | Could not reach GitHub |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release |
+| `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
 
@@ -633,6 +655,8 @@ Applies the upstream update. Creates a timestamped backup branch (`backup-pre-up
 npm run update
 ```
 
+**From a linked git worktree** (the default session layout of agents such as Claude Code), `check`, `update`, `rollback` and `dismiss` re-run themselves in the checkout that has `main` checked out, so the update is committed to `main` rather than the worktree's throwaway branch. Afterwards, `git merge main` inside the worktree picks it up. If no checkout has `main`, or that checkout has uncommitted changes to tracked files, `update` and `rollback` refuse without changing anything. Set `CAREER_OPS_UPDATE_IN_WORKTREE=1` to update the worktree's own branch instead.
+
 **Exit codes:** `0` success, `1` lock conflict or safety violation.
 
 ---
@@ -656,6 +680,8 @@ Tests whether job posting URLs are still live. Two rungs: a zero-token API check
 The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
 Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the posting is live; Ashby's public API is org-level (the whole job board), so that rung parses the board and confirms the specific job id is still listed. A definitive 404/410 from any ATS API is authoritative and short-circuits the browser check entirely — zero tokens, no browser launch.
+
+Workday answers a withdrawn posting with a 403 whose body carries `errorCode: "S22"` ("permission denied"). That exact body is authoritative the same way a 404 is; any other 403 — a bot wall, or a different Workday error code — stays inconclusive and falls back to the browser.
 
 ```bash
 npm run liveness -- https://example.com/job/123

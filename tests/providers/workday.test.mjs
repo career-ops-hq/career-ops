@@ -180,6 +180,68 @@ try {
     } else {
       fail(`workdayDedupKey() mishandled the underscore base: ${wd('R26_05710-1')} / ${wd('R26_05710')}`);
     }
+
+    // #3882: a hyphenated base carrying Workday's "-N" collapses to the
+    // un-suffixed base, as an unhyphenated one already did. Real pairs from
+    // public tenants, sampled in #3882 (lambweston, unimelb).
+    const hyphenatedPairs = [
+      ['REQ-271559', ['REQ-271559-1']],
+      ['JR-017459', ['JR-017459-1']],
+      ['JR-016640', ['JR-016640-2']],
+    ];
+    const hyphenatedMissed = hyphenatedPairs.filter(([base, variants]) =>
+      wd(base) !== keyOf(base) || variants.some((v) => wd(v) !== keyOf(base)));
+    if (hyphenatedMissed.length === 0) {
+      pass('workdayDedupKey() strips the disambiguator off a hyphenated base (REQ-271559-1, JR-017459-1, JR-016640-2)');
+    } else {
+      fail(`workdayDedupKey() did not collapse hyphenated bases: ${hyphenatedMissed.map(([b]) => b).join(', ')}`);
+    }
+
+    // The short form the base-shape check actually protects: "R-25" splits to
+    // a base of "r", which has no digit, so the tail is the ID and stays.
+    if (wd('R-25') === keyOf('R-25') && wd('R-26') === keyOf('R-26')) {
+      pass('workdayDedupKey() keeps a short hyphen tail whole (R-25, R-26 — base "r" is not requisition-shaped)');
+    } else {
+      fail(`workdayDedupKey() stripped a short hyphen tail: ${wd('R-25')} / ${wd('R-26')}`);
+    }
+
+    // A tenant numbering its own IDs with a hyphenated, zero-padded counter
+    // must not start folding: "-01".."-09" are padded and "-10".."-12" are two
+    // digits, while Workday's disambiguator on a hyphenated base is one digit.
+    const ownSeries = Array.from({ length: 12 }, (_, i) => `REQ-2026-${String(i + 1).padStart(2, '0')}`);
+    const seriesChanged = ownSeries.filter((t) => wd(t) !== keyOf(t));
+    if (seriesChanged.length === 0) {
+      pass('workdayDedupKey() keeps a padded REQ-2026-01..-12 series as twelve distinct keys');
+    } else {
+      fail(`workdayDedupKey() folded a padded series: ${seriesChanged.join(', ')}`);
+    }
+
+    // #3882 acceptance: every key the fixtures above produced before the
+    // hyphenated-base change, pinned literally. Scan history is re-keyed
+    // through this function, so a key that moves would re-add a posting the
+    // user has already seen.
+    const pinned = [
+      ['R11312', 'R11312'], ['R11312-2', 'R11312'], ['R11312-3', 'R11312'],
+      ['R260022205', 'R260022205'], ['R260022205-2', 'R260022205'],
+      ['R26007842', 'R26007842'], ['R26007842-1', 'R26007842'],
+      ['R266069', 'R266069'], ['R266069-1', 'R266069'],
+      ['R53113', 'R53113'], ['R53113-2', 'R53113'],
+      ['JR1126610', 'JR1126610'], ['JR1126610-1', 'JR1126610'],
+      ['R2000678390', 'R2000678390'], ['R2000678390-1', 'R2000678390'],
+      ['R26_05710', 'R26_05710'], ['R26_05710-1', 'R26_05710'],
+      ['R-2593225', 'R-2593225'], ['R-2592964', 'R-2592964'],
+      ['JR26-39350', 'JR26-39350'], ['JR26-42996', 'JR26-42996'],
+      ['R-058589', 'R-058589'], ['R-101976', 'R-101976'], ['R-4253', 'R-4253'], ['R-103502', 'R-103502'],
+      ['R2026-00707', 'R2026-00707'], ['R2026-01237', 'R2026-01237'],
+      ['R2026-01334', 'R2026-01334'], ['R2026-01355', 'R2026-01355'],
+      ['JR00123', 'JR00123'], ['JR_2024_00123', 'JR_2024_00123'], ['R100', 'R100'],
+    ];
+    const moved = pinned.filter(([tail, reqId]) => wd(tail) !== keyOf(reqId));
+    if (moved.length === 0) {
+      pass(`workdayDedupKey() leaves all ${pinned.length} pre-existing fixture keys exactly where they were`);
+    } else {
+      fail(`workdayDedupKey() moved existing keys: ${moved.map(([t]) => `${t} → ${wd(t)}`).join(', ')}`);
+    }
   }
 
   // Two different tenants reusing the same bare requisition number must not

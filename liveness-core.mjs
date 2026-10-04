@@ -97,7 +97,8 @@ const SOFT_EXPIRED_PATTERNS = [
 // short and lacks an apply control, so without this guard they fall through to
 // `insufficient_content` → expired, and scan --verify would write live jobs to
 // scan-history and permanently filter them out. Treat as uncertain instead.
-const BOT_CHALLENGE_PATTERNS = [
+// Exported so browser scanners (scan-dayforce.mjs) recognise the same walls.
+export const BOT_CHALLENGE_PATTERNS = [
   /just a moment/i,
   /performing security verification/i,
   /checking your browser before/i,

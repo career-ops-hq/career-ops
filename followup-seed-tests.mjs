@@ -497,16 +497,27 @@ function cleanup(sandbox) {
   const sb = makeSandbox();
   writeTracker(sb, [trackerRow(1, '2026-05-01', 'Acme', 'Engineer', '4.0/5', 'Applied', 'Applied 2026-06-20.')]);
   // Ownerless for 100ms: past the caller's staleMs (so the unfloored code
-  // reclaims it immediately) but far inside the 1s floor. Pinning both sides
-  // of the relation keeps the test off the wall clock — against a directory
+  // reclaims it immediately) but far inside the floor. Pinning both sides of
+  // the relation keeps the test off the wall clock — against a directory
   // created "just now" this would instead depend on whether a sub-millisecond
   // age drifts past a 1ms threshold before the retry loop looks again.
+  //
+  // The floor itself is widened to 30s via CAREER_OPS_OWNERLESS_GRACE_MS
+  // (#4537): at the production 1s default, the child's own startup cost —
+  // execFileSync, Node boot, the module graph behind followup-seed.mjs, plus
+  // up to 300ms of retries — could itself eat past 900ms of the window on a
+  // loaded CI runner, so the lock read as aged-out before the child ever
+  // looked, and this test failed by measuring exactly the race it exists to
+  // forbid. 30s leaves no realistic startup cost a chance to cross it, and
+  // test 17 below (recovery past the floor) is unaffected — it keeps the
+  // production default so the floor's other edge stays covered.
   mkdirSync(sb.lock, { recursive: true });
   const heldSince = new Date(Date.now() - 100);
   utimesSync(sb.lock, heldSince, heldSince);
   const res = run(['1'], sb, {
     CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS: '10',
     CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '300',
+    CAREER_OPS_OWNERLESS_GRACE_MS: '30000',
   });
   if (res.code === 4) pass('16. ownerless lock inside the grace period is not stolen → exit 4');
   else fail(`16. ownerless lock inside the grace period is not stolen → exit 4 — got ${res.code}\n${res.stdout}${res.stderr}`);

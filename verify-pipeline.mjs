@@ -19,6 +19,7 @@
  * 14. data/follow-ups.md table schema (see #2971)
  * 15. portals.yml entries no provider claims (see #3251)
  * 16. No invisible control characters in tracker cells (error — see #3892)
+ * 17. JD archive coverage — check-jd-archive.mjs's findings (warning/error — see #4525)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -37,6 +38,7 @@ import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 import { loadCanonicalStates } from './tracker-utils.mjs';
+import { checkJdArchive } from './check-jd-archive.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
@@ -49,6 +51,10 @@ const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
 const REPORTS_DIR = process.env.CAREER_OPS_REPORTS
   ? resolve(CAREER_OPS, process.env.CAREER_OPS_REPORTS)
   : join(CAREER_OPS, 'reports');
+// CAREER_OPS_JDS overrides the jds/ dir (used by tests, mirrors CAREER_OPS_REPORTS).
+const JDS_DIR = process.env.CAREER_OPS_JDS
+  ? resolve(CAREER_OPS, process.env.CAREER_OPS_JDS)
+  : join(CAREER_OPS, 'jds');
 const STATES_FILE = existsSync(join(CODE_ROOT, 'templates/states.yml'))
   ? join(CODE_ROOT, 'templates/states.yml')
   : join(CODE_ROOT, 'states.yml');
@@ -644,6 +650,28 @@ for (let i = 0; i < lines.length; i++) {
   controlByteRows++;
 }
 if (controlByteRows === 0) ok('No control characters in tracker cells');
+
+// --- Check 17: JD archive coverage (#4525) ---
+// check-jd-archive.mjs is a plain local filesystem scan — no network, no cost
+// reason to keep it as a command a user has to remember to run separately the
+// way audit-portals.mjs's live half justifiably is. Its own CLI already
+// distinguishes two severities and this mirrors that split exactly:
+// `missing-jd-archive` is what its own exit code treats as hard (a SENT
+// application with no archived JD and no terminal status to excuse it), so it
+// reports here as an error; `jd-archive-review-due` is explicitly soft in its
+// own source (a still-live/unresolved row, not yet a confirmed miss), so it
+// reports as a warning, same as this file's own Check 9/10 warnings.
+const jdArchiveResult = checkJdArchive(REPORTS_DIR, JDS_DIR, { trackerPath: APPS_FILE, statesPath: STATES_FILE });
+const jdArchiveMissing = jdArchiveResult.findings.filter(f => f.type === 'missing-jd-archive');
+const jdArchiveReviewDue = jdArchiveResult.findings.filter(f => f.type === 'jd-archive-review-due');
+for (const f of jdArchiveMissing) error(`${f.file}: ${f.detail}`);
+for (const f of jdArchiveReviewDue) warn(`${f.file}: ${f.detail}`);
+for (const w of jdArchiveResult.warnings) warn(`${w.file}: ${w.detail}`);
+if (jdArchiveMissing.length === 0 && jdArchiveReviewDue.length === 0 && jdArchiveResult.warnings.length === 0) {
+  ok(jdArchiveResult.reportsScanned === 0
+    ? 'No reports yet — nothing to check for JD archives'
+    : `All ${jdArchiveResult.reportsScanned} report(s) have an archived JD or a resolvable jds/ capture`);
+}
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

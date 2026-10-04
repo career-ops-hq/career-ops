@@ -368,6 +368,7 @@ title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
   # 2-3 letter keyword ("AI", "ML", "VP"), which is matched on word boundaries
   # so it does not fire inside another word ("AI" will not match "Maintenance").
+  # A CJK character counts as a boundary, so "AI" does match "AI工程师".
   # Either way an entry expresses the exact spelling you write, and nothing
   # else: real titles vary in separator and word order, and every variant your
   # list does not literally contain is dropped in silence.
@@ -1367,7 +1368,7 @@ search_queries:
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
 #   enabled: true                         # ~445 English postings (zero-token XML)
 #
-# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+# - name: Deutsche Bahn                   # single-company; db.jobs search front
 #   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true
