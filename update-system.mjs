@@ -401,6 +401,9 @@ const SYSTEM_PATHS = [
   'paste-reply.mjs',
   'paste-reply-tests.mjs',
   'contact-extract.mjs',
+  // Retired 2026-10-04: the suite moved to tests/contact-extract.test.mjs. The
+  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
+  // drop it once a release has shipped past that move.
   'contact-extract-tests.mjs',
   'outcome.mjs',
   'batch/batch-prompt.md',
