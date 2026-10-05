@@ -10,6 +10,22 @@
 # update-system.mjs — the file `apply` overwrites and git re-merges on every
 # sync, so the statement is guaranteed to conflict (#2421).
 #
+# Running the suite in CI in a fork
+#   `validate-system-paths-coverage.mjs` reads this file, so a fork whose CI runs
+#   the suite has to make it visible to that checkout — otherwise every path
+#   declared here is reported as an orphan (#2991). Committing it as-is fails the
+#   other guard instead: `tests/user-layer-untracked.test.mjs` refuses a User Layer
+#   file that is git-ignored AND tracked, which is how a late ignore rule hides an
+#   already-committed personal file.
+#
+#   The supported route is to stop ignoring it in your fork, then commit it:
+#
+#       echo '!config/local-paths.txt' >> .gitignore
+#       git add .gitignore config/local-paths.txt
+#
+#   It is then tracked and NOT ignored, so both guards are satisfied. Keep the
+#   negation AFTER upstream's rule — Git applies the last matching pattern.
+#
 # Format
 #   - one repo-relative path per line
 #   - `#` starts a comment; blank lines are ignored

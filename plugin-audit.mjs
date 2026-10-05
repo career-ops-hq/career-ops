@@ -82,6 +82,12 @@ function listMjs(dir) {
     // third-party plugin code: a directory that could opt out of the audit by
     // planting a `.git` marker is a place to hide a forbidden import.
     allowNestedCheckouts: true,
+    // ...and follows links, for the same reason. `import()` resolves a symlink
+    // of either kind, so whatever a link reaches is code the plugin can load:
+    // a symlinked file (which the hand-rolled walk this replaced did read) and
+    // a symlinked directory (which it did not — a hole this closes). walkTree
+    // stops at a link onto its own ancestor, so a loop cannot hang the audit.
+    links: 'follow',
   }).map((abs) => ({ abs, rel: path.relative(dir, abs).split(path.sep).join('/') }));
 }
 

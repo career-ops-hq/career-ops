@@ -22,11 +22,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectMjsFiles, SKIP_DIRS } from '../lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout, SKIP_DIRS } from '../lib/mjs-files.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -145,14 +146,117 @@ test('the walk root is exempt, so running from inside a worktree still checks it
   }
 });
 
-// The predicate itself, and the rule that no other walker may re-implement it,
-// moved to tests/walk-tree.test.mjs together with the walk that consults it.
-// This file used to assert that three named suites imported `isNestedCheckout`
-// and called it somewhere — which proved neither that they called it on the
-// path they were about to descend into, nor that a fourth walker existed to be
-// checked at all. Both of those are now properties of the one walker in
-// lib/walk-tree.mjs: one behavioural test proves the guard, and a ban keeps the
-// count at one (#3818).
+// Through the RE-EXPORT on purpose: `lib/walk-tree.mjs` owns the predicate now,
+// but intake.mjs and older callers import it from here, and this is the test
+// that notices if the re-export is dropped.
+test('isNestedCheckout detects the marker, of either type, and nothing else', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-mjs-files-'));
+  try {
+    mkdirSync(join(dir, 'worktree'));
+    writeFileSync(join(dir, 'worktree', '.git'), 'gitdir: /elsewhere\n');
+    mkdirSync(join(dir, 'clone', '.git'), { recursive: true });
+    mkdirSync(join(dir, 'plain'));
+
+    assert.equal(isNestedCheckout(join(dir, 'worktree')), true, 'a .git file is a linked worktree or submodule');
+    assert.equal(isNestedCheckout(join(dir, 'clone')), true, 'a .git directory is an independent clone');
+    assert.equal(isNestedCheckout(join(dir, 'plain')), false, 'an ordinary subdirectory is source');
+    assert.equal(isNestedCheckout(join(dir, 'does-not-exist')), false, 'a missing directory is not a checkout');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #3792's static analysis of every hand-rolled walker — guardsEveryDescent and
+// its detector — is superseded by the ban in tests/walk-tree.test.mjs: there is
+// one recursion left, so the question "does this recursion guard the right
+// path?" has one answer, proved by running it, and the question that remains is
+// "is there another recursion?", which is decidable (#3818).
+//
+// The two below are kept from #3792 unchanged in intent, because they hold no
+// matter how a walk is implemented: neither reads a line of source.
+
+test('a checkout under tests/ does not get its suites EXECUTED by the runner', () => {
+  // The end of the #3762 chain, asserted where it bites. Every other walker in
+  // this repository READS what it finds; `discoverTests` feeds `node:test`, so
+  // a worktree under `tests/` ran a stale checkout's suites against the current
+  // tree and `test-all.mjs` printed "🟢 All tests passed — safe to push/merge"
+  // for them. The marker is what the predicate keys on, so a plain file named
+  // `.git` reproduces it exactly as `git worktree add tests/x` does, without
+  // needing git.
+  //
+  // mkdtemp rather than a fixed path: the fixture has to live under the real
+  // tests/ for the real discovery to walk it, and the previous form cleared its
+  // path with a recursive rm BEFORE creating it — which is a delete of whatever
+  // a developer happened to have there. The generated basename is what `--only`
+  // filters on, so the discovery contract is unchanged.
+  const fixture = mkdtempSync(join(ROOT, 'tests', 'nested-checkout-3762-'));
+  const only = basename(fixture);
+  try {
+    mkdirSync(join(fixture, 'tests'), { recursive: true });
+    writeFileSync(join(fixture, '.git'), 'gitdir: /nowhere\n');
+    // Directly beside the marker, NOT one level below it. With the suite at
+    // `fixture/tests/`, a guard mutated to test the directory being read
+    // (`isNestedCheckout(dir)`) still skipped it — that mutant kept every test
+    // green while walking the files sitting immediately inside a checkout. The
+    // second copy deeper down keeps the recursive case covered too.
+    const stale = "import test from 'node:test';\ntest('NESTED SUITE EXECUTED', () => { throw new Error('a stale checkout suite ran'); });\n";
+    writeFileSync(join(fixture, 'stale.test.mjs'), stale);
+    writeFileSync(join(fixture, 'tests', 'stale-nested.test.mjs'), stale);
+
+    let status = 0;
+    let output = '';
+    try {
+      output = execFileSync(process.execPath, ['test-all.mjs', '--only', only], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 120000,
+      });
+    } catch (err) {
+      status = err.status;
+      output = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+    }
+
+    // `--only` exits 1 on an empty match precisely so a path typo cannot turn
+    // CI green; here that same exit is the pass condition — the stale suite was
+    // not discovered, so there was nothing to run.
+    assert.equal(status, 1, `the runner discovered suites inside a nested checkout:\n${output}`);
+    assert.match(output, /no test files matched/, output);
+    assert.doesNotMatch(output, /stale(-nested)?\.test\.mjs|NESTED SUITE EXECUTED/, output);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('a checkout parked among the fixture states is not an allowlisted state', () => {
+  // The class no static gate can see: `listStates()` reads one level, and its
+  // result becomes the ROOT that `walk()` starts from — where the child-only
+  // guard is deliberately blind (the walk root is exempt on purpose). So a
+  // checkout at test-fixtures/upgrade/<state> would be a valid `--state` name
+  // and seedFixture would copy a whole second repository into the install
+  // under test, hashing every file of it into the manifest (#3762).
+  const FIXTURES = join(ROOT, 'test-fixtures', 'upgrade');
+  // mkdtemp for the same reason as the test above — and the `state-` prefix
+  // keeps the probe shaped like the thing it is pretending to be.
+  const probe = mkdtempSync(join(FIXTURES, 'state-nested-checkout-probe-'));
+  const probeName = basename(probe);
+  try {
+    writeFileSync(join(probe, '.git'), 'gitdir: /nowhere\n');
+    writeFileSync(join(probe, 'cv.md'), '# not ours\n');
+
+    const listed = execFileSync(
+      process.execPath,
+      ['-e', "import('./seed-fixture.mjs').then((m) => console.log(JSON.stringify(m.listStates())))"],
+      { cwd: ROOT, encoding: 'utf-8', timeout: 60000 },
+    );
+    const states = JSON.parse(listed);
+    assert.ok(states.length > 0, 'the probe must not empty the state list — that would pass for the wrong reason');
+    assert.ok(
+      !states.includes(probeName),
+      `listStates() offered a nested checkout as a fixture state: ${states.join(', ')}`,
+    );
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+});
+
 
 test('both syntax checkers derive their file list from the shared collector', () => {
   for (const caller of ['test-all.mjs', 'scripts/check-syntax.mjs']) {

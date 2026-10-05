@@ -54,11 +54,50 @@
  *                               salary_filter and rendered into pipeline.md's
  *                               compensation column via formatCompensation(); an
  *                               empty/absent value always passes the filter.
+ *                               `adp-workforcenow.mjs` is another producer.
+ * @property {string} [requisitionId] The EMPLOYER's requisition id (Greenhouse
+ *                               `requisition_id`, e.g. "JR103948"; Workday: the
+ *                               token ending `externalPath`, cross-site "-N"
+ *                               suffix removed) — the
+ *                               schema.org/JobPosting `identifier` concept.
+ *
+ *                               ⚠ MANY-TO-ONE WITH POSTINGS. This is a REQ key,
+ *                               not a posting key, and must NEVER be used alone to
+ *                               conclude two rows are the same opening. Measured on
+ *                               Affirm's live board: 181 postings carry 118 distinct
+ *                               requisition_ids, and 61 of those cover more than one
+ *                               posting — JR103863 alone spans four, including
+ *                               "Engineering Manager, ML Platform" AND "Senior
+ *                               Engineering Manager, ML Platform" across US and
+ *                               Canada. Keying dedup on it merges two different
+ *                               levels of a role. That is by design: Google's own
+ *                               guidance calls `identifier` useful "when the same
+ *                               role exists at multiple locations".
+ *
+ *                               Correct use: an ADVISORY grouping signal ("possible
+ *                               repost / sibling req"), always paired with employer
+ *                               and, where it matters, location; per-posting
+ *                               identity is the URL. scan.mjs's company+role dedup
+ *                               reads it only in the safe direction: two
+ *                               same-titled postings with DIFFERENT ids are two
+ *                               requisitions. Written to scan-history.tsv.
+ *                               Capture verbatim; never reconstruct from the URL.
  * @property {number} [trustScore] 0-100 trust score from _trust-validator.mjs.
  * @property {string[]} [trustFlags] Flags raised by trust validation (e.g.
  *                                   'invalid_url', 'suspicious_domain').
  * @property {'high'|'medium'|'low'} [trustLevel] Classification derived from
  *                                                 trustScore.
+ * @property {string} [language] Language the posting is written in, as the
+ *                               source names it: a code (`de`, `en-GB`,
+ *                               `en_GLOBAL`) or a name (`German`). Prefer the
+ *                               code when the source offers both. Consumers
+ *                               reduce a code to its canonical language subtag
+ *                               (`en-GB`, `en_GLOBAL` → `en`; `deu` → `de`) and
+ *                               compare anything else whole, case-folded.
+ *                               Omitted when the source doesn't say. Consumed
+ *                               by scan.mjs's opt-in
+ *                               `scan_history.dedup_include_language` and
+ *                               written to scan-history.tsv.
  */
 
 /**

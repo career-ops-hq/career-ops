@@ -59,7 +59,7 @@ batch/
       <headless-cmd> "Process this job. URL: {url}. JD: /tmp/batch-jd-{id}.txt. Report: {num}. ID: {id}"
       ```
 
-   e. Update `batch-state.tsv` (completed/failed + score + report_num)
+   e. Handle `needs_confirmation` before any completion: follow **Agency confirmation handoff** in `modes/_shared.md`. The worker writes no tracker, report, or CV; the parent asks its question with the posting URL, releases the unused reservation, and resumes only after the user's explicit answer for that posting. Other jobs may continue. Update `batch-state.tsv` (completed/failed/needs_confirmation + score + report_num); a held item has no score or report artifact.
    f. Log to `logs/{report_num}-{id}.log`
    g. Chrome: go back → next job
 5. **Pagination**: If no more jobs → click "Next" → repeat
@@ -104,7 +104,7 @@ Options:
 - `--retry-failed` — retry only failed jobs
 - `--resume-paused` — resume jobs paused after a Claude session/rate limit
 - `--start-from N` — start from ID N
-- `--limit N` — max number of jobs to process in this run
+- `--limit N` — max number of jobs to process in this run (positive integer; `0` is rejected, omit the flag for no limit)
 - `--parallel N` — N workers in parallel
 - `--max-retries N` — attempts per job (default: 2)
 - `--rate-limit-sleep N` — seconds to wait before retrying a transient rate-limited worker (default: 300; use 0 to pause the batch immediately)
@@ -120,11 +120,17 @@ id	url	status	started_at	completed_at	report_num	score	error	retries
 5	https://...	paused_rate_limit	2026-...	2026-...	005	-	session limit; paused	1
 ```
 
-Valid statuses include `pending`, `processing`, `completed`, `failed`, `skipped`, `rate_limited`, and `paused_rate_limit`. `rate_limited` is an intermediate non-completed state emitted while the runner waits before retrying; if the run is interrupted there, a later non-`--retry-failed` run treats it as pending work.
+Valid statuses include `pending`, `processing`, `completed`, `failed`, `skipped`, `needs_confirmation`, `rate_limited`, and `paused_rate_limit`. `needs_confirmation` is batch coordination state, never a tracker lifecycle status. `rate_limited` is an intermediate non-completed state emitted while the runner waits before retrying; if the run is interrupted there, a later non-`--retry-failed` run treats it as pending work.
 
 `paused_rate_limit` means a worker hit a Claude session/usage limit. The runner stops scheduling new offers, preserves the retry count, and resumes only when explicitly called with `--resume-paused`.
 
 ## Resumability
+
+**Agency confirmation (#4359):** every worker dispatch includes the **Agency confirmation handoff** contract (already included in `batch/batch-prompt.md`). The standalone runner records `needs_confirmation`, prints the question, and leaves the item held without consuming retries or merging artifacts for it. Ordinary reruns, `--retry-failed`, and `--resume-paused` never resume this state. Show held items separately in summaries; they are neither failures nor completed evaluations.
+
+The standalone script cannot ask a human or authenticate a conversational answer. Bring its URL and question (full worker payload in the job log) to the parent session. The parent asks the user; after an explicit answer identifying/confirming the agency or correcting the posting to direct, process that URL interactively through `auto-pipeline`, or dispatch a fresh worker with the exact answer and URL. Reserve a fresh report number and re-check the normal gates. Only after successful artifact creation/merge may the parent mark the batch item completed with the actual report number and score. If the user declines or cannot identify the agency, leave it held. Never change it back to pending just to retry without the answer.
+
+**Close the held batch row after interactive completion:** wait until `batch-runner.sh` has exited (do not edit state while it or its workers run). Re-read `batch/batch-state.tsv`, locate the single row matching BOTH the held `id` and exact `url`, and verify the new report's URL and the merged tracker row match that posting. The parent then updates only that row: `status=completed`, `completed_at=<current UTC ISO8601>`, `report_num=<actual new report number>`, `score=<actual numeric score>`, `error=-`; preserve `id`, `url`, `started_at`, and `retries`. Preserve all other rows and the header, and replace the state file atomically using a temporary sibling file. If the row is missing, ambiguous, no longer held, or the artifacts do not match, stop and inspect instead of guessing. Run `batch/batch-runner.sh --status` to verify completion, then `node reconcile-pipeline.mjs` to move the now-completed URL out of Pending. No new consent flag is required: the explicit answer belongs in the parent conversation, and this state update happens only after the confirmed work actually finishes.
 
 - If it crashes → re-run → reads `batch-state.tsv` → skip completed jobs
 - Lock file (`batch-runner.pid`) prevents double execution

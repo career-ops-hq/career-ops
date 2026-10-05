@@ -108,6 +108,51 @@ try {
     fail(`ordinary prose produced a false title claim: ${JSON.stringify(proseTitle)}`);
   }
 
+  // #3907 — "role:" or "title:" immediately followed by a bare capitalised
+  // pronoun ("I") satisfied the old `[A-Z][\w/-]*` first-token class (the
+  // `*` allows zero extra characters), so ordinary prose like a cover-letter
+  // disclaimer was misread as a one-letter job title claim and blocked
+  // rendering even though nothing false was ever asserted.
+  const roleColonPronoun = factClaims(
+    'I want to be direct about something important to this role: I do not have functional knowledge in X.',
+  );
+  if (!roleColonPronoun.some(claim => claim.kind === 'title')) {
+    pass('#3907 "role: I" is not read as a one-letter title claim');
+  } else {
+    fail(`#3907 regression: "role: I ..." produced a false title claim: ${JSON.stringify(roleColonPronoun)}`);
+  }
+
+  const titleColonArticle = factClaims('Please review the role: A candidate should have strong communication skills.');
+  if (!titleColonArticle.some(claim => claim.kind === 'title')) {
+    pass('#3907 "role: A" is not read as a one-letter title claim');
+  } else {
+    fail(`#3907 regression: "role: A ..." produced a false title claim: ${JSON.stringify(titleColonArticle)}`);
+  }
+
+  // The #3907 fix must not make the gate blind to real title fabrication,
+  // including short 2-letter acronym titles, which are common enough (VP,
+  // PM, HR) that a naive "require 2+ letters, uppercase only" fix would have
+  // broken them.
+  const unsupportedAcronymTitle = verifyFacts('Title: VP of Sales, previously unrelated experience.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unsupportedAcronymTitle.verdict === 'block'
+      && unsupportedAcronymTitle.unsupportedFacts.some(claim => claim.kind === 'title' && claim.value === 'vp of sales')) {
+    pass('#3907 fix does not blind the gate to a fabricated acronym title (VP of Sales)');
+  } else {
+    fail(`#3907 fix broke acronym title detection: ${JSON.stringify(unsupportedAcronymTitle)}`);
+  }
+
+  const unsupportedRealTitle = verifyFacts('Title: Principal Engineer, previously unrelated experience.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (unsupportedRealTitle.verdict === 'block'
+      && unsupportedRealTitle.unsupportedFacts.some(claim => claim.kind === 'title' && claim.value === 'principal engineer')) {
+    pass('#3907 fix still flags a genuinely unsupported title claim (Principal Engineer)');
+  } else {
+    fail(`#3907 fix regressed real title detection: ${JSON.stringify(unsupportedRealTitle)}`);
+  }
+
   const boundary = verifyFacts('I am using Go and Google Cloud.', {
     sourcePaths: [source], configPath: config,
   });
@@ -202,6 +247,126 @@ try {
     pass('a source-backed lowercase tool name is not penalized for casing');
   } else {
     fail(`a source-backed lowercase tool name was blocked: ${JSON.stringify(backedLowercaseTool)}`);
+  }
+
+  // #4004 - `isLikelyTool()` accepts by default: a fragment that is neither
+  // tool-shaped nor an exact source match is still asserted as a tool unless
+  // one of its words happens to sit in `TOOL_PROSE_WORDS`. A tailoring run
+  // that rewords a "using" sentence out of the CV's own vocabulary therefore
+  // blocks the render of a document that asserts nothing false.
+  writeFileSync(source, [
+    'Regional Sales Manager at Northwind Supply.',
+    'Reported on campaign performance and on coverage of the pipeline every week.',
+    'Advised clients on solutions for print and digital channels.',
+    'Grew the account through a consultative approach to selling.',
+  ].join('\n'));
+  const rewordedProse = [
+    ['a reworded source phrase', 'Reported weekly using campaign performance and pipeline coverage.'],
+    ['a noun phrase reassembled from the source', 'Advised clients using digital solutions.'],
+    ['a gerund phrase from the source', 'Grew the account using consultative selling.'],
+  ];
+  for (const [label, target] of rewordedProse) {
+    const result = verifyFacts(target, { sourcePaths: [source], configPath: config });
+    if (result.verdict === 'pass' && !result.unsupportedFacts.some(claim => claim.kind === 'tool')) {
+      pass(`#4004 prose built from the source's own words is not a tool claim: ${label}`);
+    } else {
+      fail(`#4004 ordinary prose blocked a truthful document (${label}): ${JSON.stringify(result)}`);
+    }
+  }
+
+  // A name the source never mentions is still unverified, whatever its casing:
+  // the source-vocabulary test above must not become a way to smuggle one in.
+  const novelLowercaseTool = verifyFacts('Reported weekly using kubernetes.', {
+    sourcePaths: [source], configPath: config,
+  });
+  if (novelLowercaseTool.verdict === 'block'
+      && novelLowercaseTool.unsupportedFacts.some(claim => claim.kind === 'tool' && claim.value === 'kubernetes')) {
+    pass('#4004 a lowercase name absent from the source still blocks');
+  } else {
+    fail(`#4004 opened a bypass for an unbacked lowercase tool: ${JSON.stringify(novelLowercaseTool)}`);
+  }
+
+  // Determiners are a closed grammatical class, so this one needs no source:
+  // "that campaign" and "our playbook" are ordinary reference, not products.
+  const determinerCases = [
+    ['a demonstrative', 'Rebuilt the funnel using that campaign.'],
+    ['a possessive', 'Ran the quarterly review using our playbook.'],
+  ];
+  for (const [label, text] of determinerCases) {
+    const found = factClaims(text).filter(claim => claim.kind === 'tool');
+    if (found.length === 0) {
+      pass(`#4004 a determiner-led fragment is not a tool claim: ${label}`);
+    } else {
+      fail(`#4004 determiner-led prose was extracted as a tool (${label}): ${JSON.stringify(found)}`);
+    }
+  }
+
+  // A determiner LATER in a list leads one fragment, not the whole capture.
+  // The check ran on the raw capture before the split, so "React and our
+  // playbook" lost React, and an unsupported "kubernetes" in that position
+  // stopped being blocked at all. A determiner immediately after the trigger
+  // is different and still drops the clause: that marks the trigger as
+  // ordinary English ("worked with the team in London"), which the prose guard
+  // above depends on.
+  const mixedList = factClaims('Built with React and our playbook.').filter(claim => claim.kind === 'tool');
+  if (mixedList.some(claim => claim.value === 'react')
+      && !mixedList.some(claim => claim.value.includes('playbook'))) {
+    pass('#4004 a determiner in one fragment does not discard its siblings');
+  } else {
+    fail(`#4004 a determiner-led fragment took the whole list with it: ${JSON.stringify(mixedList)}`);
+  }
+
+  const mixedListFailClosed = factClaims('Shipped it using kubernetes and our stack.').filter(claim => claim.kind === 'tool');
+  if (mixedListFailClosed.some(claim => claim.value === 'kubernetes')) {
+    pass('#4004 an unsupported name beside a determiner-led fragment is still claimed');
+  } else {
+    fail(`#4004 a determiner-led sibling suppressed a claim that must block: ${JSON.stringify(mixedListFailClosed)}`);
+  }
+
+  // A determiner can be the WHOLE fragment, not just its lead: the `for`
+  // lookahead ends the capture at "that", and the split can leave one standing
+  // alone. Requiring trailing whitespace missed both.
+  const bareDeterminer = factClaims('Built this using that for the migration.').filter(claim => claim.kind === 'tool');
+  if (bareDeterminer.length === 0) {
+    pass('#4004 a determiner standing alone is not a tool claim');
+  } else {
+    fail(`#4004 a bare determiner was extracted as a tool: ${JSON.stringify(bareDeterminer)}`);
+  }
+
+  // The whole-clause drop is about PROSE triggers: a determiner after "using"
+  // or "worked with" says the trigger is ordinary English. A determiner after
+  // "Technologies:" says no such thing, because that trigger is a declaration
+  // whatever follows it, so there the determiner taints only its own fragment.
+  const declaredWithDeterminer = factClaims('Technologies: our playbook and React').filter(claim => claim.kind === 'tool');
+  if (declaredWithDeterminer.some(claim => claim.value === 'react')
+      && !declaredWithDeterminer.some(claim => claim.value.includes('playbook'))) {
+    pass('#4004 a determiner in a declared list does not discard the list');
+  } else {
+    fail(`#4004 a declared technology was lost to a determiner sibling: ${JSON.stringify(declaredWithDeterminer)}`);
+  }
+
+  const declaredFailClosed = factClaims('Tech stack: our stack and kubernetes').filter(claim => claim.kind === 'tool');
+  if (declaredFailClosed.some(claim => claim.value === 'kubernetes')) {
+    pass('#4004 a declared list still yields the claim the gate must block');
+  } else {
+    fail(`#4004 a determiner sibling suppressed a declared claim: ${JSON.stringify(declaredFailClosed)}`);
+  }
+
+  // The other direction: an explicit declaration is still a declaration.
+  const declaredTools = factClaims('Technologies: React, Postgres');
+  if (declaredTools.some(claim => claim.kind === 'tool' && claim.value === 'react')
+      && declaredTools.some(claim => claim.kind === 'tool' && claim.value === 'postgres')) {
+    pass('#4004 a Technologies: list is still extracted');
+  } else {
+    fail(`#4004 lost a declared technology list: ${JSON.stringify(declaredTools)}`);
+  }
+
+  const builtWithTools = factClaims('Built with Django and Redis.');
+  if (builtWithTools.some(claim => claim.kind === 'tool' && claim.value === 'django')
+      && builtWithTools.some(claim => claim.kind === 'tool' && claim.value === 'redis')) {
+    pass('#4004 a "built with" declaration is still extracted');
+  } else {
+    fail(`#4004 lost a "built with" declaration: ${JSON.stringify(builtWithTools)}`);
   }
 
   const delegatedSource = [
