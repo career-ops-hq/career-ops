@@ -10,6 +10,7 @@ try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/startup-jobs.mjs')).href);
   const startupJobs = mod.default;
   const { parseStartupJobsFeed } = mod;
+  const { buildTitleFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   if (startupJobs.id === 'startup-jobs') pass('startup-jobs.id is "startup-jobs"');
   else fail(`startup-jobs.id is ${JSON.stringify(startupJobs.id)}`);
@@ -123,6 +124,54 @@ try {
     pass('parseStartupJobsFeed skips a title with no usable " at " segment instead of attributing it to the board');
   } else {
     fail('the unattributed-employer item should have been dropped, not kept');
+  }
+
+  // An entity-encoded "&amp;" in the TITLE itself (not just the company) must
+  // decode before title_filter sees it — an undecoded "&amp;" would read as
+  // literal text and could drop a job a plain "&" title_filter query should match.
+  const entityInTitleXml = [
+    '<rss><channel>',
+    '<item>',
+    '  <title>R&amp;D Engineer at Acme</title>',
+    '  <link>https://startup.jobs/r-and-d-engineer-acme-10260832</link>',
+    '</item>',
+    '</channel></rss>',
+  ].join('\n');
+  const entityTitleJobs = parseStartupJobsFeed(entityInTitleXml);
+  if (entityTitleJobs[0]?.title === 'R&D Engineer' && entityTitleJobs[0]?.company === 'Acme') {
+    pass('parseStartupJobsFeed decodes an entity-encoded "&amp;" in the title, not just the company');
+  } else {
+    fail(`entity-in-title row = ${JSON.stringify(entityTitleJobs[0])}`);
+  }
+  // The end-to-end claim (#2921): the decoded title has to survive the
+  // user's own title_filter, not just look right in isolation. An
+  // undecoded "R&amp;D Engineer" would fail a positive "r&d" keyword match
+  // and the posting would be silently dropped before it ever reaches
+  // pipeline.md — scan.mjs's buildTitleFilter lowercases and substring-matches.
+  const keepsRnD = buildTitleFilter({ positive: ['r&d'], negative: [] });
+  if (keepsRnD(entityTitleJobs[0]?.title)) {
+    pass('the decoded title survives a positive "r&d" title_filter keyword match');
+  } else {
+    fail(`decoded title ${JSON.stringify(entityTitleJobs[0]?.title)} was dropped by positive "r&d"`);
+  }
+
+  // The feed sometimes glues a German "bei" preposition onto the company
+  // name (source data, not a parsing artifact). Left in, "bei PROLOGA" would
+  // silently bypass a data/blacklist.md row for "PROLOGA" and company-based
+  // dedup against the same employer's own ATS.
+  const beiPrefixXml = [
+    '<rss><channel>',
+    '<item>',
+    '  <title>Quality Assurance Engineer (m/w/d) - remote DE at bei PROLOGA</title>',
+    '  <link>https://startup.jobs/qa-engineer-prologa-10260833</link>',
+    '</item>',
+    '</channel></rss>',
+  ].join('\n');
+  const beiJobs = parseStartupJobsFeed(beiPrefixXml);
+  if (beiJobs[0]?.company === 'PROLOGA') {
+    pass('parseStartupJobsFeed strips a leading "bei " from the company so blacklist/dedup matching sees the plain name');
+  } else {
+    fail(`bei-prefix company = ${JSON.stringify(beiJobs[0]?.company)}`);
   }
 
   // description: the <description> text ships in the same payload, so it is

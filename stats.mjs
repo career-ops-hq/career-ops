@@ -30,6 +30,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
 export { parseStatusLogStages } from './funnel-stages.mjs';
+import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -249,11 +250,10 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
   const weekCounts = new Map();
   let totalRecorded = 0, added = 0, firstSeen = null, lastSeen = null;
   for (const line of lines) {
-    const cols = line.split('\t');
-    if (cols[0] === 'url') continue; // header
-    if (!/^https?:\/\//.test(cols[0])) continue; // torn/malformed row
+    const { url, first_seen: date, portal, company, status: statusRaw } = parseScanHistoryLine(line);
+    if (url === 'url') continue; // header
+    if (!/^https?:\/\//.test(url)) continue; // torn/malformed row
     totalRecorded++;
-    const [, date, portal, , company, statusRaw] = cols;
     const status = (statusRaw || 'added').trim() || 'added';
     byStatus[status] = (byStatus[status] || 0) + 1;
     if (portal) byPortal[portal] = (byPortal[portal] || 0) + 1;
@@ -279,9 +279,9 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
 export function scanCompanyNames(content) {
   const names = new Set();
   for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
-    const cols = line.split('\t');
-    if (!/^https?:\/\//.test(cols[0] || '')) continue;
-    const company = (cols[4] || '').trim();
+    const row = parseScanHistoryLine(line);
+    if (!/^https?:\/\//.test(row.url)) continue;
+    const company = row.company.trim();
     if (company) names.add(company.toLowerCase());
   }
   return [...names];
