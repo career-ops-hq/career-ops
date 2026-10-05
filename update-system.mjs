@@ -4601,6 +4601,14 @@ function rollback() {
         }
       }
     }
+    // Tree membership says the target ships the path, not that this update
+    // wrote it. Only the update can make a target-only path tracked: its
+    // checkout stages the file. An untracked file there is the user's own,
+    // kept by apply or never reached by it, and removing it would lose bytes
+    // no backup holds.
+    const trackedFileSet = removalCandidates.length > 0
+      ? new Set(gitRaw('ls-files', '-z').split('\0').filter(Boolean))
+      : new Set();
     const removed = [];
     for (const file of removalCandidates) {
       const absolute = join(ROOT, file);
@@ -4620,6 +4628,12 @@ function rollback() {
         }
         if (existsSync(absolute) && lstatSync(absolute).isDirectory()) {
           console.error(`Rollback warning: ${file} became a directory; leaving it and its children untouched.`);
+          continue;
+        }
+        if (!trackedFileSet.has(file)) {
+          if (existsSync(absolute)) {
+            console.error(`Rollback warning: ${file} is not tracked, so this update did not write it; leaving it untouched.`);
+          }
           continue;
         }
         git('--literal-pathspecs', 'rm', '-f', '--ignore-unmatch', '--', file);

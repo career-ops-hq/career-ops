@@ -856,3 +856,50 @@ function readMaybe(path) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// ── 14. Real CLI: an untracked file at a target-only path is the user's ──
+// The target ships target-only.mjs and the backup does not, so tree membership
+// alone makes it a removal candidate. Here the update never wrote it: the file
+// on disk is untracked local content, which no backup holds.
+{
+  const fixture = seedRollbackRepo('co-rollback-untracked-target-only-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, g } = fixture;
+  try {
+    g('rm', '-q', '--cached', '--', 'target-only.mjs');
+    g('commit', '-qm', 'target-only.mjs was never written by the update');
+    writeFileSync(join(dir, 'target-only.mjs'), 'untracked local bytes\n');
+
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status === 0 && !result.error,
+      'rollback succeeds with an untracked file at a target-only path',
+      `untracked-target-only rollback failed (status ${result.status}): ${output}`,
+    );
+    check(
+      readMaybe(join(dir, 'target-only.mjs')) === 'untracked local bytes\n',
+      'rollback leaves an untracked file at a target-only path byte-identical',
+      'rollback deleted or changed an untracked file the update never wrote',
+    );
+    check(
+      /target-only\.mjs is not tracked/.test(output),
+      'rollback visibly warns when it leaves an untracked target-only path alone',
+      `untracked warning was absent: ${JSON.stringify(output)}`,
+    );
+    check(
+      !existsSync(join(dir, ' leading-target-only.mjs')),
+      'tracked target-only files are still removed alongside an untracked one',
+      'an untracked target-only path stopped rollback from removing the tracked ones',
+    );
+    check(
+      /rollback system files/.test(g('log', '-1', '--format=%s')),
+      'the rollback commit still lands when an untracked target-only path is skipped',
+      `rollback did not commit: ${g('log', '-1', '--format=%s')}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
