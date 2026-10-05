@@ -24,6 +24,7 @@ import { readFileSync, statSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs'; 
+import { asciiFold } from './lib/ascii-fold.mjs';
 
 const DEFAULT_MIN_SCORE = 70;
 
@@ -93,9 +94,59 @@ function collapse(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** Strip a fragment of inner tags to a plain-text label. */
+// The named entities a generated CV actually carries: the Latin-1 letters an
+// accented heading is written with, plus the five markup ones. Anything else
+// arrives numeric, which is handled generically below.
+const NAMED_ENTITIES = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
+  igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï', ntilde: 'ñ',
+  ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø',
+  ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü', yacute: 'ý', yuml: 'ÿ',
+  szlig: 'ß', thorn: 'þ', eth: 'ð', scaron: 'š', zcaron: 'ž', oelig: 'œ',
+};
+
+/**
+ * Decode the HTML entities a generated CV carries, in ONE pass.
+ *
+ * Single-pass is what makes this safe. Chained `.replace()` calls have to
+ * decode `&amp;` last, or `&amp;lt;` becomes `&lt;` and then `<`, unescaping
+ * text that was never an entity. Here each match is replaced once and the
+ * replacement is never rescanned, so `&amp;lt;` yields `&lt;` whatever order
+ * the table is written in, and the ordering constraint disappears.
+ *
+ * Case-insensitive for named entities because generated markup is not
+ * consistent about it; numeric and hex forms are decoded generically.
+ * @param {string} text
+ * @returns {string}
+ */
+function decodeEntities(text) {
+  return text.replace(/&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10);
+      // Lone surrogates and out-of-range values are not text; leave them literal.
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return whole;
+      if (code >= 0xd800 && code <= 0xdfff) return whole;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[body.toLowerCase()];
+    return named === undefined ? whole : named;
+  });
+}
+
+/**
+ * Strip a fragment of inner tags to a plain-text label.
+ *
+ * Entities are decoded, because this produces the section headings the scorer
+ * matches against. `Exp&eacute;rience` reached the matcher as
+ * `exp eacute rience` and matched nothing, so a French CV was reported as
+ * missing the Experience section it plainly has (#4261).
+ */
 function stripInline(fragment) {
-  return collapse(fragment.replace(/<[^>]+>/g, ' '));
+  return collapse(decodeEntities(fragment.replace(/<[^>]+>/g, ' ')));
 }
 
 /**
@@ -158,9 +209,18 @@ function cssTrim(text) {
  * @returns {string}
  */
 function describeFontName(name) {
-  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch =>
-    ch === ' ' ? ch : `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`
-  );
+  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch => {
+    if (ch === ' ') return ch;
+    const code = ch.codePointAt(0);
+    // `\uXXXX` is only unambiguous up to U+FFFF. Above it the escape runs to
+    // five or six hex digits, and the reader has no way to tell where it ends:
+    // U+E0001 printed bare is `1`, which reads as `` followed by a
+    // literal "1", naming a different character than the one that was flagged.
+    // The braced form is the spelling that terminates itself.
+    return code > 0xffff
+      ? `\\u{${code.toString(16)}}`
+      : `\\u${code.toString(16).padStart(4, '0')}`;
+  });
 }
 
 /**
@@ -289,7 +349,16 @@ function extractHeadings(html) {
   for (const m of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) {
     out.push(stripInline(m[1]));
   }
-  return out.map(s => s.toLowerCase()).filter(Boolean);
+  // Folded to ASCII, because the patterns matched against these are ASCII by
+  // construction. Without it `Compétences` never matches `competenc` and
+  // `Expérience` never matches `experience`, so an accented heading reads
+  // as a missing section (#4261). Same fix lib/ascii-fold.mjs documents for
+  // verify-portals.mjs and providers/_trust-validator.mjs; this was the third
+  // instance. The unfolded text is kept too: folding is lossy for scripts with
+  // no ASCII base letter (スキル, مهارات), whose patterns must match the original.
+  return out
+    .flatMap(s => [s.toLowerCase(), asciiFold(s).toLowerCase()])
+    .filter(Boolean);
 }
 
 /**
@@ -349,10 +418,80 @@ function auditAts(html, opts = {}) {
 
   // 2. Standard section headings.
   const headingBlob = extractHeadings(html).join(' | ');
+  // Matched against BOTH the raw heading and its ASCII fold (extractHeadings
+  // emits each). The Latin terms are therefore written unaccented: `competenc`
+  // catches Competences, Competências and Competenze via the fold, so only
+  // genuinely different words need their own alternative.
+  //
+  // career-ops ships evaluation modes for ar, da, de, es, fr, hi, id, it, ja,
+  // ko, nl, pl, pt, ru, tr, ua, zh and zh-TW, and before this every one of
+  // them failed the gate on a structurally perfect CV. The Skills and
+  // experience terms are taken from the `| Skills |` and `| Career history |`
+  // rows of each modes/<lang>/README.md rather than invented here; the
+  // education terms had no such table and are the ordinary CV heading in each
+  // language. Native-speaker corrections welcome, as in #3223.
+  // Each term must START a word: `formation` must not be found inside
+  // `Information`, nor `formacion` inside `Informacion`. `\b` is ASCII-only, so
+  // the boundary is "not preceded by a letter or digit" in any script. Terms
+  // stay open on the right (`experien`, `competen`) and the German, Dutch and
+  // Danish compounds that put the key word LAST are listed whole.
+  const startsWord = (terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})`, 'u');
   const required = [
-    { name: 'Experience', re: /experience|work history|employment/ },
-    { name: 'Education', re: /education|academic/ },
-    { name: 'Skills', re: /skills|competenc|proficienc/ },
+    { name: 'Experience', re: startsWord([
+      'experience', 'work history', 'employment',          // en
+      'experien', 'esperienza',                            // es pt fr (folded); it spells it with an s
+      'erfahrung', 'berufserfahrung', 'arbeitserfahrung', 'werdegang', // de: compounds put it last
+      'ervaring', 'werkervaring', 'loopbaan',              // nl
+      'doswiadczenie', 'przebieg kariery',                 // pl
+      'deneyim',                                           // tr
+      'erhvervserfaring', 'karriereforlob',                // da
+      'riwayat karier', 'pengalaman',                      // id
+      'parcours professionnel',                            // fr
+      'trayectoria', 'trajetoria',                         // es pt
+      'percorso professionale',                            // it
+      '職務経歴', '職歴',                                    // ja
+      '경력',                                                // ko
+      'опыт работы',                                    // ru
+      'досвід роботи',                                    // ua
+      'الخبرات', 'التاريخ المهني',                        // ar
+      'करियर',                                              // hi
+      '工作经历', '工作經歷',                                  // zh zh-TW
+    ]) },
+    { name: 'Education', re: startsWord([
+      'education', 'academic',                             // en
+      'formation', 'formacion', 'formacao',                // fr es pt
+      'ausbildung', 'bildung', 'studium',                  // de
+      'istruzione',                                        // it
+      'opleiding',                                         // nl
+      'wyksztalcenie',                                     // pl
+      'egitim',                                            // tr
+      'uddannelse',                                        // da
+      'pendidikan',                                        // id
+      '学歴',                                                // ja
+      '학력',                                                // ko
+      'образование',                                      // ru
+      'освіта',                                              // ua
+      'التعليم', 'المؤهلات',                            // ar
+      'शिक्षा',                                             // hi
+      '教育背景', '學歷',                                    // zh zh-TW
+    ]) },
+    { name: 'Skills', re: startsWord([
+      'skills', 'competen', 'proficienc',                  // en, + es pt fr folded; 'competen' also covers it 'Competenze'
+      'kenntnisse', 'fachkenntnisse', 'sprachkenntnisse', 'fahigkeiten', // de
+      'habilidades',                                       // es pt
+      'vaardigheden',                                      // nl
+      'umiejetnosci',                                      // pl
+      'beceri',                                            // tr
+      'kompetenc', 'kernkompetenc',                        // da + pl/pt variants
+      'keahlian',                                          // id
+      'スキル',                                              // ja
+      '역량', '기술',                                          // ko
+      'навыки',                                              // ru
+      'навички',                                             // ua
+      'مهارات',                                             // ar
+      'कौशल',                                               // hi
+      '技能', '专业技能', '專業技能',                           // zh zh-TW: 專業技能 does not start with 技能
+    ]) },
   ];
   const missing = [];
   for (const s of required) {
@@ -528,7 +667,7 @@ export {
  * Build a clean, ATS-friendly CV HTML fixture for the self-test, with hooks to
  * override individual pieces (font, email, charset, sections, extra body) so a
  * single check can be regressed in isolation.
- * @param {{font?:string, email?:string, charset?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
+ * @param {{font?:string, email?:string, charset?:string, experience?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
  * @returns {string} A full HTML document.
  */
 function buildCleanHtml(overrides = {}) {
@@ -536,6 +675,7 @@ function buildCleanHtml(overrides = {}) {
     font = "'Liberation Sans', Arial, sans-serif",
     email = '<a href="mailto:jane@example.com">jane@example.com</a>',
     charset = '<meta charset="UTF-8">',
+    experience = '<div class="section"><div class="section-title">Work Experience</div>\n    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,\n    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>',
     education = '<div class="section"><div class="section-title">Education</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
     skills = '<div class="section"><div class="section-title">Skills</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>',
     extraBody = '',
@@ -552,9 +692,7 @@ function buildCleanHtml(overrides = {}) {
     distributed systems. Led platform teams delivering resilient services on Kubernetes, with a
     focus on observability, cost efficiency, and clean, well-tested Python codebases used daily
     across the organization.</p></div>
-  <div class="section"><div class="section-title">Work Experience</div>
-    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,
-    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>
+  ${experience}
   <div class="section"><div class="section-title">Projects</div>
     <p>Open-source tracing toolkit adopted by several teams for latency debugging.</p></div>
   ${education}
@@ -588,6 +726,74 @@ function runSelfTest() {
   const noSections = auditAts(buildCleanHtml({ education: '', skills: '' }));
   check('missing Education+Skills is flagged', hasIssue(noSections.issues, 'Education') && hasIssue(noSections.issues, 'Skills'));
   check('missing two required sections is critical', hasCritical(noSections.issues));
+
+  // A CV in any language career-ops ships a mode for must clear the gate on the
+  // same structure an English one clears it on. Before #4261 every one of these
+  // was reported as missing all three sections, which is critical, so a
+  // structurally perfect non-English CV did not merely score lower: it FAILED.
+  {
+    const localized = {
+      fr: ['Expérience professionnelle', 'Formation', 'Compétences'],
+      de: ['Berufserfahrung', 'Ausbildung', 'Kenntnisse'],
+      es: ['Experiencia profesional', 'Formación', 'Competencias'],
+      it: ['Esperienza professionale', 'Istruzione', 'Competenze'],
+      pt: ['Experiência profissional', 'Formação', 'Habilidades'],
+      nl: ['Werkervaring', 'Opleiding', 'Vaardigheden'],
+      pl: ['Doświadczenie zawodowe', 'Wykształcenie', 'Umiejętności'],
+      tr: ['İş deneyimi', 'Eğitim', 'Beceriler'],
+      da: ['Erhvervserfaring', 'Uddannelse', 'Kompetencer'],
+      id: ['Pengalaman kerja', 'Pendidikan', 'Keahlian'],
+      ja: ['職務経歴', '学歴', 'スキル'],
+      ko: ['경력', '학력', '역량'],
+      ru: ['Опыт работы', 'Образование', 'Навыки'],
+      ua: ['Досвід роботи', 'Освіта', 'Навички'],
+      ar: ['الخبرات المهنية', 'التعليم', 'مهارات'],
+      hi: ['करियर इतिहास', 'शिक्षा', 'कौशल'],
+      zh: ['工作经历', '教育背景', '技能'],
+      'zh-TW': ['工作經歷', '學歷', '專業技能'],
+    };
+    const failing = Object.entries(localized)
+      .filter(([, [exp, edu, skl]]) => {
+        // Each localized heading REPLACES the English one, so the English fallback
+        // cannot satisfy the requirement on the localized heading's behalf.
+        const cv = auditAts(buildCleanHtml({
+          experience: `<div class="section"><div class="section-title">${exp}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>`,
+          education: `<div class="section"><div class="section-title">${edu}</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>`,
+          skills: `<div class="section"><div class="section-title">${skl}</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>`,
+        }));
+        return hasIssue(cv.issues, 'missing standard section');
+      })
+      .map(([lang]) => lang);
+    check(`every localized mode's CV headings are recognized (${Object.keys(localized).length} languages)`,
+      failing.length === 0);
+  }
+
+  // The entity form of the same heading must read the same as the literal one:
+  // `Exp&eacute;rience` reached the matcher as `exp eacute rience`.
+  const entityHeading = auditAts(buildCleanHtml({
+    education: '<div class="section"><div class="section-title">&Eacute;ducation</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
+  }));
+  check('an HTML-entity heading is decoded before matching', !hasIssue(entityHeading.issues, 'missing standard section'));
+
+  // A term must start a word: `Personal Information` contains `formation` and
+  // `Informacion personal` contains `formacion`, and neither is an Education
+  // heading. A CV with no Education section must still be told so.
+  for (const heading of ['Personal Information', 'Informations personnelles', 'Información personal']) {
+    const noEdu = auditAts(buildCleanHtml({ education: `<div class="section"><div class="section-title">${heading}</div><p>Based in San Francisco.</p></div>` }));
+    check(`"${heading}" does not pass for Education`, hasIssue(noEdu.issues, 'missing standard section'));
+  }
+  // ...while the compounds that put the key word last are still recognized.
+  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring']) {
+    const compound = auditAts(buildCleanHtml({ experience: `<div class="section"><div class="section-title">${heading}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>` }));
+    check(`compound heading "${heading}" is recognized for Experience`, !hasIssue(compound.issues, 'missing standard section'));
+  }
+
+  // Decoding must not double-unescape: `&amp;lt;` is the literal text "&lt;",
+  // not "<". A single pass gives that for free, whatever order the table is in.
+  check('decodeEntities does not double-unescape', decodeEntities('&amp;lt;') === '&lt;');
+  check('decodeEntities reads decimal and hex forms', decodeEntities('&#233;&#xe9;&#XE9;') === 'ééé');
+  // An unknown or malformed entity is text, and must survive untouched.
+  check('decodeEntities leaves an unknown entity alone', decodeEntities('&nosuch; &#xZZ; R&D') === '&nosuch; &#xZZ; R&D');
 
   // Table-based layout ⇒ critical, reading order warning.
   const tableCv = auditAts(
@@ -669,6 +875,15 @@ function runSelfTest() {
   // under the plain name its invisible prefix trimmed onto.
   const nbspUnsafe = auditAts(buildCleanHtml({ font: "' Comic Sans MS', sans-serif" }));
   check('a flagged font keeps its real name', hasIssue(nbspUnsafe.issues, '\\u00a0comic sans ms'));
+
+  // Above the BMP a bare `\uXXXXX` does not say where it ends: U+E0001 printed
+  // as `1` reads as `` then "1", which is a different character.
+  const astralFont = auditAts(buildCleanHtml({ font: "'\u{E0001}Arial', sans-serif" }));
+  check('a format character above the BMP is escaped in braces', hasIssue(astralFont.issues, '\\u{e0001}arial'));
+
+  // …and the BMP spelling stays the familiar four-digit one, so the common
+  // case is not churned for the sake of the rare one.
+  check('a BMP character keeps the bare four-digit escape', hasIssue(nbspFont.issues, '\\u00a0arial'));
 
   // The Korean and Traditional Chinese stacks the template declares
   // unconditionally must not penalise a CV that never renders them.

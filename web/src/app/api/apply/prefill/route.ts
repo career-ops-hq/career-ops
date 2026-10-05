@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveCli } from "@/lib/clis";
+import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
 import { resolveSessionCv } from "@/lib/apply/cv";
@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId, company, application } = body;
+  const { sessionId, cliId: requestedCliId, company, application } = body;
   // Same two identifiers the fill route takes, validated the same way: they
   // reach a filesystem resolver, so a non-string is refused before it gets there.
   if (company !== undefined && typeof company !== "string") {
@@ -77,16 +77,20 @@ export async function POST(req: Request) {
         controller.close();
       };
       try {
-        fs.appendFileSync(logPath, `\n===== prefill ${new Date(t0).toISOString()} session=${sessionId} cli=${cliId} =====\n`);
+        fs.appendFileSync(logPath, `\n===== prefill ${new Date(t0).toISOString()} session=${sessionId} cli=${requestedCliId} =====\n`);
       } catch {
         /* ignore */
       }
 
       const s = sessionId ? getSession(sessionId) : undefined;
       if (!s) return fail("apply session not found (it may have expired)");
-      const resolved = cliId ? resolveCli(cliId) : null;
-      if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
+      const resolved = requestedCliId ? resolveCliOrFallback(requestedCliId) : null;
+      if (!resolved) return fail(cliUnavailableError(requestedCliId ?? "").error);
       const { spec, binPath } = resolved;
+      // The CLI actually running: the planner's fencing and argv are keyed on it.
+      const cliId = spec.id;
+      const substitution = cliSubstitutionNotice(resolved);
+      if (substitution) log(substitution);
 
       const mem = readMemory().trim();
       // Draft from the SAME tailored CV the fill route uploads to this form,

@@ -8,7 +8,7 @@ name: PR triage
 #   workflow_run (Tests) -> re-triage de la PR de ese head al acabar su CI (triage/new -> ready/trivial/...)
 #   schedule (cada 6h)   -> sweep: PRs >20h sin comentario de maintainer ni marcador reciben labels y la primera
 #                           respuesta (tope TRIAGE_SWEEP_MAX por pasada); las de más de TRIAGE_BACKLOG_HOURS (72)
-#                           solo labels (la sesión responde con first-reply-backlog); las pegadas en triage/new se re-triagean
+#                           también, con una disculpa por la espera y sin fechas; las pegadas en triage/new se re-triagean
 #
 # Seguridad: `pull_request_target` corre con permisos de escritura, así que NUNCA se hace checkout del
 # código del fork. El checkout es de la rama BASE (ref por defecto del evento) y solo para leer el script,

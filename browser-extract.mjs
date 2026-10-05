@@ -546,6 +546,90 @@ async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
 }
 
 /**
+ * Greenhouse posting reached through a company careers page (`?gh_jid=` only,
+ * no board in the URL). The embed redirect names the board — the same
+ * `followEmbed` hop liveness uses, which also pins the redirect target to
+ * greenhouse.io — and the per-job boards-api endpoint then ships the JD.
+ */
+async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let jobApiUrl;
+  try {
+    const res = await fetch(resolved.apiUrl, {
+      headers: { 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    jobApiUrl = await resolved.followEmbed(res, resolved.parts);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+  return jobApiUrl ? fetchGreenhouseJd(jobApiUrl, postingUrl, textCap, timeoutMs) : null;
+}
+
+/**
+ * Shape one SmartRecruiters posting into a jd-mode result. Pure, same contract
+ * as the other normalizers. The body is `jobAd.sections`, HTML blocks appended
+ * in the order the rendered page shows them; the location object also carries
+ * remote/hybrid flags, surfaced because they are often the only work-model
+ * signal the posting has.
+ *
+ * @param {any} json - parsed postings-API response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const sections = json?.jobAd?.sections;
+  if (!sections || typeof sections !== 'object') return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const blocks = ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']
+    .map((key) => {
+      const body = jdHtmlToText(sections[key]?.text);
+      return body ? [str(sections[key]?.title), body].filter(Boolean).join('\n') : '';
+    })
+    .filter(Boolean);
+  if (!blocks.length) return null;
+
+  const loc = json?.location || {};
+  const meta = [];
+  const where = str(loc.fullLocation) || [str(loc.city), str(loc.country)].filter(Boolean).join(', ');
+  if (where) meta.push(`Location: ${where}`);
+  if (loc.remote === true) meta.push('Work model: Remote');
+  else if (loc.hybrid === true) meta.push('Work model: Hybrid');
+
+  return {
+    url: postingUrl,
+    title: compactText(str(json?.name), 300),
+    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return normalizeSmartRecruitersJob(json, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * ats id → fetcher. THE routing table `fetchJdViaKnownApi` dispatches through,
  * exported so the owned test can assert its key set IS `JD_TEXT_API_ATS`.
  *
@@ -567,6 +651,10 @@ export const JD_FETCHERS = {
     fetchGreenhouseJd(resolved.apiUrl, url, textCap, timeoutMs),
   lever: (resolved, url, textCap, timeoutMs) =>
     fetchLeverJd(resolved.apiUrl, url, textCap, timeoutMs),
+  'greenhouse-embedded': (resolved, url, textCap, timeoutMs) =>
+    fetchGreenhouseEmbeddedJd(resolved, url, textCap, timeoutMs),
+  smartrecruiters: (resolved, url, textCap, timeoutMs) =>
+    fetchSmartRecruitersJd(resolved.apiUrl, url, textCap, timeoutMs),
 };
 
 /**

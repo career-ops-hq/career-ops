@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Some branded tenants publish canonical job links on their Eploy host. -->
+  <url>
+    <loc>https://exampletenant.eploy.net/vacancies/201/implementation-consultant--hcm.html</loc>
+    <lastmod>2026-09-09T10:30:00Z</lastmod>
+  </url>
+  <url><loc>https://evil.example/vacancies/202/off-host-role.html</loc></url>
+  <url><loc>https://exampletenant.eploy.net.attacker.com/vacancies/205/suffix-spoof-role.html</loc></url>
+  <url><loc>http://exampletenant.eploy.net/vacancies/203/insecure-role.html</loc></url>
+  <url><loc>https://exampletenant.eploy.net/not-vacancies/204/wrong-path.html</loc></url>
+</urlset>
