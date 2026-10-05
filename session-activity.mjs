@@ -21,6 +21,10 @@
  * job is to let a caller ask "is anyone already active on this key?" before
  * starting work, and to answer honestly, so a session can choose to warn the
  * user instead of silently duplicating work another session already started.
+ * The TTL is a ceiling on advisory claims even while their recorded PID is
+ * alive: a PID can be reused after its original process exits. This can expire
+ * a genuinely long-running claim, which is acceptable for a warning-only
+ * signal; correctness-critical work must continue to use its own hard lock.
  *
  * Sentinels live at {activityDir}/{sha1(key)}.json rather than being named
  * from the key directly, so an arbitrary key (a full URL, a company+role
@@ -83,16 +87,20 @@ function processIsAlive(pid) {
 
 function isStale(entry, path, ttlMs) {
   if (!entry) return true;
-  if (entry.pid) {
-    const alive = processIsAlive(entry.pid);
-    if (alive === true) return false;
-    if (entry.process_bound === true && alive === false) return true;
-  }
+  // PID liveness cannot establish process identity: after the original owner
+  // exits, its PID may be reused and keep an advisory claim alive forever.
+  // TTL is therefore a ceiling over liveness, as well as the fallback when
+  // there is no usable PID.
   try {
-    return Date.now() - statSync(path).mtimeMs > ttlMs;
+    if (Date.now() - statSync(path).mtimeMs > ttlMs) return true;
   } catch {
     return true;
   }
+  if (entry.pid) {
+    const alive = processIsAlive(entry.pid);
+    if (entry.process_bound === true && alive === false) return true;
+  }
+  return false;
 }
 
 /**
@@ -169,7 +177,7 @@ export function releaseActivity(key, options = {}) {
   }
 }
 
-/** Remove sentinels past their TTL whose owning process is no longer alive. */
+/** Remove sentinels past their TTL or process-bound claims whose PID is dead. */
 export function gcStaleActivity(options = {}) {
   const activityDir = activityDirFor(options);
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;

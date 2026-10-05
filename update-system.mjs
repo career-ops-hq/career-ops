@@ -3,8 +3,10 @@
 /**
  * update-system.mjs — Safe auto-updater for career-ops
  *
- * Updates ONLY system layer files (modes, scripts, dashboard, templates).
- * NEVER touches user data (cv.md, profile.yml, _profile.md, data/, reports/).
+ * Updates system-layer files (modes, scripts, dashboard, templates) plus the
+ * exact system-owned `.gitkeep` scaffolds listed in DATA_CONTRACT.md. It never
+ * touches user-owned data (cv.md, profile.yml, _profile.md, or user files in
+ * data/, reports/, output/, and jds/).
  *
  * Usage:
  *   node update-system.mjs check      # Check if a newer release is published
@@ -30,10 +32,15 @@
  *                                     # Don't ask again about this release;
  *                                     # a newer one asks again
  *
+ * From a linked git worktree (an agent's default session layout), every
+ * subcommand re-runs in the checkout that has `main` checked out, so the
+ * update lands on main rather than the worktree's branch. Set
+ * CAREER_OPS_UPDATE_IN_WORKTREE=1 to update the worktree's branch instead.
+ *
  * See DATA_CONTRACT.md for the full system/user layer definitions.
  */
 
-import { execFile, execFileSync, execSync } from 'child_process';
+import { execFile, execFileSync, execSync, spawnSync } from 'child_process';
 import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
@@ -192,6 +199,15 @@ const SYSTEM_PATHS = [
   'modes/upskill.md',
   'modes/intake.md',
   'documents/.gitkeep',
+  // Empty scaffolds are system-owned exceptions inside otherwise user-owned
+  // directories. Ship only these exact files; the data they sit beside stays
+  // in USER_PATHS and is never checked out by the updater.
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
   'documents/README.md',
   'modes/update.md',
   'modes/agent-inbox.md',
@@ -220,6 +236,7 @@ const SYSTEM_PATHS = [
   'modes/pt/interview/',
   'modes/ru/',
   'modes/ru/interview/',
+  'modes/sg/',
   'modes/tr/',
   'modes/ua/',
   'modes/ua/interview/',
@@ -252,6 +269,7 @@ const SYSTEM_PATHS = [
   'lib/placeholder-cell.mjs',
   'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
+  'lib/scan-history-columns.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/scratch-dirs.mjs',
@@ -294,13 +312,14 @@ const SYSTEM_PATHS = [
   'tracker-aliases.json',
   'session-activity.mjs',
   'set-status.mjs',
-  'set-status-tests.mjs',
   'mark-pdf-ready.mjs',
   'normalize-statuses.mjs',
   'cv-sync-check.mjs',
   'i18n-drift.mjs',
   'verify-cv-facts.mjs',
+  'verify-cv-structure.mjs',
   'verify-ats.mjs',
+  'ats-payload.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
   'ats-vendor.mjs',
@@ -327,6 +346,36 @@ const SYSTEM_PATHS = [
   'data-static/',
   'seeds/',
   'tests/',
+
+  // ── Retired paths ─────────────────────────────────────────────────────────
+  // These files no longer exist upstream: #3765 moved four root suites into
+  // tests/ (tracker-columns-tests.mjs stayed, for its timeout). They
+  // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
+  // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
+  // file that is gone from the remote tree AND matches an entry here. Drop the
+  // entry and an upgrading install keeps its copy of the old root file forever,
+  // where tests/root-tests-registration.test.mjs then reports it as an
+  // unregistered suite and turns `node test-all.mjs` red on a healthy install.
+  //
+  // Probe on this list vs. the pre-#3765 one, with a local tree holding the
+  // four and a remote tree without them: without these entries the prune
+  // returns nothing at all; with them it returns all four.
+  //
+  // NB: keep square brackets out of every comment in this array. Several
+  // assertions in test-all.mjs extract the manifest with a NON-GREEDY regex
+  // that ends at the first closing bracket, so one inside a comment truncates
+  // the parsed list and every entry below it reads as missing. That is not
+  // hypothetical: the first draft of this block wrote the probe result as an
+  // empty-array literal and turned the check-table-freshness assertion red.
+  //
+  // They are therefore expected to be ABSENT from the working tree, which is
+  // why updater-migration-tests.mjs lists them in ALLOWED_MISSING_ENTRIES.
+  // Safe to delete once no supported install can still be carrying them.
+  'agent-inbox-tests.mjs',
+  'followup-seed-tests.mjs',
+  'paste-reply-tests.mjs',
+  'set-status-tests.mjs',
+  // ── end retired paths ─────────────────────────────────────────────────────
   'user-agent.mjs',
   'doctor.mjs',
   'jsonc-parse.mjs',
@@ -343,6 +392,7 @@ const SYSTEM_PATHS = [
   'skill-extract.mjs',
   'intake.mjs',
   'stats.mjs',
+  'funnel-stages.mjs',
   'detect-reposts.mjs',
   'rank-pipeline.mjs',
   'discover-ats.mjs',
@@ -358,6 +408,7 @@ const SYSTEM_PATHS = [
   'funnel-velocity.mjs',
   'assessment-log.mjs',
   'contacts.mjs',
+  'contact-lookup.mjs',
   'linkedin-join.mjs',
   'weekly-digest.mjs',
   'tracker-sync-check.mjs',
@@ -365,7 +416,6 @@ const SYSTEM_PATHS = [
   'invite-match.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
-  'followup-seed-tests.mjs',
   'profile-language.mjs',
   'title-keywords.mjs',
   'gemini-eval.mjs',
@@ -379,7 +429,6 @@ const SYSTEM_PATHS = [
   'test-all.mjs',
   'tracker-columns-tests.mjs',
   'tracker-writer-lock-tests.mjs',
-  'agent-inbox-tests.mjs',
   'validate-portals.mjs',
   'validate-profile.mjs',
   'verify-portals.mjs',
@@ -391,8 +440,10 @@ const SYSTEM_PATHS = [
   'reply-matcher.mjs',
   'reply-watch.mjs',
   'paste-reply.mjs',
-  'paste-reply-tests.mjs',
   'contact-extract.mjs',
+  // Retired 2026-10-04: the suite moved to tests/contact-extract.test.mjs. The
+  // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
+  // drop it once a release has shipped past that move.
   'contact-extract-tests.mjs',
   'outcome.mjs',
   'batch/batch-prompt.md',
@@ -537,18 +588,20 @@ const BOOTSTRAP_PATHS = [
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
   'agent-inbox.mjs',
-  'agent-inbox-tests.mjs',
+  'tests/agent-inbox.test.mjs',
 ];
 
-// User layer paths — NEVER touch these (safety check)
+// User layer paths — never touch user-owned files under these paths (safety
+// check). Exact system-owned scaffold files are explicit SYSTEM_PATHS entries.
 /**
- * Files and directories the updater must never touch — the USER layer of the
- * data contract (DATA_CONTRACT.md). Exported so other tooling can derive the
- * same boundary instead of re-listing it: a hardcoded second copy is how a
- * fourth user file eventually gets policed by something that has no business
- * having an opinion about it (#2480).
+ * Files and directories whose user-owned contents the updater must never touch
+ * — the USER layer of the data contract (DATA_CONTRACT.md). Exported so other
+ * tooling can derive the same boundary instead of re-listing it: a hardcoded
+ * second copy is how a fourth user file eventually gets policed by something
+ * that has no business having an opinion about it (#2480).
  */
 export const USER_PATHS = [
+  '.career-ops-web/',
   'cv.md',
   'config/profile.yml',
   'modes/_profile.md',
@@ -675,7 +728,7 @@ export function localUserPaths(root = ROOT) {
  * safety check compares against — the built-in list alone would report a
  * fork's own files as violations.
  * @param {string} [root=ROOT] - Repo root to read from.
- * @returns {string[]} Every path the updater must never touch.
+ * @returns {string[]} User-layer paths whose user-owned contents are protected.
  */
 export function effectiveUserPaths(root = ROOT) {
   return [...USER_PATHS, ...localUserPaths(root)];
@@ -1144,6 +1197,185 @@ function assertOwnGitToplevel() {
   }
 }
 
+// ── WORKTREE REDIRECT ───────────────────────────────────────────
+
+// The branch an update is meant to land on. The canonical repo's default
+// branch, which is what a fresh clone checks out.
+const UPDATE_BRANCH = 'main';
+
+// Subcommands whose state lives in the checkout: the commit apply makes, the
+// branch rollback restores, the VERSION check reads and the marker dismiss
+// writes. All four have to agree on one checkout, or check keeps offering an
+// update that apply installed somewhere else.
+const REDIRECTED_COMMANDS = new Set(['check', 'apply', 'rollback', 'dismiss']);
+
+/**
+ * Parse `git worktree list --porcelain` into one record per worktree.
+ *
+ * @param {string} porcelain - The command's stdout.
+ * @returns {{path: string, branch: string|null, bare: boolean, prunable: boolean}[]}
+ *   `branch` is the full ref (`refs/heads/main`), or null when detached.
+ */
+export function parseWorktreeList(porcelain) {
+  const worktrees = [];
+  let current = null;
+  for (const line of String(porcelain).split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length), branch: null, bare: false, prunable: false };
+      worktrees.push(current);
+    } else if (!current) {
+      continue;
+    } else if (line.startsWith('branch ')) {
+      current.branch = line.slice('branch '.length);
+    } else if (line === 'bare') {
+      current.bare = true;
+    } else if (line === 'prunable' || line.startsWith('prunable ')) {
+      current.prunable = true;
+    }
+  }
+  return worktrees;
+}
+
+function samePath(a, b) {
+  const canonicalize = realpathSync.native ?? realpathSync;
+  try {
+    return canonicalize(a) === canonicalize(b);
+  } catch {
+    return resolve(a) === resolve(b);
+  }
+}
+
+/**
+ * Where an update run from `root` has to happen, when that is not `root`.
+ *
+ * Agents such as Claude Code run each session in a linked git worktree on a
+ * throwaway branch. Every git call here runs with `cwd: ROOT`, so an update
+ * started there committed to that branch: the user's `main` stayed on the old
+ * release, the next session's fresh worktree prompted for the same update, and
+ * the installed one vanished with the worktree. The update belongs on `main`,
+ * in whichever checkout has it.
+ *
+ * Returns null when `root` is not a linked worktree, or is one that already
+ * has `main` checked out: run here, exactly as before. A main checkout on
+ * some other branch is not redirected either; that is the user's own choice
+ * of where to run. Returns `{path}` for the checkout to run in instead, or
+ * `{error}` when no usable checkout has `main`.
+ *
+ * @param {string} [root=ROOT] - The install the updater was started from.
+ * @param {(...args: string[]) => string} [run] - git runner bound to `root`.
+ * @returns {null | {path: string, branch: string} | {error: string, branch: string}}
+ */
+export function worktreeUpdateTarget(root = ROOT, run = (...args) => gitIn(root, ...args)) {
+  let gitDir;
+  let commonDir;
+  try {
+    [gitDir, commonDir] = run('rev-parse', '--git-dir', '--git-common-dir').split(/\r?\n/);
+  } catch {
+    return null;
+  }
+  // Both come back relative to `root` unless git chose an absolute spelling.
+  if (!gitDir || !commonDir || samePath(resolve(root, gitDir), resolve(root, commonDir))) return null;
+
+  let branch = '(detached HEAD)';
+  try {
+    branch = run('rev-parse', '--abbrev-ref', 'HEAD') || branch;
+  } catch {
+    // Unborn or unreadable HEAD: keep the placeholder for the message.
+  }
+
+  let worktrees;
+  try {
+    worktrees = parseWorktreeList(run('worktree', 'list', '--porcelain'));
+  } catch {
+    return null;
+  }
+  const primary = worktrees.find(wt => !wt.bare)?.path || worktrees[0]?.path || '';
+  const target = worktrees.find(wt => wt.branch === `refs/heads/${UPDATE_BRANCH}` && !wt.bare);
+
+  if (target && samePath(target.path, root)) return null;
+
+  const override = 'set CAREER_OPS_UPDATE_IN_WORKTREE=1 to update this worktree\'s branch instead';
+  if (!target || target.prunable || !existsSync(target.path)) {
+    return {
+      branch,
+      error: `This is a linked git worktree on branch '${branch}', and no checkout has '${UPDATE_BRANCH}' checked out, so there is no main checkout to update. Nothing was changed. Check out ${UPDATE_BRANCH} in your main checkout${primary ? ` (git -C "${primary}" checkout ${UPDATE_BRANCH})` : ''} and re-run, or ${override}.`,
+    };
+  }
+  if (!existsSync(join(target.path, 'update-system.mjs'))) {
+    return {
+      branch,
+      error: `This is a linked git worktree on branch '${branch}'. The checkout with '${UPDATE_BRANCH}' (${target.path}) has no update-system.mjs, so it cannot be updated from here. Nothing was changed. Run the update from that checkout, or ${override}.`,
+    };
+  }
+  return { path: target.path, branch };
+}
+
+/**
+ * Re-run this command in the checkout that has `main`, when started from a
+ * linked worktree (see worktreeUpdateTarget()).
+ *
+ * The child is that checkout's own update-system.mjs, so every ROOT-bound path
+ * in it — lock file, backup branch, VERSION, dismiss marker — resolves there
+ * with no changes to the rest of this file. That copy may be an older release
+ * without this redirect; it still runs against its own checkout, which is the
+ * point.
+ *
+ * @param {string} cmd - The subcommand.
+ * @param {string[]} [argv]
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {number|null} The child's exit status, or null to run here.
+ */
+function redirectToMainCheckout(cmd, argv = process.argv, env = process.env) {
+  if (!REDIRECTED_COMMANDS.has(cmd)) return null;
+  // The user's explicit opt-out, and the loop guard for the child below.
+  if (env.CAREER_OPS_UPDATE_IN_WORKTREE === '1' || env.CAREER_OPS_UPDATE_REDIRECTED === '1') return null;
+  // A nested .git-less install has its own guards and messages (#3334);
+  // its enclosing repo's worktrees are not ours to pick from.
+  if (gitToplevelMismatch()) return null;
+
+  const target = worktreeUpdateTarget();
+  if (!target) return null;
+  if (target.error) {
+    if (cmd === 'check') {
+      // Agents stay quiet on unknown statuses (AGENTS.md); `apply` carries the
+      // actionable message.
+      console.log(JSON.stringify({ status: 'worktree-without-main', local: localVersion(), worktree_branch: target.branch }));
+      return 0;
+    }
+    throw new Error(target.error);
+  }
+
+  // apply and rollback commit into a checkout the user is not looking at from
+  // here, so refuse while it carries tracked edits rather than build on them.
+  // Untracked files are left out: the user layer lives there, and a direct
+  // run in that checkout never refuses over them either.
+  if (cmd === 'apply' || cmd === 'rollback') {
+    const dirty = gitIn(target.path, 'status', '--porcelain', '--untracked-files=no');
+    if (dirty) {
+      throw new Error(
+        `The ${UPDATE_BRANCH} checkout at ${target.path} has uncommitted changes to tracked files. Nothing was changed. Commit or stash them there, then re-run ${cmd} from this worktree.`,
+      );
+    }
+  }
+
+  // check's stdout is one JSON object; keep it that way.
+  const chatty = cmd === 'apply' || cmd === 'rollback';
+  if (chatty) {
+    console.log(`This is a linked git worktree on branch '${target.branch}'. Running ${cmd} in the ${UPDATE_BRANCH} checkout at ${target.path} instead.`);
+  }
+  const res = spawnSync(process.execPath, ['update-system.mjs', ...argv.slice(2)], {
+    cwd: target.path,
+    stdio: 'inherit',
+    env: { ...env, CAREER_OPS_UPDATE_REDIRECTED: '1' },
+  });
+  if (res.error) throw res.error;
+  const status = res.status ?? 1;
+  if (chatty && status === 0) {
+    console.log(`To bring this worktree up to date: git merge ${UPDATE_BRANCH} (or git rebase ${UPDATE_BRANCH}) from inside it.`);
+  }
+  return status;
+}
+
 /**
  * Paths the target manifest ships that did not materialize on disk.
  *
@@ -1228,7 +1460,11 @@ export function parsePorcelainStatus(status) {
 }
 
 export function gitStatusEntries(root = ROOT) {
-  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z'));
+  // Git collapses an untracked directory to a single entry by default. When
+  // apply() checks out a tracked scaffold there, the next snapshot expands it
+  // to the scaffold plus each user file. Comparing snapshots would report the
+  // unchanged user files as new updater output, so keep the granularity stable.
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z', '--untracked-files=all'));
 }
 
 export function extractArrayFromSource(source, name) {
@@ -4106,6 +4342,10 @@ if (isCli) {
   const cmd = process.argv[2] || 'check';
 
   try {
+    // From a linked worktree the update belongs on main, not this branch.
+    const redirected = redirectToMainCheckout(cmd);
+    if (redirected !== null) process.exit(redirected);
+
     switch (cmd) {
       case 'check': await check(); break;
       case 'status': console.log(`career-ops v${formatLocalVersion()}`); break;

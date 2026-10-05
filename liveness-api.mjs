@@ -9,13 +9,16 @@
  * inconclusive. This is the cheap first rung of the liveness ladder.
  *
  * CONSERVATIVE BY DESIGN: a false "expired" is worse than the status quo (the user
- * misses a real job). So on a definitive 404/410 we return `expired`, and for
+ * misses a real job). So we return `expired` only on a definitive signal — a
+ * 404/410, or a closed marker the provider's `interpret` step recognises — and for
  * anything ambiguous (unknown ATS, redirect, 429/5xx, network/timeout) we return
  * `null` (→ caller falls back to Playwright).
  *
  * Three endpoint shapes:
  *   - Per-job (Greenhouse, Lever, Workday): the URL maps to a single-job endpoint,
- *     so a 200 is itself proof the posting is live.
+ *     so a 200 is itself proof the posting is live. Workday also reads its 403
+ *     body, whose error code tells a withdrawn posting apart from a blocked
+ *     request.
  *   - Org-level (Ashby): the URL maps to the org's whole job board. A 200 only
  *     proves the board exists, so the provider's `interpret` step parses the board
  *     and confirms THIS posting is still listed before returning active/expired.
@@ -61,9 +64,14 @@ function isSafeValue(v) {
 //   `timeoutMs`  — override the default fetch timeout (slow/rate-limited APIs).
 //   `throttleMs` — minimum interval between our requests to this provider.
 //   `accept`     — override the Accept header (providers that answer in HTML).
-//   `interpret`  — read the 200 response body to decide liveness (org-level APIs
+//   `interpret`  — read the response body to decide liveness (org-level APIs
 //                  where a 200 alone doesn't prove THIS posting is live, and
 //                  per-job APIs that answer 200 for a closed posting).
+//   `interpretStatuses` — the statuses whose body `interpret` reads; defaults
+//                  to [200]. A provider that answers a closed posting with an
+//                  error status carrying a recognisable body lists that status
+//                  here instead (see the `workday` entry); a 200 it leaves out
+//                  takes the default per-job reading, proof the posting is live.
 //   `api404Authoritative` — defaults to true (a 404/410 means gone). Set to
 //                  false when the provider's public API can 404 a posting that
 //                  is still genuinely live elsewhere (see the `lever` entry).
@@ -154,9 +162,9 @@ const ATS_PROVIDERS = [
     // Mirrors the tenant/shard/site detection in providers/workday.mjs, but for a
     // single posting rather than the board-wide CXS search endpoint. Workday's
     // per-job CXS endpoint (`/wday/cxs/{tenant}/{site}/job/{jobPath}`) is a
-    // genuinely PER-JOB API like Greenhouse/Lever — a 200 is itself proof the
-    // posting is live, confirmed against real tenants (BMO, TD, Manulife, CIBC):
-    // an existing posting returns 200, a garbage job id returns 404.
+    // genuinely PER-JOB API like Greenhouse/Lever: a live posting returns 200, a
+    // missing one returns 404, and a withdrawn posting returns a structured 403,
+    // whose body classifyWorkday403 reads.
     //
     // jobPath is intentionally multi-segment (Workday encodes a location slug and
     // a title slug as separate path parts, e.g.
@@ -174,6 +182,16 @@ const ATS_PROVIDERS = [
     },
     api: ({ tenant, shard, site, jobPath }) =>
       `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobPath}`,
+    interpretStatuses: [403],
+    async interpret(res) {
+      let json;
+      try {
+        json = await res.json();
+      } catch {
+        return null; // unparseable body (e.g. a WAF HTML interstitial) → inconclusive
+      }
+      return classifyWorkday403(json);
+    },
   },
   {
     id: 'smartrecruiters',
@@ -368,10 +386,30 @@ export function classifyAshbyBoard(json, jobId) {
 }
 
 /**
+ * Decide liveness for one Workday posting from the body of a 403 on its per-job
+ * CXS endpoint. Pure + deterministic (no I/O), mirroring classifyAshbyBoard.
+ *
+ * On this endpoint a live posting is a 200 and a missing one is a 404, both
+ * concluded from the status alone by the generic path. A withdrawn posting is a
+ * 403 whose JSON body carries `errorCode: "S22"`, "permission denied" — the
+ * only case where the body decides. Only that exact S22 shape reads as expired;
+ * any other 403 body — a WAF or bot-wall page, or a Workday error with a
+ * different code — stays inconclusive.
+ *
+ * @param {any} json - parsed body of a 403 from the CXS per-job endpoint
+ * @returns {{ result: 'expired', code: string, reason: string } | null}
+ */
+export function classifyWorkday403(json) {
+  return json?.httpStatus === 403 && json?.errorCode === 'S22'
+    ? { result: 'expired', code: 'workday_api_withdrawn', reason: 'Workday CXS answers 403 S22 — posting withdrawn' }
+    : null;
+}
+
+/**
  * Map a posting URL to its ATS API URL, or null if it isn't a known ATS posting
  * (or any extracted segment fails the strict charset). Pure + deterministic.
  * @param {string} rawUrl
- * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, api404Authoritative: boolean } | null}
+ * @returns {{ ats: string, apiUrl: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, interpretStatuses?: number[], api404Authoritative: boolean } | null}
  */
 export function resolveAtsApi(rawUrl) {
   let u;
@@ -398,6 +436,7 @@ export function resolveAtsApi(rawUrl) {
       headers: provider.headers,
       followEmbed: provider.followEmbed,
       interpret: provider.interpret,
+      interpretStatuses: provider.interpretStatuses,
       api404Authoritative: provider.api404Authoritative !== false,
     };
   }
@@ -412,12 +451,15 @@ export function isAtsPosting(url) {
 // ATS ids whose public API returns the actual JD body (not just a liveness
 // signal). Greenhouse (`content`), Lever (`descriptionPlain`), Ashby
 // (`descriptionPlain` on the org board), Workday (`jobPostingInfo.jobDescription`
-// on the per-job CXS endpoint) all ship full text for free in the same payload
-// resolveAtsApi() already points at. Microsoft and LinkedIn are on ATS_PROVIDERS
+// on the per-job CXS endpoint) and SmartRecruiters (`jobAd.sections`) all ship
+// full text for free in the same payload resolveAtsApi() already points at.
+// greenhouse-embedded (a company careers page carrying only `?gh_jid=`) reaches
+// the same per-job Greenhouse endpoint once its embed redirect names the board.
+// Microsoft and LinkedIn are on ATS_PROVIDERS
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
 // fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
-export const JD_TEXT_API_ATS = new Set(['greenhouse', 'lever', 'ashby', 'workday']);
+export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters']);
 
 /**
  * Zero-token liveness check via the posting's ATS API.
@@ -430,7 +472,7 @@ export const JD_TEXT_API_ATS = new Set(['greenhouse', 'lever', 'ashby', 'workday
 export async function checkLivenessViaApi(url) {
   const resolved = resolveAtsApi(url);
   if (!resolved) return null;
-  const { ats, apiUrl, parts, interpret, timeoutMs, throttleMs, accept, headers, followEmbed, api404Authoritative } = resolved;
+  const { ats, apiUrl, parts, interpret, interpretStatuses, timeoutMs, throttleMs, accept, headers, followEmbed, api404Authoritative } = resolved;
 
   // Wait out any provider rate limit BEFORE arming the timeout, so the spacing
   // does not eat the budget the request itself needs.
@@ -467,10 +509,11 @@ export async function checkLivenessViaApi(url) {
       if (!api404Authoritative) return null; // inconclusive → let Playwright check the real page
       return { result: 'expired', code: `${ats}_api_gone`, reason: `ATS API ${res.status} — posting removed` };
     }
+    // Providers with an `interpret` step read the body of the statuses they
+    // list (by default the 200: org-level Ashby, and per-job APIs whose 200 can
+    // still describe a closed posting); any other 200 is proof the posting is live.
+    if (interpret && (interpretStatuses || [200]).includes(res.status)) return await interpret(res, parts);
     if (res.status === 200) {
-      // Org-level APIs (Ashby) inspect the body to confirm THIS posting; per-job
-      // APIs (Greenhouse, Lever) treat a 200 as proof the posting is live.
-      if (interpret) return await interpret(res, parts);
       return { result: 'active', code: `${ats}_api_ok`, reason: 'ATS API returns the posting (live)' };
     }
     return null; // 429/5xx/other → inconclusive, fall back to the browser check

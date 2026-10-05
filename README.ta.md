@@ -288,7 +288,6 @@ career-ops ஒரு பகிரப்பட்ட command router-ஐப் ப
 /career-ops interview    → ஊடாடும் சுயவிவர/CV onboarding நேர்காணல்
 /career-ops master-profile → உங்கள் Master Career Profile-ஐ இறக்குமதி செய், மதிப்பாய்வு செய், சரிபார்
 /career-ops eu-swe    → CV/apply/interview-க்கு முன் ஐரோப்பிய SWE விண்ணப்பத்தை அளவீடு செய்
-/career-ops eu-fintech → Product Manager பதவிகளுக்காக 21 EU fintech தளங்களை ஸ்கேன் செய் (token இல்லை)
 /career-ops interview/plan → வரவிருக்கும் நேர்காணலுக்கு நேரப் பிரிவுகளிலான தயாரிப்புத் திட்டம்
 /career-ops interview/practice → பயிற்சி நேர்காணல், பின்னூட்டத்துடன் ஒரு நேரத்தில் ஒரு கேள்வி
 /career-ops interview/debrief → நேர்காணலுக்குப் பிந்தைய ஆய்வு: இடைவெளிகளை மூடு, அடுத்த சுற்றைக் கணி

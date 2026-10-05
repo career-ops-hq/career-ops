@@ -55,6 +55,22 @@
 # scan_history:
 #   dedup_include_location: true
 
+# -- Language-aware duplicate roles (optional, opt-in) --
+# An employer can publish one requisition in more than one language (for
+# example German and English), with the same title and location in each. By
+# default those are ONE role and the scan keeps whichever version the ATS
+# returned first.
+#
+# Set dedup_include_language: true to keep them apart when the ATS reports each
+# posting's language. Turn it on when you only apply to postings written in some
+# languages and discard the rest (for example, skip every JD written in German):
+# otherwise the version the scan kept may be the one you throw away.
+# Regional variants count as one language (en-GB equals en), and a posting whose
+# language the ATS doesn't report is compared as before.
+#
+# scan_history:
+#   dedup_include_language: true
+
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
 # scanner for Interamt.de, a portal for German federal, state, and municipal
@@ -321,18 +337,20 @@
 #         - "claude"
 
 # -- Visa / work-authorization filter (optional) --
-# Surfaces roles that sponsor a work visa (H-1B / H-1B1 / O-1 for the US, plus
-# the generic "visa sponsorship" wording) and drops roles that explicitly refuse
-# it. Like content_filter it reads the job DESCRIPTION text, so it only has
-# signal for providers that populate job.description (see the content_filter
-# provider-support note above).
+# Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1), Singapore
+# (Employment Pass / S Pass / ONE Pass / Work Pass), EU (Blue Card), UK (Skilled
+# Worker), plus the generic "visa sponsorship" wording — and drops roles that
+# explicitly refuse it. Like content_filter it reads the job DESCRIPTION text, so
+# it only has signal for providers that populate job.description (see the
+# content_filter provider-support note above).
 # Semantics (case-insensitive substring):
 #   - Any `negative` keyword present → reject (an explicit "no sponsorship")
 #   - require_mention: false (default) → after clearing negatives, pass — jobs
 #     with no description included. Use this to only weed out explicit rejections.
 #   - require_mention: true → keep only jobs whose description advertises
 #     sponsorship (contains a `positive` keyword); missing description → reject.
-#   - `positive`/`negative` default to a curated US-sponsorship vocabulary when
+#   - `positive`/`negative` default to a curated sponsorship vocabulary (US,
+#     Singapore, EU, UK work-visa wording) when
 #     omitted, so `visa_filter: { enabled: true }` works out of the box.
 #   - If this entire block is absent, jobs are not filtered on sponsorship.
 #
@@ -340,7 +358,7 @@
 # visa_filter:
 #   enabled: true
 #
-# Strict: only surface postings that explicitly advertise US sponsorship
+# Strict: only surface postings that explicitly advertise sponsorship
 # visa_filter:
 #   enabled: true
 #   require_mention: true
@@ -348,6 +366,9 @@
 #     - "visa sponsorship"
 #     - "h-1b"
 #     - "h1b1"
+#     - "employment pass"
+#     - "eu blue card"
+#     - "skilled worker visa"
 #     - "will sponsor"
 #   negative:
 #     - "no sponsorship"
@@ -363,6 +384,7 @@ title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
   # 2-3 letter keyword ("AI", "ML", "VP"), which is matched on word boundaries
   # so it does not fire inside another word ("AI" will not match "Maintenance").
+  # A CJK character counts as a boundary, so "AI" does match "AI工程师".
   # Either way an entry expresses the exact spelling you write, and nothing
   # else: real titles vary in separator and word order, and every variant your
   # list does not literally contain is dropped in silence.
@@ -617,6 +639,40 @@ title_filter:
 #       - "Program Administrator"
 #       - "Registrar"
 #       - "Student Services"
+
+# -- Declared-field whitelists (optional, scan.mjs) --
+# title_filter judges a posting by its TITLE. Some boards publish a better
+# discriminator as a field of its own — an occupation code, a department —
+# which no title list can stand in for: one title spans several occupations,
+# and one occupation is advertised under countless titles.
+#
+# field_filters holds one whitelist per field, in the same keyword language as
+# title_filter (plain substring, `word:`, `stem:`). A target opts in with
+# `filter_on`; a target without it gates on title exactly as before.
+#
+#   filter_on: noc             # judge this target by `noc` instead of title
+#   filter_on: [title, noc]    # both must match (AND)
+#
+# The provider has to emit the field: e.g. a local_parser script adding
+# "noc": "22221" to each job object it prints. A posting without the field
+# PASSES rather than being dropped, and is counted as "Passed, field absent" in
+# the scan summary; a target that never supplies the field at all gets an
+# end-of-run warning that its whitelist is effectively off. `title` cannot be
+# a key here — title keywords belong in title_filter above.
+#
+# field_filters:
+#   noc:
+#     positive: ["stem:22", "stem:13"]   # occupation codes starting 22 or 13
+#
+# and, as an entry under the tracked_companies: key further down:
+#   - name: Example Occupation-Coded Board
+#     careers_url: https://example.com/jobs
+#     scan_method: local_parser
+#     filter_on: noc
+#     parser:
+#       command: node
+#       script: local/example-board-jobs.js
+#       format: jobs-json-v1
 
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
@@ -1026,6 +1082,8 @@ search_queries:
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   gupy            portal.gupy.io       (pt-BR board-wide Gupy search; each gupy.keywords entry swept separately, results
+#                   deduped. A single tenant's <slug>.gupy.io career page is NOT claimed)
 #   feishu-jobs     jobs.bytedance.com or <tenant>.jobs.feishu.cn
 #   mokahr          (app|hire-r1).mokahr.com/(social-recruitment|campus-recruitment|apply)/<org>/<siteId>
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
@@ -1360,7 +1418,7 @@ search_queries:
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
 #   enabled: true                         # ~445 English postings (zero-token XML)
 #
-# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+# - name: Deutsche Bahn                   # single-company; db.jobs search front
 #   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true
@@ -1481,6 +1539,21 @@ search_queries:
 # - name: Flowxtra                        # board-wide, every company hosted on Flowxtra
 #   provider: flowxtra
 #   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
+#   enabled: true
+#
+# - name: Gupy                            # board-wide, every Brazilian employer hosted on Gupy
+#   provider: gupy                        # or careers_url: https://portal.gupy.io (auto-detected)
+#   gupy:
+#     # keywords optional: falls back to config/profile.yml's target_roles
+#     # (primary[] + archetypes[].name) when omitted. Each term is its own
+#     # sweep: the API's jobName is a narrow title match, so keep terms short.
+#     # keywords: ["Desenvolvedor", "Engenheiro de Software"]  # explicit override
+#     since_days: 14      # optional: this entry's own recency window (a run's --since wins)
+#     workplace_types: [remote, hybrid]  # optional: remote / hybrid / on-site
+#     # job_types: [vacancy_type_effective]  # optional: platform job-type ids
+#     # state: São Paulo  # optional state filter
+#     # country: Brasil   # optional country filter
+#   max_pages: 5          # optional page cap per keyword (100 jobs/page, default 5, max 200)
 #   enabled: true
 #
 # - name: Arbeitsagentur — AI Roles      # German federal jobs API
@@ -1654,6 +1727,35 @@ search_queries:
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
 #   provider: pythonorg
 #   careers_url: https://www.python.org/jobs/
+#   enabled: true
+#
+# Startup Jobs: global startup/scale-up jobs (public RSS feed). Each query
+# returns only the ~50 most recent postings, so cover a search with several
+# narrow entries rather than one broad one: one per role slug, plus a
+# `workplace: remote` variant (for a broad slug the unscoped entry fills up
+# within hours, while the remote one stays under the cap longer).
+#   role: slug = last segment of a https://startup.jobs/roles/<slug> page;
+#     full list: bare /roles/<slug> entries in
+#     https://cdn.startup.jobs/sitemaps/startupjobs/roles.xml.gz
+#   workplace: optional; "remote" is the only accepted value, anything else → HTTP 404
+#
+# - name: Startup Jobs — Platform Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#   enabled: true
+#
+# - name: Startup Jobs — Platform Engineer (remote)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#     workplace: remote
+#   enabled: true
+#
+# - name: Startup Jobs — Site Reliability Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: site-reliability-engineer
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
