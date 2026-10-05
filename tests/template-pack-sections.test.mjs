@@ -72,6 +72,8 @@ function throws(label, fn, ...patterns) {
   pass(label);
 }
 
+const CONTEXT_TEXT = 'Series B fintech, 40 engineers';
+
 const PAYLOAD = {
   lang: 'en',
   page_format: 'letter',
@@ -86,10 +88,10 @@ const PAYLOAD = {
  * exit or { stderr, status } on a non-zero one, so each check can assert the
  * outcome it expects instead of treating a crash as a suite abort.
  */
-function build(dir, template) {
+function build(dir, template, payload = PAYLOAD) {
   const input = join(dir, 'payload.json');
   const output = join(dir, 'out.html');
-  writeFileSync(input, JSON.stringify(PAYLOAD));
+  writeFileSync(input, JSON.stringify(payload));
   if (run(NODE, [join(ROOT, 'build-cv-html.mjs'), input, output, template]) === null) {
     const f = lastRunFailure();
     return { status: f?.status ?? null, stderr: f?.stderr || '' };
@@ -350,6 +352,20 @@ function build(dir, template) {
       pass('the ATS pack renders through its own partials with no built-in experience DOM');
     } else {
       fail(`ATS pack render: exit ${r.status}, ${r.html ? 'built-in job-header leaked' : (r.stderr || '').trim()}`);
+    }
+
+    // Declaring `sections: all` claims the pack owns its whole DOM, which means
+    // it must render the optional fields the builders offer, not just the ones
+    // it happened to need when it was written. The experience `context` line
+    // (#4049) landed on main while this pack owned only three sections, so the
+    // pack's own experience.html had no CONTEXT_BLOCK and the field vanished
+    // from an ATS CV with nothing said. Rendered through a template that
+    // declares completeness, a dropped field is a broken claim.
+    const ctx = build(dir, ats.path, { ...PAYLOAD, experience: [{ ...PAYLOAD.experience[0], context: CONTEXT_TEXT }] });
+    if (ctx.status === 0 && ctx.html.includes(CONTEXT_TEXT)) {
+      pass('the ATS pack renders the optional experience context line (#4049)');
+    } else {
+      fail(`ATS pack dropped the experience context line: exit ${ctx.status}, ${(ctx.stderr || '').trim()}`);
     }
   }
 }
