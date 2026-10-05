@@ -257,6 +257,9 @@ const ALLOWED_MISSING_ENTRIES = new Set([
   // Kept in SYSTEM_PATHS for one release so staleSystemFiles() prunes the
   // retired suite during upgrades after it moved into tests/.
   'lib/context-budget.test.mjs',
+  // Same reason: moved to tests/contact-extract.test.mjs, kept listed so the
+  // prune still reaches an upgrading install's leftover copy.
+  'contact-extract-tests.mjs',
 ]);
 for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
   for (const entry of entries) {

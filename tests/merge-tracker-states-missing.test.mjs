@@ -10,14 +10,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { linkNodeModules } from './helpers.mjs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
-test('merge-tracker merges with the status as written when templates/states.yml is missing', () => {
+test('merge-tracker merges with the status as written when templates/states.yml is missing', (t) => {
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-no-states-'));
   try {
     const codeRoot = join(tmp, 'code');
@@ -27,7 +28,13 @@ test('merge-tracker merges with the status as written when templates/states.yml 
       if (entry.isFile() && /\.(mjs|json)$/.test(entry.name)) cpSync(join(ROOT, entry.name), join(codeRoot, entry.name));
     }
     cpSync(join(ROOT, 'lib'), join(codeRoot, 'lib'), { recursive: true });
-    symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'junction');
+    // linkNodeModules() rather than a raw symlinkSync: a bare call leaves a
+    // dangling link when the tree is absent, so merge-tracker dies at module
+    // load and every assertion below passes vacuously. The helper returns a
+    // reason instead, and makes a junction on Windows where a 'dir' link needs
+    // a privilege a normal shell lacks.
+    const depsReason = linkNodeModules(codeRoot, ROOT);
+    if (depsReason) return t.skip(depsReason);
     // No templates/ at all: neither states.yml candidate exists.
 
     const tracker = join(dataRoot, 'data', 'applications.md');

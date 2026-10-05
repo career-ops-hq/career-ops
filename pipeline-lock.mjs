@@ -35,7 +35,28 @@ import { join, dirname } from 'path';
 import { randomUUID } from 'crypto';
 
 const DEFAULT_STALE_MS = 30_000;
-export const OWNERLESS_GRACE_MS = 1_000;
+// Env-overridable like its three siblings below (staleMs, timeoutMs, retryMs)
+// for the same reason: a test that backdates a lock by a small, fixed amount
+// to stay just past a tiny staleMs needs the OTHER side of that window —
+// the floor itself — to have slack too, or the real cost of spawning the
+// child process (Node startup, the module graph, retries) can eat into the
+// 1s default before the child ever looks. On a slower CI runner that reads
+// as the lock "aging out" prematurely and the test asserting the opposite of
+// what it measured (#4537) — read once at module load, which is fine since
+// every caller is a fresh process.
+//
+// Only a finite, positive override is honoured. `|| 1_000` alone would accept
+// a NEGATIVE value (a truthy number, so it survives the `||`) and reduce the
+// floor below 1,000ms — the opposite of every legitimate use, which widens
+// it. It would also accept `Infinity`, which stops ownerless locks from ever
+// aging out and can hang acquisition on a genuinely abandoned lock. Both are
+// clearly misconfiguration, not a caller asking for "no floor"; unlike
+// acquirePipelineLock's own `maxWaitMs`, this constant has no documented
+// Infinity-means-unbounded convention to preserve.
+const configuredOwnerlessGraceMs = Number(process.env.CAREER_OPS_OWNERLESS_GRACE_MS);
+export const OWNERLESS_GRACE_MS = Number.isFinite(configuredOwnerlessGraceMs) && configuredOwnerlessGraceMs > 0
+  ? configuredOwnerlessGraceMs
+  : 1_000;
 const DEFAULT_RETRY_MS = 80;
 const DEFAULT_TIMEOUT_MS = 8_000;
 // Ceiling on progress-extended waiting (see the deadline logic in

@@ -61,6 +61,9 @@
      `style:`, which the PDF pipeline injects as a later :root block. */
   :root {
     --secondary-color: hsl(270, 70%, 45%);
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
   }
 
   * {
@@ -216,11 +219,11 @@
     font-family: 'DM Sans', sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -301,7 +304,7 @@
     font-size: 9px;
     font-weight: 500;
     color: hsl(187, 74%, 32%);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
@@ -432,11 +435,20 @@
 
   /* === PAGE BREAK CONTROL === */
   .avoid-break,
-  .job,
   .project,
   .edu-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — unchanged default (this template has always kept a role
+     whole; override via config/profile.yml style.job_break_inside: auto to
+     let a role flow across a page break instead). This template's :root token
+     block does not declare --job-break-inside, so the fallback below is the
+     only default. */
+  .job {
+    page-break-inside: var(--job-break-inside, avoid);
+    break-inside: var(--job-break-inside, avoid);
   }
 
   /* === RTL (Arabic) Support === */

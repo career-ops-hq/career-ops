@@ -1,6 +1,7 @@
 import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession } from "@/lib/apply/session";
 import { driveSession } from "@/lib/apply/drive";
 import { classifyEmpty } from "@/lib/apply/diagnose";
+import { resolveCliOrFallback } from "@/lib/clis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +17,10 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId = "", goal = "reach", answers } = body;
+  const { sessionId, goal = "reach", answers } = body;
+  // Same fallback as the session open that precedes every drive, which is where
+  // a substitution is reported (#4607); driveSession() itself needs Claude.
+  const cliId = (body.cliId && resolveCliOrFallback(body.cliId)?.spec.id) || body.cliId || "";
   const s = sessionId ? getSession(sessionId) : undefined;
   if (!s) return Response.json({ error: "apply session not found (it may have expired)" }, { status: 404 });
 

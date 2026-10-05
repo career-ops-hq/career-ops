@@ -6,10 +6,12 @@
 
 候補者が **URL**（JD テキストではなく）を貼り付けた場合、評価を始める前に求人がまだ live であることを確認する。Dead link は Block A に進めない。404 / expired page に対して A-G 評価、report、PDF を作るのは無駄。
 
+**LinkedIn:** navigate や fallback の前に AGENTS.md → **LinkedIn JD loading guard (#4121)** を適用する。前の mode の内容と試行回数を引き継ぐ。Skeleton のまま、または JD が読めない場合は closed ではなく unconfirmed。再 navigate せず、実際の JD テキストが得られるまで Block A の前で止まる。
+
 1. ページ内容を取得する。`auto-pipeline` から来た場合（Step 0.5 がすでに navigate し、link を確認済み）、その snapshot を再利用する。直接 URL が渡された場合は Playwright（`browser_navigate` + `browser_snapshot`）で navigate し、title、URL、visible content を読む。
 2. 投稿を分類する：
    - **active posting evidence:** title/role + 実際の job description または application/apply path
-   - **closed posting evidence:** expired/closed/"no longer accepting applications"、JD がなく nav/footer だけ、generic careers/search page への hard redirect、404/410
+   - **closed posting evidence:** expired/closed/"no longer accepting applications"、読み込み中やアクセス不能ではないと確認した上で JD がなく nav/footer だけ、generic careers/search page への hard redirect、404/410
 3. 投稿が closed に見える場合は、**Block A の前で stop**：候補者に link が dead であると伝える。entry が `data/pipeline.md` 由来なら、`- [x] ~~Company | Role~~ -- 求人非アクティブ` として mark する。評価、report、CV は生成しない。
 4. 候補者が JD テキストだけを貼った場合（URL なし）、liveness は確認できない。その limitation を note して進む。確認する link がないため。
 

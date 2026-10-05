@@ -288,7 +288,6 @@ career-ops एक साझा कमांड राउटर इस्ते�
 /career-ops interview    → इंटरैक्टिव प्रोफ़ाइल/CV ऑनबोर्डिंग इंटरव्यू
 /career-ops master-profile → अपना Master Career Profile इम्पोर्ट करें, उसकी समीक्षा करें और उसे सत्यापित करें
 /career-ops eu-swe    → CV/apply/interview से पहले यूरोपीय SWE आवेदन कैलिब्रेट करें
-/career-ops eu-fintech → Product Manager भूमिकाओं के लिए 21 EU फ़िनटेक पोर्टल स्कैन करें (ज़ीरो-टोकन)
 /career-ops interview/plan → आने वाले इंटरव्यू के लिए समय-खंडों में तैयारी योजना
 /career-ops interview/practice → अभ्यास इंटरव्यू, फ़ीडबैक के साथ एक बार में एक सवाल
 /career-ops interview/debrief → इंटरव्यू के बाद डीब्रीफ़: कमियाँ भरें, अगले राउंड का अनुमान लगाएँ
