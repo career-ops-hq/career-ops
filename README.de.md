@@ -288,7 +288,6 @@ career-ops nutzt einen gemeinsamen Befehls-Router. In CLIs, die Slash Commands r
 /career-ops interview    → Interaktives Onboarding-Interview für Profil und Lebenslauf
 /career-ops master-profile → Dein Master Career Profile importieren, prüfen und validieren
 /career-ops eu-swe    → Eine europäische SWE-Bewerbung vor Lebenslauf, Bewerbung und Interview kalibrieren
-/career-ops eu-fintech → 21 EU-Fintech-Portale nach Product-Manager-Rollen scannen (ohne Tokens)
 /career-ops interview/plan → Zeitgeblockter Vorbereitungsplan für ein anstehendes Interview
 /career-ops interview/practice → Übungsinterview, eine Frage nach der anderen mit Feedback
 /career-ops interview/debrief → Debrief nach dem Interview: Lücken schließen, nächste Runde vorhersagen

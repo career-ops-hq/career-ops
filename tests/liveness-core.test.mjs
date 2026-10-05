@@ -290,3 +290,83 @@ for (const { text, label } of [
     ? pass(`${label} -> active/apply_control_visible`)
     : fail(`${label} classified ${verdict.result}/${verdict.code}, expected active/apply_control_visible`);
 }
+
+console.log('\nliveness-core — a posting that says how it will close is still open');
+
+// Each of these is a LIVE posting naming the condition or date it will close
+// on. Hard patterns are checked before the apply control, so each used to read
+// as expired, and scan --verify recorded the posting as skipped_expired.
+const jdBody = 'You will support faculty research and build data pipelines across the institute. '.repeat(4);
+for (const { text, label } of [
+  {
+    // University of Wisconsin System posting, LinkedIn 2023.
+    text: 'Screening will begin immediately and be ongoing through December 22, 2023. However, applications may be accepted until the position has been filled.',
+    label: '"applications may be accepted until the position has been filled"',
+  },
+  {
+    // The job-noun window starts at "role", so the clause has to be read back
+    // from the end of the match, not from its start.
+    text: 'This role is open until the position has been filled.',
+    label: '"This role is open until the position has been filled"',
+  },
+  {
+    text: 'We will contact shortlisted candidates once applications have closed.',
+    label: '"once applications have closed"',
+  },
+  {
+    text: 'The advert will be removed once we are no longer accepting applications.',
+    label: '"once we are no longer accepting applications"',
+  },
+  {
+    text: 'This posting will be closed on December 15, 2026.',
+    label: '"will be closed on December 15"',
+  },
+  {
+    text: 'The advert is to be closed on 15 December 2026.',
+    label: '"is to be closed on 15 December"',
+  },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${jdBody}${text}`,
+    applyControls: ['Apply'],
+  });
+  verdict.result === 'active' && verdict.code === 'apply_control_visible'
+    ? pass(`${label} -> active/apply_control_visible`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected active/apply_control_visible`);
+}
+
+// The banners themselves still close the posting.
+for (const { text, label } of [
+  {
+    // Every occurrence is checked, not just the first.
+    text: 'Applications will be accepted until the position has been filled. This position has been filled.',
+    label: 'a filled banner on a page whose copy also says "until ... has been filled"',
+  },
+  {
+    // normalizeForMatch() joins this line onto the banner under it. The "if"
+    // is 16 words back, outside the clause.
+    text: 'Sign in if you already have a profile The job you are trying to apply for has been filled.',
+    label: 'a filled banner right after a sign-in line containing "if"',
+  },
+  {
+    // The comma ends the opening phrase before the banner's own clause.
+    text: 'After careful consideration, the position has been filled.',
+    label: '"After careful consideration, the position has been filled"',
+  },
+  {
+    text: 'This posting has been closed on 15 September 2026.',
+    label: '"has been closed on 15 September" (a past date)',
+  },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${jdBody}${text}`,
+    applyControls: ['Apply'],
+  });
+  verdict.result === 'expired' && verdict.code === 'expired_body'
+    ? pass(`${label} -> expired/expired_body`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected expired/expired_body`);
+}

@@ -257,6 +257,9 @@ const EXEMPT = new Map([
   // instead of importing it. The exemption covers the source scan ONLY; the
   // behaviour test at the bottom of this file pins its semantics.
   ['update-system.mjs', 'self-loading per #1706; behaviour-pinned below'],
+  // Cookbook parsers are copied outside the repository into gitignored local/.
+  // They must remain standalone, so they cannot import the core helper.
+  ['docs/recipes/gojobs/parse-gojobs-html.mjs', 'standalone cookbook file copied into local/'],
   // This file quotes the pattern in its detector self-test and error messages.
   ['tests/main-guard-convention.test.mjs', 'quotes the pattern to test the detector'],
   // Assigns argv[1] inside a spawned child's preamble so the copied script's

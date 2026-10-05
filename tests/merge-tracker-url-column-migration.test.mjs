@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedBatchStatePath } from './helpers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const MERGE = join(ROOT, 'merge-tracker.mjs');
@@ -25,7 +26,7 @@ function run(env, args = ['--backfill-urls']) {
   return execFileSync(process.execPath, [MERGE, ...args], {
     cwd: env.root,
     encoding: 'utf8',
-    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.additions },
+    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.additions, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.additions) },
   });
 }
 
@@ -33,7 +34,7 @@ function runResult(env, args = ['--backfill-urls']) {
   return spawnSync(process.execPath, [MERGE, ...args], {
     cwd: env.root,
     encoding: 'utf8',
-    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.additions },
+    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.additions, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.additions) },
   });
 }
 

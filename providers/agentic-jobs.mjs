@@ -3,6 +3,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { sleep } from './_http.mjs';
+import { countryName } from './_country.mjs';
 
 // Agentic Engineering Jobs provider — queries the site's public, documented
 // REST API instead of scraping HTML. The previous scraper parsed
@@ -52,22 +53,9 @@ function assertAgenticUrl(url) {
   return url;
 }
 
-const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
-
-/**
- * Resolve a two-letter ISO country code to an English name. Returns '' for
- * anything that isn't a resolvable two-letter code. Exported for tests.
- * @param {unknown} code
- */
-export function countryName(code) {
-  if (typeof code !== 'string' || !/^[A-Za-z]{2}$/.test(code)) return '';
-  try {
-    const name = regionNames.of(code.toUpperCase());
-    return name && name !== code.toUpperCase() ? name : '';
-  } catch {
-    return '';
-  }
-}
+// countryName lives in _country.mjs (shared with gem.mjs); re-exported here
+// because this provider's tests import it from this module.
+export { countryName };
 
 /**
  * Strip tags (dropping script/style content entirely) and decode entities,

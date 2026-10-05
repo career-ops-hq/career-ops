@@ -106,7 +106,7 @@
         "guid": "corporate-logo",
         "status": "active",
         "name": "Corporate logo sponsorship",
-        "description": "Clearly-labeled logo placement for companies, agreed with the project and invoiced by its fiscal host, with a tracked link and a monthly report of the reach the project measures on its own channels. Media kit on request at sponsors@career-ops.org. Visibility only: sponsorship buys no influence over the roadmap and no personal services from any maintainer.",
+        "description": "Company tiers with public prices on the project's collective; founding sponsorships are agreed in writing with the fiscal host. Visibility only: no influence over the roadmap, no access to users or their data, no personal services from any maintainer.",
         "amount": 0,
         "currency": "USD",
         "frequency": "monthly",

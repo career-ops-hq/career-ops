@@ -50,10 +50,12 @@ Recommended Contract:
   scan_method: local_parser
   parser:
     command: node
-    script: scripts/parsers/example-company-jobs.js
+    script: local/example-company-jobs.js
     format: jobs-json-v1
   enabled: true
 ```
+
+The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `scripts/parsers/` is for a parser you intend to upstream. See `docs/local-parser-cookbook.md`.
 
 Typically, the parser is company-specific and already knows the URL, selectors, and pagination. `args` is optional: use it however it helps the script author, for example, to reuse it across companies, pass `{careers_url}` or `{company}`, activate a debug flag, save a JSON snapshot, or control any parser-specific behavior.
 
@@ -246,7 +248,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
-   - `scan-history.tsv` → exact URL already seen
+   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_location` or `skipped_age`, which never count as seen; see Scan History)
    - `applications.md` → normalized company + role already evaluated
    - `pipeline.md` → exact URL already in pending or processed list
 
@@ -302,7 +304,7 @@ If a non-publicly accessible URL is found:
 
 ## Scan History
 
-`data/scan-history.tsv` tracks ALL seen URLs. Each row has twelve tab-separated columns, in the order `formatScanHistoryRow` emits them (`scan.mjs`):
+`data/scan-history.tsv` tracks ALL seen URLs. Each row has tab-separated columns in the order `formatScanHistoryRow` emits them (`scan.mjs`):
 
 | # | Column | Example | Notes |
 |---|--------|---------|-------|
@@ -311,20 +313,29 @@ If a non-publicly accessible URL is found:
 | 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
 | 4 | `title` | `PM AI` | Job title as returned by the ATS |
 | 5 | `company` | `Acme` | Company name |
-| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired` |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_invalid_url`, `skipped_blocked_host`, `cooldown:{company}:{until}` |
 | 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
 | 8 | `fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available |
 | 9 | `posted_at` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
 | 10 | `trust_score` | `70` | Trust/legitimacy score, written only when the scanner flagged the posting (score < 100); empty otherwise |
 | 11 | `trust_flags` | `no_company_site,vague_jd` | Comma-joined trust flags, written under the same condition as col 10; empty otherwise |
 | 12 | `normalized_company` | `acme` | Canonical company key (`normalizeCompanyName`) so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all match; col 5 stays faithful to what the provider returned |
+| 13 | `requisition_id` | `ID2608-00427A` | The employer's requisition id, when the provider reads one from a dedicated ATS field (`Job.requisitionId`); empty otherwise. Company+role dedup keeps two same-titled postings apart when their requisitions differ |
+| 14 | `language` | `en-GB` | Language of the posting text as the source names it (a code or a name), when the provider reports it (`Job.language`); empty otherwise. Read by the opt-in `scan_history.dedup_include_language` |
 
 Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
 
+`skipped_location` and `skipped_age` record what `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed threshold is visible in the data rather than only as a summary counter, and they carry no dedup weight: both name a setting the user edits, so a row written under the old threshold must not suppress the same posting once it moves. Each posting gets one such row per status, not one per scan.
+
+The scanner writes the other statuses in that list itself: `skipped_no_apply_control` for a page that loaded without an Apply control, `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.
+
 ```tsv
-url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme
+url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme		
+https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de
 ```
+
+The first row comes from a provider that reports no requisition id or language, so its last two cells are empty; the second from one that reports both.
 
 ### Filtering by posted date
 

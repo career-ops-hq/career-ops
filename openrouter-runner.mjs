@@ -540,8 +540,8 @@ function markPipelineDone(url) {
 // silently, because every reader skips a malformed or missing row quietly.
 //
 // Delegating fixes three things at once that were all symptoms of hand-rolling
-// the write: the lock, the row format (formatScanHistoryRow emits all twelve
-// columns; this module wrote seven and created a seven-column header), and the
+// the write: the lock, the row format (formatScanHistoryRow emits every trailing
+// column; this module wrote seven and created a seven-column header), and the
 // date (the shared path stamps the local day, this one stamped the UTC day —
 // the defect #3240/#3241 fixed in the other scanners, which this module escaped
 // because that census finds scanners by looking for appendToScanHistory calls).

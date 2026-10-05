@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { resolveCli } from "@/lib/clis";
+import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { localISODate } from "@/lib/followups";
 import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
@@ -32,18 +32,21 @@ export async function POST(req: Request) {
   } catch {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
-  const { kind = "evaluate", input, cliId } = body;
-  if (!input || !cliId) {
+  const { kind = "evaluate", input, cliId: requestedCliId } = body;
+  if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  const resolved = resolveCli(cliId);
+  const resolved = resolveCliOrFallback(requestedCliId);
   if (!resolved) {
-    return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
+    return new Response(JSON.stringify(cliUnavailableError(requestedCliId)), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
   const { spec, binPath } = resolved;
+  // The CLI actually running: fencing, capabilities and argv below are keyed on it.
+  const cliId = spec.id;
+  const substitution = cliSubstitutionNotice(resolved);
   const capabilities = capabilitiesFor(kind);
   if (!isCliAllowedForCapabilities(cliId, capabilities)) {
     return new Response(
@@ -302,6 +305,7 @@ export async function POST(req: Request) {
       // isFencingNotice() rather than a literal spelled in two files.
       const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: capabilitiesFor(kind) });
       if (fencing.notice) send({ type: "status", label: fencing.notice });
+      if (substitution) send({ type: "status", label: substitution });
       // Time-based keepalive. The stream is silent whenever the agent is thinking
       // or inside a long tool call, and in pdf mode it is silent for the whole
       // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured

@@ -249,9 +249,21 @@ try {
 // inside it. Add an entry to ALLOWED_MISSING_ENTRIES only with a comment
 // justifying why it may legitimately be absent.
 const ALLOWED_MISSING_ENTRIES = new Set([
+  // Retired by #3765, which moved these four suites into tests/. They are kept
+  // in SYSTEM_PATHS deliberately so `staleSystemFiles` can still prune an
+  // upgrading install's leftover copies (see the "Retired paths" block in
+  // update-system.mjs); a retired path is only useful to the prune while it is
+  // still listed, and by definition it is no longer on disk here.
+  'agent-inbox-tests.mjs',
+  'followup-seed-tests.mjs',
+  'paste-reply-tests.mjs',
+  'set-status-tests.mjs',
   // Kept in SYSTEM_PATHS for one release so staleSystemFiles() prunes the
   // retired suite during upgrades after it moved into tests/.
   'lib/context-budget.test.mjs',
+  // Same reason: moved to tests/contact-extract.test.mjs, kept listed so the
+  // prune still reaches an upgrading install's leftover copy.
+  'contact-extract-tests.mjs',
 ]);
 for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
   for (const entry of entries) {
@@ -363,6 +375,41 @@ const twoPassManifestChecks = [
     pattern: /mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths[\s\S]*?\)/,
   },
   {
+    // The guard must wrap the MERGED manifest. apply() self-bootstraps into the
+    // fetched updater before this runs, so the local SYSTEM_PATHS constant is
+    // upstream's list too — a regression that filters only remoteSystemPaths
+    // reads as protection while the same entry walks in through the other half.
+    name: 'apply filters the MERGED manifest against the user layer, not just the fetched half',
+    pattern: /rejectUserLayerPaths\(\s*mergePathLists\(SYSTEM_PATHS,\s*remoteSystemPaths,\s*BOOTSTRAP_PATHS\),/,
+  },
+  {
+    // The unit suite drives the rule with a synthetic user-path list and synthetic
+    // probes, so THIS is the only assertion tying the guard to the real sources.
+    // Weakening it to a shape-only match would let the rule keep passing while
+    // apply() fed it something other than the user layer and the real checkout.
+    name: 'the guard reads the real user layer, not a local stand-in',
+    pattern: /rejectUserLayerPaths\([\s\S]{0,200}?effectiveUserPaths\(\)/,
+  },
+  {
+    // The probes must be built by manifestProbes() from real git output, INSIDE
+    // the rejectUserLayerPaths() call. A source pattern cannot tell
+    // `trackedFiles.has(path)` from `() => true`, so what the probes DO is
+    // verified behaviourally in tests/updater-remote-manifest-user-paths.test.mjs
+    // against the factory's own exports; this only has to pin that apply() feeds
+    // it `ls-files -z` and `ls-tree -z` rather than something of its own.
+    name: 'the guard is handed probes built by manifestProbes from real git output',
+    pattern: /rejectUserLayerPaths\([\s\S]{0,300}?manifestProbes\(\{\s*trackedOutput:\s*git\('ls-files',\s*'-z'\),\s*upstreamOutput:\s*git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*'FETCH_HEAD'\),\s*\}\),/,
+  },
+  {
+    // A refused entry was never checked out, so verifying it would report a gap
+    // this run created on purpose, exit 1, and advise a re-run that refuses the
+    // same entry and fails identically — a manifest mistake turned into a
+    // permanently dead updater, which is the opposite of refusing loudly without
+    // aborting. Subtracting the refused set is what keeps that contract.
+    name: 'the completeness check skips entries the guard refused',
+    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths\.filter\(\(path\) => !refusedSet\.has\(path\)\),\s*\)/,
+  },
+  {
     name: 'apply checks out the merged manifest instead of only the local manifest',
     pattern: /for\s*\(const path of updatePaths\)/,
   },
@@ -387,7 +434,11 @@ const twoPassManifestChecks = [
     // paths, so everything added upstream since is silently absent and apply
     // still printed "Update complete" (#1998).
     name: 'apply verifies the target manifest materialized before claiming success (#1998)',
-    pattern: /missingFromTargetManifest\(remoteSystemPaths\)/,
+    // The TARGET manifest is what must be verified — verifying the local one
+    // would re-introduce #1998, since a client whose manifest predates the
+    // target's is exactly the case this check exists for. Which entries are
+    // subtracted before the comparison is pinned separately below.
+    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths/,
   },
   {
     name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
@@ -522,6 +573,14 @@ const allowedSystemUserOverlap = new Set([
   // updater ships the scaffold, never the user's source documents.
   'documents/.gitkeep',
   'documents/README.md',
+  // Exact empty placeholders may ship inside user directories, while the
+  // updater continues to protect every other file below those paths (#4708).
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
 ]);
 let hasSystemUserCollision = false;
 for (const systemPath of systemPaths) {

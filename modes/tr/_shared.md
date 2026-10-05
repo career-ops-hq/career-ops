@@ -105,7 +105,41 @@ Sistem tüm hedef rollere eşit özenle yaklaşır. Maaş ve gelişim fırsatı 
 
 ### Arketip Tespiti
 
-Her ilanı aşağıdaki türlerden birine (ya da en fazla ikisine) sınıflandır:
+İlanı arketipe göre sınıflandır. `modes/_profile.md` → *Your Target Roles*
+belirleyicidir: orada arketip tanımlanmışsa tespiti **o** tabloya göre yap,
+aşağıdakini yalnızca onun kapsamadığı durumlar için yedek olarak kullan. Bu,
+yukarıda belirtilen önceliğin aynısıdır: kullanıcının `_profile.md`'deki
+özelleştirmeleri bu dosyadaki varsayılanları geçersiz kılar. `_profile.md` yoksa,
+*Your Target Roles* bölümü yoksa ya da o tabloda hiç satır yoksa, aşağıdaki
+varsayılan tablo hedef kümesidir: sınıflandırmayı ona göre yap; oradaki bir
+eşleşme hedefli sayılır.
+
+Aşağıdaki tablo kapalı bir liste değil, bir varsayılandır. Belirli bir iş
+aramasını yansıtır (bkz. AGENTS.md → Origin) ve her kullanıcının alanını
+tanımlamaz: silikon tasarım doğrulama mühendisi, kantitatif analist ya da
+klinisyen için burada hiçbir arketip yoktur.
+
+**İlan, kullanıcının gerçekten hedeflediği hiçbir arketiple eşleşmiyorsa bunu
+açıkça söyle ve North Star uyumuna 1 ver.** Bu gerçek ve işe yarar bir sinyaldir.
+İlanı en yakın etikete — ya da ikisinin "hibrit"ine — zorlamak, kullanıcının
+başvurmadığı bir iş için kendinden emin bir uyum anlatısı üretir; bu, düşük bir
+puandan daha kötüdür, çünkü analiz gibi okunur.
+
+**Aşağıdaki varsayılan tabloyla eşleşmek, kullanıcının hedefleriyle eşleşmek
+demek değildir.** `_profile.md`'de arketip tanımlıysa "hedefli", onlardan biri
+demektir. Varsayılan tablodaki bir satıra tam oturan ama `_profile.md`'deki
+hiçbir şeye uymayan ilan yine de eşleşmeyen bir ilandır: rolü açıklamaya
+yardımcı oluyorsa varsayılan arketipin adını ver, ama North Star'ı yine
+eşleşmeyen olarak puanla. Yedek tabloyu hedef gibi okumak, bu bölümün önlemek
+için var olduğu hatanın ta kendisidir.
+
+**Puan konusunda: eşleşmeyen bir ilan North Star'da 1 alır.** `modes/ofertas.md`
+bu boyutu `5 = exact target role, 1 = unrelated` diye sabitler; eşleşmeyen ilan bu
+ölçeğin ortası değil, `1` ucudur — kullanıcının aradığı bir ilan değildir ve 2 ya
+da 3, var olmayan kısmi bir uyum gibi okunur. Kullanıcının hedeflerinden biriyle
+tam olarak ya da ikisinin hibriti olarak eşleşen ilan ise her zamanki gibi aynı
+ölçeğin geri kalanına göre puanlanır; bu bölüm onun yanına ikinci bir ölçek
+eklemez.
 
 | Arketip | İlanda öne çıkan sinyaller |
 |---------|---------------------------|

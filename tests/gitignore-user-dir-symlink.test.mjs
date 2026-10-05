@@ -4,7 +4,7 @@
 // a mode-120000 link containing a local filesystem path.
 
 import { spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
+import { lstatSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, warn, rmSync, ROOT } from './helpers.mjs';
@@ -15,8 +15,12 @@ const names = ['data', 'output', 'jds', 'documents'];
 const lines = readFileSync(join(ROOT, '.gitignore'), 'utf-8').split(/\r?\n/).map((line) => line.trim());
 
 // The un-slashed, root-anchored rule catches both directories and symlinks.
-// A trailing-slash negation would also match a symlink to a directory and
-// cancel the protection, so these paths must not be re-included.
+// It must be paired with a trailing-slash negation. A trailing slash matches
+// DIRECTORIES only and a symlink is not a directory to git, so `!data/`
+// re-includes a real directory and leaves a link ignored. Measured below in
+// both directions. Without the negation the anchored rule also excludes the
+// directory itself, and git does not descend into an excluded directory, so
+// every `!data/...` rule beneath it stops applying.
 for (const name of names) {
   const ignore = lines.indexOf(`/${name}`);
   const dirOnly = lines.includes(`/${name}/`);
@@ -35,14 +39,23 @@ try {
   else fail('control failed: check-ignore did not report an unignored path as unignored');
 
   for (const name of names) {
-    let linked = true;
+    // 'dir', never 'junction'. A junction is an NTFS reparse point that git
+    // reads as a real directory, so the `!name/` negation re-includes it and the
+    // probe judges the symlink rule against something that is not a symlink. It
+    // then reports the rule as broken on Windows while it is doing its job.
+    // lstat confirms what was actually created rather than what was requested,
+    // because the third argument is advisory: POSIX ignores it, and Windows may
+    // refuse a 'dir' link without the privilege it needs.
+    let link = null;
     try {
-      symlinkSync('target', join(dir, name), 'junction');
+      symlinkSync('target', join(dir, name), 'dir');
+      link = lstatSync(join(dir, name));
     } catch (err) {
-      linked = false;
       warn(`${name} symlink probe skipped (${err.code}) — static rule check still applies`);
     }
-    if (linked) {
+    if (link && !link.isSymbolicLink()) {
+      warn(`${name} symlink probe skipped (created a non-symlink) — static rule check still applies`);
+    } else if (link) {
       if (ask(name) === 0) pass(`symlink named ${name} is ignored`);
       else fail(`symlink named ${name} is NOT ignored — git add could stage it`);
     }
@@ -86,4 +99,43 @@ try {
   }
 } finally {
   rmSync(contentDir, { recursive: true, force: true });
+}
+
+// ── The anchored rule must not switch off the negations beneath it ──────────
+//
+// `git ls-files --error-unmatch` above proves these paths are still TRACKED,
+// which .gitignore cannot change and which is therefore true either way. It
+// says nothing about whether the patterns now claim them. `--no-index` asks
+// the pattern question directly, and that is the one that regressed: with a
+// bare `/data` and no `!data/`, git excludes the directory itself and never
+// descends, so `!data/.gitkeep`, `!data/offers/` and `!data/parser-output/`
+// stop applying. It surfaces on a fresh scaffold or after a directory is
+// removed and restored, never in a working tree where the files are tracked.
+{
+  const probe = mkdtempSync(join(tmpdir(), 'gitignore-user-dir-negations-'));
+  try {
+    spawnSync('git', ['init', '-q', '.'], { cwd: probe });
+    writeFileSync(join(probe, '.gitignore'), readFileSync(join(ROOT, '.gitignore'), 'utf-8'));
+    const ignored = (path) =>
+      spawnSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: probe }).status === 0;
+
+    if (ignored('data/whatever-the-user-wrote.md')) {
+      pass('control: real user content under data/ is still ignored');
+    } else {
+      fail('control failed: data/ content is not ignored, so the probe proves nothing');
+    }
+
+    const scaffolds = [
+      'data/.gitkeep', 'data/offers/.gitkeep', 'data/parser-output/.gitkeep',
+      'output/.gitkeep', 'jds/.gitkeep', 'documents/.gitkeep', 'documents/README.md',
+    ];
+    const claimed = scaffolds.filter(ignored);
+    if (claimed.length === 0) {
+      pass('every system scaffold survives the anchored rule as an un-ignored path');
+    } else {
+      fail(`the anchored rule switched off the negations for: ${claimed.join(', ')}`);
+    }
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
 }

@@ -5,7 +5,7 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
@@ -31,14 +31,15 @@ const VALID_CLIS = ['claude', 'codex', 'opencode', 'pi', 'antigravity', 'grok', 
 // silently diagnosed THIS checkout instead of the one asked for. Handled via
 // lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
 // flags before --help so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--target', '--json', '--strict', '--cli', '--help', '-h'];
+const KNOWN_FLAGS = ['--target', '--json', '--init-templates', '--strict', '--cli', '--help', '-h'];
 
 // Both take their value as the next argv token.
 const VALUE_FLAGS = ['--target', '--cli'];
 
 const USAGE = `Usage:
   node doctor.mjs                    # run the setup diagnostic
-  node doctor.mjs --json             # machine-readable onboarding state
+  node doctor.mjs --json             # read-only machine-readable onboarding state
+  node doctor.mjs --json --init-templates # create missing personalization files for onboarding
   node doctor.mjs --strict           # also probe portals.yml entries (network)
   node doctor.mjs --target <path>    # diagnose another career-ops checkout
   node doctor.mjs --cli <name>       # check a specific CLI's integration
@@ -66,6 +67,11 @@ const projectRoot = explicitTarget || getCareerOpsRoot();
 // tests/doctor-tracked-bak-files.test.mjs already exercises it.
 const codeRoot = explicitTarget || __dirname;
 const JSON_OUT = argv.includes('--json');
+const INIT_TEMPLATES = argv.includes('--init-templates');
+if (INIT_TEMPLATES && !JSON_OUT) {
+  console.error('Error: --init-templates requires --json');
+  process.exit(1);
+}
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
@@ -253,8 +259,8 @@ async function checkPlaywright() {
 }
 
 // Per-CLI MCP config registry. `plugins: true` marks a CLI whose MCP servers
-// can also arrive from an installed plugin, i.e. from outside the project root
-// (see isPlaywrightMcpFromPlugin).
+// can also arrive from outside the project root: from .claude.json or from an
+// installed plugin (see isPlaywrightMcpFromClaudeJson, isPlaywrightMcpFromPlugin).
 const MCP_CONFIGS = [
   { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'], plugins: true },
   // opencode.jsonc is JSONC: OpenCode accepts comments and trailing commas
@@ -343,6 +349,28 @@ function isPlaywrightMcpFromPlugin(root) {
   });
 }
 
+// `claude mcp add` writes to .claude.json, not to any file in the checkout
+// (#4392): user scope under the top-level `mcpServers`, local scope (the
+// default) under `projects[<dir>].mcpServers`. The file lives in
+// CLAUDE_CONFIG_DIR when that is set, otherwise directly in the home dir -
+// beside ~/.claude/, not inside it.
+//
+// Claude Code on Windows can store one directory under both C:\... and C:/...
+// with the server under only one of them, while process.cwd() returns the
+// backslash form. So keys are compared with slashes and case folded, and every
+// matching key counts, not just the first.
+function isPlaywrightMcpFromClaudeJson(root) {
+  const dir = process.env.CLAUDE_CONFIG_DIR || homedir();
+  const cfg = readConfigIfPresent(join(dir, '.claude.json'));
+  if (!cfg || typeof cfg !== 'object') return false;
+  if (hasPlaywrightIn(cfg)) return true;
+  if (!root || !cfg.projects || typeof cfg.projects !== 'object') return false;
+  const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const target = norm(root);
+  return Object.entries(cfg.projects)
+    .some(([key, project]) => norm(key) === target && hasPlaywrightIn(project));
+}
+
 function isPlaywrightMcpConfigured(root, activeCli) {
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
   if (!entry) return false; // known CLI but no MCP file mapping; caller warns
@@ -353,7 +381,8 @@ function isPlaywrightMcpConfigured(root, activeCli) {
   if (inProject) return true;
   // Gated behind the project scan, so an already-configured project pays no
   // extra I/O and non-plugin CLIs never touch the user config dir.
-  return entry.plugins === true && isPlaywrightMcpFromPlugin(root);
+  return entry.plugins === true
+    && (isPlaywrightMcpFromClaudeJson(root) || isPlaywrightMcpFromPlugin(root));
 }
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
@@ -411,7 +440,7 @@ function checkPlaywrightMcp(root, activeCli) {
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
       entry.plugins
-        ? `No project-level MCP config, and no enabled plugin providing one, was detected for ${activeCli}.`
+        ? `No project-level MCP config, no server in .claude.json (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json when set), and no enabled plugin providing one, was detected for ${activeCli}.`
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (see opencode.example.json) or pass --cli <name> if you actually run a different CLI.'
@@ -762,8 +791,8 @@ async function main() {
 //     into every A-F evaluation, so offers are scored against a stranger.
 //   _brief.md unedited hands the triage first pass literal `{placeholders}`
 //     instead of the candidate's archetypes, comp floor and hard DQ criteria.
-// doctor auto-copies both from their templates on first run, so "the file
-// exists" is guaranteed and tells us nothing — only its CONTENT does.
+// Explicit onboarding copies both from their templates, so existence alone
+// tells us nothing about personalization — only the CONTENT does.
 const PERSONALIZATION_FILES = [
   {
     path: 'modes/_profile.md',
@@ -790,7 +819,8 @@ function unpersonalizedFiles(root) {
   const out = [];
   for (const { path, template, impact } of PERSONALIZATION_FILES) {
     const targetPath = join(root, ...path.split('/'));
-    const templatePath = join(root, ...template.split('/'));
+    const rootTemplatePath = join(root, ...template.split('/'));
+    const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
     if (!existsSync(targetPath) || !existsSync(templatePath)) continue;
     let target, tpl;
     try {
@@ -844,9 +874,11 @@ function onboardingState(root) {
     const targetPath = join(root, ...target.split('/'));
     const rootTemplatePath = join(root, ...template.split('/'));
     const templatePath = existsSync(rootTemplatePath) ? rootTemplatePath : join(__dirname, ...template.split('/'));
-    if (!existsSync(targetPath) && existsSync(templatePath)) {
+    // Diagnosis must not create user files. Copy only during explicit onboarding.
+    if (INIT_TEMPLATES && !existsSync(targetPath) && existsSync(templatePath)) {
       try {
-        copyFileSync(templatePath, targetPath);
+        mkdirSync(dirname(targetPath), { recursive: true });
+        copyFileSync(templatePath, targetPath, constants.COPYFILE_EXCL);
         autoCopied.push(target);
       } catch {
         // Gracefully handle read-only filesystems (e.g., CI/CD or containerized environments)
