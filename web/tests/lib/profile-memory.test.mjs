@@ -13,7 +13,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readProfileMemory, NOTES_START, NOTES_END } from "../../src/lib/profile-memory.mjs";
@@ -143,7 +143,35 @@ test("a file where modes/ belongs is an error, not silence", () => {
   ROOTS.push(root);
   writeFileSync(join(root, "modes"), "not a directory");
 
-  assert.throws(() => readProfileMemory(root), (err) => err.code === "ENOTDIR");
+  // POSIX reports ENOTDIR for a non-directory path component. Windows reports
+  // ERROR_PATH_NOT_FOUND, which libuv maps to ENOENT — the same code an absent
+  // file gives, and readProfileMemory must keep reading ENOENT as silence. So
+  // on Windows this condition is genuinely indistinguishable from "nobody wrote
+  // one", and asserting a throw there pins a promise the platform cannot keep.
+  //
+  // The errno is probed rather than a platform list pinned, so the assertion
+  // stays live wherever the distinction exists and degrades honestly where it
+  // does not.
+  let probe = null;
+  try {
+    readFileSync(join(root, "modes", "_profile.md"), "utf8");
+  } catch (err) {
+    probe = err?.code ?? null;
+  }
+
+  if (probe === "ENOENT") {
+    assert.equal(
+      readProfileMemory(root),
+      "",
+      "where the platform cannot tell a broken path from an absent one, silence is the documented behaviour",
+    );
+  } else {
+    assert.throws(
+      () => readProfileMemory(root),
+      (err) => err.code === probe,
+      `a file standing where modes/ belongs is a broken path, not a fresh install (expected ${probe})`,
+    );
+  }
 });
 
 test("a profile that exists and cannot be read is an error, not silence", () => {
