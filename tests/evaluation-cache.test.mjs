@@ -276,6 +276,19 @@ test('deleting the newest invalidated report cannot revive an older duplicate', 
   assert.equal(result.payload.captured_at, iso(NOW + 1000));
 });
 
+test('repeated invalidation preserves the newest tombstone across matching reports', integration, async (t) => {
+  const f = fixture(t);
+  const newestTombstone = NOW + 1000;
+  const oldPath = f.write('999-old.md', { invalidated_at: iso(newestTombstone) });
+  const newPath = f.write('001-new.md');
+  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } });
+  for (const path of [oldPath, newPath]) {
+    const parsed = yamlLoad(readFileSync(path, 'utf8').match(/```yaml\n([\s\S]*?)\n```/)[1]);
+    assert.equal(parsed.job_facts_cache.invalidated_at, iso(newestTombstone));
+  }
+  assertMiss(await lookupJobFacts(f.args));
+});
+
 test('uncertain or stale liveness never writes durable invalidation', integration, async (t) => {
   const f = fixture(t);
   const path = f.write('001-example.md');

@@ -168,7 +168,8 @@ export async function invalidateJobFacts({ reportsDir = join(getCareerOpsRoot(),
   try {
     const records = reportFiles(reportsDir).map(path => reportRecord(path, identity, key)).filter(Boolean);
     if (!records.length) return miss('no-cached-facts');
-    const invalidatedAt = new Date(now).toISOString();
+    const invalidatedAt = new Date(Math.max(now, ...records
+      .map(record => Number.isFinite(record.invalidated) ? record.invalidated : -Infinity))).toISOString();
     // Stamp every duplicate so deleting/archiving one report cannot remove
     // the only closure marker and revive another still-fresh copy.
     for (const record of records) {
