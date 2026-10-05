@@ -150,16 +150,55 @@ test('credential-bearing HTTP proxies are rejected without exposing their creden
 });
 
 test('credential-bearing HTTPS proxies remain available to provider requests', async () => {
+  // The proxied path calls undici's own fetch, so the stub replaces the undici
+  // module itself: a recording agent plus a fetch that checks it was handed one.
+  const { spawnSync } = await import('node:child_process');
+  const fakeUndici = `
+    export class EnvHttpProxyAgent { constructor(options) { this.options = options; } }
+    export async function fetch(_url, options) {
+      if (!(options.dispatcher instanceof EnvHttpProxyAgent)) throw new Error('no proxy dispatcher');
+      return new Response('TLS PROXY CONFIGURED ' + options.dispatcher.options.httpsProxy);
+    }`;
+  const loader = 'data:text/javascript,' + encodeURIComponent(
+    `export async function resolve(s, c, next) { if (s === "undici") return { url: ${JSON.stringify('data:text/javascript,' + encodeURIComponent(fakeUndici))}, shortCircuit: true }; return next(s, c); }`,
+  );
+  const moduleUrl = new URL('../../providers/_http.mjs', import.meta.url).href;
+  const script = `
+    import assert from 'node:assert/strict';
+    const { fetchText } = await import(${JSON.stringify(moduleUrl)});
+    globalThis.fetch = async () => { throw new Error('global fetch must not carry the proxy dispatcher'); };
+    process.env.CAREER_OPS_TRUST_PROXY_EGRESS = '1';
+    process.env.HTTPS_PROXY = 'https://user:secret@proxy.example:3128';
+    assert.equal(await fetchText('https://public.example/'), 'TLS PROXY CONFIGURED https://user:secret@proxy.example:3128');
+  `;
+  const env = { ...process.env };
+  for (const key of ['http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY']) delete env[key];
+  const result = spawnSync(process.execPath, ['--experimental-loader', loader, '--input-type=module', '-e', script], { encoding: 'utf8', env });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+// The proxy agent is an instance from the installed `undici` package, and only
+// that package's fetch is guaranteed to speak its dispatcher API. Node's global
+// fetch is a bundled undici whose major follows the Node release: Node 26's
+// undici 8 rejects an undici 6 agent with "invalid onError method", while Node
+// 24's undici 7 still tolerates it, so a real-proxy test alone passes or fails
+// depending on which Node runs it. Breaking the global fetch pins the pairing on
+// every Node.
+test('proxied provider requests never go through the global fetch', async () => {
+  const proxy = http.createServer();
+  proxy.on('connect', (_req, socket) => {
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+  });
+  const proxyUrl = await listening(proxy);
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = async (_url, options) => {
-      assert.ok(options.dispatcher);
-      return new Response('TLS PROXY CONFIGURED');
-    };
-    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: 'https://user:secret@proxy.example:3128' }, async () => {
-      assert.equal(await fetchText('https://public.example/'), 'TLS PROXY CONFIGURED');
+    globalThis.fetch = async () => { throw new Error('global fetch used for a proxied request'); };
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl }, async () => {
+      assert.equal(await fetchText('http://unresolvable.invalid/job'), 'PROXIED!');
     });
   } finally {
     globalThis.fetch = originalFetch;
+    proxy.close();
   }
 });
