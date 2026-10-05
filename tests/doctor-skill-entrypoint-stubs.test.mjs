@@ -11,7 +11,6 @@ import { execFileSync, execSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, symlinkSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { pathToFileURL } from 'url';
 
 console.log('\ndoctor.mjs — skill entrypoint stubs');
 
@@ -68,7 +67,7 @@ function skillWarning(state) {
     } else {
       fail(`apply listed before materialization: ${JSON.stringify(warning)}`);
     }
-    if (warning && warning.includes(join(dir, 'update-system.mjs')) && warning.includes(pathToFileURL(join(dir, 'scaffolder', 'bin', 'skill-entrypoints.mjs')).href)) {
+    if (warning && warning.includes(join(dir, 'update-system.mjs')) && warning.includes(join(dir, 'scaffolder', 'bin', 'skill-entrypoints.mjs'))) {
       pass('both commands are built from the checked root, not the current directory');
     } else {
       fail(`remedy commands are not rooted at the checked checkout: ${JSON.stringify(warning)}`);
@@ -83,38 +82,76 @@ function skillWarning(state) {
   }
 }
 
-// 1b. The printed materialize command works as pasted, from a different
-//     directory, against the checkout that was checked.
-{
-  const dir = mkdtempSync(join(tmpdir(), process.platform === 'win32' ? 'co-skill stub 1b-' : "co-skill $HOME $(echo pwned) 'q' 1b-"));
+// 1b. The printed repair command works as pasted, from a different directory,
+//     against the checkout that was checked, and a root full of shell
+//     metacharacters stays literal. Which characters matter depends on the
+//     shell, so each case names its own: sh/PowerShell must not expand $HOME or
+//     $(...) or break on a quote; cmd must not trip on & or ^ (and a path with %
+//     cannot be made literal there, so doctor prints no cmd form for it).
+const CANONICAL = '---\nname: career-ops\n---\nrouter body\n';
+
+function repairCase(label, dirPrefix, pickCommand, run) {
+  const dir = mkdtempSync(join(tmpdir(), dirPrefix));
   const elsewhere = mkdtempSync(join(tmpdir(), 'co-skill-elsewhere-'));
   try {
-    const canonical = '---\nname: career-ops\n---\nrouter body\n';
-    put(dir, '.agents/skills/career-ops/SKILL.md', canonical);
+    put(dir, '.agents/skills/career-ops/SKILL.md', CANONICAL);
     const mod = join(dir, 'scaffolder', 'bin', 'skill-entrypoints.mjs');
     mkdirSync(dirname(mod), { recursive: true });
     copyFileSync(join(ROOT, 'scaffolder', 'bin', 'skill-entrypoints.mjs'), mod);
     const stub = put(dir, CLAUDE, POINTER);
     const state = runDoctor(dir);
     const warning = state._error ? null : skillWarning(state);
-    const cmd = warning && warning.split('\n').map((l) => l.replace(/^\s*→\s*/, '').trim()).find((l) => l.startsWith('node -e'));
+    const lines = warning ? warning.split('\n').map((l) => l.replace(/^\s*→\s*/, '').trim()) : [];
+    const cmd = lines.find(pickCommand);
     if (!cmd) {
-      fail(`no materialize command in warning: ${JSON.stringify(warning)}`);
-    } else {
-      // execSync, not execFileSync: it is what pasting into a prompt does. The
-      // shell-string form hands the command to sh -c / cmd /d /s /c verbatim,
-      // where execFileSync re-escapes the quotes it was given on Windows.
-      execSync(cmd, { cwd: elsewhere, stdio: 'pipe' });
-      if (readFileSync(stub, 'utf-8') === canonical) {
-        pass('the printed materialize command repairs the checked checkout from another directory (path with a space, and on POSIX $HOME, $(...) and a quote, none expanded)');
-      } else {
-        fail(`stub still holds: ${JSON.stringify(readFileSync(stub, 'utf-8').slice(0, 60))}`);
-      }
+      fail(`${label}: no matching command in warning: ${JSON.stringify(warning)}`);
+      return;
     }
+    run(cmd, elsewhere);
+    if (readFileSync(stub, 'utf-8') === CANONICAL) pass(label);
+    else fail(`${label}: stub still holds ${JSON.stringify(readFileSync(stub, 'utf-8').slice(0, 60))}`);
+    return warning;
+  } catch (err) {
+    fail(`${label}: ${String(err.message).split('\n')[0]}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(elsewhere, { recursive: true, force: true });
   }
+}
+
+// execSync, not execFileSync: pasting into a prompt hands the string to the
+// shell verbatim, where execFileSync re-escapes the quotes on Windows.
+const viaShell = (cmd, cwd) => execSync(cmd, { cwd, stdio: 'pipe' });
+const isNode = (l) => l.startsWith('node -e');
+
+if (process.platform !== 'win32') {
+  repairCase(
+    'the printed command repairs the checked checkout from another directory; $HOME, $(...), a backtick and a quote in the path are not expanded',
+    "co-skill $HOME $(echo pwned) `id` 'q' 1b-",
+    isNode,
+    viaShell,
+  );
+} else {
+  const powershell = (cmd, cwd) => execFileSync(
+    'powershell', ['-NoProfile', '-NonInteractive', '-Command', cmd], { cwd, stdio: 'pipe' },
+  );
+  const warning = repairCase(
+    "the PowerShell command repairs the checked checkout; $HOME, $(...), quotes (straight and curly) and % in the path stay literal",
+    "co-skill $HOME $(echo pwned) 'q' \u2019r\u2019 %TEMP% 1b-",
+    (l) => l.startsWith("node -e '"),
+    powershell,
+  );
+  if (warning && /cmd\.exe form not shown/.test(warning)) {
+    pass('a path containing % gets no cmd.exe form, since cmd always expands it');
+  } else {
+    fail(`a % path should print no cmd form: ${JSON.stringify(warning)}`);
+  }
+  repairCase(
+    'the cmd.exe command repairs the checked checkout; $, parentheses, a quote, & and ^ in the path stay literal',
+    "co-skill $HOME $(echo pwned) 'q' & ^ 1b-",
+    (l) => l.startsWith('node -e "'),
+    viaShell,
+  );
 }
 
 // 2. Real skill content and a trailing newline on a real file are not stubs.

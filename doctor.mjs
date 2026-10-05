@@ -9,7 +9,7 @@ import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync,
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
@@ -236,19 +236,54 @@ function checkTrackedBakFiles(root) {
 // up to date, so a fresh clone never reaches it and nothing else says why
 // /career-ops does nothing. Read-only on purpose (doctor must not write): it
 // names the stubs and the one command that materializes them.
-function quoteForShell(value) {
-  if (process.platform === 'win32') return `"${value}"`;
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+// One script for every shell, deliberately free of quote characters so each
+// shell can wrap it in its own: backticks for the one string, and both paths
+// arrive as separate argv words, never interpolated into the script. (Read back
+// with argv.at(-n): tests/main-guard-convention.test.mjs bans the literal
+// entry-path index in source files, printed strings included.)
+const MATERIALIZE_SCRIPT = 'import(require(`url`).pathToFileURL(process.argv.at(-2)).href).then(m=>console.log(m.materializeSkillEntrypoints(process.argv.at(-1))))';
 
-function materializeCommand(root) {
-  const url = pathToFileURL(join(root, 'scaffolder', 'bin', 'skill-entrypoints.mjs')).href;
-  // The script's own string quotes must differ from the shell's: double on
-  // Windows (cmd wraps -e in double quotes), single on POSIX would end the
-  // single-quoted -e, so use JSON's double quotes there.
-  const lit = process.platform === 'win32' ? `'${url}'` : JSON.stringify(url);
-  const script = `import(${lit}).then(m => console.log(m.materializeSkillEntrypoints(process.argv.at(-1))))`;
-  return `node -e ${quoteForShell(script)} ${quoteForShell(root)}`;
+// --target accepts any path, so what is printed has to be literal when pasted.
+// Each shell expands something different inside the quoting it prefers:
+//   sh          single quotes are fully literal; a quote is closed, escaped, reopened
+//   PowerShell  single quotes are literal ($(...), $HOME stay text); a quote is
+//               escaped by doubling it, and PowerShell also treats the curly
+//               and low quotes as quote characters, so those double too
+//   cmd         double quotes are the only form, and %VAR% is expanded inside
+//               them with no escape on an interactive line (a Windows path may
+//               contain %, and a double quote cannot occur in one)
+const quoteSh = (v) => `'${v.replace(/'/g, `'\\''`)}'`;
+const quotePowerShell = (v) => `'${v.replace(/['\u2018\u2019\u201A\u201B]/g, (c) => c + c)}'`;
+const quoteCmd = (v) => `"${v}"`;
+
+function repairCommands(root) {
+  const mod = join(root, 'scaffolder', 'bin', 'skill-entrypoints.mjs');
+  const updater = join(root, 'update-system.mjs');
+  const forms = (quote) => ({
+    materialize: `node -e ${quote(MATERIALIZE_SCRIPT)} ${quote(mod)} ${quote(root)}`,
+    update: `node ${quote(updater)} apply --confirm`,
+  });
+  const lines = [];
+  const section = (heading, f) => lines.push(heading.materialize, f.materialize, heading.update, f.update);
+  const heading = {
+    materialize: 'Repair them now, no update needed:',
+    update: 'Or update (this only repairs them when an update is actually applied):',
+  };
+  if (process.platform !== 'win32') {
+    section(heading, forms(quoteSh));
+    return lines;
+  }
+  const label = (shell) => ({
+    materialize: `${heading.materialize} (${shell})`,
+    update: `${heading.update} (${shell})`,
+  });
+  section(label('PowerShell'), forms(quotePowerShell));
+  if (root.includes('%')) {
+    lines.push('cmd.exe form not shown: this path contains %, which cmd always expands. Use the PowerShell commands above.');
+  } else {
+    section(label('cmd.exe'), forms(quoteCmd));
+  }
+  return lines;
 }
 
 function checkSkillEntrypoints(root) {
@@ -272,22 +307,12 @@ function checkSkillEntrypoints(root) {
     label: `${stubs.length} CLI skill entrypoint${stubs.length === 1 ? ' is' : 's are'} a symlink-target stub, not the skill — this checkout has no symlink support, so that CLI loads an empty /career-ops`,
     // Materializing first: it is the repair that works on the clone this
     // warning is most likely for, one that is already up to date, where apply
-    // returns before reaching ensureSkillEntrypoints. Both commands are built
-    // from the root the check just inspected, so they act on that checkout from
-    // whatever directory the user pastes them into. The root is a separate argv
-    // word, never interpolated into the -e script (read back with argv.at(-1):
-    // tests/main-guard-convention.test.mjs bans the literal entry-path index
-    // in source files, printed strings included). POSIX single-quotes
-    // everything, so a root holding $(...), $HOME or a backtick (--target takes
-    // any path) is not expanded when pasted into sh. Windows paths cannot hold
-    // a double quote, so double quotes are exact there and are the one form
-    // cmd and PowerShell both parse.
+    // returns before reaching ensureSkillEntrypoints. Both are built from the
+    // root the check just inspected, so they act on that checkout from whatever
+    // directory they are pasted into.
     fix: [
       ...stubs,
-      'Repair them now, no update needed:',
-      materializeCommand(root),
-      'Or update (this only repairs them when an update is actually applied):',
-      `node ${quoteForShell(join(root, 'update-system.mjs'))} apply --confirm`,
+      ...repairCommands(root),
     ],
   };
 }
