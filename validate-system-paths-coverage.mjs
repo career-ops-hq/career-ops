@@ -6,7 +6,8 @@
  *
  * Every tracked file in the repo must be covered by either SYSTEM_PATHS
  * (system layer, fetched on `update-system.mjs apply`) or USER_PATHS
- * (user-owned, never touched). Anything else is a coverage gap: it
+ * (user-owned, except for exact system-owned `.gitkeep` scaffolds explicitly
+ * listed in SYSTEM_PATHS). Anything else is a coverage gap: it
  * lives in the repo but the auto-updater won't propagate it to
  * clients on `apply`. That breaks them on the next test run.
  *

@@ -3,8 +3,10 @@
 /**
  * update-system.mjs — Safe auto-updater for career-ops
  *
- * Updates ONLY system layer files (modes, scripts, dashboard, templates).
- * NEVER touches user data (cv.md, profile.yml, _profile.md, data/, reports/).
+ * Updates system-layer files (modes, scripts, dashboard, templates) plus the
+ * exact system-owned `.gitkeep` scaffolds listed in DATA_CONTRACT.md. It never
+ * touches user-owned data (cv.md, profile.yml, _profile.md, or user files in
+ * data/, reports/, output/, and jds/).
  *
  * Usage:
  *   node update-system.mjs check      # Check if a newer release is published
@@ -550,13 +552,14 @@ const BOOTSTRAP_PATHS = [
   'agent-inbox-tests.mjs',
 ];
 
-// User layer paths — NEVER touch these (safety check)
+// User layer paths — never touch user-owned files under these paths (safety
+// check). Exact system-owned scaffold files are explicit SYSTEM_PATHS entries.
 /**
- * Files and directories the updater must never touch — the USER layer of the
- * data contract (DATA_CONTRACT.md). Exported so other tooling can derive the
- * same boundary instead of re-listing it: a hardcoded second copy is how a
- * fourth user file eventually gets policed by something that has no business
- * having an opinion about it (#2480).
+ * Files and directories whose user-owned contents the updater must never touch
+ * — the USER layer of the data contract (DATA_CONTRACT.md). Exported so other
+ * tooling can derive the same boundary instead of re-listing it: a hardcoded
+ * second copy is how a fourth user file eventually gets policed by something
+ * that has no business having an opinion about it (#2480).
  */
 export const USER_PATHS = [
   '.career-ops-web/',
@@ -686,7 +689,7 @@ export function localUserPaths(root = ROOT) {
  * safety check compares against — the built-in list alone would report a
  * fork's own files as violations.
  * @param {string} [root=ROOT] - Repo root to read from.
- * @returns {string[]} Every path the updater must never touch.
+ * @returns {string[]} User-layer paths whose user-owned contents are protected.
  */
 export function effectiveUserPaths(root = ROOT) {
   return [...USER_PATHS, ...localUserPaths(root)];
