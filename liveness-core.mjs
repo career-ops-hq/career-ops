@@ -319,7 +319,13 @@ export function planExpiredHistoryRows(scanHistoryText = '', verdicts = [], norm
     // content, it still lives on the row being retired, and a stale copy on a
     // dead row is only noise for the cross-listing check.
     knownByKey.get(key).set(url, { url, source: portal, title, company, location, fingerprint: '' });
+    // The file is append-only and chronological, so the last row for a URL says
+    // what it is now. A later `added` row is a relisting: it un-retires the URL
+    // so a second death can be recorded, instead of the first retirement
+    // silencing every one after it. An empty status cell reads as `added`, the
+    // convention collectSeenUrls already uses.
     if (EXPIRED_HISTORY_STATUS.test(status)) recorded.add(url);
+    else if ((status || 'added') === 'added') recorded.delete(url);
   }
 
   const rows = [];

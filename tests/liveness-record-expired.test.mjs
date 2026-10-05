@@ -152,6 +152,31 @@ test('a URL already recorded dead is not recorded twice', () => {
   assert.deepEqual(plan(rows, [{ url: DEAD, result: 'expired' }]), []);
 });
 
+test('a posting relisted after it died can be recorded dead a second time', () => {
+  // Scan history is append-only and chronological, so the LAST row for a URL
+  // states what it is now. A posting that was retired, relisted, and died again
+  // is live in the feed under that newer `added` row; if the first retirement
+  // keeps the URL marked for good, the second death writes nothing and the
+  // posting resurfaces — the failure this file exists to stop, arriving by a
+  // longer route.
+  const rows = [
+    HEADER,
+    `${DEAD}\t2026-09-01\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote`,
+    `${DEAD}\t2026-09-04\tgreenhouse\tStaff Engineer\tAcme\tskipped_expired\tRemote`,
+    `${DEAD}\t2026-09-20\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote`,
+  ];
+  assert.deepEqual(plan(rows, [{ url: DEAD, result: 'expired' }]), [
+    {
+      url: DEAD,
+      source: 'greenhouse',
+      title: 'Staff Engineer',
+      company: 'Acme',
+      location: 'Remote',
+      fingerprint: '',
+    },
+  ]);
+});
+
 test('the same URL passed twice in one run is planned once', () => {
   const rows = [HEADER, `${DEAD}\t2026-09-01\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote`];
   const planned = plan(rows, [
