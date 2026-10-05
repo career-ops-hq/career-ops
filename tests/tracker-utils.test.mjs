@@ -114,7 +114,12 @@ test('resolveWorkspaceRootFor keeps a symlinked data/ inside the repo (#3169)', 
     mkdirSync(join(external, 'data'), { recursive: true });
     writeFileSync(join(external, 'data', 'applications.md'), '# tracker\n');
     // The natural #524 workaround: symlink only data/ out of the repo.
-    symlinkSync(join('..', 'external', 'data'), join(repo, 'data'));
+    // On Windows a directory symlink needs a privilege a non-elevated shell
+    // lacks (EPERM), so link with a junction there, as #3259 did for the plugin
+    // suite. realpathSync resolves a junction the same way, which is all the
+    // assertions below depend on. A junction target has to be absolute.
+    if (process.platform === 'win32') symlinkSync(join(external, 'data'), join(repo, 'data'), 'junction');
+    else symlinkSync(join('..', 'external', 'data'), join(repo, 'data'));
 
     const canonicalRepo = realpathSync(repo);
     const canonicalExternal = realpathSync(external);

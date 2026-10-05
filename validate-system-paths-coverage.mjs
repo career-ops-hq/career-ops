@@ -6,7 +6,8 @@
  *
  * Every tracked file in the repo must be covered by either SYSTEM_PATHS
  * (system layer, fetched on `update-system.mjs apply`) or USER_PATHS
- * (user-owned, never touched). Anything else is a coverage gap: it
+ * (user-owned, except for exact system-owned `.gitkeep` scaffolds explicitly
+ * listed in SYSTEM_PATHS). Anything else is a coverage gap: it
  * lives in the repo but the auto-updater won't propagate it to
  * clients on `apply`. That breaks them on the next test run.
  *
@@ -121,6 +122,20 @@ function covered(file) {
   );
 }
 
+// USER_PATHS directory prefixes normally make every child look covered, but
+// tracked .gitkeep files inside those trees need an exact updater policy: an
+// exact SYSTEM_PATHS entry ships the scaffold, or an exact EXCLUDES entry
+// leaves it repo-only. A broad USER_PATHS prefix must not silently choose.
+function isUserLayerPlaceholder(file) {
+  return file.endsWith('/.gitkeep') && USER_PATHS.some((path) =>
+    path.endsWith('/') ? file.startsWith(path) : file === path,
+  );
+}
+
+function hasExplicitPlaceholderPolicy(file) {
+  return SYSTEM_PATHS.includes(file) || EXCLUDES.includes(file);
+}
+
 if (process.argv.includes('--self-test')) {
   console.log('Running validate-system-paths-coverage.mjs self-tests...');
   
@@ -170,6 +185,14 @@ if (process.argv.includes('--self-test')) {
   assert(covered('SIGNATURES.md') === true, 'SIGNATURES.md must be covered (repo-only exclude, #4062)');
   assert(!SYSTEM_PATHS.includes('SIGNATURES.md'), 'SIGNATURES.md must NOT re-enter SYSTEM_PATHS: its churn reads as system-files-changed drift on every install (#4062)');
 
+  // This path is already covered by reports/ in USER_PATHS, so generic
+  // coverage alone cannot prove that an updater policy was chosen.
+  assert(covered('data/new-subdir/.gitkeep') === true, 'a nested placeholder is covered by USER_PATHS');
+  assert(isUserLayerPlaceholder('data/new-subdir/.gitkeep'), 'a nested placeholder is a user-layer placeholder');
+  assert(!hasExplicitPlaceholderPolicy('data/new-subdir/.gitkeep'), 'a USER_PATHS prefix alone must not count as an explicit placeholder policy');
+  assert(hasExplicitPlaceholderPolicy('data/.gitkeep'), 'data/.gitkeep must have an explicit ship-or-exclude policy');
+  assert(hasExplicitPlaceholderPolicy('interview-prep/.gitkeep'), 'interview-prep/.gitkeep must have an explicit ship-or-exclude policy');
+
   // Test unrelated file
   assert(covered('untracked-orphan-file-xyz.js') === false, 'untracked-orphan-file-xyz.js must NOT be covered');
 
@@ -214,6 +237,13 @@ if (tracked.length === 0) {
 }
 
 const orphans = tracked.filter((f) => !covered(f));
+const placeholderGaps = tracked.filter((f) => isUserLayerPlaceholder(f) && !hasExplicitPlaceholderPolicy(f));
+
+if (placeholderGaps.length > 0) {
+  console.error('Coverage gap — tracked .gitkeep placeholders under USER_PATHS need an exact SYSTEM_PATHS entry (ship) or EXCLUDES entry (repo-only):');
+  for (const path of placeholderGaps) console.error(`  ${path}`);
+  process.exit(1);
+}
 
 if (orphans.length > 0) {
   console.error('Coverage gap — tracked files not in SYSTEM_PATHS or USER_PATHS:');
