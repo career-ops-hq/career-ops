@@ -159,6 +159,11 @@ test("a file where modes/ belongs is an error, not silence", () => {
     probe = err?.code ?? null;
   }
 
+  // The fixture is only meaningful while the read actually fails. If it ever
+  // succeeds, `probe` stays null and the branch below would assert against null,
+  // failing for a reason that has nothing to do with the behaviour under test.
+  assert.notEqual(probe, null, "the fixture must make the read fail: a file occupies modes/");
+
   if (probe === "ENOENT") {
     assert.equal(
       readProfileMemory(root),
