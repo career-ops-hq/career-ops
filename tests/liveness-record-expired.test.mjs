@@ -43,7 +43,15 @@ process.env.CAREER_OPS_SCAN_HISTORY = historyPath;
 
 const { planExpiredHistoryRows } = await import('../liveness-core.mjs');
 const { normalizeUrlForDedup, shouldDedupScanHistoryRow } = await import('../scan.mjs');
-const { collectWhatsNew } = await import('../web/src/lib/whats-new.mjs');
+// web/ is not in every checkout, and an unguarded import of it crashes the whole
+// suite there rather than skipping one case (#3269). The core half of this file
+// does not need web/ at all; only the end-to-end feed assertion does.
+const WEB_SRC = join(ROOT, 'web', 'src');
+const WEB_WHATS_NEW = join(WEB_SRC, 'lib', 'whats-new.mjs');
+const HAS_WEB = existsSync(WEB_SRC);
+const { collectWhatsNew } = HAS_WEB
+  ? await import(pathToFileURL(WEB_WHATS_NEW).href)
+  : { collectWhatsNew: null };
 const { recordingEnabled, recordExpiredVerdicts } = await import('../check-liveness.mjs');
 
 const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation';
@@ -203,7 +211,7 @@ test('an empty or absent history plans nothing', () => {
 
 // ── 3. The posting stops resurfacing (writer + reader, end to end) ─────────
 
-test('a re-confirmed dead posting stops resurfacing in the web feed', async () => {
+test('a re-confirmed dead posting stops resurfacing in the web feed', { skip: HAS_WEB ? false : 'web/ not present in this checkout' }, async () => {
   // The whats-new route's own row predicate: cols are
   // url, first_seen, portal, title, company, status, location.
   const toOffer = (c) => {
