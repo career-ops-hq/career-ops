@@ -124,7 +124,7 @@ test('a dependency reachable only through NODE_PATH is missing', () => {
 test('no node_modules anywhere fails, listing every dependency', () => {
   withTempDir((dir) => {
     writeManifest(dir);
-    assert.match(dependencyLine(dir), new RegExp(`✗ Dependencies missing: ${DEPS.join(', ').replace(/[/]/g, '\\/')}$`));
+    assert.equal(dependencyLine(dir), `✗ Dependencies missing: ${DEPS.join(', ')}`);
   });
 });
 
