@@ -9,7 +9,7 @@ console.log('\nProvider — personio');
 try {
   const personioModule = await import(pathToFileURL(join(ROOT, 'providers/personio.mjs')).href);
   const personio = personioModule.default;
-  const { parsePersonioXml, parsePersonioHtml } = personioModule;
+  const { parsePersonioXml, parsePersonioHtml, parsePersonioListing } = personioModule;
 
   if (personio.id === 'personio') pass('personio.id is "personio"');
   else fail(`personio.id is ${JSON.stringify(personio.id)}`);
@@ -192,14 +192,15 @@ try {
     fail(`sneaky parse = ${JSON.stringify(sj2.map(j => j.title))} (len ${sj2.length})`);
   }
 
-  // fetch() passes redirect:'error' to fetchText (SSRF hardening must not regress)
-  let capturedOpts = null;
+  // fetch() passes redirect:'error' to fetchText on every request (careers page
+  // and feed alike) — SSRF hardening must not regress.
+  const capturedOpts = [];
   await personio.fetch(
     { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
-    { fetchText: async (_url, opts) => { capturedOpts = opts; return '<workzag-jobs></workzag-jobs>'; } },
+    { fetchText: async (_url, opts) => { capturedOpts.push(opts); return '<workzag-jobs></workzag-jobs>'; } },
   );
-  if (capturedOpts && capturedOpts.redirect === 'error') {
-    pass('personio.fetch() passes redirect:"error" to fetchText');
+  if (capturedOpts.length === 2 && capturedOpts.every(opts => opts?.redirect === 'error')) {
+    pass('personio.fetch() passes redirect:"error" to fetchText on every request');
   } else {
     fail(`personio.fetch() should pass redirect:"error", got: ${JSON.stringify(capturedOpts)}`);
   }
@@ -290,7 +291,8 @@ try {
     fail('parsePersonioHtml: empty / non-string page should yield empty result');
   }
 
-  // fetch() falls back to HTML scraping when /xml 404s.
+  // fetch() falls back to the careers page's job links when the page carries no
+  // readable payload and /xml 404s — reusing the page it already fetched.
   {
     const calls = [];
     const jobsFromFallback = await personio.fetch(
@@ -307,13 +309,13 @@ try {
         },
       },
     );
-    if (calls.length === 2 && calls[0].endsWith('/xml') && calls[1] === 'https://acme.jobs.personio.de/?language=en') {
-      pass('personio.fetch() falls back to the careers page (?language=en) after a 404 on /xml');
+    if (calls.length === 2 && calls[0] === 'https://acme.jobs.personio.de/' && calls[1].endsWith('/xml')) {
+      pass('personio.fetch() reads the careers page once, then /xml, when the page has no payload');
     } else {
       fail(`personio.fetch() fallback calls = ${JSON.stringify(calls)}`);
     }
     if (jobsFromFallback.length === 2) {
-      pass('personio.fetch() returns jobs parsed from the HTML fallback');
+      pass('personio.fetch() returns jobs parsed from the job-link fallback');
     } else {
       fail(`personio.fetch() fallback returned ${jobsFromFallback.length} jobs`);
     }
@@ -323,7 +325,10 @@ try {
   try {
     await personio.fetch(
       { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
-      { fetchText: async () => { const err = new Error('HTTP 500 Internal Server Error'); err.status = 500; throw err; } },
+      {
+        fetchText: async () => { const err = new Error('HTTP 500 Internal Server Error'); err.status = 500; throw err; },
+        sleep: async () => {},
+      },
     );
     fail('personio.fetch() should re-throw non-404 errors instead of falling back');
   } catch (e) {
@@ -331,6 +336,211 @@ try {
       pass('personio.fetch() re-throws non-404 errors without falling back to HTML');
     } else {
       fail(`personio.fetch() threw the wrong error: ${e.message}`);
+    }
+  }
+
+  // ── Careers-page payload (the primary source) ──────────────────────
+  // The page streams its Next.js payload as self.__next_f.push([1,"<chunk>"])
+  // scripts whose JSON string chunks concatenate; postings are JSON objects in
+  // it. The fixture is built the same way, split mid-object across two chunks.
+  const flightPage = (...objects) => {
+    const payload = `7:["$","div",null,{"jobs":[${objects.map(o => JSON.stringify(o)).join(',')}]}]\n`;
+    const mid = Math.floor(payload.length / 2);
+    return '<html><body><script>self.__next_f.push([0])</script>'
+      + [payload.slice(0, mid), payload.slice(mid)]
+        .map(chunk => `<script>self.__next_f.push(${JSON.stringify([1, chunk])})</script>`).join('')
+      + '</body></html>';
+  };
+  const posting = (id, name, available, current, extra = {}) => ({
+    id: String(id),
+    name,
+    main_office: 'Berlin',
+    additional_offices: ['Remote', 'Berlin'],
+    available_languages: available,
+    default_locale: available[0],
+    current_locale: current,
+    created_at: '2026-10-02T09:00:00Z',
+    ...extra,
+  });
+
+  {
+    const listing = parsePersonioListing(flightPage(
+      posting(101, 'QA Engineer (m/w/d)', ['de', 'en'], 'de'),
+      { id: '5', title: 'not a posting' },
+      { id: 'abc', name: 'Non-numeric', available_languages: ['en'] },
+      posting(102, 'Lead {"id":"9"} "Quoted" Engineer', ['EN', 'not a code!'], 'EN'),
+      posting(101, 'QA Engineer (m/w/d)', ['de', 'en'], 'de'),
+    ));
+    if (listing.length === 2 && listing[0].id === '101' && listing[1].id === '102') {
+      pass('parsePersonioListing keeps postings only, in page order, once per id');
+    } else {
+      fail(`parsePersonioListing ids = ${JSON.stringify(listing.map(p => p.id))}`);
+    }
+    if (listing[0]?.name === 'QA Engineer (m/w/d)' && listing[0]?.mainOffice === 'Berlin'
+      && JSON.stringify(listing[0]?.additionalOffices) === '["Remote","Berlin"]'
+      && listing[0]?.createdAt === '2026-10-02T09:00:00Z'
+      && JSON.stringify(listing[0]?.availableLanguages) === '["de","en"]' && listing[0]?.currentLocale === 'de') {
+      pass('parsePersonioListing reads name, offices, created_at, available_languages, current_locale');
+    } else {
+      fail(`parsePersonioListing row 0 = ${JSON.stringify(listing[0])}`);
+    }
+    if (listing[1]?.name === 'Lead {"id":"9"} "Quoted" Engineer') {
+      pass('parsePersonioListing survives braces and quotes inside a name');
+    } else {
+      fail(`parsePersonioListing row 1 name = ${JSON.stringify(listing[1]?.name)}`);
+    }
+    if (JSON.stringify(listing[1]?.availableLanguages) === '["en"]' && listing[1]?.currentLocale === 'en') {
+      pass('parsePersonioListing lowercases language codes and drops malformed ones');
+    } else {
+      fail(`parsePersonioListing row 1 languages = ${JSON.stringify(listing[1])}`);
+    }
+    if (parsePersonioListing(htmlSample).length === 0 && parsePersonioListing('').length === 0 && parsePersonioListing(null).length === 0) {
+      pass('parsePersonioListing: page without a payload / empty / non-string → empty');
+    } else {
+      fail('parsePersonioListing should yield nothing without a payload');
+    }
+  }
+
+  // A tenant: A is German by default with an English version, B is English
+  // only, C is French by default with a German version. A page asked for a
+  // language a posting lacks renders that posting in its default language.
+  const BASE = 'https://acme.jobs.personio.de/';
+  const tenantPages = {
+    [BASE]: flightPage(
+      posting(1, 'A de', ['de', 'en'], 'de'), posting(2, 'B en', ['en'], 'en'), posting(3, 'C fr', ['de', 'fr'], 'fr')),
+    [`${BASE}?language=de`]: flightPage(
+      posting(1, 'A de', ['de', 'en'], 'de'), posting(2, 'B en', ['en'], 'en'), posting(3, 'C de', ['de', 'fr'], 'de')),
+    [`${BASE}?language=en`]: flightPage(
+      posting(1, 'A en', ['de', 'en'], 'en'), posting(2, 'B en', ['en'], 'en'), posting(3, 'C fr', ['de', 'fr'], 'fr')),
+    [`${BASE}?language=fr`]: flightPage(
+      posting(1, 'A de', ['de', 'en'], 'de'), posting(2, 'B en', ['en'], 'en'), posting(3, 'C fr', ['de', 'fr'], 'fr')),
+  };
+  const tenantCtx = (extra = {}, failing = new Set()) => {
+    const calls = [];
+    let sleeps = 0;
+    return {
+      calls,
+      sleeps: () => sleeps,
+      ctx: {
+        fetchText: async (url, opts) => {
+          calls.push(url);
+          if (opts?.redirect !== 'error') throw new Error(`redirect:'error' missing for ${url}`);
+          if (failing.has(url)) { const err = new Error('HTTP 500'); err.status = 500; throw err; }
+          if (url in tenantPages) return tenantPages[url];
+          const err = new Error(`HTTP 404 ${url}`); err.status = 404; throw err;
+        },
+        sleep: async () => { sleeps++; },
+        ...extra,
+      },
+    };
+  };
+  const brief = jobs => jobs.map(j => `${j.url.replace(BASE, '')}|${j.language ?? '-'}|${j.title}`);
+
+  {
+    const { ctx, calls } = tenantCtx();
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: BASE }, ctx);
+    if (calls.length === 1 && calls[0] === BASE
+      && JSON.stringify(brief(jobs)) === JSON.stringify(['job/1?language=de|de|A de', 'job/2?language=en|en|B en', 'job/3?language=fr|fr|C fr'])) {
+      pass('personio.fetch(): one careers-page fetch, each posting in its own default language, language on url and Job');
+    } else {
+      fail(`personio.fetch() defaults: calls=${JSON.stringify(calls)} jobs=${JSON.stringify(brief(jobs))}`);
+    }
+    if (jobs[0]?.location === 'Berlin, Remote' && jobs[0]?.company === 'Acme'
+      && jobs[0]?.postedAt === Date.parse('2026-10-02T09:00:00Z')) {
+      pass('personio.fetch(): payload postings map to location (de-duplicated offices), company, postedAt');
+    } else {
+      fail(`personio.fetch() job 0 = ${JSON.stringify(jobs[0])}`);
+    }
+  }
+
+  {
+    const { ctx, calls } = tenantCtx();
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=en` }, ctx);
+    if (calls.length === 1 && calls[0] === `${BASE}?language=en`
+      && JSON.stringify(brief(jobs)) === JSON.stringify(['job/1?language=en|en|A en', 'job/2?language=en|en|B en', 'job/3?language=fr|fr|C fr'])) {
+      pass('personio.fetch(): a ?language= on careers_url asks for that language wherever a posting has it');
+    } else {
+      fail(`personio.fetch() preferred language: calls=${JSON.stringify(calls)} jobs=${JSON.stringify(brief(jobs))}`);
+    }
+  }
+
+  {
+    const { ctx, calls, sleeps } = tenantCtx({ dedupIncludeLanguage: true });
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=en` }, ctx);
+    const expected = [
+      'job/1?language=de|de|A de', 'job/1?language=en|en|A en',
+      'job/2?language=en|en|B en',
+      'job/3?language=fr|fr|C fr', 'job/3?language=de|de|C de',
+    ];
+    if (JSON.stringify(calls) === JSON.stringify([BASE, `${BASE}?language=de`, `${BASE}?language=en`])) {
+      pass('personio.fetch() with dedupIncludeLanguage: defaults page, then one page per further language');
+    } else {
+      fail(`personio.fetch() all languages: calls=${JSON.stringify(calls)}`);
+    }
+    if (JSON.stringify(brief(jobs)) === JSON.stringify(expected)) {
+      pass('personio.fetch() with dedupIncludeLanguage: every version, each posting\'s default language first');
+    } else {
+      fail(`personio.fetch() all languages: jobs=${JSON.stringify(brief(jobs))}`);
+    }
+    if (sleeps() === 1) pass('personio.fetch(): the per-language fetches are paced');
+    else fail(`personio.fetch(): expected 1 pacing sleep, got ${sleeps()}`);
+  }
+
+  {
+    const { ctx } = tenantCtx({ dedupIncludeLanguage: true }, new Set([`${BASE}?language=de`]));
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: BASE }, ctx);
+    if (JSON.stringify(brief(jobs)) === JSON.stringify(['job/1?language=de|de|A de', 'job/1?language=en|en|A en', 'job/2?language=en|en|B en', 'job/3?language=fr|fr|C fr'])) {
+      pass('personio.fetch(): a failing language fetch drops only that language\'s versions');
+    } else {
+      fail(`personio.fetch() failing language: jobs=${JSON.stringify(brief(jobs))}`);
+    }
+  }
+
+  // The payload is undocumented: when the careers page fails or yields nothing,
+  // the documented XML feed answers instead.
+  {
+    const calls = [];
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: BASE }, {
+      fetchText: async (url) => {
+        calls.push(url);
+        if (url === BASE) { const err = new Error('HTTP 403'); err.status = 403; throw err; }
+        return sample;
+      },
+      sleep: async () => {},
+    });
+    if (JSON.stringify(calls) === JSON.stringify([BASE, `${BASE}xml`]) && jobs.length === 2
+      && jobs[0].url === 'https://acme.jobs.personio.de/job/1834171' && jobs[0].language === undefined) {
+      pass('personio.fetch(): a failing careers page falls back to the XML feed (no language)');
+    } else {
+      fail(`personio.fetch() careers-page failure: calls=${JSON.stringify(calls)} jobs=${JSON.stringify(jobs)}`);
+    }
+  }
+  {
+    const calls = [];
+    await personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=en` }, {
+      fetchText: async (url) => { calls.push(url); return url.includes('/xml') ? sample : htmlSample; },
+    });
+    if (JSON.stringify(calls) === JSON.stringify([`${BASE}?language=en`, `${BASE}xml?language=en`])) {
+      pass('personio.fetch(): a careers page without a payload falls back to the feed, keeping the asked-for language');
+    } else {
+      fail(`personio.fetch() no-payload fallback: calls=${JSON.stringify(calls)}`);
+    }
+  }
+  {
+    const calls = [];
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: BASE }, {
+      fetchText: async (url) => {
+        calls.push(url);
+        if (calls.length === 1) { const err = new Error('HTTP 403'); err.status = 403; throw err; }
+        if (url.endsWith('/xml')) { const err = new Error('HTTP 404'); err.status = 404; throw err; }
+        return htmlSample;
+      },
+      sleep: async () => {},
+    });
+    if (JSON.stringify(calls) === JSON.stringify([BASE, `${BASE}xml`, BASE]) && jobs.length === 2) {
+      pass('personio.fetch(): careers page and feed both failing → careers page re-fetched for its job links');
+    } else {
+      fail(`personio.fetch() double failure: calls=${JSON.stringify(calls)} jobs=${jobs.length}`);
     }
   }
 

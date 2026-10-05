@@ -97,7 +97,14 @@
  *                               Omitted when the source doesn't say. Consumed
  *                               by scan.mjs's opt-in
  *                               `scan_history.dedup_include_language` and
- *                               written to scan-history.tsv.
+ *                               written to scan-history.tsv. A source that
+ *                               serves every language version of a posting at
+ *                               one URL, told apart by a `language` / `lang` /
+ *                               `locale` param, returns one Job per version
+ *                               with that param on its `url`, the posting's
+ *                               own default language first: the URL dedup
+ *                               resolves a seen row of unknown language to the
+ *                               first version when no title tells it apart.
  */
 
 /**
@@ -170,6 +177,11 @@
  *                              paginating providers (avature, workday) to throttle between page
  *                              requests. May be absent — providers fall back to a native
  *                              `setTimeout`-based delay.
+ * @property {boolean} [dedupIncludeLanguage] Whether the scan keeps language versions of
+ *                              one posting apart (`scan_history.dedup_include_language`).
+ *                              A provider whose extra language versions cost extra
+ *                              requests fetches them only when this is true; otherwise
+ *                              the scan keeps one version per posting and drops the rest.
  */
 
 /**
