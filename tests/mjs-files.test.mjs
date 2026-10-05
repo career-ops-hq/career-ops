@@ -416,6 +416,52 @@ test('trackedFiles survives a path it cannot stat, and names the reason', () => 
   }
 });
 
+test('trackedFiles rethrows a stat failure it does not recognise, instead of logging it', () => {
+  // The skip list is deliberate, not a catch-all. ENOTDIR and EACCES are the
+  // MISSING case wearing a different errno, so they are skipped. Anything else
+  // is a filesystem the scan cannot read, and swallowing it would do exactly
+  // what this module exists to prevent: report a clean pass over a tree it
+  // never managed to inspect. An EIO on every path would otherwise return an
+  // empty list and a tidy warning.
+  //
+  // ELOOP is the producible unrecognised errno: lstat does not follow the FINAL
+  // component, but it does resolve intermediate ones, so a self-referential
+  // directory symlink in the middle of the path throws. As with the unstattable
+  // fixture above, the real errno is probed rather than a platform list pinned —
+  // where the probe yields a recognised code, the skip contract is asserted
+  // instead, so the test stays live either way.
+  const { dir, git } = gitRepo('co-tracked-unknown-errno-');
+  try {
+    writeFileSync(join(dir, 'real.mjs'), 'const a = 1;\n');
+    mkdirSync(join(dir, 'a'));
+    writeFileSync(join(dir, 'a', 'b.mjs'), 'const b = 2;\n');
+    git('add', '-A');
+
+    // Replace the directory with a symlink to itself, leaving a/b.mjs indexed.
+    rmSync(join(dir, 'a'), { recursive: true, force: true });
+    symlinkSync('a', join(dir, 'a'));
+
+    let probe = null;
+    try {
+      lstatSync(join(dir, 'a', 'b.mjs'), { throwIfNoEntry: false });
+    } catch (err) {
+      probe = err.code;
+    }
+
+    if (probe && !['ENOTDIR', 'EACCES'].includes(probe)) {
+      assert.throws(() => trackedFiles(dir), (err) => err.code === probe,
+        `an unrecognised ${probe} must end the scan, not become a warning line`);
+    } else {
+      const { value: files, warnings } = capturingWarnings(() => trackedFiles(dir));
+      assert.ok(relPaths(files, dir).includes('real.mjs'),
+        'a recognised skip must leave the rest of the scan intact');
+      assert.equal(warnings.length, 1, 'a recognised skip is reported once');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('trackedFiles returns an unmerged path once, not once per index stage', () => {
   // `git ls-files` prints one line per stage, so a conflicted path arrives two
   // or three times. Left as-is, every offender inside one would be reported
