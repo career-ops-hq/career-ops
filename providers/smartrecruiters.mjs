@@ -135,7 +135,7 @@ export default {
       const apiUrl = buildPostingsUrl(slug, page * SR_PAGE_SIZE);
       assertSmartRecruitersUrl(apiUrl);
       const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
-      const parsed = parseSmartRecruitersResponse(json, entry.name);
+      const parsed = parseSmartRecruitersResponse(json, entry.name, slug);
       if (parsed.length === 0) break;
       all.push(...parsed);
       if (parsed.length < SR_PAGE_SIZE) break;  // last page (short)
@@ -185,13 +185,15 @@ export default {
  *   which the liveness checker then reports as an expired posting (#1612).
  *   SmartRecruiters resolves the page by id alone, so the trailing title slug is
  *   cosmetic. If `ref` is missing or untrusted, synthesise the same shape from
- *   the company slug + posting id.
+ *   the configured company slug + posting id. The display name is only a
+ *   fallback for callers that do not supply a company slug.
  *
  * @param {any} json
  * @param {string} companyName
+ * @param {string} [companySlug]
  * @returns {Array<{title: string, url: string, company: string, location: string, id?: string}>}
  */
-export function parseSmartRecruitersResponse(json, companyName) {
+export function parseSmartRecruitersResponse(json, companyName, companySlug) {
   const items = json?.content;
   if (!Array.isArray(items)) return [];
   return items.map(j => {
@@ -219,9 +221,9 @@ export function parseSmartRecruitersResponse(json, companyName) {
       }
     }
     if (!url && j.id) {
-      const companySlug = (companyName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      if (companySlug) {
-        url = `https://jobs.smartrecruiters.com/${companySlug}/${j.id}${slugified ? `-${slugified}` : ''}`;
+      const fallbackSlug = companySlug || (companyName || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      if (fallbackSlug) {
+        url = `https://jobs.smartrecruiters.com/${fallbackSlug}/${j.id}${slugified ? `-${slugified}` : ''}`;
       }
     }
     return { title: j.name || '', url, location, company: companyName, id: typeof j.id === 'string' || typeof j.id === 'number' ? String(j.id) : undefined };
