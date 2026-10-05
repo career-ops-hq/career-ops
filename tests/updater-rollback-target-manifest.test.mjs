@@ -312,7 +312,7 @@ function runRollback(dir) {
   });
 }
 
-function seedRollbackRepo(prefix, { paired, fetchTarget }) {
+function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false }) {
   const fixture = makeUpdaterRepo(gitIn, { prefix });
   const { dir, g } = fixture;
   const backup = paired
@@ -350,6 +350,9 @@ function seedRollbackRepo(prefix, { paired, fetchTarget }) {
     put(dir, 'system/nested/target-only.txt', 'target-only nested\n');
     put(dir, ' leading-target-only.mjs', 'leading-space target-only\n');
     put(dir, 'target-only.mjs', 'target-only top-level\n');
+    if (targetChangesPreExisting) {
+      put(dir, ' pre-existing-outside-backup-manifest.mjs', 'target bytes over a pre-existing file\n');
+    }
     put(dir, 'writing-samples/README.md', 'target scaffold\n');
     g('add', '-A');
     g('commit', '-qm', 'target state');
@@ -470,6 +473,46 @@ function readMaybe(path) {
       !existsSync(join(dir, 'target-only.mjs')),
       'complete backup membership still permits removal of genuinely target-only files',
       'backup membership made target-only removal overly conservative',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 7b. Real CLI: a target-covered file the update overwrote is restored ──
+{
+  const fixture = seedRollbackRepo('co-rollback-backup-restore-', {
+    paired: true,
+    fetchTarget: false,
+    targetChangesPreExisting: true,
+  });
+  const { dir, commonManifest } = fixture;
+  try {
+    // Same manifest drift as section 7, but here the target changed the file.
+    // Neither restore manifest lists it; only the paired target claims it.
+    put(dir, 'update-system.mjs', sourceWithManifest(commonManifest));
+
+    const result = runRollback(dir);
+    check(
+      result.status === 0 && !result.error,
+      'real rollback succeeds when the target changed a file outside both restore manifests',
+      `backup-restore rollback failed (status ${result.status}): ${outputOf(result)}`,
+    );
+    check(
+      readMaybe(join(dir, ' pre-existing-outside-backup-manifest.mjs'))
+        === 'pre-existing backup bytes\n',
+      'rollback restores the backup bytes of a target-covered file that was already in the backup tree',
+      'rollback left the update\'s bytes in a pre-existing file omitted from both restore manifests',
+    );
+    check(
+      !existsSync(join(dir, 'target-only.mjs')),
+      'restoring target-covered backup files still removes genuinely target-only files',
+      'restoring target-covered backup files blocked target-only removal',
+    );
+    check(
+      readMaybe(join(dir, 'cv.md')) === 'user cv current\n',
+      'restoring target-covered backup files leaves user data untouched',
+      'restoring target-covered backup files changed user data',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

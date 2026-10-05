@@ -4557,8 +4557,17 @@ function rollback() {
       return '';
     };
 
+    // apply() also overwrites a file the target manifest claims when it was
+    // already in the backup tree, even if neither restore manifest lists it.
+    // Restore those through the same guards, or they keep the update's bytes.
+    const backupFileSet = new Set(backupFiles);
+    const restoreFiles = [
+      ...backupFiles,
+      ...targetFiles.filter((file) => backupTreeFileSet.has(file) && !backupFileSet.has(file)),
+    ];
+
     const restored = [];
-    for (const file of backupFiles) {
+    for (const file of restoreFiles) {
       try {
         const symlink = symlinkedAncestor(file);
         if (symlink) {
