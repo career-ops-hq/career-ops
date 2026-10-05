@@ -347,8 +347,12 @@ const twoPassManifestChecks = [
     pattern: /git\('--literal-pathspecs',\s*'checkout',\s*pairedTargetRef,\s*'--',\s*\.\.\.reexecFiles\)/,
   },
   {
-    name: 'apply validates the self-bootstrap import closure against protected user paths',
-    pattern: /const reexecFiles = assertSafeManifestPaths\([\s\S]{0,240}?resolveReexecCheckout\(pairedTargetRef,\s*'update-system\.mjs'\)[\s\S]{0,240}?'Target updater import closure'/,
+    name: 'apply validates the canonical form of the self-bootstrap import closure',
+    pattern: /const reexecFiles = assertCanonicalManifestPaths\([\s\S]{0,240}?resolveReexecCheckout\(pairedTargetRef,\s*'update-system\.mjs'\)[\s\S]{0,240}?'Target updater import closure'/,
+  },
+  {
+    name: 'apply gives the self-bootstrap import closure the same user-layer decision as the manifest',
+    pattern: /const \{ refused: refusedReexecFiles \} = rejectUserLayerPaths\(\s*reexecFiles,\s*manifestUserPaths,\s*manifestProbes\(/,
   },
   {
     name: 'apply rejects self-bootstrap files outside the validated merged manifest',
@@ -635,12 +639,14 @@ if (appearsInOrder(applySource, [pairCall, 'pruneStaleTargetRefs();'])) {
 if (appearsInOrder(applySource, [
   pairCall,
   "remoteUpdaterSource = git('show', `${pairedTargetRef}:update-system.mjs`);",
-  "remoteSystemPaths = assertSafeManifestPaths(remoteSystemPaths, manifestUserPaths, 'Target SYSTEM_PATHS');",
-  'const validatedManifestPaths = assertSafeManifestPaths(',
+  "remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, 'Target SYSTEM_PATHS');",
+  'const validatedManifestPaths = assertCanonicalManifestPaths(',
   "'Merged updater manifest',",
   "resolveReexecCheckout(pairedTargetRef, 'update-system.mjs')",
   "'Target updater import closure',",
   'uncoveredReexecFiles.length > 0',
+  'const { refused: refusedReexecFiles } = rejectUserLayerPaths(',
+  'refusedReexecFiles.length > 0',
   "git('--literal-pathspecs', 'checkout', pairedTargetRef, '--', ...reexecFiles)",
 ])) {
   pass('apply validates target and merged manifests before any self-bootstrap checkout');

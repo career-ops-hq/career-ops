@@ -33,7 +33,7 @@ try {
   }
 
   const source = readFileSync(join(root, 'update-system.mjs'), 'utf8');
-  const closureAt = source.indexOf('const reexecFiles = assertSafeManifestPaths(');
+  const closureAt = source.indexOf('const reexecFiles = assertCanonicalManifestPaths(');
   const coverageAt = source.indexOf('uncoveredReexecFiles.length > 0', closureAt);
   const detectAt = source.indexOf('locallyModifiedSystemFiles(reexecFiles, pairedTargetRef)', coverageAt);
   const backUpAt = source.indexOf('backupSystemFiles(bootstrapAtRisk)', detectAt);

@@ -148,12 +148,8 @@ export const REEXEC_BUFFER_TIMEOUT_MS = parsePositiveInt(process.env.CAREER_OPS_
 // directories. Keep this escape hatch small and reviewable: aliases, parents,
 // children, and case/Unicode variants are not overlaps.
 //
-// apply() validates the TARGET's SYSTEM_PATHS against the RUNNING updater's
-// copy of this list, before the self-bootstrap checkout loads the target
-// updater. So a new overlap takes two releases: first ship the entry here,
-// then ship the file in SYSTEM_PATHS. Shipping both at once stops every
-// install still running the older updater at assertSafeManifestPaths, on
-// every retry.
+// Rollback reads this list; apply() does not. apply() leaves the user-layer
+// decision to rejectUserLayerPaths, entry by entry.
 export const MANIFEST_USER_PATH_OVERLAPS = Object.freeze([
   'writing-samples/README.md',
   'interview-prep/sessions/.gitkeep',
@@ -829,6 +825,12 @@ function assertSafeManifestPaths(paths, userPaths, label) {
     throw new Error(`${label} contains unsafe manifest path(s): ${detail}`);
   }
   return safe;
+}
+
+// Canonical form only: no protected-path comparison. apply() uses this before
+// the self-bootstrap checkout, where a malformed spelling would reach git.
+function assertCanonicalManifestPaths(paths, label) {
+  return assertSafeManifestPaths(paths, [], label);
 }
 
 /**
@@ -3782,10 +3784,12 @@ async function apply() {
       }
     }
 
-    // The fetched manifest is trusted updater code, but its paths still have to
-    // obey the canonical data-contract boundary. Validate before even the
-    // self-bootstrap checkout, and fail closed when the target updater or its
-    // manifest is missing/corrupt.
+    // The fetched manifest is trusted updater code, but its paths still reach
+    // git. Validate their canonical form before even the self-bootstrap
+    // checkout, and fail closed when the target updater or its manifest is
+    // missing/corrupt. Whether an entry names the user layer is not decided
+    // here: rejectUserLayerPaths refuses those entry by entry (3a), so one bad
+    // entry cannot block every install.
     const manifestUserPaths = effectiveUserPaths();
     let remoteUpdaterSource;
     try {
@@ -3794,10 +3798,9 @@ async function apply() {
       throw new Error(`Target updater is unreadable; refusing to update (${err.message})`);
     }
     let remoteSystemPaths = extractArrayFromSource(remoteUpdaterSource, 'SYSTEM_PATHS');
-    remoteSystemPaths = assertSafeManifestPaths(remoteSystemPaths, manifestUserPaths, 'Target SYSTEM_PATHS');
-    const validatedManifestPaths = assertSafeManifestPaths(
+    remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, 'Target SYSTEM_PATHS');
+    const validatedManifestPaths = assertCanonicalManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
-      manifestUserPaths,
       'Merged updater manifest',
     );
 
@@ -3808,9 +3811,8 @@ async function apply() {
         // at load time must exist first. Resolve the fetched update-system.mjs's
         // relative-import closure and check out exactly those files, so a future
         // new top-level import can't reintroduce the self-reexec crash (#1245).
-        const reexecFiles = assertSafeManifestPaths(
+        const reexecFiles = assertCanonicalManifestPaths(
           resolveReexecCheckout(pairedTargetRef, 'update-system.mjs'),
-          manifestUserPaths,
           'Target updater import closure',
         );
         const uncoveredReexecFiles = reexecFiles.filter(
@@ -3819,6 +3821,24 @@ async function apply() {
         if (uncoveredReexecFiles.length > 0) {
           throw new Error(
             `Target updater import closure is outside the validated manifest: ${uncoveredReexecFiles.join(', ')}`,
+          );
+        }
+        // This checkout runs before the re-exec'd updater reaches 3a, so the
+        // closure gets the same user-layer decision here. A refused manifest
+        // entry is skipped; a refused import cannot be, because the target
+        // updater would not load without it.
+        const { refused: refusedReexecFiles } = rejectUserLayerPaths(
+          reexecFiles,
+          manifestUserPaths,
+          manifestProbes({
+            trackedOutput: git('ls-files', '-z'),
+            upstreamOutput: git('ls-tree', '-r', '--name-only', '-z', pairedTargetRef),
+          }),
+        );
+        if (refusedReexecFiles.length > 0) {
+          throw new Error(
+            `Target updater imports file(s) naming the user layer: ${refusedReexecFiles.join(', ')}. `
+            + 'Your files were NOT touched. Please report this — it is a manifest error.',
           );
         }
         const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, pairedTargetRef);
