@@ -7,6 +7,7 @@
 
 import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
+import { createRequire } from 'module';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -159,13 +160,41 @@ function checkBillingSource() {
   };
 }
 
+// Whether each package.json dependency resolves from the code checkout the way
+// Node will at run time — not whether a node_modules directory exists. That
+// was wrong both ways: a git worktree with no node_modules of its own resolves
+// through the main checkout's (Node walks up parent directories), and a
+// node_modules installed before a dependency was added (undici, #4445) still
+// exists while the import fails. require.resolve.paths() is Node's own lookup
+// list (the parent walk, skipping node_modules/node_modules, plus NODE_PATH and
+// the global folders), so a package counts as installed when one of those
+// directories holds it. Checking for its package.json, rather than resolving
+// the package, never consults an `exports` map that refuses the lookup and
+// never loads the package — doctor runs on every session's first message.
+function findMissingDependencies(root) {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+  const requireFromRoot = createRequire(join(root, 'package.json'));
+  return Object.keys(manifest.dependencies || {}).filter((name) =>
+    !(requireFromRoot.resolve.paths(name) || []).some((dir) => existsSync(join(dir, name, 'package.json'))));
+}
+
 function checkDependencies() {
-  if (existsSync(join(codeRoot, 'node_modules'))) {
+  let missing;
+  try {
+    missing = findMissingDependencies(codeRoot);
+  } catch (err) {
+    return {
+      pass: false,
+      label: `Dependencies could not be checked: package.json unreadable (${err.message})`,
+      fix: 'Run doctor from a career-ops checkout, or pass --target <checkout>',
+    };
+  }
+  if (missing.length === 0) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
     pass: false,
-    label: 'Dependencies not installed',
+    label: `Dependencies missing: ${missing.join(', ')}`,
     fix: 'Run: npm install',
   };
 }
