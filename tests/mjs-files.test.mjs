@@ -53,6 +53,10 @@ function gitRepo(prefix) {
   git('config', 'user.email', 'fixture@example.invalid');
   git('config', 'user.name', 'Fixture');
   git('config', 'commit.gpgsign', 'false');
+  // A globally configured hooks path reaches a fresh `git init`, so a
+  // contributor's pre-commit hook would otherwise run inside these fixtures.
+  // A local override also bypasses hooks copied by `init.templateDir`.
+  git('config', 'core.hooksPath', join(dir, '.git', 'no-hooks'));
   return { dir, git };
 }
 
