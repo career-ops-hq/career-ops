@@ -68,7 +68,7 @@ import { parseFileInput, collectInteractive } from './paste-reply.mjs';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { parseFollowups } from './followup-cadence.mjs';
-import { escapeFormulaCell, unescapeFormulaCell } from './contacts.mjs';
+import { escapeFormulaCell, unescapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const CONTACTS_PATH = path.join(DATA_ROOT, 'data', 'contacts.tsv');

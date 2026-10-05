@@ -76,6 +76,7 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { promoteKnownFragmentIdentity } from './url-key.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
@@ -2326,10 +2327,9 @@ export const ANY_REQUISITION = '*';
  *   (`Job.requisitionId`, e.g. SmartRecruiters `refNumber`), or the same value
  *   recorded in scan-history's `requisition_id` column. Not parsed: it is the
  *   employer's own identifier, not text, so it counts even without a digit.
- *   It is compared case-folded and in the form scan-history stores it
- *   (`sanitizeTsvField`, idempotent), so a live id and its stored copy meet
- *   even when the writer's formula guard prefixed the stored one. Forms read
- *   from a URL or from text must contain a digit;
+ *   It is compared case-folded, with whitespace flattened the way the
+ *   scan-history writer flattens it, so a live id meets its copy read back
+ *   from the file. Forms read from a URL or from text must contain a digit;
  * - a Workday URL, via `workdayDedupKey` (the same parse the provider uses for
  *   cross-site dedupe, #3439, including its `-N` repost-suffix stripping);
  * - labelled free text (tracker Notes, a posting title) via the tracker's own
@@ -2376,7 +2376,7 @@ export const ANY_REQUISITION = '*';
 export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
   const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
-  if (suppliedId) return [sanitizeTsvField(suppliedId).toUpperCase()];
+  if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
   let raws;
   if (workdayKey) {
     // `workday:{hostname}:{reqId}` — a hostname has no colon, so the ID is
@@ -2802,9 +2802,12 @@ function sanitizePipelineUrl(value) {
     .replace(/\|/g, '%7C');
 }
 
+// One TSV cell as scan-history stores it: tabs and line breaks flattened to
+// spaces (the format has no escape for them), then reversible formula
+// escaping. parseScanHistoryLine undoes the escaping, so a reader gets back
+// normalizeScanScalar(value).
 export function sanitizeTsvField(value) {
-  const normalized = normalizeScanScalar(value);
-  return /^[=+\-@]/.test(normalized) ? `'${normalized}` : normalized;
+  return escapeFormulaCell(normalizeScanScalar(value));
 }
 
 // Format an offer's parsed compensation (the annualized {min,max,currency} that

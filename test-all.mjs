@@ -8166,6 +8166,8 @@ try {
 
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const history = parseScanHistoryLine(historyRow);
+  // The stored cells carry the formula escaping; parseScanHistoryLine undoes it.
+  const stored = Object.fromEntries(SCAN_HISTORY_COLUMNS.map((name, i) => [name, historyRow.split('\t')[i]]));
   if (
     historyRow.split('\t').length === SCAN_HISTORY_COLUMNS.length && // every declared column, empty ones included
     !historyRow.includes('\n') && !historyRow.includes('\r') &&
@@ -8173,14 +8175,18 @@ try {
     history.trust_score === '' && history.trust_flags === '' && // no trust signal
     history.url === 'https://jobs.example.com/123|evil' &&
     history.title.includes('- [ ] https://evil.example/job') &&
-    history.company === "'=ACME\\Corp | R&D" &&
-    history.location === "'@Remote EU" &&
-    history.requisition_id === "'=R1 DROP x" &&
-    history.language === "'@en -GB"
+    stored.company === "'=ACME\\Corp | R&D" &&
+    stored.location === "'@Remote EU" &&
+    stored.requisition_id === "'=R1 DROP x" &&
+    stored.language === "'@en -GB" &&
+    history.company === '=ACME\\Corp | R&D' &&
+    history.location === '@Remote EU' &&
+    history.requisition_id === '=R1 DROP x' &&
+    history.language === '@en -GB'
   ) {
-    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas');
+    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas; the reader gets the values back');
   } else {
-    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(history)}`);
+    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify({ stored, history })}`);
   }
 
   // ── postedAt persistence ──
