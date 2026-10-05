@@ -5,7 +5,8 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 
 // Personio provider for public, no-auth `<slug>.jobs.personio.(de|com)` career
 // sites (common across DACH/EU companies), auto-detected from that careers
-// host. Per-tenant subdomains are the variable part, so the SSRF defence is an
+// host. A single-company adapter: wire each tenant in as one `tracked_companies:`
+// entry. Per-tenant subdomains are the variable part, so the SSRF defence is an
 // anchored host regex rather than a static allowlist.
 //
 // A tenant serves its postings on three public pages:
@@ -27,14 +28,16 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 //   `?language=xx` on careers_url asks for that language instead, wherever a
 //   posting has it.
 // - `ctx.dedupIncludeLanguage` (scan_history.dedup_include_language): one more
-//   fetch of `/` per further language, so every version comes back; each
-//   posting's default-language version first, which scan.mjs's language-aware
-//   URL dedup relies on.
+//   fetch of `/` per further language, up to MAX_EXTRA_LANGUAGES, so every
+//   version comes back; each posting's default-language version first, which
+//   scan.mjs's language-aware URL dedup relies on. Skipped under a health probe
+//   (`ctx.maxPages`), which needs one listing request and nothing more.
 //
 // The payload is undocumented, so when `/` yields nothing (fetch failure, or a
 // changed page build) the provider falls back to `/xml`, parsed in-process
 // with a tiny tag extractor, and to the job links on `/` when the tenant has
-// the feed disabled.
+// the feed disabled. Job links on `/` with no postings in its payload mean the
+// page build changed, which is warned about rather than passed over silently.
 
 const PERSONIO_HOST_RE = /^[a-z0-9][a-z0-9-]*\.jobs\.personio\.(de|com)$/;
 
@@ -48,6 +51,11 @@ const LANGUAGE_RE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/;
 
 // Spacing between the per-language careers-page fetches of one tenant.
 const INTER_LANGUAGE_DELAY_MS = 200;
+
+// Ceiling on the per-language fetches of one tenant. The languages come from
+// the payload, so the source alone must never decide how many requests one
+// portals.yml entry makes; live tenants carry a handful at most.
+const MAX_EXTRA_LANGUAGES = 5;
 
 /** @param {string} url */
 function assertPersonioUrl(url) {
@@ -137,13 +145,14 @@ export default {
 
   detect(entry) {
     const host = resolveHost(entry);
-    return host ? { url: `https://${host}/xml` } : null;
+    return host ? { url: `https://${host}/` } : null;
   },
 
   async fetch(entry, ctx) {
     const host = resolveHost(entry);
     if (!host) throw new Error(`personio: cannot derive feed URL for ${entry.name}`);
-    const allLanguages = ctx.dedupIncludeLanguage === true;
+    const probing = Number(ctx.maxPages) > 0;
+    const allLanguages = ctx.dedupIncludeLanguage === true && !probing;
     // Every language is fetched anyway, so the first fetch is the defaults one:
     // it is what puts each posting's default-language version first.
     const language = allLanguages ? null : preferredLanguage(entry);
@@ -159,10 +168,13 @@ export default {
     const postings = page === null ? [] : parsePersonioListing(page);
     if (postings.length > 0) {
       const versions = postings.map(posting => [posting]);
-      if (allLanguages) await addLanguageVersions(host, postings, versions, ctx);
+      if (allLanguages) await addLanguageVersions(entry.name, host, postings, versions, ctx);
       return versions.flat()
         .map(posting => listingPostingToJob(posting, entry.name, host))
         .filter(job => job !== null);
+    }
+    if (page !== null && parsePersonioHtml(page, entry.name, host).length > 0) {
+      console.warn(`personio: ${entry.name}: careers page links jobs but its payload yielded none — page build may have changed; falling back to /xml`);
     }
 
     const feedUrl = assertPersonioUrl(`https://${host}/xml${languageQuery(language)}`);
@@ -184,17 +196,23 @@ export default {
  * Fetch the careers page once per language some posting has beyond the one it
  * was first rendered in, and append each posting's version in that language to
  * its entry in `versions`. Best-effort: a language whose fetch fails is skipped
- * and the versions already collected stand.
+ * and the versions already collected stand. Languages past MAX_EXTRA_LANGUAGES
+ * (in code order) are not fetched, with a warning.
  *
+ * @param {string} companyName
  * @param {string} host
  * @param {ListingPosting[]} postings - From the defaults fetch.
  * @param {ListingPosting[][]} versions - Parallel to `postings`; appended to.
  * @param {any} ctx
  */
-async function addLanguageVersions(host, postings, versions, ctx) {
+async function addLanguageVersions(companyName, host, postings, versions, ctx) {
   const indexById = new Map(postings.map((posting, i) => [posting.id, i]));
-  const languages = [...new Set(postings.flatMap(posting =>
+  const wanted = [...new Set(postings.flatMap(posting =>
     posting.availableLanguages.filter(language => language !== posting.currentLocale)))].sort();
+  const languages = wanted.slice(0, MAX_EXTRA_LANGUAGES);
+  if (languages.length < wanted.length) {
+    console.warn(`personio: ${companyName}: ${wanted.length} further languages exceed the cap of ${MAX_EXTRA_LANGUAGES}; skipped ${wanted.slice(MAX_EXTRA_LANGUAGES).join(', ')}`);
+  }
   for (const [n, language] of languages.entries()) {
     if (n > 0) await sleep(INTER_LANGUAGE_DELAY_MS, ctx);
     let page;

@@ -96,7 +96,9 @@ export default {
   silently lands in `verify-portals` `skipped`.
 - `fetch(entry, ctx)` — required. Use `ctx.fetchJson` / `ctx.fetchText`
   (never bare `fetch`); `ctx.fetchResponse` returns the raw `Response` when
-  you need headers. Optional `ctx.maxPages` and `ctx.sleep(ms)`. Returns a
+  you need headers. Optional `ctx.maxPages`, `ctx.sleep(ms)` and
+  `ctx.dedupIncludeLanguage` (whether the scan keeps a posting's language
+  versions apart — fetch extra versions only when it is `true`). Returns a
   normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
@@ -106,7 +108,11 @@ export default {
   text's language as the source names it, preferring a code such as `de` or
   `en-GB` over a display name when both are offered): the scanner's
   company+role dedup reads both. Omit either key when the source has no such
-  field. See `_types.js` for the full list of optional fields.
+  field. A source that serves every language version of a posting at one URL
+  with a `language` / `lang` / `locale` param returns one Job per version,
+  the posting's own default language first — the URL dedup relies on that
+  order (`_types.js`, `language`; reference `providers/personio.mjs`). See
+  `_types.js` for the full list of optional fields.
   Populate `description` **only** when the list payload carries it for free
   (no extra per-job request — the scanner is zero-token). The one exception
   is opt-in enrichment: an entry with `fetchDetails: true` (plus an optional

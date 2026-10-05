@@ -11,13 +11,26 @@ try {
   const personio = personioModule.default;
   const { parsePersonioXml, parsePersonioHtml, parsePersonioListing } = personioModule;
 
+  // Runs `fn` with console.warn captured, so a test can assert on (and keep out
+  // of the run's output) the provider's warnings.
+  const withWarnings = async (fn) => {
+    const warnings = [];
+    const original = console.warn;
+    console.warn = (...args) => { warnings.push(args.join(' ')); };
+    try {
+      return { result: await fn(), warnings };
+    } finally {
+      console.warn = original;
+    }
+  };
+
   if (personio.id === 'personio') pass('personio.id is "personio"');
   else fail(`personio.id is ${JSON.stringify(personio.id)}`);
 
-  // detect: <slug>.jobs.personio.de careers host → /xml feed
+  // detect: <slug>.jobs.personio.de careers host → the careers page
   const hit = personio.detect({ name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' });
-  if (hit && hit.url === 'https://acme.jobs.personio.de/xml') {
-    pass('personio.detect() resolves <slug>.jobs.personio.de → /xml feed');
+  if (hit && hit.url === 'https://acme.jobs.personio.de/') {
+    pass('personio.detect() resolves <slug>.jobs.personio.de → its careers page');
   } else {
     fail(`personio.detect() returned ${JSON.stringify(hit)}`);
   }
@@ -30,7 +43,7 @@ try {
     personio: 'acme',
     careers_url: 'https://www.acme.example/careers/',
   });
-  if (pinned && pinned.url === 'https://acme.jobs.personio.de/xml') {
+  if (pinned && pinned.url === 'https://acme.jobs.personio.de/') {
     pass('personio.detect() resolves an explicit personio: <slug> pin');
   } else {
     fail(`personio.detect() with slug pin returned ${JSON.stringify(pinned)}`);
@@ -51,7 +64,7 @@ try {
 
   // detect: the .com TLD variant is also accepted
   const comHit = personio.detect({ name: 'Acme', careers_url: 'https://acme.jobs.personio.com/jobs' });
-  if (comHit && comHit.url === 'https://acme.jobs.personio.com/xml') {
+  if (comHit && comHit.url === 'https://acme.jobs.personio.com/') {
     pass('personio.detect() accepts the .com TLD variant');
   } else {
     fail(`personio.detect() .com → ${JSON.stringify(comHit)}`);
@@ -295,7 +308,7 @@ try {
   // readable payload and /xml 404s — reusing the page it already fetched.
   {
     const calls = [];
-    const jobsFromFallback = await personio.fetch(
+    const { result: jobsFromFallback, warnings } = await withWarnings(() => personio.fetch(
       { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
       {
         fetchText: async (url, opts) => {
@@ -308,7 +321,7 @@ try {
           return htmlSample;
         },
       },
-    );
+    ));
     if (calls.length === 2 && calls[0] === 'https://acme.jobs.personio.de/' && calls[1].endsWith('/xml')) {
       pass('personio.fetch() reads the careers page once, then /xml, when the page has no payload');
     } else {
@@ -319,12 +332,28 @@ try {
     } else {
       fail(`personio.fetch() fallback returned ${jobsFromFallback.length} jobs`);
     }
+    // The page links jobs, yet its payload yielded none: a changed page build.
+    if (warnings.length === 1 && /Acme: careers page links jobs but its payload yielded none/.test(warnings[0])) {
+      pass('personio.fetch() warns when the careers page links jobs its payload does not list');
+    } else {
+      fail(`personio.fetch() page-build warning: ${JSON.stringify(warnings)}`);
+    }
+  }
+
+  // An empty board (no job links, no payload postings) falls back without a warning.
+  {
+    const { warnings } = await withWarnings(() => personio.fetch(
+      { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
+      { fetchText: async (url) => (url.includes('/xml') ? '<workzag-jobs></workzag-jobs>' : '<html><body></body></html>') },
+    ));
+    if (warnings.length === 0) pass('personio.fetch() does not warn for a careers page with no job links');
+    else fail(`personio.fetch() warned on an empty board: ${JSON.stringify(warnings)}`);
   }
 
   // A transient /xml failure is retried before the feed is given up on.
   {
     const calls = [];
-    const jobs = await personio.fetch(
+    const { result: jobs } = await withWarnings(() => personio.fetch(
       { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
       {
         fetchText: async (url) => {
@@ -337,7 +366,7 @@ try {
         },
         sleep: async () => {},
       },
-    );
+    ));
     if (calls.filter(u => u.includes('/xml')).length === 2 && jobs.length === 2) {
       pass('personio.fetch() retries a transient /xml failure');
     } else {
@@ -520,6 +549,40 @@ try {
     }
   }
 
+  // The languages to fetch come from the payload, so their number is capped.
+  {
+    const extra = ['ar', 'cs', 'da', 'es', 'fi', 'fr', 'it'];
+    const calls = [];
+    const page = flightPage(posting(1, 'A de', ['de', ...extra], 'de'));
+    const { warnings } = await withWarnings(() => personio.fetch({ name: 'Acme', careers_url: BASE }, {
+      fetchText: async (url) => { calls.push(url); return page; },
+      sleep: async () => {},
+      dedupIncludeLanguage: true,
+    }));
+    const fetched = calls.slice(1).map(url => url.replace(`${BASE}?language=`, ''));
+    if (JSON.stringify(fetched) === JSON.stringify(extra.slice(0, 5))) {
+      pass('personio.fetch(): at most 5 further languages are fetched, in code order');
+    } else {
+      fail(`personio.fetch() language cap: fetched ${JSON.stringify(fetched)}`);
+    }
+    if (warnings.length === 1 && /Acme: 7 further languages exceed the cap of 5; skipped fr, it/.test(warnings[0])) {
+      pass('personio.fetch(): the language cap names the languages it skipped');
+    } else {
+      fail(`personio.fetch() language-cap warning: ${JSON.stringify(warnings)}`);
+    }
+  }
+
+  // A health probe (ctx.maxPages) gets the one listing request and no fan-out.
+  {
+    const { ctx, calls } = tenantCtx({ dedupIncludeLanguage: true, maxPages: 1 });
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: BASE }, ctx);
+    if (JSON.stringify(calls) === JSON.stringify([BASE]) && jobs.length === 3) {
+      pass('personio.fetch(): under ctx.maxPages the language fan-out is skipped');
+    } else {
+      fail(`personio.fetch() probe: calls=${JSON.stringify(calls)} jobs=${jobs.length}`);
+    }
+  }
+
   // The payload is undocumented: when the careers page fails or yields nothing,
   // the documented XML feed answers instead.
   {
@@ -541,9 +604,9 @@ try {
   }
   {
     const calls = [];
-    await personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=en` }, {
+    await withWarnings(() => personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=en` }, {
       fetchText: async (url) => { calls.push(url); return url.includes('/xml') ? sample : htmlSample; },
-    });
+    }));
     if (JSON.stringify(calls) === JSON.stringify([`${BASE}?language=en`, `${BASE}xml?language=en`])) {
       pass('personio.fetch(): a careers page without a payload falls back to the feed, keeping the asked-for language');
     } else {
