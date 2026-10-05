@@ -525,8 +525,8 @@ try {
       'job/2?language=en|en|B en',
       'job/3?language=fr|fr|C fr', 'job/3?language=de|de|C de',
     ];
-    if (JSON.stringify(calls) === JSON.stringify([BASE, `${BASE}?language=de`, `${BASE}?language=en`])) {
-      pass('personio.fetch() with dedupIncludeLanguage: defaults page, then one page per further language');
+    if (JSON.stringify(calls) === JSON.stringify([BASE, `${BASE}?language=en`, `${BASE}?language=de`])) {
+      pass('personio.fetch() with dedupIncludeLanguage: defaults page, then one page per further language, the careers_url one first');
     } else {
       fail(`personio.fetch() all languages: calls=${JSON.stringify(calls)}`);
     }
@@ -569,6 +569,21 @@ try {
       pass('personio.fetch(): the language cap names the languages it skipped');
     } else {
       fail(`personio.fetch() language-cap warning: ${JSON.stringify(warnings)}`);
+    }
+
+    // The careers_url language is fetched even when code order would put it past the cap.
+    const preferredCalls = [];
+    const { warnings: preferredWarnings } = await withWarnings(() => personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=it` }, {
+      fetchText: async (url) => { preferredCalls.push(url); return page; },
+      sleep: async () => {},
+      dedupIncludeLanguage: true,
+    }));
+    const preferredFetched = preferredCalls.slice(1).map(url => url.replace(`${BASE}?language=`, ''));
+    if (JSON.stringify(preferredFetched) === JSON.stringify(['it', 'ar', 'cs', 'da', 'es'])
+      && /skipped fi, fr/.test(preferredWarnings[0] ?? '')) {
+      pass('personio.fetch(): the careers_url language comes first, so the cap never drops it');
+    } else {
+      fail(`personio.fetch() preferred language under the cap: fetched ${JSON.stringify(preferredFetched)}, warnings ${JSON.stringify(preferredWarnings)}`);
     }
   }
 

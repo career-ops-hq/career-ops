@@ -153,9 +153,10 @@ export default {
     if (!host) throw new Error(`personio: cannot derive feed URL for ${entry.name}`);
     const probing = Number(ctx.maxPages) > 0;
     const allLanguages = ctx.dedupIncludeLanguage === true && !probing;
+    const preferred = preferredLanguage(entry);
     // Every language is fetched anyway, so the first fetch is the defaults one:
     // it is what puts each posting's default-language version first.
-    const language = allLanguages ? null : preferredLanguage(entry);
+    const language = allLanguages ? null : preferred;
 
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertPersonioUrl it guarantees the final hostname stays in-domain.
@@ -168,7 +169,7 @@ export default {
     const postings = page === null ? [] : parsePersonioListing(page);
     if (postings.length > 0) {
       const versions = postings.map(posting => [posting]);
-      if (allLanguages) await addLanguageVersions(entry.name, host, postings, versions, ctx);
+      if (allLanguages) await addLanguageVersions(entry.name, host, postings, versions, ctx, preferred);
       return versions.flat()
         .map(posting => listingPostingToJob(posting, entry.name, host))
         .filter(job => job !== null);
@@ -197,18 +198,21 @@ export default {
  * was first rendered in, and append each posting's version in that language to
  * its entry in `versions`. Best-effort: a language whose fetch fails is skipped
  * and the versions already collected stand. Languages past MAX_EXTRA_LANGUAGES
- * (in code order) are not fetched, with a warning.
+ * are not fetched, with a warning; the order is the careers_url language
+ * first, then code order, so the cap never drops the language asked for.
  *
  * @param {string} companyName
  * @param {string} host
  * @param {ListingPosting[]} postings - From the defaults fetch.
  * @param {ListingPosting[][]} versions - Parallel to `postings`; appended to.
  * @param {any} ctx
+ * @param {string|null} preferred - The careers_url language, if any.
  */
-async function addLanguageVersions(companyName, host, postings, versions, ctx) {
+async function addLanguageVersions(companyName, host, postings, versions, ctx, preferred) {
   const indexById = new Map(postings.map((posting, i) => [posting.id, i]));
   const wanted = [...new Set(postings.flatMap(posting =>
-    posting.availableLanguages.filter(language => language !== posting.currentLocale)))].sort();
+    posting.availableLanguages.filter(language => language !== posting.currentLocale)))]
+    .sort((a, b) => Number(b === preferred) - Number(a === preferred) || a.localeCompare(b));
   const languages = wanted.slice(0, MAX_EXTRA_LANGUAGES);
   if (languages.length < wanted.length) {
     console.warn(`personio: ${companyName}: ${wanted.length} further languages exceed the cap of ${MAX_EXTRA_LANGUAGES}; skipped ${wanted.slice(MAX_EXTRA_LANGUAGES).join(', ')}`);
