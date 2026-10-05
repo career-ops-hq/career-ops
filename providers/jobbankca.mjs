@@ -45,7 +45,7 @@
 // recall-first tradeoff arbeitsagentur.mjs already accepts for a single
 // failed keyword request.
 
-import { fetchTextWithRetry, BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { fetchTextWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
 
@@ -63,12 +63,6 @@ const MAX_PAGES_CAP = 20;
 
 /** robots.txt: `Crawl-delay: 5`. Applied between every request, including the first. */
 const INTER_REQUEST_DELAY_MS = 5000;
-
-/** @param {any} ctx @param {number} ms */
-function sleep(ctx, ms) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /**
  * Reads and sanitizes the entry's `jobbankca:` config block.
@@ -264,7 +258,7 @@ export default {
     for (const keyword of keywords) {
       let keywordFailed = false;
       for (let page = 1; page <= maxPages; page++) {
-        await sleep(ctx, INTER_REQUEST_DELAY_MS);
+        await sleep(INTER_REQUEST_DELAY_MS, ctx);
 
         const url = assertJobBankUrl(buildFeedUrl(keyword, page));
         let xml;

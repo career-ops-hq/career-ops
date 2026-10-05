@@ -6,7 +6,7 @@
     "name": "Santiago Fernández de Valderrama",
     "email": "hi@santifer.io",
     "phone": "",
-    "description": "I build and maintain career-ops, the open-source job search agent that runs on the user's own machine. I spent sixteen years running a device repair business in Seville before software took over my life; I built career-ops for my own job search, then open-sourced it under MIT when I no longer needed it. Five months after launch it has 72,400+ stars, 409 contributors and a community of 4,800+ people (counted 22 Sep 2026). Since September 2026 I work on career-ops full time, and funding sustains that: maintenance, security, releases, documentation and independence. The project signed its first corporate sponsor in September 2026; that covers a fraction of one maintainer's time, while adoption has grown far faster than the economic capacity required to sustain it. Every one of the project's 1,610 merged pull requests was reviewed and merged by that one person (counted 22 Sep 2026).",
+    "description": "I build and maintain career-ops, the open-source job search agent that runs on the user's own machine. I spent sixteen years running a device repair business in Seville before software took over my life; I built career-ops for my own job search, then open-sourced it under MIT when I no longer needed it. Five months after launch it has 72,400+ stars, 409 contributors and a community of 4,800+ people (counted 22 Sep 2026). Funding is held by the project's fiscal host, Open Source Collective, on a public ledger, and goes to maintenance, security, releases, documentation and independence. The project needs it more now than before: it agreed its first corporate sponsorship in 2026, while adoption has grown far faster than its funding. Almost all of the project's 1,610 merged pull requests were reviewed and merged by one person (counted 22 Sep 2026).",
     "webpageUrl": {
       "url": "https://santifer.io",
       "wellKnown": "https://santifer.io/.well-known/funding-manifest-urls"
@@ -16,13 +16,14 @@
     {
       "guid": "career-ops",
       "name": "career-ops",
-      "description": "Open-source AI job search agent: scans job portals, evaluates listings into a structured report with a human-in-the-loop scoring rubric, tailors CVs and tracks applications. Runs locally in the user's AI coding CLI with their own API key; no server ever touches their data. Permanently free and MIT-licensed by design: everything runs locally, so there is nothing to paywall. 72,400+ GitHub stars, 13,600+ forks, 409 contributors with 1,610 merged pull requests, and 4,800+ community members; ~9,700 npm installs in the last month (npm package launched June 2026); new contributors joined at 19, 77, 97 and 101 per month from May through August (all counted 22 Sep 2026). In a domain dominated by proprietary, server-side products, career-ops is the open alternative: anyone can run, audit or self-host it, and the user's data never leaves their machine.",
+      "description": "Open-source AI job search agent: scans job portals, evaluates listings into a structured report with a human-in-the-loop scoring rubric, tailors CVs and tracks applications. Runs locally in the user's AI coding CLI with their own API key: the user's CV goes from their machine to the AI provider they chose, and nowhere else. Permanently free and MIT-licensed. 72,400+ GitHub stars, 13,600+ forks, 409 contributors with 1,610 merged pull requests, and 4,800+ community members; ~9,700 npm installs in the last month (npm package launched June 2026); new contributors joined at 19, 77, 97 and 101 per month from May through August (all counted 22 Sep 2026). In a domain dominated by proprietary, server-side products, career-ops is the open alternative: anyone can run, audit or self-host it, and the user's data goes only to the AI provider they chose.",
       "webpageUrl": {
         "url": "https://career-ops.org",
         "wellKnown": "https://career-ops.org/.well-known/funding-manifest-urls"
       },
       "repositoryUrl": {
-        "url": "https://github.com/career-ops-hq/career-ops"
+        "url": "https://github.com/career-ops-hq/career-ops",
+        "wellKnown": "https://github.com/career-ops-hq/career-ops/blob/main/.well-known/funding-manifest-urls"
       },
       "licenses": [
         "spdx:MIT"
@@ -40,16 +41,16 @@
   "funding": {
     "channels": [
       {
-        "guid": "github-sponsors",
+        "guid": "open-collective",
         "type": "payment-provider",
-        "address": "https://github.com/sponsors/santifer",
-        "description": "GitHub Sponsors profile dedicated to career-ops. Nine identical monthly tiers ($1 to $1,000) plus one-time options: every tier carries the same description on purpose, because no amount of money influences the project's direction. Zero platform fees; 100% reaches the maintainer."
+        "address": "https://opencollective.com/career-ops",
+        "description": "The project's collective on Open Collective, with Open Source Collective as its fiscal host. The money belongs to the project, and every contribution and expense is on a public ledger. Accepts one-time and recurring contributions, and invoices companies."
       },
       {
         "guid": "corporate-direct",
         "type": "other",
         "address": "sponsors@career-ops.org",
-        "description": "Direct channel for corporate logo sponsorship: handled with a contract, UTM tracking from day one and a real monthly traffic report. Sponsorship buys clearly-labeled visibility, never influence: no amount of money changes the roadmap or places anything in the product."
+        "description": "Contact channel for companies. Sponsorships are invoiced by the project's fiscal host, Open Source Collective, and paid to the project's collective. Sponsorship buys clearly-labeled visibility, never influence: no amount of money changes the roadmap or places anything in the product."
       }
     ],
     "plans": [
@@ -57,60 +58,61 @@
         "guid": "maintainer-half-year",
         "status": "active",
         "name": "Six months of sustained maintenance",
-        "description": "Funds six months of dedicated maintainer time (maintenance, security reviews, releases, documentation and community support) plus the project's infrastructure: CI, domains and hosting for public endpoints. career-ops reached 72,400+ stars and 409 contributors with a single maintainer; this closes the gap between adoption and the capacity required to sustain it.",
+        "description": "Funds six months of the project's maintenance through its fiscal host: security reviews, releases, documentation, community support and the infrastructure behind them (CI, domains and hosting for public endpoints). Adoption has grown far faster than the project's funding; this closes that gap.",
         "amount": 50000,
         "currency": "USD",
         "frequency": "one-time",
         "channels": [
-          "corporate-direct"
+          "open-collective"
         ]
       },
       {
         "guid": "maintainer-quarter",
         "status": "active",
-        "name": "One quarter of focused maintainer time",
-        "description": "Funds three months of dedicated maintainer time plus the project's infrastructure (CI, domains, hosting for public endpoints).",
+        "name": "One quarter of sustained maintenance",
+        "description": "Funds three months of the project's maintenance through its fiscal host, plus its infrastructure (CI, domains and hosting for public endpoints).",
         "amount": 25000,
         "currency": "USD",
         "frequency": "one-time",
         "channels": [
-          "corporate-direct"
+          "open-collective"
         ]
       },
       {
         "guid": "community-monthly",
         "status": "active",
         "name": "Community sponsorship (monthly)",
-        "description": "Any monthly tier from $1 to $1,000, all identical by design. Funds maintainer time: maintenance, security, releases, documentation and keeping the project independent.",
+        "description": "Recurring contributions of any amount to the project's collective. They fund maintenance, security, releases, documentation and the project's independence.",
         "amount": 0,
         "currency": "USD",
         "frequency": "monthly",
         "channels": [
-          "github-sponsors"
+          "open-collective"
         ]
       },
       {
         "guid": "community-one-time",
         "status": "active",
         "name": "Community sponsorship (one time)",
-        "description": "One-time contributions ($10, $50 or custom) for backers who prefer not to subscribe, or whose cards fail on recurring payments.",
+        "description": "One-time contributions of any amount to the project's collective, for backers who prefer not to subscribe.",
         "amount": 0,
         "currency": "USD",
         "frequency": "one-time",
         "channels": [
-          "github-sponsors"
+          "open-collective"
         ]
       },
       {
         "guid": "corporate-logo",
         "status": "active",
         "name": "Corporate logo sponsorship",
-        "description": "Clearly-labeled logo placement for companies, negotiated directly with a contract, UTM tracking and a monthly report of real, measured numbers. Media kit available on request at sponsors@career-ops.org. Visibility only: sponsorship never buys influence over the roadmap.",
+        "description": "Company tiers with public prices on the project's collective; founding sponsorships are agreed in writing with the fiscal host. Visibility only: no influence over the roadmap, no access to users or their data, no personal services from any maintainer.",
         "amount": 0,
         "currency": "USD",
         "frequency": "monthly",
         "channels": [
-          "corporate-direct"
+          "corporate-direct",
+          "open-collective"
         ]
       }
     ],

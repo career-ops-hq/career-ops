@@ -15,6 +15,27 @@ const HYDRATION_WAIT_MS = 2_000;
 const FRAME_CONTENT_TIMEOUT_MS = 6_000;
 const FRAME_CONTENT_POLL_MS = 500;
 
+// BambooHR's client bundle can throw during first paint — a failed
+// /globals/locale request followed by an uncaught TypeError reading
+// `hasPasskey` on null — which halts the SPA on its bare loading spinner well
+// past HYDRATION_WAIT_MS, so a live posting reads as insufficient_content. The
+// posting itself is untouched; a reload clears it. This is a shared
+// front-end bug across every *.bamboohr.com tenant (not one company's
+// board) and common enough to matter: rerun checkUrlLiveness in a loop
+// against any live *.bamboohr.com posting URL with this branch disabled to
+// see the current failure rate.
+//
+// Scoped to this one host on purpose, not a generic "flaky ATS" mechanism: no
+// other provider has shown this failure signature, and retrying every
+// insufficient-content verdict on every host would pay an extra page load on
+// every genuinely dead posting for no evidence of benefit elsewhere. If a
+// second ATS turns up the same symptom, generalize then.
+const BAMBOOHR_HOSTS = [/(^|\.)bamboohr\.com$/];
+
+function isBambooHrHost(hostname) {
+  return BAMBOOHR_HOSTS.some((pattern) => pattern.test(hostname));
+}
+
 /**
  * Same-origin test used to decide whether a child frame is part of the posting
  * or somebody else's widget. Deliberately strict: about:blank, data: frames,
@@ -423,17 +444,59 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       }
     }
 
-    if (page && page._blockedByGuard) {
-      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
-    }
-
-    return classifyLiveness({
+    let verdict = classifyLiveness({
       status,
       requestedUrl: url,
       finalUrl,
       bodyText: bodyText + frameText,
       applyControls,
     });
+
+    // See BAMBOOHR_HOSTS above. Only fires on the specific verdict this
+    // render race produces (a short/empty body, not an explicit closure
+    // banner or a 404/410, both of which are trusted as-is).
+    if (verdict.code === 'insufficient_content' && typeof page.reload === 'function') {
+      let host = '';
+      try { host = new URL(finalUrl || url).hostname; } catch { /* leave empty, retry test below just fails closed */ }
+      if (isBambooHrHost(host)) {
+        try {
+          const reloadResponse = await page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
+          const reloadStatus = reloadResponse?.status() ?? status;
+          await page.waitForTimeout(HYDRATION_WAIT_MS);
+          const reloadFinalUrl = page.url();
+          const reloadBodyText = await page.evaluate(() => document.body?.innerText ?? '');
+          const reloadApplyControls = await page.evaluate(extractApplyControls);
+          const reloadVerdict = classifyLiveness({
+            status: reloadStatus,
+            requestedUrl: url,
+            finalUrl: reloadFinalUrl,
+            bodyText: reloadBodyText,
+            applyControls: reloadApplyControls,
+          });
+          const stillNotFound = reloadVerdict.code === 'insufficient_content' || reloadVerdict.code === 'listing_page';
+          verdict = !stillNotFound
+            ? { ...reloadVerdict, reason: `${reloadVerdict.reason} (after BambooHR reload retry)` }
+            : {
+                result: 'uncertain',
+                code: 'bamboohr_render_retry_failed',
+                reason: 'BambooHR page did not render content even after a reload retry — not trusted as evidence of removal',
+              };
+        } catch (err) {
+          // Reload itself failed — still never let this surface as `expired`.
+          verdict = {
+            result: 'uncertain',
+            code: 'bamboohr_render_retry_failed',
+            reason: `BambooHR reload retry failed: ${err.message.split('\n')[0]}`,
+          };
+        }
+      }
+    }
+
+    if (page && page._blockedByGuard) {
+      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
+    }
+
+    return verdict;
   } catch (err) {
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };

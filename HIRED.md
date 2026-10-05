@@ -15,6 +15,20 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=13 level=handle handle=RomanY467 role="Secops Engineer" sector="YC Company" geo="remote - Argentina" weeks=4 link="https://github.com/career-ops-hq/career-ops/issues/4722" -->
+### Hire #13
+
+> On my first test run, career-ops surfaced a single top match (4.0/5). I applied, had my first interview within a week, and got hired after 4+ interviews. The matching between my CV
+
+<a href="https://github.com/RomanY467"><img src="https://github.com/RomanY467.png?size=64" width="28" height="28" align="top" alt="@RomanY467"> **@RomanY467**</a> · Secops Engineer · remote - Argentina · 4 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4722)
+
+<!-- hire n=12 level=role role="Salesforce Administrator - Sales & Service Cloud (f/m/d)" geo="Germany" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/4457" -->
+### Hire #12
+
+> Tracked about 70 Salesforce/CRM roles over roughly 10 weeks and kept the focus on admin roles that matched my core profile. The one that landed went from first video call to signed
+
+**Salesforce Administrator - Sales &amp; Service Cloud (f/m/d)** · Germany · 10 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4457)
+
 <!-- hire n=11 level=handle handle=SPerekrestova role="Software Engineer" sector="Big tech / global marketplace" geo="Amsterdam, Netherlands" weeks=8 link="https://github.com/career-ops-hq/career-ops/issues/4339" -->
 ### Hire #11
 
