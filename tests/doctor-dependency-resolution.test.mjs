@@ -44,13 +44,12 @@ function installPackage(dir, name) {
   writeFileSync(join(pkgDir, 'index.js'), '', 'utf-8');
 }
 
-function dependencyLine(codeRoot) {
+function dependencyLine(codeRoot, { nodePath = '' } = {}) {
   const run = spawnSync(process.execPath, [DOCTOR, '--target', codeRoot], {
     cwd: codeRoot,
     encoding: 'utf-8',
-    // NODE_PATH is one of the directories Node searches; clear it so only the
-    // fixture tree decides the outcome.
-    env: { ...process.env, NODE_PATH: '' },
+    // Pinned so an inherited NODE_PATH can never be what decides the outcome.
+    env: { ...process.env, NODE_PATH: nodePath },
   });
   assert.equal(run.stderr, '', `doctor wrote to stderr: ${run.stderr}`);
   const line = run.stdout.split('\n').find((l) => /Dependencies/.test(l));
@@ -104,6 +103,21 @@ test('an existing but stale node_modules fails, naming the package it lacks', ()
     installPackage(dir, 'co-doctor-fake-alpha');
     installPackage(dir, '@co-doctor-fake/scoped');
     assert.match(dependencyLine(dir), /✗ Dependencies missing: co-doctor-fake-esm-only$/);
+  });
+});
+
+test('a dependency reachable only through NODE_PATH is missing', () => {
+  withTempDir((dir) => {
+    // require() searches NODE_PATH, but the ESM imports every script uses do
+    // not, so a package found only there still fails to import at run time.
+    const codeRoot = join(dir, 'checkout');
+    const elsewhere = join(dir, 'global');
+    writeManifest(codeRoot);
+    installPackage(codeRoot, 'co-doctor-fake-alpha');
+    installPackage(codeRoot, '@co-doctor-fake/scoped');
+    installPackage(elsewhere, 'co-doctor-fake-esm-only');
+    const line = dependencyLine(codeRoot, { nodePath: join(elsewhere, 'node_modules') });
+    assert.match(line, /✗ Dependencies missing: co-doctor-fake-esm-only$/);
   });
 });
 

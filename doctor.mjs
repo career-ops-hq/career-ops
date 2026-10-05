@@ -7,9 +7,8 @@
 
 import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { createRequire } from 'module';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
@@ -165,17 +164,24 @@ function checkBillingSource() {
 // was wrong both ways: a git worktree with no node_modules of its own resolves
 // through the main checkout's (Node walks up parent directories), and a
 // node_modules installed before a dependency was added (undici, #4445) still
-// exists while the import fails. require.resolve.paths() is Node's own lookup
-// list (the parent walk, skipping node_modules/node_modules, plus NODE_PATH and
-// the global folders), so a package counts as installed when one of those
-// directories holds it. Checking for its package.json, rather than resolving
-// the package, never consults an `exports` map that refuses the lookup and
-// never loads the package — doctor runs on every session's first message.
+// exists while the import fails. Every script loads its dependencies with ESM
+// `import`, whose bare-specifier lookup is node_modules in the code root and
+// each ancestor directory — and nothing else: unlike require(), it ignores
+// NODE_PATH and the global folders, so a package found only there would pass
+// here and still fail to import. A package counts as installed when one of
+// those node_modules holds it. Checking for its package.json, rather than
+// resolving the package, never consults an `exports` map that refuses the
+// lookup and never loads the package — doctor runs on every session's first
+// message.
 function findMissingDependencies(root) {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-  const requireFromRoot = createRequire(join(root, 'package.json'));
+  const lookupDirs = [];
+  for (let dir = resolve(root); ; dir = dirname(dir)) {
+    lookupDirs.push(join(dir, 'node_modules'));
+    if (dirname(dir) === dir) break;
+  }
   return Object.keys(manifest.dependencies || {}).filter((name) =>
-    !(requireFromRoot.resolve.paths(name) || []).some((dir) => existsSync(join(dir, name, 'package.json'))));
+    !lookupDirs.some((dir) => existsSync(join(dir, name, 'package.json'))));
 }
 
 function checkDependencies() {
