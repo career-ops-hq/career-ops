@@ -420,7 +420,7 @@ test('trackedFiles survives a path it cannot stat, and names the reason', () => 
   }
 });
 
-test('trackedFiles rethrows a stat failure it does not recognise, instead of logging it', () => {
+test('trackedFiles rethrows a stat failure it does not recognise, instead of logging it', (t) => {
   // The skip list is deliberate, not a catch-all. ENOTDIR and EACCES are the
   // MISSING case wearing a different errno, so they are skipped. Anything else
   // is a filesystem the scan cannot read, and swallowing it would do exactly
@@ -443,7 +443,14 @@ test('trackedFiles rethrows a stat failure it does not recognise, instead of log
 
     // Replace the directory with a symlink to itself, leaving a/b.mjs indexed.
     rmSync(join(dir, 'a'), { recursive: true, force: true });
-    symlinkSync('a', join(dir, 'a'));
+    try {
+      symlinkSync('a', join(dir, 'a'));
+    } catch (err) {
+      // Windows needs a privilege for this unless Developer Mode is on (#2828),
+      // the same rule the tracked-symlink fixture above follows. A machine that
+      // cannot link must SKIP, not redden.
+      return t.skip(`symlinks unsupported here (${err.code || err.message})`);
+    }
 
     let probe = null;
     try {
