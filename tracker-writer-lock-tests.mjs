@@ -11,6 +11,7 @@ import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { acquireTrackerLock, openTrackerTransaction } from './tracker-utils.mjs';
+import { waitForContentionMarker } from './tests/helpers/tracker-contention-marker.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -64,28 +65,6 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // timeoutMs / staleMs / retryMs are the lock's own parameters. Those are what
 // the tests assert on, so widening them would change what is being tested.
 const HARNESS_WAIT_MS = 30_000;
-
-/**
- * Wait for the test-only durable marker written after a CLI writer loses the
- * lock mkdir race. Unlike the recover guard, it survives until fixture cleanup,
- * so this still orders the mutation correctly when every old guard poll would
- * have missed its sampling window.
- */
-async function waitForContentionMarker(markerPath, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (existsSync(markerPath)) {
-      try {
-        return JSON.parse(readFileSync(markerPath, 'utf-8'));
-      } catch {
-        // A concurrent writer may have created the file but not finished its
-        // synchronous JSON write yet; retry until the bounded deadline.
-      }
-    }
-    await sleep(10);
-  }
-  return null;
-}
 
 function trackerTable(rows) {
   return `# Applications Tracker
