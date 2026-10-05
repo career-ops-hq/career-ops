@@ -231,6 +231,17 @@ const NON_CONTENT_MARKERS = [
     reason: 'looks like a "please enable JavaScript" shell, not a posting',
     re: /(please enable javascript|this site requires javascript|<noscript)/i,
   },
+  {
+    category: 'bot-challenge',
+    // Matched on established challenge PHRASES, deliberately not the bare
+    // word "captcha" — a real posting can legitimately mention CAPTCHA as a
+    // technology (a security-engineering role's requirements, say), and that
+    // single word alone is not distinctive enough to tell the two apart.
+    // These phrases are how the actual interstitial page renders, not a
+    // topic a JD would describe.
+    reason: 'looks like a bot-verification/challenge page, not a posting',
+    re: /(checking your browser before accessing|verify(?:ing)? (?:that )?you are (?:a )?human|please stand by,? while we (?:are )?check(?:ing)? your browser|cloudflare ray id|captcha verification required to continue)/i,
+  },
 ];
 
 // Returns the first matching marker ({category, reason}) or null. Exported

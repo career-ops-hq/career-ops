@@ -6,8 +6,9 @@
  * as tracker-writer-lock-tests.mjs with a 180s budget of its own (#2906),
  * because on Windows it spent most of its time idling: each writer case waited
  * up to 2s to SEE a recover guard that lives for well under a millisecond, and
- * every miss burned the full 2s. The writers now announce that they are
- * waiting on the lock, so there is nothing to miss (#4759).
+ * every miss burned the full 2s. A waiting writer now leaves a durable marker
+ * once it has created that guard (#4762), so there is nothing to miss, and
+ * the suite fits the shared cap (#4759).
  */
 
 import { test } from 'node:test';
@@ -17,24 +18,22 @@ import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync,
   utimesSync, writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { acquireTrackerLock, openTrackerTransaction } from '../tracker-utils.mjs';
+import { waitForContentionMarker } from './helpers/tracker-contention-marker.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NODE = process.execPath;
 const CONCURRENT_ROW = '| 99 | 2026-01-03 | ConcurrentCo | Keeper | 4.3/5 | Applied | ❌ | [99](reports/099-concurrent.md) | preserve me |';
-// Run-level evidence that the matrix still orders a fixture mutation on the
-// lock-wait signal. See the last test in this file (#2436).
-let lockWaitWatchedCases = 0;
-// The first writer case whose writer never reported waiting, if any. Learning
-// that costs the writer's whole 3s lock timeout, because "not yet" and "never"
-// look the same until it gives up. When the hook is gone every case pays it,
-// which put a red run at 28s locally against a 30s cap, so on a slower runner
-// the regression would arrive as an unexplained suite kill. One case pays
-// instead, and the rest fail straight away, naming it.
-let lockWaitFirstMissed = null;
+// The first writer case whose writer never left its contention marker, if
+// any. Learning that costs the writer's whole 3s lock timeout, because "not
+// yet" and "never" look the same until it gives up. When the marker is gone
+// every case pays it, which put a red run at 28s locally against a 30s cap, so
+// on a slower runner the regression would arrive as an unexplained suite kill.
+// One case pays instead, and the rest fail straight away, naming it.
+let markerFirstMissed = null;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // A harness deadline raced against a child. Unref'd, because the race usually
@@ -148,11 +147,8 @@ async function runWhileLocked({
     CAREER_OPS_TRACKER_DB: db,
     CAREER_OPS_TRACKER_LOCK: lockDir,
     CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
-    // Test-only: acquireTrackerLock sends a 'tracker-lock-waiting' message the
-    // first time it finds the lock held. See announceLockWait in tracker-utils.
-    CAREER_OPS_TRACKER_LOCK_WAIT_IPC: '1',
   };
-  const launchWriter = (timeoutMs) => {
+  const launchWriter = (timeoutMs, markerPath = null) => {
     let stdout = '';
     let stderr = '';
     const resolvedArgs = args.map(arg => arg === '{tracker}' ? tracker : arg);
@@ -160,28 +156,28 @@ async function runWhileLocked({
       cwd: ROOT,
       env: {
         ...childEnv,
+        // Test-only: acquireTrackerLock writes this marker once it has found
+        // the lock held and created the recover guard (tracker-utils.mjs).
+        ...(markerPath ? {
+          NODE_ENV: 'test',
+          CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER: markerPath,
+        } : {}),
         CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: String(timeoutMs),
       },
-      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
-    const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
-    // True once the writer reports waiting on THIS lock; false if it closes
-    // without ever doing so.
-    const lockWait = new Promise(resolve => {
-      child.on('message', msg => {
-        if (msg?.type === 'tracker-lock-waiting' && basename(String(msg.lockDir)) === basename(lockDir)) {
-          resolve(true);
-        }
-      });
-      closePromise.then(() => resolve(false));
-    });
+    let closed = false;
+    const closePromise = new Promise(resolve => child.once('close', code => {
+      closed = true;
+      resolve({ code });
+    }));
     child.stdin.end(stdin);
     return {
       child,
       closePromise,
-      lockWait,
+      closed: () => closed,
       output: () => ({ stdout, stderr }),
     };
   };
@@ -198,7 +194,9 @@ async function runWhileLocked({
     return { ...result, timedOut: false };
   };
 
-  const evidence = { probe: null, reachedPrompt: null, lockWaitSeen: null, lockWaitNotAwaited: null, run: null };
+  const evidence = {
+    probe: null, reachedPrompt: null, watched: false, marker: null, markerNotAwaited: null, lockDir, run: null,
+  };
   try {
     const lock = await acquireTrackerLock(lockDir, {
       timeoutMs: 2_000,
@@ -216,7 +214,9 @@ async function runWhileLocked({
       trackerAfter: readFileSync(tracker, 'utf-8'),
     };
 
-    const run = launchWriter(3_000);
+    const markerPath = beforeMutationOutput ? null : join(dir, `${name}.lock-waiting.json`);
+    const run = launchWriter(3_000, markerPath);
+    evidence.runPid = run.child.pid;
     try {
       if (beforeMutationOutput) {
         const promptDeadline = Date.now() + HARNESS_WAIT_MS;
@@ -237,29 +237,26 @@ async function runWhileLocked({
         // above its acquireTrackerLockForCli call left this suite fully green
         // until a wait was added.
         //
-        // The signal is the writer's own report that it has tried the lock
-        // and found it held. That instant sits after a pre-lock read and
-        // before a post-lock one, which is exactly the discrimination the
-        // mutation needs. It replaces sampling the lock's recover guard with
-        // readdirSync: the guard exists for well under a millisecond per
-        // retry, Windows CI missed it in 3 of 8 cases and 0 of 8 on another
-        // leg, and each miss idled 2s before falling back to timing-dependent
-        // ordering (#4759). A message is not sampled, so it cannot be missed,
-        // and its absence is now a real failure rather than bad luck.
+        // The signal is the marker the writer leaves once it has tried the
+        // lock, found it held, and created the recover guard. That instant
+        // sits after a pre-lock read and before a post-lock one, which is
+        // exactly the discrimination the mutation needs. It replaces sampling
+        // the recover guard itself with readdirSync: the guard exists for well
+        // under a millisecond per retry, Windows CI missed it in 3 of 8 cases
+        // and 0 of 8 on another leg, and each miss idled 2s before falling back
+        // to timing-dependent ordering (#4759). The marker stays on disk, so
+        // it cannot be missed, and its absence is a real failure (#4762).
         //
         // beforeMutationOutput entries have a stronger, script-specific
         // ordering signal (their pre-lock review prompt), and a writer parked
         // at that prompt has not reached the lock yet, so they skip this.
-        lockWaitWatchedCases++;
-        if (lockWaitFirstMissed) {
-          evidence.lockWaitSeen = false;
-          evidence.lockWaitNotAwaited = lockWaitFirstMissed;
+        evidence.watched = true;
+        if (markerFirstMissed) {
+          evidence.markerNotAwaited = markerFirstMissed;
         } else {
-          evidence.lockWaitSeen = await Promise.race([
-            run.lockWait,
-            deadline(HARNESS_WAIT_MS).then(() => false),
-          ]);
-          if (!evidence.lockWaitSeen) lockWaitFirstMissed = name;
+          // Stops early once the writer has exited: no marker can arrive then.
+          evidence.marker = await waitForContentionMarker(markerPath, HARNESS_WAIT_MS, { stopWhen: run.closed });
+          if (!evidence.marker) markerFirstMissed = name;
         }
       }
       // Simulate the current lock owner committing another row. The waiting
@@ -292,9 +289,10 @@ async function runWhileLocked({
 }
 
 /**
- * One writer in the matrix: a test per writer, with a subtest for each of the
- * two claims it makes (it contends on the shared lock; it completes against
- * the fresh tracker once the lock is released).
+ * One writer in the matrix: a test per writer, with a subtest for each claim
+ * it makes (it contends on the shared lock; where the mutation is ordered on
+ * the marker, it signals contention after creating the recover guard; it
+ * completes against the fresh tracker once the lock is released).
  */
 function writerCase({
   verifyConcurrent = after => after.includes(CONCURRENT_ROW),
@@ -305,7 +303,7 @@ function writerCase({
   const { name, content } = options;
   test(name, async (t) => {
     const outcome = runWhileLocked({ ...options, verifyConcurrent, verifyOutput });
-    // Both subtests read the one run; an error in it fails both, by name.
+    // Every subtest reads the one run; an error in it fails each, by name.
     outcome.catch(() => {});
 
     await t.test('contends on the shared lock before reading or writing', async () => {
@@ -318,15 +316,27 @@ function writerCase({
       assert.equal(probe.trackerAfter, content, 'lock contention probe changed the tracker without the lock');
     });
 
+    // Only the cases that order their mutation on the marker make this claim;
+    // a writer parked at a pre-lock prompt has not reached the lock yet.
+    if (!options.beforeMutationOutput) {
+      await t.test('signals contention durably after creating the recover guard', async () => {
+        const { marker, markerNotAwaited, lockDir, runPid } = await outcome;
+        assert.equal(markerNotAwaited, null,
+          `not waited for: the writer in ${markerNotAwaited} never left its contention marker, `
+          + 'so this case did not spend 3s learning the same thing (see that case for the cause)');
+        assert.ok(marker,
+          'the writer left no contention marker, so the fixture mutation was not ordered after its read — '
+          + 'the CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER hook in tracker-utils.mjs is gone, renamed, or no '
+          + 'longer reached on contention');
+        assert.equal(marker.lockDir, lockDir, 'the marker names a different lock');
+        assert.equal(marker.guardCreated, true, 'the marker does not record the recover guard being created');
+        assert.equal(marker.pid, runPid, 'the marker came from a different process');
+      });
+    }
+
     await t.test(completion, async () => {
-      const { run, reachedPrompt, lockWaitSeen, lockWaitNotAwaited } = await outcome;
+      const { run, reachedPrompt } = await outcome;
       assert.notEqual(reachedPrompt, false, 'did not reach the pre-lock review prompt before the fixture mutation');
-      assert.equal(lockWaitNotAwaited, null,
-        `not waited for: the writer in ${lockWaitNotAwaited} never reported waiting on the tracker lock, `
-        + 'so this case did not spend 3s learning the same thing (see that case for the cause)');
-      assert.notEqual(lockWaitSeen, false,
-        'the writer never reported waiting on the tracker lock, so the fixture mutation was not ordered after '
-        + 'its read — announceLockWait in tracker-utils.mjs is gone, renamed, or no longer reached on contention');
       const detail = `exit=${run.code}, timedOut=${run.timedOut}\n${run.stdout}${run.stderr}\n${run.after}`;
       assert.equal(run.timedOut, false, `writer hung after lock release (${detail})`);
       assert.equal(run.code, 0, `writer failed after lock release (${detail})`);
@@ -855,16 +865,4 @@ test('recover guard held by a live caller is not evicted by a small staleMs', as
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-// #2436: the writer cases order their fixture mutation on the lock-wait
-// signal. Each one now fails on its own when the signal does not arrive, so
-// what is left to guard is the matrix itself: a change that drops every
-// signal-watched case would leave nothing exercising the signal at all, and
-// the suite green while it did (CodeRabbit review). Zero watched cases is the
-// regression. Declared last, and node:test runs a file's top-level tests in
-// order, so every writer case has run by the time this reads the count.
-test('the writer matrix orders its fixture mutation on the lock-wait signal', () => {
-  assert.ok(lockWaitWatchedCases > 0,
-    'no writer case waited on the lock-wait signal — the matrix no longer exercises it, so nothing validates the mutation ordering');
 });
