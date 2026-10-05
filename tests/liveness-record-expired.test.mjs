@@ -42,7 +42,7 @@ const historyPath = join(sandbox, 'scan-history.tsv');
 process.env.CAREER_OPS_SCAN_HISTORY = historyPath;
 
 const { planExpiredHistoryRows } = await import('../liveness-core.mjs');
-const { normalizeUrlForDedup } = await import('../scan.mjs');
+const { normalizeUrlForDedup, shouldDedupScanHistoryRow } = await import('../scan.mjs');
 const { collectWhatsNew } = await import('../web/src/lib/whats-new.mjs');
 const { recordingEnabled, recordExpiredVerdicts } = await import('../check-liveness.mjs');
 
@@ -324,4 +324,38 @@ test('recording is a no-op when no history file exists', async () => {
   rmSync(historyPath, { force: true });
   assert.equal(await recordExpiredVerdicts([{ url: DEAD, result: 'expired' }]), 0);
   assert.equal(existsSync(historyPath), false);
+});
+
+// ── 6. A retirement is not a life sentence (#3891 follow-up) ──────────────
+//
+// Recording the verdict stops a dead posting resurfacing. It must not also put
+// the URL beyond the recheck the user configured: `scan_history.recheck_after_days`
+// is the knob that says "look again after N days", and a posting can be relisted.
+// Before this, shouldDedupScanHistoryRow returned true for every status that was
+// not `added`, so the TTL below it was unreachable for a row this PR writes.
+
+test('a recorded expired row is pinned until the configured recheck window passes', () => {
+  const row = { firstSeen: '2026-07-01', status: 'skipped_expired' };
+
+  // No TTL configured: pinned, exactly as before.
+  assert.equal(shouldDedupScanHistoryRow(row, { today: '2026-08-07' }), true);
+
+  // Inside the window: still pinned.
+  assert.equal(shouldDedupScanHistoryRow(row, { recheckAfterDays: 90, today: '2026-08-07' }), true);
+
+  // Past the window: released, so the user's recheck can reach it.
+  assert.equal(shouldDedupScanHistoryRow(row, { recheckAfterDays: 30, today: '2026-08-07' }), false);
+});
+
+test('a status that describes the URL rather than the posting stays pinned', () => {
+  // The recheck window says "look at this posting again". It does not say an
+  // invalid URL became valid or a blocked host became reachable, so those keep
+  // their permanent pin whatever the TTL is.
+  for (const status of ['skipped_invalid_url', 'skipped_blocked_host']) {
+    assert.equal(
+      shouldDedupScanHistoryRow({ firstSeen: '2026-01-01', status }, { recheckAfterDays: 30, today: '2026-08-07' }),
+      true,
+      `${status} must stay pinned`,
+    );
+  }
 });
