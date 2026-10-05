@@ -6,7 +6,7 @@
 
 1. **讀取資料**：分析 `data/pipeline.md`，找出 "Pending" 區塊下所有標記為 `- [ ]` 的待處理項目。
 2. **逐一處理**：對每一個未處理的 URL：
-   a. **計算新報告編號**：掃描 `reports/` 目錄，找出目前最大的三位數字前綴並加 1，作為 `REPORT_NUM`。
+   a. **領取新報告編號**：執行 `node reserve-report-num.mjs` 原子地佔用下一個順序編號作為 `REPORT_NUM`；報告寫入後執行 `node reserve-report-num.mjs --release <num>` 釋放佔位。切勿自行掃描 `reports/` 取最大值加 1 —— 並行時多個 worker 會算出同一個編號（#749）。
    b. **擷取職缺描述 (JD)**：首選 Playwright（透過 `browser_navigate` + `browser_snapshot`）渲染網頁擷取；次選 `WebFetch` 抓取靜態文字；最後以 `WebSearch` 搜尋同名職缺的快照。
    c. **例外處理**：若連結因權限、失效等原因完全打不開，將該項標記為 `- [!]`，附上錯誤描述，然後繼續處理下一個。
    d. **執行一鍵管線評估**：跑 A–F 各維度評估 → 存成報告 `.md` → 依設定產生履歷 PDF（若評分達門檻）→ 自動登錄至 tracker。
@@ -50,7 +50,7 @@
 3. **WebSearch（最終手段）**：在第三方求職聚合平台上找同名職缺的快照。
 
 **特殊情況處理：**
-- **LinkedIn**：可能會觸發強制登入的攔截。若多次失敗，標記為 `[!]` 並引導求職者直接貼上 JD 全文。
+- **LinkedIn**：先遵守 AGENTS.md → **LinkedIn JD loading guard (#4121)**，跨模式共用一次瀏覽器嘗試。正文仍為載入佔位或無法讀取時，不再導覽重試；保留原始 URL，標記為 `[!]`，請求職者貼上 JD 全文或提供合規的雇主/ATS 來源。載入失敗不代表職缺關閉。
 - **PDF 檔案**：若 URL 直接指向一份 PDF 文件，使用 Read 工具讀取該二進位檔案。
 - **本機檔案前綴 `local:`**：若是本機路徑，直接讀取對應檔案。例如：`local:jds/linkedin-pm-ai.md` 代表讀取本機的 `jds/linkedin-pm-ai.md`。
 

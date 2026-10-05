@@ -22,9 +22,11 @@
 //
 // WHY AT LOOKUP TIME. The address validated has to be the address dialled, or
 // a name that answers public-then-private (DNS rebinding) slips through a
-// pre-flight check. `net.connect` reads `dns.lookup` at call time and connects
-// to what it returns, so validating in the lookup closes that window without
-// an undici Agent — and undici is not a dependency of this project.
+// pre-flight check. Direct `net.connect` reads `dns.lookup` at call time and
+// connects to what it returns, so validating there closes that window.
+// With explicit trusted-proxy opt-in, only the proxy's own DNS lookup is
+// exempted. The proxy resolves the destination remotely, so its operator must
+// enforce the same public-address rule there; see README proxy setup.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -40,6 +42,12 @@ export const providerFetchContext = new AsyncLocalStorage();
 /** Is a provider request in flight on this async path? */
 export function inProviderFetch() {
   return providerFetchContext.getStore() !== undefined;
+}
+
+/** Only the explicitly trusted proxy's own socket may resolve privately. */
+export function isTrustedProxyLookup(hostname) {
+  const context = providerFetchContext.getStore();
+  return Boolean(context?.proxyHost && hostname === context.proxyHost && hostname !== context.targetHost);
 }
 
 /**
@@ -117,6 +125,14 @@ export function isBlockedAddress(address) {
   if (tail.includes('.')) {
     const embedded = v4ToInt(tail);
     return embedded === null ? true : isBlockedAddress(tail);
+  }
+  // The same two forms written in hex, which is how the URL parser prints them:
+  // `new URL('http://[::ffff:127.0.0.1]/').hostname` is `[::ffff:7f00:1]`.
+  const hexEmbedded = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(addr);
+  if (hexEmbedded) {
+    const high = Number.parseInt(hexEmbedded[1], 16);
+    const low = Number.parseInt(hexEmbedded[2], 16);
+    return isBlockedAddress(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
   }
 
   if (addr === '::' || addr === '::1') return true;      // unspecified, loopback

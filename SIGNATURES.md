@@ -180,3 +180,13 @@ public commit with a stated reason.
 - @PrinceGarth | 2026-09-18 | id:279495077 | src:https://github.com/career-ops-hq/career-ops/discussions/4294 | n:132
 - @abirislam910 | Abir Islam | 2026-09-19 | "The hiring process needs to be revolutionized, plain and simple" | id:68037470 | src:https://github.com/career-ops-hq/career-ops/discussions/4327 | n:133
 - @Hoodliife | 2026-09-20 | "Smooth like butta" | id:239451005 | src:https://github.com/career-ops-hq/career-ops/discussions/4344 | n:134
+- @bravely | Jake Demarest-Mays | 2026-09-23 | id:301293 | src:https://github.com/career-ops-hq/career-ops/discussions/4424 | n:135
+- @samayoade10 | 2026-09-24 | "I want to explore the best way to find opportunities that ordinarily I won’t look at exploring." | id:42525188 | src:https://github.com/career-ops-hq/career-ops/discussions/4447 | n:136
+- @JAYPHARMA | 2026-09-27 | id:187297453 | src:https://github.com/career-ops-hq/career-ops/discussions/4512 | n:137
+- @michelle-toftely | 2026-09-27 | "I want hiring to become an evaluation of capability and future impact, rather than a checklist of historical titles." | id:334648826 | src:https://github.com/career-ops-hq/career-ops/discussions/4520 | n:138
+- @juanpabloescamilla-ing | 2026-09-28 | "Si puede servir para encontar un empleo mejor, me parece una interesante practica" | id:321902910 | src:https://github.com/career-ops-hq/career-ops/discussions/4568 | n:139
+- @faizhameed | Faiz Hameed | 2026-09-30 | id:41015883 | src:https://github.com/career-ops-hq/career-ops/discussions/4637 | n:140
+- @sec-js | 2026-09-30 | id:54868859 | src:https://github.com/career-ops-hq/career-ops/discussions/4654 | n:141
+- @nguyentuanngoc21 | 2026-10-01 | "I am trying with it, it looks good" | id:82352476 | src:https://github.com/career-ops-hq/career-ops/discussions/4662 | n:142
+- @Krandheer | Randheer | 2026-10-02 | id:37265128 | src:https://github.com/career-ops-hq/career-ops/discussions/4712 | n:143
+- @JohnFScha | John F. | 2026-10-05 | "We need more tools like this, long live OSS" | id:115885102 | src:https://github.com/career-ops-hq/career-ops/discussions/4775 | n:144

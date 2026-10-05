@@ -2,6 +2,8 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
+import { countryName } from './_country.mjs';
 
 // Agentic Engineering Jobs provider — queries the site's public, documented
 // REST API instead of scraping HTML. The previous scraper parsed
@@ -51,22 +53,9 @@ function assertAgenticUrl(url) {
   return url;
 }
 
-const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
-
-/**
- * Resolve a two-letter ISO country code to an English name. Returns '' for
- * anything that isn't a resolvable two-letter code. Exported for tests.
- * @param {unknown} code
- */
-export function countryName(code) {
-  if (typeof code !== 'string' || !/^[A-Za-z]{2}$/.test(code)) return '';
-  try {
-    const name = regionNames.of(code.toUpperCase());
-    return name && name !== code.toUpperCase() ? name : '';
-  } catch {
-    return '';
-  }
-}
+// countryName lives in _country.mjs (shared with gem.mjs); re-exported here
+// because this provider's tests import it from this module.
+export { countryName };
 
 /**
  * Strip tags (dropping script/style content entirely) and decode entities,
@@ -155,13 +144,12 @@ export default {
   },
 
   async fetch(_entry, ctx) {
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const jobs = [];
     const seen = new Set();
     let total = null;
 
     for (let page = 1; page <= MAX_PAGES; page++) {
-      if (page > 1) await wait(PAGE_DELAY_MS);
+      if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       const url = assertAgenticUrl(`${API_BASE}/jobs?page=${page}`);
       const json = await ctx.fetchJson(url, { redirect: 'error', headers: { accept: 'application/json' } });
       // A missing/non-array `data` is a response-shape change, not a legitimate

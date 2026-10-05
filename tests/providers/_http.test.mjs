@@ -1,18 +1,12 @@
-// tests/providers/_http.test.mjs — direct coverage of isRetryableError() and
-// fetchJsonWithRetry(), previously only exercised indirectly through
-// consumer providers' tests.
-//
-// Main case: a refused redirect (redirect:'error' meeting a 3xx — mandatory
-// on every provider, #1440) surfaces as a bare TypeError with no .status, the
-// same shape as a transient network error, but it's deterministic and must
-// NOT be retried.
+// tests/providers/_http.test.mjs — direct coverage for the shared HTTP layer
+// (providers/_http.mjs).
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 console.log('\nProvider — _http retry helpers');
 
-const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse } =
+const { isRetryableError, isRefusedRedirectError, fetchJsonWithRetry, fetchResponse, fetchResponseWithRetry, makeHttpCtx, sleep } =
   await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
 
 // isRetryableError() — status-based classification.
@@ -37,11 +31,17 @@ if (isRetryableError(new Error('network down')) === true) {
   fail('isRetryableError(generic no-status network error) should be true');
 }
 
-// The refused-redirect shape: a bare TypeError with err.cause.message set to
-// undici's REDIRECT_REFUSAL_CAUSE_MESSAGE (see providers/_http.mjs). Hardcoded
-// here rather than imported — the whole point of pinning it is to catch a
-// typo/drift in the production constant, not compare it to itself. Must be
-// classified as non-retryable, unlike a plain network error above.
+// A redirect refused by the mandatory SSRF guard — redirect:'error' meeting a
+// 3xx (#1440) — arrives as a bare TypeError with no .status, indistinguishable
+// by shape from a timeout or a DNS failure; only err.cause.message tells them
+// apart. It's deterministic, so it must NOT be retried — unlike the plain
+// network error just above.
+//
+// undici's message for that case is pinned as REDIRECT_REFUSAL_CAUSE_MESSAGE in
+// providers/_http.mjs. Hardcoded here rather than imported — pinning it catches
+// a typo/drift in the production constant instead of comparing it to itself, so
+// a Node/undici bump that changes the wording fails loudly here instead of
+// silently reverting to over-retrying.
 const UNEXPECTED_REDIRECT_CAUSE_MESSAGE = 'unexpected redirect';
 const redirectRefusal = Object.assign(new TypeError('fetch failed'), {
   cause: { message: UNEXPECTED_REDIRECT_CAUSE_MESSAGE },
@@ -168,6 +168,17 @@ if (isRefusedRedirectError(transportFailure) === false) {
     const empty = await fetchResponse('https://example.com/empty');
     if (empty.status === 204) pass('fetchResponse() handles null-body statuses (204) without throwing');
     else fail(`fetchResponse() 204 wrong: status=${empty.status}`);
+
+    // Stateful providers must be able to inspect a manual redirect and
+    // validate Location themselves. This exercises the production makeHttpCtx
+    // path rather than a provider-local fake that returns 302 directly.
+    stub(null, { status: 302, headers: { location: '/session/bootstrap', 'set-cookie': 'PSJSESSIONID=abc' } });
+    const redirected = await makeHttpCtx().fetchResponse('https://example.com/start', { redirect: 'manual' });
+    if (redirected.status === 302 && redirected.headers.get('location') === '/session/bootstrap') {
+      pass("makeHttpCtx().fetchResponse exposes redirect:'manual' responses for validated provider hop handling");
+    } else {
+      fail(`makeHttpCtx().fetchResponse manual redirect wrong: status=${redirected.status} location=${redirected.headers.get('location')}`);
+    }
   } catch (e) {
     fail(`fetchResponse() threw: ${e.message}`);
   } finally {
@@ -205,5 +216,119 @@ if (isRefusedRedirectError(transportFailure) === false) {
     fail(`manual-redirect test threw: ${e.message}`);
   } finally {
     globalThis.fetch = realFetch;
+  }
+}
+
+// The default redirect policy is the SSRF guard's second half (#4079): the
+// ip guard checks the host that was asked for, and only redirect:'error'
+// stops a 3xx from pointing the follow-up request somewhere else. It has to
+// be the default, not something every provider remembers to pass.
+{
+  const { fetchText, fetchJson } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  const realFetch = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), redirect: init?.redirect });
+    return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    await fetchText('https://example.test/list');
+    await fetchJson('https://example.test/api');
+    await fetchText('https://example.test/legacy', { redirect: 'follow' });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  if (seen.length === 3 && seen[0].redirect === 'error' && seen[1].redirect === 'error') {
+    pass("fetchText/fetchJson default to redirect:'error'");
+  } else {
+    fail(`fetchText/fetchJson should default to redirect:'error' — got ${JSON.stringify(seen)}`);
+  }
+  if (seen[2]?.redirect === 'follow') pass("an explicit redirect option still passes through");
+  else fail(`explicit redirect:'follow' should pass through — got ${JSON.stringify(seen[2])}`);
+}
+
+// ── sleep() ─────────────────────────────────────────────────────────────────
+// The ctx-aware delay every provider's inter-page pacing now routes through.
+// Exercised indirectly by each provider's "paces between pages" assertion, but
+// those only see the ctx.sleep branch; the setTimeout fallback and the
+// bad-clock guard have no other coverage.
+{
+  // No ctx at all — the setTimeout fallback path must still resolve.
+  try {
+    await sleep(0);
+    pass('sleep(0) with no ctx resolves via the setTimeout fallback');
+  } catch (e) {
+    fail(`sleep(0) with no ctx threw: ${e.message}`);
+  }
+
+  // A ctx clock is called with exactly the ms value and nothing else.
+  {
+    /** @type {any[]} */
+    let args = null;
+    await sleep(42, { sleep: (...a) => { args = a; return Promise.resolve(); } });
+    if (args && args.length === 1 && args[0] === 42) {
+      pass('sleep(ms, ctx) forwards ms to ctx.sleep and passes no other argument');
+    } else {
+      fail(`sleep() called ctx.sleep with ${JSON.stringify(args)}`);
+    }
+  }
+
+  // A ctx whose `sleep` is not a function is ignored — fall back, don't throw.
+  try {
+    await sleep(0, { sleep: 'not-a-fn' });
+    pass('sleep() ignores a non-function ctx.sleep and takes the fallback');
+  } catch (e) {
+    fail(`sleep() with a non-function ctx.sleep threw: ${e.message}`);
+  }
+}
+
+// ── fetchResponseWithRetry() ────────────────────────────────────────────────
+// Same policy as fetchJsonWithRetry, over ctx.fetchResponse instead of
+// ctx.fetchJson — added for peoplesoft.mjs, which needs Set-Cookie off a
+// retried request, not just the parsed body.
+{
+  let calls = 0;
+  const okResponse = new Response('<html></html>', { status: 200 });
+  const ctx = {
+    fetchResponse: async () => {
+      calls++;
+      if (calls < 3) {
+        const err = new Error('HTTP 503 Service Unavailable');
+        err.status = 503;
+        throw err;
+      }
+      return okResponse;
+    },
+    sleep: async () => {},
+  };
+  const res = await fetchResponseWithRetry(ctx, 'https://example.com/psc/x', {}, { retries: 3, baseDelayMs: 1, maxDelayMs: 10 });
+  if (res === okResponse && calls === 3) {
+    pass('fetchResponseWithRetry() retries a 5xx and returns the eventual successful Response');
+  } else {
+    fail(`fetchResponseWithRetry() retry: calls=${calls}, res===okResponse=${res === okResponse}`);
+  }
+}
+
+{
+  // A non-retryable status (403) must not be retried at all.
+  let calls = 0;
+  const ctx = {
+    fetchResponse: async () => {
+      calls++;
+      const err = new Error('HTTP 403 Forbidden');
+      err.status = 403;
+      throw err;
+    },
+    sleep: async () => {},
+  };
+  try {
+    await fetchResponseWithRetry(ctx, 'https://example.com/psc/x', {}, { retries: 3, baseDelayMs: 1, maxDelayMs: 10 });
+    fail('fetchResponseWithRetry() should rethrow on a 403');
+  } catch (e) {
+    if (calls === 1 && e?.status === 403) {
+      pass('fetchResponseWithRetry() does not retry a 403 (non-transient)');
+    } else {
+      fail(`fetchResponseWithRetry() 403 handling wrong: calls=${calls}, status=${e?.status}`);
+    }
   }
 }
