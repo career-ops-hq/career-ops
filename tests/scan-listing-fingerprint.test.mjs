@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail } from './helpers.mjs';
 import { computeListingFingerprint } from '../listing-fingerprint.mjs';
-import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl } from '../scan.mjs';
+import { isOfferSeen, loadDedupSnapshot, markOfferSeen, formatScanHistoryRow, collectSeenUrls, retainVerifiedListingIdentities, migrateOfferToUrl, refreshListingKey } from '../scan.mjs';
 
 console.log('\nscan.mjs — listing fingerprint participates in scan dedup');
 
@@ -131,6 +131,17 @@ try {
     if (migrated.previousUrl === first.url && !('listingIdentity' in migrated) && !('listingKey' in migrated)) {
       pass('rediscovered URLs do not inherit the source posting identity');
     } else fail('a rediscovered URL inherited unresolved source identity fields');
+
+    const malformedProviderIdentity = {
+      ...first,
+      listingIdentity: { ats_provider: 'greenhouse', board_slug: 'acme' },
+      listingKey: 'provider-supplied-stale-key',
+    };
+    refreshListingKey(malformedProviderIdentity);
+    if (malformedProviderIdentity.listingKey === ''
+        && formatScanHistoryRow(malformedProviderIdentity, '2026-10-03').endsWith('\t')) {
+      pass('an invalid provider identity clears a stale listing_key before history output');
+    } else fail('an invalid provider identity leaked a stale listing_key into history output');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

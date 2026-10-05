@@ -2785,6 +2785,17 @@ export function listingIdentityToken(offer) {
   }
 }
 
+/**
+ * Replace any provider-supplied listing key with the key derived from the
+ * validated identity, or clear it when the identity is incomplete/malformed.
+ * The scanner calls this before a job can reach history output.
+ */
+export function refreshListingKey(offer) {
+  const token = listingIdentityToken(offer);
+  offer.listingKey = token ? token.slice('listing:'.length) : '';
+  return token;
+}
+
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
   const urlToken = normalizeUrlForDedup(offer?.url);
   const identityToken = listingIdentityToken(offer);
@@ -3938,8 +3949,7 @@ async function main() {
 
       const declaredFields = normalizeFilterOn(company.filter_on);
       for (const job of jobs) {
-        const listingToken = listingIdentityToken(job);
-        job.listingKey = listingToken ? listingToken.slice('listing:'.length) : '';
+        const listingToken = refreshListingKey(job);
         // #3438. Presence accounting only — no verdict, no rejection. It runs
         // before every filter below, including the blacklist skip, because it
         // answers "does this provider publish this field at all", which no
