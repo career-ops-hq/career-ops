@@ -549,37 +549,41 @@ test('followup-seed: seeds follow-ups under its own lock while the tracker lock 
 
     let stdout = '';
     let stderr = '';
-    const child = startNode([join(ROOT, 'followup-seed.mjs'), '1', '--json'], {
-      cwd: ROOT,
-      env: {
-        ...process.env,
-        CAREER_OPS_TRACKER: tracker,
-        CAREER_OPS_FOLLOWUPS: followups,
-        CAREER_OPS_FOLLOWUPS_LOCK: followupsLockDir,
-        CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS: '20',
-        CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '3000',
-        // Short enough that a followup-seed which DID reach for the shared
-        // tracker lock would time out and fail loudly inside the harness wait,
-        // instead of hanging until the suite's own timeout.
-        CAREER_OPS_TRACKER_LOCK: trackerLockDir,
-        CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '500',
-        CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
-    child.stdin.end();
-    const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
-    let result = await Promise.race([closePromise, deadline(HARNESS_WAIT_MS).then(() => null)]);
-    if (result === null) {
-      child.kill('SIGKILL');
-      result = await closePromise;
+    let result;
+    try {
+      const child = startNode([join(ROOT, 'followup-seed.mjs'), '1', '--json'], {
+        cwd: ROOT,
+        env: {
+          ...process.env,
+          CAREER_OPS_TRACKER: tracker,
+          CAREER_OPS_FOLLOWUPS: followups,
+          CAREER_OPS_FOLLOWUPS_LOCK: followupsLockDir,
+          CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS: '20',
+          CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS: '3000',
+          // Short enough that a followup-seed which DID reach for the shared
+          // tracker lock would time out and fail loudly inside the harness
+          // wait, instead of hanging until the suite's own timeout.
+          CAREER_OPS_TRACKER_LOCK: trackerLockDir,
+          CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '500',
+          CAREER_OPS_TRACKER_LOCK_RETRY_MS: '20',
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
+      child.stdin.end();
+      const closePromise = new Promise(resolve => child.once('close', code => resolve({ code })));
+      result = await Promise.race([closePromise, deadline(HARNESS_WAIT_MS).then(() => null)]);
+      if (result === null) {
+        child.kill('SIGKILL');
+        result = await closePromise;
+      }
+    } finally {
+      // Released only after the child is done, so "completed" means
+      // "completed while the tracker lock was held by someone else" — and
+      // released even when starting or waiting on the child throws.
+      lock.release();
     }
-
-    // Released only after the child is done, so "completed" means "completed
-    // while the tracker lock was held by someone else".
-    lock.release();
 
     const after = readFileSync(tracker, 'utf-8');
     const trackerUntouched = after === lockedContent && statSync(tracker).mtimeMs === lockedMtimeMs;
