@@ -14,6 +14,28 @@ import { extractRefs, prFromQueueRef, renderBody, resolveDependsOn } from '../.g
 // Regenerate with `GITHUB_TOKEN=... node tests/record-fixtures.mjs`.
 const FIXTURES = JSON.parse(readFileSync(new URL('./fixtures/rendered-bodies.json', import.meta.url), 'utf8'));
 
+/** The value of a single-quoted JS string literal, given its inner text. */
+function literalValue(raw) {
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] !== '\\') { out += raw[i]; continue; }
+    const c = raw[i + 1];
+    i += 1;
+    if (c === 'n') out += '\n';
+    else if (c === 't') out += '\t';
+    else if (c === 'r') out += '\r';
+    else if (c === '0') out += '\0';
+    else if (c === 'u' && raw[i + 1] === '{') {
+      const end = raw.indexOf('}', i + 2);
+      out += String.fromCodePoint(parseInt(raw.slice(i + 2, end), 16));
+      i = end;
+    } else if (c === 'u') { out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 5), 16)); i += 4; }
+    else if (c === 'x') { out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 3), 16)); i += 2; }
+    else out += c;
+  }
+  return out;
+}
+
 /** What the check returns for a Markdown body, offline. */
 function refs(body, self = null) {
   if (typeof body !== 'string' || !body.trim()) return [];
@@ -493,7 +515,7 @@ test('every Markdown case in this suite has a recorded fixture', () => {
   const src = readFileSync(new URL('./depends-on.test.mjs', import.meta.url), 'utf8');
   const missing = [];
   for (const m of src.matchAll(/\brefs\('((?:[^'\\]|\\.)*)'/g)) {
-    const body = JSON.parse(`"${m[1].replace(/"/g, '\\"')}"`);
+    const body = literalValue(m[1]);
     if (typeof body === 'string' && body.trim() && FIXTURES[body] === undefined) missing.push(body);
   }
   assert.deepEqual(missing, [], 'run node tests/record-fixtures.mjs');

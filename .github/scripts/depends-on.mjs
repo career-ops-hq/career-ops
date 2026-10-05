@@ -55,6 +55,18 @@ const holdsBlock = (inner) => [...inner.matchAll(ANY_TAG)].some((m) => !INLINE.h
 // later blocks in it, and that wrapper is kept so its declarations survive, but a
 // genuine fence inside it must still be removed or a documented example becomes a
 // declaration.
+// Repeatedly, for the same reason as code: one pass over `<!--<!-- x -->` leaves a
+// bare `<!--` behind, so a later `-->` pairs with it and swallows the text between.
+function stripComments(html) {
+  let out = html;
+  for (let i = 0; i < 8; i += 1) {
+    const next = out.replace(COMMENT, '');
+    if (next === out) return out;
+    out = next;
+  }
+  return out;
+}
+
 function stripCode(html) {
   let out = html;
   for (let i = 0; i < 8; i += 1) {
@@ -108,7 +120,7 @@ function textOf(html) {
   return decodeEntities(
     html
       .replace(/[\s\S]*/, stripCode)
-      .replace(COMMENT, '')
+      .replace(/[\s\S]*/, stripComments)
       .replace(/<br\s*\/?>\n?/gi, '\n')
       .replace(INLINE_RUN, (run, before, after) => (/[A-Za-z]/.test(before) && /[A-Za-z]/.test(after) ? before + after : `${before} ${after}`))
       .replace(TAG, (m, name) => (INLINE.has(name.toLowerCase()) ? ' ' : '\n'))

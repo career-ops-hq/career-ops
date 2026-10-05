@@ -23,13 +23,35 @@ const REPO = process.env.GITHUB_REPOSITORY || 'career-ops-hq/career-ops';
 // a recorder that misses one records nothing for it, which the suite then reports
 // as a missing fixture rather than silently passing. Over-recording a handful of
 // unused entries is the cheap direction.
+/** The value of a single-quoted JS string literal, given its inner text. */
+function literalValue(raw) {
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] !== '\\') { out += raw[i]; continue; }
+    const c = raw[i + 1];
+    i += 1;
+    if (c === 'n') out += '\n';
+    else if (c === 't') out += '\t';
+    else if (c === 'r') out += '\r';
+    else if (c === '0') out += '\0';
+    else if (c === 'u' && raw[i + 1] === '{') {
+      const end = raw.indexOf('}', i + 2);
+      out += String.fromCodePoint(parseInt(raw.slice(i + 2, end), 16));
+      i = end;
+    } else if (c === 'u') { out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 5), 16)); i += 4; }
+    else if (c === 'x') { out += String.fromCharCode(parseInt(raw.slice(i + 1, i + 3), 16)); i += 2; }
+    else out += c;
+  }
+  return out;
+}
+
 const src = fs.readFileSync(SUITE, 'utf8');
 const bodies = new Set();
 for (const m of src.matchAll(/'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"/g)) {
   const raw = m[1] ?? m[2];
   if (raw === undefined) continue;
   let text;
-  try { text = JSON.parse(`"${raw.replace(/\\'/g, "'").replace(/"/g, '\\"')}"`); } catch { continue; }
+  try { text = literalValue(raw); } catch { continue; }
   if (text.trim()) bodies.add(text);
 }
 
