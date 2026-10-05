@@ -321,6 +321,30 @@ try {
     }
   }
 
+  // A transient /xml failure is retried before the feed is given up on.
+  {
+    const calls = [];
+    const jobs = await personio.fetch(
+      { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
+      {
+        fetchText: async (url) => {
+          calls.push(url);
+          if (!url.includes('/xml')) return htmlSample;
+          if (calls.filter(u => u.includes('/xml')).length === 1) {
+            const err = new Error('HTTP 503'); err.status = 503; throw err;
+          }
+          return sample;
+        },
+        sleep: async () => {},
+      },
+    );
+    if (calls.filter(u => u.includes('/xml')).length === 2 && jobs.length === 2) {
+      pass('personio.fetch() retries a transient /xml failure');
+    } else {
+      fail(`personio.fetch() /xml retry: calls=${JSON.stringify(calls)} jobs=${jobs.length}`);
+    }
+  }
+
   // fetch() re-throws non-404 errors from the /xml feed (no silent fallback).
   try {
     await personio.fetch(

@@ -167,13 +167,14 @@ export default {
 
     const feedUrl = assertPersonioUrl(`https://${host}/xml${languageQuery(language)}`);
     try {
-      const text = await ctx.fetchText(feedUrl, { redirect: 'error' });
+      const text = await fetchTextWithRetry(ctx, feedUrl, { redirect: 'error' });
       return parsePersonioXml(text, entry.name, host);
     } catch (err) {
+      // A 404 is never retried, so it arrives here on the first attempt.
       if (err?.status !== 404) throw err;
       // Some tenants disable the public XML feed; the careers page still links
       // every job in its initial HTML.
-      const html = page ?? await ctx.fetchText(careersPageUrl(host, language), { redirect: 'error' });
+      const html = page ?? await fetchTextWithRetry(ctx, careersPageUrl(host, language), { redirect: 'error' });
       return parsePersonioHtml(html, entry.name, host);
     }
   },
