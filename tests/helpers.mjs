@@ -4,7 +4,7 @@
 import { execFileSync } from 'child_process';
 import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, dirname } from 'path';
+import { basename, join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { isNestedCheckout } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
@@ -445,6 +445,36 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
 }
 
 /**
+ * Directory of the installation of `pkgName` that Node's bare-specifier lookup
+ * would find from `fromDir`, or null when there is none.
+ *
+ * Walks the same way Node does: `<dir>/node_modules/<pkgName>` for `fromDir`
+ * and then each ancestor up to the filesystem root, nearest first, skipping any
+ * `<dir>` that is itself named `node_modules` (Node never looks for
+ * `node_modules/node_modules`). A candidate counts only if it holds a
+ * package.json, so an empty or half-removed directory is not mistaken for an
+ * installation. Walked by hand rather than through
+ * `require.resolve('<pkg>/package.json')`, which a package's `exports` map is
+ * allowed to refuse.
+ *
+ * @param {string} pkgName - Package name, scoped names included (`@scope/name`).
+ * @param {string} [fromDir=ROOT] - Directory the lookup starts from.
+ * @returns {string|null} The package directory, or null if not installed.
+ */
+export function findInstalledPackage(pkgName, fromDir = ROOT) {
+  let dir = resolve(fromDir);
+  for (;;) {
+    if (basename(dir) !== 'node_modules') {
+      const candidate = join(dir, 'node_modules', pkgName);
+      if (existsSync(join(candidate, 'package.json'))) return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
  * Make one of the repo's own dependencies resolvable from a sandbox Node cannot
  * reach `ROOT/node_modules` from.
  *
@@ -466,16 +496,23 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
  * beside the `playwright` stub each sandbox already writes there -- makes the
  * sandbox self-sufficient wherever it physically lives.
  *
+ * The package is taken from wherever Node would resolve it for the repo, not
+ * from `ROOT/node_modules` specifically. A git worktree (for example one under
+ * `.claude/worktrees/<name>`) usually has no `node_modules` of its own: the
+ * scripts under test import fine there because Node walks up into the main
+ * checkout's `node_modules`, so insisting on `ROOT/node_modules` failed every
+ * suite that links a package while the code it tests resolved without trouble.
+ *
  * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
- * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
+ * @param {string} pkgName - Package name, as it would be imported from the repo root.
  * @returns {string} Path to the package as seen from inside the sandbox.
  */
 export function linkRepoPackage(sandboxDir, pkgName) {
-  const source = join(ROOT, 'node_modules', pkgName);
   const dest = join(sandboxDir, 'node_modules', pkgName);
   if (existsSync(dest)) return dest;
-  if (!existsSync(source)) {
-    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
+  const source = findInstalledPackage(pkgName);
+  if (source === null) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed in any node_modules from ${ROOT} upward -- run npm install`);
   }
   mkdirSync(dirname(dest), { recursive: true });
   try {
