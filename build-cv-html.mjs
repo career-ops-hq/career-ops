@@ -40,6 +40,7 @@ import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,7 +49,7 @@ const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
-const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PROFILE_PATH = resolve(DATA_ROOT, 'config', 'profile.yml');
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -400,12 +401,15 @@ function buildExperience(entries, partial) {
       const location = e.location
         ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
         : '';
+      const context = e.context
+        ? `\n    <div class="job-context">${escapeHtml(e.context)}</div>`
+        : '';
       return `<div class="job">
     <div class="job-header">
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
     </div>
-    <div class="job-role">${escapeHtml(e.role)}</div>${location}
+    <div class="job-role">${escapeHtml(e.role)}</div>${context}${location}
     <ul>
 ${bullets}
     </ul>
@@ -420,12 +424,14 @@ ${bullets}
       : '';
     const blockValues = new Map([
       ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''), present: Boolean(e.location) }],
+      ['CONTEXT_BLOCK', { value: escapeHtml(e.context || ''), present: Boolean(e.context) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       COMPANY: escapeHtml(e.company || ''),
       PERIOD: escapeHtml(e.dates || e.period || ''),
       ROLE: escapeHtml(e.role || ''),
       LOCATION: escapeHtml(e.location || ''),
+      CONTEXT: escapeHtml(e.context || ''),
       BULLETS: bullets,
     }, blockValues);
   }).join('\n  ');
@@ -473,7 +479,25 @@ function buildProjects(entries, partial) {
     const nameHtml = url
       ? `<a href="${url}">${nameText}</a>`
       : nameText;
-    return fillEntry(entryTemplate, blocks, {
+    // A bullets array with 2+ items and no description renders one DESC_BLOCK
+    // per bullet, matching how experience renders one <li> per bullet, instead
+    // of joining them into a single block.
+    let entryBlocks = blocks;
+    const multi = !e.description && Array.isArray(e.bullets)
+      ? e.bullets.filter(Boolean) : [];
+    const descBlock = blocks.get('DESC_BLOCK');
+    if (multi.length > 1 && descBlock) {
+      // The expanded block is scanned again by fillEntry, so encode braces in
+      // the bullet text: a literal {{DESC}} must render as text, not be treated
+      // as a template reference.
+      const literalBraces = (t) => escapeHtml(t).replace(/\{/g, '&#123;').replace(/\}/g, '&#125;');
+      const present = multi
+        .map(b => descBlock.present.replace(/\{\{(DESC_BLOCK|DESC)\}\}/g, () => literalBraces(b)))
+        .join('\n  ');
+      entryBlocks = new Map(blocks);
+      entryBlocks.set('DESC_BLOCK', { ...descBlock, present });
+    }
+    return fillEntry(entryTemplate, entryBlocks, {
       NAME:  nameHtml,
       BADGE: escapeHtml(e.badge || ''),
       DESC:  escapeHtml(descText),
@@ -670,10 +694,21 @@ function buildPhoto(candidate, name) {
   return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
+// Professional title / headline under the name (candidate.title). An ATS reads
+// this first to place the candidate ("Backend Engineer" vs "Accountant"); a CV
+// with no title forces the reader to infer the role. Empty/absent → no element,
+// so a payload without a title renders byte-identical to before.
+function buildTitle(candidate) {
+  const title = candidate && candidate.title != null ? String(candidate.title).trim() : '';
+  return title ? `<div class="header-title">${escapeHtml(title)}</div>` : '';
+}
+
 function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
-  const pageWidth = PAGE_WIDTHS[payload.page_format] || PAGE_WIDTHS.letter;
+  // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
+  // the same resolver rather than each keeping a fallback of their own.
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
@@ -714,6 +749,14 @@ function renderHtml(template, payload, templatePath) {
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+  // Captures the placeholder's own leading newline + indentation so an empty
+  // title drops the whole line — matching just the token (as every other
+  // {{PLACEHOLDER}} above does) would leave a blank line where the token sat,
+  // which is not byte-identical to a template that never had the slot
+  // (CodeRabbit, #3763). With a title, the indentation is reused verbatim so
+  // output is unchanged from the token-only replace this replaces.
+  const titleBlock = buildTitle(candidate);
+  html = html.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
@@ -874,6 +917,7 @@ async function runSelfTest() {
       company: 'Test Corp',
       role: 'Test Engineer',
       location: 'Remote',
+      context: 'Seed-stage startup; joined as employee #7.',
       dates: 'June 2024 - Present',
       bullets: [
         'Built automated testing pipelines with CI/CD integration',
@@ -1014,8 +1058,53 @@ async function runSelfTest() {
     console.error('Self-test failed: job-location block not rendered when location is present');
     process.exit(1);
   }
+  if (!html.includes('class="job-context"') || !html.includes('Seed-stage startup; joined as employee #7.')) {
+    console.error('Self-test failed: job-context block not rendered when context is present');
+    process.exit(1);
+  }
+  // context sits directly under the role, ahead of the location, on both paths:
+  // the section partial and the built-in builder (templates with no sections/).
+  const contextDiv = '<div class="job-context">Seed-stage startup; joined as employee #7.</div>';
+  for (const [path, out] of [['partial', html], ['built-in', buildExperience(sample.experience)]]) {
+    const [role, context, location] = ['class="job-role"', contextDiv, 'class="job-location"'].map(s => out.indexOf(s));
+    if (role === -1 || !(role < context && context < location)) {
+      console.error(`Self-test failed: ${path} builder did not render job-context between the role and the location`);
+      process.exit(1);
+    }
+  }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
+    process.exit(1);
+  }
+
+  // Guard that a project's bullets array renders one DESC_BLOCK per bullet
+  // (2+ bullets, no description), while a plain description stays a single block.
+  const multiBulletHtml = renderHtml(template, {
+    ...sample,
+    projects: [{ name: 'Multi', bullets: ['First bullet', 'Second bullet', 'Third bullet'] }],
+  }, TEMPLATE_PATH);
+  // Literal placeholder text inside a bullet must render as text, not be
+  // re-read as a template reference (which would fail as an unresolved marker).
+  let literalHtml;
+  try {
+    literalHtml = renderHtml(template, {
+      ...sample,
+      projects: [{ name: 'Literal', bullets: ['Uses {{DESC}} syntax', 'Also {{DESC_BLOCK}} here'] }],
+    }, TEMPLATE_PATH);
+  } catch (err) {
+    console.error(`Self-test failed: literal placeholder text in a project bullet: ${err.message}`);
+    process.exit(1);
+  }
+  if (!literalHtml.includes('&#123;&#123;DESC&#125;&#125;') || !literalHtml.includes('&#123;&#123;DESC_BLOCK&#125;&#125;')) {
+    console.error('Self-test failed: literal placeholders in project bullets were not preserved');
+    process.exit(1);
+  }
+  if ((multiBulletHtml.match(/class="project-desc"/g) || []).length !== 3) {
+    console.error('Self-test failed: project bullets did not render one block per bullet');
+    process.exit(1);
+  }
+  if ((html.match(/class="project-desc"/g) || []).length !== 1) {
+    console.error('Self-test failed: project description should render as a single block');
     process.exit(1);
   }
 
@@ -1036,6 +1125,10 @@ async function runSelfTest() {
   }
   if (noLocHtml.includes('class="job-location"')) {
     console.error('Self-test failed: job-location block rendered when location is absent');
+    process.exit(1);
+  }
+  if (noLocHtml.includes('class="job-context"') || buildExperience(noLocSample.experience).includes('class="job-context"')) {
+    console.error('Self-test failed: job-context block rendered when context is absent');
     process.exit(1);
   }
   if (noLocHtml.includes('class="edu-location"')) {

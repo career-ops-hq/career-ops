@@ -18,6 +18,7 @@ import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const MIN_SECTIONS = 4;
 
@@ -253,15 +254,36 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
   return report;
 }
 
+// ── CLI flags + help ──────────────────────────────────────
+
+const KNOWN_FLAGS = ['--compile-only', '--help', '-h'];
+
+const USAGE = `Usage:
+  node generate-latex.mjs <input.tex> [output.pdf]                 # validate career-ops template structure, then compile
+  node generate-latex.mjs <input.tex> [output.pdf] --compile-only  # skip template validation; compile any user-owned .tex (latex-tex mode)
+  node generate-latex.mjs --help|-h                                # print this usage block and exit
+
+Requires tectonic (preferred) or pdflatex on PATH.`;
+
 async function main() {
   const rawArgs = process.argv.slice(2);
+
+  // Before the positional reads below: every argv token that is not
+  // --compile-only is consumed as a PATH, so an unrecognized flag does not
+  // fall through to a default, it silently becomes a filename. `--help`
+  // landed in args[0] and was resolved as the input .tex ("Error reading
+  // /…/--help: ENOENT"), and a mistyped `--compileonly` landed in args[1]
+  // as the OUTPUT path while template validation it meant to skip ran anyway.
+  // This is the defect lib/cli-flags.mjs was written for; see its header.
+  validateFlags(rawArgs, KNOWN_FLAGS, USAGE);
+
   const compileOnly = rawArgs.includes('--compile-only');
   const args = rawArgs.filter(a => a !== '--compile-only');
   const inputPath = args[0];
   const outputPath = args[1];
 
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--compile-only]');
+    console.error(USAGE);
     process.exit(1);
   }
 

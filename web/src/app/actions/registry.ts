@@ -11,8 +11,8 @@
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { Job } from "@/components/jobs/job-store";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { formatBatchSpendConfirmation, requiresBatchSpendConfirmation } from "@/lib/run-cost-estimate.mjs";
 
-export const AUTO_FIRE_MAX = 3; // fire ≤3 evaluations silently; confirm above that
 export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 
 // Canonical states (templates/states.yml) — the web validates against the same set.
@@ -39,6 +39,7 @@ export type ActionCtx = {
   inbox: InboxJob[];
   applications: Application[]; // tracker snapshot — resolve #n → company/role for confirms
   jobForUrl: (url: string) => Job | undefined; // skip-if-done / retry logic
+  estimateCost?: (kind: string, count: number) => { tokens?: number; usd?: number };
   rememberFact: (fact: string) => void;
   writeStatus: (n: string, status: string) => void; // UPDATE-only writeback via /api/status
   setApplyField: (idOrLabel: string, value: string) => void; // edit an apply-proxy answer
@@ -204,10 +205,11 @@ const ACTIONS: Record<string, ActionDef> = {
         return { jobIds: ids, batchId };
       };
 
-      if (pending.length <= AUTO_FIRE_MAX) return { status: "done", ...fire() };
+      if (!requiresBatchSpendConfirmation(pending.length)) return { status: "done", ...fire() };
+      const estimate = ctx.estimateCost?.("evaluate", pending.length) ?? {};
       return {
         status: "confirm",
-        summary: `Evaluate ${pending.length} ${company} postings? (~${pending.length} worker${pending.length > 1 ? "s" : ""})`,
+        summary: formatBatchSpendConfirmation(`Evaluate ${pending.length} ${company} postings`, pending.length, estimate),
         run: fire,
       };
     },

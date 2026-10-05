@@ -14,6 +14,8 @@ sections: all
     --font-family: "Liberation Sans", "Helvetica Neue", Arial, "DejaVu Sans", sans-serif;
     --font-size: 11px;
     --page-margin: 0.6in;
+    /* #3242: unchanged default — this template has always kept a role whole. */
+    --job-break-inside: avoid;
   }
   @page { margin: var(--page-margin); }
 
@@ -59,6 +61,17 @@ sections: all
     color: #1a1a2e;
     letter-spacing: -0.02em;
     margin-bottom: 6px;
+    line-height: 1.2;
+  }
+
+  .header-title {
+    font-family: var(--font-family);
+    font-size: 14px;
+    font-weight: 600;
+    color: #2c3e50;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
     line-height: 1.2;
   }
 
@@ -317,10 +330,15 @@ sections: all
   .edu-item,
   .cert-item,
   .competency-item,
-  .skill-item,
-  .job {
+  .skill-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    page-break-inside: var(--job-break-inside, avoid);
+    break-inside: var(--job-break-inside, avoid);
   }
 
   .section-title,
@@ -346,6 +364,7 @@ sections: all
   }
 
   html[lang="ar"] .header h1,
+  html[lang="ar"] .header-title,
   html[lang="ar"] .section-title,
   html[lang="ar"] .job-company,
   html[lang="ar"] .project-title,
@@ -362,6 +381,7 @@ sections: all
   }
 
   html[lang="ja"] .header h1,
+  html[lang="ja"] .header-title,
   html[lang="ja"] .section-title,
   html[lang="ja"] .job-company,
   html[lang="ja"] .project-title,
@@ -384,6 +404,7 @@ sections: all
   }
 
   html[lang="zh-CN"] .header h1,
+  html[lang="zh-CN"] .header-title,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
   html[lang="zh-CN"] .project-title,
@@ -391,6 +412,7 @@ sections: all
   html[lang="zh-CN"] .competency-item,
   html[lang="zh-CN"] .skill-category,
   html[lang="zh"] .header h1,
+  html[lang="zh"] .header-title,
   html[lang="zh"] .section-title,
   html[lang="zh"] .job-company,
   html[lang="zh"] .project-title,
@@ -413,6 +435,7 @@ sections: all
   }
 
   html[lang="ko"] .header h1,
+  html[lang="ko"] .header-title,
   html[lang="ko"] .section-title,
   html[lang="ko"] .job-company,
   html[lang="ko"] .project-title,
@@ -435,6 +458,7 @@ sections: all
   }
 
   html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .header-title,
   html[lang="zh-TW"] .section-title,
   html[lang="zh-TW"] .job-company,
   html[lang="zh-TW"] .project-title,
@@ -465,6 +489,7 @@ sections: all
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>

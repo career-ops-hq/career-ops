@@ -148,6 +148,19 @@ try {
     fail(`auditCompanies drifted: ${JSON.stringify(rows.map((r) => [r.name, r.verdict]))}`);
   }
 
+  let observedMaxPages;
+  const cappedProvider = {
+    id: 'capped',
+    detect: () => ({ url: 'x' }),
+    fetch: async (_entry, ctx) => { observedMaxPages = ctx.maxPages; return []; },
+  };
+  await auditCompanies(
+    [{ name: 'Capped Co', careers_url: 'https://example.com/capped', enabled: true }],
+    { providers: new Map([['capped', cappedProvider]]), concurrency: 1 },
+  );
+  if (observedMaxPages === 1) pass('auditCompanies() passes its page cap to providers');
+  else fail(`expected maxPages=1, got ${JSON.stringify(observedMaxPages)}`);
+
   // A provider that throws must degrade to `error`, never take the run down.
   const angry = { id: 'angry', detect: () => ({ url: 'x' }), fetch: async () => { throw new Error('429 Too Many Requests'); } };
   const errRows = await auditCompanies(
