@@ -9,6 +9,7 @@ import {
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
+import { currentConnectionScope } from './_connection-scope.mjs';
 import { normalizeUrl } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
@@ -129,15 +130,21 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // rather than a transport error. curl on the same URL returns the full
     // ~900KB. Callers can still override via `headers`.
     if (!requestHeaders.has('accept-encoding')) requestHeaders.set('accept-encoding', 'gzip, deflate, br');
+    // A sweep runs each board inside withConnectionScope() so its sockets are
+    // released when the board is done (see _connection-scope.mjs). The scope
+    // brings its own fetch: undici's Agent is only safe with undici's fetch.
+    // A trusted-proxy dispatcher, when configured, still takes precedence,
+    // together with the fetchImpl proxyFor() paired it with.
+    const scope = dispatcher ? undefined : currentConnectionScope();
     let res;
     try {
-      res = await fetchImpl(url, {
+      res = await (scope ? scope.fetch : fetchImpl)(url, {
         method,
         headers: requestHeaders,
         body,
         redirect,
         signal: controller.signal,
-        dispatcher,
+        dispatcher: dispatcher ?? scope?.agent,
       });
     } catch (err) {
       if (!dispatcher && ['ENOTFOUND', 'EAI_AGAIN'].includes(err?.cause?.code)
