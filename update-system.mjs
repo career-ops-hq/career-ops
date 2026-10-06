@@ -434,6 +434,18 @@ export const SYSTEM_PATHS = [
   'batch/aggregate-tokens.mjs',
   'batch/README.md',
   'utils/token-tracker.mjs',
+  // Zero-token redirect-chain resolver: walks 3xx location headers to the real
+  // ATS destination without a browser. Registered beside token-tracker.mjs
+  // because utils/ is not a SYSTEM_DIRS prefix in verify-repo-hygiene.mjs, so
+  // nothing under it is claimed by directory. validate-system-paths-coverage
+  // enumerates tracked files only, so an unregistered entry stays invisible
+  // until the first commit and then fails the coverage gate.
+  // NOTE: this comment deliberately contains NO quote characters of either
+  // kind. updater-migration-tests.mjs extractArray() pulls every quoted run
+  // out of the array body as if it were an entry, so an apostrophe or a
+  // double quote anywhere in a comment shifts the pairing and silently drops
+  // real entries — the failure shows up later as unrelated missing-path errors.
+  'utils/url-resolver.mjs',
   'batch-tailor.mjs',
   'dashboard/',
   'templates/',

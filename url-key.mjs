@@ -39,7 +39,14 @@
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
 // names are absent.
-const TRACKING_PARAMS = [
+//
+// Exported because utils/url-resolver.mjs needs the SAME denylist to clean a
+// resolved destination URL. Two copies of this list would drift the first time
+// either was edited, and the two consumers disagreeing about what identifies a
+// click is the exact failure this module's header warns about. Exporting does
+// not change normalizeUrl's behaviour: this is an additive exposure of an
+// existing module-local constant.
+export const TRACKING_PARAMS = [
   /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i,
   /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i, /^trk$/i, /^trackingid$/i,
 ];
