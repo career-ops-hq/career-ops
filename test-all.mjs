@@ -5641,6 +5641,23 @@ try {
     fail(`tracker writers bypass shared transaction scope: ${unsafeWriters.join(', ')}`);
   }
 
+  // The dashboard must use the same canonical writer as the CLI. Keep this
+  // boundary check beside the root-writer contract so a future UI refactor
+  // cannot silently reintroduce a direct tracker mutation that skips the
+  // shared lock, lifecycle ledger, or follow-up transaction.
+  const dashboardWriter = readFile('dashboard/internal/data/status_writer.go');
+  const runWriterStart = dashboardWriter.indexOf('func runStatusWriter(');
+  const runWriterBody = runWriterStart === -1 ? '' : dashboardWriter.slice(runWriterStart);
+  const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
+    && runWriterBody.includes('exec.CommandContext')
+    && runWriterBody.includes('"--report-link"')
+    && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
+  if (delegatesToCanonicalWriter) {
+    pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
+  } else {
+    fail('dashboard status writer bypasses the shared set-status transaction scope');
+  }
+
 } catch (e) {
   fail(`tracker writer lock contract tests crashed: ${e.message}`);
 }

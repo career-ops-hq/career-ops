@@ -103,11 +103,11 @@ import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname, resolve, sep, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
+import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  rebuildRow, resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState,
   normalizeCompany, cell, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli, resolveWorkspaceRoot,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -140,12 +140,16 @@ const { OK: EXIT_OK, USAGE: EXIT_USAGE, NOT_FOUND: EXIT_NOT_FOUND, AMBIGUOUS: EX
 const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--on YYYY-MM-DD] [--force] [--dry-run] [--json]
        node set-status.mjs --row N <state> [...]        (explicit tracker row ID)
        node set-status.mjs --report N <state> [...]     (explicit report ID)
+       node set-status.mjs --report-link N <state> [...] (strict Report-cell identity)
 
   <report#|company>  Row selector: tracker # (exact) or company name (normalized match)
   <state>            Canonical state from templates/states.yml (aliases accepted)
   --row N            Select by tracker # explicitly (unambiguous; skips the mismatch guard)
   --report N         Select the row whose Report cell links report #N
+  --report-link N    Select an exact numeric Report link; reject malformed cells
+                     and unknown current states (used by the dashboard)
   --note "..."       Append to the Notes cell ("; "-separated, idempotent)
+  --note=VALUE       Pass a literal note, including text beginning with --
   --replace-note "OLD" Replace whole OLD notes with --note text; fail if neither is present
   --role "..."       Disambiguate when several rows share the company (fuzzy match)
   --on YYYY-MM-DD    Real event date for the status-log entry (defaults to today —
@@ -204,8 +208,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, source: null, force: false, dryRun: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--source': 'source' };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, json: false };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -245,7 +249,9 @@ const WRITER_SOURCES = new Set(['set-status', 'web', 'reply-watch']);
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
-  if (a in VALUE_FLAGS) {
+  if (a.startsWith('--note=')) {
+    flags.note = a.slice('--note='.length);
+  } else if (a in VALUE_FLAGS) {
     // Never consume a following flag as the value: "--note --dry-run" would
     // silently disable dry-run and turn a preview into a real write.
     const value = rawArgs[i + 1];
@@ -254,7 +260,7 @@ for (let i = 0; i < rawArgs.length; i++) {
     }
     // --row/--report name a row by number; a non-numeric value is a typo, and
     // silently treating it as "no match" would hide the mistake.
-    if ((a === '--row' || a === '--report') && !/^\d+$/.test(value)) {
+    if ((a === '--row' || a === '--report' || a === '--report-link') && !/^\d+$/.test(value)) {
       failUsage(`${a} expects a positive integer, got "${value}"`);
     }
     if (a === '--source' && !WRITER_SOURCES.has(value)) {
@@ -277,16 +283,16 @@ if (flags.replaceNote !== null && (!cell(flags.replaceNote) || flags.note === nu
 // --row and --report ARE the selector, so they replace the positional one.
 // Accepting both would leave two competing answers to "which row?"; refuse
 // rather than pick, since picking wrong writes to the wrong application.
-if (flags.row !== null && flags.report !== null) {
-  failUsage('--row and --report are mutually exclusive — they name different number spaces');
+if ([flags.row, flags.report, flags.reportLink].filter(value => value !== null).length > 1) {
+  failUsage('--row, --report and --report-link are mutually exclusive selectors');
 }
-const explicitSelector = flags.row !== null || flags.report !== null;
+const explicitSelector = flags.row !== null || flags.report !== null || flags.reportLink !== null;
 
 if (explicitSelector) {
   if (positional.length !== 1) {
     failUsage(positional.length === 0
-      ? `Expected the state after ${flags.row !== null ? '--row' : '--report'}`
-      : `With ${flags.row !== null ? '--row' : '--report'} the only positional argument is the state, got ${positional.length}`);
+      ? `Expected the state after ${flags.row !== null ? '--row' : flags.report !== null ? '--report' : '--report-link'}`
+      : `With ${flags.row !== null ? '--row' : flags.report !== null ? '--report' : '--report-link'} the only positional argument is the state, got ${positional.length}`);
   }
 } else if (positional.length !== 2) {
   failUsage(positional.length === 0 ? null : `Expected 2 arguments (selector, state), got ${positional.length}`);
@@ -415,6 +421,26 @@ function resolveCandidates(matches, { notFound, ambiguous }) {
  * @returns {object} The single matched row. Exits the process on 0 or 2+ matches.
  */
 function resolveRow(rows) {
+  // --report-link is the dashboard's strict identity selector: only the
+  // dedicated Report cell may identify the row, and every candidate must have
+  // exactly one well-formed link. References in Notes or malformed cells are
+  // rejected instead of being skipped in favour of another row.
+  if (flags.reportLink !== null) {
+    const matches = [];
+    for (const row of rows) {
+      const links = [...String(row.report ?? '').matchAll(/\[(\d+)\]\(([^)]+)\)/g)];
+      if (!links.some(link => link[1] === flags.reportLink)) continue;
+      if (links.length !== 1 || links[0][0] !== String(row.report ?? '').trim()) {
+        failWith(EXIT_AMBIGUOUS, 'malformed-report', `Malformed Report cell for report #${flags.reportLink}: expected exactly one report link`);
+      }
+      matches.push(row);
+    }
+    return resolveCandidates(matches, {
+      notFound: `No tracker row has Report link #${flags.reportLink}`,
+      ambiguous: () => `Report #${flags.reportLink} occurs in multiple tracker rows`,
+    });
+  }
+
   // --report N: resolve through the Report cell, which is the number space a
   // caller reading a report filename actually has in hand.
   if (flags.report !== null) {
@@ -474,12 +500,19 @@ try {
   failWith(EXIT_NOT_FOUND, 'read-failure', `Cannot read tracker at ${APPS_FILE}: ${err.message}`);
 }
 const lines = content.split('\n');
-const colmap = resolveColumns(lines);
+const parseOptions = { allowTabs: true, allowIndentation: true };
+const colmap = resolveColumns(lines, parseOptions);
 
 const rows = [];
 for (let i = 0; i < lines.length; i++) {
-  const row = parseTrackerRow(lines[i], colmap);
+  const row = parseTrackerRow(lines[i], colmap, parseOptions);
   if (row) rows.push({ ...row, lineIdx: i });
+  else if (flags.reportLink !== null && colmap.report != null) {
+    const report = splitTrackerCells(lines[i])[colmap.report] ?? '';
+    if ([...String(report).matchAll(/\[(\d+)\]\(([^)]+)\)/g)].some(link => link[1] === flags.reportLink)) {
+      failWith(EXIT_AMBIGUOUS, 'malformed-row', `Tracker row linking report #${flags.reportLink} has missing cells`);
+    }
+  }
 }
 if (rows.length === 0) {
   failWith(EXIT_NOT_FOUND, 'empty-tracker', `Tracker at ${APPS_FILE} has no data rows`);
@@ -589,7 +622,16 @@ if (flags.role && !flags.force && !roleMatchesTarget) {
   );
 }
 const oldStatus = target.status;
-const note = flags.note != null ? cell(flags.note) : null;
+if (flags.reportLink !== null && !resolveCanonicalState(oldStatus, states)) {
+  failWith(EXIT_USAGE, 'invalid-current-state', `Tracker #${target.num} has an unrecognized current status: "${oldStatus}"`);
+}
+const rawLine = lines[target.lineIdx];
+const separator = trackerRowSeparator(rawLine);
+// A tab is a cell delimiter in a legacy TSV row. Neutralize tabs only there;
+// in a pipe table they remain ordinary note text.
+const note = flags.note != null
+  ? cell(separator === '\t' ? flags.note.replace(/\t/g, ' ') : flags.note)
+  : null;
 
 // ── advisory session-activity claim (#4532) ──────────────────────
 //
@@ -641,17 +683,31 @@ const replacedNote = flags.replaceNote !== null ? cell(flags.replaceNote) : null
 try {
   // Rebuild only the matched line: change the Status cell, append the note, keep
   // every other cell exactly as parsed.
-  const parts = lines[target.lineIdx].split('|').map(s => s.trim());
+  const parts = splitTrackerCells(rawLine);
   while (parts.length <= Math.max(colmap.status, colmap.notes ?? 0)) parts.push('');
 
-  statusChanged = parts[colmap.status] !== newStatus;
-  parts[colmap.status] = newStatus;
+  const replaceCellValue = (index, value) => {
+    const original = parts[index] ?? '';
+    const trimmed = original.trim();
+    if (trimmed) {
+      const start = original.indexOf(trimmed);
+      parts[index] = original.slice(0, start) + value + original.slice(start + trimmed.length);
+    } else if (original.length >= 2) {
+      const half = Math.floor(original.length / 2);
+      parts[index] = original.slice(0, half) + value + original.slice(half);
+    } else {
+      parts[index] = ` ${value} `;
+    }
+  };
+
+  statusChanged = parts[colmap.status].trim() !== newStatus;
+  if (statusChanged) replaceCellValue(colmap.status, newStatus);
 
   if (note) {
     if (colmap.notes == null) {
       failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
     }
-    const existing = parts[colmap.notes] ?? '';
+    const existing = (parts[colmap.notes] ?? '').trim();
     if (replacedNote !== null) {
       // Use the same whole-note boundaries as append idempotency. Prefer the
       // longer complete span so NEW containing OLD (including "; ") is not
@@ -667,7 +723,7 @@ try {
       if (!found) {
         failWith(EXIT_USAGE, 'replace-note-not-found', 'Neither --replace-note nor --note matches a whole note in the Notes cell');
       }
-      parts[colmap.notes] = updated;
+      replaceCellValue(colmap.notes, updated);
       noteChanged = updated !== existing;
     } else {
       // Delimiter-aware idempotency: the note counts as already present only when
@@ -681,14 +737,20 @@ try {
         || existing.endsWith(`; ${note}`)
         || existing.includes(`; ${note}; `);
       if (!hasNote) {
-        parts[colmap.notes] = existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note;
+        replaceCellValue(colmap.notes, existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note);
         noteChanged = true;
       }
     }
   }
 
   if ((statusChanged || noteChanged) && !flags.dryRun) {
-    lines[target.lineIdx] = rebuildRow(parts);
+    if (separator === '\t') {
+      const closing = rawLine.trimEnd().endsWith('|');
+      lines[target.lineIdx] = parts[0] + '|' + parts.slice(1, closing ? -1 : undefined).join('\t')
+        + (closing ? '|' + parts.at(-1) : '');
+    } else {
+      lines[target.lineIdx] = parts.join('|');
+    }
     try {
       writeFileAtomic(APPS_FILE, lines.join('\n'));
     } catch (err) {
