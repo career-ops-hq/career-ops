@@ -42,7 +42,7 @@ try {
     const pipelinePath = join(root, 'pipeline.md');
     const applicationsPath = join(root, 'applications.md');
     writeFileSync(historyPath,
-      'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key\n'
+      'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n'
       + `${rows[0]}\n`);
     writeFileSync(pipelinePath, '# Pipeline\n\n## Pending\n\n## Processed\n');
     writeFileSync(applicationsPath, '');
@@ -57,8 +57,8 @@ try {
     // A recheck TTL releases an old added row only when its pipeline item is
     // complete. An actionable item still pins both its URL and listing key.
     const staleUrl = 'https://boards.greenhouse.io/acme/jobs/4012345';
-    const staleHistory = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key\n'
-      + `${staleUrl}\t2026-08-01\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote\t\t\t\t\tacme\t${expectedKey}\n`;
+    const staleHistory = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n'
+      + `${staleUrl}\t2026-08-01\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote\t\t\t\t\tacme\t\t\t${expectedKey}\n`;
     const pendingPipeline = `# Pipeline\n\n## Pending\n- [ ] ${staleUrl}\n\n## Processed\n`;
     const staleSources = collectSeenUrls({ scanHistoryText: staleHistory, pipelineText: pendingPipeline },
       { recheckAfterDays: 1, today: '2026-10-03' },
@@ -90,7 +90,7 @@ try {
     // URL-specific failures still pin only that URL and cannot promote an ATS
     // key onto aliases.
     const blocked = collectSeenUrls({
-      scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\tskipped_blocked_host\tRemote\t\t\t\t\tacme\t${expectedKey}\n`,
+      scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\tskipped_blocked_host\tRemote\t\t\t\t\tacme\t\t\t${expectedKey}\n`,
     }, {}, { extraTokensFor: (_url, _portal, key) => key ? `listing:${key}` : null });
     if (blocked.seen.has(acceptedUrl) && !blocked.seen.has(`listing:${expectedKey}`)
         && !isOfferSeen(alias, blocked.seen, blocked.identityPromotableUrls)) {
@@ -99,7 +99,7 @@ try {
 
     for (const status of ['skipped_expired', 'skipped_no_apply_control']) {
       const rejected = collectSeenUrls({
-        scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\t${status}\tRemote\t\t\t\t\tacme\t${expectedKey}\n`,
+        scanHistoryText: `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key\n${acceptedUrl}\t2026-10-03\tgreenhouse\tStaff Engineer\tAcme\t${status}\tRemote\t\t\t\t\tacme\t\t\t${expectedKey}\n`,
       }, {}, { extraTokensFor: (_url, _portal, key) => key ? `listing:${key}` : null });
       if (rejected.seen.has(acceptedUrl) && !rejected.seen.has(`listing:${expectedKey}`)
           && !isOfferSeen(alias, rejected.seen, rejected.identityPromotableUrls)) {
