@@ -20,7 +20,9 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { atsVendorOf } from './ats-vendor.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -40,6 +42,11 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'top_strengths',
   'risk_level',
   'confidence',
+  // Evidence states and unresolved checks behind the existing confidence tier.
+  // Preserved for report consumers; historical outcome analysis does not use
+  // them to change the Global Score or calibration rates.
+  'score_evidence',
+  'confidence_gaps',
   'next_action',
   // Optional context fields accepted for future reports.
   'domain',
@@ -256,6 +263,17 @@ export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
   };
 }
 
+// Vendor outcome analysis intentionally stays on the five URL-fingerprintable
+// community ATS families it has always reported. The shared detector knows
+// more providers for scan routing, but those do not widen this analysis.
+const VENDOR_ANALYSIS_SCOPE = Object.freeze(['greenhouse', 'lever', 'ashby', 'workday', 'icims']);
+
+/** Keep vendor analysis inside its declared taxonomy, not arbitrary hosts. */
+export function knownAtsVendorOf(rawUrl) {
+  const vendor = atsVendorOf(rawUrl);
+  return VENDOR_ANALYSIS_SCOPE.includes(vendor) ? vendor : null;
+}
+
 // Statuses that count as a submitted application for channel-yield analysis.
 // 'evaluated' was never sent, 'skip' is self-filtered, and 'discarded' (withdrawn
 // or the posting closed) proves neither a submission nor an answer — the same
@@ -285,7 +303,7 @@ function normalizeScalar(value) {
   return null;
 }
 
-function parseMachineSummary(content) {
+export function parseMachineSummary(content) {
   const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
 
@@ -523,14 +541,15 @@ requirement_importance:
     ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
     ['https://careers.icims.com/jobs/9/x', 'icims'],
-    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
+    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', 'dayforce'],
+    ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['not a url', null],
     ['', null],
     [null, null],
   ];
   for (const [url, expected] of vendorCases) {
-    const got = detectVendor(url);
-    if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    const got = atsVendorOf(url);
+    if (got !== expected) failures.push(`atsVendorOf(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
 
   // Report header fields survive the locale they were written in. French output
@@ -1096,28 +1115,6 @@ function classifyRemote(raw) {
 // (which needs the full posting path to build an API URL) — a tracker report's
 // URL may point at a board/careers page, not a canonical posting.
 //
-// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
-// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
-// NOT detectable from the URL alone and are deferred until the community adds a
-// reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
-const VENDOR_HOST_PATTERNS = [
-  { id: 'greenhouse', test: (h) => /(^|\.)greenhouse\.io$/.test(h) },
-  { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
-  { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
-  { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
-  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
-];
-
-function detectVendor(rawUrl) {
-  if (!rawUrl || typeof rawUrl !== 'string') return null;
-  let u;
-  try { u = new URL(rawUrl.trim()); } catch { return null; }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-  const host = u.hostname.toLowerCase();
-  for (const v of VENDOR_HOST_PATTERNS) if (v.test(host)) return v.id;
-  return null;
-}
-
 // --- Classify company size ---
 function classifyCompanySize(teamSize) {
   if (!teamSize) return 'unknown';
@@ -1281,9 +1278,7 @@ function buildPatternSignals(enriched) {
 }
 
 // --- Main analysis ---
-function analyze() {
-  const entries = parseTracker();
-
+export function analyze(entries = parseTracker()) {
   if (entries.length === 0) {
     // noData marks this as the empty-tracker case rather than a failure, so the
     // exit status below does not have to match on the message text.
@@ -1328,7 +1323,7 @@ function analyze() {
       report: reportData,
       remoteBucket: classifyRemote(remoteSource),
       companySize: classifyCompanySize(teamSource),
-      vendor: detectVendor(reportData?.url),
+      vendor: knownAtsVendorOf(reportData?.url),
     };
   });
 
@@ -1436,7 +1431,7 @@ function analyze() {
 
   const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
   const vendorAnalysis = {
-    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
+    scope: [...VENDOR_ANALYSIS_SCOPE],
     minSampleForClaim: MIN_VENDOR_N,
     submitted: submitted.length,
     identified: identifiedCount,
@@ -1559,7 +1554,7 @@ function analyze() {
     metadata: {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
-      analysisDate: new Date().toISOString().split('T')[0],
+      analysisDate: localToday(),
       byOutcome,
       // The same rates as every breakdown row, over the whole tracker — the
       // one honest place to quote "X% of what I sent advanced".

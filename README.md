@@ -256,6 +256,12 @@ claude   # or codex / opencode / qwen / agy / grok
 
 </details>
 
+### Scanning through an outbound proxy
+
+Node's ordinary `fetch()` may ignore `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in a proxy-only sandbox. Provider requests can use those variables with `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. This uses a request-scoped proxy dispatcher; unrelated requests are unaffected, and `NO_PROXY` destinations still use the local private-address guard.
+
+Set this flag **only when the configured proxy itself blocks connections to private, loopback and metadata addresses**. When a proxy resolves the destination remotely, career-ops cannot verify that final address locally; the proxy must enforce that part of the SSRF boundary. Without this explicit trust setting, provider requests keep their normal direct transport and a DNS failure names the proxy setup needed. Proxy URLs containing credentials must use HTTPS; credential-free HTTP proxies remain supported. The flag requires Node.js 18.17 or newer. Existing installations keep direct transport after a system update; proxy environment variables alone do not enable it. Before enabling the flag, run `npm install` in the career-ops directory to install the added `undici` dependency. It is loaded only for an opted-in request with a configured proxy, so direct scanning continues to work even before that dependency is installed.
+
 ### Global install
 
 ```bash
@@ -288,7 +294,6 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops interview    → Interactive profile/CV onboarding interview
 /career-ops master-profile → Import, review, and validate your Master Career Profile
 /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
-/career-ops eu-fintech → Scan 21 EU fintech portals for Product Manager roles (zero-token)
 /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
 /career-ops interview/practice → Practice interview, one question at a time with feedback
 /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round

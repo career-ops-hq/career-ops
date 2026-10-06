@@ -288,7 +288,6 @@ career-ops utilise un routeur de commandes partagé. Dans les CLI qui enregistre
 /career-ops interview    → Entretien interactif d'intégration du profil et du CV
 /career-ops master-profile → Importer, relire et valider ton Master Career Profile
 /career-ops eu-swe    → Calibrer une candidature SWE européenne avant le CV, la candidature ou l'entretien
-/career-ops eu-fintech → Scanner 21 portails fintech européens pour des postes de Product Manager (sans tokens)
 /career-ops interview/plan → Plan de préparation par blocs de temps pour un entretien à venir
 /career-ops interview/practice → Entretien d'entraînement, une question à la fois avec retour
 /career-ops interview/debrief → Débrief après entretien : combler les lacunes, anticiper le prochain tour

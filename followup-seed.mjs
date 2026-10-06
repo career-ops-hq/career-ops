@@ -53,6 +53,7 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS   lock acquire timeout
  *   CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS     lock retry interval
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS     stale-lock recovery threshold
+ *   CAREER_OPS_OWNERLESS_GRACE_MS          ownerless-lock floor (pipeline-lock.mjs; shared, not per-script)
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';

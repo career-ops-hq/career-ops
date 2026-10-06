@@ -88,6 +88,21 @@ try {
     fail(`row 1 location = ${JSON.stringify(jobs[1]?.location)}, expected "Lagos, Lagos, NG, Remote"`);
   }
 
+  // A ready-made name without the country ("Seattle, WA") gets country.name
+  // folded in, so a location_filter.block on "United States" can see it.
+  const countryJobs = parseBreezyResponse([
+    {
+      name: 'Staff Engineer',
+      url: 'https://acme.breezy.hr/p/c0de-staff',
+      location: { name: 'Seattle, WA', city: 'Seattle', state: 'WA', country: { name: 'United States' }, is_remote: true },
+    },
+  ], 'Acme');
+  if (countryJobs[0]?.location === 'Seattle, WA, United States, Remote') {
+    pass('parseBreezyResponse appends country.name to a location.name that lacks it');
+  } else {
+    fail(`country-fold location = ${JSON.stringify(countryJobs[0]?.location)}, expected "Seattle, WA, United States, Remote"`);
+  }
+
   if (jobs[1]?.postedAt === undefined) {
     pass('parseBreezyResponse omits postedAt when published_date is absent');
   } else {

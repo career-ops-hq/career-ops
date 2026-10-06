@@ -288,7 +288,6 @@ career-ops używa wspólnego routera komend. W CLI, które rejestrują komendy s
 /career-ops interview    → Interaktywny wywiad wdrożeniowy o profilu i CV
 /career-ops master-profile → Zaimportuj, przejrzyj i zweryfikuj swój Master Career Profile
 /career-ops eu-swe    → Skalibruj europejską aplikację SWE przed CV, aplikacją lub rozmową
-/career-ops eu-fintech → Przeskanuj 21 europejskich portali fintech pod role Product Managera (bez tokenów)
 /career-ops interview/plan → Plan przygotowań w blokach czasowych na nadchodzącą rozmowę
 /career-ops interview/practice → Rozmowa ćwiczeniowa, jedno pytanie na raz z feedbackiem
 /career-ops interview/debrief → Podsumowanie po rozmowie: zamknij luki, przewidź następną rundę

@@ -27,6 +27,8 @@ version: 1.0.0
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
     --page-margin: 0.6in;
+    /* #3242: unchanged default — see templates/cv-template.html. */
+    --job-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -122,7 +124,8 @@ version: 1.0.0
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.14em;
+    /* Wide tracking splits section names in the PDF text layer. */
+    letter-spacing: 0.04em;
     color: var(--accent-color);
     border-bottom: 0.75px solid #c4ccd6;
     padding-bottom: 2px;
@@ -287,6 +290,12 @@ version: 1.0.0
   .skill-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    page-break-inside: var(--job-break-inside, auto);
+    break-inside: var(--job-break-inside, auto);
   }
 
   .section-title,

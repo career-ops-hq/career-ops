@@ -27,14 +27,18 @@ Before writing any user-visible prose, read `config/profile.yml` if it exists.
 
 - Resolve `language.output`; default to `en` when the key is absent.
 - `language.output` controls all human-facing output: report prose, report headings, tracker notes, PDF text, cover/application text if any, and final user-facing summaries.
-- `language.modes_dir`, when present, supplies market vocabulary and local evaluation rules only. It must not force the prose language.
+- `language.modes_dir`, when present, supplies market vocabulary and local evaluation rules only. It must not force the prose language. It may be a string or an ordered list of declared candidate markets; the first entry is primary for evaluation rules, while every declared market contributes shared context.
+- `modes` is a valid entry in that list for a target market with no localized directory. It counts as a declared candidate; when first, it uses `modes/oferta.md`, and its `modes/_shared.md` baseline is loaded only once.
 
 **Write all human-facing output in `language.output`, regardless of the language of this prompt or the job description.** Keep machine-readable field names exactly as specified. Keep market-specific terms from `language.modes_dir` when relevant, but explain them in `language.output` when needed.
 
 Examples:
 
 - `language.output: en` + `language.modes_dir: modes/de` → write the report in English, using DACH market concepts where relevant.
+- `language.output: en` + `language.modes_dir: [modes, modes/zh]` → keep English prose, load both shared contexts, and choose market concepts from the JD's jurisdiction, currency, benefits, and legal signals — not language alone.
 - Missing `language.output` → write in English.
+
+If the declared markets remain genuinely ambiguous after reviewing the JD, the behavior depends on the execution path: an interactive session asks the candidate and stops before writing or merging until they choose. This batch worker is unattended, so nobody can answer: continue with the first/primary market and state both the ambiguity and that fallback explicitly in the report header or Block G before writing the report and tracker entry.
 
 ---
 
@@ -313,8 +317,9 @@ Batch mode limitation: Playwright is not available, so exact apply-button state 
 13. **Pay-Transparency Range-Width Check** — pure arithmetic on the `advertised_comp` already parsed for Block B. Requires both bounds, one explicit and matching currency, an explicit period, and a normalized floor strictly above zero; anything missing or ambiguous → skip rather than guess. Flag when `top - bottom > 0.5 × bottom`, and say plainly that this is a general heuristic on the posting's own numbers, not a jurisdiction's legal threshold.
 14. **Minimum-Wage Lawyer Question** — only for a guaranteed fixed cash amount (never a range, never bonus, commission or benefits), and only when the JD's own stated work location names a jurisdiction — never the candidate's `location`. Convert to an hourly figure using the JD's stated hours, or disclose the 2080-hour fallback; missing hours or currency → skip. Report it as an `[ask your lawyer]` question. Never state, look up or compare a statutory minimum.
 15. **AI-Screening Disclosure** — two independent checks. (a) The JD discloses AI or automated screening: quote it, informational only, never a warning. (b) Corroborating-only, never standalone: the candidate's jurisdiction has a row in `templates/jurisdiction-ai-screening-disclosure.yml` whose condition their `location` string actually satisfies — a borough-level NYC string, not a state-level "New York" — its `effective` date is on or before the posting's own date (or today's date, only when the JD carries no clear date), and the JD shows no disclosure at all. State the statutory fact and the posting's silence side by side; silence is never evidence that disclosure did not happen.
+16. **Fixed-Term Contract Disclosure** — presence-based from JD text only. Flag explicit duration/disclosure wording (`18 month contract`, `6-month contract`, `fixed-term`, `fixed-term contract position`, `temporary position/role/assignment`, `term position`), quote it, and preserve any stated duration verbatim. A bare "contract" or unqualified `contract position` in customer contracts, contract management/law, or contractor-status text does not fire it. Keep this separate from Signal 6. Add a non-scoring note and an optional compensation-conversation prompt covering finite term, benefits, renewal and transition risk; never invent a percentage premium or market benchmark.
 
-Signals 1-5 and 7-9 set the tier. Signal 6 is `not evaluated` in batch, so it never feeds the tier either — it stays a descriptive, informational finding, as the Risk Summary already reports. Signals 10-15 never change the tier: report each one separately as its own finding, keep every one of them descriptive rather than assertive, and close them as informational, not legal advice.
+Signals 1-5 and 7-9 set the tier. Signal 6 is `not evaluated` in batch, so it never feeds the tier either — it stays a descriptive, informational finding, as the Risk Summary already reports. Signals 10-16 never change the tier: report each one separately as its own finding, keep every one of them descriptive rather than assertive, and close them as informational, not legal advice.
 
 Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence.
 
@@ -333,6 +338,7 @@ Batch rendering rules per row:
 | Culture screen | `— not evaluated` (batch Block A does not produce the Culture screen pass/caution/fail field) |
 | Interview red flags | If `interview-prep/{company-slug}-redflags.md` exists, mirror its warning level + relative link `[{level}](../interview-prep/{company-slug}-redflags.md)`; if not, `— no interview sessions yet` |
 | AI claims vs. infrastructure | If this prompt/report contains the AI/infrastructure mismatch check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); if not, `— not evaluated` |
+| Fixed-term contract | `ℹ️ fixed term — "{quoted phrase}"` when explicit fixed-term language is present; otherwise `✅ no fixed term disclosed` |
 
 Block format:
 
@@ -346,6 +352,7 @@ Block format:
 | Culture screen | — not evaluated |
 | Interview red flags | — no interview sessions yet |
 | AI claims vs. infrastructure | — not evaluated |
+| Fixed-term contract | ✅ no fixed term disclosed |
 ```
 
 #### Score Global
@@ -383,6 +390,12 @@ Provide a score table:
 
 Decide the Global Score once as the holistic judgment across these dimensions, applying any `modes/_custom.md` Scoring Rules. Do not average report blocks A–H. Copy the same value into the report header, Machine Summary `score`, and tracker addition; do not recalculate it at each write.
 
+#### Score Evidence
+
+The Machine Summary `confidence` is confidence in the **evidence behind this Global Score**, never a hiring probability. It does not change the score and is separate from Block G posting legitimacy and historical `/calibrate` conversion rates. After Risk Summary in the saved report, include `## Score Evidence`: one row each for CV match, North Star alignment, Compensation, Cultural signals, and Red flags, with status (`supported`, `partial`, `unknown`), a concrete source or observation, and an unresolved question. `supported` needs current JD text, primary candidate files, or a verifiable current source; `partial` means some direct evidence exists but a decision-relevant detail is incomplete or inferred; `unknown` means decision-relevant evidence is missing, contradictory, or stale. An unchecked dimension is not `supported`.
+
+Apply the tiers in order: **Low** if the JD is inaccessible or too incomplete to assess, CV match or North Star is `unknown`, a material work-eligibility or work-model contradiction remains unresolved, or at least two dimensions are `unknown`; otherwise **Medium** if any dimension is `partial`/`unknown` or a material question remains unresolved; otherwise **High** only if all five are `supported` with no material unresolved question. Add `**Evidence confidence:** {High | Medium | Low} — {main reason}` and up to three concrete verification priorities. Mirror the five statuses in `score_evidence` and the priorities in `confidence_gaps`; use `[]` when none remain. Never present the tier as a numeric probability or hide a missing input behind a neutral score. A usable JD with one missing detail can still be Medium; do not classify every omission as an incomplete JD.
+
 #### Machine Summary
 
 Create a machine-readable summary from the completed A-G evaluation and global score. Keep field names exact, use YAML, and do not add prose inside the fence.
@@ -402,6 +415,13 @@ top_strengths:
   - "{strength most relevant to this role}"
 risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
+score_evidence:
+  cv_match: "{supported | partial | unknown}"
+  north_star: "{supported | partial | unknown}"
+  compensation: "{supported | partial | unknown}"
+  culture: "{supported | partial | unknown}"
+  red_flags: "{supported | partial | unknown}"
+confidence_gaps: []
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
@@ -423,18 +443,20 @@ risk_summary:
   interview_redflags: "{none | caution | warning | not_evaluated}"
   ai_infra: "{consistent | mismatch | not_evaluated}"
   ai_screening_disclosure: "{disclosed | corroborating_only | no_match | not_evaluated}"
+  fixed_term: "{detected | not_detected | not_evaluated}"
 ```
 
 Rules:
-- Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, `discard_reasons`, or `requirement_importance` when empty.
+- Populate `confidence_gaps` with up to three non-empty strings naming the verification priorities; the examples show the empty form, `confidence_gaps: []`.
+- Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, `discard_reasons`, `requirement_importance`, or `confidence_gaps` when empty.
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
 - `reports_to` is the reporting line the JD itself states, in the JD's own wording; `null` when the JD names none — never infer it from the title, the team size, or company research. It records the seat's altitude, which the title alone does not: an IC seat reporting to a Head of Marketing and one reporting to the CEO are different roles.
-- Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
+- Do not invent missing data. Derive `confidence` from `score_evidence` using the Score Evidence tier rules above; the report's evidence table and `confidence_gaps` must explain the tier. Do not confuse it with `legitimacy_tier`.
 - `work_auth` reflects the Block A work-authorization tier: `no_sponsorship` only when the JD **explicitly** refuses sponsorship for a role outside the candidate's `authorized_in`; `unstated` when the JD is silent (neutral, not a blocker); `not_needed` when the role is within `authorized_in` or sponsorship isn't required; `sponsors` when the JD explicitly offers it.
 - `requirement_importance` mirrors Block B's table row by row — same rows, same verdicts, snake_cased. `evidence: stated` **requires** a non-null verbatim `jd_signal`; `jd_signal: null` is legal only for `structural` and `inferred`. `importance` is never `critical` or `high` when `evidence: inferred` — that is Block B's gate, machine-checkable here. `match` is `strong | partial | missing | na`, mirroring ✅ / ⚠️ / ❌ / ➖. Use `[]` when the JD yields no usable requirement list. No consumer reads this key yet; it is allowlisted so it round-trips.
-- `risk_summary` mirrors the `## Risk Summary` block row by row — same source verdicts, snake_cased: `legitimacy` from the Block G tier (`high_confidence` / `proceed_with_caution` / `suspicious`), `culture` from the Block A Culture screen (`pass` / `caution` / `fail`), `interview_redflags` from the red-flag file's warning level (`none` / `caution` / `warning`), `ai_screening_disclosure` from the Block G AI-screening disclosure signal (`disclosed` when the posting names AI/automated screening, `corroborating_only` when the jurisdiction requires disclosure and the posting is silent, `no_match` when the candidate's jurisdiction has no table row). Any row rendered `— not evaluated` (or `— no interview sessions yet`) is `not_evaluated` here. Never invent a value the block does not show.
+- `risk_summary` mirrors the `## Risk Summary` block row by row — same source verdicts, snake_cased: `legitimacy` from the Block G tier (`high_confidence` / `proceed_with_caution` / `suspicious`), `culture` from the Block A Culture screen (`pass` / `caution` / `fail`), `interview_redflags` from the red-flag file's warning level (`none` / `caution` / `warning`), `ai_screening_disclosure` from the Block G AI-screening disclosure signal (`disclosed` when the posting names AI/automated screening, `corroborating_only` when the jurisdiction requires disclosure and the posting is silent, `no_match` when the candidate's jurisdiction has no table row), and `fixed_term` from Signal 16 (`detected` / `not_detected`). Any row rendered `— not evaluated` (or `— no interview sessions yet`) is `not_evaluated` here. Never invent a value the block does not show.
 
 ### Step 3 — Save the Report
 
@@ -486,6 +508,13 @@ top_strengths:
   - "{strength most relevant to this role}"
 risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
+score_evidence:
+  cv_match: "{supported | partial | unknown}"
+  north_star: "{supported | partial | unknown}"
+  compensation: "{supported | partial | unknown}"
+  culture: "{supported | partial | unknown}"
+  red_flags: "{supported | partial | unknown}"
+confidence_gaps: []
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
@@ -507,6 +536,7 @@ risk_summary:
   interview_redflags: "{none | caution | warning | not_evaluated}"
   ai_infra: "{consistent | mismatch | not_evaluated}"
   ai_screening_disclosure: "{disclosed | corroborating_only | no_match | not_evaluated}"
+  fixed_term: "{detected | not_detected | not_evaluated}"
 ```
 ```
 
@@ -522,6 +552,7 @@ Then include:
 - `## F) Interview Plan`
 - `## G) Posting Legitimacy`
 - `## Risk Summary`
+- `## Score Evidence`
 - `## Extracted Keywords`
 
 Translate these human-facing headings according to `language.output` when it is not English. Keep `## Machine Summary`, the `## Job Description (archived verbatim)` heading, and the YAML keys exact for downstream parsers: `check-jd-archive.mjs` matches the archive heading by its literal English `## Job Description` prefix, so a translated heading reports a real archive as missing.

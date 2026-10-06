@@ -12,6 +12,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify` | `verify-pipeline.mjs` | Check pipeline data integrity |
 | `npm run normalize` | `normalize-statuses.mjs` | Fix non-canonical statuses |
 | `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
+| `npm run fix-report-links` | `fix-report-links.mjs` | Rewrite tracker Report cells whose link points at a missing file to `—` |
 | `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
 | `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
 | `npm run jd:similarity` | `jd-similarity.mjs` | Compare a new JD with a previous JD/CV and recommend reuse, edits, or regeneration |
@@ -24,11 +25,14 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
+| `node update-system.mjs status` | `update-system.mjs status` | Print installed version + short SHA |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
 | `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD; Greenhouse, Lever, Ashby and Workday postings are read from their public JSON endpoints instead of the client-rendered page, and an empty jd extraction exits 1 with `code: empty_text` |
 | `node fetch-jd.mjs <url>` | `fetch-jd.mjs` | JD text on stdout from a known ATS API (Greenhouse/Lever/Ashby/Workday) — exit 1 with empty stdout when the host has no JD-bearing API, so a caller falls back to its browser/WebFetch path |
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 | `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
+| `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by Task Scheduler) |
+| `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 | `npm run tracker` | `tracker.mjs` | SQLite derived index over applications.md — sync/query/history/export |
@@ -113,6 +117,21 @@ Creates a `.bak` backup before writing.
 
 ---
 
+## fix-report-links
+
+Repairs the rows `verify-pipeline.mjs` reports as `Report not found: ...` (Check 3). Rewrites **only** the Report cell of a row whose markdown link does not resolve to a regular file to `—`, the tracker's existing "no report" value. Every other cell, the row order, cell padding and the file's line endings (LF or CRLF) stay byte-for-byte as they were; nothing is re-sorted or re-formatted. "Broken" is decided by `findDeadReportLink()` in `tracker-utils.mjs` (the link is resolved from the tracker's directory, then from the data root; a directory is not a report), the same function `verify-pipeline.mjs` and `merge-tracker.mjs` use, so the tools always agree. The Report column is located by header name, so extra columns (`Via`, `URL`, `Location`) or aliased headers are fine; a tracker without a Report column is reported and left alone.
+
+```bash
+npm run fix-report-links             # apply changes
+npm run fix-report-links -- --dry-run  # list the rows (#, company, role, dead link), write nothing
+```
+
+A Report cell that is anything other than exactly one link (two links, or a link plus text) is never rewritten; it is listed under "skipped, please check by hand". Cells that are `—`, `N/A` or empty are left alone. Creates a `.bak` backup before writing and writes through the shared tracker lock. It does not guess why a report is missing and does not regenerate it. A second run changes nothing.
+
+**Exit codes:** `0` always (changes or no changes), `1` on an unknown flag or when the tracker lock cannot be acquired.
+
+---
+
 ## merge
 
 Merges batch tracker additions (`batch/tracker-additions/*.tsv`) into `applications.md`. Handles 9-column TSV, 8-column TSV, and pipe-delimited markdown formats. Detects duplicates by report number, entry number, and company+role fuzzy match. Higher-scored re-evaluations update existing entries in place.
@@ -141,7 +160,7 @@ add the column or otherwise change a legacy tracker's schema.
 
 Validates `portals.yml` before running the scanner. The validator is offline: it reads YAML, loads local provider IDs from `providers/*.mjs`, and checks common configuration mistakes without fetching any job boards.
 
-It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, and invalid local parser blocks. `tracked_companies` and `job_boards` entries are checked against the same schema, and their names share one namespace: a duplicate enabled name — within either list or across the two — is a warning (it may be intentional during a migration, but is worth reviewing).
+It reports errors for invalid YAML shape, unknown explicit providers, malformed URLs, empty filter keywords, invalid local parser blocks, and `field_filters` / `filter_on` declarations that would not filter (an unknown key, a block with no keyword, a `filter_on` naming a field with no block). `tracked_companies` and `job_boards` entries are checked against the same schema, and their names share one namespace: a duplicate enabled name — within either list or across the two — is a warning (it may be intentional during a migration, but is worth reviewing).
 
 ```bash
 npm run validate:portals
@@ -351,7 +370,7 @@ In targeted mode a local `--url-text` path is a **required** input, so it is rea
 
 ## salary-gap
 
-Folds compensation observations into per-application desired/advertised/actual values and gap aggregates. Sources: `reports/*.md` Machine Summary `advertised_comp` (advertised, source `jd` — historical reports backfill automatically), `data/salary-observations.tsv` (desired/actual/stated, append-only), and `config/profile.yml` `compensation.target_range` (desired default). Fold precedence: highest trust tier wins, then latest date (`actual`: contract > offer-letter > recruiter-verbal > user). Aggregates group by (company, role) and per currency — no FX conversion. Unparseable amounts, orphaned tracker numbers, sample sizes, and staleness are always reported.
+Folds compensation observations into per-application desired/advertised/actual values and gap aggregates. Sources: `reports/*.md` Machine Summary `advertised_comp` (advertised, source `jd` — historical reports backfill automatically), `data/salary-observations.tsv` (desired/actual/stated, append-only), and `config/profile.yml` `compensation.target_range` (desired default). Fold precedence: highest trust tier wins, then latest date (`actual`: contract > offer-letter > recruiter-verbal > user). Aggregates group by (company, role) and per currency — no FX conversion. Unparseable amounts, orphaned tracker numbers, mislabeled report links, sample sizes, and staleness are always reported.
 
 ```bash
 node salary-gap.mjs             # JSON
@@ -367,6 +386,10 @@ Observation line format (TSV, one per line, `#`-prefixed lines are comments):
 ```
 
 Amounts: number + optional k/K suffix, ranges allowed ("80-90k"), annual gross unless noted. Sources: jd | profile | user | recruiter-verbal | offer-letter | contract.
+
+**Column 1 is a tracker#, not a report#** (#4351). It is the `#` of the row in the active tracker file (`data/applications.md` in the default layout), and that row is where the observation's company and role come from. Do not read the number off a `reports/{###}-*.md` filename: those are two independent counters that diverge permanently once any row exists without a report — the same divergence `set-status.mjs` documents below — so on a diverged tracker `#5` and report 5 are different applications. To log a figure, find the application's tracker row and copy its `#`. Padding is not identity — `29` and `029` are the same tracker#, so either spelling matches, and a row that has no report at all still folds normally.
+
+A report's own `advertised_comp` reaches a row through that row's Report link, never by matching numbers, and the three ways that can be unclear are reported instead of guessed: an id that is both a tracker row and a different row's report (`ambiguousIds`), one report linked from several rows — a repost or a duplicate row, counted once on the first (`sharedReports`), and a Report link whose numeric label disagrees with the file it points at, e.g. `[5](../reports/006-globex-….md)` (`mislabeledReports` — the target is the report that gets joined, the label is only reported, so one row can never collect two companies' figures).
 
 **`stated` observations** are a narrower-purpose addition (#1852): a specific compensation number the candidate verbally committed to, in a specific interview round, to a specific interviewer — so a later round doesn't accidentally contradict it. `round` and `interviewer` are two optional trailing columns, meaningful only for `stated` rows (existing rows without them still parse — they default to `''`). `stated` observations carry no trust tier and never participate in the desired/advertised/actual fold or gap math; look them up with `getStatedObservations(observations, num)` or `--stated-for`. Interview-prep modes (`modes/interview/plan.md`, `modes/interview-prep.md`) check this before generating comp-related prep content — see their Inputs sections.
 
@@ -464,9 +487,47 @@ Contact line format (TSV, one per line, `#`-prefixed lines are comments):
 {name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}
 ```
 
-`type`: recruiter | hiring-manager | peer | interviewer | other — optional; when present it must be one of the enum, else it is flagged in `quality`. Only name + company are required (>= 4 cells); all channels are optional; `-` for the tracker number when the contact precedes an application. Lines are updated in place when a contact's details change — unlike the append-only salary log. If two lines resolve to the same generated UID (`careerops-{uidPart(name)}--{uidPart(company)}` — normally rows with the same name + company), the LAST one wins the `--vcf` export (JSON keeps all rows and reports the clash in `quality.duplicates`). Import: send the `.vcf` to your phone (AirDrop/email/messaging) and open it — iOS Contacts offers "Add All Contacts", Android imports via Contacts → Fix & manage → Import.
+`type`: recruiter | hiring-manager | peer | interviewer | internal-referral | other — optional; when present it must be one of the enum, else it is flagged in `quality`. `internal-referral` (#4691) is distinct from `peer`: `peer` assumes no prior relationship (do not ask for a job), `internal-referral` exists only because a real one already does (a past interviewer, or a contact saved from an earlier application at the same company) — see `contact-lookup.mjs` below and `modes/contacto.md`. Only name + company are required (>= 4 cells); all channels are optional; `-` for the tracker number when the contact precedes an application. Lines are updated in place when a contact's details change — unlike the append-only salary log. If two lines resolve to the same generated UID (`careerops-{uidPart(name)}--{uidPart(company)}` — normally rows with the same name + company), the LAST one wins the `--vcf` export (JSON keeps all rows and reports the clash in `quality.duplicates`). Import: send the `.vcf` to your phone (AirDrop/email/messaging) and open it — iOS Contacts offers "Add All Contacts", Android imports via Contacts → Fix & manage → Import.
 
 **Exit codes:** `0` always (an empty/missing store prints an explanatory message and writes no file), `1` self-test failure or a `--vcf` path escaping the project directory.
+
+## contact-lookup
+
+Saved-contact company lookup over `data/contacts.tsv`, run by the `contacto`
+mode (#4691) before any cold WebSearch — "do I already have a saved contact
+at this company?" A real prior relationship (a past interviewer, or a contact
+from an earlier, different-role application) is a far stronger outreach
+target than a fresh search, so a match is surfaced first and offered as an
+`internal-referral` ask. Matching is exact-key via `normalizeCompany()`
+(`tracker-utils.mjs`) — the same key `merge-tracker.mjs`/`set-status.mjs`/
+`company-history.mjs` use for same-company lookups — deliberately not
+`linkedin-join.mjs`'s fuzzy token matching, since `contacts.tsv`'s company
+column is normally written from the same string already in the tracker.
+
+```bash
+node contact-lookup.mjs --company "Acme"            # JSON: saved contacts at "Acme"
+node contact-lookup.mjs --company "Acme" --summary  # human-readable
+node contact-lookup.mjs --self-test
+```
+
+**Exit codes:** `0` on a successful lookup (including zero matches), `1` for a missing `--company`, self-test failure, or an unrecognized flag.
+
+## contact-extract
+
+Extract a recruiter or interviewer from a pasted reply, attach the contact to a
+matching tracker row, and create or update the corresponding name+company row
+in `data/contacts.tsv`. The script is local-only: it never sends a message and
+never changes application status. Without `--yes`, it asks before writing.
+
+```bash
+node contact-extract.mjs --file email.txt
+node contact-extract.mjs --file email.txt --company "Acme Inc" --tracker 42
+```
+
+The input format is `Subject:`, `From:`, a blank line, then the message body.
+Use `--type recruiter|hiring-manager|peer|interviewer|internal-referral|other` to override the
+inferred type. `--company` and `--tracker` are validated against the same
+tracker row, so a contact cannot be attached across companies.
 
 ---
 
@@ -568,8 +629,35 @@ Possible JSON responses:
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
 | `offline` | Could not reach GitHub |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release |
+| `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
+
+The `local` field in the JSON output stays a bare semver string (e.g., `"1.32.0"`). A separate `local_sha` field is provided alongside it when the install is a git checkout — containing the short commit SHA (e.g., `"ae919b6f"`). For tarball installs without git metadata, `local_sha` will be omitted. This lets a bug report identify the exact tree under test, not just the release name (two installs pulled days apart can share a version string while running different code — see #3203).
+
+**Exit codes:** `0` always.
+
+---
+
+## status
+
+Prints the installed version to stdout — a quick human-readable alternative to parsing `check` JSON.
+
+```bash
+node update-system.mjs status
+```
+
+Example output:
+
+```
+career-ops v1.32.0 (ae919b6f)
+```
+
+On a tarball install with no git metadata the short SHA is omitted:
+
+```
+career-ops v1.32.0
+```
 
 **Exit codes:** `0` always.
 
@@ -577,11 +665,13 @@ Possible JSON responses:
 
 ## update
 
-Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches the latest published release from the canonical repo (`--channel main`: main's tip instead), checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-layer files (`cv.md`, `config/profile.yml`, `data/`, etc.) are never touched.
+Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches the latest published release from the canonical repo (`--channel main`: main's tip instead), checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-owned files (`cv.md`, `config/profile.yml`, and files in `data/`, `reports/`, `output/`, and `jds/`) are preserved; only the exact system-owned `.gitkeep` scaffolds listed in `DATA_CONTRACT.md` may be replaced.
 
 ```bash
 npm run update
 ```
+
+**From a linked git worktree** (the default session layout of agents such as Claude Code), `check`, `update`, `rollback` and `dismiss` re-run themselves in the checkout that has `main` checked out, so the update is committed to `main` rather than the worktree's throwaway branch. Afterwards, `git merge main` inside the worktree picks it up. If no checkout has `main`, or that checkout has uncommitted changes to tracked files, `update` and `rollback` refuse without changing anything. Set `CAREER_OPS_UPDATE_IN_WORKTREE=1` to update the worktree's own branch instead.
 
 **Exit codes:** `0` success, `1` lock conflict or safety violation.
 
@@ -607,6 +697,8 @@ The LinkedIn rung reads the guest posting endpoint, which returns the rendered p
 
 Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the posting is live; Ashby's public API is org-level (the whole job board), so that rung parses the board and confirms the specific job id is still listed. A definitive 404/410 from any ATS API is authoritative and short-circuits the browser check entirely — zero tokens, no browser launch.
 
+Workday answers a withdrawn posting with a 403 whose body carries `errorCode: "S22"` ("permission denied"). That exact body is authoritative the same way a 404 is; any other 403 — a bot wall, or a different Workday error code — stays inconclusive and falls back to the browser.
+
 ```bash
 npm run liveness -- https://example.com/job/123
 npm run liveness -- https://a.com/job/1 https://b.com/job/2
@@ -631,16 +723,22 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 
 The location component is the canonical **set** of the places a posting names, not the provider's display string. That field is free text and is often not one place: live Greenhouse boards pack several into one value with `;`, `|`, `/` or the word `or`, sometimes mixing two separators in the same value, and several providers here (greenhouse, ashby, eightfold, gem, ibm, echojobs) fold a multi-site role's extra cities into the string themselves in whatever order the upstream array arrived. Keying that string verbatim is stable only while the order holds, so a re-ordered list would read as a new posting and re-enter the pipeline. Splitting on those separators, normalizing each place, deduplicating and sorting makes the key depend on which places a posting names rather than the order it names them in. `,` is not a separator - it delimits city from region inside one place.
 
+When a provider reads the employer's requisition id from a dedicated ATS field (`Job.requisitionId`, e.g. SmartRecruiters `refNumber`), company+role dedup uses it the way it uses a Workday requisition: two postings with one title but different requisitions stay two entries, while an unknown requisition on either side keeps the duplicate. The id is recorded in scan-history (`requisition_id`), and tracker and pipeline rows pick it up from the scan-history row with the same URL, so the check also holds across runs.
+
+`scan_history.dedup_include_language` (optional, opt-in, default off) keeps language versions of one posting apart. An employer can publish one requisition in more than one language (for example German and English) with the same title and location in each; off, the scan keeps whichever version the ATS returned first. On, two postings whose languages are both known (`Job.language`, recorded in scan-history's `language` column) and differ are not duplicates. A language code is reduced to its canonical language subtag with `Intl.Locale`, so `en-GB`, `en-US` and `en` are one language and so are `deu` and `de`; anything that isn't a language tag, such as a display name, is compared whole, ignoring case. Turn it on when you only apply to postings in some languages and discard the rest: the discarded version may otherwise be the one the scan kept. An unknown language on either side keeps the duplicate, so a provider that doesn't report a language behaves exactly as before.
+
 For custom SSR pages, configure a tracked company with `scan_method: local_parser` and a `parser` block. The parser can be written in JavaScript, Python, or any language available as a local executable. Company-specific parsers usually already know their source URL and only need to print JSON jobs to stdout:
 
 ```yaml
 parser:
   command: node
-  script: scripts/parsers/example-company-jobs.js
+  script: local/example-company-jobs.js
   format: jobs-json-v1
 ```
 
 Use `args` only for reusable parsers that intentionally accept runtime parameters such as `{careers_url}` or `{company}`.
+
+The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a parser you intend to upstream. See [local-parser-cookbook.md](local-parser-cookbook.md).
 
 If a parser writes full extraction artifacts for debugging or audit, store them under `data/parser-output/{company}/`. `scan.mjs` reads stdout and does not require those JSON files after parsing. Keep generated JSON artifacts out of git; `.gitkeep` placeholders are the only exception for preserving directory structure.
 
@@ -681,6 +779,14 @@ Defaults are unchanged, so a single-lane setup needs none of this. Note that the
 
 Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours.
 
+Pass `--history-seeds` to derive board seeds locally from posting URLs already
+in the user's tracker and `data/scan-history.tsv`. A normal run does not read
+either history source. With the flag, known ATS hosts route to the
+matching installed provider; an unknown host remains its hostname rather than
+being discarded. Known vendor labels become scannable automatically if a
+matching provider is added later. This is read-only input: no tracker column or
+apply-time browser capture is required, and history is never uploaded or pooled.
+
 BambooHR's and iCIMS's list pages both carry no publish date, so every match from either is undated on first pass; the scanner enriches it from the job's detail endpoint (one extra request per match that already cleared the title/location filters), then applies `--since` as usual.
 
 Postings without a usable publish date are dropped by default — a reverse scan targets fresh postings, and an undated flood would defeat that — but `--include-undated` keeps them (each marked `dateStatus: "unknown"` in `--json` output; the human log shows `n/a` for the date). New matches are appended to `data/pipeline.md` and `data/scan-history.tsv` in the same format as `scan.mjs`.
@@ -707,6 +813,8 @@ Same detection logic applies to `scan.mjs` (the standard portal scanner) — the
 npm run scan:full                              # all ATS directories, last 3 days
 node scan-ats-full.mjs --since 7               # postings from the last 7 days
 node scan-ats-full.mjs --ats greenhouse,workday # subset of sources
+node scan-ats-full.mjs --history-seeds          # also scan boards found in local history
+node scan-ats-full.mjs --history-seeds --ats successfactors # history-derived SF boards only
 node scan-ats-full.mjs --limit 200             # max companies per ATS
 node scan-ats-full.mjs --dry-run               # preview without writing
 node scan-ats-full.mjs --liveness              # Playwright-verify matches first
@@ -1053,18 +1161,112 @@ These have no `npm run` binding — modes and agents call them with
 |------------|---------|
 | `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
 | `node mark-pdf-ready.mjs <report#> [--dry-run] [--json]` | Mark the matched tracker's PDF cell ready after the web PDF render path finishes; resolves the report number, uses the shared tracker lock, and writes atomically |
+| `node sync-pdf-flags.mjs [--dry-run] [--prune [--write]] [--json]` | Reconcile tracker PDF column against data/pdf-index.tsv; `--prune` drops manifest rows whose PDF is gone from disk (dry run by default, `--write` to commit) |
 | `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
 | `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
 | `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
 | `node process-quality.mjs [--summary]` | Aggregate `[process-friction]` tags from `data/active-interviews.md` per company |
 | `node reserve-report-num.mjs [--count N]` | Atomically reserve report numbers for parallel workers (fixes the #749 race) |
 | `node agent-inbox.mjs add "..."` | Append a request to the queue the agent drains at the next session start |
+| `node agent-inbox.mjs list [--all]` | List pending (or all) queued items by stable number — gaps mean already resolved |
+| `node agent-inbox.mjs resolve <n> [--expect "..."] [--result "..."]` | Tick item `n` and stamp a one-line result; `--expect` aborts unless the item contains that substring |
 | `node generate-latex.mjs <input.tex> [output.pdf] [--compile-only] [--help]` | Validate and compile a generated `.tex` CV via tectonic or pdflatex; `--compile-only` skips career-ops template validation so a user-owned `.tex` compiles as-is (`latex-tex` mode) |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
+| `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs [--help]` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA); the engine behind the `plugins.mjs` new/add commands, which `--help` points at |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+
+---
+
+## ats-payload.mjs
+
+Prepares a `build-cv-html.mjs` payload for an ATS parser: **one safe transform,
+three lints**. Zero-LLM, deterministic, offline, and read-only with respect to
+user-layer files — it consumes a payload and emits a new one, and never writes
+back to `cv.md` or `config/profile.yml`.
+
+```bash
+node ats-payload.mjs cv.json > cv-ats.json
+node ats-payload.mjs cv.json --summary > cv-ats.json     # human findings on stderr
+cat cv.json | node ats-payload.mjs - > cv-ats.json
+node build-cv-html.mjs cv-ats.json out.html templates/ats/cv-template.ats.html
+```
+
+**stdout is the payload and only the payload**; every human-facing word goes to
+stderr (JSON by default, a formatted report with `--summary`). That is what makes
+`> cv-ats.json` safe and lets the script compose into a pipe.
+
+### The transform (applied)
+
+`competencies[]` is folded into `skills[]` as one comma-delimited category, and
+the source array is emptied.
+
+The reason is a fact about parsers, not about any one user. `build-cv-html.mjs`
+renders competencies as bare tag spans into a container whose separation is
+entirely visual (`.competencies-grid { gap: 8px }`) — there is no delimiter
+*character* between one competency and the next, so extracting the text layer
+runs adjacent competencies into a single token. And the block ships under
+`Core Competencies`, which parsers do not recognise as a section name, so it is
+frequently dropped whole rather than merely mangled. `Skills` **is** recognised,
+and already renders as `Category: a, b, c` — comma-delimited, under a header
+parsers look for. The same facts, expressed two ways, survive or don't depending
+on which array they sit in.
+
+Pure data movement: no text is invented, and the transform is reversible and
+**idempotent** — a second run is a no-op, and re-added competencies merge into
+the existing category rather than creating a duplicate one. A payload carrying a
+localized `sections.competencies` keeps its own label as the category name.
+
+### The lints (reported, never applied)
+
+Each needs a decision only the author can make, which is exactly where the
+no-fabrication rule in `AGENTS.md` draws the line.
+
+| Code | What it sees | Why it is not applied |
+|------|--------------|-----------------------|
+| `employer-in-role` | An employer name inside `experience[].role` — the trap for consulting and agency work, where a client's name reads naturally as part of the title. Yields a phantom employer in the parsed record | Deciding "this substring is an employer" is not something a script should be confident about, and silently rewriting a job title is worse than the mangling it prevents |
+| `parenthetical-in-company` | `Globex (Cloud Platform Division)` — kept verbatim as part of the employer name, so the record matches no search for the employer | Stripping it is easy; deciding where that detail *goes* instead (role, location, a bullet) is authoring |
+| `multiple-date-ranges` | Two date ranges in one `experience[].dates` — two stints at one employer parse as one | Splitting them needs someone to decide which bullets belong to which stint. The script can see the second range; it cannot allocate the bullets |
+
+Findings are **advisory**: the transform still succeeds and the payload on stdout
+is still usable, so the script exits 0 with findings present. Exit 1 is reserved
+for an unreadable or malformed input.
+
+### Input validation
+
+The three fields the script reads are shape-checked at the CLI boundary, and a
+payload that would make the run quietly wrong is **refused, not accommodated** —
+nothing reaches stdout, so a shell redirect cannot capture a half-right artifact.
+
+- `skills` present and not an array — folding into it would discard the value you
+  supplied and hand back a well-formed-looking payload with the skills gone.
+- `experience` present and not an array — the lints would report nothing, which
+  prints as "No lint findings" and reads exactly like a clean payload.
+- `competencies` present and neither an array nor a comma-separated string, or an
+  array holding a member with no scalar value (an object, array or `null`) — that
+  member would be dropped rather than folded, thinning the section silently.
+- the existing category the fold would merge into holding such a member in its
+  `items`, or an `items` that is neither a string nor an array — the merge reads
+  it, gets nothing, and overwrites the supplied value. Both are checked only when
+  a fold will actually happen, and only for the one category it would touch, so a
+  payload that would pass through untouched is never rejected for it.
+
+The line is drawn at what is *lost*, not at what is not a string: a numeric or
+boolean member is coerced by `String()` and keeps its value, which is what
+`build-cv-html.mjs` does with it too (numeric years and dates must render, not
+vanish — `tests/cv-numeric-scalars.test.mjs`). Rejecting those would make this
+script stricter than the builder it feeds. An `items` *container* is the other
+way round and is refused: the builder's `joinItems()` returns `''` for anything
+that is neither a string nor an array, so a scalar there has no value-preserving
+path in either tool.
+
+Refusing rather than coercing is deliberate: there is no honest place to put a
+string `skills` value inside `skills[]`, and inventing the structure to hold it
+is the same authoring the lints exist to avoid.
+
+Self-test: `node ats-payload.mjs --self-test`.
 
 ---
 
@@ -1152,6 +1354,23 @@ not overwrite one another. Exit status `0` covers a successful mark and an
 idempotent no-op; `1` is a usage, column, or write error; `2` means the tracker
 or report row was not found; `3` means the report matched more than one row;
 and `4` means the tracker lock timed out and the operation should be retried.
+
+---
+
+## sync-pdf-flags.mjs
+
+Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`.
+
+`--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`.
+
+```bash
+node sync-pdf-flags.mjs                          # sync PDF flags to tracker (dry-run with --dry-run)
+node sync-pdf-flags.mjs --prune                  # preview stale manifest rows whose PDF is missing
+node sync-pdf-flags.mjs --prune --write          # prune missing manifest rows from data/pdf-index.tsv
+node sync-pdf-flags.mjs --prune --write --json   # JSON output of prune results
+```
+
+Exit status: `0` success, `1` invalid option or write error, `2` missing tracker file or unreadable manifest, `4` tracker lock timeout.
 
 ---
 

@@ -22,14 +22,16 @@ import {
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // Every file here is user layer, so it resolves against the data root
 // (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data marker), never the
 // script's own directory — which is only the default when none is configured.
 const DATA_ROOT = getCareerOpsRoot();
-const DEFAULT_CANDIDATES_PATH = path.join(DATA_ROOT, 'data', 'reply-candidates.json');
-const APPS_FILE = resolveTrackerPath(DATA_ROOT);
-const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
+export const DEFAULT_CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
+  || path.join(DATA_ROOT, 'data', 'reply-candidates.json');
+export const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+export const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 
 // Helper to ask a question in the CLI
 function askQuestion(query) {
@@ -359,7 +361,9 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

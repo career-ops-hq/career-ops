@@ -57,6 +57,26 @@ try {
     fail(`row 2 location = ${JSON.stringify(jobs[2]?.location)}`);
   }
 
+  // The flat primary `location` gets the same country fold as locations[]
+  // entries: a subdivision-only name must not hide the country from
+  // location_filter, and a name that already carries it is left alone.
+  const primaryCountry = parseRecruiteeResponse({
+    offers: [
+      { title: 'SRE', careers_url: 'https://x.recruitee.com/o/sre', location: 'London, England', country: 'United Kingdom' },
+      { title: 'PM', careers_url: 'https://x.recruitee.com/o/pm', location: 'Zürich, Zürich, Switzerland', country: 'Switzerland' },
+    ],
+  }, 'X');
+  if (primaryCountry[0]?.location === 'London, England, United Kingdom') {
+    pass('parseRecruiteeResponse appends country to a flat location that lacks it');
+  } else {
+    fail(`flat-location country fold = ${JSON.stringify(primaryCountry[0]?.location)}`);
+  }
+  if (primaryCountry[1]?.location === 'Zürich, Zürich, Switzerland') {
+    pass('parseRecruiteeResponse does not duplicate a country already in the flat location');
+  } else {
+    fail(`flat-location no-duplicate = ${JSON.stringify(primaryCountry[1]?.location)}`);
+  }
+
   if (parseRecruiteeResponse({}, 'X').length === 0) pass('empty {} → empty result');
   else fail('empty {} should yield empty result');
 
