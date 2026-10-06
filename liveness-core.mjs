@@ -4,14 +4,18 @@
 // expired posting fell through to `no_apply_control` → uncertain → never filtered.
 // Normalize once at the entry point and spell every pattern below in the
 // normalized alphabet: ASCII quotes, no diacritics, collapsed whitespace.
-function normalizeForMatch(text = '') {
+//
+// keepLineBreaks collapses a run of whitespace that held a line break to "\n"
+// instead of " ". Every run becomes one character either way, so the two forms
+// of a text line up index for index.
+function normalizeForMatch(text = '', { keepLineBreaks = false } = {}) {
   if (typeof text !== 'string') return '';
   return text
     .replace(/[‘’ʼ′´`]/g, "'")
     .replace(/[“”″]/g, '"')
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, (run) => (keepLineBreaks && run.includes('\n') ? '\n' : ' '));
 }
 
 const HARD_EXPIRED_PATTERNS = [
@@ -164,19 +168,28 @@ function firstMatch(patterns, text = '') {
 // live posting as skipped_expired and every later scan skipped it.
 //
 // So an occurrence counts only when no time or condition word opens its clause:
-// none within ten words of the end of the match, with no clause punctuation in
-// between. The bound is what keeps real banners: normalizeForMatch() has joined
-// the page's lines, so a sign-in line ending "if you already have a profile"
-// runs straight into the banner under it, and that banner must still read as
-// one. Every occurrence is checked, since a page can carry the closing line in
-// its copy and a real banner above it.
+// none within ten words of the end of the match, with no clause punctuation and
+// no line break in between. The line break matters because a banner sits on a
+// line of its own, under page chrome that often ends without punctuation ("Sign
+// in if you already have a profile"). With the lines joined, that "if" opened
+// the banner's clause and the closed posting read as open. Every occurrence is
+// checked, since a page can carry the closing line in its copy and a real
+// banner above it.
+//
+// Words are separated by a single space because normalizeForMatch() leaves one
+// character per run of whitespace; "\n" is not a space, so the clause stops there.
 const TIME_OR_CONDITION_CLAUSE =
-  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as)\s+(?:[^\s.,;:!?…|•·]+\s+){0,9}[^\s.,;:!?…|•·]+$/i;
+  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/i;
 
-function firstStatedMatch(patterns, text = '') {
+// `lines` keeps its line breaks (normalizeForMatch with keepLineBreaks). The
+// patterns match on the joined text, as every other check here does, so a
+// banner broken over two lines still matches; only the clause test sees the
+// breaks.
+function firstStatedMatch(patterns, lines = '') {
+  const text = lines.replace(/\n/g, ' ');
   return patterns.find((pattern) => {
     for (const match of text.matchAll(new RegExp(pattern, `${pattern.flags}g`))) {
-      if (!TIME_OR_CONDITION_CLAUSE.test(text.slice(0, match.index + match[0].length))) return true;
+      if (!TIME_OR_CONDITION_CLAUSE.test(lines.slice(0, match.index + match[0].length))) return true;
     }
     return false;
   });
@@ -187,8 +200,9 @@ function hasApplyControl(controls = []) {
 }
 
 export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [] } = {}) {
-  const bodyText = normalizeForMatch(rawBodyText);
-  const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map(normalizeForMatch);
+  const bodyLines = normalizeForMatch(rawBodyText, { keepLineBreaks: true });
+  const bodyText = bodyLines.replace(/\n/g, ' ');
+  const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map((control) => normalizeForMatch(control));
 
   if (status === 404 || status === 410) {
     return { result: 'expired', code: 'http_gone', reason: `HTTP ${status}` };
@@ -226,7 +240,7 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
     return { result: 'expired', code: 'expired_url', reason: `redirect to ${finalUrl}` };
   }
 
-  const expiredBody = firstStatedMatch(HARD_EXPIRED_PATTERNS, bodyText);
+  const expiredBody = firstStatedMatch(HARD_EXPIRED_PATTERNS, bodyLines);
   if (expiredBody) {
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
   }
