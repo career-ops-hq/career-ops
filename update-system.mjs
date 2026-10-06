@@ -453,6 +453,14 @@ export const SYSTEM_PATHS = [
   // registration rationale as url-resolver.mjs directly above, and the same
   // quote-free-comment rule applies for the extractArray reason noted above.
   'utils/stream-bridge.mjs',
+  // Queue drainer: polls the n8n-written inbound_alerts table over PostgREST,
+  // feeds every pending row through stream-bridge.mjs, then stamps the row
+  // ingested or failed so a drained row is never reprocessed. Same registration
+  // rationale and same quote-free-comment rule as the two utils entries directly
+  // above; nothing under utils/ is claimed by directory in verify-repo-hygiene, so
+  // this must be listed by exact path or validate-system-paths-coverage fails
+  // the moment the file becomes tracked.
+  'utils/stream-poll.mjs',
   'batch-tailor.mjs',
   'dashboard/',
   'templates/',
