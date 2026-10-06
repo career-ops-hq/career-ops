@@ -9,6 +9,12 @@ grouped/flat views, lazy-loaded report previews, and an inline status picker.
 It is isolated from the Node core — optional, never required by any other
 component.
 
+The list's DATE column shows a row's most recent transition in the ledger
+beside the tracker, `status-log.tsv` — when its status last changed — and
+falls back to the tracker's own Date cell (the evaluation date, which nothing
+rewrites) for rows with no ledger history. The date sort orders by the same
+value.
+
 ## Prerequisites and running
 
 Requires Go 1.24+ (`go.mod`). From the repo root:
