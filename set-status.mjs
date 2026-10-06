@@ -160,6 +160,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
                      report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
   --repair-status-log  On an idempotent Applied retry, repair a missing ledger observation
+  --repair-followup  On an idempotent Applied retry, repair a missing follow-up pin
   --json             Machine-readable output on stdout (errors included)
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
@@ -209,7 +210,7 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, repairStatusLog: false, json: false };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, repairStatusLog: false, repairFollowup: false, json: false };
 const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source' };
 
 /**
@@ -273,6 +274,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--repair-status-log') { flags.repairStatusLog = true; }
+  else if (a === '--repair-followup') { flags.repairFollowup = true; }
   else if (a === '--json') { flags.json = true; }
   else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
@@ -682,6 +684,7 @@ let statusChanged = false;
 let noteChanged = false;
 let statusLogged = false;
 let statusLogRepaired = false;
+let statusLogRepair = null;
 const replacedNote = flags.replaceNote !== null ? cell(flags.replaceNote) : null;
 try {
   // Rebuild only the matched line: change the Status cell, append the note, keep
@@ -788,30 +791,59 @@ try {
   // A dashboard call that received the partial-success error above can retry
   // the same Applied action. The tracker is already Applied, so there is no
   // normal transition to log; append one correction observation only when the
-  // row still has no Applied entry. This is append-only and idempotent, and the
-  // correction source is folded by funnel-velocity.mjs onto the repaired stage.
+  // effective timeline does not already end at Applied. This is append-only
+  // and idempotent, and the correction source is folded by funnel-velocity.mjs
+  // onto the repaired stage.
   if (flags.repairStatusLog && !statusChanged && newStatus === 'Applied' && !flags.dryRun) {
     const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
-    let hasAppliedObservation = false;
+    const timeline = [];
+    let inspectionError = null;
     try {
       const log = readFileSync(logPath, 'utf-8');
-      hasAppliedObservation = log.split(/\r?\n/).some(line => {
+      for (const line of log.split(/\r?\n/)) {
         const cells = line.trimEnd().split('\t');
-        return cells[0] === String(target.num) && cells[3] === 'Applied';
-      });
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        console.error(`⚠ status-log inspection failed (status change itself succeeded): ${err.message}`);
+        if (cells[0] !== String(target.num) || cells.length < 5) continue;
+        const to = cells[3];
+        const source = cells[4];
+        if (to === '-') {
+          timeline.pop();
+        } else if (source === 'correction') {
+          const index = timeline.map(entry => entry.to).lastIndexOf(to);
+          if (index >= 0) timeline[index] = { to, date: cells[1] };
+          else timeline.push({ to, date: cells[1] });
+        } else {
+          timeline.push({ to, date: cells[1] });
+        }
       }
+    } catch (err) {
+      if (err.code !== 'ENOENT') inspectionError = err;
     }
-    if (!hasAppliedObservation) {
-      const eventDate = flags.on ?? localToday();
-      try {
-        appendFileSync(logPath, `${target.num}\t${eventDate}\t-\tApplied\tcorrection\t\n`);
-        statusLogged = true;
-        statusLogRepaired = true;
-      } catch (err) {
-        console.error(`⚠ status-log repair failed (status itself is already Applied): ${err.message}`);
+    if (inspectionError) {
+      const error = `status-log inspection failed: ${inspectionError.message}`;
+      statusLogRepair = { attempted: true, repaired: false, error };
+      console.error(`⚠ ${error}`);
+    } else if (timeline.at(-1)?.to === 'Applied') {
+      statusLogRepair = { attempted: true, repaired: false, reason: 'already-present' };
+    } else {
+      // Prefer an explicit event date, then the latest effective ledger date,
+      // then the tracker's own dated row. Never invent today's date for an
+      // existing Applied row whose history is older or absent.
+      const eventDate = flags.on ?? timeline.at(-1)?.date ?? target.date;
+      if (!eventDate) {
+        const error = 'status-log repair needs an event date (--on or a dated tracker row)';
+        statusLogRepair = { attempted: true, repaired: false, error };
+        console.error(`⚠ ${error}`);
+      } else {
+        try {
+          appendFileSync(logPath, `${target.num}\t${eventDate}\t-\tApplied\tcorrection\t\n`);
+          statusLogged = true;
+          statusLogRepaired = true;
+          statusLogRepair = { attempted: true, repaired: true };
+        } catch (err) {
+          const error = `status-log repair failed: ${err.message}`;
+          statusLogRepair = { attempted: true, repaired: false, error };
+          console.error(`⚠ ${error}`);
+        }
       }
     }
   }
@@ -857,7 +889,7 @@ const changed = statusChanged || noteChanged;
 // the same wording, as the status-log append above. It is also idempotent
 // (`already-seeded` → seeded:false), so a re-run cannot stack duplicate pins.
 let followupSeeded = null;
-if (statusChanged && newStatus === 'Applied') {
+if ((statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
   try {
     const { seedFollowup } = await import('./followup-seed.mjs');
     // followupsPath is derived from the tracker's own directory, not left to
@@ -1019,9 +1051,9 @@ const result = {
   ...(note != null ? { note } : {}),
   ...(replacedNote !== null ? { replacedNote } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
-  // Fire the #1430 hook only on an actual transition INTO Applied — an
-  // idempotent re-run of an already-Applied row must not invite a consumer
-  // to seed a duplicate follow-up.
+  // Fire the #1430 hook on an actual transition INTO Applied or an explicit
+  // lifecycle repair retry. The seeder itself is idempotent, so a repair retry
+  // cannot stack duplicate follow-ups.
   // followupSeedCandidate is kept for any consumer already reading it; the
   // seeding it used to merely advertise now actually happens, and its outcome
   // travels beside it.
@@ -1030,6 +1062,7 @@ const result = {
   ...(jdArchiveTriggered ? { jdArchiveTriggered } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   ...(statusLogRepaired ? { statusLogRepaired } : {}),
+  ...(statusLogRepair ? { statusLogRepair } : {}),
   tracker: APPS_FILE,
 };
 

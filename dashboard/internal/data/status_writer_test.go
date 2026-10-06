@@ -140,6 +140,49 @@ func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
 	}
 }
 
+func TestDashboardStatusPropagatesAppliedLedgerRepairFailure(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER", "")
+	before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
+	root, tracker := writeTracker(t, before)
+	logPath := filepath.Join(filepath.Dir(tracker), "status-log.tsv")
+	if err := os.Mkdir(logPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied"); err == nil {
+		t.Fatal("initial partial save must report the missing ledger")
+	}
+	err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied")
+	if err == nil || !strings.Contains(err.Error(), "status-log repair failed") {
+		t.Fatalf("same-status retry must propagate ledger inspection failure: %v", err)
+	}
+}
+
+func TestDashboardStatusRepairsMissingAppliedFollowup(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER", "")
+	before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
+	root, tracker := writeTracker(t, before)
+	followupsPath := filepath.Join(filepath.Dir(tracker), "follow-ups.md")
+	if err := os.Mkdir(followupsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied"); err == nil {
+		t.Fatal("initial partial save must report the missing follow-up")
+	}
+	if err := os.Remove(followupsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
+		t.Fatalf("same-status retry should repair the follow-up: %v", err)
+	}
+	followups, err := os.ReadFile(followupsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(followups), "next #42 ") != 1 {
+		t.Fatalf("want one repaired follow-up pin: %s", followups)
+	}
+}
+
 func TestDashboardStatusReportsBusyTracker(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER", "")
 	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")

@@ -50,9 +50,10 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	}
 	args := []string{script, "--report-link", report, status, "--json"}
 	if strings.EqualFold(status, "applied") {
-		// A retry after a partial Applied save may need to repair the missing
-		// status-log observation even though the tracker is already Applied.
+		// A retry after a partial Applied save may need to repair missing
+		// lifecycle observations even though the tracker is already Applied.
 		args = append(args, "--repair-status-log")
+		args = append(args, "--repair-followup")
 	}
 	if note != "" {
 		args = append(args, "--note="+note)
@@ -80,10 +81,14 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 		return fmt.Errorf("status update timed out; the change may or may not have been applied")
 	}
 	var result struct {
-		Changed        *bool  `json:"changed"`
-		NewStatus      string `json:"newStatus"`
-		Error          string `json:"error"`
-		StatusLogged   *bool  `json:"statusLogged"`
+		Changed         *bool  `json:"changed"`
+		NewStatus       string `json:"newStatus"`
+		Error           string `json:"error"`
+		StatusLogged    *bool  `json:"statusLogged"`
+		StatusLogRepair *struct {
+			Repaired bool   `json:"repaired"`
+			Error    string `json:"error"`
+		} `json:"statusLogRepair"`
 		FollowupSeeded *struct {
 			Reason string `json:"reason"`
 			Error  string `json:"error"`
@@ -103,6 +108,9 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	// partial success so a missing lifecycle record cannot disappear silently.
 	if result.StatusLogged != nil && !*result.StatusLogged {
 		return fmt.Errorf("status saved, but status-log append failed: %s", strings.TrimSpace(stderr.String()))
+	}
+	if repair := result.StatusLogRepair; repair != nil && repair.Error != "" {
+		return fmt.Errorf("status saved, but status-log repair failed: %s", repair.Error)
 	}
 	if seed := result.FollowupSeeded; seed != nil && seed.Reason == "error" {
 		return fmt.Errorf("status saved, but follow-up seeding failed: %s", seed.Error)
