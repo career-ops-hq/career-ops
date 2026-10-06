@@ -158,6 +158,13 @@ export const MANIFEST_USER_PATH_OVERLAPS = Object.freeze([
   'interview-prep/sessions/README.md',
   'documents/.gitkeep',
   'documents/README.md',
+  // Empty placeholders in otherwise user-owned directories (#4708).
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
 ]);
 
 // System layer paths — ONLY these files get updated
@@ -805,7 +812,7 @@ function unsafeManifestPathReason(path, userPaths) {
   }
   if (segments.some((segment) => segment === '.git')) return 'the git metadata directory is forbidden';
 
-  // The five system-owned scaffolds are exceptions only in their exact byte
+  // The system-owned scaffolds are exceptions only in their exact byte
   // spelling. Testing this before the protected-boundary comparison allows the
   // documented files while ensuring no alias, parent, or child inherits it.
   if (MANIFEST_USER_PATH_OVERLAPS.includes(path)) return null;

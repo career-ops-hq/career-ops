@@ -37,6 +37,9 @@ const protectedUserPaths = [
   'cv.md',
   'data/',
   'documents/',
+  'jds/',
+  'output/',
+  'reports/',
   'interview-prep/',
   'writing-samples/',
 ];
@@ -46,6 +49,12 @@ const expectedOverlaps = [
   'interview-prep/sessions/README.md',
   'documents/.gitkeep',
   'documents/README.md',
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
 ];
 
 console.log('\n🧪 Testing updater rollback target manifests (#3782)...');
@@ -69,7 +78,7 @@ function rejectedBy(fn) {
   check(
     actual.length === expectedOverlaps.length
       && expectedOverlaps.every((path) => actual.includes(path)),
-    'the exact user/system overlap constant contains only the five documented scaffolds',
+    'the exact user/system overlap constant contains only the documented scaffolds',
     `overlap constant drifted: ${JSON.stringify(actual)}`,
   );
 
@@ -77,7 +86,7 @@ function rejectedBy(fn) {
     isSafeManifestPath(path, protectedUserPaths));
   check(
     allowed,
-    'all five byte-exact overlap paths are allowed inside protected user directories',
+    'all byte-exact overlap paths are allowed inside protected user directories',
     'one or more documented overlap paths were rejected',
   );
 
@@ -88,6 +97,9 @@ function rejectedBy(fn) {
     'writing-samples/README.md.bak',
     'interview-prep/sessions/README.md/child',
     'documents/readme.md',
+    'data/.GITKEEP',
+    'data/offers/.gitkeep/child',
+    'reports/.gitkeep.bak',
   ];
   check(
     nearOverlaps.every((path) => !isSafeManifestPath(path, protectedUserPaths)),
