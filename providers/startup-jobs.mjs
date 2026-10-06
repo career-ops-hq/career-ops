@@ -1,6 +1,6 @@
+// @ts-check
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText } from './_html-to-text.mjs';
-// @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Startup Jobs provider — the board-wide public RSS feed at
@@ -8,18 +8,31 @@ import { htmlToText } from './_html-to-text.mjs';
 // The feed is public, no-auth, and XML; startup.jobs's JSON API
 // (api.startup.jobs) requires a bearer-token account and is NOT used here —
 // providers read public, no-auth sources only. The feed returns a fixed
-// snapshot of the most recent ~50 matching postings (no cursor/pagination),
-// so this is a single-fetch provider, the same shape as providers/larajobs.mjs.
+// snapshot of only the ~50 most recent matching postings, with no
+// pagination, so a single unscoped entry covers only a few hours of
+// postings — narrower than it looks. Cover a search with several narrow
+// entries instead of one broad one: one per role slug, plus a
+// `workplace: remote` variant (role+remote combinations tend to return
+// fewer than 50 items over a longer window, so that slice comes back
+// complete rather than truncated to the newest 50).
 //
-// Query params (both optional, passed through entry.startup_jobs): `role`
-// (a role slug, e.g. "platform-engineer", "site-reliability-engineer",
-// "devops-engineer", "engineering" — confirmed live, not an exhaustive
-// documented list since /v1/roles sits behind the gated JSON API) and
-// `workplace` (free-text, e.g. "remote" — confirmed live, changes the result
-// set). The JSON API additionally documents a `country` param, but it is a
+// Query params (both optional, passed through entry.startup_jobs):
+//   - `role`: a role slug, e.g. "platform-engineer", "site-reliability-engineer".
+//     The slug is the last segment of a `https://startup.jobs/roles/<slug>`
+//     page; the full list lives in the roles sitemap
+//     (`https://cdn.startup.jobs/sitemaps/startupjobs/roles.xml.gz`, the bare
+//     `/roles/<slug>` entries) since /v1/roles sits behind the gated JSON API.
+//     An unknown slug returns HTTP 404 (`fetch()` throws — the correct
+//     behavior per providers/ADDING_A_PROVIDER.md's "Defensive parsing"
+//     section: failing loud on a config typo beats reading it as empty).
+//   - `workplace`: confirmed live to accept exactly one value, `"remote"`
+//     (matching the feed's only workplace subpage, `/roles/<slug>/remote`).
+//     Any other value — "hybrid", "onsite", "on-site", etc. — returns HTTP
+//     404. This is NOT a free-text filter.
+// The JSON API additionally documents a `country` param, but it is a
 // confirmed no-op on this RSS endpoint (identical output with and without
 // it, including for a nonsense code) and is deliberately NOT exposed here —
-// NL eligibility is left entirely to the global location_filter instead.
+// location eligibility is left entirely to the global location_filter instead.
 //
 // The feed exposes no structured company/location fields (unlike LaraJobs'
 // job: namespace), so both are parsed heuristically:
@@ -29,6 +42,10 @@ import { htmlToText } from './_html-to-text.mjs';
 //     employer, so the row is skipped entirely rather than attributed to the
 //     board itself — a listing the scanner can't name a real employer for is
 //     not a real, employer-attributed posting (providers/ADDING_A_PROVIDER.md).
+//     Some postings store the employer with a leading German preposition
+//     glued on by the source itself (e.g. "... at bei PROLOGA"); a leading
+//     "bei " is stripped so the company matches what a user would actually
+//     write in `data/blacklist.md` or expect from the employer's own ATS.
 //   - location: the description's last non-empty line, with anything after
 //     " · " (a trailing comp range) stripped. Observed shapes: "{body}\n\n{Location}",
 //     "{body}\n\n{Location} · {Comp}", or just "{Location}" with no body at all.
@@ -73,12 +90,18 @@ function toEpochMs(value) {
  * Split "{Role} at {Company}" on the LAST " at " segment. Returns `null`
  * when the title carries no usable employer segment — the caller skips that
  * row rather than attributing it to the board itself.
+ *
+ * A leading German "bei " (e.g. "... at bei PROLOGA") is stripped from the
+ * company: it's source data, not a parsing artifact, but left in place it
+ * silently breaks both `data/blacklist.md` matching and company-based dedup
+ * against the same employer's own ATS — both match on the plain company
+ * name, which "bei PROLOGA" is not.
  */
 function splitTitleCompany(rawTitle) {
   const idx = rawTitle.lastIndexOf(' at ');
   if (idx === -1) return null;
   const title = rawTitle.slice(0, idx).trim();
-  const company = rawTitle.slice(idx + 4).trim();
+  const company = rawTitle.slice(idx + 4).trim().replace(/^bei\s+/i, '');
   if (!title || !company) return null;
   return { title, company };
 }

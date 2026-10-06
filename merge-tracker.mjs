@@ -30,7 +30,7 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolve
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates, findDeadReportLink } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from './url-key.mjs';
@@ -1514,12 +1514,12 @@ for (const file of tsvFiles) {
   // exactly one verify-pipeline would flag later. resolveReportPath() is NOT
   // used: it strips leading `../` and so can accept a link verify-pipeline
   // rejects (e.g. `../../stray.md`).
-  // A directory (e.g. a link to `reports/`) is not a report, so require a
-  // regular file; verify-pipeline's Check 3 applies the same rule.
-  const isReportFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
-  const reportLink = (addition.report || '').match(/\]\(([^)]+)\)/);
-  if (reportLink && !isReportFile(join(TRACKER_DIR, reportLink[1])) && !isReportFile(join(DATA_ROOT, reportLink[1]))) {
-    const linked = reportLink[1].trim();
+  // The rule itself lives in tracker-utils.mjs (findDeadReportLink), shared with
+  // verify-pipeline's Check 3 and fix-report-links.mjs: a directory (e.g. a link
+  // to `reports/`) is not a report, so a regular file is required.
+  const deadLink = findDeadReportLink(addition.report, TRACKER_DIR, DATA_ROOT);
+  if (deadLink !== null) {
+    const linked = deadLink.trim();
     console.warn(`⚠️  ${file}: ${addition.company} — ${addition.role}: report link "${linked}" does not resolve to a file (checked from ${TRACKER_DIR} and ${DATA_ROOT}) — the row is not rewritten; verify-pipeline will flag it until the report exists`);
     missingReports++;
   }
