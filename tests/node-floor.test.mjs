@@ -14,7 +14,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { nodeFloor, NODE_MIN } from '../lib/node-floor.mjs';
+import { nodeFloor, NODE_MIN, NODE_MIN_23, NODE_ENGINES } from '../lib/node-floor.mjs';
 
 console.log('\n🔎 Node floor (one number, every restatement in step)');
 
@@ -32,11 +32,21 @@ const floor = NODE_MIN.split('.').slice(0, 2).join('.');
     ok(Array.isArray(r.fix) && r.fix.length >= 1, '  and it offers a fix');
   }
 
+  // 23.x unflagged node:sqlite only in 23.4.0, so 23.0–23.3 fail even though
+  // they sort above 22.13.
+  ok(NODE_MIN_23 === '23.4.0', 'the 23.x floor is 23.4.0, where node:sqlite lost its flag on that line');
+  for (const v of ['23.0.0', '23.3.0']) {
+    const r = nodeFloor(v);
+    ok(r.pass === false, `Node ${v} fails the floor`);
+    ok(r.label.includes(v) && r.label.includes('23.4'), `  and its label names both ${v} and 23.4`);
+    ok(Array.isArray(r.fix) && r.fix.length >= 1, '  and it offers a fix');
+  }
+
   // 22.5–22.12 is the range doctor used to pass while tracker.mjs could not
   // import node:sqlite there. It must stay a failure, not a warning.
   ok(nodeFloor('22.12.9').warn !== true, '22.12 is a hard failure, not a warning');
 
-  for (const v of ['22.13.0', '22.13.1', '22.20.0', '23.0.0', '24.11.0', '26.10.0', 'v24.1.0']) {
+  for (const v of ['22.13.0', '22.13.1', '22.20.0', '23.4.0', '23.11.1', '24.11.0', '26.10.0', 'v24.1.0']) {
     ok(nodeFloor(v).pass === true, `Node ${v} passes the floor`);
   }
 
@@ -51,7 +61,7 @@ const floor = NODE_MIN.split('.').slice(0, 2).join('.');
   const engines = (rel) => JSON.parse(readFileSync(join(ROOT, rel), 'utf8')).engines?.node;
   for (const rel of ['package.json', 'scaffolder/package.json']) {
     const got = engines(rel);
-    ok(got === `>=${floor}`, `${rel} engines.node is ">=${floor}" (found ${JSON.stringify(got)})`);
+    ok(got === NODE_ENGINES, `${rel} engines.node is "${NODE_ENGINES}" (found ${JSON.stringify(got)})`);
   }
 
   // The CI floor job. Exact match: a bare major ('22') resolves to the newest
