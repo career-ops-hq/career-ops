@@ -161,7 +161,9 @@ export async function lookupJobFacts({ reportsDir = join(getCareerOpsRoot(), 're
 export async function invalidateJobFacts({ reportsDir = join(getCareerOpsRoot(), 'reports'), fingerprint, liveness, now = Date.now() } = {}) {
   const { identity, key, failure } = await contextFor({ fingerprint, liveness, now });
   if (failure) return failure;
-  if (liveness.result !== 'expired') throw new TypeError('invalidation requires confirmed expired liveness');
+  if (liveness.result !== 'expired' || liveness.code === 'insufficient_content') {
+    throw new TypeError('invalidation requires explicit closure evidence');
+  }
   const files = reportFiles(reportsDir);
   if (!files.length) return miss('no-cached-facts');
   const lock = await acquireTrackerLock(trackerLockDirFor(join(realpathSync(reportsDir), '.job-facts-cache')), { timeoutMs: 5000 });

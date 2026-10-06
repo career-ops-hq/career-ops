@@ -295,6 +295,7 @@ test('uncertain or stale liveness never writes durable invalidation', integratio
   const before = readFileSync(path, 'utf8');
   for (const liveness of [
     { ...f.liveness, result: 'uncertain' },
+    { ...f.liveness, result: 'expired', code: 'insufficient_content' },
     { ...f.liveness, result: 'expired', checked_at: iso(NOW - HOUR) },
     { ...f.liveness, result: 'expired', url: 'https://other.example/jobs/12345' },
   ]) {
