@@ -49,6 +49,11 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 		return err
 	}
 	args := []string{script, "--report-link", report, status, "--json"}
+	if strings.EqualFold(status, "applied") {
+		// A retry after a partial Applied save may need to repair the missing
+		// status-log observation even though the tracker is already Applied.
+		args = append(args, "--repair-status-log")
+	}
 	if note != "" {
 		args = append(args, "--note="+note)
 	}

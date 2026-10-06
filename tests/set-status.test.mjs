@@ -932,6 +932,29 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// A dashboard retry may repair the ledger after the tracker was saved Applied
+// but status-log.tsv could not be appended on the first attempt. The repair is
+// explicit and idempotent; a second retry must not add another correction.
+{
+  const sb = makeSandbox(TRACKER_9);
+  mkdirSync(join(sb.dir, 'status-log.tsv'));
+  runSetStatus(['2', 'Applied', '--json'], sb);
+  rmSync(join(sb.dir, 'status-log.tsv'), { recursive: true, force: true });
+  const repaired = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
+  const parsed = JSON.parse(repaired.stdout);
+  const log = readFileSync(join(sb.dir, 'status-log.tsv'), 'utf8');
+  const retry = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
+  const retryLog = readFileSync(join(sb.dir, 'status-log.tsv'), 'utf8');
+  if (repaired.code === 0 && parsed.statusLogRepaired === true
+      && /\t-\tApplied\tcorrection\t/.test(log)
+      && retry.code === 0 && retryLog === log) {
+    pass('ledger: explicit Applied retry repairs a missing observation exactly once');
+  } else {
+    fail(`ledger repair contract broken (code=${repaired.code}, repaired=${parsed.statusLogRepaired})`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // ── explicit --row / --report selectors (tracker-row-vs-report-id) ──
 //
 // Tracker row IDs and report IDs are independent counters sharing one number

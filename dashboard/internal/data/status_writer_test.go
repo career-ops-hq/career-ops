@@ -104,6 +104,42 @@ func TestDashboardStatusReportsLifecycleFailure(t *testing.T) {
 	}
 }
 
+func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER", "")
+	before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
+	root, tracker := writeTracker(t, before)
+	logPath := filepath.Join(filepath.Dir(tracker), "status-log.tsv")
+	if err := os.Mkdir(logPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied"); err == nil {
+		t.Fatal("initial partial save must report the missing ledger")
+	}
+	if err := os.Remove(logPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
+		t.Fatalf("same-status retry should repair the ledger: %v", err)
+	}
+	ledger, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(ledger), "\t-\tApplied\tcorrection\t"); got != 1 {
+		t.Fatalf("want one Applied correction, got %d: %s", got, ledger)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
+		t.Fatal(err)
+	}
+	ledgerAgain, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(ledgerAgain) != string(ledger) {
+		t.Fatalf("repair retry appended duplicate correction:\nfirst: %s\nretry: %s", ledger, ledgerAgain)
+	}
+}
+
 func TestDashboardStatusReportsBusyTracker(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER", "")
 	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")

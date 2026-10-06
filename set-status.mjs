@@ -159,6 +159,7 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
                      report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
+  --repair-status-log  On an idempotent Applied retry, repair a missing ledger observation
   --json             Machine-readable output on stdout (errors included)
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
@@ -208,7 +209,7 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, json: false };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, repairStatusLog: false, json: false };
 const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source' };
 
 /**
@@ -271,6 +272,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   }
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
+  else if (a === '--repair-status-log') { flags.repairStatusLog = true; }
   else if (a === '--json') { flags.json = true; }
   else if (a === '-h' || a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
   else { positional.push(a); }
@@ -679,6 +681,7 @@ if (!flags.dryRun) {
 let statusChanged = false;
 let noteChanged = false;
 let statusLogged = false;
+let statusLogRepaired = false;
 const replacedNote = flags.replaceNote !== null ? cell(flags.replaceNote) : null;
 try {
   // Rebuild only the matched line: change the Status cell, append the note, keep
@@ -780,6 +783,36 @@ try {
       statusLogged = true;
     } catch (err) {
       console.error(`⚠ status-log append failed (status change itself succeeded): ${err.message}`);
+    }
+  }
+  // A dashboard call that received the partial-success error above can retry
+  // the same Applied action. The tracker is already Applied, so there is no
+  // normal transition to log; append one correction observation only when the
+  // row still has no Applied entry. This is append-only and idempotent, and the
+  // correction source is folded by funnel-velocity.mjs onto the repaired stage.
+  if (flags.repairStatusLog && !statusChanged && newStatus === 'Applied' && !flags.dryRun) {
+    const logPath = join(dirname(APPS_FILE), 'status-log.tsv');
+    let hasAppliedObservation = false;
+    try {
+      const log = readFileSync(logPath, 'utf-8');
+      hasAppliedObservation = log.split(/\r?\n/).some(line => {
+        const cells = line.trimEnd().split('\t');
+        return cells[0] === String(target.num) && cells[3] === 'Applied';
+      });
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        console.error(`⚠ status-log inspection failed (status change itself succeeded): ${err.message}`);
+      }
+    }
+    if (!hasAppliedObservation) {
+      const eventDate = flags.on ?? localToday();
+      try {
+        appendFileSync(logPath, `${target.num}\t${eventDate}\t-\tApplied\tcorrection\t\n`);
+        statusLogged = true;
+        statusLogRepaired = true;
+      } catch (err) {
+        console.error(`⚠ status-log repair failed (status itself is already Applied): ${err.message}`);
+      }
     }
   }
 } finally {
@@ -996,6 +1029,7 @@ const result = {
   ...(followupSeeded ? { followupSeeded } : {}),
   ...(jdArchiveTriggered ? { jdArchiveTriggered } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
+  ...(statusLogRepaired ? { statusLogRepaired } : {}),
   tracker: APPS_FILE,
 };
 
