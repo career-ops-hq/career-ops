@@ -13450,7 +13450,7 @@ console.log('\n15. Tracker derived index (sync/query/export round-trip)');
 
 const sqliteAvailable = run(NODE, ['--no-warnings', '-e', "import('node:sqlite').then(()=>process.exit(0),()=>process.exit(1))"]) !== null;
 if (!sqliteAvailable) {
-  warn('node:sqlite unavailable (Node < 22.5) — tracker index tests skipped');
+  warn('node:sqlite unavailable (Node < 22.13) — tracker index tests skipped');
 } else {
   try {
     const idxTmp = mkdtempSync(join(tmpdir(), 'career-ops-index-'));
@@ -16736,7 +16736,7 @@ try {
   //
   // In the REQUIRED suite on purpose: web-ci.yml is informative-only, so asserting
   // this only there would gate nothing. Importing is safe — these are
-  // dependency-free ESM modules and the root suite runs on Node >= 18.
+  // dependency-free ESM modules and the root suite runs on Node >= 22.13.
   const webLib = join(ROOT, 'web', 'src', 'lib');
   const runRoutePath = join(ROOT, 'web', 'src', 'app', 'api', 'run', 'route.ts');
   if (!existsSync(webLib)) {

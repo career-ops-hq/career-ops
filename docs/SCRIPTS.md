@@ -65,7 +65,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 
 ## doctor
 
-Validates that all prerequisites are in place: Node.js >= 18, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
 
 ```bash
 npm run doctor
@@ -879,7 +879,7 @@ SQLite **derived index** for the applications tracker (RFC #918, phase 1). `data
 
 Why: at hundreds of rows a markdown table degrades structurally (encoding corruption, column drift, `|` inside cells shifting columns), and agents grepping it get model-dependent results. The index normalizes on sync, so a query returns the same rows for every model on every CLI — and corruption is detected at sync time instead of propagating silently.
 
-Zero new dependencies — uses `node:sqlite`, built into Node ≥ 22.5.
+Zero new dependencies — uses `node:sqlite`, built into Node (no flag needed from 22.13).
 
 ```bash
 node tracker.mjs sync                     # (re)build applications.db from applications.md
@@ -921,7 +921,7 @@ Everything else that cannot be reproduced is reported, never quietly changed. `e
 
 Data loss is a decision you make, not a side effect of adopting a repaired copy.
 
-**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
+**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.13, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
 
 ---
 

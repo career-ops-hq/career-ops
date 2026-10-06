@@ -19,7 +19,7 @@
  * Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered
  * view) is a separate, explicit per-user opt-in — not implemented here.
  *
- * Zero new dependencies — uses node:sqlite (built into Node >= 22.5).
+ * Zero new dependencies — uses node:sqlite (built into Node; unflagged from 22.13).
  *
  * Usage:
  *   node tracker.mjs sync [--check]             # (re)build applications.db from applications.md
@@ -139,7 +139,7 @@ async function loadSqlite() {
     const { DatabaseSync } = await import('node:sqlite');
     return DatabaseSync;
   } catch {
-    console.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.5 (you are on ' + process.version + ').');
+    console.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.13 (you are on ' + process.version + ').');
     console.error('The markdown tracker keeps working without it — the index is optional.');
     process.exit(1);
   } finally {

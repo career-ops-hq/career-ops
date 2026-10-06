@@ -3,8 +3,7 @@
 ## Prerequisites
 
 - An AI coding CLI — [Claude Code](https://claude.ai/code), Gemini CLI, Codex, Qwen Code, OpenCode, Pi, GitHub Copilot CLI, Antigravity CLI, Grok Build CLI, or Hermes Agent (see [Supported CLIs](SUPPORTED_CLIS.md))
-- [Node.js](https://nodejs.org) 18+ and `git` (`npx` ships with Node — the installer refuses to run without them) — note: the Gemini CLI integration requires Node.js 20+
-- (Optional) Node.js 22.5+ for the tracker index (`tracker.mjs` uses `node:sqlite`, see [tracker](SCRIPTS.md#tracker)), and 22.6+ for the web UI in `web/`
+- [Node.js](https://nodejs.org) 22.13+ and `git` (`npx` ships with Node — the installer refuses to run without them). 22.13 is the first release where `node:sqlite`, used by the tracker index (see [tracker](SCRIPTS.md#tracker)), needs no flag
 - (Optional) Go 1.21+ (for the dashboard TUI)
 
 ## Quick Start
