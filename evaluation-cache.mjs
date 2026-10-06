@@ -14,6 +14,7 @@ export const JOB_FACTS_TTL_MS = 24 * 60 * 60 * 1000;
 const LIVENESS_TTL_MS = 5 * 60 * 1000;
 const PUBLIC_FIELDS = ['company', 'role', 'advertised_comp', 'reports_to'];
 const CACHE_FIELDS = ['schema_version', 'listing_fingerprint', 'captured_at', 'invalidated_at'];
+const EXPLICIT_CLOSURE_CODES = new Set(['http_gone', 'expired_url', 'expired_body', 'listing_page']);
 const miss = (reason) => ({ status: 'miss', reason });
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -161,7 +162,7 @@ export async function lookupJobFacts({ reportsDir = join(getCareerOpsRoot(), 're
 export async function invalidateJobFacts({ reportsDir = join(getCareerOpsRoot(), 'reports'), fingerprint, liveness, now = Date.now() } = {}) {
   const { identity, key, failure } = await contextFor({ fingerprint, liveness, now });
   if (failure) return failure;
-  if (liveness.result !== 'expired' || liveness.code === 'insufficient_content') {
+  if (liveness.result !== 'expired' || !EXPLICIT_CLOSURE_CODES.has(liveness.code)) {
     throw new TypeError('invalidation requires explicit closure evidence');
   }
   const files = reportFiles(reportsDir);

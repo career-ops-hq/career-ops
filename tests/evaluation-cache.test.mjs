@@ -188,7 +188,7 @@ test('query-identified postings require liveness for the same authoritative stro
   const liveness = { ...f.liveness, url: wrongUrl, listing_fingerprint: wrongIdentity };
   assert.equal(wrongIdentity.canonical_path, fingerprint.canonical_path);
   assertMiss(await lookupJobFacts({ ...f.args, fingerprint, liveness }));
-  assertMiss(await invalidateJobFacts({ ...f.args, fingerprint, liveness: { ...liveness, result: 'expired' } }));
+  assertMiss(await invalidateJobFacts({ ...f.args, fingerprint, liveness: { ...liveness, result: 'expired', code: 'expired_body' } }));
   assert.equal(readFileSync(path, 'utf8'), before);
   assert.equal((await lookupJobFacts({ ...f.args, fingerprint, liveness: { ...f.liveness, url, listing_fingerprint: fingerprint } })).status, 'hit');
 });
@@ -243,7 +243,7 @@ test('explicit expired invalidation stamps all matching reports and preserves un
     if (process.platform !== 'win32') chmodSync(path, 0o600);
     originals.set(path, readFileSync(path, 'utf8'));
   }
-  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } });
+  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired', code: 'expired_body' } });
   assert.equal(readFileSync(otherPath, 'utf8'), otherBytes, 'a different listing must remain untouched');
   for (const [path, before] of originals) {
     const after = readFileSync(path, 'utf8');
@@ -266,7 +266,7 @@ test('deleting the newest invalidated report cannot revive an older duplicate', 
   const f = fixture(t);
   f.write('999-old.md', { captured_at: iso(NOW - 2 * HOUR) });
   const newest = f.write('001-new.md');
-  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } });
+  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired', code: 'expired_body' } });
   rmSync(newest);
   const after = { ...f.args, now: NOW + 2000, liveness: { ...f.liveness, checked_at: iso(NOW + 2000) } };
   assertMiss(await lookupJobFacts(after));
@@ -281,7 +281,7 @@ test('repeated invalidation preserves the newest tombstone across matching repor
   const newestTombstone = NOW + 1000;
   const oldPath = f.write('999-old.md', { invalidated_at: iso(newestTombstone) });
   const newPath = f.write('001-new.md');
-  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } });
+  await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired', code: 'expired_body' } });
   for (const path of [oldPath, newPath]) {
     const parsed = yamlLoad(readFileSync(path, 'utf8').match(/```yaml\n([\s\S]*?)\n```/)[1]);
     assert.equal(parsed.job_facts_cache.invalidated_at, iso(newestTombstone));
@@ -296,6 +296,8 @@ test('uncertain or stale liveness never writes durable invalidation', integratio
   for (const liveness of [
     { ...f.liveness, result: 'uncertain' },
     { ...f.liveness, result: 'expired', code: 'insufficient_content' },
+    { ...f.liveness, result: 'expired', code: 'expired_body_soft' },
+    { ...f.liveness, result: 'expired', code: 'unrecognized_closure' },
     { ...f.liveness, result: 'expired', checked_at: iso(NOW - HOUR) },
     { ...f.liveness, result: 'expired', url: 'https://other.example/jobs/12345' },
   ]) {
@@ -316,7 +318,7 @@ test('invalidation preserves valid opaque identifiers containing replacement met
     url, strong: { ...f.fingerprint.strong, posting_id: "id-$&-$$-$`-$'" },
   });
   const path = f.write('001-example.md', { listing_fingerprint: fingerprint });
-  const result = await invalidateJobFacts({ ...f.args, fingerprint, liveness: { ...f.liveness, url, listing_fingerprint: fingerprint, result: 'expired' } });
+  const result = await invalidateJobFacts({ ...f.args, fingerprint, liveness: { ...f.liveness, url, listing_fingerprint: fingerprint, result: 'expired', code: 'expired_body' } });
   assert.equal(result.status, 'invalidated');
   const parsed = yamlLoad(readFileSync(path, 'utf8').match(/```yaml\n([\s\S]*?)\n```/)[1]);
   assert.deepEqual(parsed.job_facts_cache.listing_fingerprint, fingerprint);
@@ -337,7 +339,7 @@ test('report symlinks cannot read or mutate files outside the reports directory'
   }
   const before = readFileSync(outside, 'utf8');
   assertMiss(await lookupJobFacts(f.args));
-  try { await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired' } }); } catch { /* refusal is expected */ }
+  try { await invalidateJobFacts({ ...f.args, liveness: { ...f.liveness, result: 'expired', code: 'expired_body' } }); } catch { /* refusal is expected */ }
   assert.equal(readFileSync(outside, 'utf8'), before);
 });
 
