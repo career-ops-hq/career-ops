@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { readReplyProposals } from '../lib/reply-proposals.mjs';
 import { resolveColumns, parseTrackerRow } from '../tracker-parse.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
+import { linkNodeModules } from './helpers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STATES = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
@@ -70,13 +71,8 @@ function prepareCode(f) {
     mkdirSync(dirname(join(f.code, file)), { recursive: true });
     copyFileSync(join(ROOT, file), join(f.code, file));
   }
-  for (let dir = ROOT; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, 'node_modules'))) {
-      symlinkSync(join(dir, 'node_modules'), join(f.code, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
-      break;
-    }
-    if (dirname(dir) === dir) break;
-  }
+  const depsReason = linkNodeModules(f.code, ROOT);
+  if (depsReason) throw new Error(`reply-proposals fixture dependencies unavailable: ${depsReason}`);
   f.codeReady = true;
 }
 
