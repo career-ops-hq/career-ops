@@ -4293,7 +4293,9 @@ async function main() {
           careersUrlDomain,
         };
         newOffers.push(offerForVerification);
-        if (verify) verifyDedupKeys.set(offerForVerification, { key, baseKey, requisition });
+        if (verify) verifyDedupKeys.set(offerForVerification, {
+          key, baseKey, requisition, language,
+        });
       }
     } catch (err) {
       errors.push({
@@ -4327,7 +4329,11 @@ async function main() {
       for (const migrated of migratedOffers) {
         const previous = newOffers.find((offer) => offer.url === migrated.previousUrl);
         const priorKeys = previous && verifyDedupKeys.get(previous);
-        if (priorKeys) verifyDedupKeys.set(migrated, { ...priorKeys, requisition: requisitionIdsForDedup({ url: migrated.url, text: migrated.title }) });
+        if (priorKeys) verifyDedupKeys.set(migrated, {
+          ...priorKeys,
+          requisition: requisitionIdsForDedup({ url: migrated.url, text: migrated.title }),
+          language: languageFormsForDedup(migrated.language),
+        });
       }
     }
     // Several URL aliases can reach verification before liveness is known.
@@ -4346,14 +4352,20 @@ async function main() {
         seen: seenCompanyRoles,
         requisitions: seenCompanyRoleRequisitions,
         locatedRequisitions: locatedRequisitionsByBase,
-      }, keys.requisition)) {
+        languages: seenCompanyRoleLanguages,
+        locatedLanguages: locatedLanguagesByBase,
+      }, keys.requisition, dedupIncludeLanguage ? keys.language : [])) {
         totalDupes++;
         continue;
       }
       if (keys?.key !== null && keys?.key !== undefined) {
         seenCompanyRoles.add(keys.key);
-        recordRequisition(seenCompanyRoleRequisitions, keys.key, keys.requisition);
-        if (keys.key !== keys.baseKey) recordRequisition(locatedRequisitionsByBase, keys.baseKey, keys.requisition);
+        recordForms(seenCompanyRoleRequisitions, keys.key, keys.requisition);
+        recordLanguages(seenCompanyRoleLanguages, keys.key, keys.requisition, keys.language);
+        if (keys.key !== keys.baseKey) {
+          recordForms(locatedRequisitionsByBase, keys.baseKey, keys.requisition);
+          recordLanguages(locatedLanguagesByBase, keys.baseKey, keys.requisition, keys.language);
+        }
       }
       acceptedOffers.push(offer);
     }
