@@ -288,7 +288,6 @@ career-ops는 공유 명령 라우터를 사용합니다. 슬래시 명령을 �
 /career-ops interview    → 대화형 프로필/이력서 온보딩 인터뷰
 /career-ops master-profile → 마스터 커리어 프로필 가져오기, 검토, 검증
 /career-ops eu-swe    → 이력서/지원/면접 전에 유럽 SWE 지원서 보정
-/career-ops eu-fintech → 유럽 핀테크 포털 21곳에서 Product Manager 직무 스캔 (토큰 소모 없음)
 /career-ops interview/plan → 다가오는 면접을 위한 시간 블록 단위 준비 계획
 /career-ops interview/practice → 연습 면접, 피드백과 함께 한 번에 한 질문씩
 /career-ops interview/debrief → 면접 후 디브리핑: 부족한 점 보완, 다음 라운드 예측

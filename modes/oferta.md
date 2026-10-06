@@ -8,13 +8,16 @@ When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F 
 
 When the candidate pastes a **URL** (not JD text), confirm the posting is still live before doing any evaluation. A dead link must never reach Block A — a 404/expired page wastes a full A-H evaluation, report, and PDF on phantom content.
 
+**LinkedIn URLs:** first apply AGENTS.md → **LinkedIn JD loading guard (#4121)**, including on direct `oferta` entry. Reuse prior content and the one-attempt budget across mode handoffs; it overrides the generic CLI/browser fallback below. A missing JD or stuck skeleton stays unconfirmed even with a title and Apply button. Stop before Block A and all artifact/tracker writes until real JD text is available; never navigate again just to resolve this gate.
+
 1. Get the page content: if you arrived here from `auto-pipeline` (its Step 0.5 already navigated and cleared the link), reuse that snapshot — do not navigate again. On a direct URL entry, navigate with Playwright (`browser_navigate` + `browser_snapshot`) and read the title, URL, and visible content. **Opt-in:** if `scan.extractor: cli` is set in `config/profile.yml`, run `node browser-extract.mjs <url>` (default `--mode jd`) instead and use its compact `{ "url", "title", "text" }` (the distilled JD main text rather than the full page a11y tree — fewer tokens for the model, board-dependent), **falling back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing.
    - The CLI extractor reads only the outer document. If its output lacks a real JD or apply path, use Playwright to check for an embedded iframe before making any closure decision, even when the extractor returned successfully.
 2. Classify the posting:
    - **active posting evidence:** title/role + a real job description or an application/apply path
    - **closed posting evidence:** expired/closed/"no longer accepting applications", missing JD with only nav/footer after the iframe check below, hard redirect to a generic careers/search page, or 404/410
 3. An empty `main` or nav/footer-only snapshot is **inconclusive** when the page contains an iframe. Company careers pages commonly embed an Ashby board (`jobs.ashbyhq.com`), or another ATS, in an iframe that loads after the outer page. Wait briefly and take one fresh snapshot; inspect the iframe content directly if the browser tool exposes it. If the iframe still cannot be read, do not infer that the posting is closed from the empty outer page alone. Try the fallback sources from `auto-pipeline` Step 0 or ask the candidate for the JD.
-4. If the posting has confirmed closed evidence after that check, invalidate any strong-identity job-facts cache as described below, then **stop before Block A**: tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
+4. If the posting has confirmed closed evidence after that check, invalidate any strong-identity job-facts cache as described below, then **stop before Block A**: output `---DEAD_POSTING---` on its own line, tell the candidate the link is dead, and if the entry came from `data/pipeline.md`, mark it `- [x] ~~Company | Role~~ — oferta nieaktywna`. Do not generate an evaluation, report, or CV.
+   - The batch evaluator treats `---DEAD_POSTING---` as a request to verify the URL, never as proof of closure. Only an independent deterministic liveness check returning `expired` with closure evidence may complete the entry; `insufficient_content` alone remains inconclusive even if the checker labels it expired. Active, uncertain, or failed checks leave it pending for evaluation/retry; URL-only entries retain their source URL.
 5. If the candidate pasted JD text (no URL), liveness cannot be verified — note that and proceed; there is no link to check.
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
@@ -51,7 +54,23 @@ If deeper company research is useful, recommend running `/career-ops deep` separ
 
 ## Step 0 — Archetype Detection
 
-Classify the job into one of the 6 archetypes (see `_shared.md`). If it is a hybrid, indicate the 2 closest ones. This determines:
+Classify the job against the archetypes in `_shared.md` — which means the user's
+own, from `modes/_profile.md` → *Your Target Roles*, where those exist. If
+`_profile.md` is missing, has no *Your Target Roles* section, or that table has
+no rows, classify against `_shared.md`'s default table instead, and treat a
+match there as a target. If it is a hybrid of two of the user's targets,
+indicate both.
+
+**"None of these" is a valid outcome and must be reported as one.** If the role
+matches nothing the user targets, do not pick the nearest label and do not call
+it a hybrid: say so, score North Star 1, and continue
+the evaluation on the other dimensions — the rest of the report is still worth
+having, and a low alignment score with an honest reason is more useful than a
+confident fit narrative for a job the user is not applying for. Where
+`_profile.md` does define targets, a match against `_shared.md`'s default table
+alone is not a match against them.
+
+This determines:
 - Which proof points to prioritize in block B
 - How to rewrite the summary in block E
 - Which STAR stories to prepare in block F
@@ -541,6 +560,22 @@ If (b) fires (and only (b), i.e. no disclosure language present), append a short
 
 This signal does not change the High Confidence / Proceed with Caution / Suspicious tier below — it is orthogonal to ghost-job detection and reported separately. **Out of scope for this signal (deliberately deferred, #2892):** cross-referencing whether the candidate actually ended up on an AI-led interview via `invite-match.mjs`'s `isAIInterviewerPlatform` detection (#2676), and disclosure *capture* feeding the ATS-channel analytics layer (#1404/#1405) — both need their own design pass per the umbrella's own scoping note.
 
+**16. Fixed-Term Contract Disclosure** (from JD text only; jurisdiction-agnostic, presence-based, #4534):
+
+Check whether the posting explicitly describes a time-limited employee role. Match clear duration/disclosure language such as `18 month contract`, `6-month contract`, `2 year contract`, `fixed-term`, `fixed-term contract position`, `temporary position`, `temporary role`, `temporary assignment`, or `term position`. Require employment-duration context: a bare occurrence of "contract" or an unqualified `contract position` in "customer contracts", "contract management", "contract law", or a contractor-status discussion does not fire this signal. When a numeric duration is present, preserve it verbatim in the finding; never infer a duration the JD does not state.
+
+This is deliberately separate from Signal 6. A fixed-term employee role can carry ordinary payroll, benefits, and employment protections; Signal 6 instead looks for contractor/services-status language. The same posting may trigger both only when it independently contains evidence for both checks.
+
+When present, append a factual, non-alarmist note:
+
+> ℹ️ **Fixed-term contract note:** [Render in {language.output}: quote the posting's exact fixed-term phrase and state the duration when provided. Explain that this is a time-limited role rather than a permanent-role disclosure, without treating that fact as negative or changing the recommendation. Invite the candidate to confirm renewal expectations, benefits, notice/end-of-term terms, and whether the total compensation reflects the finite term.]
+
+Then append one optional negotiation talking point:
+
+> **Compensation conversation:** [Render in {language.output}: "Because this role is explicitly fixed-term, consider asking how the total package accounts for the finite term, benefits coverage, renewal uncertainty, and transition risk at the end of the term. Contract roles commonly carry different compensation structures from equivalent permanent roles; verify current benchmarks for this market and role before choosing an anchor." Never state or invent a percentage premium, market rate, entitlement, or legal conclusion.]
+
+This signal is corroborating information only. It never changes the 1–5 Global Score, the High Confidence / Proceed with Caution / Suspicious tier, or the application recommendation; it never blocks or discourages an application. If no explicit fixed-term language is present, report the check as clear and do not generate the negotiation talking point.
+
 ### Output format:
 
 **Assessment:** One of three tiers:
@@ -589,6 +624,7 @@ Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not eval
 | Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet` |
 | AI claims vs. infrastructure | AI/infrastructure mismatch check in Block G, when present | If this report contains that check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | AI-screening disclosure | AI-screening disclosure signal in Block G (Signal 15), when present | If this report contains that check: `✅ discloses AI use` when (a) fired, `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` when only (b) fired (corroborating-only, never a compliance verdict), `— no jurisdiction match` when neither fired because the candidate's jurisdiction has no table row; otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
+| Fixed-term contract | Fixed-term disclosure signal in Block G (Signal 16) | `ℹ️ fixed term — "{quoted phrase}"` when explicit fixed-term language is present; otherwise `✅ no fixed term disclosed`; `— not evaluated` only when no JD text was available |
 
 Block format:
 
@@ -602,6 +638,7 @@ Block format:
 | Culture screen | ⚠️ caution — {evidence} |
 | Interview red flags | — no interview sessions yet |
 | AI claims vs. infrastructure | — not evaluated |
+| Fixed-term contract | ℹ️ fixed term — "18-month contract" |
 ```
 
 Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose.
@@ -667,6 +704,8 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 
 ## Post-evaluation
 
+Before saving the report, apply `modes/_shared.md` → Evidence confidence for the Global Score. After Risk Summary, include `## Score Evidence` with one row per scoring dimension (`CV match`, `North Star alignment`, `Compensation`, `Cultural signals`, `Red flags`): evidence status (`supported`, `partial`, `unknown`), concrete source or observation, and unresolved question. Follow it with `**Evidence confidence:** {High | Medium | Low} — {main reason}` and up to three verification priorities. This is confidence in the score's evidence, separate from Block G's posting-legitimacy tier. Mirror the five statuses and priorities in Machine Summary `score_evidence` and `confidence_gaps` using the canonical schema in `batch/batch-prompt.md`.
+
 **ALWAYS** after generating blocks A-G:
 
 ### 1. Save report .md
@@ -687,6 +726,14 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **URL:**
 **Via:** {agency/recruiter firm, or — for direct applications}
 **Archetype:** {detected}
+<!-- When the role matches one of the user's targets, name it. When it matches
+     none, this field is NOT left blank and NOT hedged — an empty field reads as
+     the tool failing, and "possibly a hybrid of X and Y" is the coercion this
+     is meant to prevent. Write one of:
+       Not a target — closest default: {row from _shared.md's table}
+       Not a target — no close match
+     Naming the default row still helps the reader place the role; what it must
+     not do is stand in for a target the user actually has. -->
 **Score:** {X/5}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **Work Auth:** {✅ Sponsors | ➖ Not needed | ⚠️ Unstated | ⛔ No sponsorship}
@@ -720,6 +767,9 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ## Risk Summary
 (one row per risk signal, fixed order — see the Risk Summary section above)
+
+## Score Evidence
+(five scoring dimensions, evidence status and source, unresolved questions, evidence-confidence tier, and verification priorities)
 
 ## H) Draft Application Answers
 (only if score >= 4.5 — draft answers for the application form)

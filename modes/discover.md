@@ -135,8 +135,7 @@ careers_url) and the unresolved list with reasons. Call out:
 
 ## Step 3 — Handoff
 
-After writing, tell the user to run `/career-ops scan` (or a regional preset
-like `eu-fintech`) to pull matching roles from the newly tracked boards.
+After writing, tell the user to run `/career-ops scan` to pull matching roles from the newly tracked boards.
 
 ## Rules
 
