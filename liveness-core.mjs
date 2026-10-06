@@ -47,8 +47,11 @@ const HARD_EXPIRED_PATTERNS = [
   /job (listing )?not found/i,
   /the page you are looking for doesn.t exist/i,
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
-  /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
-  /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
+  // "Was closed on 15 December" is a closure. "Will be closed on", "is to be
+  // closed on" and "may be closed on" give a date still ahead, on a posting
+  // that is open until then.
+  /(?<!\bbe\s)closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
+  /(?<!\bbe\s)closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
   // French closure banners. Spelled accent-free on purpose: normalizeForMatch
   // strips diacritics, so "expiree" here matches "expirée" on the page.
@@ -153,6 +156,32 @@ function firstMatch(patterns, text = '') {
   return patterns.find((pattern) => pattern.test(text));
 }
 
+// A hard pattern names a closure; it cannot tell whether the closure has
+// happened. A live posting often says how it will end: "applications will be
+// accepted until the position has been filled", "we will contact shortlisted
+// candidates once applications have closed". Both read as banners, and hard
+// patterns are checked before the apply control, so scan --verify recorded the
+// live posting as skipped_expired and every later scan skipped it.
+//
+// So an occurrence counts only when no time or condition word opens its clause:
+// none within ten words of the end of the match, with no clause punctuation in
+// between. The bound is what keeps real banners: normalizeForMatch() has joined
+// the page's lines, so a sign-in line ending "if you already have a profile"
+// runs straight into the banner under it, and that banner must still read as
+// one. Every occurrence is checked, since a page can carry the closing line in
+// its copy and a real banner above it.
+const TIME_OR_CONDITION_CLAUSE =
+  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as)\s+(?:[^\s.,;:!?…|•·]+\s+){0,9}[^\s.,;:!?…|•·]+$/i;
+
+function firstStatedMatch(patterns, text = '') {
+  return patterns.find((pattern) => {
+    for (const match of text.matchAll(new RegExp(pattern, `${pattern.flags}g`))) {
+      if (!TIME_OR_CONDITION_CLAUSE.test(text.slice(0, match.index + match[0].length))) return true;
+    }
+    return false;
+  });
+}
+
 function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
@@ -197,7 +226,7 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
     return { result: 'expired', code: 'expired_url', reason: `redirect to ${finalUrl}` };
   }
 
-  const expiredBody = firstMatch(HARD_EXPIRED_PATTERNS, bodyText);
+  const expiredBody = firstStatedMatch(HARD_EXPIRED_PATTERNS, bodyText);
   if (expiredBody) {
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
   }

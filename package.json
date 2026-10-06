@@ -17,6 +17,7 @@
     "lint": "node scripts/check-syntax.mjs",
     "normalize": "node normalize-statuses.mjs",
     "dedup": "node dedup-tracker.mjs",
+    "fix-report-links": "node fix-report-links.mjs",
     "merge": "node merge-tracker.mjs",
     "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",

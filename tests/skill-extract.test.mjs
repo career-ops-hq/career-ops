@@ -425,6 +425,49 @@ try {
     fail(`example-CV Hugging Face => ${JSON.stringify(classified)}`);
   }
 
+  // Fine-tuning is matched outside SKILL_TOKENS, and only where it names the ML
+  // skill: as an entry of its own in a list or table row, or on a line that also
+  // names a model skill. These are the shapes a CV, a posting and a report's Gap
+  // table write it in, across all three spellings; the bare name is what
+  // jd-skill-gap passes in to ask whether a skill is known at all.
+  const fineTuningNamed = [
+    'Fine-tuning', 'finetuning', 'fine tuning',
+    'AI/ML: PyTorch, Hugging Face, Fine-tuning, RAG',
+    'Techniques: Fine-tuning, distillation, quantization',
+    '- **Fine-tuning** (LoRA, QLoRA)',
+    '| Fine-tuning | Medium | No production runs yet |',
+    'Experience fine-tuning LLMs for classification',
+    'LLM fine-tuning and evaluation',
+    'Experience with model fine-tuning, evaluation and deployment',
+    'Fine-tuning of models for intent classification',
+    // examples/cv-example.md, the shipped ML CV
+    '- Built NLP pipeline for document classification (BERT fine-tuning, 94% accuracy on legal docs)',
+  ];
+  const ftMissed = fineTuningNamed.filter(text => !extractSkills(text).has('Fine-tuning'));
+  for (const raw of ['fine-tuning', 'finetuning', 'fine tuning']) {
+    if (canonicalize(raw) !== 'Fine-tuning') ftMissed.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (ftMissed.length === 0) pass(`extractSkills reads Fine-tuning in all ${fineTuningNamed.length} list and model-context shapes`);
+  else fail(`Fine-tuning missed => ${ftMissed.join(' | ')}`);
+
+  // Everywhere else it is tuning something that is not a model. A skill on the
+  // same line is context only when it is a model skill (not Google Ads, not
+  // PostgreSQL, not Spark, a data tool from the Data / ML / AI block), the word
+  // "models" only when it is what is being tuned, and a label in front of a
+  // colon is not a list entry (its pair is the "Techniques:" line above).
+  const fineTuningProse = [
+    'Fine-tuning the funnel to lift ROAS',
+    'Owned paid acquisition, fine-tuning bids and budgets across Google Ads and Meta',
+    'Fine-tuning PostgreSQL queries and indexes cut p95 latency by 40%',
+    'Fine-tuning Spark jobs for cost on Databricks',
+    'Fine-tuning dbt models to cut warehouse spend',
+    'Fine-tuning attribution models in GA4',
+    'Fine-tuning: dbt models to cut warehouse spend',
+  ];
+  const ftLeaks = fineTuningProse.filter(text => extractSkills(text).has('Fine-tuning'));
+  if (ftLeaks.length === 0) pass('extractSkills does not read fine-tuning of funnels, bids, queries, Spark jobs, dbt and attribution models, or a label over prose as the ML skill');
+  else fail(`Fine-tuning prose leak => ${ftLeaks.join(' | ')}`);
+
   // empty / falsy input
   if (extractSkills('').size === 0 && extractSkills(null).size === 0) pass('extractSkills returns an empty set for empty/null input');
   else fail('extractSkills should return {} for empty/null');

@@ -3,8 +3,10 @@
 /**
  * update-system.mjs — Safe auto-updater for career-ops
  *
- * Updates ONLY system layer files (modes, scripts, dashboard, templates).
- * NEVER touches user data (cv.md, profile.yml, _profile.md, data/, reports/).
+ * Updates system-layer files (modes, scripts, dashboard, templates) plus the
+ * exact system-owned `.gitkeep` scaffolds listed in DATA_CONTRACT.md. It never
+ * touches user-owned data (cv.md, profile.yml, _profile.md, or user files in
+ * data/, reports/, output/, and jds/).
  *
  * Usage:
  *   node update-system.mjs check      # Check if a newer release is published
@@ -197,6 +199,15 @@ const SYSTEM_PATHS = [
   'modes/upskill.md',
   'modes/intake.md',
   'documents/.gitkeep',
+  // Empty scaffolds are system-owned exceptions inside otherwise user-owned
+  // directories. Ship only these exact files; the data they sit beside stays
+  // in USER_PATHS and is never checked out by the updater.
+  'data/.gitkeep',
+  'data/offers/.gitkeep',
+  'data/parser-output/.gitkeep',
+  'jds/.gitkeep',
+  'output/.gitkeep',
+  'reports/.gitkeep',
   'documents/README.md',
   'modes/update.md',
   'modes/agent-inbox.md',
@@ -258,6 +269,7 @@ const SYSTEM_PATHS = [
   'lib/placeholder-cell.mjs',
   'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
+  'lib/scan-history-columns.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/scratch-dirs.mjs',
@@ -300,14 +312,15 @@ const SYSTEM_PATHS = [
   'tracker-aliases.json',
   'session-activity.mjs',
   'set-status.mjs',
-  'set-status-tests.mjs',
   'mark-pdf-ready.mjs',
   'normalize-statuses.mjs',
+  'fix-report-links.mjs',
   'cv-sync-check.mjs',
   'i18n-drift.mjs',
   'verify-cv-facts.mjs',
   'verify-cv-structure.mjs',
   'verify-ats.mjs',
+  'ats-payload.mjs',
   'update-system.mjs',
   'path-resolver.mjs',
   'ats-vendor.mjs',
@@ -334,6 +347,36 @@ const SYSTEM_PATHS = [
   'data-static/',
   'seeds/',
   'tests/',
+
+  // ── Retired paths ─────────────────────────────────────────────────────────
+  // These files no longer exist upstream: #3765 moved four root suites into
+  // tests/ (tracker-columns-tests.mjs stayed, for its timeout). They
+  // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
+  // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
+  // file that is gone from the remote tree AND matches an entry here. Drop the
+  // entry and an upgrading install keeps its copy of the old root file forever,
+  // where tests/root-tests-registration.test.mjs then reports it as an
+  // unregistered suite and turns `node test-all.mjs` red on a healthy install.
+  //
+  // Probe on this list vs. the pre-#3765 one, with a local tree holding the
+  // four and a remote tree without them: without these entries the prune
+  // returns nothing at all; with them it returns all four.
+  //
+  // NB: keep square brackets out of every comment in this array. Several
+  // assertions in test-all.mjs extract the manifest with a NON-GREEDY regex
+  // that ends at the first closing bracket, so one inside a comment truncates
+  // the parsed list and every entry below it reads as missing. That is not
+  // hypothetical: the first draft of this block wrote the probe result as an
+  // empty-array literal and turned the check-table-freshness assertion red.
+  //
+  // They are therefore expected to be ABSENT from the working tree, which is
+  // why updater-migration-tests.mjs lists them in ALLOWED_MISSING_ENTRIES.
+  // Safe to delete once no supported install can still be carrying them.
+  'agent-inbox-tests.mjs',
+  'followup-seed-tests.mjs',
+  'paste-reply-tests.mjs',
+  'set-status-tests.mjs',
+  // ── end retired paths ─────────────────────────────────────────────────────
   'user-agent.mjs',
   'doctor.mjs',
   'jsonc-parse.mjs',
@@ -375,7 +418,6 @@ const SYSTEM_PATHS = [
   'invite-match.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
-  'followup-seed-tests.mjs',
   'profile-language.mjs',
   'title-keywords.mjs',
   'gemini-eval.mjs',
@@ -389,7 +431,6 @@ const SYSTEM_PATHS = [
   'test-all.mjs',
   'tracker-columns-tests.mjs',
   'tracker-writer-lock-tests.mjs',
-  'agent-inbox-tests.mjs',
   'validate-portals.mjs',
   'validate-profile.mjs',
   'verify-portals.mjs',
@@ -401,7 +442,6 @@ const SYSTEM_PATHS = [
   'reply-matcher.mjs',
   'reply-watch.mjs',
   'paste-reply.mjs',
-  'paste-reply-tests.mjs',
   'contact-extract.mjs',
   // Retired 2026-10-04: the suite moved to tests/contact-extract.test.mjs. The
   // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
@@ -550,16 +590,17 @@ const BOOTSTRAP_PATHS = [
   'validate-plugin-registry.mjs',
   'config/plugins.example.yml',
   'agent-inbox.mjs',
-  'agent-inbox-tests.mjs',
+  'tests/agent-inbox.test.mjs',
 ];
 
-// User layer paths — NEVER touch these (safety check)
+// User layer paths — never touch user-owned files under these paths (safety
+// check). Exact system-owned scaffold files are explicit SYSTEM_PATHS entries.
 /**
- * Files and directories the updater must never touch — the USER layer of the
- * data contract (DATA_CONTRACT.md). Exported so other tooling can derive the
- * same boundary instead of re-listing it: a hardcoded second copy is how a
- * fourth user file eventually gets policed by something that has no business
- * having an opinion about it (#2480).
+ * Files and directories whose user-owned contents the updater must never touch
+ * — the USER layer of the data contract (DATA_CONTRACT.md). Exported so other
+ * tooling can derive the same boundary instead of re-listing it: a hardcoded
+ * second copy is how a fourth user file eventually gets policed by something
+ * that has no business having an opinion about it (#2480).
  */
 export const USER_PATHS = [
   '.career-ops-web/',
@@ -689,7 +730,7 @@ export function localUserPaths(root = ROOT) {
  * safety check compares against — the built-in list alone would report a
  * fork's own files as violations.
  * @param {string} [root=ROOT] - Repo root to read from.
- * @returns {string[]} Every path the updater must never touch.
+ * @returns {string[]} User-layer paths whose user-owned contents are protected.
  */
 export function effectiveUserPaths(root = ROOT) {
   return [...USER_PATHS, ...localUserPaths(root)];
@@ -1421,7 +1462,11 @@ export function parsePorcelainStatus(status) {
 }
 
 export function gitStatusEntries(root = ROOT) {
-  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z'));
+  // Git collapses an untracked directory to a single entry by default. When
+  // apply() checks out a tracked scaffold there, the next snapshot expands it
+  // to the scaffold plus each user file. Comparing snapshots would report the
+  // unchanged user files as new updater output, so keep the granularity stable.
+  return parsePorcelainStatus(gitRawIn(root, 'status', '--porcelain', '-z', '--untracked-files=all'));
 }
 
 export function extractArrayFromSource(source, name) {

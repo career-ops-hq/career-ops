@@ -12,6 +12,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify` | `verify-pipeline.mjs` | Check pipeline data integrity |
 | `npm run normalize` | `normalize-statuses.mjs` | Fix non-canonical statuses |
 | `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
+| `npm run fix-report-links` | `fix-report-links.mjs` | Rewrite tracker Report cells whose link points at a missing file to `—` |
 | `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
 | `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
 | `npm run jd:similarity` | `jd-similarity.mjs` | Compare a new JD with a previous JD/CV and recommend reuse, edits, or regeneration |
@@ -113,6 +114,21 @@ npm run dedup -- --dry-run  # preview without writing
 Creates a `.bak` backup before writing.
 
 **Exit codes:** `0` always.
+
+---
+
+## fix-report-links
+
+Repairs the rows `verify-pipeline.mjs` reports as `Report not found: ...` (Check 3). Rewrites **only** the Report cell of a row whose markdown link does not resolve to a regular file to `—`, the tracker's existing "no report" value. Every other cell, the row order, cell padding and the file's line endings (LF or CRLF) stay byte-for-byte as they were; nothing is re-sorted or re-formatted. "Broken" is decided by `findDeadReportLink()` in `tracker-utils.mjs` (the link is resolved from the tracker's directory, then from the data root; a directory is not a report), the same function `verify-pipeline.mjs` and `merge-tracker.mjs` use, so the tools always agree. The Report column is located by header name, so extra columns (`Via`, `URL`, `Location`) or aliased headers are fine; a tracker without a Report column is reported and left alone.
+
+```bash
+npm run fix-report-links             # apply changes
+npm run fix-report-links -- --dry-run  # list the rows (#, company, role, dead link), write nothing
+```
+
+A Report cell that is anything other than exactly one link (two links, or a link plus text) is never rewritten; it is listed under "skipped, please check by hand". Cells that are `—`, `N/A` or empty are left alone. Creates a `.bak` backup before writing and writes through the shared tracker lock. It does not guess why a report is missing and does not regenerate it. A second run changes nothing.
+
+**Exit codes:** `0` always (changes or no changes), `1` on an unknown flag or when the tracker lock cannot be acquired.
 
 ---
 
@@ -649,7 +665,7 @@ career-ops v1.32.0
 
 ## update
 
-Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches the latest published release from the canonical repo (`--channel main`: main's tip instead), checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-layer files (`cv.md`, `config/profile.yml`, `data/`, etc.) are never touched.
+Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches the latest published release from the canonical repo (`--channel main`: main's tip instead), checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-owned files (`cv.md`, `config/profile.yml`, and files in `data/`, `reports/`, `output/`, and `jds/`) are preserved; only the exact system-owned `.gitkeep` scaffolds listed in `DATA_CONTRACT.md` may be replaced.
 
 ```bash
 npm run update
@@ -706,6 +722,10 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 `scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
 
 The location component is the canonical **set** of the places a posting names, not the provider's display string. That field is free text and is often not one place: live Greenhouse boards pack several into one value with `;`, `|`, `/` or the word `or`, sometimes mixing two separators in the same value, and several providers here (greenhouse, ashby, eightfold, gem, ibm, echojobs) fold a multi-site role's extra cities into the string themselves in whatever order the upstream array arrived. Keying that string verbatim is stable only while the order holds, so a re-ordered list would read as a new posting and re-enter the pipeline. Splitting on those separators, normalizing each place, deduplicating and sorting makes the key depend on which places a posting names rather than the order it names them in. `,` is not a separator - it delimits city from region inside one place.
+
+When a provider reads the employer's requisition id from a dedicated ATS field (`Job.requisitionId`, e.g. SmartRecruiters `refNumber`), company+role dedup uses it the way it uses a Workday requisition: two postings with one title but different requisitions stay two entries, while an unknown requisition on either side keeps the duplicate. The id is recorded in scan-history (`requisition_id`), and tracker and pipeline rows pick it up from the scan-history row with the same URL, so the check also holds across runs.
+
+`scan_history.dedup_include_language` (optional, opt-in, default off) keeps language versions of one posting apart. An employer can publish one requisition in more than one language (for example German and English) with the same title and location in each; off, the scan keeps whichever version the ATS returned first. On, two postings whose languages are both known (`Job.language`, recorded in scan-history's `language` column) and differ are not duplicates. A language code is reduced to its canonical language subtag with `Intl.Locale`, so `en-GB`, `en-US` and `en` are one language and so are `deu` and `de`; anything that isn't a language tag, such as a display name, is compared whole, ignoring case. Turn it on when you only apply to postings in some languages and discard the rest: the discarded version may otherwise be the one the scan kept. An unknown language on either side keeps the duplicate, so a provider that doesn't report a language behaves exactly as before.
 
 For custom SSR pages, configure a tracked company with `scan_method: local_parser` and a `parser` block. The parser can be written in JavaScript, Python, or any language available as a local executable. Company-specific parsers usually already know their source URL and only need to print JSON jobs to stdout:
 
@@ -1148,12 +1168,105 @@ These have no `npm run` binding — modes and agents call them with
 | `node process-quality.mjs [--summary]` | Aggregate `[process-friction]` tags from `data/active-interviews.md` per company |
 | `node reserve-report-num.mjs [--count N]` | Atomically reserve report numbers for parallel workers (fixes the #749 race) |
 | `node agent-inbox.mjs add "..."` | Append a request to the queue the agent drains at the next session start |
+| `node agent-inbox.mjs list [--all]` | List pending (or all) queued items by stable number — gaps mean already resolved |
+| `node agent-inbox.mjs resolve <n> [--expect "..."] [--result "..."]` | Tick item `n` and stamp a one-line result; `--expect` aborts unless the item contains that substring |
 | `node generate-latex.mjs <input.tex> [output.pdf] [--compile-only] [--help]` | Validate and compile a generated `.tex` CV via tectonic or pdflatex; `--compile-only` skips career-ops template validation so a user-owned `.tex` compiles as-is (`latex-tex` mode) |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
+| `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs [--help]` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA); the engine behind the `plugins.mjs` new/add commands, which `--help` points at |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
 | `node validate-plugin-registry.mjs` | Shape gate for `plugins-registry/<id>.json` files |
+
+---
+
+## ats-payload.mjs
+
+Prepares a `build-cv-html.mjs` payload for an ATS parser: **one safe transform,
+three lints**. Zero-LLM, deterministic, offline, and read-only with respect to
+user-layer files — it consumes a payload and emits a new one, and never writes
+back to `cv.md` or `config/profile.yml`.
+
+```bash
+node ats-payload.mjs cv.json > cv-ats.json
+node ats-payload.mjs cv.json --summary > cv-ats.json     # human findings on stderr
+cat cv.json | node ats-payload.mjs - > cv-ats.json
+node build-cv-html.mjs cv-ats.json out.html templates/ats/cv-template.ats.html
+```
+
+**stdout is the payload and only the payload**; every human-facing word goes to
+stderr (JSON by default, a formatted report with `--summary`). That is what makes
+`> cv-ats.json` safe and lets the script compose into a pipe.
+
+### The transform (applied)
+
+`competencies[]` is folded into `skills[]` as one comma-delimited category, and
+the source array is emptied.
+
+The reason is a fact about parsers, not about any one user. `build-cv-html.mjs`
+renders competencies as bare tag spans into a container whose separation is
+entirely visual (`.competencies-grid { gap: 8px }`) — there is no delimiter
+*character* between one competency and the next, so extracting the text layer
+runs adjacent competencies into a single token. And the block ships under
+`Core Competencies`, which parsers do not recognise as a section name, so it is
+frequently dropped whole rather than merely mangled. `Skills` **is** recognised,
+and already renders as `Category: a, b, c` — comma-delimited, under a header
+parsers look for. The same facts, expressed two ways, survive or don't depending
+on which array they sit in.
+
+Pure data movement: no text is invented, and the transform is reversible and
+**idempotent** — a second run is a no-op, and re-added competencies merge into
+the existing category rather than creating a duplicate one. A payload carrying a
+localized `sections.competencies` keeps its own label as the category name.
+
+### The lints (reported, never applied)
+
+Each needs a decision only the author can make, which is exactly where the
+no-fabrication rule in `AGENTS.md` draws the line.
+
+| Code | What it sees | Why it is not applied |
+|------|--------------|-----------------------|
+| `employer-in-role` | An employer name inside `experience[].role` — the trap for consulting and agency work, where a client's name reads naturally as part of the title. Yields a phantom employer in the parsed record | Deciding "this substring is an employer" is not something a script should be confident about, and silently rewriting a job title is worse than the mangling it prevents |
+| `parenthetical-in-company` | `Globex (Cloud Platform Division)` — kept verbatim as part of the employer name, so the record matches no search for the employer | Stripping it is easy; deciding where that detail *goes* instead (role, location, a bullet) is authoring |
+| `multiple-date-ranges` | Two date ranges in one `experience[].dates` — two stints at one employer parse as one | Splitting them needs someone to decide which bullets belong to which stint. The script can see the second range; it cannot allocate the bullets |
+
+Findings are **advisory**: the transform still succeeds and the payload on stdout
+is still usable, so the script exits 0 with findings present. Exit 1 is reserved
+for an unreadable or malformed input.
+
+### Input validation
+
+The three fields the script reads are shape-checked at the CLI boundary, and a
+payload that would make the run quietly wrong is **refused, not accommodated** —
+nothing reaches stdout, so a shell redirect cannot capture a half-right artifact.
+
+- `skills` present and not an array — folding into it would discard the value you
+  supplied and hand back a well-formed-looking payload with the skills gone.
+- `experience` present and not an array — the lints would report nothing, which
+  prints as "No lint findings" and reads exactly like a clean payload.
+- `competencies` present and neither an array nor a comma-separated string, or an
+  array holding a member with no scalar value (an object, array or `null`) — that
+  member would be dropped rather than folded, thinning the section silently.
+- the existing category the fold would merge into holding such a member in its
+  `items`, or an `items` that is neither a string nor an array — the merge reads
+  it, gets nothing, and overwrites the supplied value. Both are checked only when
+  a fold will actually happen, and only for the one category it would touch, so a
+  payload that would pass through untouched is never rejected for it.
+
+The line is drawn at what is *lost*, not at what is not a string: a numeric or
+boolean member is coerced by `String()` and keeps its value, which is what
+`build-cv-html.mjs` does with it too (numeric years and dates must render, not
+vanish — `tests/cv-numeric-scalars.test.mjs`). Rejecting those would make this
+script stricter than the builder it feeds. An `items` *container* is the other
+way round and is refused: the builder's `joinItems()` returns `''` for anything
+that is neither a string nor an array, so a scalar there has no value-preserving
+path in either tool.
+
+Refusing rather than coercing is deliberate: there is no honest place to put a
+string `skills` value inside `skills[]`, and inventing the structure to hold it
+is the same authoring the lints exist to avoid.
+
+Self-test: `node ats-payload.mjs --self-test`.
 
 ---
 

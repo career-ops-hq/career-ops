@@ -55,6 +55,22 @@
 # scan_history:
 #   dedup_include_location: true
 
+# -- Language-aware duplicate roles (optional, opt-in) --
+# An employer can publish one requisition in more than one language (for
+# example German and English), with the same title and location in each. By
+# default those are ONE role and the scan keeps whichever version the ATS
+# returned first.
+#
+# Set dedup_include_language: true to keep them apart when the ATS reports each
+# posting's language. Turn it on when you only apply to postings written in some
+# languages and discard the rest (for example, skip every JD written in German):
+# otherwise the version the scan kept may be the one you throw away.
+# Regional variants count as one language (en-GB equals en), and a posting whose
+# language the ATS doesn't report is compared as before.
+#
+# scan_history:
+#   dedup_include_language: true
+
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
 # scanner for Interamt.de, a portal for German federal, state, and municipal
@@ -1713,12 +1729,33 @@ search_queries:
 #   careers_url: https://www.python.org/jobs/
 #   enabled: true
 #
-# - name: Startup Jobs                    # global startup/scale-up jobs (public RSS feed, ~50-item snapshot)
+# Startup Jobs: global startup/scale-up jobs (public RSS feed). Each query
+# returns only the ~50 most recent postings, so cover a search with several
+# narrow entries rather than one broad one: one per role slug, plus a
+# `workplace: remote` variant (for a broad slug the unscoped entry fills up
+# within hours, while the remote one stays under the cap longer).
+#   role: slug = last segment of a https://startup.jobs/roles/<slug> page;
+#     full list: bare /roles/<slug> entries in
+#     https://cdn.startup.jobs/sitemaps/startupjobs/roles.xml.gz
+#   workplace: optional; "remote" is the only accepted value, anything else → HTTP 404
+#
+# - name: Startup Jobs — Platform Engineer
 #   provider: startup-jobs
 #   startup_jobs:
-#     role: platform-engineer    # optional role slug (confirmed live: platform-engineer,
-#                                 # site-reliability-engineer, devops-engineer, engineering, ...)
-#     workplace: remote          # optional free-text, e.g. "remote"
+#     role: platform-engineer
+#   enabled: true
+#
+# - name: Startup Jobs — Platform Engineer (remote)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#     workplace: remote
+#   enabled: true
+#
+# - name: Startup Jobs — Site Reliability Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: site-reliability-engineer
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
