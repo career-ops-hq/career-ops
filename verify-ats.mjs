@@ -615,9 +615,12 @@ function auditAts(html, opts = {}) {
   // The property is anchored on the start of a declaration so that
   // `background-color:#fff` (a visible badge) is not read as `color:#fff`.
   // `-webkit-text-fill-color` paints the glyph fill and overrides `color`, so it
-  // counts. CSS comments are whitespace to a browser, so they are stripped here
-  // (this check only) to read the declaration the way the browser does.
-  if (inlineStyles.some(s => /(?:^|;)\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s.replace(/\/\*[\s\S]*?\*\//g, ' ')))) {
+  // counts. A comment may sit wherever whitespace can, so each gap admits one.
+  // Nothing is deleted before matching: stripping comments first would also eat
+  // comment markers inside a quoted value, and the real declaration between.
+  const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/)*`;
+  const whiteText = new RegExp(String.raw`(?:^|;)${gap}(?:-webkit-text-fill-)?color${gap}:${gap}(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))`, 'i');
+  if (inlineStyles.some(s => whiteText.test(s))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -954,6 +957,18 @@ function runSelfTest() {
   // browser drops that declaration, so it must not read as white text.
   const splitIdent = auditAts(buildCleanHtml({ extraBody: '<span style="col/**/or:#fff">Senior engineer</span>' }));
   check('a comment splitting the property name is not flagged as hidden text', !hasIssue(splitIdent.issues, 'hidden text'));
+  // Comment markers inside a quoted value belong to the string, not a comment.
+  // Reading them as one would delete the real declaration that sits between.
+  const quotedMarkers = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'/*';color:#fff;font-family:'*/'">python kubernetes aws rust golang</span>` }));
+  check('comment markers inside quoted values do not hide a real white declaration', hasIssue(quotedMarkers.issues, 'hidden text'));
+  // A comment may sit on either side of the colon, and the declaration applies.
+  for (const [label, style] of [
+    ['a comment before the colon', 'color/**/:#fff'],
+    ['a comment after the colon', 'color:/**/#fff'],
+  ]) {
+    const commented = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`white text with ${label} is still flagged as hidden text`, hasIssue(commented.issues, 'hidden text'));
+  }
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
