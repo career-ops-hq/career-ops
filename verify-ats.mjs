@@ -617,7 +617,7 @@ function auditAts(html, opts = {}) {
   // `-webkit-text-fill-color` paints the glyph fill and overrides `color`, so it
   // counts. CSS comments are whitespace to a browser, so they are stripped here
   // (this check only) to read the declaration the way the browser does.
-  if (inlineStyles.some(s => /(?:^|;)\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s.replace(/\/\*[\s\S]*?\*\//g, '')))) {
+  if (inlineStyles.some(s => /(?:^|;)\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s.replace(/\/\*[\s\S]*?\*\//g, ' ')))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -950,6 +950,10 @@ function runSelfTest() {
   // A comment inside a non-color declaration must not create a false positive.
   const commentedBackground = auditAts(buildCleanHtml({ extraBody: '<span style="background-color:/**/#fff;color:#111">Senior engineer</span>' }));
   check('white background-color with an inner comment is not flagged as hidden text', !hasIssue(commentedBackground.issues, 'hidden text'));
+  // A comment splits a CSS identifier in two, so `col/**/or` is not `color`. A
+  // browser drops that declaration, so it must not read as white text.
+  const splitIdent = auditAts(buildCleanHtml({ extraBody: '<span style="col/**/or:#fff">Senior engineer</span>' }));
+  check('a comment splitting the property name is not flagged as hidden text', !hasIssue(splitIdent.issues, 'hidden text'));
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
