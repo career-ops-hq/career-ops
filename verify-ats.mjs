@@ -615,11 +615,14 @@ function auditAts(html, opts = {}) {
   // The property is anchored on the start of a declaration so that
   // `background-color:#fff` (a visible badge) is not read as `color:#fff`.
   // `-webkit-text-fill-color` paints the glyph fill and overrides `color`, so it
-  // counts. A comment may sit wherever whitespace can, so each gap admits one.
+  // counts. A comment may precede the property, as in `a:b;/**/color:#fff`.
   // Nothing is deleted before matching: stripping comments first would also eat
   // comment markers inside a quoted value, and the real declaration between.
-  const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/)*`;
-  const whiteText = new RegExp(String.raw`(?:^|;)${gap}(?:-webkit-text-fill-)?color${gap}:${gap}(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))`, 'i');
+  // Comments are admitted before the property only, never around the colon, so
+  // this can only match where `color\s*:\s*#fff` itself already appears. The
+  // comment pattern stops at its first `*/`, so it cannot backtrack across one.
+  const comment = String.raw`\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/`;
+  const whiteText = new RegExp(String.raw`(?:^|;)(?:\s|${comment})*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))`, 'i');
   if (inlineStyles.some(s => whiteText.test(s))) {
     hiddenSignals.push('white-on-white text');
   }
@@ -961,14 +964,17 @@ function runSelfTest() {
   // Reading them as one would delete the real declaration that sits between.
   const quotedMarkers = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'/*';color:#fff;font-family:'*/'">python kubernetes aws rust golang</span>` }));
   check('comment markers inside quoted values do not hide a real white declaration', hasIssue(quotedMarkers.issues, 'hidden text'));
-  // A comment may sit on either side of the colon, and the declaration applies.
-  for (const [label, style] of [
-    ['a comment before the colon', 'color/**/:#fff'],
-    ['a comment after the colon', 'color:/**/#fff'],
-  ]) {
-    const commented = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
-    check(`white text with ${label} is still flagged as hidden text`, hasIssue(commented.issues, 'hidden text'));
-  }
+  // A quoted value can hold text that looks like a declaration. Here the real
+  // color is #111; the white one is inside a string, and the browser ignores it.
+  const quotedFake = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:';color/**/:#fff';color:#111">Senior engineer</span>` }));
+  check('a white declaration inside a quoted value is not flagged as hidden text', !hasIssue(quotedFake.issues, 'hidden text'));
+  // The comment pattern must not match across a `*/`. If it could, a run of
+  // comments splits exponentially many ways, and a style that fails to match
+  // at its end backtracks through every one of them.
+  const manyComments = `<span style=";${'/**/'.repeat(30)}colour:#fff">Senior engineer</span>`;
+  const auditStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: manyComments }));
+  check('a long run of comments does not backtrack catastrophically', performance.now() - auditStarted < 1000);
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
