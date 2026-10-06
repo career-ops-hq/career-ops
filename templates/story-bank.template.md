@@ -10,7 +10,9 @@ Every story is a `### ` block in exactly this shape. The readers match it litera
 - `**A (Action):**` is required. A block without it is invisible to `npm run star`.
 - The `### ` heading and the field labels stay in **English**, whatever language the story itself is written in.
 - Never paste Block F table rows here. Turn each row into a block.
-- Do not add a `**Provenance:**` line when writing from an evaluation. A story without one counts as `derived-unverified` until the user confirms its figures.
+- Do not add a `**Provenance:**` line when writing from an evaluation: an evaluation does not get to vouch for its own figures. Without a marker, `story-provenance-check.mjs` sorts each figure by `cv.md`: `existing` when the same number appears there in context, `supportedByResume` when `cv.md` supports the fact but not the number, otherwise `derived-unverified`.
+- When the user answers for a story's figures, add `**Provenance:**` followed by exactly one of `source: cv.md`, `user-stated YYYY-MM-DD` or `user-cannot-confirm`, alone on its line. Any text after the value makes the readers ignore the marker.
+- Other single-line `**Label:** value` lines are allowed and ignored by the readers. Keep tables and `#`/`##` headings out of a story, since the readers stop at them, and keep code fences out too, since their content is skipped.
 
 ```markdown
 ### [Theme] Story Title

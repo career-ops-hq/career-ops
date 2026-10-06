@@ -158,7 +158,7 @@ import { join } from 'path';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
+import { splitStoryBlocks, isValidStory, getField, STORY_FIELDS } from './lib/story-bank.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -233,40 +233,77 @@ const STOPWORDS = new Set([
 // unverified numbers #2947 exists to surface. Invalid entries are flagged,
 // never dropped.
 
+/** First `**Provenance:**` value in `text`, lowercased, or null. */
+function provenanceIn(text) {
+  // The marker must open its own line (optional indent, at most one list or
+  // quote marker). A `**Provenance:**` quoted inside another field's value is
+  // story text, not the story's marker (issue #4819).
+  const m = text.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
+  return m ? m[1].trim().toLowerCase() : null;
+}
+
 /**
  * Parse story-bank.md into checkable entries: every `### ` block, valid or
- * not, then every table row outside a block, each attributed to itself.
+ * not; every run of text a story was cut off from by a table or heading; and
+ * every table row outside a block. Each is attributed to itself, so a figure
+ * is never credited to a field it isn't in.
+ *
+ * Provenance is the exception, on purpose. A story and the text cut off from
+ * it are ONE unit for the marker, as they were before a story ended at a
+ * table or heading: a marker in either covers both. Otherwise a Result line
+ * that happens to sit below a table would lose its story's
+ * `user-cannot-confirm` and come back as derived-unverified, asking the user
+ * to confirm a figure they already said they can't (the decay AGENTS.md's
+ * confirmation invariant forbids). Table rows inherit only that denial, never
+ * `source:` or `user-stated`: rows after a story are often separate Block F
+ * rows, and a denial can only make a classification stricter.
+ *
  * @param {string} content
- * @returns {Array<{kind: 'story'|'table-row', title: string, provenance: string|null, body: string, valid: boolean, line: number}>}
+ * @returns {Array<{kind: 'story'|'trailing'|'table-row', title: string, provenance: string|null, body: string, valid: boolean, line: number, actionAfterCut?: string}>}
  */
 function parseStoryBlocks(content) {
-  const { blocks, tableRows } = splitStoryBlocks(content);
+  const { blocks, tableRows, trailing } = splitStoryBlocks(content);
 
-  const stories = blocks.map((b) => {
-    // The marker must open its own line (optional indent, at most one list or
-    // quote marker). A `**Provenance:**` quoted inside another field's value is
-    // story text, not the story's marker (issue #4819).
-    const provMatch = b.raw.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
+  // The story's own text first, then its cut-off runs in file order: the
+  // first marker found is the unit's, the same rule as reading the block whole.
+  const unitProvenance = blocks.map((b, i) => [b.raw, ...trailing.filter((t) => t.story === i).map((t) => t.text)]
+    .map(provenanceIn).find((p) => p) ?? null);
+
+  const stories = blocks.map((b, i) => {
+    // An Action below the cut is why such a story reads as invalid; say so
+    // instead of "no Action", which sends the user looking for a missing line.
+    const cut = trailing.find((t) => t.story === i && getField(t.text, STORY_FIELDS.action));
     return {
       kind: 'story',
       title: b.title || `(untitled, line ${b.line})`,
-      provenance: provMatch ? provMatch[1].trim().toLowerCase() : null,
+      provenance: unitProvenance[i],
       body: b.raw,
       valid: isValidStory(b),
       line: b.line,
+      ...(cut ? { actionAfterCut: cut.after } : {}),
     };
   });
+
+  const cutOff = trailing.map((t) => ({
+    kind: 'trailing',
+    title: `(after ${t.after}, line ${t.line}) in "${stories[t.story].title}"`,
+    provenance: unitProvenance[t.story],
+    body: t.text,
+    valid: false,
+    line: t.line,
+    after: t.after,
+  }));
 
   const rows = tableRows.map((r) => ({
     kind: 'table-row',
     title: `(table row, line ${r.line}) ${r.label}`.trim(),
-    provenance: null,
+    provenance: r.story >= 0 && unitProvenance[r.story] === 'user-cannot-confirm' ? 'user-cannot-confirm' : null,
     body: r.text,
     valid: false,
     line: r.line,
   }));
 
-  return [...stories, ...rows];
+  return [...stories, ...cutOff, ...rows];
 }
 
 /**
@@ -274,14 +311,13 @@ function parseStoryBlocks(content) {
  * @param {ReturnType<typeof parseStoryBlocks>} entries
  */
 function malformedEntries(entries) {
-  return entries.filter((e) => !e.valid).map((e) => ({
-    title: e.title,
-    kind: e.kind,
-    line: e.line,
-    reason: e.kind === 'table-row'
-      ? 'table row: not a ### block'
-      : 'no **A (Action):** line',
-  }));
+  const reason = (e) => {
+    if (e.kind === 'table-row') return 'table row: not a ### block';
+    if (e.kind === 'trailing') return `text after a ${e.after} inside a story: the readers stop at the ${e.after}`;
+    if (e.actionAfterCut) return `its **A (Action):** line comes after a ${e.actionAfterCut}, where the readers stop`;
+    return 'no **A (Action):** line';
+  };
+  return entries.filter((e) => !e.valid).map((e) => ({ title: e.title, kind: e.kind, line: e.line, reason: reason(e) }));
 }
 
 // ── Claim extraction ─────────────────────────────────────────────────

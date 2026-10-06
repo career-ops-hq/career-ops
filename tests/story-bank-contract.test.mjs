@@ -29,9 +29,9 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { splitStoryBlocks, isValidStory, parseStories, STORY_FIELDS } from '../lib/story-bank.mjs';
+import { splitStoryBlocks, isValidStory, parseStories, getField, STORY_FIELDS } from '../lib/story-bank.mjs';
 import { parseStories as matchStarParseStories } from '../match-star.mjs';
-import { parseStoryBlocks, classifyStoryBank } from '../story-provenance-check.mjs';
+import { parseStoryBlocks, classifyStoryBank, malformedEntries } from '../story-provenance-check.mjs';
 import { analyze } from '../negotiation-roi.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -63,6 +63,13 @@ const EMPTY_ACTION = `### [Gap] Empty action line
 **R (Result):** It went fine`;
 
 const HEADING_ONLY = `### [Stub] Heading with nothing under it`;
+
+// A label quoted inside another field's value is not that field. Unanchored,
+// this passed isValidStory() with action = "TBD that nobody filled in." —
+// on main too, before this module existed (#4684 review, point 1).
+const QUOTED_ACTION = `### [Ops] Runbook cleanup
+**S (Situation):** The runbook had a line reading **A (Action):** TBD that nobody filled in.
+**R (Result):** Fewer pages.`;
 
 const BLOCK_F_TABLE = `| # | JD Requirement | STAR+R Story | S | T | A | R | Reflection |
 |---|-----------------|-----------------|---|---|---|---|------------|
@@ -110,6 +117,7 @@ const FIXTURES = {
   'no Action': NO_ACTION,
   'empty Action': EMPTY_ACTION,
   'heading only': HEADING_ONLY,
+  'Action label quoted inside another field': QUOTED_ACTION,
   'table rows only': `# Story Bank\n\n${BLOCK_F_TABLE}\n`,
   'block then table': `# Story Bank\n\n${LONG_LABELS}\n\n${BLOCK_F_TABLE}\n`,
   'valid, invalid, valid': [LONG_LABELS, NO_ACTION, SHORT_LABELS].join('\n\n'),
@@ -164,6 +172,27 @@ test('match-star and negotiation-roi read through the shared parser', () => {
   assert.equal(matchStarParseStories, parseStories, 'match-star re-exports a different parseStories');
   assert.equal(analyze(FIXTURES['table rows only'], '').storiesScanned, 0);
   assert.equal(analyze(LONG_LABELS, '').storiesScanned, 1);
+});
+
+test('a field label counts only at the start of a line', () => {
+  assert.equal(parseStories(QUOTED_ACTION).length, 0, 'a quoted **A (Action):** made the story valid');
+  assert.equal(
+    parseStoryBlocks(QUOTED_ACTION).filter((e) => e.kind === 'story' && e.valid).length, 0,
+    'the provenance checker counted the quoted Action',
+  );
+
+  const action = (line) => getField(line, STORY_FIELDS.action);
+  // Accepted: indentation, and ONE list or quote marker before the label.
+  for (const line of ['**A (Action):** x', '   **A (Action):** x', '- **A (Action):** x', '* **A (Action):** x',
+    '+ **A (Action):** x', '> **A (Action):** x', '-\t**A (Action):** x', '**Action:** x']) {
+    assert.equal(action(line), 'x', `rejected a real field line: ${JSON.stringify(line)}`);
+  }
+  // Rejected: the label anywhere but the start of the line.
+  for (const line of ['**S (Situation):** see **A (Action):** x', 'Note: **A (Action):** x', '-**A (Action):** x']) {
+    assert.equal(action(line), '', `accepted a mid-line label: ${JSON.stringify(line)}`);
+  }
+  // A blank field line doesn't hide a real one further down.
+  assert.equal(action('**A (Action):**\n**A (Action):** later'), 'later');
 });
 
 test('expected verdicts for the edge fixtures', () => {
@@ -244,6 +273,68 @@ test("a table row's figure is attributed to that row, not the story above", () =
   const hit = all.find((c) => c.claim === '200 employees');
   assert.ok(hit, 'the table-row figure was not checked at all');
   assert.match(hit.story, /^\(table row, line \d+\) Migration buy-in$/);
+});
+
+// Text after a heading or table inside a story (#4684 review, point 2). The
+// story ends there so a table's figures aren't credited to it, but the lines
+// below are still in the file and still get checked, as on main.
+const HEADING_IN_STORY = `### [Ops] Story
+**A (Action):** a
+## Notes
+**R (Result):** Cut costs by 15%.`;
+const TABLE_IN_STORY = `### [Ops] Story
+**S (Situation):** s
+| x | y |
+|---|---|
+| 1 | 2 |
+**A (Action):** a
+**R (Result):** Cut costs by 15%.`;
+
+/** Every classified claim as `bucket: claim @ story`. */
+function claimsOf(md, cv = '') {
+  return Object.entries(classifyStoryBank(md, cv)).flatMap(([bucket, list]) => list.map((c) => `${bucket}: ${c.claim} @ ${c.story}`));
+}
+
+test('a figure after a heading inside a story is still checked', () => {
+  assert.deepEqual(claimsOf(HEADING_IN_STORY), ['derivedUnverified: 15% @ (after heading, line 4) in "Story"']);
+  const malformed = malformedEntries(parseStoryBlocks(HEADING_IN_STORY));
+  assert.deepEqual(malformed.map((m) => m.kind), ['trailing']);
+  assert.match(malformed[0].reason, /after a heading/);
+});
+
+test('a figure after a table inside a story is still checked, and the story says why it is invalid', () => {
+  assert.deepEqual(claimsOf(TABLE_IN_STORY), ['derivedUnverified: 15% @ (after table, line 6) in "Story"']);
+  const malformed = malformedEntries(parseStoryBlocks(TABLE_IN_STORY));
+  const story = malformed.find((m) => m.kind === 'story');
+  assert.match(story.reason, /comes after a table/, 'the story was reported as having no Action at all');
+});
+
+test("a story's user-cannot-confirm still covers figures cut off below a table or heading", () => {
+  // The decay this guards against: the denial sits on the story, the figure
+  // below the cut. Classified on its own, the figure would come back as
+  // derived-unverified and ask the user to confirm what they said they can't.
+  const marked = (md) => md.replace('**A (Action):** a', '**A (Action):** a\n**Provenance:** user-cannot-confirm');
+  for (const md of [HEADING_IN_STORY, TABLE_IN_STORY]) {
+    const claims = claimsOf(marked(md));
+    assert.equal(claims.length, 1);
+    assert.match(claims[0], /^userCannotConfirm: 15% @ \(after /, `the denial decayed: ${claims[0]}`);
+  }
+  // A marker below the cut covers the story's own figures too.
+  const below = '### [Ops] Story\n**A (Action):** grew revenue 30%\n## Notes\n**Provenance:** user-cannot-confirm';
+  assert.deepEqual(claimsOf(below), ['userCannotConfirm: 30% @ Story']);
+});
+
+test('table rows after a story inherit only its denial, never a confirmation', () => {
+  const after = (marker) => `### [Ops] Story\n**A (Action):** a\n**Provenance:** ${marker}\n\n${BLOCK_F_TABLE}\n`;
+  const rowClaim = (md) => claimsOf(md).find((c) => c.includes('200 employees'));
+  assert.match(rowClaim(after('user-cannot-confirm')), /^userCannotConfirm: /);
+  // source: cv.md would launder separate Block F rows into `existing`.
+  assert.match(rowClaim(after('source: cv.md')), /^derivedUnverified: /);
+});
+
+test('text before the first story belongs to no story and is not scanned', () => {
+  const { trailing } = splitStoryBlocks('# Story Bank\n\nAim for 5-10 stories, 100% honest.\n\n' + LONG_LABELS);
+  assert.deepEqual(trailing, []);
 });
 
 test('npm run star names unreadable table rows instead of "no stories"', () => {

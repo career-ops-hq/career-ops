@@ -349,7 +349,7 @@ The **Reflection** column captures what was learned or what would be done differ
 **Best for questions about:** …
 ```
 
-Never paste table rows into the bank. Always fill in `**A (Action):**`: a block without it is invisible to the readers. Keep the `### ` heading and the field labels in English whatever the output language. Do not add a `**Provenance:**` line: the evaluation does not get to vouch for its own figures, so the entry counts as `derived-unverified` until the user confirms them. Over time this builds a reusable bank of 5-10 master stories that can be adapted to any interview question.
+Never paste table rows into the bank. Always fill in `**A (Action):**`: a block without it is invisible to the readers. Keep the `### ` heading and the field labels in English whatever the output language. Do not add a `**Provenance:**` line: the evaluation does not get to vouch for its own figures. Without one, `story-provenance-check.mjs` sorts each figure by `cv.md` (`existing` when the same number appears there in context, `supportedByResume` when `cv.md` supports the fact but not the number, otherwise `derived-unverified`), and only the user adds a marker, in the form `templates/story-bank.template.md` gives. Over time this builds a reusable bank of 5-10 master stories that can be adapted to any interview question.
 
 **Selected and framed according to the archetype:**
 - FDE → emphasize delivery speed and client-facing
