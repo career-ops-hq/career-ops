@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, rmSync } from './helpers.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEDUP = join(HERE, '..', 'dedup-tracker.mjs');
