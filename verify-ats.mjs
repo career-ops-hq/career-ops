@@ -612,7 +612,9 @@ function auditAts(html, opts = {}) {
   // headers, the header gradient), so scanning stylesheets for it would flag
   // normal templates. Inline `style="color:#fff"` on a text span is the classic
   // white-on-white stuffing trick and is the reliable signal.
-  if (inlineStyles.some(s => /color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s))) {
+  // The property is anchored on the start of a declaration so that
+  // `background-color:#fff` (a visible badge) is not read as `color:#fff`.
+  if (inlineStyles.some(s => /(?:^|;)\s*color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -906,6 +908,30 @@ function runSelfTest() {
   // Single-quoted inline styles must not bypass hidden-text detection.
   const hiddenSingleQuote = auditAts(buildCleanHtml({ extraBody: "<span style='color:#ffffff'>python rust golang aws terraform</span>" }));
   check('single-quoted white text is flagged', hasIssue(hiddenSingleQuote.issues, 'hidden text'));
+
+  // A white VALUE on a property that merely ends in `color` is visible text
+  // (a badge, a bordered callout), not white-on-white stuffing. `color:#fff`
+  // is a substring of `background-color:#fff`, so the signal is anchored on
+  // the start of a declaration. This mirrors atsLint in cv-templates.mjs.
+  for (const [label, style] of [
+    ['white background-color with dark text', 'background-color:#fff; color:#111'],
+    ['named white background-color with dark text', 'background-color:white;color:#222'],
+    ['white border-color with dark text', 'border-color:#fff; color:#000'],
+  ]) {
+    const visible = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`${label} is not flagged as hidden text`, !hasIssue(visible.issues, 'hidden text'));
+  }
+  // The anchor must not disable the detector: genuine white text still flags,
+  // including after another declaration and when no declaration precedes it.
+  for (const [label, style] of [
+    ['bare color:#fff', 'color:#fff'],
+    ['color:#ffffff after another declaration', 'font-weight:bold;color:#ffffff'],
+    ['color:white after a space', 'font-weight:bold; color:white'],
+    ['color:rgb(255,255,255)', 'color:rgb(255, 255, 255)'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} is still flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
