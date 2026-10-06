@@ -337,15 +337,17 @@ function extractInlineStyles(html) {
 
 /**
  * Split an inline style into its declarations the way a browser reads them. A
- * `;` ends a declaration only outside a quoted string and outside a comment, a
- * backslash escapes the next character, and a comment counts as whitespace.
- * One forward pass, so it stays linear on any input, including an unterminated
- * string or comment.
+ * `;` ends a declaration only outside a quoted string, a comment, and any open
+ * parentheses, brackets or braces. A backslash escapes the next character, a
+ * comment counts as whitespace, and a raw newline ends a string early, as CSS
+ * does with a bad string. One forward pass, so it stays linear on any input,
+ * including an unterminated string, comment or block.
  * @param {string} style
  * @returns {string[]}
  */
 function cssDeclarations(style) {
   const declarations = [];
+  const closers = [];
   let current = '';
   let quote = null;
   for (let i = 0; i < style.length; i++) {
@@ -356,7 +358,7 @@ function cssDeclarations(style) {
     }
     if (quote) {
       current += c;
-      if (c === quote) quote = null;
+      if (c === quote || c === '\n' || c === '\r' || c === '\f') quote = null;
       continue;
     }
     if (c === '/' && style[i + 1] === '*') {
@@ -365,12 +367,16 @@ function cssDeclarations(style) {
       current += ' ';
       continue;
     }
-    if (c === ';') {
+    if (c === ';' && closers.length === 0) {
       declarations.push(current);
       current = '';
       continue;
     }
     if (c === '"' || c === "'") quote = c;
+    else if (c === '(') closers.push(')');
+    else if (c === '[') closers.push(']');
+    else if (c === '{') closers.push('}');
+    else if (c === closers[closers.length - 1]) closers.pop();
     current += c;
   }
   declarations.push(current);
@@ -1035,6 +1041,22 @@ function runSelfTest() {
   ]) {
     const swallowed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
     check(`white text ${label} is not flagged as hidden text`, !hasIssue(swallowed.issues, 'hidden text'));
+  }
+  // A raw newline ends a quoted string early: CSS reads it as a bad string, so
+  // the declaration after it is real. Every CSS newline form counts.
+  for (const [label, nl] of [['LF', '\n'], ['CR', '\r'], ['FF', '\f'], ['CRLF', '\r\n']]) {
+    const broken = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x${nl};color:white">python kubernetes aws rust golang</span>` }));
+    check(`white text after a string broken by ${label} is flagged as hidden text`, hasIssue(broken.issues, 'hidden text'));
+  }
+  // A `;` inside parentheses or brackets belongs to that value, not to the
+  // declaration list, so it cannot start a new declaration.
+  for (const [label, style] of [
+    ['inside url()', 'background:url(data:x;color:white)'],
+    ['inside a function', 'background:foo(abc;color:white)'],
+    ['inside brackets', 'grid-template-areas:[a;color:white]'],
+  ]) {
+    const nested = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(nested.issues, 'hidden text'));
   }
   // A comment may sit on either side of the colon, and the declaration applies.
   for (const [label, style] of [
