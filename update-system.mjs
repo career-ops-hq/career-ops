@@ -446,6 +446,13 @@ export const SYSTEM_PATHS = [
   // double quote anywhere in a comment shifts the pairing and silently drops
   // real entries — the failure shows up later as unrelated missing-path errors.
   'utils/url-resolver.mjs',
+  // Queue bridge: takes an alert payload, resolves its tracking URL through
+  // url-resolver.mjs, runs the zero-token liveness core from liveness-api.mjs, and
+  // appends a deduped row to data/pipeline.md via the scan.mjs appendToPipeline
+  // seam so it can never disagree with the scanners about format or dedup. Same
+  // registration rationale as url-resolver.mjs directly above, and the same
+  // quote-free-comment rule applies for the extractArray reason noted above.
+  'utils/stream-bridge.mjs',
   'batch-tailor.mjs',
   'dashboard/',
   'templates/',
