@@ -336,6 +336,48 @@ function extractInlineStyles(html) {
 }
 
 /**
+ * Split an inline style into its declarations the way a browser reads them. A
+ * `;` ends a declaration only outside a quoted string and outside a comment, a
+ * backslash escapes the next character, and a comment counts as whitespace.
+ * One forward pass, so it stays linear on any input, including an unterminated
+ * string or comment.
+ * @param {string} style
+ * @returns {string[]}
+ */
+function cssDeclarations(style) {
+  const declarations = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < style.length; i++) {
+    const c = style[i];
+    if (c === '\\' && i + 1 < style.length) {
+      current += c + style[++i];
+      continue;
+    }
+    if (quote) {
+      current += c;
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '/' && style[i + 1] === '*') {
+      const end = style.indexOf('*/', i + 2);
+      i = end === -1 ? style.length : end + 1;
+      current += ' ';
+      continue;
+    }
+    if (c === ';') {
+      declarations.push(current);
+      current = '';
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    current += c;
+  }
+  declarations.push(current);
+  return declarations;
+}
+
+/**
  * Candidate section headings: the template's `.section-title` divs plus any
  * generic <h1>–<h6>. Lowercased so downstream matching is case-insensitive.
  * @param {string} html
@@ -612,18 +654,13 @@ function auditAts(html, opts = {}) {
   // headers, the header gradient), so scanning stylesheets for it would flag
   // normal templates. Inline `style="color:#fff"` on a text span is the classic
   // white-on-white stuffing trick and is the reliable signal.
-  // The property is anchored on the start of a declaration so that
-  // `background-color:#fff` (a visible badge) is not read as `color:#fff`.
-  // `-webkit-text-fill-color` paints the glyph fill and overrides `color`, so it
-  // counts. A comment may precede the property, as in `a:b;/**/color:#fff`.
-  // Nothing is deleted before matching: stripping comments first would also eat
-  // comment markers inside a quoted value, and the real declaration between.
-  // Comments are admitted before the property only, never around the colon, so
-  // this can only match where `color\s*:\s*#fff` itself already appears. The
-  // comment pattern stops at its first `*/`, so it cannot backtrack across one.
-  const comment = String.raw`\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\/`;
-  const whiteText = new RegExp(String.raw`(?:^|;)(?:\s|${comment})*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))`, 'i');
-  if (inlineStyles.some(s => whiteText.test(s))) {
+  // The property must start its declaration, so `background-color:#fff` (a
+  // visible badge) is not read as `color:#fff`. `-webkit-text-fill-color` paints
+  // the glyph fill and overrides `color`, so it counts. A regex over the raw
+  // style cannot tell a real declaration from text inside a string or comment,
+  // so cssDeclarations splits the style first and each piece is tested alone.
+  const whiteDeclaration = /^\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i;
+  if (inlineStyles.some(s => cssDeclarations(s).some(d => whiteDeclaration.test(d)))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -975,6 +1012,38 @@ function runSelfTest() {
   const auditStarted = performance.now();
   auditAts(buildCleanHtml({ extraBody: manyComments }));
   check('a long run of comments does not backtrack catastrophically', performance.now() - auditStarted < 1000);
+  // An unterminated comment must not be rescanned from every semicolon. That
+  // made a long `;/*;/*` run quadratic: seconds at 100k characters.
+  const unterminated = `<span style="${';/*'.repeat(33334)}colour:#fff">Senior engineer</span>`;
+  const unterminatedStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: unterminated }));
+  check('a long run of unterminated comments stays linear', performance.now() - unterminatedStarted < 1000);
+  // A semicolon inside a string or a comment does not end a declaration, so
+  // white text written inside either one is never applied by the browser.
+  for (const [label, style] of [
+    ['inside a quoted value', `--x:'/*;color:#fff';color:#111`],
+    ['inside a comment', 'color:#111;/*;color:#fff*/'],
+  ]) {
+    const inert = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(inert.issues, 'hidden text'));
+  }
+  // An unterminated string runs to the end, and an escaped `;` is part of a
+  // value. Either way the white declaration after it is never applied.
+  for (const [label, style] of [
+    ['after an unterminated string', `font-family:'abc;color:#fff`],
+    ['after an escaped semicolon', 'a:b\\;color:#fff'],
+  ]) {
+    const swallowed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(swallowed.issues, 'hidden text'));
+  }
+  // A comment may sit on either side of the colon, and the declaration applies.
+  for (const [label, style] of [
+    ['a comment before the colon', 'color/**/:#fff'],
+    ['a comment after the colon', 'color:/**/#fff'],
+  ]) {
+    const commented = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`white text with ${label} is still flagged as hidden text`, hasIssue(commented.issues, 'hidden text'));
+  }
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
