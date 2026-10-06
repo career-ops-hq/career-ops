@@ -1265,8 +1265,9 @@ try {
 
   // Headed-fallback-on-challenge path (liveness-browser.mjs). Fake Playwright
   // pages script the goto/evaluate calls so we can exercise the wrapper without
-  // launching a browser. checkUrlLiveness reads body text first, apply controls
-  // second — the fake returns them in that order.
+  // launching a browser. checkUrlLiveness reads the page repeatedly while it
+  // hydrates, so the fakes tell the two reads apart by the extractor passed in:
+  // only the apply-control extractor calls querySelectorAll.
   const { checkUrlLiveness, checkUrlLivenessWithFallback, isChallengeResult, jitteredDelayMs } =
     await import(pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href);
 
@@ -1282,15 +1283,13 @@ try {
     fail(`jitteredDelayMs out of spec (disabled=${disabled}, inRange=${inRange})`);
   }
 
-  const fakePage = ({ status, finalUrl, bodyText, applyControls }) => {
-    let evalCall = 0;
-    return {
-      async goto() { return { status: () => status }; },
-      async waitForTimeout() {},
-      url() { return finalUrl; },
-      async evaluate() { evalCall += 1; return evalCall === 1 ? bodyText : applyControls; },
-    };
-  };
+  const isControlsRead = (fn) => String(fn).includes('querySelectorAll');
+  const fakePage = ({ status, finalUrl, bodyText, applyControls }) => ({
+    async goto() { return { status: () => status }; },
+    async waitForTimeout() {},
+    url() { return finalUrl; },
+    async evaluate(fn) { return isControlsRead(fn) ? applyControls : bodyText; },
+  });
   const URL = 'https://www.pracuj.pl/praca/sap-consultant,oferta,1004870954';
   const challengePage = () => fakePage({
     status: 403,
@@ -1324,7 +1323,7 @@ try {
         async evaluate(fn) {
           // Both extractors mention innerText, so discriminate on the selector
           // call that only the apply-control extractor makes.
-          const isControls = String(fn).includes('querySelectorAll');
+          const isControls = isControlsRead(fn);
           const filled = textReads >= (spec.fillAfter ?? 0);
           if (!isControls) textReads += 1;
           if (isControls) return filled ? (spec.controls ?? []) : [];
@@ -1332,14 +1331,13 @@ try {
         },
       };
     });
-    let evalCall = 0;
     Object.assign(page, {
       async goto() { return { status: () => status }; },
       async waitForTimeout() {},
       url() { return finalUrl; },
       frames() { return [main, ...built]; },
       mainFrame() { return main; },
-      async evaluate() { evalCall += 1; return evalCall === 1 ? shellText : []; },
+      async evaluate(fn) { return isControlsRead(fn) ? [] : shellText; },
     });
     return page;
   };
@@ -1379,7 +1377,7 @@ try {
   // A 410 must not pay the frame poll: the status already decided it, and a
   // dead posting whose error page renders into an iframe would otherwise wait
   // for that error page to fill before saying what it knew at byte one.
-  // Count only the 500ms poll waits; the 2000ms hydration wait always happens.
+  // Count only the 500ms frame-poll waits.
   let pollWaits = 0;
   const gonePage = framedPage({
     status: 410,
@@ -1411,20 +1409,17 @@ try {
   // bamboohr.com posting URL, not point at a real, permanently-live one.
   const BAMBOO_URL = 'https://example-co.bamboohr.com/careers/1';
   const bambooRetryPage = ({ reloadBodyText, reloadApplyControls = [] }) => {
-    let evalCall = 0;
+    // Empty render until reload() is called, the given render after it.
+    let reloaded = false;
     return {
       async goto() { return { status: () => 200 }; },
       async waitForTimeout() {},
       url() { return BAMBOO_URL; },
-      async evaluate() {
-        evalCall += 1;
-        // 1st/2nd calls: initial (empty) render. 3rd/4th: post-reload render.
-        if (evalCall === 1) return '';
-        if (evalCall === 2) return [];
-        if (evalCall === 3) return reloadBodyText;
-        return reloadApplyControls;
+      async evaluate(fn) {
+        if (isControlsRead(fn)) return reloaded ? reloadApplyControls : [];
+        return reloaded ? reloadBodyText : '';
       },
-      async reload() { return { status: () => 200 }; },
+      async reload() { reloaded = true; return { status: () => 200 }; },
     };
   };
 
@@ -1704,9 +1699,8 @@ try {
         },
         async waitForTimeout() {},
         url: () => 'https://careers.example.com/jobs/1',
-        async evaluate() {
-          this._n = (this._n || 0) + 1;
-          return this._n === 1 ? 'Senior Analyst. '.repeat(30) : ['Apply for this job'];
+        async evaluate(fn) {
+          return String(fn).includes('querySelectorAll') ? ['Apply for this job'] : 'Senior Analyst. '.repeat(30);
         },
       };
     };
