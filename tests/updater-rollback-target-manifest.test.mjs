@@ -324,7 +324,11 @@ function runRollback(dir) {
   });
 }
 
-function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false }) {
+// Long enough that a few hundred of them overflow the 32,767-character Windows
+// command line when passed as one argv.
+const bulkFile = (i) => `system/nested/bulk/a-deliberately-long-file-name-for-argv-length-${String(i).padStart(4, '0')}.txt`;
+
+function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false, bulkFiles = 0 }) {
   const fixture = makeUpdaterRepo(gitIn, { prefix });
   const { dir, g } = fixture;
   const backup = paired
@@ -351,6 +355,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExistin
     put(dir, ' pre-existing-outside-backup-manifest.mjs', 'pre-existing backup bytes\n');
     put(dir, 'writing-samples/private.md', 'user sibling base\n');
     put(dir, 'cv.md', 'user cv base\n');
+    for (let i = 0; i < bulkFiles; i++) put(dir, bulkFile(i), `backup ${i}\n`);
     g('add', '-A');
     g('commit', '-qm', 'backup state');
     const backupCommit = g('rev-parse', 'HEAD');
@@ -366,6 +371,7 @@ function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExistin
       put(dir, ' pre-existing-outside-backup-manifest.mjs', 'target bytes over a pre-existing file\n');
     }
     put(dir, 'writing-samples/README.md', 'target scaffold\n');
+    for (let i = 0; i < bulkFiles; i++) put(dir, bulkFile(i), `target ${i}\n`);
     g('add', '-A');
     g('commit', '-qm', 'target state');
     const targetCommit = g('rev-parse', 'HEAD');
@@ -910,6 +916,114 @@ function readMaybe(path) {
       /rollback system files/.test(g('log', '-1', '--format=%s')),
       'the rollback commit still lands when an untracked target-only path is skipped',
       `rollback did not commit: ${g('log', '-1', '--format=%s')}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 15. Real CLI: the rollback commit does not depend on argv length ──
+// Enough restored files that naming each one on a single command line exceeds
+// the Windows limit. The commit has to land from the index instead.
+{
+  const BULK = 900;
+  const fixture = seedRollbackRepo('co-rollback-bulk-commit-', {
+    paired: true,
+    fetchTarget: false,
+    bulkFiles: BULK,
+  });
+  const { dir, g } = fixture;
+  try {
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status === 0 && !result.error,
+      'rollback succeeds with more restored files than one command line can name',
+      `bulk rollback failed (status ${result.status}): ${output.slice(-600)}`,
+    );
+    check(
+      /rollback system files/.test(g('log', '-1', '--format=%s')),
+      'the rollback commit lands with a restore list longer than the Windows argv limit',
+      `rollback did not commit: ${g('log', '-1', '--format=%s')}`,
+    );
+    check(
+      g('diff', '--cached', '--name-only') === '',
+      'no restored file is left staged after the rollback commit',
+      `files left staged: ${g('diff', '--cached', '--name-only').split('\n').length}`,
+    );
+    check(
+      readMaybe(join(dir, bulkFile(0))) === 'backup 0\n'
+        && readMaybe(join(dir, bulkFile(BULK - 1))) === `backup ${BULK - 1}\n`,
+      'the bulk files carry their backup bytes after rollback',
+      'bulk files were not restored from the backup',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 16. Real CLI: unrelated staged work stays out of the rollback commit ──
+{
+  const fixture = seedRollbackRepo('co-rollback-unrelated-staged-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, g } = fixture;
+  try {
+    put(dir, 'my-own-notes.txt', 'staged by the user before rollback\n');
+    g('add', '--', 'my-own-notes.txt');
+
+    const result = runRollback(dir);
+    check(
+      result.status === 0 && !result.error,
+      'rollback succeeds with unrelated work staged',
+      `unrelated-staged rollback failed (status ${result.status}): ${outputOf(result)}`,
+    );
+    check(
+      /rollback system files/.test(g('log', '-1', '--format=%s'))
+        && !g('show', '--name-only', '--format=', 'HEAD').split('\n').includes('my-own-notes.txt'),
+      'the rollback commit excludes a file the user had staged',
+      `rollback commit contents: ${g('show', '--name-only', '--format=', 'HEAD')}`,
+    );
+    check(
+      g('diff', '--cached', '--name-only') === 'my-own-notes.txt',
+      'the unrelated file is still staged after rollback',
+      `staged after rollback: ${JSON.stringify(g('diff', '--cached', '--name-only'))}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 17. Real CLI: a failed rollback commit is reported, not hidden ──
+{
+  const fixture = seedRollbackRepo('co-rollback-commit-fails-', {
+    paired: true,
+    fetchTarget: false,
+  });
+  const { dir, g } = fixture;
+  try {
+    const hooks = join(dir, '.git', 'failing-hooks');
+    mkdirSync(hooks, { recursive: true });
+    writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    g('config', 'core.hooksPath', hooks);
+
+    const result = runRollback(dir);
+    const output = outputOf(result);
+    check(
+      result.status !== 0,
+      'rollback exits non-zero when its commit fails',
+      `rollback reported success although the commit failed: ${output.slice(-400)}`,
+    );
+    check(
+      /rollback commit failed/.test(output) && !/Rollback complete/.test(output),
+      'rollback names the failed commit and does not print "Rollback complete"',
+      `unexpected output for a failed commit: ${JSON.stringify(output.slice(-400))}`,
+    );
+    check(
+      readMaybe(join(dir, 'system/root.txt')) === 'backup root\n',
+      'the restored files are still on disk when the commit fails',
+      'a failed commit left the worktree unrestored',
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

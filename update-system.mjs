@@ -4701,13 +4701,29 @@ function rollback() {
     // target-only deletions; no directory pathspec is ever passed to add/commit.
     if (restored.length > 0) addPaths(restored);
     const concreteRollbackPaths = mergePathLists(restored, removed);
-    try {
-      if (concreteRollbackPaths.length > 0) {
-        git('--literal-pathspecs', 'commit', '-m', `chore: rollback system files from ${latest}`, '--', ...concreteRollbackPaths);
+    // Commit from the index, not from the path list. The concrete list runs to
+    // well over a thousand files, which exceeds the Windows command-line limit
+    // as one argv. Only what is staged can be committed, so name just those
+    // paths, and only when something unrelated is staged alongside them.
+    const rollbackPathSet = new Set(concreteRollbackPaths);
+    const stagedRollbackPaths = gitRaw('diff', '--cached', '--name-only', '-z')
+      .split('\0')
+      .filter((path) => path !== '' && rollbackPathSet.has(path));
+    // A second rollback has nothing staged, and so nothing to commit.
+    if (stagedRollbackPaths.length > 0) {
+      const message = `chore: rollback system files from ${latest}`;
+      try {
+        if (stagedPathsOutside(concreteRollbackPaths).length === 0) {
+          git('commit', '-m', message);
+        } else {
+          git('--literal-pathspecs', 'commit', '-m', message, '--', ...stagedRollbackPaths);
+        }
+      } catch (err) {
+        throw new Error(
+          `the files were restored and staged, but the rollback commit failed (${err.message}). `
+          + 'Fix the cause and commit the staged files.',
+        );
       }
-    } catch {
-      // A second rollback commonly has nothing to commit. Match apply()'s
-      // established broad tolerance; real setup failures surface on later git.
     }
 
     console.log(`Rollback complete. Restored ${restored.length} file(s) from ${latest}, removed ${removed.length} target-only file(s).`);
