@@ -688,7 +688,7 @@ function renderReport(payload, partials) {
     INTERESTS: buildInterests(payload.interests),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
-    CONSENT: escapeHtml(payload.consent || ''),
+    CONSENT: escapeHtml((payload.consent || '').trim()),
   };
   return { substitutions, candidate };
 }

@@ -54,8 +54,12 @@ const PAYLOAD = {
 const dir = mkdtempSync(join(tmpdir(), 'cv-consent-footer-'));
 const inputWith = join(dir, 'payload-with.json');
 const inputWithout = join(dir, 'payload-without.json');
+const inputBlank = join(dir, 'payload-blank.json');
 writeFileSync(inputWith, JSON.stringify({ ...PAYLOAD, consent: CONSENT_TEXT }));
 writeFileSync(inputWithout, JSON.stringify(PAYLOAD));
+// Nonbreaking space only — blank after trim() must render as absent, or the
+// :empty guard cannot hide a div holding whitespace.
+writeFileSync(inputBlank, JSON.stringify({ ...PAYLOAD, consent: '\u00A0' }));
 
 for (const { file, label } of TEMPLATES) {
   const path = join(ROOT, file);
@@ -118,6 +122,22 @@ for (const { file, label } of TEMPLATES) {
     else fail(`${label}: consent text leaked into the output despite absent payload.consent`);
   } catch (e) {
     fail(`${label}: build-cv-html.mjs crashed on WITHOUT-consent render — ${e.message}`);
+  }
+
+  // (c2) Blank-after-trim consent (a lone nonbreaking space) must normalize to
+  // absent before escaping, so the :empty guard hides the div instead of
+  // leaving a bordered footer with no text.
+  const outputBlank = join(dir, `${label}-blank.html`);
+  try {
+    execFileSync(NODE, ['build-cv-html.mjs', inputBlank, outputBlank, path], { cwd: ROOT, encoding: 'utf-8' });
+    const rendered = readFileSync(outputBlank, 'utf-8');
+    if (/<div class="cv-consent"><\/div>/.test(rendered)) {
+      pass(`${label}: blank-after-trim consent renders as an empty div (:empty hides it)`);
+    } else {
+      fail(`${label}: blank-after-trim consent leaked into the div — :empty guard cannot hide it`);
+    }
+  } catch (e) {
+    fail(`${label}: build-cv-html.mjs crashed on blank-consent render — ${e.message}`);
   }
 
   // (d) The consent div survives an all-empty section strip and the closing
