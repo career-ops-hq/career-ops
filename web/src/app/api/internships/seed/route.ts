@@ -10,14 +10,22 @@ export async function POST() {
   const file = path.join(careerOpsRoot(), "data", "internships.json");
 
   // Don't overwrite if already seeded
+  let fileExists = false;
   try {
     fs.accessSync(file);
-    const existing = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (existing.length > 0) {
-      return NextResponse.json({ message: "already seeded", count: existing.length });
-    }
+    fileExists = true;
   } catch {
-    // no file yet, proceed
+    // no file yet, proceed with seeding
+  }
+  if (fileExists) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (existing.length > 0) {
+        return NextResponse.json({ message: "already seeded", count: existing.length });
+      }
+    } catch {
+      return NextResponse.json({ error: "data file is corrupt, fix or delete data/internships.json before seeding" }, { status: 500 });
+    }
   }
 
   const data = SEED_DATA.map((row) => ({

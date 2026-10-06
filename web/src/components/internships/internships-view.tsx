@@ -353,10 +353,10 @@ function BoardView({
   onViewResume: (i: Internship) => void;
   duplicateCompanies: Set<string>;
 }) {
-  const columns: Internship["status"][] = ["wishlist", "applied", "interviewing", "offered", "accepted", "rejected"];
+  const columns: Internship["status"][] = ["wishlist", "not_posted", "applied", "interviewing", "offered", "accepted", "rejected", "closed", "unknown"];
 
   return (
-    <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+    <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
       {columns.map((status) => {
         const items = internships.filter((i) => i.status === status);
         const cfg = STATUS_CONFIG[status];

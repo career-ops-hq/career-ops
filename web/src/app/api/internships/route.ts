@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   }
 
   const newEntry: Internship = {
-    id: body.id ?? crypto.randomUUID(),
+    id: crypto.randomUUID(),
     company: body.company ?? "",
     role: body.role ?? "",
     location: body.location ?? "",

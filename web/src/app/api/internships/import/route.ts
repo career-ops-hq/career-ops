@@ -75,12 +75,18 @@ export async function POST(req: NextRequest) {
 
   // Read existing to dedup by company+role
   let existing: Internship[] = [];
+  const file = INTERNSHIPS_FILE();
   try {
-    const file = INTERNSHIPS_FILE();
     fs.accessSync(file);
-    existing = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
-    // no file yet
+    // no file yet — valid empty state
+  }
+  if (fs.existsSync(file)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return NextResponse.json({ error: "data file is corrupt, fix or delete data/internships.json before importing" }, { status: 500 });
+    }
   }
   const existingKeys = new Set(existing.map((i) => `${i.company.toLowerCase()}|${i.role.toLowerCase()}`));
 
