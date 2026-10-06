@@ -35,7 +35,6 @@ try {
   assert.deepEqual(rows.map(row => row.split('|')[1].trim()), ['1']);
   pass('dedup merges same-role rows differing only by the APC corporate suffix');
 } catch (error) {
-  process.exitCode = 1;
   fail(`dedup should merge Acme Widgets, APC with Acme Widgets — ${error.message}`);
 } finally {
   rmSync(dir, { recursive: true, force: true });
