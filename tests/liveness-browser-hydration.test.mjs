@@ -120,6 +120,23 @@ const live = { text: POSTING, controls: ['Apply for this job'] };
   }
 }
 
+// An unrendered first read followed only by failing reads must not be
+// reported from that stale snapshot as insufficient_content (expired).
+{
+  const page = scriptedPage({
+    render: (n) => {
+      if (n === 0) return blank;
+      throw new Error('Execution context was destroyed');
+    },
+  });
+  const verdict = await checkUrlLiveness(page, POSTING_URL);
+  if (verdict.result === 'uncertain' && verdict.code === 'navigation_error' && page.waits.length === 16) {
+    pass('a poll that ends on failed reads after an unrendered read is navigation_error, not expired');
+  } else {
+    fail(`stale unrendered reading: ${JSON.stringify(verdict)}, waits=${page.waits.length}`);
+  }
+}
+
 // A same-origin frame appearing ends the top-level poll; the frame poll
 // (500ms ticks) takes over and reads the posting from the frame.
 {

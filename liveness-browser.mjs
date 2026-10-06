@@ -13,9 +13,8 @@ const NAVIGATE_TIMEOUT_MS = 15_000;
 // is read repeatedly until the verdict stops being a "not rendered yet" code;
 // a single early read would call a live posting insufficient_content.
 // Measured over 386 loads of 188 posting URLs: the first decisive verdict
-// arrived at p50 1785ms, p95 3071ms and at
-// most 3308ms outside iCIMS (whose frames have their own poll below); 17
-// reads 250ms apart cover 4000ms. Bounded by a count rather than a clock so a
+// arrived at p50 1785ms, p95 3071ms and at most 3308ms outside iCIMS (whose
+// frames have their own poll below); 17 reads 250ms apart cover 4000ms. Bounded by a count rather than a clock so a
 // page double whose waitForTimeout returns at once still terminates.
 // Once a read is decisive no later read flipped a live posting to closed, so
 // stopping at the first decisive read is safe. Stopping when the text stops
@@ -392,10 +391,14 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     // Read the top-level document until it is decisive, a same-origin frame
     // appears (the frame poll below takes over), the request guard has already
     // decided the verdict, or HYDRATION_MAX_POLLS waits have passed. A read
-    // that throws (the SPA rebuilding its DOM) is retried; if none succeeded,
-    // the last error propagates and becomes a navigation_error.
+    // that throws (the SPA rebuilding its DOM) is retried. If the poll ends on
+    // a failed read while the last good reading still looked unrendered, that
+    // reading is stale evidence, so the error propagates and becomes a
+    // navigation_error instead of an expired verdict; the same happens when no
+    // read succeeded at all.
     const pollTopLevel = async (pageStatus) => {
       let reading = null;
+      let hydrating = true;
       let lastError = null;
       for (let poll = 0; ; poll += 1) {
         try {
@@ -403,15 +406,17 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
           const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
           const applyControls = await page.evaluate(extractApplyControls);
           reading = { finalUrl, bodyText, applyControls };
+          lastError = null;
           const { code } = classifyLiveness({ status: pageStatus, requestedUrl: url, ...reading });
-          if (!HYDRATING_CODES.has(code) || childFrames(finalUrl).length > 0) break;
+          hydrating = HYDRATING_CODES.has(code);
+          if (!hydrating || childFrames(finalUrl).length > 0) break;
         } catch (err) {
           lastError = err;
         }
         if (page._blockedByGuard || poll >= HYDRATION_MAX_POLLS) break;
         await page.waitForTimeout(HYDRATION_POLL_MS);
       }
-      if (!reading) throw lastError;
+      if (lastError && hydrating) throw lastError;
       return reading;
     };
 
