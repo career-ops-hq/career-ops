@@ -13,7 +13,6 @@
           - modes/*.md
           - modes/**/*.md
           - .claude/skills/**
-          - .cursor/skills/**
           - .opencode/skills/**
           - .qwen/skills/**
           - .antigravitycli/skills/**

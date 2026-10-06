@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-這個 skill 按開放標準定義在 `.agents/skills/career-ops/SKILL.md` 中，並為每個支援的 CLI（例如 `.claude/`、`.cursor/`、`.qwen/`、`.antigravitycli/`、`.grok/`）建立了符號連結或引用。
+這個 skill 按開放標準定義在 `.agents/skills/career-ops/SKILL.md` 中，並為每個支援的 CLI（例如 `.claude/`、`.qwen/`、`.antigravitycli/`、`.grok/`）建立了符號連結或引用。 Cursor 會自動探索 `.agents/skills/` 中的共用 skill。
 
 ## Codex 整合
 

@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-Скіл визначено за відкритим стандартом у `.agents/skills/career-ops/SKILL.md` і підключено символічним посиланням або посиланням для кожного підтримуваного CLI (наприклад `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+Скіл визначено за відкритим стандартом у `.agents/skills/career-ops/SKILL.md` і підключено символічним посиланням або посиланням для кожного підтримуваного CLI (наприклад `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`). Cursor автоматично виявляє спільний скіл у `.agents/skills/`.
 
 ## Інтеграція з Codex
 

@@ -167,7 +167,6 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `templates/*` | Base templates |
 | `fonts/*` | Self-hosted fonts |
 | `.claude/skills/*` | Skill definitions (Claude Code) |
-| `.cursor/skills/*` | Skill definitions (Cursor) |
 | `.opencode/skills/*` | Skill definitions (OpenCode) |
 | `.qwen/skills/*` | Skill definitions (Qwen Code) |
 | `.antigravitycli/skills/*` | Skill definitions (Antigravity CLI) |
