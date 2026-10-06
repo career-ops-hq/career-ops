@@ -614,7 +614,10 @@ function auditAts(html, opts = {}) {
   // white-on-white stuffing trick and is the reliable signal.
   // The property is anchored on the start of a declaration so that
   // `background-color:#fff` (a visible badge) is not read as `color:#fff`.
-  if (inlineStyles.some(s => /(?:^|;)\s*color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s))) {
+  // `-webkit-text-fill-color` paints the glyph fill and overrides `color`, so it
+  // counts. CSS comments are whitespace to a browser, so they are stripped here
+  // (this check only) to read the declaration the way the browser does.
+  if (inlineStyles.some(s => /(?:^|;)\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s.replace(/\/\*[\s\S]*?\*\//g, '')))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -932,6 +935,21 @@ function runSelfTest() {
     const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
     check(`${label} is still flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
   }
+  // -webkit-text-fill-color paints the glyph fill and overrides `color`, so a
+  // white fill is white text. A CSS comment is whitespace to a browser, so a
+  // declaration behind one is still a declaration.
+  for (const [label, style] of [
+    ['-webkit-text-fill-color:#fff over dark color', '-webkit-text-fill-color:#fff;color:#111'],
+    ['-webkit-text-fill-color:white after another declaration', 'font-weight:bold;-webkit-text-fill-color:white;color:#111'],
+    ['color:#fff after a comment following a declaration', 'background:red;/**/color:#fff'],
+    ['color:#fff after a leading comment', '/**/color:#fff'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} is flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
+  // A comment inside a non-color declaration must not create a false positive.
+  const commentedBackground = auditAts(buildCleanHtml({ extraBody: '<span style="background-color:/**/#fff;color:#111">Senior engineer</span>' }));
+  check('white background-color with an inner comment is not flagged as hidden text', !hasIssue(commentedBackground.issues, 'hidden text'));
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));
