@@ -1,0 +1,83 @@
+# Career-Ops — Sidedoor Outreach Rules (System Two generation engine)
+#
+# THIN STRUCTURAL SHELL — the substance is NOT here.
+#
+# Layering: this file lives in templates/ (SYSTEM layer: shipped default,
+# auto-updatable, overwritten by `update-system.mjs apply`). The lane
+# definitions, targeting, and proof points are the USER's facts, so they live in
+# the user layer where updates can never touch them:
+#
+#   modes/_profile.md  -> "Your Target Roles"        (L1-L4 lanes + mapping)
+#                          "Your Adaptive Framing"   (per-lane emphasis + sources)
+#                          "Sidedoor Outreach Rules" (the pitch rules themselves)
+#   config/profile.yml -> contact block, comp, location policy, jev_gate
+#   cv.md              -> verbatim proof points (the only source for a number)
+#
+# Keeping personal targeting out of templates/ is the Data Contract (AGENTS.md):
+# a system update would otherwise silently revert the user's lanes to a shipped
+# default, and their positioning would ship to every other install.
+#
+# Override path: if you want this shipped default changed for everyone, edit
+# templates/sidedoor-outreach-rules.yml. If you want to change YOUR outreach,
+# edit modes/_profile.md — never this file.
+
+sidedoor_outreach:
+  # Gated on the Jev ATS prior, read from config/profile.yml -> jev_gate.band_low.
+  # Measured p15 over 73 scorable captures in jds/; clearing it means the posting
+  # has left the `low` band. A drafting trigger ONLY — config/profile.yml states
+  # that no Jev threshold is safe as an auto-discard.
+  trigger:
+    source: config/profile.yml
+    path: jev_gate.band_low
+    comparison: ">="
+    resolved_value: 2.260
+    action: draft_outreach
+    never: auto_discard
+
+  # Files the generation engine must read before writing a single word.
+  sources:
+    read:
+      - config/profile.yml
+      - cv.md
+      - modes/_profile.md
+    proof_points_from:
+      - cv.md
+      - article-digest.md
+      - config/profile.yml
+
+  # Lane table and role->lane mapping are NOT duplicated here. Resolve them from
+  # modes/_profile.md at generation time so the two can never drift.
+  lanes:
+    definition_source: modes/_profile.md
+    section: Your Target Roles
+    framing_source: modes/_profile.md
+    framing_section: Your Adaptive Framing
+    order:
+      - L1   # Solutions Engineer / Consultant (AI & Data Systems Deployment)
+      - L2   # Technical Product Specialist / Customer Success Engineering (Enterprise AI)
+      - L3   # Automation & Integration Architect / Technical Account Management
+      - L4   # Technical Founder-Track Operations / Systems Engineer (secondary)
+
+  output:
+    format: email
+    paragraphs: 3
+    structure:
+      - hook      # the posting's implied problem, in their vocabulary
+      - proof     # 1-2 verbatim facts from cv.md; at most one proof point
+      - ask       # one low-friction, specific sentence
+    length:
+      target_words: [60, 80]
+      read_aloud_seconds: 30
+    register: peer_to_peer_engineering   # Tier 2 conversational, modes/_writing.md
+    prohibited:
+      - greeting_padding
+      - restating_the_job_title
+      - sycophancy
+      - manufactured_numbers
+      - authorship_claims_not_in_cv
+
+  staging:
+    queue: data/agent-inbox.md
+    command: 'node agent-inbox.mjs add "<request>"'
+    auto_send: false        # hard rule: drafts are staged, never sent
+    drain: manual
