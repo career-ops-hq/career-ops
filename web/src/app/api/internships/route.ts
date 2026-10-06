@@ -12,21 +12,35 @@ export type Internship = {
   company: string;
   role: string;
   location: string;
-  status: "wishlist" | "applied" | "interviewing" | "offered" | "rejected" | "accepted";
+  status: "wishlist" | "applied" | "interviewing" | "offered" | "rejected" | "accepted" | "closed" | "not_posted" | "unknown";
   dateAdded: string;
   dateApplied?: string;
   deadline?: string;
   url?: string;
   notes: string;
-  resumeFile?: string; // filename in data/internship-resumes/
+  resumeFile?: string;
   score?: string;
+  // Extended fields from CSV tracker
+  track?: string; // DS, DA, BIE, SWE
+  term?: string; // e.g. "Summer 2027"
+  opened?: string; // date posting opened
+  dateConfidence?: string; // Confirmed, Reported, Unknown
+  gradEligibility?: string;
+  workAuth?: string;
+  requirements?: string;
+  priority?: string;
+  source?: string;
+  lastVerified?: string;
+  statusLog?: { date: string; from: string; to: string; note?: string }[];
 };
 
-const VALID_STATUSES = new Set<Internship["status"]>(["wishlist", "applied", "interviewing", "offered", "rejected", "accepted"]);
+const VALID_STATUSES = new Set<Internship["status"]>(["wishlist", "applied", "interviewing", "offered", "rejected", "accepted", "closed", "not_posted", "unknown"]);
 
 const WRITABLE_FIELDS = new Set([
   "company", "role", "location", "status", "dateApplied",
   "deadline", "url", "notes", "resumeFile", "score",
+  "track", "term", "opened", "dateConfidence", "gradEligibility",
+  "workAuth", "requirements", "priority", "source", "lastVerified",
 ]);
 
 function readInternships(): { data: Internship[]; error?: string } {
@@ -67,18 +81,29 @@ export async function POST(req: NextRequest) {
   }
 
   const newEntry: Internship = {
-    id: crypto.randomUUID(),
+    id: body.id ?? crypto.randomUUID(),
     company: body.company ?? "",
     role: body.role ?? "",
     location: body.location ?? "",
     status,
-    dateAdded: new Date().toISOString().slice(0, 10),
+    dateAdded: body.dateAdded ?? new Date().toISOString().slice(0, 10),
     dateApplied: body.dateApplied,
     deadline: body.deadline,
     url: body.url,
     notes: body.notes ?? "",
     resumeFile: body.resumeFile,
     score: body.score,
+    track: body.track,
+    term: body.term,
+    opened: body.opened,
+    dateConfidence: body.dateConfidence,
+    gradEligibility: body.gradEligibility,
+    workAuth: body.workAuth,
+    requirements: body.requirements,
+    priority: body.priority,
+    source: body.source,
+    lastVerified: body.lastVerified,
+    statusLog: body.statusLog,
   };
 
   internships.push(newEntry);
