@@ -312,11 +312,11 @@ function put(dir, path, bytes) {
   writeFileSync(destination, bytes);
 }
 
-function runRollback(dir) {
+function runRollback(dir, timeout = 30_000) {
   return spawnSync(process.execPath, ['update-system.mjs', 'rollback'], {
     cwd: dir,
     encoding: 'utf8',
-    timeout: 30_000,
+    timeout,
     env: {
       ...process.env,
       CAREER_OPS_GIT_TIMEOUT_MS: '10000',
@@ -324,9 +324,10 @@ function runRollback(dir) {
   });
 }
 
-// Long enough that a few hundred of them overflow the 32,767-character Windows
-// command line when passed as one argv.
-const bulkFile = (i) => `system/nested/bulk/a-deliberately-long-file-name-for-argv-length-${String(i).padStart(4, '0')}.txt`;
+// Long names, so a couple of hundred files overflow the 32,767-character
+// Windows command line when passed as one argv. Rollback restores one file per
+// git call, so the count is kept low and the length is carried by the names.
+const bulkFile = (i) => `system/nested/bulk/${'argv-length-'.repeat(11)}${String(i).padStart(4, '0')}.txt`;
 
 function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false, bulkFiles = 0 }) {
   const fixture = makeUpdaterRepo(gitIn, { prefix });
@@ -926,7 +927,7 @@ function readMaybe(path) {
 // Enough restored files that naming each one on a single command line exceeds
 // the Windows limit. The commit has to land from the index instead.
 {
-  const BULK = 900;
+  const BULK = 240;
   const fixture = seedRollbackRepo('co-rollback-bulk-commit-', {
     paired: true,
     fetchTarget: false,
@@ -934,7 +935,13 @@ function readMaybe(path) {
   });
   const { dir, g } = fixture;
   try {
-    const result = runRollback(dir);
+    const argvChars = Array.from({ length: BULK }, (_, i) => bulkFile(i).length + 1).reduce((a, b) => a + b, 0);
+    check(
+      argvChars > 32767,
+      'the bulk fixture is longer than the Windows command-line limit',
+      `bulk fixture is only ${argvChars} characters`,
+    );
+    const result = runRollback(dir, 180_000);
     const output = outputOf(result);
     check(
       result.status === 0 && !result.error,
