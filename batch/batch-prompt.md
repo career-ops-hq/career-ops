@@ -591,7 +591,7 @@ If score is greater than or equal to the threshold:
 8. Reorder experience bullets by relevance.
 9. Build a 6-8 item competency grid.
 10. Inject keywords ethically into existing achievements; never invent skills or metrics.
-11. Write HTML to `output/cv-candidate-{company-slug}.html`.
+11. If consent is absent, replace `{{CONSENT}}` with an empty string. If consent is present, replace `{{CONSENT}}` with its HTML-escaped value. Write HTML to `output/cv-candidate-{company-slug}.html`.
 12. Run:
 
 ```bash
