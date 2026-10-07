@@ -3,16 +3,50 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { Internship } from "../../route";
-import fallbackProfile from "@/lib/resume-profile.json";
 
 export const dynamic = "force-dynamic";
 
 const INTERNSHIPS_FILE = () => path.join(careerOpsRoot(), "data", "internships.json");
 const PROFILE_FILE = () => path.join(careerOpsRoot(), "data", "resume-profile.json");
 
-type ResumeProfile = typeof fallbackProfile;
-type ResumeExperience = ResumeProfile["experience"][number];
-type ResumeProject = ResumeProfile["projects"][number];
+type ResumeExperience = {
+  title: string;
+  company: string;
+  location: string;
+  dates: string;
+  bullets: string[];
+  tags: string[];
+};
+
+type ResumeProject = {
+  name: string;
+  tech: string[];
+  year: number;
+  bullets: string[];
+  tags: string[];
+};
+
+type ResumeProfile = {
+  name: string;
+  education: { school: string; degree: string; expected: string };
+  certifications: string[];
+  skills: Record<string, string[]>;
+  skillKeywords: string[];
+  experience: ResumeExperience[];
+  projects: ResumeProject[];
+  parsedFrom?: string;
+  parsedAt?: string;
+};
+
+const EMPTY_PROFILE: ResumeProfile = {
+  name: "",
+  education: { school: "", degree: "", expected: "" },
+  certifications: [],
+  skills: {},
+  skillKeywords: [],
+  experience: [],
+  projects: [],
+};
 
 function loadResumeProfile(): ResumeProfile {
   const file = PROFILE_FILE();
@@ -20,14 +54,14 @@ function loadResumeProfile(): ResumeProfile {
     fs.accessSync(file);
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
-    // Fall back to static profile if dynamic one doesn't exist yet
-    return fallbackProfile;
+    // Fall back to empty profile if dynamic one doesn't exist yet
+    return EMPTY_PROFILE;
   }
 }
 
-// Normalize a string for keyword matching
+// Normalize a string for keyword matching (preserve hyphens for terms like scikit-learn, cross-validation)
 function norm(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9+#/ ]/g, "").trim();
+  return s.toLowerCase().replace(/[^a-z0-9+#/\- ]/g, "").trim();
 }
 
 // Extract requirement keywords from internship data
@@ -115,25 +149,27 @@ function matchSkills(profile: ResumeProfile, requirementKeywords: string[]) {
   return { matched, gaps, coverage: requirementKeywords.length > 0 ? Math.round((matched.length / requirementKeywords.length) * 100) : 100 };
 }
 
-// Generate prep suggestions based on track and gaps
-function generatePrep(internship: Internship, gaps: string[], track: string | undefined): string[] {
+// Generate prep suggestions based on track, gaps, and the user's actual resume
+function generatePrep(internship: Internship, gaps: string[], track: string | undefined, profile: ResumeProfile): string[] {
   const tips: string[] = [];
+  const projectNames = profile.projects.map((p) => p.name).filter(Boolean);
+  const expTitles = profile.experience.map((e) => e.title).filter(Boolean);
 
   if (track === "DS") {
     tips.push("Review: hypothesis testing, A/B test design, and metrics definition — common DS intern interview topics");
-    tips.push("Prepare to discuss your permutation testing work (Floor Generals, LoL projects) as proof of statistical rigor");
+    if (projectNames.length > 0) tips.push(`Prepare to discuss your projects (${projectNames.slice(0, 2).join(", ")}) as proof of statistical and analytical rigor`);
     tips.push("Practice SQL window functions and CTEs — almost every DS interview includes a SQL round");
   } else if (track === "DA") {
-    tips.push("Prepare a portfolio walkthrough of your Tableau dashboards from the StoryAI research");
-    tips.push("Review: translating data findings into business recommendations — your StoryAI demo to 100 educators is a strong example");
+    if (expTitles.length > 0) tips.push(`Prepare a portfolio walkthrough of your experience as ${expTitles[0]} — highlight dashboards and data storytelling`);
+    tips.push("Review: translating data findings into business recommendations");
     tips.push("Practice SQL aggregations, joins, and subqueries for the technical screen");
   } else if (track === "BIE") {
-    tips.push("Review: data modeling, schema design, and ETL/ELT patterns — your NBA pipeline project demonstrates pipeline thinking");
+    tips.push("Review: data modeling, schema design, and ETL/ELT patterns");
     tips.push("Practice SQL at intermediate-to-advanced level: CTEs, window functions, optimization");
-    tips.push("Be ready to discuss idempotency and fault tolerance — your NBA API pipeline with exponential backoff is directly relevant");
+    if (projectNames.length > 0) tips.push(`Be ready to discuss pipeline design and fault tolerance from your projects (${projectNames[0]})`);
   } else if (track === "SWE") {
     tips.push("Practice LeetCode medium-level problems: arrays, hashmaps, trees, graphs, and dynamic programming");
-    tips.push("Review your StoryTrek web development experience — demonstrates full-stack team collaboration");
+    if (expTitles.length > 0) tips.push(`Review your ${expTitles[0]} experience — demonstrates team collaboration`);
     tips.push("Prepare to discuss system design basics: API design, caching, databases");
   }
 
@@ -152,13 +188,16 @@ function generatePrep(internship: Internship, gaps: string[], track: string | un
   return tips;
 }
 
-// Pick the strongest project for this role
-function bestProject(track: string | undefined): string {
-  if (track === "DS") return "Floor Generals (permutation testing, network analysis) or LoL Esports (ML classification, fairness analysis)";
-  if (track === "DA") return "US Interstate Wage Gaps (panel data, R, robustness checks) or StoryAI dashboards (Tableau, behavioral data)";
-  if (track === "BIE") return "Floor Generals (idempotent pipeline, API ingestion, atomic writes, resumable cache)";
-  if (track === "SWE") return "Floor Generals (pipeline engineering) or StoryTrek (web platform, team collaboration)";
-  return "Floor Generals (pipeline + statistical testing) — your most versatile project";
+// Pick the strongest project for this role based on scored projects
+function bestProject(track: string | undefined, profile: ResumeProfile, requirementKeywords: string[]): string {
+  if (profile.projects.length === 0) return "No projects in resume — consider adding your strongest work";
+
+  const scored = profile.projects
+    .map((p) => ({ name: p.name, tech: p.tech, score: scoreRelevance(p.tags, requirementKeywords, track) }))
+    .sort((a, b) => b.score - a.score);
+
+  const top = scored.slice(0, 2);
+  return top.map((p) => `${p.name} (${p.tech.join(", ")})`).join(" or ");
 }
 
 export async function GET(
@@ -214,8 +253,8 @@ export async function GET(
     ),
   ];
 
-  const prep = generatePrep(internship, skills.gaps, track);
-  const leadProject = bestProject(track);
+  const prep = generatePrep(internship, skills.gaps, track, resumeProfile);
+  const leadProject = bestProject(track, resumeProfile, requirementKeywords);
 
   // Fit assessment
   let fitLevel: "strong" | "moderate" | "stretch";

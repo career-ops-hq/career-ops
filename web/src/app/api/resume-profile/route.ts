@@ -269,9 +269,13 @@ export async function GET() {
   const file = PROFILE_FILE();
   try {
     fs.accessSync(file);
-    return NextResponse.json(JSON.parse(fs.readFileSync(file, "utf8")));
   } catch {
     return NextResponse.json({ error: "no resume profile yet — upload a resume first" }, { status: 404 });
+  }
+  try {
+    return NextResponse.json(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch {
+    return NextResponse.json({ error: "resume profile is corrupt — re-upload your resume to regenerate" }, { status: 500 });
   }
 }
 

@@ -71,10 +71,18 @@ export function TailorPanel({ internshipId, onClose }: { internshipId: string; o
       setLoading(true);
       setError(null);
       try {
-        // Ensure resume profile is parsed (no-op if already exists)
+        // Ensure resume profile is parsed (trigger parse only if missing, not if corrupt)
         const profileCheck = await fetch("/api/resume-profile");
         if (profileCheck.status === 404) {
-          await fetch("/api/resume-profile", { method: "POST" });
+          const parseRes = await fetch("/api/resume-profile", { method: "POST" });
+          if (!parseRes.ok) {
+            const body = await parseRes.json().catch(() => null);
+            setError(body?.error ?? "Could not parse resume — upload a resume first");
+            return;
+          }
+        } else if (profileCheck.status === 500) {
+          setError("Resume profile is corrupt — re-upload your resume to fix");
+          return;
         }
 
         const res = await fetch(`/api/internships/${internshipId}/tailor`);
@@ -98,6 +106,7 @@ export function TailorPanel({ internshipId, onClose }: { internshipId: string; o
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
         <div className="w-full max-w-3xl rounded-2xl border border-border bg-background p-8 shadow-xl text-center">
           <div className="animate-pulse text-muted">Analyzing fit...</div>
+          <button onClick={onClose} className="mt-4 text-xs text-muted hover:text-foreground transition-colors">Cancel</button>
         </div>
       </div>
     );

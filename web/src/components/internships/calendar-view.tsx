@@ -82,7 +82,8 @@ export function CalendarView({
   const [month, setMonth] = useState(now.getMonth());
 
   const events = buildEvents(internships);
-  const todayStr = now.toISOString().slice(0, 10);
+  // Use local date to avoid UTC/local mismatch at day boundaries
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfWeek(year, month);
@@ -128,13 +129,13 @@ export function CalendarView({
       {/* Calendar header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button onClick={prevMonth} className="rounded-lg p-1.5 text-muted hover:bg-surface-hover transition-colors">
+          <button onClick={prevMonth} aria-label="Previous month" className="rounded-lg p-1.5 text-muted hover:bg-surface-hover transition-colors">
             <ChevronLeft className="h-5 w-5" />
           </button>
           <h2 className="text-lg font-semibold w-48 text-center">
             {MONTHS[month]} {year}
           </h2>
-          <button onClick={nextMonth} className="rounded-lg p-1.5 text-muted hover:bg-surface-hover transition-colors">
+          <button onClick={nextMonth} aria-label="Next month" className="rounded-lg p-1.5 text-muted hover:bg-surface-hover transition-colors">
             <ChevronRight className="h-5 w-5" />
           </button>
         </div>
@@ -204,7 +205,7 @@ export function CalendarView({
                   )}
                 </div>
                 <div className="space-y-0.5">
-                  {dayEvents.slice(0, 3).map((ev, i) => {
+                  {dayEvents.map((ev, i) => {
                     const style = EVENT_STYLES[ev.type];
                     return (
                       <button
@@ -214,16 +215,13 @@ export function CalendarView({
                           "flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] leading-tight transition-opacity hover:opacity-80",
                           style.bg,
                         )}
-                        title={`${ev.company} — ${ev.role} (${style.label})`}
+                        aria-label={`${ev.company} — ${ev.role} (${style.label})`}
                       >
                         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", style.dot)} />
                         <span className="truncate">{ev.company}</span>
                       </button>
                     );
                   })}
-                  {dayEvents.length > 3 && (
-                    <span className="block text-[9px] text-muted pl-1">+{dayEvents.length - 3} more</span>
-                  )}
                 </div>
               </div>
             );
