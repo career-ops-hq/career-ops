@@ -384,8 +384,8 @@ async function fetchFromEmbed(entry, ctx) {
     // A row the payload mangled is dropped on its own, never the board: a null
     // entry, or one with no usable id. The id is the URL's last segment, so
     // without it `String(undefined)` minted ".../undefined" — a dead link that
-    // passed the title/url filter (CodeRabbit, #4298). The URL and externalId
-    // now come from the same coerced value.
+    // passed the title/url filter (CodeRabbit, #4298). The URL is built from
+    // the coerced value.
     if (!p || typeof p !== 'object') return null;
     const id = coerceId(p.id);
     if (id === undefined) return null;
@@ -411,7 +411,6 @@ async function fetchFromEmbed(entry, ctx) {
       title: p.title || '',
       url: encodedId === null ? '' : `https://${EMBED_HOST}/${encodedSlug}/${encodedId}`,
       company: entry.name,
-      externalId: id,
       location,
       // The embed payload carries neither descriptionPlain nor publishedAt —
       // the posting API's two extras. An absent date means "unknown", never

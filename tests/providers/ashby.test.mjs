@@ -440,9 +440,8 @@ try {
       && j.title === 'Business Operations Manager'
       && j.url === 'https://jobs.ashbyhq.com/whatnot/c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
       && j.company === 'Whatnot'
-      && j.externalId === 'c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
       && j.location === 'Los Angeles, CA · New York, NY'
-      ? pass('ashby embed source maps title/url/company/externalId and dedupes the location list')
+      ? pass('ashby embed source maps title/url/company and dedupes the location list')
       : fail(`ashby embed mapping: ${JSON.stringify(jobs)}`);
 
     calls.length === 1
@@ -478,7 +477,7 @@ try {
     const { ctx } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: postings } }));
     let jobs = null; let err = null;
     try { jobs = await ashby.fetch(EMBED_ENTRY, ctx); } catch (e) { err = e; }
-    !err && jobs.length === 1 && jobs[0].externalId === POSTING.id && !jobs.some((j) => /undefined/.test(j.url))
+    !err && jobs.length === 1 && jobs[0].url.endsWith(`/${POSTING.id}`) && !jobs.some((j) => /undefined/.test(j.url))
       ? pass('ashby embed source drops null rows and rows without a usable id, keeps the rest')
       : fail(`ashby embed bad rows: err=${err && err.message} jobs=${JSON.stringify(jobs)}`);
   }
