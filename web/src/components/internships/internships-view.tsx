@@ -99,9 +99,11 @@ export function InternshipsView() {
   // Filter internships by search, track, and status
   const filtered = internships.filter((i) => {
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      const haystack = `${i.company} ${i.role} ${i.location} ${i.notes} ${i.track ?? ""} ${i.term ?? ""} ${i.source ?? ""}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
+      const terms = searchQuery.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+      if (terms.length > 0) {
+        const haystack = `${i.company} ${i.role} ${i.location} ${i.notes} ${i.track ?? ""} ${i.term ?? ""} ${i.source ?? ""}`.toLowerCase();
+        if (!terms.some((t) => haystack.includes(t))) return false;
+      }
     }
     if (trackFilter !== "all" && i.track !== trackFilter) return false;
     if (statusFilter === "active") return !["closed", "rejected"].includes(i.status);
@@ -238,7 +240,7 @@ export function InternshipsView() {
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
           <input
             type="text"
-            placeholder="Search companies, roles, notes..."
+            placeholder="Search (comma-separated, e.g. data analyst, DS)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="rounded-lg border border-border bg-transparent py-1.5 pl-8 pr-3 text-xs placeholder:text-muted/60 focus:border-brand focus:outline-none w-56"
