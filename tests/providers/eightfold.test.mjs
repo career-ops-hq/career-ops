@@ -509,6 +509,60 @@ try {
       : fail(`pcsx domain: ${pcsx.map((c) => c.url).join(' ')}`);
   }
 
+  // A PCSX probe that 404s means PCSX is simply not there, so the v2 403 is the
+  // real story (a WAF or datacenter-IP block). Surfacing the probe's 404 instead
+  // read as "board gone" to dead-boards.mjs, which skips a board after 3 misses.
+  {
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Forbidden');
+      throw httpErr(404, 'Not Found');
+    });
+    let caught = null;
+    try { await ef.fetch(TENANT, ctx); } catch (e) { caught = e; }
+    caught?.status === 403
+      ? pass('eightfold reports the v2 403 (a block), not the probe 404, when PCSX is absent')
+      : fail(`pcsx-absent error status: ${caught && caught.status}`);
+  }
+
+  // A board cut short by a 429 is tagged on the returned array (the
+  // workdayTruncated / adpTruncated convention), so callers can tell a partial
+  // board from a complete one instead of reading only a console line.
+  {
+    const { ctx } = recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start === 0) return { positions: Array.from({ length: 10 }, (_, i) => position(String(i), `R${i}`)), count: 500 };
+      throw httpErr(429, 'slow down');
+    });
+    const jobs = await ef.fetch(TENANT, ctx);
+    const complete = await ef.fetch(TENANT, recording(() => ({ positions: [position('1', 'Only')], count: 1 })).ctx);
+    jobs.length === 10 && jobs.eightfoldTruncated === true && complete.eightfoldTruncated === undefined
+      ? pass('eightfold tags a 429-truncated board eightfoldTruncated, and only that board')
+      : fail(`truncation tag: partial=${jobs.eightfoldTruncated} complete=${complete.eightfoldTruncated}`);
+  }
+
+  // PCSX pages are paced for PCSX: Microsoft's edge 429s a walk at the v2
+  // spacing, so PCSX pages wait longer between requests than v2 pages do.
+  {
+    const sleeps = [];
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      return pcsxPage(start === 0 ? Array.from({ length: 10 }, (_, i) => position(String(i), `P${i}`)) : [position('99', 'Last')], 11);
+    });
+    ctx.sleep = async (ms) => { sleeps.push(ms); };
+    const v2Sleeps = [];
+    const v2 = recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      return { positions: start === 0 ? Array.from({ length: 10 }, (_, i) => position(String(i), `V${i}`)) : [position('99', 'Last')], count: 11 };
+    });
+    v2.ctx.sleep = async (ms) => { v2Sleeps.push(ms); };
+    await ef.fetch(TENANT, ctx);
+    await ef.fetch(TENANT, v2.ctx);
+    sleeps.length === 1 && v2Sleeps.length === 1 && sleeps[0] > v2Sleeps[0]
+      ? pass(`eightfold paces PCSX pages slower than v2 pages (${sleeps[0]}ms vs ${v2Sleeps[0]}ms)`)
+      : fail(`pcsx pacing: pcsx=${JSON.stringify(sleeps)} v2=${JSON.stringify(v2Sleeps)}`);
+  }
+
 } catch (e) {
   fail(`eightfold provider tests crashed: ${e.message}`);
 }

@@ -27,13 +27,23 @@
 //   business_unit, t_create/t_update (epoch SECONDS), canonicalPositionUrl,
 //   display_job_id.
 //
+// PCSX (tenants migrated to Eightfold's newer career-site API):
+//   https://<tenant>.eightfold.ai/api/pcsx/search?domain=<domain>&start=<n>
+//   A migrated tenant answers the v2 endpoint above with
+//   403 {"message": "Not authorized for PCSX"}. The provider then probes PCSX
+//   once on the same host and pages there for the rest of the walk.
+//   Response: { status, error, data: { count, positions: [...] } }, with
+//   positions naming fields differently (postedTs, atsJobId, positionUrl);
+//   normalizePcsxPage maps them onto the v2 names above.
+//
 // PAGE SIZE IS SERVER-CAPPED AT 10. Requesting num=25/50/100/200 all return
 // exactly 10 rows (measured against a 616-posting tenant). So a large board
 // costs count/10 requests; the page cap below is what keeps that bounded, and
 // `max_pages` on the entry raises it for a genuinely huge tenant.
 //
 // Known limitation: several tenants front the API with a WAF that 403s
-// datacenter/cloud egress IPs. That is an environment/IP issue, not a provider
+// datacenter/cloud egress IPs. When the PCSX probe is refused or absent too,
+// that 403 is what the provider reports. That is an environment/IP issue, not a provider
 // bug — the same request succeeds from a residential IP. A browser-like
 // User-Agent is sent to reduce (not eliminate) the friction.
 
@@ -54,6 +64,12 @@ const MAX_PAGES_CAP = 1000;
 const INTER_PAGE_DELAY_MS = 250;
 
 const RETRY_POLICY = { retries: 3, baseDelayMs: 500, maxDelayMs: 8_000 };
+// PCSX tenants are the large ones (Microsoft: 2,395 postings), and Microsoft's
+// edge 429s a sustained walk at the v2 spacing above. Tuned against that edge:
+// 400ms between pages and a 2s-to-32s backoff walk the board where 250ms with a
+// 0.5s-to-8s backoff stalls partway.
+const PCSX_INTER_PAGE_DELAY_MS = 400;
+const PCSX_RETRY_POLICY = { retries: 5, baseDelayMs: 2_000, maxDelayMs: 32_000 };
 
 /**
  * SSRF guard — every request URL passes through here before it is fetched.
@@ -222,7 +238,8 @@ function assembleLocation(p) {
 }
 
 /**
- * Pure normalizer for one `/api/apply/v2/jobs` response. Exported for unit
+ * Pure normalizer for one `/api/apply/v2/jobs` response, or a PCSX page after
+ * normalizePcsxPage has mapped it onto the same shape. Exported for unit
  * tests. Returns [] for null / {} / non-array / {positions: null}.
  *
  * Drop rules (a dropped row is silently omitted, never emitted half-formed):
@@ -334,7 +351,7 @@ export default {
 
     for (let page = 0; page < maxPages; page++) {
       const start = page * PAGE_SIZE;
-      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+      if (page > 0) await sleep(api === 'pcsx' ? PCSX_INTER_PAGE_DELAY_MS : INTER_PAGE_DELAY_MS, ctx);
 
       /** One request on whichever API this tenant is on. */
       const request = async (/** @type {string} */ which) => {
@@ -350,7 +367,7 @@ export default {
             redirect: 'error',
             headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'application/json' },
           },
-          RETRY_POLICY,
+          which === 'pcsx' ? PCSX_RETRY_POLICY : RETRY_POLICY,
         ));
       };
 
@@ -363,18 +380,20 @@ export default {
         // itself. It is deterministic, never retried (RFC 9110 §15.5.4, and
         // _http.mjs's isRetryableError agrees), so it is a safe point to switch
         // APIS ONCE rather than to give up: before this, every PCSX tenant read
-        // as the WAF case below and the board silently returned zero postings.
+        // as the WAF case (module header) and the board silently returned zero postings.
         if (api === 'v2' && page === 0 && status === 403) {
           let pcsxJson = null;
           try {
             pcsxJson = await request('pcsx');
           } catch (probeErr) {
-            // PCSX refusing too (403) makes the original 403 the real story: a
-            // WAF or datacenter-IP block. Any other probe failure — a 429, a 5xx,
-            // a network error — is its own problem, and reporting the v2 403 in
-            // its place would read as a deterministic block when the tenant is
-            // only busy or down.
-            if (/** @type {any} */ (probeErr)?.status === 403) throw err;
+            // PCSX refusing too (403), or simply not existing on this host
+            // (404/410), makes the original 403 the real story: a WAF or
+            // datacenter-IP block. Surfacing the probe's 404 instead read as
+            // "board gone" to dead-boards.mjs, which skips a board after three
+            // misses. Any other probe failure (a 429, a 5xx, a network error) is
+            // its own problem, and reporting the v2 403 in its place would read
+            // as a deterministic block when the tenant is only busy or down.
+            if ([403, 404, 410].includes(/** @type {any} */ (probeErr)?.status)) throw err;
             throw probeErr;
           }
           const page0 = normalizePcsxPage(pcsxJson);
@@ -427,6 +446,10 @@ export default {
 
     if (rateLimited) {
       console.error(`⚠️  eightfold: ${entry.name} stopped early on HTTP 429 (${all.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial, not empty`);
+      // Tagged on the array, as workday.mjs (workdayTruncated) and
+      // adp-workforcenow.mjs (adpTruncated) do, so a caller can tell this
+      // board from a complete one without reading stderr.
+      /** @type {any} */ (all).eightfoldTruncated = true;
     } else if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
     }
