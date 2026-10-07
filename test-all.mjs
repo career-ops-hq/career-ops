@@ -10067,13 +10067,15 @@ try {
 // ── RESERVE-REPORT-NUM RANGE RESERVATION (#1426) ────────────────
 // Manual multi-agent fan-outs need N report numbers up front. --count N
 // reserves a contiguous range (per-slot atomic sentinels); tests run against
-// a temp dir via the CAREER_OPS_REPORTS_DIR override.
+// a temp dir via the CAREER_OPS_REPORTS_DIR override. CAREER_OPS_BATCH_STATE
+// points every run at a fixture-local batch-state.tsv, so failed rows in the
+// install's real batch/batch-state.tsv cannot occupy fixture numbers (#4391).
 console.log('\n🧪 Testing reserve-report-num env override and range reservation...');
 try {
   const RESERVE = join(ROOT, 'reserve-report-num.mjs');
   const reserveRun = (args, dir, tracker = join(dir, 'applications.md')) => execFileSync(NODE, [RESERVE, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: tracker },
+    env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: tracker, CAREER_OPS_BATCH_STATE: join(dir, 'batch-state.tsv') },
   }).trim();
 
   // Importing the module must expose the same allocator used by the CLI,
@@ -10120,7 +10122,7 @@ try {
     }));
   `], {
     encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_REPORTS_DIR: apiTmp, CAREER_OPS_TRACKER: apiTracker },
+    env: { ...process.env, CAREER_OPS_REPORTS_DIR: apiTmp, CAREER_OPS_TRACKER: apiTracker, CAREER_OPS_BATCH_STATE: join(apiTmp, 'batch-state.tsv') },
   }).trim();
   let apiResult = null;
   try { apiResult = JSON.parse(apiProbe); } catch {}
@@ -10203,6 +10205,7 @@ try {
     await allocatorApi.reserveReportNumbers(2, {
       reportsDir: unsafeRangeReports,
       trackerPath: unsafeRangeTracker,
+      batchStateFile: join(unsafeRangeTmp, 'batch-state.tsv'),
     });
   } catch (err) {
     unsafeRangeError = err;
@@ -10462,7 +10465,7 @@ try {
     try {
       const spawnReserve = () => new Promise(resolve => {
         const child = spawn(NODE, [RESERVE, '--count', '4'], {
-          env: { ...process.env, CAREER_OPS_REPORTS_DIR: concTmp },
+          env: { ...process.env, CAREER_OPS_REPORTS_DIR: concTmp, CAREER_OPS_BATCH_STATE: join(concTmp, 'batch-state.tsv') },
         });
         let stdout = '';
         child.stdout.on('data', chunk => { stdout += chunk; });
@@ -10499,7 +10502,7 @@ try {
       execFileSync(NODE, [RESERVE, ...args], {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: join(dir, 'applications.md') },
+        env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: join(dir, 'applications.md'), CAREER_OPS_BATCH_STATE: join(dir, 'batch-state.tsv') },
       });
       return null;
     } catch (err) {
