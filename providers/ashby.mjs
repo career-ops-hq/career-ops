@@ -224,10 +224,41 @@ export function buildEmbedUrl(slug) {
   return `https://${EMBED_HOST}/${encodeURIComponent(slug)}?embed=js`;
 }
 
-// The embed page hydrates from a single assignment. Capturing to the closing
-// `};` of the object literal keeps the match anchored on the shape rather than
-// on surrounding markup.
-const APP_DATA_RE = /window\.__appData\s*=\s*(\{[\s\S]*?\});/;
+// The embed page hydrates from a single assignment of a JSON object.
+const APP_DATA_START_RE = /window\.__appData\s*=\s*\{/;
+
+/**
+ * The JSON object assigned to window.__appData, as source text. A brace scan
+ * that skips string contents, because a lazy regex up to the first `};` cut
+ * the object at any title, team name or theme CSS containing that sequence.
+ *
+ * @param {string} html
+ * @returns {string|null|undefined} the object text; null when the assignment
+ *   is absent; undefined when it starts but never closes.
+ */
+function appDataSource(html) {
+  const m = APP_DATA_START_RE.exec(html);
+  if (!m) return null;
+  const start = m.index + m[0].length - 1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < html.length; i++) {
+    const c = html[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}' && --depth === 0) {
+      return html.slice(start, i + 1);
+    }
+  }
+  return undefined;
+}
 
 /**
  * Pull the job board out of the embed page.
@@ -245,11 +276,12 @@ const APP_DATA_RE = /window\.__appData\s*=\s*(\{[\s\S]*?\});/;
  * @throws when __appData itself cannot be found or parsed.
  */
 export function parseEmbedAppData(html) {
-  const m = APP_DATA_RE.exec(html || '');
-  if (!m) throw new Error('ashby: embed page carried no window.__appData — Ashby changed the embed markup');
+  const source = appDataSource(html || '');
+  if (source === null) throw new Error('ashby: embed page carried no window.__appData — Ashby changed the embed markup');
   let data;
   try {
-    data = JSON.parse(m[1]);
+    if (source === undefined) throw new Error('unterminated');
+    data = JSON.parse(source);
   } catch {
     throw new Error('ashby: embed page __appData did not parse as JSON — Ashby changed the embed markup');
   }

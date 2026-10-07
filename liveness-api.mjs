@@ -146,6 +146,11 @@ const ATS_PROVIDERS = [
     // unauthenticated hits (see providers/ashby.mjs). Give it more room than the ATS
     // default so a slow-but-live board doesn't time out into a Playwright fallback.
     timeoutMs: 20_000,
+    // The API is board-level, so a 404 means the board API is off for this org
+    // (embed-only boards such as Whatnot, providers/ashby.mjs `ashby.embed`) or
+    // the slug is wrong. Neither says THIS posting is gone: removal shows as a
+    // 200 board that no longer lists the id (`ashby_api_unlisted`).
+    api404Authoritative: false,
     async interpret(res, { jobId }) {
       let json;
       try {

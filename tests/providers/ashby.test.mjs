@@ -568,6 +568,42 @@ try {
       : fail(`ashby embed empty board: ${JSON.stringify(jobs)}`);
   }
 
+  // __appData is JSON, so a "};" inside a string value (a title, a team name,
+  // custom CSS) is data. A lazy regex up to the first "};" cut the object
+  // there and the whole board threw "Ashby changed the embed markup".
+  {
+    const { parseEmbedAppData } = ashbyModule;
+    const tricky = { ...POSTING, id: 'b1', title: 'Engineer, C++ {templates}; "quoted" \\ path' };
+    const html = embedHtml({ organization: { name: 'Whatnot', theme: { css: '.a{color:red};' } }, jobBoard: { jobPostings: [tricky, POSTING] } });
+    let board = null; let err = null;
+    try { board = parseEmbedAppData(html); } catch (e) { err = e; }
+    !err && board?.jobPostings.length === 2 && board.jobPostings[0].title === tricky.title
+      ? pass('ashby embed parser keeps "};", quotes and backslashes inside JSON string values')
+      : fail(`ashby embed "};" in value: ${err && err.message} ${JSON.stringify(board)}`);
+
+    let unterminated = null;
+    try { parseEmbedAppData('<script>window.__appData = {"jobBoard": {"jobPostings": ['); } catch (e) { unterminated = e; }
+    /did not parse as JSON/.test(unterminated?.message || '')
+      ? pass('ashby embed parser reports an unterminated __appData as unparseable')
+      : fail(`ashby embed unterminated: ${unterminated && unterminated.message}`);
+  }
+
+  // Liveness: Ashby's posting API is board-level. An embed-only board answers
+  // 404 there for every posting (Whatnot, live 2026-10-07) while the postings
+  // are live on the embed page, so the 404 says "API off for this org", never
+  // "posting gone". Reading it as authoritative marked live roles expired.
+  {
+    const { checkLivenessViaApi, resolveAtsApi } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
+    const url = 'https://jobs.ashbyhq.com/whatnot/cf5ce9e0-d595-46f8-981e-c7f95778e6fa';
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('Not Found', { status: 404 });
+    let r;
+    try { r = await checkLivenessViaApi(url); } finally { globalThis.fetch = realFetch; }
+    r === null && resolveAtsApi(url)?.api404Authoritative === false
+      ? pass('ashby liveness treats a board-level 404 as inconclusive, not expired')
+      : fail(`ashby board 404 liveness: ${JSON.stringify(r)}`);
+  }
+
 } catch (e) {
   fail(`ashby provider tests crashed: ${e.message}`);
 }
