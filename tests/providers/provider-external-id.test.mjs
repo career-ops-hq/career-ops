@@ -33,8 +33,8 @@ console.log('\nproviders — ATS-native identifier capture');
 // ── PROVIDER-LEVEL: these must fail if the capture is deleted from the provider.
 // An earlier version of this file only exercised scan.mjs's formatters with
 // hand-built literals, so stripping externalId/requisitionId from all five
-// providers left the whole suite green — the exact regression the local-patch
-// README warns the updater will cause silently.
+// providers left the whole suite green, so a provider edit could drop the
+// capture with no failing test.
 
 // Workday: the req token must be ANCHORED to the trailing path segment. An
 // unanchored `externalPath.includes(bulletField)` check certified the LOCATION as
@@ -143,7 +143,7 @@ titleUnderscore[2]?.requisitionId === '10154966'
 // ids. The table pins each shape, including the cross-site suffix that must
 // still be stripped, and asserts the dedup key agrees with the captured id.
 const REQ_TOKEN_CASES = [
-  // externalPath                                        expected externalId   why
+  // externalPath                                        expected reqId        why
   ['/job/Bentonville/Sr-Analyst_R-2593225',              'R-2593225',          'Walmart: hyphen is part of the id'],
   ['/job/NY/Analyst_JR-10423',                           'JR-10423',           'two-letter prefix, hyphenated'],
   ['/job/SF/Sr-Associate--Corporate-Strategy_R167982-1', 'R167982',            'cross-site -1 stripped'],

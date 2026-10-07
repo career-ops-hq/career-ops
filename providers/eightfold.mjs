@@ -236,8 +236,8 @@ export function parseEightfoldResponse(json, tenant, companyName) {
     // ATS-native identifier capture. Eightfold's own position id, plus
     // the customer's upstream-ATS id when the tenant exposes one. Type-guarded
     // like every other provider here — an unguarded String() coerced a tenant
-    // returning an object into the literal "[object Object]" and wrote that
-    // into the req: segment as though it were an id.
+    // returning an object into the literal "[object Object]" and emitted that
+    // as though it were an id.
     // ats_job_id is deliberately NOT in this chain. It is the customer's upstream
     // REQ id, which is many-to-one with postings (see requisitionId in _types.js),
     // so falling back to it would hand a consumer asking for per-posting identity a
