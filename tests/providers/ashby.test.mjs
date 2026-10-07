@@ -604,6 +604,29 @@ try {
       : fail(`ashby board 404 liveness: ${JSON.stringify(r)}`);
   }
 
+  // verify-portals: an embed-only board's posting API answers 404 by design, so
+  // tier 1's direct API probe reported Whatnot as "slug not found" (and failed
+  // --strict). An entry that opts into the embed source must be verified
+  // through the provider, which reads the embed page.
+  {
+    const { verifyCompanies } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
+    const apiCalls = [];
+    const fetchJson = async (url) => { apiCalls.push(url); throw Object.assign(new Error('HTTP 404'), { status: 404 }); };
+    const fetchText = async () => '';
+    const httpCtx = {
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson,
+      fetchText: async (url) => (url.includes('?embed=js')
+        ? embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: [POSTING] } })
+        : ''),
+    };
+    const rows = await verifyCompanies([EMBED_ENTRY], { fetchJson, fetchText, providers: new Map([['ashby', ashby]]), httpCtx });
+    rows[0]?.status === 'live' && rows[0]?.provider === 'ashby' && apiCalls.every((u) => !u.includes('posting-api'))
+      ? pass('verify-portals reads an embed-only Ashby board through the provider, not the disabled posting API')
+      : fail(`verify-portals embed board: ${JSON.stringify(rows)} apiCalls=${JSON.stringify(apiCalls)}`);
+  }
+
 } catch (e) {
   fail(`ashby provider tests crashed: ${e.message}`);
 }

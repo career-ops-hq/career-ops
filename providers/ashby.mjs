@@ -157,7 +157,7 @@ export function parseCompensation(job) {
 const ALLOWED_ASHBY_HOSTS = new Set(['api.ashbyhq.com']);
 
 /** @param {string} url */
-function assertAshbyUrl(url) {
+function assertAshbyUrl(url, hosts = ALLOWED_ASHBY_HOSTS) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -165,8 +165,8 @@ function assertAshbyUrl(url) {
     throw new Error(`ashby: invalid URL: ${url}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`ashby: URL must use HTTPS: ${url}`);
-  if (!ALLOWED_ASHBY_HOSTS.has(parsed.hostname))
-    throw new Error(`ashby: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_ASHBY_HOSTS].join(', ')}`);
+  if (!hosts.has(parsed.hostname))
+    throw new Error(`ashby: untrusted hostname "${parsed.hostname}" — must be one of: ${[...hosts].join(', ')}`);
   return url;
 }
 
@@ -186,15 +186,6 @@ function resolveApiUrl(entry) {
 }
 
 const EMBED_HOST = 'jobs.ashbyhq.com';
-
-/** Same pin as the posting API, for the other host this provider may read. */
-function assertEmbedUrl(url) {
-  let parsed;
-  try { parsed = new URL(url); } catch { throw new Error(`ashby: invalid embed URL: ${url}`); }
-  if (parsed.protocol !== 'https:') throw new Error(`ashby: embed URL must use HTTPS: ${url}`);
-  if (parsed.hostname !== EMBED_HOST) throw new Error(`ashby: untrusted embed hostname "${parsed.hostname}" — must be ${EMBED_HOST}`);
-  return url;
-}
 
 /**
  * Resolve the board slug for the embed source.
@@ -393,7 +384,9 @@ async function fetchFromEmbed(entry, ctx) {
   const slug = resolveBoardSlug(entry);
   if (!slug) throw new Error(`ashby: cannot derive the board slug for ${entry.name} — set ashby.board or a jobs.ashbyhq.com careers_url`);
   const url = buildEmbedUrl(slug);
-  assertEmbedUrl(url);
+  // Its own one-host set, deliberately NOT added to ALLOWED_ASHBY_HOSTS: that
+  // would also let a portals.yml `api:` entry point at the embed page.
+  assertAshbyUrl(url, new Set([EMBED_HOST]));
   const html = /** @type {string} */ (await fetchTextWithRetry(
     ctx,
     url,
@@ -410,8 +403,9 @@ async function fetchFromEmbed(entry, ctx) {
     /** @type {any} */ (err).status = 404;
     throw err;
   }
-  const encodedSlug = safeEncodeURIComponent(slug);
-  if (encodedSlug === null) throw new Error(`ashby: board slug for ${entry.name} cannot be URI-encoded`);
+  // The slug comes from portals.yml, not the payload, and buildEmbedUrl above
+  // already encoded it (a slug encodeURIComponent rejects never gets this far).
+  const encodedSlug = encodeURIComponent(slug);
   return board.jobPostings.map((/** @type {any} */ p) => {
     // A row the payload mangled is dropped on its own, never the board: a null
     // entry, or one with no usable id. The id is the URL's last segment, so
@@ -445,7 +439,9 @@ async function fetchFromEmbed(entry, ctx) {
       company: entry.name,
       location,
       // The embed payload carries neither descriptionPlain nor publishedAt —
-      // the posting API's two extras. An absent date means "unknown", never
+      // the posting API's two extras — and compensation only as a display string
+      // (compensationTierSummary), which is not parsed: a bare "$" names no
+      // currency. An absent date means "unknown", never
       // "stale", so nothing is invented here. workplaceType is folded into
       // location above, exactly as on the API path, and not emitted on its own.
     };
