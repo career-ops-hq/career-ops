@@ -237,10 +237,41 @@ function isKeywordsHeading(line) {
 }
 
 /**
+ * Lines in the keyword section that are Markdown structure, not keywords
+ * (CommonMark 0.31.2): a thematic break (§4.1, three or more matching `-`, `_`
+ * or `*`, spaces allowed between them) and a code-fence delimiter (§4.5, three
+ * or more backticks or tildes, then an optional info string). Agents often wrap
+ * the list in a fence; the lines inside it are still read as keywords.
+ */
+const THEMATIC_BREAK = /^(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$/;
+const CODE_FENCE = /^(?:`{3,}|~{3,})/;
+
+/**
+ * A list-item marker (CommonMark §5.2): a bullet `-`, `+` or `*`, or an ordered
+ * marker of one to nine digits followed by `.` or `)`. Left on the line, an
+ * ordered marker turns `1. SQL` into a keyword no CV ever contains. Chinese
+ * numbering writes the marker with no space after it (`1、`, `一、`, `1．`, `2）`);
+ * left on the line, `、` would split off a bare `1` that matches any number.
+ */
+const LIST_MARKER = /^(?:(?:[-+*]|\d{1,9}[.)])\s+|(?:\d{1,9}|[\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D\u4E03\u516B\u4E5D\u5341\u767E]+)[\u3001\uFF0E\uFF09]\s*)/;
+
+/**
+ * What separates two keywords on one line: the ASCII comma; the comma of each
+ * non-Latin script a mode writes in (U+3001 IDEOGRAPHIC COMMA, which the Unicode
+ * NamesList notes "in Chinese, delimits items in a list or series", U+FF0C
+ * FULLWIDTH COMMA, U+060C ARABIC COMMA); and a U+00B7 MIDDLE DOT with whitespace
+ * on both sides. The middle dot needs the spaces because it also sits inside
+ * words: the NamesList records it as a vowel length mark in many Amerindian
+ * orthographies, and Catalan writes `l·l`.
+ */
+const KEYWORD_SEPARATOR = /[,\u3001\uFF0C\u060C]|\s\u00B7\s/;
+
+/**
  * Pull keywords out of a report's keyword section, opened by any heading in
- * KEYWORDS_HEADINGS. Liberal: accepts bulleted, comma-separated, or
- * one-per-line entries; stops at the next level-2 heading; skips an
- * empty/placeholder parenthetical line. Returns [] if the block is absent.
+ * KEYWORDS_HEADINGS. Liberal: accepts bulleted, numbered, comma-separated
+ * (KEYWORD_SEPARATOR), fenced, or one-per-line entries; stops at the next
+ * level-2 heading; skips an empty/placeholder parenthetical line, a thematic
+ * break and a code-fence delimiter. Returns [] if the block is absent.
  *
  * @param {string} reportText - Full report markdown.
  * @returns {string[]} Extracted keywords in order.
@@ -256,9 +287,10 @@ export function extractKeywords(reportText) {
     if (/^##\s+/.test(line)) break;
     if (!line) continue;
     if (/^\(.*\)$/.test(line)) continue;
-    const body = line.replace(/^[-*]\s+/, '');
-    for (const part of body.split(',')) {
-      const kw = part.trim().replace(/\.+$/, '').trim();
+    if (THEMATIC_BREAK.test(line) || CODE_FENCE.test(line)) continue;
+    const body = line.replace(LIST_MARKER, '');
+    for (const part of body.split(KEYWORD_SEPARATOR)) {
+      const kw = part.trim().replace(/(?<![.\u3002\uFF0E\u0964])[.\u3002\uFF0E\u0964]+$/, '').trim();
       if (kw) out.push(kw);
     }
   }
