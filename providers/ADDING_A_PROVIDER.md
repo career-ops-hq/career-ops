@@ -100,16 +100,24 @@ export default {
   normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
+  When the payload has a dedicated field for them, also set `requisitionId`
+  (the employer's requisition id — never the posting id, which changes on
+  every re-release; `coerceId` from `_ids.mjs`) and `language` (the posting
+  text's language as the source names it, preferring a code such as `de` or
+  `en-GB` over a display name when both are offered): the scanner's
+  company+role dedup reads both. Omit either key when the source has no such
+  field. See `_types.js` for the full list of optional fields.
   Populate `description` **only** when the list payload carries it for free
   (no extra per-job request — the scanner is zero-token). The one exception
   is opt-in enrichment: an entry with `fetchDetails: true` (plus an optional
   `detailLimit` cap) makes the provider fetch per-posting detail to fill
   `description`, bounded by `detailLimit` and skipped entirely while a health
-  probe runs (currently `vdab`, `smartrecruiters`). That enrichment is
+  probe runs (reference: `eploy.mjs`; find the rest with
+  `grep -l fetchDetails providers/*.mjs`). That enrichment is
   opt-in *only*: gate the whole detail loop on the entry config asking for
-  it **and** on not being in a probe — `smartrecruiters.mjs`
-  (`if (fetchDetails && !probing)`), `vdab.mjs`
-  (`if (fetchDetails && byId.size && !probing)`). A provider that fetches
+  it **and** on not being in a probe — `eploy.mjs`
+  (`if (!fetchDetails || probing) return jobs;`), `peoplesoft.mjs`
+  (`if (fetchDetails && !probing)`). A provider that fetches
   per-posting detail on every scan, with no config switch, defeats the
   opt-in and puts the per-posting request fan-out back on the default path;
   `detailLimit` is the cap on that loop, never the thing that turns it on.
@@ -454,7 +462,7 @@ When `ctx.maxPages` is set, `verify-portals` is running a liveness probe
 (`maxPages: 1`), not a scan. Two things follow.
 
 **Cap the walk (SHOULD).** Stop after `ctx.maxPages` pages, and skip any
-per-posting `fetchDetails` / detail enrichment (`smartrecruiters`, `vdab`) —
+per-posting `fetchDetails` / detail enrichment (`eploy`, `peoplesoft`) —
 the probe has no use for it. Reference `providers/workday.mjs`:
 
 ```js
@@ -526,7 +534,8 @@ per-posting detail fetches:
   `fetchTextWithRetry` / `fetchJsonWithRetry`. Detail enrichment is
   best-effort: a detail fetch that exhausts retry is caught, the listing row
   kept as-is, and the sweep moves on — it never fails the run
-  (`smartrecruiters.mjs`, `vdab.mjs`).
+  (`eploy.mjs` — small parallel batches, `fetchTextWithRetry`, `sleep`
+  between batches; `peoplesoft.mjs` — sequential, paced per request).
 
 **Exhaustion is your call, not the helper's.** `withRetry` rethrows; the
 error carries `.attempts` (the real request count). Decide per provider: keep
@@ -676,7 +685,7 @@ went through them. Must cover:
 - `fetchDetails` + a failed detail fetch (if any): a detail fetch that
   exhausts retry is caught, the listing row comes back intact, and the sweep
   finishes — enrichment failure is never fatal to the target
-  (reference: `smartrecruiters.mjs`).
+  (reference: `eploy.test.mjs`, which also retries a transient error first).
 - `detailLimit` (if `fetchDetails`): a test caps the detail-fetch count at
   `detailLimit` however many postings match — `smartrecruiters.test.mjs`
   runs 40 postings at `detailLimit: 10` and asserts exactly 10 detail calls.

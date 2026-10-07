@@ -186,7 +186,7 @@ test("readStatusLog: a missing log is an empty log", { skip: skipTs }, () => {
   assert.deepEqual(withDataRoot(() => {}, () => readStatusLog()), []);
 });
 
-test("Sankey and cumulative tiles read the same active tracker's ledger", { skip: skipTs }, () => {
+test("Sankey and cumulative tiles read the same active tracker's ledger", { skip: skipTs }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sankey-tracker-"));
   const priorRoot = process.env.CAREER_OPS_ROOT;
   const priorTracker = process.env.CAREER_OPS_TRACKER;
@@ -211,9 +211,21 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
     check(3);
     process.env.CAREER_OPS_TRACKER = path.relative(process.cwd(), custom);
     check(3);
-    fs.symlinkSync(custom, path.join(root, "linked.md"));
-    process.env.CAREER_OPS_TRACKER = path.join(root, "linked.md");
-    check(3);
+    // A FILE symlink needs a privilege a non-elevated Windows shell lacks, and
+    // a junction only links directories, so this one leg has no stand-in there.
+    // Skip it by name; any other error is still a failure.
+    let linked = true;
+    try {
+      fs.symlinkSync(custom, path.join(root, "linked.md"));
+    } catch (e) {
+      if (e?.code !== "EPERM" || e?.syscall !== "symlink") throw e;
+      linked = false;
+      t.diagnostic("symlinked-tracker leg skipped: no symlink privilege (EPERM)");
+    }
+    if (linked) {
+      process.env.CAREER_OPS_TRACKER = path.join(root, "linked.md");
+      check(3);
+    }
   } finally {
     if (priorRoot === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = priorRoot;

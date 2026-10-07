@@ -119,22 +119,19 @@ version: 1.0.0
   .separator { margin: 0 4px; }
 
   /* === SECTIONS ===
-     Small caps + a rule directly beneath, matching \titlerule in the original. */
+     Uppercase + a rule directly beneath, matching \titlerule in the original.
+     Synthetic small caps split words into differently sized PDF text runs. */
   .section { margin-bottom: 8px; }
 
   .section-title {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 400;
-    font-variant: small-caps;
-    text-transform: lowercase;
+    text-transform: uppercase;
     letter-spacing: 0.04em;
     border-bottom: 0.8px solid #000000;
     padding-bottom: 1px;
     margin-bottom: 4px;
   }
-  /* small-caps needs lowercase source text to render as small caps; the first
-     letter is restored to a full cap so headings read "Work Experience". */
-  .section-title::first-letter { text-transform: uppercase; }
 
   .summary-text { margin-top: 2px; }
 

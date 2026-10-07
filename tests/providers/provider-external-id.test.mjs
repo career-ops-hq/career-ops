@@ -1,5 +1,5 @@
 // tests/providers/provider-external-id.test.mjs — ATS-native identifiers must be captured
-// at ingest and serialized onto the pipeline row.
+// at ingest, on the Job each provider returns.
 //
 // WHY: dedup used to key only on the URL, so the same requisition posted under a
 // second host read as a brand-new role (Adobe R167982, 2026-08-01). The fallback
@@ -9,8 +9,10 @@
 // slug text can mint ids that were never in the posting at all.
 //
 // The providers already receive the id and were discarding it. These checks pin the
-// capture (providers/_types.js Job.requisitionId / .externalId) and its serialization
-// so a future provider edit cannot silently drop it back to the lossy path.
+// capture (providers/_types.js Job.requisitionId / .externalId) so a future provider
+// edit cannot silently drop it back to the lossy path. scan.mjs records
+// requisitionId in scan-history.tsv's requisition_id column (#4613); externalId
+// has no consumer yet.
 //
 // requisitionId is the schema.org/JobPosting `identifier` concept — "the hiring
 // organization's unique identifier for the job" — which is what survives a repost
@@ -146,6 +148,7 @@ const REQ_TOKEN_CASES = [
   ['/job/NY/Analyst_JR-10423',                           'JR-10423',           'two-letter prefix, hyphenated'],
   ['/job/SF/Sr-Associate--Corporate-Strategy_R167982-1', 'R167982',            'cross-site -1 stripped'],
   ['/job/SF/Sr-Associate_R167982-12',                    'R167982',            'cross-site -12 stripped'],
+  ['/job/Bentonville/Sr-Analyst_R-2593225-1',            'R-2593225',          'cross-site -1 stripped from a hyphenated id, ATS casing kept'],
   ['/job/Burbank/Sr-Analyst_10154966',                   '10154966',           'bare numeric req'],
   ['/job/Remote/Data_Scientist',                         undefined,            'title word: no digit, abstain'],
   ['/job/NY/Sr_Manager_Ops',                             undefined,            'title word: no digit, abstain'],
@@ -180,6 +183,16 @@ const walmartUrl = 'https://walmart.wd5.myworkdayjobs.com/walmartexternal/job/Be
 workdayDedupKey({ url: walmartUrl }) === `workday:walmart.wd5.myworkdayjobs.com:${String(reqRows[0]?.requisitionId).toLowerCase()}`
   ? pass('workday dedup key and captured requisitionId derive the same requisition')
   : failWith('workday dedup/id agreement', `key=${workdayDedupKey({ url: walmartUrl })} id=${reqRows[0]?.requisitionId}`);
+
+// A cross-site copy of that hyphenated req must land on the BASE posting's id and
+// key. The case-preserving id used to keep "-1" (its prefix check was lowercase
+// only) while the lowercased key dropped it (CodeRabbit, #4076).
+const walmartCrossSiteUrl = `${walmartUrl}-1`;
+const crossSiteRow = reqRows[REQ_TOKEN_CASES.findIndex(([p]) => p === '/job/Bentonville/Sr-Analyst_R-2593225-1')];
+workdayDedupKey({ url: walmartCrossSiteUrl }) === workdayDedupKey({ url: walmartUrl })
+  && crossSiteRow?.requisitionId === reqRows[0]?.requisitionId
+  ? pass('workday cross-site copy of a hyphenated req shares the base posting\'s id and dedup key')
+  : failWith('workday hyphenated cross-site', `key=${workdayDedupKey({ url: walmartCrossSiteUrl })} id=${crossSiteRow?.requisitionId}`);
 
 // Underscored ids used to split the two derivations: the id took the text after
 // the LAST underscore ("00123") while the key took it after the FIRST

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, parseClaudeEvent, parseCodexEvent, parseGrokEvent } from "./run-cli-support.mjs";
+import { installedCliIds, pickUsableCli } from "./cli-pick.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -148,4 +149,42 @@ export function resolveCli(id: string): { spec: CliSpec; binPath: string } | nul
   const binPath = findBin(spec.bin);
   if (!binPath) return null;
   return { spec, binPath };
+}
+
+export type CliResolution = { spec: CliSpec; binPath: string; substitutedFrom: string | null };
+
+/**
+ * resolveCli() for a cliId that came from the client's saved config.
+ *
+ * A saved id outlives the CLI it names (#4012). /api/run's client re-checks it
+ * before sending (#4019), but every other AI surface sends it as-is, so this
+ * applies the same rule on the server: the requested CLI while it is installed,
+ * otherwise the sole installed one (#4607).
+ *
+ * A caller that gets a substitution MUST use `spec.id` from here on, not the id
+ * it was sent: fencing, capability checks and per-CLI argv are all keyed on the
+ * id, and running one CLI under another's fencing is the mismatch #2507 is about.
+ */
+export function resolveCliOrFallback(id: string): CliResolution | null {
+  const direct = resolveCli(id);
+  if (direct) return { ...direct, substitutedFrom: null };
+  const pick = pickUsableCli(id, detectClis());
+  if (!pick.id) return null;
+  const fallback = resolveCli(pick.id);
+  return fallback ? { ...fallback, substitutedFrom: pick.substitutedFrom } : null;
+}
+
+/** The notice a route shows when it ran a different CLI than the one it was sent. */
+export function cliSubstitutionNotice(r: CliResolution): string | null {
+  if (!r.substitutedFrom) return null;
+  return `Saved CLI '${r.substitutedFrom}' is not installed — using ${r.spec.name} instead. Pick one in Config to make this permanent.`;
+}
+
+/** The 404 body when no CLI can be resolved: which CLIs ARE installed, and where to choose. */
+export function cliUnavailableError(id: string): { error: string; installed: string[] } {
+  const installed = installedCliIds(detectClis());
+  const error = installed.length
+    ? `CLI '${id}' not found on this machine. Installed: ${installed.join(", ")} — choose one in Config.`
+    : `CLI '${id}' not found on this machine, and no supported CLI is installed. Install one, then choose it in Config.`;
+  return { error, installed };
 }

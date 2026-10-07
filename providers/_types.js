@@ -55,19 +55,21 @@
  *                               compensation column via formatCompensation(); an
  *                               empty/absent value always passes the filter.
  *                               `adp-workforcenow.mjs` is another producer.
- * @property {string} [externalId] The ATS's own stable id for this POSTING
- *                               (Greenhouse `id`, Ashby posting uuid, Lever
- *                               `id`). Unique within that ATS, not across
- *                               employers — always pair it with the source when
- *                               keying. Unset for Workday: its list API exposes
- *                               no posting id, and the token at the end of
- *                               `externalPath` is a requisition shared by every
- *                               site the req is cross-posted to (requisitionId).
- * @property {string} [requisitionId] The EMPLOYER's requisition id (Greenhouse
- *                               `requisition_id`, e.g. "JR103948"; Workday: the
- *                               token ending `externalPath`, cross-site "-N"
- *                               suffix removed) — the
- *                               schema.org/JobPosting `identifier` concept.
+ * @property {string} [externalId] The ATS's own id for this POSTING, where the
+ *                               source exposes one (`git grep -n externalId
+ *                               providers/` lists the providers that set it).
+ *                               Unique within that ATS, not across employers —
+ *                               pair it with the source if you key on it. Not
+ *                               read by the scanner, whose per-posting identity
+ *                               is the URL. Left unset when the source exposes no
+ *                               posting id — never filled with a requisition id,
+ *                               which is shared by sibling postings.
+ * @property {string} [requisitionId] The EMPLOYER's requisition id — the
+ *                               schema.org/JobPosting `identifier` concept — from
+ *                               wherever the ATS exposes it: a dedicated payload
+ *                               field, or the posting URL when the ATS encodes it
+ *                               there. `git grep -n requisitionId providers/`
+ *                               lists the providers that set it.
  *
  *                               ⚠ MANY-TO-ONE WITH POSTINGS. This is a REQ key,
  *                               not a posting key, and must NEVER be used alone to
@@ -84,14 +86,31 @@
  *
  *                               Correct use: an ADVISORY grouping signal ("possible
  *                               repost / sibling req"), always paired with employer
- *                               and, where it matters, location. Use `externalId`
- *                               when you need per-posting identity.
- *                               Capture verbatim; never reconstruct from the URL.
+ *                               and, where it matters, location. Per-posting
+ *                               identity is the URL. scan.mjs's company+role dedup
+ *                               reads it only in the safe direction: two
+ *                               same-titled postings with DIFFERENT ids are two
+ *                               requisitions. Written to scan-history.tsv. The
+ *                               scanner compares it as given (case folded), so
+ *                               report it in canonical form: any normalization,
+ *                               such as dropping an ATS repost suffix, happens in
+ *                               the provider.
  * @property {number} [trustScore] 0-100 trust score from _trust-validator.mjs.
  * @property {string[]} [trustFlags] Flags raised by trust validation (e.g.
  *                                   'invalid_url', 'suspicious_domain').
  * @property {'high'|'medium'|'low'} [trustLevel] Classification derived from
  *                                                 trustScore.
+ * @property {string} [language] Language the posting is written in, as the
+ *                               source names it: a code (`de`, `en-GB`,
+ *                               `en_GLOBAL`) or a name (`German`). Prefer the
+ *                               code when the source offers both. Consumers
+ *                               reduce a code to its canonical language subtag
+ *                               (`en-GB`, `en_GLOBAL` → `en`; `deu` → `de`) and
+ *                               compare anything else whole, case-folded.
+ *                               Omitted when the source doesn't say. Consumed
+ *                               by scan.mjs's opt-in
+ *                               `scan_history.dedup_include_language` and
+ *                               written to scan-history.tsv.
  */
 
 /**

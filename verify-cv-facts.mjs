@@ -148,7 +148,13 @@ const COUNT_CLAIM_RE = new RegExp(
   // one a human reads. #2279's wide-window cases are unaffected — "~5 live
   // Cloud Run deployments" still yields "5 deployments", because there is only
   // one noun to bind to.
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
+  //
+  // A number glued to letters by a hyphen is a standard's identifier, not a
+  // count: "EIP-712 signed offers" is not a claim of 712 offers, nor
+  // "ERC-4626 vaults" one of 4626 vaults. Without the lookbehind, a tailored
+  // bullet that drops a word the source had inside the modifier window (so
+  // the source yields no claim and the bullet does) fails the gate.
+  String.raw`(?<![A-Za-z]-)\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([

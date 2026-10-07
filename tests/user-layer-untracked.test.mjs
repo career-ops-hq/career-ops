@@ -17,7 +17,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
  * @returns {string[]}
  */
 export function parseUserLayerPaths(markdown) {
-  const section = markdown.match(/^## User Layer \(NEVER auto-updated\)\s*$([\s\S]*?)(?=^##?\s|(?![\s\S]))/m)?.[1];
+  const section = markdown.match(/^## User Layer(?: \([^\n]*\))?\s*$([\s\S]*?)(?=^##?\s|(?![\s\S]))/m)?.[1];
   if (!section) throw new Error('DATA_CONTRACT.md is missing the User Layer section');
 
   const paths = [];
@@ -75,16 +75,37 @@ try {
   const paths = parseUserLayerPaths(contract);
   pass(`parsed ${paths.length} user-layer paths from DATA_CONTRACT.md`);
 
+  const shippedScaffolds = [
+    'data/.gitkeep',
+    'data/offers/.gitkeep',
+    'data/parser-output/.gitkeep',
+    'jds/.gitkeep',
+    'output/.gitkeep',
+    'reports/.gitkeep',
+  ];
+  if (
+    shippedScaffolds.every((path) => contract.includes(`\`${path}\``)) &&
+    contract.includes('The updater may create or replace only these system-owned `.gitkeep` scaffolds') &&
+    contract.includes('It never checks out or modifies any other user file in those directories.')
+  ) {
+    pass('data contract lists all shipped scaffolds and preserves other user files');
+  } else {
+    fail('data contract must list all six shipped scaffolds and protect other user files');
+  }
+
   // These are system-owned directory scaffolds, not user data. A root-level
   // ignore rule must cover a same-named symlink as well as the real directory,
   // which means Git also reports the already-tracked scaffolds as ignored.
   // Keep this allowlist exact so real user files in the same paths still fail.
   const trackedScaffolds = new Set([
+    'data/.gitkeep',
     'data/offers/.gitkeep',
+    'data/parser-output/.gitkeep',
     'documents/.gitkeep',
     'documents/README.md',
     'jds/.gitkeep',
     'output/.gitkeep',
+    'reports/.gitkeep',
   ]);
   const violations = trackedIgnoredUserLayerFiles(ROOT, paths)
     .filter((path) => !trackedScaffolds.has(path));
@@ -103,7 +124,7 @@ try {
   const eofContract = [
     '# Data Contract',
     '',
-    '## User Layer (NEVER auto-updated)',
+    '## User Layer (preserved by updates)',
     '',
     '| File | Purpose |',
     '|------|---------|',
@@ -127,7 +148,7 @@ try {
   mkdirSync(join(fixture, 'documents'));
   writeFileSync(join(fixture, 'DATA_CONTRACT.md'), `# Data Contract
 
-## User Layer (NEVER auto-updated)
+## User Layer (preserved by updates)
 
 | File | Purpose |
 |------|---------|
@@ -173,7 +194,7 @@ try {
   mkdirSync(join(forkFixture, 'config'));
   writeFileSync(join(forkFixture, 'DATA_CONTRACT.md'), `# Data Contract
 
-## User Layer (NEVER auto-updated)
+## User Layer (preserved by updates)
 
 | File | Purpose |
 |------|---------|
