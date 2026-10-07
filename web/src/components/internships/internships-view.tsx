@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target, Search, BarChart3 } from "lucide-react";
+import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target, Search, BarChart3, Send, Download, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -218,6 +218,7 @@ export function InternshipsView() {
               </button>
             ))}
           </div>
+          <SimplifyMenu onImported={fetchData} />
           <Button onClick={() => setShowAdd(true)} size="sm">
             <Plus className="h-4 w-4" /> Add
           </Button>
@@ -502,7 +503,17 @@ function InternshipCard({
       )}
 
       <div className="mt-2 flex items-center gap-1">
-        {item.url && (
+        {item.url && item.status === "wishlist" && (
+          <button
+            onClick={() => { window.open(item.url, "_blank", "noopener,noreferrer"); onStatusChange(item.id, "applied"); }}
+            className="flex items-center gap-1 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand hover:bg-brand/20 transition-colors"
+            title="Open application page and mark as applied"
+          >
+            <Send className="h-3 w-3" />
+            Apply
+          </button>
+        )}
+        {item.url && item.status !== "wishlist" && (
           <a href={item.url} target="_blank" rel="noopener noreferrer"
             className="rounded p-1 text-muted hover:bg-surface-hover hover:text-foreground transition-colors">
             <ExternalLink className="h-3.5 w-3.5" />
@@ -868,6 +879,97 @@ function UpdatesView({
           <Bell className="mx-auto h-8 w-8 text-muted" />
           <p className="mt-3 text-sm text-muted">No updates right now. Check back when deadlines approach!</p>
         </Card>
+      )}
+    </div>
+  );
+}
+
+function SimplifyMenu({ onImported }: { onImported: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const exportProfile = async () => {
+    setOpen(false);
+    const res = await fetch("/api/resume-profile/simplify-export");
+    if (!res.ok) {
+      setResult(res.status === 404 ? "Upload a resume first" : "Export failed");
+      setTimeout(() => setResult(null), 3000);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "simplify-profile.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importSimplify = () => {
+    setOpen(false);
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setImporting(true);
+      try {
+        const csv = await file.text();
+        const res = await fetch("/api/internships/import-simplify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csv }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setResult(`Imported ${data.imported}, skipped ${data.skipped} duplicates`);
+          onImported();
+        } else {
+          const err = await res.json().catch(() => null);
+          setResult(err?.error ?? "Import failed");
+        }
+      } finally {
+        setImporting(false);
+        setTimeout(() => setResult(null), 4000);
+      }
+    };
+    input.click();
+  };
+
+  return (
+    <div className="relative">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(!open)}
+        disabled={importing}
+      >
+        {importing ? "Importing..." : "Simplify"}
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full z-10 mt-1 w-52 rounded-lg border border-border bg-surface py-1 shadow-lg">
+          <button
+            onClick={importSimplify}
+            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Import from Simplify CSV
+          </button>
+          <button
+            onClick={exportProfile}
+            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export profile for Simplify
+          </button>
+        </div>
+      )}
+      {result && (
+        <div className="absolute right-0 top-full z-10 mt-1 rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg whitespace-nowrap">
+          {result}
+        </div>
       )}
     </div>
   );
