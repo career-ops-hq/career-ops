@@ -460,6 +460,55 @@ try {
       : fail(`429 handling: ${jobs.length} jobs, urls=${[...new Set(calls.map((c) => c.url.split('?')[0]))].join(' ')}`);
   }
 
+  // PCSX names its fields differently from v2. These keys are a live
+  // /api/pcsx/search position (careers.qualcomm.com, 2026-10-07): postedTs and
+  // atsJobId, never v2's t_create / ats_job_id / canonicalPositionUrl. Fed
+  // through unmapped, every PCSX posting lost its date, so max_posting_age_days
+  // and --since let it through as "unknown age".
+  {
+    const live = {
+      id: 446718021620, name: 'Strategy Manager', displayJobId: '3089231', atsJobId: 3089231,
+      locations: ['San Diego, California, United States of America'], standardizedLocations: ['San Diego, CA, US'],
+      postedTs: 1791331200, creationTs: 1791244800, positionUrl: '/careers/job/446718021620',
+      department: 'Strategy', isHot: 0, locationFlexibility: null, workLocationOption: 'onsite', solrScore: 1, stars: 0,
+    };
+    const { ctx } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      return pcsxPage([live], 1);
+    });
+    const [j] = await ef.fetch(TENANT, ctx);
+    j?.postedAt === 1791331200 * 1000
+      && j?.url === 'https://microsoft.eightfold.ai/careers?pid=446718021620'
+      && j?.title === 'Strategy Manager'
+      ? pass('eightfold maps PCSX-native postedTs to postedAt and keeps the ?pid= URL form')
+      : fail(`pcsx-native fields dropped: ${JSON.stringify(j)}`);
+  }
+
+  // A 429 on the FIRST page has collected nothing, so returning [] would be the
+  // silent empty board this provider exists to prevent. It must throw.
+  {
+    const { ctx, calls } = recording(() => { throw httpErr(429, 'slow down'); });
+    let caught = null; let jobs = null;
+    try { jobs = await ef.fetch(TENANT, ctx); } catch (e) { caught = e; }
+    caught?.status === 429 && jobs === null && calls.every((c) => c.url.includes('/api/apply/v2/jobs'))
+      ? pass('eightfold rethrows a first-page 429 instead of returning an empty board')
+      : fail(`first-page 429: jobs=${JSON.stringify(jobs)} caught=${caught && caught.status}`);
+  }
+
+  // Multi-brand tenants select their board with domain=; PCSX needs it as much
+  // as v2 does, or the walk reads the tenant's default brand.
+  {
+    const { ctx, calls } = recording((c) => {
+      if (c.url.includes('/api/apply/v2/jobs')) throw httpErr(403, 'Not authorized for PCSX');
+      return pcsxPage([position('1', 'Brand Role')], 1);
+    });
+    await ef.fetch({ name: 'Acme', careers_url: 'https://acme.eightfold.ai/careers?domain=brand.example' }, ctx);
+    const pcsx = calls.filter((c) => c.url.includes('/api/pcsx/search'));
+    pcsx.length > 0 && pcsx.every((c) => new URL(c.url).searchParams.get('domain') === 'brand.example')
+      ? pass('eightfold forwards domain= on PCSX requests (multi-brand tenants)')
+      : fail(`pcsx domain: ${pcsx.map((c) => c.url).join(' ')}`);
+  }
+
 } catch (e) {
   fail(`eightfold provider tests crashed: ${e.message}`);
 }

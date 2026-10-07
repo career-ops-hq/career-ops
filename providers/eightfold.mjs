@@ -177,7 +177,14 @@ export function buildPcsxUrl(tenant, start = 0) {
 export function normalizePcsxPage(json) {
   const data = json && typeof json === 'object' ? /** @type {any} */ (json).data : null;
   if (!data || typeof data !== 'object' || !Array.isArray(data.positions)) return null;
-  return { positions: data.positions, count: typeof data.count === 'number' ? data.count : undefined };
+  // PCSX also renames fields the v2 parser reads: postedTs (epoch seconds) for
+  // t_create and atsJobId for ats_job_id (live /api/pcsx/search, 2026-10-07).
+  // Unmapped, every PCSX posting lost its date. positionUrl is left alone: the
+  // ?pid= fallback URL keeps postings seen before a migration on the same key.
+  const positions = data.positions.map((/** @type {any} */ p) => (p && typeof p === 'object'
+    ? { ...p, t_create: p.t_create ?? p.postedTs ?? p.creationTs, ats_job_id: p.ats_job_id ?? p.atsJobId ?? p.displayJobId }
+    : p));
+  return { positions, count: typeof data.count === 'number' ? data.count : undefined };
 }
 
 /**
