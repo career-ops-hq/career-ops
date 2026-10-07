@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { AddInternshipModal } from "./add-internship-modal";
 import { ResumeViewer } from "./resume-viewer";
 import { TailorPanel } from "./tailor-panel";
+import { CalendarView } from "./calendar-view";
 
 type Internship = {
   id: string;
@@ -66,7 +67,7 @@ export function InternshipsView() {
   const [showAdd, setShowAdd] = useState(false);
   const [viewResume, setViewResume] = useState<Internship | null>(null);
   const [tailorId, setTailorId] = useState<string | null>(null);
-  const [view, setView] = useState<"board" | "table" | "updates">("board");
+  const [view, setView] = useState<"board" | "table" | "calendar" | "updates">("board");
   const [trackFilter, setTrackFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
 
@@ -181,13 +182,13 @@ export function InternshipsView() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border border-border text-xs">
-            {(["board", "table", "updates"] as const).map((v, idx) => (
+            {(["board", "table", "calendar", "updates"] as const).map((v, idx, arr) => (
               <button
                 key={v}
                 className={cn(
                   "px-3 py-1.5 transition-colors",
                   idx === 0 && "rounded-l-md",
-                  idx === 2 && "rounded-r-md",
+                  idx === arr.length - 1 && "rounded-r-md",
                   view === v && "bg-surface-hover font-medium",
                 )}
                 onClick={() => setView(v)}
@@ -304,6 +305,11 @@ export function InternshipsView() {
           actionableItems={actionableItems}
           pastDeadlines={pastDeadlines}
           onStatusChange={updateStatus}
+        />
+      ) : view === "calendar" ? (
+        <CalendarView
+          internships={filtered}
+          onTailor={setTailorId}
         />
       ) : view === "board" ? (
         <BoardView
