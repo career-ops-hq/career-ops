@@ -1,0 +1,112 @@
+{
+  "name": "Rei Gaddi",
+  "education": {
+    "school": "University of California, San Diego",
+    "degree": "B.S. Data Science",
+    "expected": "June 2028"
+  },
+  "certifications": [
+    "Google Data Analytics Professional Certificate (2024)",
+    "eCornell Data Science Essentials (2026)"
+  ],
+  "skills": {
+    "languages": ["Python", "SQL", "PostgreSQL", "R", "JavaScript", "HTML", "CSS"],
+    "libraries": ["pandas", "NumPy", "scikit-learn", "SciPy", "NetworkX", "Plotly", "Matplotlib", "seaborn", "tidyverse", "ggplot2"],
+    "tools": ["Jupyter", "Git", "GitHub", "Tableau", "Excel", "Google Sheets", "REST APIs"],
+    "methods": ["Hypothesis testing", "Permutation testing", "Regression", "Classification", "Cross-validation", "Exploratory data analysis", "Dashboard design"]
+  },
+  "skillKeywords": [
+    "python", "sql", "postgresql", "r", "javascript", "html", "css",
+    "pandas", "numpy", "scikit-learn", "scipy", "networkx", "plotly", "matplotlib", "seaborn", "tidyverse", "ggplot2",
+    "jupyter", "git", "github", "tableau", "excel", "google sheets", "rest api",
+    "hypothesis testing", "permutation testing", "regression", "classification", "cross-validation",
+    "exploratory data analysis", "eda", "dashboard", "data visualization", "machine learning",
+    "data wrangling", "data cleaning", "etl", "data pipeline", "statistical analysis",
+    "a/b testing", "experimentation", "random forest", "logistic regression",
+    "data modeling", "user testing", "web development", "api"
+  ],
+  "experience": [
+    {
+      "title": "Data Analyst",
+      "company": "StoryAI — Dr. Ariel Han Research Lab",
+      "location": "Remote",
+      "dates": "2024–2025",
+      "bullets": [
+        "Coded 60+ hours of session video from 30 students across 3 age groups (ages 5–13) into a structured behavioral dataset, owning the majority of the coding pass on a 5-person research team",
+        "Built Tableau dashboards for the study, visualizing how student time distributed across planning, translating, and revising stages of the writing process",
+        "Measured a 30% decrease in passive writing planning from the coded video data, alongside self-reported pre/post gains of 52% in planning efficacy and ~40% in translation and revising efficacy",
+        "Wrangled and labeled raw session data in Google Sheets and Python; the resulting analysis supported a StoryAI demo to ~100 educators at the Anaheim Union High School District AI Summit"
+      ],
+      "tags": ["data analysis", "tableau", "dashboard", "python", "data wrangling", "behavioral data", "research"]
+    },
+    {
+      "title": "Web Development Intern",
+      "company": "University of California, Irvine",
+      "location": "Irvine, CA",
+      "dates": "2023–2024",
+      "bullets": [
+        "Co-developed StoryTrek, an AI-based writing tutoring platform for elementary and middle school students, on a 4-person team working under an informatics professor, PhD students, and education researchers",
+        "Designed and independently ran user testing with 10 students and teachers across a 3-month build cycle",
+        "Found that assisted drafts showed greater lexical diversity and stronger idea generation than unassisted drafts, and reported the result together with its small-sample limitation"
+      ],
+      "tags": ["web development", "ai", "user testing", "platform development", "team collaboration"]
+    },
+    {
+      "title": "Fulfillment Expert",
+      "company": "Target",
+      "location": "Brea, CA",
+      "dates": "2025–Present",
+      "bullets": [
+        "Supported a fulfillment operation processing 850+ orders daily, tracking, packing, and shipping against same-day deadlines",
+        "Tracked sales trends and guest ordering patterns to inform inventory positioning and reduce pick times"
+      ],
+      "tags": ["operations", "data tracking", "sales trends", "inventory"]
+    },
+    {
+      "title": "Lead Sales Associate",
+      "company": "Sweet n' Salty Co.",
+      "location": "Upland, CA",
+      "dates": "2024",
+      "bullets": [
+        "Ran TikTok Shop order operations and inventory tracking for a storefront with 16k followers, hosting 3-hour weekly live streams that averaged 100+ concurrent viewers",
+        "Analyzed sales trend data to identify top-performing products and time marketing pushes"
+      ],
+      "tags": ["sales analytics", "inventory tracking", "social media", "data analysis"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Floor Generals: NBA Passing Network Analysis",
+      "tech": ["Python", "NBA Stats API", "NetworkX", "Plotly"],
+      "year": 2026,
+      "bullets": [
+        "Built an idempotent, restartable ingestion pipeline over the NBA Stats API using exponential backoff, atomic writes, and a resumable cache, collecting 9,461 directed passer–receiver edges across all 30 teams",
+        "Tested whether passing-network centralization predicts team standing with a 10,000-iteration permutation test on Spearman rank correlation (p = 0.269, n = 29), reporting the result as underpowered rather than as evidence of no effect",
+        "Produced an interactive tool that recomputes a team's passing graph with any player removed, quantifying how much shot creation depends on a single distributor"
+      ],
+      "tags": ["data pipeline", "api", "network analysis", "statistical testing", "permutation test", "interactive visualization", "python"]
+    },
+    {
+      "name": "League of Legends Esports: Action and Win Prediction",
+      "tech": ["Python", "pandas", "scikit-learn"],
+      "year": 2026,
+      "bullets": [
+        "Analyzed 150,348 rows of professional match data across 10 tier-one leagues, testing cross-league differences in game pace with a 10,000-shuffle permutation ANOVA (F = 122.6, p < 0.001)",
+        "Predicted match outcome from 15-minute game state; a logistic baseline reached 76.1% test accuracy and a tuned Random Forest 76.6%, indicating early gold lead already captured nearly all available signal",
+        "Prevented leakage from mirrored team rows by splitting train and test on game ID and using GroupKFold for hyperparameter search; fairness analysis found a 5.5-point accuracy gap between major and regional leagues (p = 0.015)"
+      ],
+      "tags": ["machine learning", "classification", "random forest", "logistic regression", "cross-validation", "data leakage prevention", "fairness", "python", "pandas", "scikit-learn"]
+    },
+    {
+      "name": "US Interstate Wage Gaps, 2004–2024",
+      "tech": ["R", "tidyverse", "ggplot2"],
+      "year": 2026,
+      "bullets": [
+        "Built parallel state and county panels from BLS QCEW data — 1,050 state-years and 64,497 county-years across 3,107 counties — deflated to 2024 dollars using CPI-U",
+        "Found P90/P10 wage dispersion essentially flat at both scales (1.42 → 1.41 states; 1.61 → 1.57 counties) despite county real wage growth ranging from −34% to +161%, driven by shale-boom churn rather than coastal divergence",
+        "Validated the finding across four robustness specifications: COVID-year exclusion, DC sensitivity, and trimming the fastest- and slowest-growth states and counties"
+      ],
+      "tags": ["r", "tidyverse", "ggplot2", "econometrics", "panel data", "robustness testing", "government data", "statistical analysis"]
+    }
+  ]
+}

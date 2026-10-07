@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter } from "lucide-react";
+import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { AddInternshipModal } from "./add-internship-modal";
 import { ResumeViewer } from "./resume-viewer";
+import { TailorPanel } from "./tailor-panel";
 
 type Internship = {
   id: string;
@@ -64,6 +65,7 @@ export function InternshipsView() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [viewResume, setViewResume] = useState<Internship | null>(null);
+  const [tailorId, setTailorId] = useState<string | null>(null);
   const [view, setView] = useState<"board" | "table" | "updates">("board");
   const [trackFilter, setTrackFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -309,6 +311,7 @@ export function InternshipsView() {
           onStatusChange={updateStatus}
           onDelete={deleteInternship}
           onViewResume={setViewResume}
+          onTailor={setTailorId}
           duplicateCompanies={new Set(duplicateCompanies.map((d) => d.name))}
         />
       ) : (
@@ -317,6 +320,7 @@ export function InternshipsView() {
           onStatusChange={updateStatus}
           onDelete={deleteInternship}
           onViewResume={setViewResume}
+          onTailor={setTailorId}
           duplicateCompanies={new Set(duplicateCompanies.map((d) => d.name))}
         />
       )}
@@ -336,6 +340,13 @@ export function InternshipsView() {
           onUpdated={fetchData}
         />
       )}
+
+      {tailorId && (
+        <TailorPanel
+          internshipId={tailorId}
+          onClose={() => setTailorId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -345,12 +356,14 @@ function BoardView({
   onStatusChange,
   onDelete,
   onViewResume,
+  onTailor,
   duplicateCompanies,
 }: {
   internships: Internship[];
   onStatusChange: (id: string, status: Internship["status"]) => void;
   onDelete: (id: string) => void;
   onViewResume: (i: Internship) => void;
+  onTailor: (id: string) => void;
   duplicateCompanies: Set<string>;
 }) {
   const columns: Internship["status"][] = ["wishlist", "not_posted", "applied", "interviewing", "offered", "accepted", "rejected", "closed", "unknown"];
@@ -377,6 +390,7 @@ function BoardView({
                   onStatusChange={onStatusChange}
                   onDelete={onDelete}
                   onViewResume={onViewResume}
+                  onTailor={onTailor}
                   isDuplicate={duplicateCompanies.has(item.company.trim().toLowerCase())}
                 />
               ))}
@@ -393,12 +407,14 @@ function InternshipCard({
   onStatusChange,
   onDelete,
   onViewResume,
+  onTailor,
   isDuplicate,
 }: {
   item: Internship;
   onStatusChange: (id: string, status: Internship["status"]) => void;
   onDelete: (id: string) => void;
   onViewResume: (i: Internship) => void;
+  onTailor: (id: string) => void;
   isDuplicate?: boolean;
 }) {
   const [showActions, setShowActions] = useState(false);
@@ -413,8 +429,8 @@ function InternshipCard({
         </div>
       )}
       <div className="flex items-start justify-between gap-1">
-        <div className="min-w-0 flex-1">
-          <p className="font-medium truncate">{item.company}</p>
+        <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onTailor(item.id)}>
+          <p className="font-medium truncate hover:text-brand transition-colors">{item.company}</p>
           <p className="text-xs text-muted truncate">{item.role}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -462,6 +478,13 @@ function InternshipCard({
         >
           <FileText className="h-3.5 w-3.5" />
         </button>
+        <button
+          onClick={() => onTailor(item.id)}
+          className="rounded p-1 text-muted hover:bg-brand/10 hover:text-brand transition-colors"
+          title="Tailor for this role"
+        >
+          <Target className="h-3.5 w-3.5" />
+        </button>
 
         <div className="relative ml-auto">
           <button
@@ -508,12 +531,14 @@ function TableView({
   onStatusChange,
   onDelete,
   onViewResume,
+  onTailor,
   duplicateCompanies,
 }: {
   internships: Internship[];
   onStatusChange: (id: string, status: Internship["status"]) => void;
   onDelete: (id: string) => void;
   onViewResume: (i: Internship) => void;
+  onTailor: (id: string) => void;
   duplicateCompanies: Set<string>;
 }) {
   return (
@@ -529,6 +554,7 @@ function TableView({
             <th className="px-4 py-3">Deadline</th>
             <th className="px-4 py-3">Applied</th>
             <th className="px-4 py-3">Resume</th>
+            <th className="px-4 py-3">Tailor</th>
             <th className="px-4 py-3"></th>
           </tr>
         </thead>
@@ -581,6 +607,15 @@ function TableView({
                     )}
                   >
                     <FileText className="h-4 w-4" />
+                  </button>
+                </td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => onTailor(item.id)}
+                    className="rounded p-1 text-muted hover:text-brand hover:bg-brand/10 transition-colors"
+                    title="Tailor for this role"
+                  >
+                    <Target className="h-4 w-4" />
                   </button>
                 </td>
                 <td className="px-4 py-3">

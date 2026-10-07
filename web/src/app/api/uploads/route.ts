@@ -84,7 +84,19 @@ export async function POST(req: NextRequest) {
   all.push(meta);
   writeMeta(all);
 
-  return NextResponse.json(meta, { status: 201 });
+  // Auto-parse resume profile when a resume is uploaded
+  let profileParsed = false;
+  if (category === "resume") {
+    try {
+      const origin = req.nextUrl.origin;
+      await fetch(`${origin}/api/resume-profile`, { method: "POST" });
+      profileParsed = true;
+    } catch {
+      // Non-critical — profile can be parsed later
+    }
+  }
+
+  return NextResponse.json({ ...meta, profileParsed }, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {
