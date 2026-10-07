@@ -615,7 +615,7 @@ const rollbackSource = rollbackSectionValid
   : '';
 
 const fetchCall = "git('fetch', CANONICAL_REPO, targetRef);";
-const pairCall = "git('update-ref', pairedTargetRef, 'FETCH_HEAD');";
+const pairCall = 'pairTargetRef(pairedTargetRef, { isReexec });';
 const fetchAt = applySource.indexOf(fetchCall);
 const pairAt = applySource.indexOf(pairCall, fetchAt + fetchCall.length);
 const gitBetweenFetchAndPair = fetchAt >= 0 && pairAt >= 0

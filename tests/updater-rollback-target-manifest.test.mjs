@@ -26,6 +26,7 @@ import {
   gitIn,
   isSafeManifestPath,
   manifestTreeFiles,
+  pairTargetRef,
   pruneStaleTargetRefs,
   targetRefForBackup,
 } from '../update-system.mjs';
@@ -221,6 +222,61 @@ function rejectedBy(fn) {
       hasRef(liveRef) && hasRef(manualRef),
       'live backup pairs and unrecognised namespace refs are retained',
       'target-ref pruning removed a live pair or manual namespace ref',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 5b. A re-exec keeps the pair its parent made ──
+{
+  const { dir, g, ctx } = makeUpdaterRepo(gitIn, { prefix: 'co-target-ref-pair-' });
+  try {
+    const commitFile = (name) => {
+      writeFileSync(join(dir, name), `${name}\n`);
+      g('add', name);
+      g('commit', '-qm', name);
+      return g('rev-parse', 'HEAD');
+    };
+    const first = commitFile('first.txt');
+    const second = commitFile('second.txt');
+    const fetchAs = (commit) => {
+      g('branch', '-f', 'moving-target', commit);
+      g('fetch', '-q', '.', 'moving-target');
+    };
+    const ref = targetRefForBackup('backup-pre-update-1.2.3-20260907T120000Z');
+    const at = () => g('rev-parse', ref);
+
+    fetchAs(first);
+    const freshKept = pairTargetRef(ref, ctx);
+    check(
+      freshKept === false && at() === first,
+      'the initial apply pairs the backup with the commit it fetched',
+      `initial pair is ${at()}, expected ${first}`,
+    );
+
+    // The upstream ref moves between the parent's fetch and the child's.
+    fetchAs(second);
+    const childKept = pairTargetRef(ref, { ...ctx, isReexec: true });
+    check(
+      childKept === true && at() === first,
+      'a re-exec keeps its parent\'s pair when its own fetch lands on a later commit',
+      `re-exec re-paired to ${at()}; the parent checked out ${first}`,
+    );
+
+    const legacyRef = targetRefForBackup('backup-pre-update-1.2.3-20260907T130000Z');
+    const legacyKept = pairTargetRef(legacyRef, { ...ctx, isReexec: true });
+    check(
+      legacyKept === false && g('rev-parse', legacyRef) === second,
+      'a re-exec whose parent made no pair creates one from its own fetch',
+      'a re-exec with no inherited pair left the backup unpaired',
+    );
+
+    const again = pairTargetRef(ref, ctx);
+    check(
+      again === false && at() === second,
+      'only a re-exec inherits: a fresh apply always pairs its own fetch',
+      `fresh apply kept a stale pair at ${at()}`,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

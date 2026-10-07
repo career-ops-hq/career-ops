@@ -1179,6 +1179,33 @@ export function targetRefForBackup(backupBranch) {
 }
 
 /**
+ * Pair a backup with the commit this update attempt fetched.
+ *
+ * A re-exec'd child inherits the pair its parent created and keeps it. The
+ * parent already checked out the self-bootstrap files from that commit, and on
+ * a moving ref (`--channel main`) the child's own fetch can land on a later
+ * one. Re-pairing there would point rollback at a commit that never knew the
+ * files the parent wrote. A child whose parent predates pairing has nothing to
+ * inherit and pairs its own fetch.
+ * @param {string} pairedTargetRef
+ * @param {{isReexec?: boolean, git?: Function}} [ctx] - `git` is a test seam.
+ * @returns {boolean} True when an inherited pair was kept.
+ */
+export function pairTargetRef(pairedTargetRef, ctx = {}) {
+  const runGit = ctx.git || git;
+  if (ctx.isReexec) {
+    try {
+      runGit('rev-parse', '--verify', '--quiet', `${pairedTargetRef}^{commit}`);
+      return true;
+    } catch {
+      // No pair yet: fall through and create one.
+    }
+  }
+  runGit('update-ref', pairedTargetRef, 'FETCH_HEAD');
+  return false;
+}
+
+/**
  * Remove target refs whose strict updater backup branch has been deleted.
  * Paired refs remain for every existing backup so rollback can still identify
  * target-only files; unrecognised/manual names in this namespace are retained.
@@ -3824,8 +3851,9 @@ async function apply() {
     git('fetch', CANONICAL_REPO, targetRef);
     // FETCH_HEAD is process-global and any later fetch can mutate it. Pair the
     // attempted target with this run's backup immediately, then use only that
-    // durable ref for every read and checkout below.
-    git('update-ref', pairedTargetRef, 'FETCH_HEAD');
+    // durable ref for every read and checkout below. A re-exec keeps the pair
+    // its parent made, whatever this second fetch returned.
+    pairTargetRef(pairedTargetRef, { isReexec });
     if (!isReexec) {
       try {
         pruneStaleTargetRefs();
