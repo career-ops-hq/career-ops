@@ -2,11 +2,13 @@
 // at ingest, on the Job each provider returns.
 //
 // WHY: dedup used to key only on the URL, so the same requisition posted under a
-// second host read as a brand-new role (Adobe R167982, 2026-08-01). The fallback
-// added for that — reconstructing an id from the URL string — is lossy in both
-// directions: on a real Greenhouse posting the payload carried
-// requisition_id "JR103948" while the URL regex recovered NOTHING, and a regex over
-// slug text can mint ids that were never in the posting at all.
+// second host read as a brand-new role (Adobe R167982, 2026-08-01). A loose regex
+// over the URL is lossy in both directions: on a real Greenhouse posting the
+// payload carried requisition_id "JR103948" while the URL regex recovered
+// NOTHING, and a regex over slug text can mint ids that were never in the posting
+// at all. Workday is the deliberate exception: its list API carries no req field,
+// so the id is read from the URL, but only as the anchored, shape-checked token
+// after the path's first underscore (tested below).
 //
 // The providers already receive the id and were discarding it. These checks pin the
 // capture (providers/_types.js Job.requisitionId / .externalId) so a future provider
@@ -223,6 +225,21 @@ const efFallback = await eightfold
 efFallback[0]?.externalId === '123456' && efFallback[1]?.externalId === '789012'
   ? pass('eightfold falls back to position_id when id is present but unusable')
   : failWith('eightfold id fallback', `got ${efFallback[0]?.externalId} / ${efFallback[1]?.externalId}`);
+
+// The same bad id must not reach the tenant fallback URL either. With no
+// canonicalPositionUrl the posting URL is built from the id, and a bare
+// template literal turned {} into "pid=[object Object]": every such posting
+// shared one URL, so URL dedup collapsed them into a single row.
+const efUrlCtx = { transport: 'http', fetchText: async () => '', fetchJson: async () => ({ positions: [
+  { id: {}, position_id: '123456', name: 'Strategy Manager', locations: ['NY'] },
+  { id: {}, name: 'No usable id', locations: ['SF'] },
+] }) };
+const efUrl = await eightfold
+  .fetch({ name: 'Acme', careers_url: 'https://acme.eightfold.ai/careers' }, efUrlCtx)
+  .catch((e) => { failWith('provider fetch threw', e.message); return []; });
+efUrl.length === 1 && efUrl[0]?.url === 'https://acme.eightfold.ai/careers?pid=123456'
+  ? pass('eightfold fallback URL uses the coerced posting id, never "[object Object]"')
+  : failWith('eightfold fallback url', JSON.stringify(efUrl.map((j) => j.url)));
 
 // Agreement again, on the shape where the suffix IS stripped — the Walmart case
 // above cannot see a dedup key that skips the shared helper, because nothing is

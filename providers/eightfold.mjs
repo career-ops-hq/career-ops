@@ -218,7 +218,10 @@ export function parseEightfoldResponse(json, tenant, companyName) {
       }
     }
     if (!url) {
-      const pid = p.id != null && `${p.id}`.trim() ? `${p.id}`.trim() : '';
+      // Same coercion and fallback as externalId below: a template literal
+      // turned an object id into "pid=[object Object]", one URL shared by every
+      // such posting, which URL dedup then collapsed into a single row.
+      const pid = coerceId(p.id) ?? coerceId(p.position_id);
       if (pid) url = buildJobUrl(tenant, pid);
     }
     if (!url) continue;
