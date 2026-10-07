@@ -414,8 +414,8 @@ async function fetchFromEmbed(entry, ctx) {
       location,
       // The embed payload carries neither descriptionPlain nor publishedAt —
       // the posting API's two extras. An absent date means "unknown", never
-      // "stale", so nothing is invented here.
-      ...(p.workplaceType ? { workplaceType: String(p.workplaceType) } : {}),
+      // "stale", so nothing is invented here. workplaceType is folded into
+      // location above, exactly as on the API path, and not emitted on its own.
     };
   }).filter((/** @type {any} */ j) => j && j.title && j.url);
 }
