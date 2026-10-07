@@ -309,10 +309,14 @@ export async function POST(_req: NextRequest) {
 
   if (ext === ".pdf") {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require("pdf-parse") as (buf: Buffer) => Promise<{ text: string }>;
+    const { PDFParse } = require("pdf-parse") as { PDFParse: new (opts: { data: Buffer }) => { getText(): Promise<string>; destroy(): void } };
     const buffer = fs.readFileSync(latest.path);
-    const data = await pdfParse(buffer);
-    text = data.text;
+    const parser = new PDFParse({ data: buffer });
+    try {
+      text = await parser.getText();
+    } finally {
+      parser.destroy();
+    }
   } else if (ext === ".txt" || ext === ".md") {
     text = fs.readFileSync(latest.path, "utf8");
   } else {
