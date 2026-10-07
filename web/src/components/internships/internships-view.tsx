@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target } from "lucide-react";
+import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target, Search, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { AddInternshipModal } from "./add-internship-modal";
 import { ResumeViewer } from "./resume-viewer";
 import { TailorPanel } from "./tailor-panel";
 import { CalendarView } from "./calendar-view";
+import { AnalyticsView } from "./analytics-view";
 
 type Internship = {
   id: string;
@@ -67,9 +68,10 @@ export function InternshipsView() {
   const [showAdd, setShowAdd] = useState(false);
   const [viewResume, setViewResume] = useState<Internship | null>(null);
   const [tailorId, setTailorId] = useState<string | null>(null);
-  const [view, setView] = useState<"board" | "table" | "calendar" | "updates">("board");
+  const [view, setView] = useState<"board" | "table" | "calendar" | "updates" | "analytics">("board");
   const [trackFilter, setTrackFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -94,8 +96,13 @@ export function InternshipsView() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Filter internships by track and status
+  // Filter internships by search, track, and status
   const filtered = internships.filter((i) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const haystack = `${i.company} ${i.role} ${i.location} ${i.notes} ${i.track ?? ""} ${i.term ?? ""} ${i.source ?? ""}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
     if (trackFilter !== "all" && i.track !== trackFilter) return false;
     if (statusFilter === "active") return !["closed", "rejected"].includes(i.status);
     if (statusFilter === "actionable") return ["wishlist"].includes(i.status);
@@ -182,7 +189,7 @@ export function InternshipsView() {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border border-border text-xs">
-            {(["board", "table", "calendar", "updates"] as const).map((v, idx, arr) => (
+            {(["board", "table", "calendar", "analytics", "updates"] as const).map((v, idx, arr) => (
               <button
                 key={v}
                 className={cn(
@@ -199,6 +206,11 @@ export function InternshipsView() {
                     {(upcomingDeadlines.length > 0 || pastDeadlines.length > 0) && (
                       <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
                     )}
+                  </span>
+                ) : v === "analytics" ? (
+                  <span className="flex items-center gap-1">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Analytics
                   </span>
                 ) : v.charAt(0).toUpperCase() + v.slice(1)}
               </button>
@@ -220,8 +232,28 @@ export function InternshipsView() {
         ))}
       </div>
 
-      {/* Filters */}
+      {/* Search & Filters */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+          <input
+            type="text"
+            placeholder="Search companies, roles, notes..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="rounded-lg border border-border bg-transparent py-1.5 pl-8 pr-3 text-xs placeholder:text-muted/60 focus:border-brand focus:outline-none w-56"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-foreground text-xs"
+              aria-label="Clear search"
+            >
+              &times;
+            </button>
+          )}
+        </div>
+        <span className="text-border">|</span>
         <div className="flex items-center gap-1.5 text-xs text-muted">
           <Filter className="h-3.5 w-3.5" />
           <span>Track:</span>
@@ -306,6 +338,8 @@ export function InternshipsView() {
           pastDeadlines={pastDeadlines}
           onStatusChange={updateStatus}
         />
+      ) : view === "analytics" ? (
+        <AnalyticsView internships={internships} />
       ) : view === "calendar" ? (
         <CalendarView
           internships={filtered}
