@@ -388,28 +388,46 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
             }
           });
 
-    // Read the top-level document until it is decisive, a same-origin frame
-    // appears (the frame poll below takes over), the request guard has already
-    // decided the verdict, or HYDRATION_MAX_POLLS waits have passed. A read
-    // that throws (the SPA rebuilding its DOM) is retried. If the poll ends on
-    // a failed read while the last good reading still looked unrendered, that
-    // reading is stale evidence, so the error propagates and becomes a
-    // navigation_error instead of an expired verdict; the same happens when no
-    // read succeeded at all.
-    const pollTopLevel = async (pageStatus) => {
+    // One reading of the page: the top-level document plus every same-origin
+    // child frame, so a posting rendered inside a frame and one rendered inline
+    // are judged the same way. A top-level read that throws propagates; a frame
+    // that detaches or turns cross-origin mid-read is skipped.
+    const readPage = async () => {
+      const finalUrl = page.url();
+      let bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+      let applyControls = await page.evaluate(extractApplyControls);
+      for (const frame of childFrames(finalUrl)) {
+        try {
+          const text = await frame.evaluate(() => document.body?.innerText ?? '');
+          if (text && text.trim()) bodyText += '\n' + text;
+          applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
+        } catch {
+          // detached or cross-origin mid-read; the rest of the reading still stands
+        }
+      }
+      return { finalUrl, bodyText, applyControls };
+    };
+
+    // Read the page until the verdict is decisive, the request guard has
+    // already decided it, or HYDRATION_MAX_POLLS waits have passed. A frame
+    // appearing does not end the poll: it may be a sign-in, chat or consent
+    // widget rather than the posting, and the posting can still render on the
+    // top level. A read that throws (the SPA rebuilding its DOM) is retried. If
+    // the poll ends on a failed read while the last good reading still looked
+    // unrendered, that reading is stale evidence, so the error propagates and
+    // becomes a navigation_error instead of an expired verdict; the same
+    // happens when no read succeeded at all.
+    const pollPage = async (pageStatus) => {
       let reading = null;
       let hydrating = true;
       let lastError = null;
       for (let poll = 0; ; poll += 1) {
         try {
-          const finalUrl = page.url();
-          const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
-          const applyControls = await page.evaluate(extractApplyControls);
-          reading = { finalUrl, bodyText, applyControls };
+          reading = await readPage();
           lastError = null;
           const { code } = classifyLiveness({ status: pageStatus, requestedUrl: url, ...reading });
           hydrating = HYDRATING_CODES.has(code);
-          if (!hydrating || childFrames(finalUrl).length > 0) break;
+          if (!hydrating) break;
         } catch (err) {
           lastError = err;
         }
@@ -417,12 +435,12 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         await page.waitForTimeout(HYDRATION_POLL_MS);
       }
       if (lastError && hydrating) throw lastError;
+      if (hydrating && childFrames(reading.finalUrl).length > 0) {
+        await waitForFramesToFill(reading.finalUrl);
+        reading = await readPage();
+      }
       return reading;
     };
-
-    const { finalUrl, bodyText, applyControls: topLevelControls } = await pollTopLevel(status);
-    let applyControls = topLevelControls;
-    let frameText = '';
 
     // Some ATS render the whole posting inside a same-origin iframe and leave the
     // top-level document as an empty shell. iCIMS is the reference case: measured
@@ -439,25 +457,16 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     // The frame ATTACHES fast but FILLS late. Measured on iCIMS 2026-08-14: the
     // same-origin child frame is present at 2000ms with 0 characters and only
     // populates between 3000 and 4000ms, so reading it as soon as it attaches
-    // gets an empty document and changes nothing. Poll until it has content,
-    // bounded. The cost is only paid on pages that actually have a same-origin
-    // child frame, so the ATS that render inline are unaffected.
-
-    // A 404/410 is decided by the status line alone, so no amount of frame
-    // content can change it. Without this, a dead posting whose error page also
-    // renders into an iframe pays the poll while that error page fills, purely
-    // to be told what the status already said. Measured on two dead iCIMS
-    // postings: 5822ms and 3314ms end to end, the spread being poll iterations.
+    // gets an empty document and changes nothing. The page poll reads the frame
+    // on every pass, so a frame that fills within the poll is caught there; a
+    // poll that ends still undecided with a same-origin frame present waits for
+    // the frames to fill, bounded, then takes one fresh reading. The cost is
+    // only paid on pages that actually have a same-origin child frame, so the
+    // ATS that render inline are unaffected.
     //
-    // The status rule is NOT restated here. classifyLiveness owns it, so this
-    // asks it and keys off the code it returns; a duplicated `status === 410`
-    // would be a second copy of that rule waiting to drift.
-    const topLevelVerdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
-    if (topLevelVerdict.code === 'http_gone') {
-      return topLevelVerdict;
-    }
-
-    if (childFrames(finalUrl).length > 0) {
+    // A 404/410 is decided on the first read: classifyLiveness checks the status
+    // before any content, so the poll stops there and no frame wait is paid.
+    const waitForFramesToFill = async (topUrl) => {
       const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
       // Wait for EVERY qualifying frame, not merely the first one to fill: with
       // two same-origin frames the posting could otherwise be read while still
@@ -465,7 +474,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       // qualifying frame per page, so in practice this is the same loop.
       for (;;) {
         let anyEmpty = false;
-        for (const frame of childFrames(finalUrl)) {
+        for (const frame of childFrames(topUrl)) {
           try {
             const probe = await frame.evaluate(() => document.body?.innerText ?? '');
             if (!probe.trim()) anyEmpty = true;
@@ -476,25 +485,11 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         if (!anyEmpty || Date.now() >= deadline) break;
         await page.waitForTimeout(FRAME_CONTENT_POLL_MS);
       }
-    }
+    };
 
-    for (const frame of childFrames(finalUrl)) {
-      try {
-        const text = await frame.evaluate(() => document.body?.innerText ?? '');
-        if (text && text.trim()) frameText += '\n' + text;
-        applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
-      } catch {
-        // detached or cross-origin mid-read; the top-level reading still stands
-      }
-    }
-
-    let verdict = classifyLiveness({
-      status,
-      requestedUrl: url,
-      finalUrl,
-      bodyText: bodyText + frameText,
-      applyControls,
-    });
+    const reading = await pollPage(status);
+    const { finalUrl } = reading;
+    let verdict = classifyLiveness({ status, requestedUrl: url, ...reading });
 
     // See BAMBOOHR_HOSTS above. Only fires on the specific verdict this
     // render race produces (a short/empty body, not an explicit closure
@@ -506,7 +501,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         try {
           const reloadResponse = await page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
           const reloadStatus = reloadResponse?.status() ?? status;
-          const reloaded = await pollTopLevel(reloadStatus);
+          const reloaded = await pollPage(reloadStatus);
           const reloadVerdict = classifyLiveness({ status: reloadStatus, requestedUrl: url, ...reloaded });
           const stillNotFound = reloadVerdict.code === 'insufficient_content' || reloadVerdict.code === 'listing_page';
           verdict = !stillNotFound

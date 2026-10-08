@@ -137,8 +137,8 @@ const live = { text: POSTING, controls: ['Apply for this job'] };
   }
 }
 
-// A same-origin frame appearing ends the top-level poll; the frame poll
-// (500ms ticks) takes over and reads the posting from the frame.
+// A posting rendered inside a same-origin frame is read as part of the poll:
+// the read that first sees the filled frame is decisive.
 {
   const frame = {
     url: () => POSTING_URL + '?in_iframe=1',
@@ -151,9 +151,61 @@ const live = { text: POSTING, controls: ['Apply for this job'] };
   const verdict = await checkUrlLiveness(page, POSTING_URL);
   const topLevelWaits = page.waits.filter((ms) => ms === 250).length;
   if (verdict.result === 'active' && page.reads === 3 && topLevelWaits === 2) {
-    pass('a same-origin frame appearing stops the top-level poll and the frame is read');
+    pass('a posting inside a same-origin frame is read within the poll');
   } else {
-    fail(`frame handoff: ${JSON.stringify(verdict)}, reads=${page.reads}, waits=${JSON.stringify(page.waits)}`);
+    fail(`posting frame: ${JSON.stringify(verdict)}, reads=${page.reads}, waits=${JSON.stringify(page.waits)}`);
+  }
+}
+
+// A same-origin frame that is not the posting (a chat or consent widget)
+// must not end the poll before the posting renders.
+{
+  const widget = {
+    url: () => 'https://careers.example.com/widgets/chat',
+    async evaluate(fn) { return isControlsRead(fn) ? ['Open chat'] : 'Chat with us'; },
+  };
+  const page = scriptedPage({ render: (n) => (n < 2 ? blank : live), frames: () => [widget] });
+  const verdict = await checkUrlLiveness(page, POSTING_URL);
+  if (verdict.result === 'active' && page.waits.length === 2) {
+    pass('a same-origin frame that is not the posting does not end the poll early');
+  } else {
+    fail(`unrelated frame: ${JSON.stringify(verdict)}, reads=${page.reads}, waits=${page.waits.length}`);
+  }
+}
+
+// An empty same-origin frame (a silent sign-in iframe) next to a posting that
+// renders on the top level: the top level decides, with no frame-fill wait.
+{
+  const sso = { url: () => 'https://careers.example.com/sso/silent', async evaluate(fn) { return isControlsRead(fn) ? [] : ''; } };
+  const page = scriptedPage({ render: (n) => (n < 4 ? blank : live), frames: () => [sso] });
+  const verdict = await checkUrlLiveness(page, POSTING_URL);
+  if (verdict.result === 'active' && page.waits.length === 4 && !page.waits.includes(500)) {
+    pass('an empty same-origin frame does not stop the top level from being read');
+  } else {
+    fail(`empty frame: ${JSON.stringify(verdict)}, waits=${JSON.stringify(page.waits)}`);
+  }
+}
+
+// A same-origin frame that only fills after the poll has given up: the frame
+// wait (500ms ticks) runs, then one fresh reading decides.
+{
+  let frameReads = 0;
+  const frame = {
+    url: () => POSTING_URL + '?in_iframe=1',
+    async evaluate(fn) {
+      if (isControlsRead(fn)) return frameReads > 20 ? ['Apply for this job online'] : [];
+      frameReads += 1;
+      return frameReads > 20 ? POSTING : '';
+    },
+  };
+  const page = scriptedPage({ render: () => ({ text: 'Careers', controls: [] }), frames: () => [frame] });
+  const verdict = await checkUrlLiveness(page, POSTING_URL);
+  const pollWaits = page.waits.filter((ms) => ms === 250).length;
+  const frameWaits = page.waits.filter((ms) => ms === 500).length;
+  if (verdict.result === 'active' && pollWaits === 16 && frameWaits > 0 && page.reads === 18) {
+    pass('a frame that fills after the poll is caught by the frame wait and a fresh reading');
+  } else {
+    fail(`late frame: ${JSON.stringify(verdict)}, pollWaits=${pollWaits}, frameWaits=${frameWaits}, reads=${page.reads}`);
   }
 }
 
