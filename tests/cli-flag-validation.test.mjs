@@ -49,6 +49,8 @@ const SCRIPTS = [
   ['normalize-statuses.mjs', '--dryrun'],
   ['cv-sync-check.mjs', '--hlep'],
   ['scan-interamt.mjs', '--dryrun'],
+  ['validate-portals.mjs', '--fiel'],
+  ['validate-portals.mjs', '--self-tst'],
 ];
 
 for (const [script, typo] of SCRIPTS) {
@@ -634,3 +636,78 @@ for (const [form, args] of [
     assert.match(r.all, /--keyword requires a value/);
   });
 }
+
+// validate-portals.mjs read --self-test and --file with nothing else before
+// #4601: there was no --help, and a mistyped flag was dropped, so
+// `--fiel templates/portals.example.yml` validated the user's own portals.yml
+// instead and exited 0 with its counts. The path on the first output line was
+// the only hint that the named file was never read — the exact failure class
+// lib/cli-flags.mjs exists to end.
+test('validate-portals.mjs --help exits 0 and prints usage without validating', () => {
+  const r = runScript('validate-portals.mjs', '--help');
+  assert.equal(r.status, 0, `validate-portals.mjs --help exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'validate-portals.mjs --help printed no usage block');
+  assert.match(r.all, /--self-test/, 'validate-portals.mjs --help does not list --self-test');
+  assert.doesNotMatch(r.all, /errors, \d+ warnings/, '--help still ran the validation');
+});
+
+test('validate-portals.mjs -h exits 0 and prints usage', () => {
+  const r = runScript('validate-portals.mjs', '-h');
+  assert.equal(r.status, 0, `validate-portals.mjs -h exited ${r.status}, want 0`);
+  assert.match(r.all, /Usage:/i, 'validate-portals.mjs -h printed no usage block');
+});
+
+test('validate-portals.mjs --help --bogus still errors', () => {
+  const r = runScript('validate-portals.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, `validate-portals.mjs --help --bogus exited ${r.status}, want 1`);
+  assert.match(r.all, /unrecognized flag/i);
+});
+
+// requireOperand: without it, `--file --self-test` reads --self-test as the
+// file path (flagValue() returns args[idx+1] unconditionally), and a bare
+// trailing --file reaches resolve('') — the current directory — which the
+// reader then rejects with a raw filesystem error instead of a usage error.
+// Same shape, same fix as verify-portals.mjs (#4250/#4254).
+for (const [form, args] of [
+  ['a trailing --file', ['--file']],
+  ['--file --self-test', ['--file', '--self-test']],
+  ['--file --help', ['--file', '--help']],
+]) {
+  test(`validate-portals.mjs rejects ${form} instead of validating`, () => {
+    const r = runScript('validate-portals.mjs', ...args);
+    assert.equal(r.status, 1, `validate-portals.mjs ${args.join(' ')} exited ${r.status}, want 1`);
+    assert.match(r.all, /--file requires a value/);
+    assert.doesNotMatch(r.all, /errors, \d+ warnings/, 'a missing operand still ran the validation');
+  });
+}
+
+// An explicit but empty `--file=` keeps its OWN pre-existing usage error: the
+// `--flag=value` form carries its own operand, so requireOperand never looks
+// at it, and the comment in main() says why resolve('') must not be reached.
+test('validate-portals.mjs still rejects an empty --file= with its usage error', () => {
+  const r = runScript('validate-portals.mjs', '--file=');
+  assert.equal(r.status, 1, `validate-portals.mjs --file= exited ${r.status}, want 1`);
+  assert.match(r.all, /Usage:/i, 'the empty --file= no longer reports usage');
+  assert.doesNotMatch(r.all, /unrecognized flag/i, '--file= must not read as an unrecognized flag');
+});
+
+// The two working paths test-all.mjs already depends on, pinned here so the
+// flag validation cannot regress them: --file must still accept its value in
+// both spellings and exit 0 on the shipped example.
+for (const [form, args] of [
+  ['--file <path>', ['--file', 'templates/portals.example.yml']],
+  ['--file=<path>', ['--file=templates/portals.example.yml']],
+]) {
+  test(`validate-portals.mjs still validates the example file with ${form}`, () => {
+    const r = runScript('validate-portals.mjs', ...args);
+    assert.equal(r.status, 0, `validate-portals.mjs ${args.join(' ')} exited ${r.status}, want 0`);
+    assert.match(r.all, /portals\.example\.yml/, 'the named file was not the one read');
+    assert.doesNotMatch(r.all, /unrecognized flag|requires a value/i);
+  });
+}
+
+test('validate-portals.mjs --self-test still runs the self-test', () => {
+  const r = runScript('validate-portals.mjs', '--self-test');
+  assert.equal(r.status, 0, `validate-portals.mjs --self-test exited ${r.status}, want 0`);
+  assert.doesNotMatch(r.all, /unrecognized flag|Usage:/i, '--self-test no longer reaches the self-test');
+});

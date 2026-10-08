@@ -7,6 +7,7 @@
  *   node validate-portals.mjs
  *   node validate-portals.mjs --file templates/portals.example.yml
  *   node validate-portals.mjs --self-test
+ *   node validate-portals.mjs --help
  */
 
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
@@ -14,7 +15,7 @@ import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -456,8 +457,30 @@ tracked_companies:
   }
 }
 
+const KNOWN_FLAGS = ['--file', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--file'];
+
+const USAGE = `Usage:
+  node validate-portals.mjs                                    # validate portals.yml in the data root
+  node validate-portals.mjs --file templates/portals.example.yml  # validate a specific portals file
+  node validate-portals.mjs --self-test                        # run the built-in fixture checks
+  node validate-portals.mjs --help                             # print this usage block and exit`;
+
 async function main() {
   const args = process.argv.slice(2);
+  // Before any file is read: an unrecognized flag exits 1, --help/-h prints
+  // USAGE and exits 0. Neither used to be checked at all (#4601) — only
+  // --self-test and --file were read, so `--fiel templates/portals.example.yml`
+  // validated the data root's own portals.yml and exited 0 with its counts.
+  // The path on the first output line was the only hint that the file the
+  // caller named was never opened.
+  // requireOperand: without it, `--file --self-test` reads --self-test as the
+  // file path (flagValue() returns args[idx + 1] unconditionally, with no check
+  // that it is not itself another flag), and a bare trailing --file reaches
+  // resolve('') — the current directory. Same shape, same fix as the sibling
+  // verify-portals.mjs (#4250/#4254).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
   if (args.includes('--self-test')) {
     await runSelfTest();
     return;
