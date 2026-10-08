@@ -76,8 +76,8 @@ export type DiscoveredOffer = {
   confidence?: "low" | "medium" | "high";
 };
 
-/** The two discovery surfaces: free deterministic Scan vs token-spending AI search. */
-export type ExploreMode = "scan" | "ai";
+/** The discovery surfaces: free deterministic Scan, token-spending AI search, or GitHub listings. */
+export type ExploreMode = "scan" | "ai" | "github";
 
 /** Stream event grammar (NDJSON). `kind` discriminates. Discovery is FREE — the
  *  terminal `done` always carries cost {tokens:0, usd:0}. */

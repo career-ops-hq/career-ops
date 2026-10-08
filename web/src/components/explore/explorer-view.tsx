@@ -13,6 +13,7 @@ import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
 import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
+import { GitHubExploreView } from "./github-explore-view";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
 import { ScheduleJobAction } from "./schedule-job-action";
@@ -107,12 +108,13 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
+  const isGitHub = mode === "github";
   const isResults = phase === "results";
   const canDiscover = filters.ats.length > 0;
   const scanRunning = running && !isAi;
   // Keep one ResultsList mounted across scanning → revealing → results so
   // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
-  const showScanList = !isAi && offers.length > 0 && (scanRunning || isResults);
+  const showScanList = !isAi && !isGitHub && offers.length > 0 && (scanRunning || isResults);
 
   if (running && isAi) return <AiHuntView cliName={cli.name} />;
 
@@ -141,6 +143,10 @@ export function ExplorerView({
         )}
       </header>
 
+      {isGitHub ? (
+        <GitHubExploreView />
+      ) : (
+      <>
       {!rootExists && (
         <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           Your career-ops home isn’t set up yet — discovery needs a checkout with a profile to seed from.
@@ -214,13 +220,16 @@ export function ExplorerView({
       </>
       )}
 
+      </>
+      )}
+
       {showScanList && (
         <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
           <ResultsList offers={enriched} />
         </div>
       )}
 
-      {!scanRunning && !isAi && (
+      {!scanRunning && !isAi && !isGitHub && (
         <>
           {phase === "empty-current" && (
             <EmptyState
