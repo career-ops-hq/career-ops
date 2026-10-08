@@ -562,7 +562,7 @@ func NormalizeStatus(raw string) string {
 		return "skip"
 	case strings.Contains(s, "interview") || strings.Contains(s, "entrevista") || strings.Contains(s, "mülakat") || strings.Contains(s, "mulakat"):
 		return "interview"
-	case strings.Contains(s, "assessment") || strings.Contains(s, "screening"):
+	case s == "assessment" || s == "screening" || s == "online assessment" || s == "online_assessment" || s == "online screening":
 		return "assessment"
 	case s == "offer" || strings.Contains(s, "oferta") || strings.Contains(s, "teklif"):
 		return "offer"
@@ -957,7 +957,7 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
 	offer := statusCounts["offer"] + statusCounts["hired"]
 	if len(history) > 0 {
-		applied, responded, interview, offer = 0, 0, 0, 0
+		applied, responded, assessment, interview, offer = 0, 0, 0, 0, 0
 		ranks := make(map[int]int)
 		var unnumberedRanks []int
 		for _, app := range apps {
@@ -987,9 +987,12 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 				responded++
 			}
 			if rank >= 3 {
-				interview++
+				assessment++
 			}
 			if rank >= 4 {
+				interview++
+			}
+			if rank >= 5 {
 				offer++
 			}
 		}

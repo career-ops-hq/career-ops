@@ -31,7 +31,7 @@ func TestRefreshPreservesMetricsWhenFunnelHistoryCannotBeRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	apps := []model.CareerApplication{{Number: 1, Company: "Example", Role: "Engineer", Status: "Discarded", Score: 4}}
-	want := data.ComputeProgressMetrics(apps, map[int]int{1: 4})
+	want := data.ComputeProgressMetrics(apps, map[int]int{1: 5})
 	theme := theme.NewTheme("auto")
 	m := appModel{
 		careerOpsPath:   root,
@@ -70,7 +70,7 @@ func TestRefreshPreservesMetricsWhenFunnelHistoryCannotBeRead(t *testing.T) {
 	}
 	updated, _ = m.Update(screens.PipelineRefreshMsg{})
 	m = updated.(appModel)
-	if m.progressMetrics.TotalOffers != 0 || m.progressMetrics.FunnelStages[3].Count != 1 {
+	if m.progressMetrics.TotalOffers != 0 || m.progressMetrics.FunnelStages[4].Count != 1 {
 		t.Fatalf("refresh did not recover after restoring the ledger: %+v", m.progressMetrics.FunnelStages)
 	}
 	if strings.Contains(m.pipeline.View(), "Status history unavailable") {
