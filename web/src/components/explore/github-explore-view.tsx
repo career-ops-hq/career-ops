@@ -106,8 +106,15 @@ export function GitHubExploreView() {
   // On mount: load any previously imported listings so they persist across navigation
   useEffect(() => {
     void loadExisting();
-    // Also check if resume exists
-    fetch("/api/resume-profile").then((r) => setHasResume(r.ok)).catch(() => setHasResume(null));
+    // Check if resume profile exists; if not, try parsing from uploaded files
+    async function checkResume() {
+      const get = await fetch("/api/resume-profile").catch(() => null);
+      if (get?.ok) { setHasResume(true); return; }
+      // Profile JSON missing — try to parse from uploaded resume
+      const post = await fetch("/api/resume-profile", { method: "POST" }).catch(() => null);
+      setHasResume(post?.ok ?? false);
+    }
+    void checkResume();
   }, [loadExisting]);
 
   const fetchListings = async () => {
