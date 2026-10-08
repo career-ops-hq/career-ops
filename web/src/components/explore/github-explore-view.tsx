@@ -25,6 +25,29 @@ const SECTIONS = [
   { key: "Hardware Engineering", label: "Hardware Engineering", track: "SWE" },
 ];
 
+const RECENCY_OPTIONS = [
+  { label: "Any time", maxDays: Infinity },
+  { label: "Past 24h", maxDays: 1 },
+  { label: "Past 3d", maxDays: 3 },
+  { label: "Past 7d", maxDays: 7 },
+  { label: "Past 14d", maxDays: 14 },
+  { label: "Past 30d", maxDays: 30 },
+];
+
+/** Parse an age string like "1d", "3d", "1w", "2mo" into approximate days. */
+function ageToDays(age: string): number | null {
+  if (!age) return null;
+  const m = age.trim().match(/^(\d+)\s*(d|w|mo|m|h)/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  const unit = m[2].toLowerCase();
+  if (unit === "h") return n / 24;
+  if (unit === "d") return n;
+  if (unit === "w") return n * 7;
+  if (unit === "mo" || unit === "m") return n * 30;
+  return null;
+}
+
 const TRACK_COLORS: Record<string, string> = {
   DS: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
   DA: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
@@ -39,6 +62,7 @@ export function GitHubExploreView() {
   const [stats, setStats] = useState<{ imported: number; filtered: number; closed: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [trackFilter, setTrackFilter] = useState<string>("all");
+  const [recencyMaxDays, setRecencyMaxDays] = useState<number>(Infinity);
   const [selectedSections, setSelectedSections] = useState<string[]>(["Data Science"]);
 
   const toggleSection = (key: string) => {
@@ -93,6 +117,10 @@ export function GitHubExploreView() {
   const filtered = useMemo(() => {
     return listings.filter((l) => {
       if (trackFilter !== "all" && l.track !== trackFilter) return false;
+      if (recencyMaxDays !== Infinity) {
+        const days = ageToDays(l.age);
+        if (days === null || days > recencyMaxDays) return false;
+      }
       if (searchQuery) {
         const terms = searchQuery.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
         const haystack = `${l.company} ${l.role} ${l.location} ${l.track}`.toLowerCase();
@@ -100,7 +128,7 @@ export function GitHubExploreView() {
       }
       return true;
     });
-  }, [listings, trackFilter, searchQuery]);
+  }, [listings, trackFilter, recencyMaxDays, searchQuery]);
 
   const tracks = [...new Set(listings.map((l) => l.track).filter(Boolean))];
 
@@ -195,6 +223,24 @@ export function GitHubExploreView() {
               className={cn("rounded-md px-2 py-1 text-xs font-medium transition-colors", trackFilter === t ? TRACK_COLORS[t] ?? "bg-surface-hover" : "text-muted hover:text-foreground")}
             >
               {t} ({listings.filter((l) => l.track === t).length})
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-muted">
+          <Clock className="h-3.5 w-3.5" />
+          <span>Posted:</span>
+        </div>
+        <div className="flex gap-1">
+          {RECENCY_OPTIONS.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => setRecencyMaxDays(opt.maxDays)}
+              className={cn(
+                "rounded-md px-2 py-1 text-xs transition-colors",
+                recencyMaxDays === opt.maxDays ? "bg-surface-hover font-medium" : "text-muted hover:text-foreground",
+              )}
+            >
+              {opt.label}
             </button>
           ))}
         </div>
