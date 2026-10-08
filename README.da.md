@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-Skillet er defineret efter den åbne standard i `.agents/skills/career-ops/SKILL.md` og symlinket/refereret for hver understøttet CLI (fx `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+Skillet er defineret efter den åbne standard i `.agents/skills/career-ops/SKILL.md` og symlinket/refereret for hver understøttet CLI (fx `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
 
 ## Codex-integration
 

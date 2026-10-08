@@ -296,7 +296,6 @@ const requiredSystemPaths = [
   '.qwen/',
   '.antigravitycli/skills/',
   '.grok/skills/',
-  '.cursor/skills/',
   'tracker-columns-tests.mjs',
   'updater-migration-tests.mjs',
   'README.ar.md',
@@ -314,7 +313,6 @@ const requiredSystemPaths = [
 
 const requiredBootstrapPaths = [
   '.agents/',
-  '.cursor/skills/',
   '.opencode/skills/',
   '.antigravitycli/skills/',
   '.grok/skills/',

@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-இந்த skill திறந்த தரநிலைப்படி `.agents/skills/career-ops/SKILL.md`-இல் வரையறுக்கப்பட்டு, ஆதரிக்கப்படும் ஒவ்வொரு CLI-க்கும் (எ.கா. `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`) symlink அல்லது குறிப்பு செய்யப்பட்டுள்ளது.
+இந்த skill திறந்த தரநிலைப்படி `.agents/skills/career-ops/SKILL.md`-இல் வரையறுக்கப்பட்டு, ஆதரிக்கப்படும் ஒவ்வொரு CLI-க்கும் (எ.கா. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`) symlink அல்லது குறிப்பு செய்யப்பட்டுள்ளது.
 
 ## Codex Integration
 

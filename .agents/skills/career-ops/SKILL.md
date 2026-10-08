@@ -23,7 +23,7 @@ Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `S
 ## Invocation Notes
 
 - CLIs with slash-command registration can expose this router as `/career-ops`.
-- In Cursor, this skill lives at `.cursor/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
+- In Cursor, this skill is auto-discovered from `.agents/skills/career-ops/`; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
 - In Pi, this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `AGENTS.md` loads from the repo root as project context, so there is no wrapper file. Headless Pi workers use `pi -p "prompt"`. Project skill discovery follows Pi's per-folder trust decision: `/trust` applies to future Pi processes, so restart `pi` before invoking `/skill:career-ops` (`-a` trusts a single run and needs no restart).
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.

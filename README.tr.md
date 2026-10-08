@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-Beceri, açık standarda göre `.agents/skills/career-ops/SKILL.md` içinde tanımlanır ve desteklenen her CLI için (ör. `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`) sembolik bağ ile bağlanır veya referans verilir.
+Beceri, açık standarda göre `.agents/skills/career-ops/SKILL.md` içinde tanımlanır ve desteklenen her CLI için (ör. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`) sembolik bağ ile bağlanır veya referans verilir.
 
 ## Codex Entegrasyonu
 

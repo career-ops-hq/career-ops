@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-المهارة معرّفة وفق المعيار المفتوح في `.agents/skills/career-ops/SKILL.md` ومربوطة برابط رمزي أو مُشار إليها لكل واجهة مدعومة (مثل `.claude/` و`.cursor/` و`.qwen/` و`.antigravitycli/` و`.grok/`).
+المهارة معرّفة وفق المعيار المفتوح في `.agents/skills/career-ops/SKILL.md` ومربوطة برابط رمزي أو مُشار إليها لكل واجهة مدعومة (مثل `.claude/` و`.qwen/` و`.antigravitycli/` و`.grok/`).
 
 ## تكامل Codex
 

@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-स्किल ओपन स्टैंडर्ड के अनुसार `.agents/skills/career-ops/SKILL.md` में परिभाषित है और हर सपोर्टेड CLI (जैसे `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`) के लिए सिमलिंक या रेफ़रेंस की गई है।
+स्किल ओपन स्टैंडर्ड के अनुसार `.agents/skills/career-ops/SKILL.md` में परिभाषित है और हर सपोर्टेड CLI (जैसे `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`) के लिए सिमलिंक या रेफ़रेंस की गई है।
 
 ## Codex Integration
 

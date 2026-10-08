@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-A skill é definida com o padrão aberto em `.agents/skills/career-ops/SKILL.md` e vinculada ou referenciada para cada CLI suportada (por exemplo `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+A skill é definida com o padrão aberto em `.agents/skills/career-ops/SKILL.md` e vinculada ou referenciada para cada CLI suportada (por exemplo `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
 
 ## Integração com Codex
 

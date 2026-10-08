@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-Скилл определён по открытому стандарту в `.agents/skills/career-ops/SKILL.md` и подключён символической ссылкой или ссылкой для каждого поддерживаемого CLI (например `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+Скилл определён по открытому стандарту в `.agents/skills/career-ops/SKILL.md` и подключён символической ссылкой или ссылкой для каждого поддерживаемого CLI (например `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
 
 ## Интеграция с Codex
 

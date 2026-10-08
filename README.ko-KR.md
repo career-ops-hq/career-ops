@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-스킬은 오픈 표준에 따라 `.agents/skills/career-ops/SKILL.md`에 정의되어 있으며, 지원되는 각 CLI(예: `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`)에 심볼릭 링크되거나 참조됩니다.
+스킬은 오픈 표준에 따라 `.agents/skills/career-ops/SKILL.md`에 정의되어 있으며, 지원되는 각 CLI(예: `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`)에 심볼릭 링크되거나 참조됩니다.
 
 ## Codex 연동
 
