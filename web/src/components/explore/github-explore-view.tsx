@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Download, Search, MapPin, Clock, Filter, FileText, X, ExternalLink } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { Download, Search, MapPin, Clock, Filter, FileText, X, ExternalLink, RefreshCw, Upload } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
@@ -67,12 +68,47 @@ export function GitHubExploreView() {
   const [selectedSections, setSelectedSections] = useState<string[]>(["Data Science"]);
   const [tailorId, setTailorId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [hasResume, setHasResume] = useState<boolean | null>(null);
 
   const toggleSection = (key: string) => {
     setSelectedSections((prev) =>
       prev.includes(key) ? prev.filter((s) => s !== key) : [...prev, key],
     );
   };
+
+  /** Load previously imported GitHub listings from the internships API. */
+  const loadExisting = useCallback(async () => {
+    try {
+      const res = await fetch("/api/internships");
+      if (!res.ok) return;
+      const all = await res.json();
+      const ghListings = all
+        .filter((i: Record<string, string>) => i.source === "simplify-github")
+        .map((i: Record<string, string>) => ({
+          id: i.id,
+          company: i.company,
+          role: i.role,
+          location: i.location || "",
+          url: i.url || "",
+          age: (i.notes || "").replace("Posted: ", "").replace(" ago", ""),
+          track: i.track || "",
+          section: "",
+        }));
+      if (ghListings.length > 0) {
+        setListings(ghListings);
+        setFetched(true);
+      }
+    } catch {
+      // silent — user can still fetch manually
+    }
+  }, []);
+
+  // On mount: load any previously imported listings so they persist across navigation
+  useEffect(() => {
+    void loadExisting();
+    // Also check if resume exists
+    fetch("/api/resume-profile").then((r) => setHasResume(r.ok)).catch(() => setHasResume(null));
+  }, [loadExisting]);
 
   const fetchListings = async () => {
     setLoading(true);
@@ -91,26 +127,7 @@ export function GitHubExploreView() {
       const data = await res.json();
       setStats({ imported: data.imported, filtered: data.filtered, closed: data.closed });
       setFetched(true);
-
-      // Now read all internships to get the newly imported ones
-      const internRes = await fetch("/api/internships");
-      if (internRes.ok) {
-        const all = await internRes.json();
-        // Show only simplify-github sourced ones
-        const ghListings = all
-          .filter((i: Record<string, string>) => i.source === "simplify-github")
-          .map((i: Record<string, string>) => ({
-            id: i.id,
-            company: i.company,
-            role: i.role,
-            location: i.location || "",
-            url: i.url || "",
-            age: (i.notes || "").replace("Posted: ", "").replace(" ago", ""),
-            track: i.track || "",
-            section: "",
-          }));
-        setListings(ghListings);
-      }
+      await loadExisting();
     } catch {
       setError("Network error");
     } finally {
@@ -248,9 +265,14 @@ export function GitHubExploreView() {
             </button>
           ))}
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { void loadExisting(); }}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </Button>
           <Button variant="outline" size="sm" onClick={() => { setFetched(false); setListings([]); setStats(null); }}>
-            Re-fetch
+            <Download className="h-3.5 w-3.5" />
+            Re-import
           </Button>
         </div>
       </div>
@@ -402,7 +424,35 @@ export function GitHubExploreView() {
         </Card>
       )}
 
-      {tailorId && (
+      {tailorId && hasResume === false && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setTailorId(null)}>
+          <div className="mx-4 max-w-sm rounded-xl border border-border bg-surface p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <Upload className="h-5 w-5" />
+              <h3 className="font-semibold text-sm">Resume needed</h3>
+            </div>
+            <p className="mt-2 text-xs text-muted">
+              Upload your resume first so we can match your skills against this role and generate tailored bullets.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <Link
+                href="/uploads"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-brand-foreground transition hover:brightness-110"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Go to Uploads
+              </Link>
+              <button
+                onClick={() => setTailorId(null)}
+                className="rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-muted hover:text-foreground transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {tailorId && hasResume !== false && (
         <TailorPanel internshipId={tailorId} onClose={() => setTailorId(null)} />
       )}
     </div>
