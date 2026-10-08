@@ -6,21 +6,18 @@ type CareerApplication struct {
 	// Display numbers synthesized for backfill rows must never join ledger IDs.
 	TrackerNumberMissing bool
 	Date                 string
-	// StatusDate is the date of the row's most recent status transition in
-	// status-log.tsv (stamped by data.ApplyStatusDates); "" when the row has no
-	// ledger history. The DATE column shows it and falls back to Date.
-	StatusDate   string
-	Company      string
-	Role         string
-	Status       string
-	Score        float64
-	ScoreRaw     string
-	HasScore     bool // false when the Score cell is a sentinel (— / N/A / -)
-	HasPDF       bool
-	ReportPath   string
-	ReportNumber string
-	Notes        string
-	JobURL       string // URL of the original job posting
+	StatusDate           string // latest status-log.tsv transition date (data.ApplyStatusDates); "" when none
+	Company              string
+	Role                 string
+	Status               string
+	Score                float64
+	ScoreRaw             string
+	HasScore             bool // false when the Score cell is a sentinel (— / N/A / -)
+	HasPDF               bool
+	ReportPath           string
+	ReportNumber         string
+	Notes                string
+	JobURL               string // URL of the original job posting
 	// Derived from Notes free-text (see data.deriveNoteFields)
 	Location    string  // "City, ST" when a US city+state appears in the notes
 	WorkMode    string  // "Remote" | "Hybrid" | "Full" (onsite), "" when unknown
