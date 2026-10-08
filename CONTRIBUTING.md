@@ -11,7 +11,7 @@ career-ops is a great place to make your **first open-source contribution** — 
 - **We answer fast.** Open an issue or PR and you'll hear back, usually within a day or two. No black holes.
 - **Tiny on-ramps.** Browse [`good first issue`](https://github.com/career-ops-hq/career-ops/contribute) — each is scoped small, with a time estimate, the pattern to copy, and a clear "done", so your first PR is a win, not a maze.
 - **Your human work gets a real review.** We read every PR. We don't drown contributors in bot noise, and we don't merge AI-slop — put thought in, get thought back.
-- **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (reviewer, then maintainer).
+- **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (see the [ladder](GOVERNANCE.md#contributor-ladder)).
 
 New to all this? That's the point. Claim a good-first-issue by commenting `/assign` on it, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
 
@@ -66,14 +66,7 @@ Comment `/assign` on any [`good first issue`](https://github.com/career-ops-hq/c
 
 ## The contribution ladder
 
-There's a clear path here — we promote people who show up:
-
-1. **First-time contributor** — you landed a PR. Welcome aboard.
-2. **Trusted contributor** — a few solid merges; we fast-track your PRs and tag you on related work.
-3. **Reviewer** — you help triage and review others' PRs. We invite you.
-4. **Maintainer** — you help steer the project.
-
-We credit contributors publicly and invite high-signal folks up the ladder. Want to help more? Just say so in an issue.
+There's a clear path here, written down in one place: [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder). We credit contributors publicly, and the [`help wanted`](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) board is open to everyone.
 
 ## Adopting an abandoned PR
 
@@ -152,9 +145,11 @@ career-ops reads job listings from public sources: ATSes, job boards, company ca
 
 5. **The aggregation layer belongs to the project.** A provider reads its own source. Cross-source aggregation, ranking, matching and the registry are the project's own and are never delegated to a source. They are first-party wherever they run: on your machine in the local core, or in the opt-in shared layer the project governs (see "First-party and official surfaces").
 
+6. **The source's own `robots.txt`.** Checked before a provider is written, and read the way a crawler reads it: per path, under the group that binds career-ops's own client (`User-agent: *`, or a token the scanner actually sends). A `Disallow` counts only when it covers a path the provider would fetch — a rule on `/api`, `/data`, a subscribe form or any route the parser never requests is not an obstacle (precedent: ITviec, CareerViet, both carrying disallows they route around). A `Disallow` that does cover the listing paths the provider needs is a stop: the source is not indexed, and the finding goes in the [Evaluated, not supported](docs/SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table (precedent: Lagou — `Disallow: /*?*` under `User-agent: *`, and every usable request carries a query string). A `robots.txt` rule scoped to a named AI or agent crawler (`ClaudeBot`, `anthropic-ai`, `Claude-Web`, a generic managed AI-bot block) does **not** name this client — the scanner is a distinct, bounded, `career-ops`-identified fetcher, not that crawler — but a scan can still be the first step toward a model reading the posting in a later `pipeline` / `triage` run. Whether the operator's intent reaches it is therefore a maintainer decision on a [source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml), not something the rule settles by itself. Anything ambiguous takes the same route.
+
 To see how the rules have actually been applied, read the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md): one entry per listed source, with what was checked and how.
 
-To propose a source (yours or anyone's): [open a source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml) walking through these five rules. A direct PR with the provider is welcome too: the same five rules apply before merge. Operator declarations are verified out-of-band before listing — a contact reachable at the source's own domain, or equivalent proof of domain control. Operators proposing their own board are welcome — that's what rule-based gates are for.
+To propose a source (yours or anyone's): [open a source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml) walking through these six rules. A direct PR with the provider is welcome too: the same six rules apply before merge. Operator declarations are verified out-of-band before listing — a contact reachable at the source's own domain, or equivalent proof of domain control. Operators proposing their own board are welcome — that's what rule-based gates are for.
 
 ## Guidelines
 
@@ -223,6 +218,24 @@ The naming is a convention, not a checked contract.
 section (syntax, scripts, dashboard, data contract, personal data, paths,
 etc.). A green `--only` run is **not** a green suite — always run the full
 `node test-all.mjs` before pushing.
+
+### Checking translated mode structure
+
+Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),
+or omit `--lang` to check every locale. `--json` emits machine-readable results;
+`--summary` prints language totals. The checker runs offline with Node alone and
+reports drift without failing.
+It checks existing mode files, including nested interview modes, and files
+promised in each locale's README. Languages shipping only the core subset are
+not penalized for modes they have not translated.
+
+Coverage compares Markdown heading levels and order, not translated words or
+prose. Fenced examples and comments are excluded. Missing structural slots are
+listed with canonical names and line numbers; when several alignments are
+possible, the report lists candidate locations instead of claiming which title
+is absent. **100% is structural coverage, not proof of translation completeness**:
+an unrelated section with the same shape can hide an omission. Translation
+review and the separate evaluation-template parity checks still apply.
 
 ## Brand and Trademark
 

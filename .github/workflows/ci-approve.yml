@@ -19,6 +19,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  contents: read
   actions: write
   pull-requests: read
 

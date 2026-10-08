@@ -8,10 +8,12 @@ Cuando el candidato pegue una oferta (texto o URL), SIEMPRE entregar los 7 bloqu
 
 Cuando el candidato pegue una **URL** (no texto de la JD), confirmar que la oferta sigue activa antes de evaluar. Un enlace muerto nunca debe llegar al Bloque A.
 
+**LinkedIn:** aplicar primero AGENTS.md → **LinkedIn JD loading guard (#4121)**, antes de navegar o usar fallbacks. Reutilizar el contenido y el intento de modos anteriores. Un skeleton de carga o una JD inaccesible queda sin confirmar, no cerrada; detenerse antes del Bloque A hasta obtener texto real, sin volver a navegar.
+
 1. Obtener el contenido de la página: si se llegó aquí desde `auto-pipeline` (su Paso 0.5 ya navegó y validó el enlace), reutilizar esa captura — no navegar de nuevo. En un envío directo de URL, navegar con Playwright (`browser_navigate` + `browser_snapshot`). **Opt-in:** si `scan.extractor: cli` está configurado en `config/profile.yml`, ejecutar `node browser-extract.mjs <url>` (por defecto `--mode jd`), **retrocediendo silenciosamente** a `browser_navigate` + `browser_snapshot` si falla.
 2. Clasificar la publicación:
    - **Evidencia de oferta activa:** título/rol + descripción real o ruta de candidatura/apply
-   - **Evidencia de oferta cerrada:** expirada/cerrada/"ya no acepta candidaturas", JD ausente con solo nav/footer, redirección a página genérica, o 404/410
+   - **Evidencia de oferta cerrada:** expirada/cerrada/"ya no acepta candidaturas", JD ausente con solo nav/footer tras descartar contenido aún cargando o inaccesible, redirección a página genérica, o 404/410
 3. Si la oferta parece cerrada, **detenerse antes del Bloque A**: informar al candidato que el enlace está muerto, y si la entrada provino de `data/pipeline.md`, marcarla `- [x] ~~Empresa | Rol~~ — oferta nieaktywna`. No generar evaluación, report ni CV.
 4. Si el candidato pegó texto de la JD (sin URL), la disponibilidad no se puede verificar — anotarlo y continuar.
 

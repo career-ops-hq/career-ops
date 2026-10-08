@@ -1,0 +1,127 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseDraftAnswersBlockH } from '../application-answers.mjs';
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/** A report whose Block H heading carries `title`. */
+const report = (title) => `# Report
+
+## G) Posting Legitimacy
+
+Tier: verified.
+
+## H) ${title}
+
+**Why do you want this role?**
+
+Because the work is close to what I already do.
+
+## Risk Summary
+
+None.
+`;
+
+// The five shipped market modes that translate the Block H title, plus the
+// three that keep it in English. Each pair is (mode file, heading title) and
+// is read from the mode file itself below, so this list cannot drift from the
+// modes without the drift test failing.
+const LOCALIZED = [
+  ['modes/es/oferta.md', 'Borradores de respuestas para la candidatura'],
+  ['modes/ru/oferta.md', 'Черновики ответов на форму'],
+  ['modes/tr/is-ilani.md', 'Başvuru Formu Taslak Yanıtları'],
+  ['modes/zh/oferta.md', '开放性问题拟答草稿'],
+  ['modes/zh-TW/oferta.md', '開放式問題擬答草稿'],
+];
+
+for (const [mode, title] of LOCALIZED) {
+  test(`Block H parses when its title is localized (${mode})`, () => {
+    const got = parseDraftAnswersBlockH(report(title));
+    assert.ok(got, `returned null — indistinguishable from "this report has no Block H"`);
+    assert.equal(got.freeText.length, 1);
+    assert.match(got.freeText[0].question, /want this role/);
+  });
+}
+
+test('the English title still parses', () => {
+  const got = parseDraftAnswersBlockH(report('Draft Application Answers'));
+  assert.ok(got);
+  assert.equal(got.freeText.length, 1);
+});
+
+test('each localized title above is the one its mode actually emits', () => {
+  // Guards against this suite testing titles the modes no longer use, which
+  // would make every case above pass against nothing.
+  //
+  // A listed mode file that is missing FAILS here rather than being skipped.
+  // Skipping defeats the guard in the exact case it exists for: a mode file
+  // that moved leaves every case above asserting a hard-coded title that
+  // nothing emits any more, and the suite stays green while checking nothing.
+  assert.ok(LOCALIZED.length > 0, 'LOCALIZED is empty, so this guard verifies nothing');
+  for (const [mode, title] of LOCALIZED) {
+    const path = join(ROOT, mode);
+    assert.ok(existsSync(path),
+      `${mode} is listed in LOCALIZED but is not in the repo — move the entry to the mode's new path, do not delete it`);
+    const src = readFileSync(path, 'utf-8');
+    assert.ok(src.includes(`## H) ${title}`),
+      `${mode} no longer emits "## H) ${title}" — update this suite, do not delete the case`);
+  }
+});
+
+test('a report with no Block H still returns null', () => {
+  assert.equal(parseDraftAnswersBlockH('# Report\n\n## G) Something\n\nbody\n'), null);
+});
+
+test('an H marker with no title is not treated as Block H', () => {
+  assert.equal(parseDraftAnswersBlockH('# Report\n\n## H)\n\nbody\n'), null);
+});
+
+test('a different lettered block is not mistaken for H', () => {
+  assert.equal(parseDraftAnswersBlockH(report('x').replace('## H)', '## G)')), null);
+});
+
+test('the marker must start the line, so prose mentioning it does not match', () => {
+  const prose = '# Report\n\nSee the ## H) Draft Application Answers block.\n';
+  assert.equal(parseDraftAnswersBlockH(prose), null);
+});
+
+// The letter rule is the last resort and the only one that reads a translated
+// heading, so its grammar is the one that decides what ELSE gets read as draft
+// answers. HEADING_PREFIX_RE, which this rule first used, also accepts `H:` and
+// `Block H`; no mode writes either for this block, so the wider grammar bought
+// nothing and let an unrelated `H:` section be parsed as answers a user later
+// sends to an employer. Both forms are pinned as rejected (#4400 review).
+test('an H: section is not Block H, because no mode writes that form', () => {
+  const r = '# Report\n\n## H: Internal Notes\n\n**Q?**\n\nA.\n';
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});
+
+test('a "Block H" heading is not Block H, for the same reason', () => {
+  const r = '# Report\n\n## Block H — Internal Notes\n\n**Q?**\n\nA.\n';
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});
+
+// `\s+` after `##` also matches a newline, so a bare `##` line consumed it and
+// the matcher captured the FOLLOWING line as the heading. Combined with the
+// letter rule, `##` then `H) Internal Notes` made an unrelated section parse as
+// draft answers, which modes/apply.md later offers as a base for what a user
+// sends to an employer (#4400 review).
+test('a bare ## does not capture the next line as its heading', () => {
+  const r = '# Report\n\n##\nH) Internal Notes\n\n**Q?**\n\nA.\n';
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});
+
+// The opener accepts `##` plus a tab, so the terminator has to as well. While it
+// matched only `## `, a later `##\tI) ...` section stayed inside Block H and its
+// bold text came back as draft answers, which is the same leak as the bare `##`
+// case one layer further on (#4400 review).
+test('a tab-separated later heading still ends Block H', () => {
+  const r = '# Report\n\n## H) Draft Application Answers\n\n**Q1?**\n\nA1.\n'
+    + '\n##\tI) Internal Notes\n\n**Not an answer?**\n\nStays out.\n';
+  const out = parseDraftAnswersBlockH(r);
+  assert.equal(out.freeText.length, 1, 'only Block H own pair is returned');
+  assert.equal(out.freeText[0].answer, 'A1.');
+});
