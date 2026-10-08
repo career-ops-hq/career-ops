@@ -131,7 +131,7 @@ function ProgressPanel({ metrics }: { metrics: ProgressMetrics }) {
           {metrics.weeklyActivity.length ? (
             <div className="mt-5 space-y-3">
               {metrics.weeklyActivity.map((week) => {
-                return <BarRow key={week.week} label={week.shortWeek} count={week.count} widthPct={(week.count / maxWeeklyActivity) * 100} tone="bg-sky-400" />;
+                return <BarRow key={week.week} label={week.week} count={week.count} widthPct={(week.count / maxWeeklyActivity) * 100} tone="bg-sky-400" />;
               })}
             </div>
           ) : <EmptyData label="No dated activity yet" detail="Weekly activity will appear once evaluations have valid dates." />}
@@ -211,7 +211,7 @@ function Distribution({ rows, emptyLabel = "No distribution data" }: { rows: { l
 }
 
 function BreakdownList({ rows, icon, emptyLabel }: { rows: { label: string; count: number; pct: number }[]; icon: React.ReactNode; emptyLabel: string }) {
-  if (!rows.length) return <EmptyData label={emptyLabel} detail="This dimension is not present in the available reports." />;
+  if (!rows.length) return <EmptyData label={emptyLabel} detail="Add an explicit work mode or location to the tracker notes to populate this dimension." />;
   return <div className="mt-4 space-y-3">{rows.map((row, index) => <div key={row.label} className="flex items-center gap-2 text-sm"><span className="text-brand">{icon}</span><span className="min-w-0 flex-1 break-words text-muted">{row.label}</span><span className="font-mono text-xs tabular-nums text-foreground">{row.count}</span><span className="w-12 text-right font-mono text-[11px] tabular-nums text-faint">{Math.round(row.pct)}%</span></div>)}</div>;
 }
 

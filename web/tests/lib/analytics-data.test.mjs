@@ -109,3 +109,15 @@ test("a dollar amount explicitly qualified as CAD is not treated as USD", () => 
   assert.equal(enriched.payMax, 0);
   assert.equal(enriched.paySource, "");
 });
+
+test("trailing USD qualifies compensation without accepting other currencies", () => {
+  for (const [notes, expected] of [
+    ["Salary: 140K USD", 140_000],
+    ["Salary: 140-180K USD (POSTED)", 180_000],
+    ["Salary: 140K CAD", 0],
+    ["Salary: CAD $140K", 0],
+    ["Salary: 140K", 0],
+  ]) {
+    assert.equal(enrichAnalyticsApplication(application(notes)).payMax, expected, notes);
+  }
+});

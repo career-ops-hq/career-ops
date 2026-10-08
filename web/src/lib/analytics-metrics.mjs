@@ -31,7 +31,7 @@ function sortByCountThenLabel(a, b) {
  * Port of dashboard/internal/data/career.go's cumulative funnel semantics.
  * The returned object is pure so it can be parity-tested without filesystem IO.
  */
-export function computeProgressMetrics(applications = []) {
+export function computeProgressMetrics(applications = [], achievements) {
   const apps = Array.isArray(applications) ? applications : [];
   const statusCounts = new Map();
   const scores = [];
@@ -55,10 +55,12 @@ export function computeProgressMetrics(applications = []) {
 
   const count = (status) => statusCounts.get(status) ?? 0;
   const tracked = apps.length;
-  const applied = count("APPLIED") + count("RESPONDED") + count("ASSESSMENT") + count("INTERVIEW") + count("OFFER") + count("HIRED") + count("REJECTED");
-  const responded = count("RESPONDED") + count("ASSESSMENT") + count("INTERVIEW") + count("OFFER") + count("HIRED");
-  const interview = count("INTERVIEW") + count("OFFER") + count("HIRED");
-  const offer = count("OFFER") + count("HIRED");
+  const applied = achievements?.applied ?? count("APPLIED") + count("RESPONDED") + count("ASSESSMENT") + count("INTERVIEW") + count("OFFER") + count("HIRED") + count("REJECTED");
+  const responded = achievements?.responded ?? count("RESPONDED") + count("ASSESSMENT") + count("INTERVIEW") + count("OFFER") + count("HIRED") + count("REJECTED");
+  // Upstream's ledger-aware core helper recovers prior interview/offer stages
+  // for applications that are now rejected or discarded.
+  const interview = achievements?.interviews ?? count("INTERVIEW") + count("OFFER") + count("HIRED");
+  const offer = achievements?.offers ?? count("OFFER") + count("HIRED");
   const funnelCounts = [tracked, applied, responded, interview, offer];
 
   const funnel = STAGE_ORDER.map((label, index) => {
@@ -98,7 +100,7 @@ export function computeProgressMetrics(applications = []) {
     avgScore: scores.length ? totalScore / scores.length : 0,
     topScore,
     activeApps,
-    totalOffers,
+    totalOffers: achievements?.offers ?? totalOffers,
     funnel,
     scoreDistribution,
     responseRate: percentage(responded, applied),

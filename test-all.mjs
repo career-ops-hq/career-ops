@@ -16473,7 +16473,7 @@ try {
         const synthetic = canonical.map((status) => ({ status, score: '4.0/5', date: '2026-09-18' }));
         const countIn = (allowed) => canonical.filter((status) => allowed.has(status)).length;
         const applied = countIn(new Set(['APPLIED', 'RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED']));
-        const responded = countIn(new Set(['RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED']));
+        const responded = countIn(new Set(['RESPONDED', 'ASSESSMENT', 'INTERVIEW', 'OFFER', 'HIRED', 'REJECTED']));
         const interview = countIn(new Set(['INTERVIEW', 'OFFER', 'HIRED']));
         const offer = countIn(new Set(['OFFER', 'HIRED']));
         const expectedFunnel = [canonical.length, applied, responded, interview, offer];

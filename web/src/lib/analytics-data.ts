@@ -33,11 +33,11 @@ function highestMoney(text: string): { value: number; source: "POSTED" | "est" |
   let highest = 0;
   let source: "POSTED" | "est" | "" = "";
   for (const match of text.matchAll(MONEY)) {
-    const hasCurrency = Boolean(match[0].match(/\$|\bUSD\b/));
-    if (!hasCurrency) continue;
     const before = text.slice(Math.max(0, (match.index ?? 0) - 8), match.index ?? 0);
     const after = text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 8);
     if (NON_USD_CURRENCY.test(before) || NON_USD_CURRENCY.test(after)) continue;
+    const hasCurrency = /\$|\bUSD\b/i.test(match[0]) || /^\s*USD\b/i.test(after);
+    if (!hasCurrency) continue;
     const value = Math.max(moneyNumber(match[1], match[2]), moneyNumber(match[3] ?? "0", match[4] ?? ""));
     const trailingText = text.slice((match.index ?? 0) + match[0].length);
     if (/^\s*(?:valuation|(?:total\s+)?raised|series\s|round\b)/i.test(trailingText)) continue;

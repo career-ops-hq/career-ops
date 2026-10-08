@@ -55,7 +55,7 @@ export function cumulativeTiles(canonStatuses) {
  * @param {string|null} content
  * @param {string} [coreRoot] Code checkout, never the separate user data root.
  */
-export async function cumulativeTilesWithHistory(applications, content, coreRoot = resolveCodeRoot(process.cwd())) {
+async function recoveredStages(applications, content, coreRoot) {
   // Turbopack is intentionally confined to web/ for Windows stability. Load
   // the core at runtime, as the other core accessors do; do not widen its root
   // or silently substitute a second engine if the installation is incomplete.
@@ -67,6 +67,21 @@ export async function cumulativeTilesWithHistory(applications, content, coreRoot
     const id = /^\d+$/.test(app.n) ? Number(app.n) : Symbol();
     statuses.set(id, statusToken(app.status));
   }
-  const values = [...recoverFunnelStages(statuses, parseStatusLogStages(content)).values()];
+  return [...recoverFunnelStages(statuses, parseStatusLogStages(content)).values()];
+}
+
+export async function cumulativeTilesWithHistory(applications, content, coreRoot = resolveCodeRoot(process.cwd())) {
+  const values = await recoveredStages(applications, content, coreRoot);
   return { interviews: values.filter(n => n >= 3).length, offers: values.filter(n => n >= 4).length };
+}
+
+/** All progress stages use the same core history contract as the headline tiles. */
+export async function cumulativeProgressWithHistory(applications, content, coreRoot = resolveCodeRoot(process.cwd())) {
+  const values = await recoveredStages(applications, content, coreRoot);
+  return {
+    applied: values.filter(n => n >= 1).length,
+    responded: values.filter(n => n >= 2).length,
+    interviews: values.filter(n => n >= 3).length,
+    offers: values.filter(n => n >= 4).length,
+  };
 }

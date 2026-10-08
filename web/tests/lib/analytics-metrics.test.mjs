@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+import { cumulativeProgressWithHistory } from "../../src/lib/funnel-tiles.mjs";
 import {
   canonicalizeArchetype,
   canonicalizeLocation,
@@ -12,6 +14,26 @@ import {
 
 const app = (status, score = "4.0/5", date = "2026-09-18", extra = {}) => ({ status, score, date, role: "Senior AI Engineer", ...extra });
 
+test("core ledger achievements survive the Analytics view refactor", () => {
+  const metrics = computeProgressMetrics([app("Rejected")], { interviews: 1, offers: 1 });
+  assert.deepEqual(metrics.funnel.map(stage => stage.count), [1, 1, 1, 1, 1]);
+  assert.equal(metrics.interviewRate, 100);
+  assert.equal(metrics.offerRate, 100);
+});
+
+test("progress preserves core history for rejected and discarded rows", async () => {
+  const applications = [app("Rejected", "4/5", "2026-09-18", { n: "1" }),
+    app("Discarded", "4/5", "2026-09-18", { n: "2" }),
+    app("SKIP", "4/5", "2026-09-18", { n: "3" })];
+  const history = "1\t2026-09-01\tInterview\tRejected\n2\t2026-09-01\tOffer\tDiscarded\n3\t2026-09-01\tOffer\tSKIP";
+  const achievements = await cumulativeProgressWithHistory(applications, history,
+    fileURLToPath(new URL("../../../", import.meta.url)));
+  assert.deepEqual(achievements, { applied: 2, responded: 2, interviews: 2, offers: 1 });
+  const metrics = computeProgressMetrics(applications, achievements);
+  assert.deepEqual(metrics.funnel.map(stage => stage.count), [3, 2, 2, 2, 1]);
+  assert.equal(metrics.totalOffers, 1);
+});
+
 test("progress uses cumulative funnel semantics, including hired and rejected", () => {
   const metrics = computeProgressMetrics([
     app("Applied", "4.5/5"),
@@ -22,13 +44,13 @@ test("progress uses cumulative funnel semantics, including hired and rejected", 
     app("Rejected", "N/A"),
   ]);
 
-  assert.deepEqual(metrics.funnel.map((stage) => stage.count), [6, 6, 4, 3, 2]);
+  assert.deepEqual(metrics.funnel.map((stage) => stage.count), [6, 6, 5, 3, 2]);
   assert.deepEqual(metrics.funnel.map((stage) => stage.label), ["Tracked", "Applied", "Responded", "Interview", "Offer"]);
   assert.equal(metrics.funnel[1].pct, 100);
-  assert.equal(metrics.funnel[2].pct, (4 / 6) * 100);
+  assert.equal(metrics.funnel[2].pct, (5 / 6) * 100);
   assert.equal(metrics.activeApps, 5);
   assert.equal(metrics.totalOffers, 2);
-  assert.equal(metrics.responseRate, (4 / 6) * 100);
+  assert.equal(metrics.responseRate, (5 / 6) * 100);
   assert.equal(metrics.interviewRate, (3 / 6) * 100);
   assert.equal(metrics.offerRate, (2 / 6) * 100);
 });
