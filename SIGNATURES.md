@@ -192,3 +192,5 @@ public commit with a stated reason.
 - @JohnFScha | John F. | 2026-10-05 | "We need more tools like this, long live OSS" | id:115885102 | src:https://github.com/career-ops-hq/career-ops/discussions/4775 | n:144
 - @dineshmannam | Dinesh Mannam | 2026-10-06 | id:30947154 | src:https://github.com/career-ops-hq/career-ops/discussions/4828 | n:145
 - @kalilurrahman | Kalilur Rahman | 2026-10-07 | "Great tool. Nice choice for great candidates to apply to good companies" | id:54368215 | src:https://github.com/career-ops-hq/career-ops/discussions/4839 | n:146
+- @Sandeep12a7 | Sandeep Vaskuri | 2026-10-08 | id:130230409 | src:https://github.com/career-ops-hq/career-ops/discussions/4857 | n:147
+- @Akane1986 | Diana | 2026-10-08 | "Now lets use IA to get the next level of my career" | id:130022501 | src:https://github.com/career-ops-hq/career-ops/discussions/4862 | n:148
