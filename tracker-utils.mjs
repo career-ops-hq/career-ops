@@ -343,6 +343,42 @@ export function pathIsInsideCanonical(childPath, parentDir) {
 }
 
 /**
+ * Report numbers whose CV PDF is really on disk, per the PDF manifest.
+ *
+ * One definition for every writer of the tracker PDF flag (sync-pdf-flags.mjs
+ * and merge-tracker.mjs), so they cannot disagree about what counts as present.
+ * A manifest row only asserts the flag when it is a CV row (a `cover` row in
+ * the kind column is skipped, as parsePdfIndex does), its pdf path resolves
+ * inside `<workspaceRoot>/output`, and the file exists. Rows with a missing
+ * file, a path outside output/, or a non-numeric report id are ignored.
+ *
+ * `workspaceRoot` must come from resolveWorkspaceRootFor(), not from the
+ * canonicalized tracker path, or a symlinked data/ checks the wrong root (#3169).
+ *
+ * @param {string} manifestText - Full contents of pdf-index.tsv.
+ * @param {string} workspaceRoot - Workspace root the manifest paths are relative to.
+ * @returns {Set<string>} Report numbers, normalized without leading zeros.
+ */
+export function presentPdfReports(manifestText, workspaceRoot) {
+  const present = new Set();
+  const outputDir = resolve(workspaceRoot, 'output');
+  for (const line of String(manifestText ?? '').split('\n')) {
+    if (!line.trim() || line.startsWith('#')) continue;
+    const fields = line.split('\t');
+    const report = fields[0]?.trim();
+    const relPdf = fields[1]?.trim();
+    if (!report || !/^\d+$/.test(report) || !relPdf) continue;
+    if ((fields[5] ?? '').trim() === 'cover') continue;
+    const num = String(parseInt(report, 10));
+    if (num === '0' || present.has(num)) continue;
+    const absPath = resolve(workspaceRoot, relPdf);
+    if (!pathIsInsideCanonical(absPath, outputDir)) continue;
+    if (existsSync(absPath)) present.add(num);
+  }
+  return present;
+}
+
+/**
  * Compute the tracker lock directory for a tracker file.
  *
  * The lock name is derived from a hash of the canonical tracker path, so every

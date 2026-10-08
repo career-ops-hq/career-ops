@@ -12610,7 +12610,16 @@ try {
       '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
       '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
       trackerRow + '\n');
-    if (pdfIndex !== null) writeFileSync(join(tmp, 'data', 'pdf-index.tsv'), pdfIndex);
+    if (pdfIndex !== null) {
+      writeFileSync(join(tmp, 'data', 'pdf-index.tsv'), pdfIndex);
+      // The flag sync is disk-aware (#4777): back every manifest row with a real file.
+      for (const line of pdfIndex.split('\n')) {
+        const pdfPath = line.startsWith('#') ? '' : (line.split('\t')[1] || '').trim();
+        if (!pdfPath) continue;
+        mkdirSync(dirname(join(tmp, pdfPath)), { recursive: true });
+        writeFileSync(join(tmp, pdfPath), 'pdf-content');
+      }
+    }
     if (additions.length > 0) {
       mkdirSync(additionsDir, { recursive: true });
       for (const addition of additions) {

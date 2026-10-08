@@ -71,6 +71,9 @@ test('merge-tracker resolves executable post-hook from code root and PDF data fr
       tracker,
       `${TRACKER_HEADER}\n| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](../reports/012-acme.md) | seeded |\n`,
     );
+    // The sync is disk-aware (#4777): the manifest row needs a real PDF behind it.
+    mkdirSync(join(dataRoot, 'output'), { recursive: true });
+    writeFileSync(join(dataRoot, 'output', 'cv-acme.pdf'), 'pdf-content');
     writeFileSync(
       join(dataRoot, 'data', 'pdf-index.tsv'),
       '# report\tpdf\thtml\tformat\tdate\n012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',

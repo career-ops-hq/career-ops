@@ -771,6 +771,9 @@ try {
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, TRACKER_HEADER + seed);
     writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    // The sync is disk-aware (#4777): back the manifest row with a real PDF.
+    mkdirSync(join(work, 'output'), { recursive: true });
+    writeFileSync(join(work, 'output', '1.pdf'), 'pdf-content');
     
     // Normal run should trigger sync and flip the PDF flag
     const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
@@ -786,6 +789,38 @@ try {
     }
   } finally {
     rmSync(work, { recursive: true, force: true });
+  }
+
+  // A manifest row whose PDF is gone, or that is a cover letter, must not set the flag (#4777)
+  for (const [label, manifestRow, writeFile] of [
+    ['missing PDF', '1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\tcv', false],
+    ['cover-letter row', '1\toutput/1-cover.pdf\toutput/1.html\ta4\t2026-01-01\tcover', true],
+  ]) {
+    const workGone = mkdtempSync(join(tmpdir(), 'cops-merge-pdf-sync-gone-'));
+    try {
+      const tracker = join(workGone, 'applications.md');
+      const addsDir = join(workGone, 'adds');
+      const pdfIndex = join(workGone, 'pdf-index.tsv');
+      mkdirSync(addsDir, { recursive: true });
+      writeFileSync(tracker, TRACKER_HEADER + seed);
+      writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\tkind\n' + manifestRow + '\n');
+      if (writeFile) {
+        mkdirSync(join(workGone, 'output'), { recursive: true });
+        writeFileSync(join(workGone, 'output', '1-cover.pdf'), 'pdf-content');
+      }
+      execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+        encoding: 'utf-8',
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
+      });
+      const trackerContent = readFileSync(tracker, 'utf-8');
+      if (/\|\s*❌\s*\|\s*\[1\]/.test(trackerContent)) {
+        pass(`merge-tracker does not set ✅ from a ${label} (#4777)`);
+      } else {
+        fail(`merge-tracker set ✅ from a ${label}: row is ${trackerContent.split('\n').find(l => /Acme/.test(l))}`);
+      }
+    } finally {
+      rmSync(workGone, { recursive: true, force: true });
+    }
   }
 
   // Dry-run should skip the sync

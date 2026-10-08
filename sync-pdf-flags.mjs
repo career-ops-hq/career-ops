@@ -9,11 +9,12 @@
  *
  * Normal sync runs under the shared tracker lock and replaces the file atomically.
  *
- * Prune mode (--prune) drops manifest rows whose PDF file is no longer on disk.
- * A deleted artifact otherwise keeps the manifest row alive, which causes the next
- * normal sync to re-assert ✅ on the tracker even though no file backs it. Prune
- * is kind-agnostic: it drops any row (CV or cover letter) whose pdf column points
- * at a missing file. It is a dry run by default — add --write to commit changes.
+ * Normal sync only counts a manifest row when it is a CV row (not a cover
+ * letter) whose PDF exists inside output/, so a deleted file never restores ✅.
+ *
+ * Prune mode (--prune) drops manifest rows whose PDF file is no longer on disk,
+ * so the manifest itself stays tidy. Prune is kind-agnostic: it drops any row
+ * (CV or cover letter) whose pdf column points at a missing file. It is a dry run by default — add --write to commit changes.
  *
  * Usage:
  *   node sync-pdf-flags.mjs [--dry-run] [--json]
@@ -23,7 +24,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, resolveWorkspaceRoot, pathIsInsideCanonical } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, resolveWorkspaceRootFor, pathIsInsideCanonical, presentPdfReports } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
@@ -68,8 +69,7 @@ if (!existsSync(APPS_FILE)) {
 // ---------------------------------------------------------------------------
 // Prune mode: drop manifest rows whose PDF is gone from disk.
 // Kind-agnostic — a cover letter whose file was deleted is just as stale as a
-// CV's. Flag-clearing (resetting ✅ on the tracker) is the follow-on half once
-// #3887 introduces kind-awareness; this half is scoped to the manifest only.
+// CV's. The normal sync no longer re-asserts ✅ from a row whose file is gone.
 // ---------------------------------------------------------------------------
 if (flags.prune) {
   if (!existsSync(PDF_MANIFEST)) {
@@ -93,7 +93,7 @@ if (flags.prune) {
 
   // The workspace root is needed to resolve the workspace-relative pdf paths
   // stored in the manifest (e.g. "output/042-acme-cv.pdf").
-  const workspaceRoot = resolveWorkspaceRoot(APPS_FILE);
+  const workspaceRoot = resolveWorkspaceRootFor(DATA_ROOT);
   const outputDir = resolve(workspaceRoot, 'output');
 
   const inputLines = rawContent.split('\n');
@@ -171,7 +171,8 @@ if (flags.prune) {
 }
 
 // ---------------------------------------------------------------------------
-// Normal sync mode: set tracker PDF cell to ✅ for rows present in the manifest.
+// Normal sync mode: set tracker PDF cell to ✅ for reports whose CV PDF is in
+// the manifest AND on disk.
 // ---------------------------------------------------------------------------
 
 const manifestReports = new Set();
@@ -187,15 +188,9 @@ if (existsSync(PDF_MANIFEST)) {
     }
     process.exit(2);
   }
-  for (const line of content.split('\n')) {
-    if (!line.trim() || line.startsWith('#')) continue;
-    const parts = line.split('\t');
-    const reportVal = parts[0]?.trim();
-    if (reportVal && /^\d+$/.test(reportVal)) {
-      const norm = parseInt(reportVal, 10);
-      if (norm > 0) manifestReports.add(norm);
-    }
-  }
+  // Disk-aware: only CV rows whose PDF exists inside output/ count, the same
+  // resolution and containment rules --prune uses (#4777).
+  for (const num of presentPdfReports(content, resolveWorkspaceRootFor(DATA_ROOT))) manifestReports.add(Number(num));
 }
 
 let transaction;

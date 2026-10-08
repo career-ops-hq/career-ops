@@ -24,13 +24,12 @@ import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { parsePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber } from './tracker-parse.mjs';
 // Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
 // for the same reason normalizeCompany lives in tracker-utils: a second private
 // list is how company identity drifts between scripts (#2445, #3665).
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './invite-match.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates, findDeadReportLink } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolveWorkspaceRootFor, presentPdfReports, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, cell, loadCanonicalStates, findDeadReportLink } from './tracker-utils.mjs';
 // Canonical posting-URL key. Kept in its own module so scan.mjs / scan-history
 // can adopt the same key later without the definitions drifting.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId } from './url-key.mjs';
@@ -500,26 +499,29 @@ function isUnscoreable(s) {
 }
 
 /**
- * Load the optional generated-PDF manifest.
+ * Load the optional generated-PDF manifest as the set of reports whose CV PDF
+ * is really on disk.
  *
  * data/pdf-index.tsv is gitignored and only exists after generate-pdf.mjs has
- * written at least one PDF. Missing manifest = nothing to sync.
+ * written at least one PDF. Missing manifest = nothing to sync. Presence is
+ * decided by presentPdfReports(), shared with sync-pdf-flags.mjs, so the two
+ * writers of the PDF flag cannot disagree (#4777).
  *
- * @returns {Map<string,string>} Normalized report# → PDF path.
+ * @returns {Set<string>} Normalized report numbers with a CV PDF on disk.
  */
 function loadPdfIndex() {
   return existsSync(PDF_INDEX_FILE)
-    ? parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8'))
-    : new Map();
+    ? presentPdfReports(readFileSync(PDF_INDEX_FILE, 'utf-8'), resolveWorkspaceRootFor(DATA_ROOT))
+    : new Set();
 }
 
 /**
- * Flip stale PDF cells to ✅ when the generated-PDF manifest has the row's
- * report number.
+ * Flip stale PDF cells to ✅ when the manifest has a CV PDF on disk for the
+ * row's report number.
  *
  * @param {Array<object>} existingApps - Parsed tracker rows.
  * @param {string[]} appLines - Mutable tracker file lines.
- * @param {Map<string,string>} pdfIndex - Normalized report# → PDF path.
+ * @param {Set<string>} pdfIndex - Normalized report numbers with a CV PDF on disk.
  * @returns {number} Number of tracker rows updated.
  */
 function syncPdfFlags(existingApps, appLines, pdfIndex) {
@@ -528,7 +530,7 @@ function syncPdfFlags(existingApps, appLines, pdfIndex) {
 
   for (const app of existingApps) {
     const reportNum = extractReportNum(app.report, app.notes);
-    if (!reportNum || !pdfIndex.has(String(reportNum)) || app.pdf !== '❌') continue;
+    if (!reportNum || !pdfIndex.has(String(parseInt(reportNum, 10))) || app.pdf !== '❌') continue;
 
     const lineIdx = appLines.indexOf(app.raw);
     if (lineIdx < 0) continue;
