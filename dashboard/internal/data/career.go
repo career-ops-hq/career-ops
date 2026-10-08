@@ -145,6 +145,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			JobURL:               at("url"),
 			Status:               at("status"),
 			HasPDF:               strings.Contains(at("pdf"), "\u2705"),
+			Location:             CanonicalizeLocation(at("location")),
 		}
 
 		// Parse score from the Score column.
