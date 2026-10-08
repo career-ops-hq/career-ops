@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { load } from 'js-yaml';
-import { computeProgressMetrics } from '../web/src/lib/analytics-metrics.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const hasWeb = existsSync(join(ROOT, 'web', 'src'));
+const { computeProgressMetrics } = hasWeb ? await import('../web/src/lib/analytics-metrics.mjs') : {};
 
 const states = load(readFileSync(new URL('../templates/states.yml', import.meta.url), 'utf8')).states;
 const expected = {
@@ -15,7 +20,7 @@ const expected = {
 
 for (const state of states) {
   const key = state.label.toUpperCase();
-  test(`Analytics independently classifies canonical ${state.label}`, () => {
+  test(`Analytics independently classifies canonical ${state.label}`, { skip: !hasWeb }, () => {
     assert.ok(expected[key], `No contract case for ${key}`);
     const metrics = computeProgressMetrics([{ status: state.label }]);
     assert.deepEqual(metrics.funnel.map(stage => stage.count), expected[key]);
