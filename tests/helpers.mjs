@@ -890,8 +890,8 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the updater suites that drive git
- * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`, and
+ * Build a throwaway git repository for the updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`, and
  * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
  * the second writes its own .gitignore and asks about index membership; the
  * third builds real backup/target commits and invokes the rollback CLI.

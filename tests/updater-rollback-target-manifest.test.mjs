@@ -23,7 +23,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   MANIFEST_USER_PATH_OVERLAPS,
-  gitIn,
   isSafeManifestPath,
   manifestTreeFiles,
   pairTargetRef,
@@ -190,7 +189,7 @@ function rejectedBy(fn) {
 
 // ── 5. Target refs are retained only while their strict backup branch exists ──
 {
-  const { dir, g, ctx } = makeUpdaterRepo(gitIn, { prefix: 'co-target-ref-prune-' });
+  const { dir, g, ctx } = makeUpdaterRepo({ prefix: 'co-target-ref-prune-' });
   try {
     writeFileSync(join(dir, 'seed.txt'), 'seed\n');
     g('add', 'seed.txt');
@@ -230,7 +229,7 @@ function rejectedBy(fn) {
 
 // ── 5b. A re-exec keeps the pair its parent made ──
 {
-  const { dir, g, ctx } = makeUpdaterRepo(gitIn, { prefix: 'co-target-ref-pair-' });
+  const { dir, g, ctx } = makeUpdaterRepo({ prefix: 'co-target-ref-pair-' });
   try {
     const commitFile = (name) => {
       writeFileSync(join(dir, name), `${name}\n`);
@@ -285,7 +284,7 @@ function rejectedBy(fn) {
 
 // ── 6. Tree expansion yields concrete, safe files only ──
 {
-  const { dir, g, ctx } = makeUpdaterRepo(gitIn, {
+  const { dir, g, ctx } = makeUpdaterRepo({
     prefix: 'co-rollback-manifest-files-',
     includeRoot: true,
   });
@@ -386,7 +385,7 @@ function runRollback(dir, timeout = 30_000) {
 const bulkFile = (i) => `system/nested/bulk/${'argv-length-'.repeat(11)}${String(i).padStart(4, '0')}.txt`;
 
 function seedRollbackRepo(prefix, { paired, fetchTarget, targetChangesPreExisting = false, bulkFiles = 0 }) {
-  const fixture = makeUpdaterRepo(gitIn, { prefix });
+  const fixture = makeUpdaterRepo({ prefix });
   const { dir, g } = fixture;
   const backup = paired
     ? 'backup-pre-update-1.2.3-20260907T120000Z'
@@ -596,7 +595,7 @@ function readMaybe(path) {
 
 // ── 8. Real CLI: file/directory transitions are not misclassified as new ──
 {
-  const fixture = makeUpdaterRepo(gitIn, { prefix: 'co-rollback-tree-shape-' });
+  const fixture = makeUpdaterRepo({ prefix: 'co-rollback-tree-shape-' });
   const { dir, g } = fixture;
   const backup = 'backup-pre-update-1.2.3-20260907T140000Z';
   const backupManifest = [
@@ -672,7 +671,7 @@ function readMaybe(path) {
 // Two or more levels down, lstat on the next segment fails with ENOTDIR, which
 // must not abort a half-applied rollback.
 {
-  const fixture = makeUpdaterRepo(gitIn, { prefix: 'co-rollback-deep-shape-' });
+  const fixture = makeUpdaterRepo({ prefix: 'co-rollback-deep-shape-' });
   const { dir, g } = fixture;
   const backup = 'backup-pre-update-1.2.3-20260907T150000Z';
   try {
