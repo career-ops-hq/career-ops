@@ -138,6 +138,20 @@ test("loading transitions keep context and only latest requests settle Today", {
     assert.equal(await updatesAlert.count(), 0);
   });
 
+  await t.test("HTTP 200 cadence-unavailable is an error, not an empty queue", async (subtest) => {
+    subtest.after(() => page.unrouteAll({ behavior: "wait" }));
+    await page.route(/\/api\/(followups|whats-new)(\?|$)/, (route) => route.fulfill({ json:
+      new URL(route.request().url()).pathname === "/api/followups"
+        ? { available: false, metadata: null, entries: [], nextUpcoming: null }
+        : emptyFresh,
+    }));
+    await page.goto(origin.origin);
+    await page.getByRole("button", { name: "Retry updates" }).waitFor();
+    assert.equal(await heading.innerText(), "Some updates are unavailable.");
+    assert.match(await updatesAlert.innerText(), /Follow-ups could not be loaded/);
+    assert.equal(await page.getByText("You're all caught up.", { exact: true }).count(), 0);
+  });
+
   await t.test("older success cannot end a newer load; older failure cannot replace newer success", async (subtest) => {
     const gates = new Map();
     const counts = new Map();

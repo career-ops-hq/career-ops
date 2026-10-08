@@ -55,6 +55,9 @@ export function TodayDashboard({
       })
       .then((d) => {
         if (!isLatest()) return;
+        // The cadence route reports engine failures as HTTP 200 with
+        // available:false; that is unavailable, not an empty action queue.
+        if (d.available === false) throw new Error("Follow-ups unavailable");
         // /api/followups already filters to urgency 'urgent'/'overdue' — due
         // now, never 'waiting'/'cold' (#86). Both count toward "due"; a
         // missing metadata.overdue must read as 0 due, never as "every entry
