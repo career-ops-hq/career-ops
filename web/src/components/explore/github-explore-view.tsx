@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Download, Search, MapPin, Clock, Filter, FileText } from "lucide-react";
+import { Download, Search, MapPin, Clock, Filter, FileText, X, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
@@ -66,6 +66,7 @@ export function GitHubExploreView() {
   const [recencyMaxDays, setRecencyMaxDays] = useState<number>(Infinity);
   const [selectedSections, setSelectedSections] = useState<string[]>(["Data Science"]);
   const [tailorId, setTailorId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggleSection = (key: string) => {
     setSelectedSections((prev) =>
@@ -258,56 +259,141 @@ export function GitHubExploreView() {
 
       {/* Results grid */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {filtered.map((l, idx) => (
-          <Card key={`${l.company}-${l.role}-${idx}`} className="group p-4 hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="font-medium text-sm truncate">{l.company}</p>
-                  {l.track && (
-                    <span className={cn("shrink-0 rounded px-1 py-0.5 text-[9px] font-bold", TRACK_COLORS[l.track] ?? "bg-zinc-500/15 text-zinc-500")}>
-                      {l.track}
+        {filtered.map((l, idx) => {
+          const isExpanded = expandedId === l.id;
+          return (
+            <Card
+              key={`${l.company}-${l.role}-${idx}`}
+              className={cn(
+                "group p-4 transition-shadow cursor-pointer",
+                isExpanded
+                  ? "sm:col-span-2 xl:col-span-3 shadow-lg border-brand/30"
+                  : "hover:shadow-md",
+              )}
+              onClick={() => setExpandedId(isExpanded ? null : l.id)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className={cn("font-medium text-sm", !isExpanded && "truncate")}>{l.company}</p>
+                    {l.track && (
+                      <span className={cn("shrink-0 rounded px-1 py-0.5 text-[9px] font-bold", TRACK_COLORS[l.track] ?? "bg-zinc-500/15 text-zinc-500")}>
+                        {l.track}
+                      </span>
+                    )}
+                  </div>
+                  <p className={cn("text-xs text-muted mt-0.5", !isExpanded && "truncate")}>{l.role}</p>
+                </div>
+                <div className="flex shrink-0 gap-1.5" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => setTailorId(l.id)}
+                    className="rounded-lg border border-border px-2 py-1 text-[10px] font-medium text-muted hover:text-brand hover:bg-brand/10 transition-colors flex items-center gap-1"
+                  >
+                    <FileText className="h-3 w-3" />
+                    Tailor
+                  </button>
+                  {l.url && (
+                    <a
+                      href={l.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-border px-2.5 py-1 text-[10px] font-medium text-brand hover:bg-brand/10 transition-colors"
+                    >
+                      Apply
+                    </a>
+                  )}
+                  {isExpanded && (
+                    <button
+                      onClick={() => setExpandedId(null)}
+                      className="rounded-lg border border-border px-1.5 py-1 text-muted hover:text-foreground transition-colors"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isExpanded ? (
+                <div className="mt-4 space-y-3 border-t border-border pt-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <p className="text-[11px] font-medium text-muted uppercase tracking-wide">Role</p>
+                      <p className="mt-0.5 text-sm">{l.role}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium text-muted uppercase tracking-wide">Company</p>
+                      <p className="mt-0.5 text-sm">{l.company}</p>
+                    </div>
+                    {l.location && (
+                      <div>
+                        <p className="text-[11px] font-medium text-muted uppercase tracking-wide">Location</p>
+                        <p className="mt-0.5 text-sm flex items-center gap-1">
+                          <MapPin className="h-3.5 w-3.5 text-muted" />
+                          {l.location}
+                        </p>
+                      </div>
+                    )}
+                    {l.age && (
+                      <div>
+                        <p className="text-[11px] font-medium text-muted uppercase tracking-wide">Posted</p>
+                        <p className="mt-0.5 text-sm flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5 text-muted" />
+                          {l.age} ago
+                        </p>
+                      </div>
+                    )}
+                    {l.track && (
+                      <div>
+                        <p className="text-[11px] font-medium text-muted uppercase tracking-wide">Track</p>
+                        <p className="mt-0.5">
+                          <span className={cn("rounded px-1.5 py-0.5 text-xs font-bold", TRACK_COLORS[l.track] ?? "bg-zinc-500/15 text-zinc-500")}>
+                            {l.track}
+                          </span>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  {l.url && (
+                    <div className="flex items-center gap-3 pt-1">
+                      <a
+                        href={l.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-brand-foreground transition hover:brightness-110"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open Application
+                      </a>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setTailorId(l.id); }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand transition-colors"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Tailor Resume
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-2 flex items-center gap-3 text-[11px] text-muted">
+                  {l.location && (
+                    <span className="flex items-center gap-1 truncate">
+                      <MapPin className="h-3 w-3 shrink-0" />
+                      {l.location}
+                    </span>
+                  )}
+                  {l.age && (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <Clock className="h-3 w-3" />
+                      {l.age}
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-muted truncate mt-0.5">{l.role}</p>
-              </div>
-              <div className="flex shrink-0 gap-1.5">
-                <button
-                  onClick={() => setTailorId(l.id)}
-                  className="rounded-lg border border-border px-2 py-1 text-[10px] font-medium text-muted hover:text-brand hover:bg-brand/10 transition-colors flex items-center gap-1"
-                >
-                  <FileText className="h-3 w-3" />
-                  Tailor
-                </button>
-                {l.url && (
-                  <a
-                    href={l.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="rounded-lg border border-border px-2.5 py-1 text-[10px] font-medium text-brand hover:bg-brand/10 transition-colors"
-                  >
-                    Apply
-                  </a>
-                )}
-              </div>
-            </div>
-            <div className="mt-2 flex items-center gap-3 text-[11px] text-muted">
-              {l.location && (
-                <span className="flex items-center gap-1 truncate">
-                  <MapPin className="h-3 w-3 shrink-0" />
-                  {l.location}
-                </span>
               )}
-              {l.age && (
-                <span className="flex items-center gap-1 shrink-0">
-                  <Clock className="h-3 w-3" />
-                  {l.age}
-                </span>
-              )}
-            </div>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
