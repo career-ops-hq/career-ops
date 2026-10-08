@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Download, Search, ExternalLink, MapPin, Clock, Filter } from "lucide-react";
+import { Download, Search, MapPin, Clock, Filter, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
+import { TailorPanel } from "@/components/internships/tailor-panel";
 
 type GitHubInternship = {
+  id: string;
   company: string;
   role: string;
   location: string;
@@ -64,6 +65,7 @@ export function GitHubExploreView() {
   const [trackFilter, setTrackFilter] = useState<string>("all");
   const [recencyMaxDays, setRecencyMaxDays] = useState<number>(Infinity);
   const [selectedSections, setSelectedSections] = useState<string[]>(["Data Science"]);
+  const [tailorId, setTailorId] = useState<string | null>(null);
 
   const toggleSection = (key: string) => {
     setSelectedSections((prev) =>
@@ -97,6 +99,7 @@ export function GitHubExploreView() {
         const ghListings = all
           .filter((i: Record<string, string>) => i.source === "simplify-github")
           .map((i: Record<string, string>) => ({
+            id: i.id,
             company: i.company,
             role: i.role,
             location: i.location || "",
@@ -269,16 +272,25 @@ export function GitHubExploreView() {
                 </div>
                 <p className="text-xs text-muted truncate mt-0.5">{l.role}</p>
               </div>
-              {l.url && (
-                <a
-                  href={l.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-[10px] font-medium text-brand hover:bg-brand/10 transition-colors"
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  onClick={() => setTailorId(l.id)}
+                  className="rounded-lg border border-border px-2 py-1 text-[10px] font-medium text-muted hover:text-brand hover:bg-brand/10 transition-colors flex items-center gap-1"
                 >
-                  Apply
-                </a>
-              )}
+                  <FileText className="h-3 w-3" />
+                  Tailor
+                </button>
+                {l.url && (
+                  <a
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg border border-border px-2.5 py-1 text-[10px] font-medium text-brand hover:bg-brand/10 transition-colors"
+                  >
+                    Apply
+                  </a>
+                )}
+              </div>
             </div>
             <div className="mt-2 flex items-center gap-3 text-[11px] text-muted">
               {l.location && (
@@ -302,6 +314,10 @@ export function GitHubExploreView() {
         <Card className="py-12 text-center">
           <p className="text-sm text-muted">No listings match your search.</p>
         </Card>
+      )}
+
+      {tailorId && (
+        <TailorPanel internshipId={tailorId} onClose={() => setTailorId(null)} />
       )}
     </div>
   );
