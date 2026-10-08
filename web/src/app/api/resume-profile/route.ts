@@ -281,6 +281,18 @@ export async function GET() {
 
 // POST: parse the most recent uploaded resume and save profile
 export async function POST(_req: NextRequest) {
+  try {
+    return await parseAndSaveResume();
+  } catch (err) {
+    console.error("resume-profile POST error:", err);
+    return NextResponse.json(
+      { error: `Failed to parse resume: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 },
+    );
+  }
+}
+
+async function parseAndSaveResume() {
   const uploadsDir = UPLOADS_DIR();
 
   // Find the most recent resume file
@@ -308,14 +320,23 @@ export async function POST(_req: NextRequest) {
   let text: string;
 
   if (ext === ".pdf") {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PDFParse } = require("pdf-parse") as { PDFParse: new (opts: { data: Buffer }) => { getText(): Promise<string>; destroy(): void } };
-    const buffer = fs.readFileSync(latest.path);
-    const parser = new PDFParse({ data: buffer });
+    // pdf-parse's pdfjs-dist worker breaks inside Next.js's bundler, so we
+    // shell out to a tiny Node script that runs pdf-parse in a clean process.
+    const { execFileSync } = await import("node:child_process");
     try {
-      text = await parser.getText();
-    } finally {
-      parser.destroy();
+      text = execFileSync("node", [
+        "-e",
+        `const{PDFParse}=require("pdf-parse");const fs=require("fs");
+         const p=new PDFParse({data:fs.readFileSync(process.argv[1])});
+         p.getText().then(r=>{process.stdout.write(typeof r==="string"?r:r.text);p.destroy()})
+         .catch(e=>{process.stderr.write(e.message);process.exit(1)});`,
+        latest.path,
+      ], { encoding: "utf8", timeout: 30000, cwd: path.resolve(process.cwd()) });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `PDF parsing failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 },
+      );
     }
   } else if (ext === ".txt" || ext === ".md") {
     text = fs.readFileSync(latest.path, "utf8");
