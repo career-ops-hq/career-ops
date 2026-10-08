@@ -248,8 +248,10 @@ export function PipelineView({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border" aria-busy={isPending}>
-              {isPending ? <PipelineTableRowsSkeleton trackerColumn /> : filtered.map((r) => {
+            {/* Keep editors mounted while query navigation is pending: sorting
+                must not discard an open editor or an in-flight status save. */}
+            <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
+              {filtered.map((r) => {
                 const company = companyPresentation(r);
                 const key = applicationKey(r);
                 return (
@@ -297,6 +299,11 @@ export function PipelineView({
                 );
               })}
             </tbody>
+            {isPending && (
+              <tbody className="divide-y divide-border" aria-busy="true">
+                <PipelineTableRowsSkeleton trackerColumn />
+              </tbody>
+            )}
           </table>
         </div>
       ) : (
