@@ -62,6 +62,47 @@ const TRACK_COLORS: Record<string, string> = {
   SWE: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
 };
 
+// Stem-aware search: "data analytics" matches "data analyst", "science" matches "scientist", etc.
+const STEM_MAP: Record<string, string[]> = {
+  analyt: ["analyst", "analytics", "analytical", "analysis", "analyze"],
+  scien: ["science", "scientist", "scientific"],
+  engineer: ["engineer", "engineering"],
+  develop: ["developer", "development", "developing"],
+  design: ["designer", "design", "designing"],
+  manag: ["manager", "management", "managing"],
+  research: ["researcher", "research", "researching"],
+  program: ["programmer", "programming", "program"],
+  consult: ["consultant", "consulting"],
+  intel: ["intelligence", "intelligent"],
+  learn: ["learning", "learner"],
+  model: ["modeler", "modeling", "model", "models"],
+  visual: ["visualization", "visualize", "visual"],
+  stat: ["statistics", "statistical", "statistician"],
+  machine: ["machine"],
+  business: ["business"],
+  data: ["data"],
+  software: ["software"],
+  product: ["product"],
+  quant: ["quantitative", "quant"],
+};
+
+function fuzzyMatch(term: string, haystack: string): boolean {
+  // Direct substring match first
+  if (haystack.includes(term)) return true;
+  // Check each word in the search term against stem families
+  const words = term.split(/\s+/);
+  return words.every((word) => {
+    if (haystack.includes(word)) return true;
+    // Find which stem family this word belongs to, then check if any sibling matches
+    for (const [, family] of Object.entries(STEM_MAP)) {
+      if (family.some((f) => f.startsWith(word) || word.startsWith(f))) {
+        if (family.some((sibling) => haystack.includes(sibling))) return true;
+      }
+    }
+    return false;
+  });
+}
+
 export function InternshipsView() {
   const [internships, setInternships] = useState<Internship[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,8 +142,8 @@ export function InternshipsView() {
     if (searchQuery) {
       const terms = searchQuery.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
       if (terms.length > 0) {
-        const haystack = `${i.company} ${i.role} ${i.location} ${i.notes} ${i.track ?? ""} ${i.term ?? ""} ${i.source ?? ""}`.toLowerCase();
-        if (!terms.some((t) => haystack.includes(t))) return false;
+        const haystack = `${i.company} ${i.role} ${i.location} ${i.notes} ${i.track ?? ""} ${i.term ?? ""} ${i.source ?? ""} ${i.requirements ?? ""}`.toLowerCase();
+        if (!terms.some((t) => fuzzyMatch(t, haystack))) return false;
       }
     }
     if (trackFilter !== "all" && i.track !== trackFilter) return false;
