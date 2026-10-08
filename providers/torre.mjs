@@ -1,6 +1,23 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+// Torre provider — RETIRED (#4859, 2026-10-08). The public opportunity search
+// this provider read (POST https://search.torre.co/opportunities/_search) now
+// answers HTTP 400 {"meta":{"message":"Invalid request"}} to every body,
+// including `{}`, and torre.ai's own job search became an AI chat that makes no
+// request to search.torre.co. The API this was built on looks changed or
+// retired, so there is nothing to repair against.
+//
+// fetch() below throws immediately with that explanation instead of surfacing
+// a bare "HTTP 400 Bad Request" for each configured entry. detect() still
+// matches `provider: torre` on purpose, so the message reaches anyone who still
+// has an entry — remove it from portals.yml once seen. See
+// docs/SUPPORTED_JOB_BOARDS.md. buildTorreQuery() and
+// normalizeTorreOpportunity() are kept (and still unit-tested) as a record of
+// the old wire shape; they are dead code today since fetch() never reaches them.
+//
+// What follows describes the API as it behaved BEFORE it was retired.
+//
 // Torre provider — the public opportunity search behind torre.ai
 // (POST https://search.torre.co/opportunities/_search). Public, zero-auth JSON.
 // Torre is a pan-LatAm talent marketplace (Colombia-born); its board carries
@@ -59,6 +76,14 @@
 // Torre's ranking is not relevance-ordered for a `skill/role` text filter, so a
 // broad `search` returns loosely-related roles. That is expected and harmless —
 // title_filter drops them downstream.
+
+// The retirement message thrown by fetch() below — also asserted in
+// tests/providers/torre.test.mjs, so update both together.
+const RETIRED_MESSAGE =
+  'torre: this source is unavailable — search.torre.co/opportunities/_search now answers ' +
+  'HTTP 400 "Invalid request" to every query, and torre.ai\'s job search no longer uses it (#4859). ' +
+  'This provider is retired, not broken-and-fixable: remove `provider: torre` from ' +
+  'portals.yml. See docs/SUPPORTED_JOB_BOARDS.md.';
 
 const SEARCH_ENDPOINT = 'https://search.torre.co/opportunities/_search';
 const TRUSTED_API_HOST = 'search.torre.co';
@@ -196,38 +221,14 @@ export function normalizeTorreOpportunity(o, fallbackCompany) {
 export default {
   id: 'torre',
 
-  async fetch(entry, ctx) {
-    assertTorreUrl(SEARCH_ENDPOINT);
-    const body = JSON.stringify(buildTorreQuery(entry));
-    const fallbackCompany = entry?.name;
+  detect(entry) {
+    return entry?.provider === 'torre' ? { url: SEARCH_ENDPOINT } : null;
+  },
 
-    // Exactly one request: the endpoint caps at 20 rows and ignores every
-    // pagination form, so a loop could only refetch the same page (quirk 2).
-    // ctx.maxPages needs no handling for the same reason — one page is all
-    // there is, which is already what the health probe wants.
-    const url = `${SEARCH_ENDPOINT}?offset=0&size=${PAGE_SIZE}`;
-    // redirect:'error' prevents SSRF via server-side redirects
-    const json = await ctx.fetchJson(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      redirect: 'error',
-    });
-
-    if (!json || !Array.isArray(json.results)) {
-      throw new Error(
-        `torre: unexpected API response — expected { results: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`,
-      );
-    }
-
-    const out = [];
-    const seen = new Set();
-    for (const o of json.results) {
-      const normalized = normalizeTorreOpportunity(o, fallbackCompany);
-      if (!normalized || seen.has(normalized.url)) continue;
-      seen.add(normalized.url);
-      out.push(normalized);
-    }
-    return out;
+  async fetch() {
+    // Deliberately no network call: the endpoint rejects every body (see the
+    // file header). Throwing here, with the cause named, replaces one opaque
+    // "HTTP 400 Bad Request" per configured entry with something actionable.
+    throw new Error(RETIRED_MESSAGE);
   },
 };
