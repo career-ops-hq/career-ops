@@ -71,17 +71,15 @@ export function TailorPanel({ internshipId, onClose }: { internshipId: string; o
       setLoading(true);
       setError(null);
       try {
-        // Ensure resume profile is parsed (trigger parse only if missing, not if corrupt)
-        const profileCheck = await fetch("/api/resume-profile");
-        if (profileCheck.status === 404) {
-          const parseRes = await fetch("/api/resume-profile", { method: "POST" });
-          if (!parseRes.ok) {
-            const body = await parseRes.json().catch(() => null);
-            setError(body?.error ?? "Could not parse resume — upload a resume first");
-            return;
-          }
-        } else if (profileCheck.status === 500) {
-          setError("Resume profile is corrupt — re-upload your resume to fix");
+        // Always re-parse from the latest uploaded resume so swapping resumes takes effect immediately
+        const parseRes = await fetch("/api/resume-profile", { method: "POST" });
+        if (!parseRes.ok && parseRes.status !== 404) {
+          const body = await parseRes.json().catch(() => null);
+          setError(body?.error ?? "Could not parse resume — upload a resume first");
+          return;
+        }
+        if (parseRes.status === 404) {
+          setError("No resume uploaded yet — upload one on the Uploads page first");
           return;
         }
 
