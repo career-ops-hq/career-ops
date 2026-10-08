@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, utimesSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, existsSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { acquireTrackerLock } from '../tracker-utils.mjs';
@@ -940,6 +940,7 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   mkdirSync(join(sb.dir, 'status-log.tsv'));
   runSetStatus(['2', 'Applied', '--json'], sb);
   rmSync(join(sb.dir, 'status-log.tsv'), { recursive: true, force: true });
+  writeFileSync(join(sb.dir, 'status-log.tsv'), '2\t2026-06-02\t-\tEvaluated\timport\t\n');
   const repaired = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
   const parsed = JSON.parse(repaired.stdout);
   const log = readFileSync(join(sb.dir, 'status-log.tsv'), 'utf8');
@@ -951,6 +952,22 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
     pass('ledger: explicit Applied retry repairs a missing observation exactly once');
   } else {
     fail(`ledger repair contract broken (code=${repaired.code}, repaired=${parsed.statusLogRepaired})`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// A repair flag on a row with no earlier ledger entry must not invent history.
+{
+  const sb = makeSandbox(TRACKER_9);
+  runSetStatus(['2', 'Applied', '--json'], sb);
+  rmSync(join(sb.dir, 'status-log.tsv'), { force: true });
+  const r = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
+  const parsed = JSON.parse(r.stdout);
+  const exists = existsSync(join(sb.dir, 'status-log.tsv'));
+  if (r.code === 0 && !parsed.statusLogRepaired && !exists) {
+    pass('ledger: repair without earlier ledger history appends nothing');
+  } else {
+    fail(`ledger repair invented history (code=${r.code}, exists=${exists})`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }

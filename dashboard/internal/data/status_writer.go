@@ -10,7 +10,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+)
+
+// pendingRepairs remembers Applied saves that returned a partial-success error,
+// so only an explicit retry of the same row asks set-status.mjs to repair the
+// missing lifecycle records. A routine Applied save never requests repair.
+var (
+	pendingRepairsMu sync.Mutex
+	pendingRepairs   = map[string]struct{ ledger, followup bool }{}
 )
 
 // Scripts belong to the checkout, even when --path points at a data-only root.
@@ -49,11 +58,27 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 		return err
 	}
 	args := []string{script, "--report-link", report, status, "--json"}
+	repairKey := tracker + "\x00" + report
 	if strings.EqualFold(status, "applied") {
-		// A retry after a partial Applied save may need to repair missing
+		// Only a retry after a partial Applied save may repair missing
 		// lifecycle observations even though the tracker is already Applied.
-		args = append(args, "--repair-status-log")
-		args = append(args, "--repair-followup")
+		pendingRepairsMu.Lock()
+		pending := pendingRepairs[repairKey]
+		pendingRepairsMu.Unlock()
+		if pending.ledger {
+			args = append(args, "--repair-status-log")
+		}
+		if pending.followup {
+			args = append(args, "--repair-followup")
+		}
+	}
+	markPending := func(ledger, followup bool) {
+		pendingRepairsMu.Lock()
+		defer pendingRepairsMu.Unlock()
+		p := pendingRepairs[repairKey]
+		p.ledger = p.ledger || ledger
+		p.followup = p.followup || followup
+		pendingRepairs[repairKey] = p
 	}
 	if note != "" {
 		args = append(args, "--note="+note)
@@ -107,13 +132,19 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	// The CLI treats these as non-fatal after the tracker commit. Surface that
 	// partial success so a missing lifecycle record cannot disappear silently.
 	if result.StatusLogged != nil && !*result.StatusLogged {
+		markPending(true, false)
 		return fmt.Errorf("status saved, but status-log append failed: %s", strings.TrimSpace(stderr.String()))
 	}
 	if repair := result.StatusLogRepair; repair != nil && repair.Error != "" {
+		markPending(true, false)
 		return fmt.Errorf("status saved, but status-log repair failed: %s", repair.Error)
 	}
 	if seed := result.FollowupSeeded; seed != nil && seed.Reason == "error" {
+		markPending(false, true)
 		return fmt.Errorf("status saved, but follow-up seeding failed: %s", seed.Error)
 	}
+	pendingRepairsMu.Lock()
+	delete(pendingRepairs, repairKey)
+	pendingRepairsMu.Unlock()
 	return nil
 }

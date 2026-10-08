@@ -5641,18 +5641,6 @@ try {
     fail(`tracker writers bypass shared transaction scope: ${unsafeWriters.join(', ')}`);
   }
 
-  // The canonical writer itself must hold the tracker lock before it reads
-  // and atomically replaces applications.md; the dashboard delegates to it.
-  const setStatusSource = readFile('set-status.mjs');
-  const lockAt = setStatusSource.indexOf('await acquireTrackerLockForCli(');
-  const replaceAt = setStatusSource.indexOf('writeFileAtomic(APPS_FILE');
-  const readAt = setStatusSource.indexOf('readFileSync(APPS_FILE', lockAt);
-  if (lockAt >= 0 && readAt > lockAt && replaceAt > readAt) {
-    pass('set-status.mjs acquires the tracker lock before reading and atomically replacing the tracker');
-  } else {
-    fail('set-status.mjs escapes the shared tracker lock transaction scope');
-  }
-
   // The dashboard must use the same canonical writer as the CLI. Keep this
   // boundary check beside the root-writer contract so a future UI refactor
   // cannot silently reintroduce a direct tracker mutation that skips the

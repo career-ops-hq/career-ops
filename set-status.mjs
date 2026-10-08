@@ -824,11 +824,15 @@ try {
       console.error(`⚠ ${error}`);
     } else if (timeline.at(-1)?.to === 'Applied') {
       statusLogRepair = { attempted: true, repaired: false, reason: 'already-present' };
+    } else if (timeline.length === 0) {
+      // No earlier ledger entry for this row: nothing proves a transition was
+      // lost, so do not invent history from the tracker date alone.
+      statusLogRepair = { attempted: true, repaired: false, reason: 'no-history' };
     } else {
       // Prefer an explicit event date, then the latest effective ledger date,
       // then the tracker's own dated row. Never invent today's date for an
       // existing Applied row whose history is older or absent.
-      const eventDate = flags.on ?? timeline.at(-1)?.date ?? target.date;
+      const eventDate = flags.on ?? timeline.at(-1).date;
       if (!eventDate) {
         const error = 'status-log repair needs an event date (--on or a dated tracker row)';
         statusLogRepair = { attempted: true, repaired: false, error };

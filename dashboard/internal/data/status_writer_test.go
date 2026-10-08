@@ -118,6 +118,9 @@ func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
 	if err := os.Remove(logPath); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(logPath, []byte("42\t2026-09-01\t-\tEvaluated\timport\t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
 		t.Fatalf("same-status retry should repair the ledger: %v", err)
 	}
@@ -279,5 +282,24 @@ func TestDashboardStatusDoesNotExecuteDataOnlyScripts(t *testing.T) {
 				t.Fatalf("data-only script must not run: %v", err)
 			}
 		})
+	}
+}
+
+func TestDashboardStatusRoutineAppliedSaveDoesNotRepair(t *testing.T) {
+	t.Setenv("CAREER_OPS_TRACKER", "")
+	root, tracker := writeTracker(t, statusTargetHeader+statusTargetRow)
+	logPath := filepath.Join(filepath.Dir(tracker), "status-log.tsv")
+	if err := os.WriteFile(logPath, []byte("42\t2026-08-01\t-\tEvaluated\timport\t\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ledger), "correction") {
+		t.Fatalf("routine Applied save must not append a correction: %s", ledger)
 	}
 }
