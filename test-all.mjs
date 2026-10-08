@@ -1374,10 +1374,10 @@ try {
     fail(`410 precedence lost to frame aggregation: ${JSON.stringify(goneWithFrame)}`);
   }
 
-  // A 410 must not pay the frame poll: the status already decided it, and a
+  // A 410 must not pay the frame wait: the status already decided it, and a
   // dead posting whose error page renders into an iframe would otherwise wait
   // for that error page to fill before saying what it knew at byte one.
-  // Count only the 500ms frame-poll waits.
+  // Count only the 500ms frame-wait ticks.
   let pollWaits = 0;
   const gonePage = framedPage({
     status: 410,
@@ -1387,7 +1387,7 @@ try {
   gonePage.waitForTimeout = async (ms) => { if (ms === 500) pollWaits += 1; };
   const goneFast = await checkUrlLiveness(gonePage, SHELL);
   if (goneFast.result === 'expired' && goneFast.code === 'http_gone' && pollWaits === 0) {
-    pass('HTTP 410 short-circuits before the frame poll (no wait spent)');
+    pass('HTTP 410 short-circuits before the frame wait (no wait spent)');
   } else {
     fail(`410 did not short-circuit: ${JSON.stringify(goneFast)}, poll waits=${pollWaits}`);
   }

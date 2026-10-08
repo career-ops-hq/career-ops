@@ -81,7 +81,7 @@ const LISTING_PAGE_PATTERNS = [
 // expired?", and — before the closed-loop guard on the closed pattern above —
 // "This role is closed-loop control of the platform" prose. liveness-browser
 // hands classifyLiveness the whole page innerText plus same-origin iframe
-// text (liveness-browser.mjs:434), so those elements are in scope.
+// text (`readPage` in liveness-browser.mjs), so those elements are in scope.
 //
 // Moved down here so the same phrase in a dead-page scenario (nodesk.co's
 // bare "JOB EXPIRED" banner, no apply control, per #4175) still fires. The

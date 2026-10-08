@@ -22,8 +22,9 @@ const NAVIGATE_TIMEOUT_MS = 15_000;
 const HYDRATION_POLL_MS = 250;
 const HYDRATION_MAX_POLLS = 16;
 const HYDRATING_CODES = new Set(['insufficient_content', 'no_apply_control']);
-// Upper bound on the extra wait for a same-origin child frame to populate, and
-// the poll interval inside it. Only spent when such a frame exists at all.
+// Upper bound on the extra wait for same-origin child frames to populate, and
+// the poll interval inside it. Only spent when the page poll ends undecided
+// while such a frame is present.
 const FRAME_CONTENT_TIMEOUT_MS = 6_000;
 const FRAME_CONTENT_POLL_MS = 500;
 

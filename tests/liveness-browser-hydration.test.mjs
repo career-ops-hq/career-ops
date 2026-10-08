@@ -1,5 +1,5 @@
 // tests/liveness-browser-hydration.test.mjs — checkUrlLiveness polls the
-// top-level document while an SPA hydrates.
+// page (the top-level document plus same-origin frames) while an SPA hydrates.
 //
 // A posting that renders after domcontentloaded reads as insufficient_content
 // (expired) or no_apply_control until it renders. The page doubles below
