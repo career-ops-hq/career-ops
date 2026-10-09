@@ -74,12 +74,40 @@ func (m PDFManifest) Lookup(app model.CareerApplication) (PDFManifestEntry, bool
 	return PDFManifestEntry{}, false
 }
 
-// LoadPDFEntriesByPath reads data/pdf-index.tsv and returns all entries indexed
+// PDFWorkspaceRoot returns the workspace owning the selected tracker. Manifest
+// artifact paths are relative to this root, even with an external index override.
+// Derive it before resolving symlinks so linking only data/ does not relocate output/.
+func PDFWorkspaceRoot(careerOpsPath string) string {
+	return pdfWorkspaceRootForTracker(resolveTrackerPath(careerOpsPath))
+}
+
+func pdfWorkspaceRootForTracker(tracker string) string {
+	root := filepath.Dir(tracker)
+	if filepath.Base(root) == "data" {
+		root = filepath.Dir(root)
+	}
+	return root
+}
+
+// resolvePDFIndexPath mirrors tracker-utils.mjs: an explicit override wins
+// (relative to cwd), otherwise the index follows the tracker workspace.
+func resolvePDFIndexPath(careerOpsPath string) string {
+	if override := os.Getenv("CAREER_OPS_PDF_INDEX"); override != "" {
+		return override
+	}
+	tracker := resolveTrackerPath(careerOpsPath)
+	if canonical, err := canonicalPath(tracker); err == nil {
+		tracker = canonical
+	}
+	return filepath.Join(pdfWorkspaceRootForTracker(tracker), "data", "pdf-index.tsv")
+}
+
+// LoadPDFEntriesByPath reads the selected PDF index and returns all entries indexed
 // by their relative PDF path. Unlike LoadPDFManifest, this includes rows that
 // were generated without a --report flag. Later rows in the file win.
 func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 	byPath := make(map[string]PDFManifestEntry)
-	raw, err := os.ReadFile(filepath.Join(careerOpsPath, "data", "pdf-index.tsv"))
+	raw, err := os.ReadFile(resolvePDFIndexPath(careerOpsPath))
 	if err != nil {
 		return byPath
 	}
@@ -116,14 +144,14 @@ func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 	return byPath
 }
 
-// LoadPDFManifest reads data/pdf-index.tsv under careerOpsPath. A missing
+// LoadPDFManifest reads the selected workspace's PDF index. A missing
 // file is not an error — the manifest is optional and absent until the
 // first generate-pdf.mjs run that writes it. Later rows win over earlier
 // ones for the same report number, so regenerated PDFs supersede stale
 // entries without any compaction step.
 func LoadPDFManifest(careerOpsPath string) PDFManifest {
 	manifest := make(PDFManifest)
-	raw, err := os.ReadFile(filepath.Join(careerOpsPath, "data", "pdf-index.tsv"))
+	raw, err := os.ReadFile(resolvePDFIndexPath(careerOpsPath))
 	if err != nil {
 		return manifest
 	}
