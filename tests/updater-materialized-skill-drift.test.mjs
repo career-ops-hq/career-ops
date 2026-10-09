@@ -47,7 +47,7 @@
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, rmSync, run, ROOT, hermeticGitRunner } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT, hermeticGitRunner } from './helpers.mjs';
 import { gitIn, systemTreeDiffers, driftPathspecExcludingSkillEntrypoints } from '../update-system.mjs';
 
 const SYSTEM_PATHS = ['scan.mjs', '.agents/', '.claude/skills/', 'scaffolder/'];
@@ -85,9 +85,14 @@ function makeOrigin() {
   writeFileSync(join(dir, 'scaffolder/bin/skill-entrypoints.mjs'), '// entrypoints v1\n');
   g('add', '-A');
   // The entrypoint ships as a real symlink upstream: git mode 120000, blob
-  // content is the pointer TEXT, not the target's content. gitIn() has no
-  // stdin seam, so this one plumbing step goes through helpers.mjs's run().
-  const pointerBlob = run('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: POINTER_TEXT });
+  // content is the pointer TEXT, not the target's content. The runner has no
+  // stdin seam, so the text is hashed from a scratch file inside .git/ (outside
+  // the work tree) — through g, so an inherited GIT_DIR cannot send the blob
+  // to some other repository. --no-filters: hash the bytes as written.
+  const pointerFile = join(dir, '.git', 'co-pointer-text');
+  writeFileSync(pointerFile, POINTER_TEXT);
+  const pointerBlob = g('hash-object', '-w', '--no-filters', pointerFile);
+  rmSync(pointerFile, { force: true });
   if (!pointerBlob) fail('fixture: git hash-object failed to write the pointer blob');
   g('update-index', '--add', '--cacheinfo', `120000,${pointerBlob},${ENTRYPOINT_PATH}`);
   g('commit', '-qm', 'base');
