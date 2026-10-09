@@ -19,6 +19,7 @@ import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
+import { findExperienceSections, headingText, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -690,6 +691,39 @@ function checkPlugins(root) {
 // WARN, never FAIL, like the plugin check below it: an unknown key is a typo,
 // not a broken install, and refusing to run would be a worse answer than naming
 // it.
+// cv.md exists but in a shape the CV checks cannot read (#4879). The prereq
+// check only proves the file is there; cv-title-check.mjs and
+// verify-cv-structure.mjs locate jobs through lib/cv-markdown.mjs, and a cv.md
+// whose Experience section they cannot find makes both run against nothing.
+// They do say so per run, but only once a tailored CV is already being built;
+// this says it at setup time. A warning, never a failure: cv.md is the user's
+// file and career-ops still works with it.
+function checkCvShape(root) {
+  const cvPath = join(root, 'cv.md');
+  if (!existsSync(cvPath)) return null;   // the prereq check owns "absent"
+  let text;
+  try {
+    text = readFileSync(cvPath, 'utf-8');
+  } catch (err) {
+    return { warn: true, label: `cv.md could not be read (${err.message})` };
+  }
+  const sections = findExperienceSections(text);
+  const entries = sections.flat().filter((line) => headingText(line, 3) !== null).length;
+  if (entries > 0) {
+    return { pass: true, label: `cv.md: Experience section recognized (${entries} entr${entries === 1 ? 'y' : 'ies'})` };
+  }
+  return {
+    warn: true,
+    label: sections.length === 0
+      ? 'cv.md: no Experience section the CV checks recognize — title and structure checks will not run'
+      : 'cv.md: Experience section has no "### Company — Location" entries — title and structure checks will not run',
+    fix: [
+      `Name the section ${EXPERIENCE_HEADING_NAMES.map((n) => `"## ${n}"`).join(', ')}`,
+      'Start each job with "### Company — Location", then a bold **Title** line, then a dates line (see examples/cv-example.md)',
+    ],
+  };
+}
+
 function checkProfileShape(root) {
   const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
@@ -730,6 +764,7 @@ async function main() {
     checkFonts(),
     checkPersonalization(projectRoot),
     checkProfileShape(projectRoot),
+    checkCvShape(projectRoot),
     checkAutoDir('data'),
     checkPipelineFile(),
     checkAutoDir('output'),
@@ -902,10 +937,12 @@ function onboardingState(root) {
   // codeRoot (the code checkout), which only differs from `root` when a real
   // split-checkout data root is in play and no --target was given.
   const bakCheck = checkTrackedBakFiles(codeRoot);
+  const cvShape = checkCvShape(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
+    ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 

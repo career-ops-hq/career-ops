@@ -24,10 +24,14 @@
  * entries out of chronological order — none of which verify-cv-facts.mjs
  * is designed to catch, so all three PDFs passed that gate anyway.
  *
- * Understands `## Experience` and `## Work Experience` sections whose entry
- * headers use an em dash, double hyphen, or single hyphen between company and
- * location. These are common conventions, not a system-wide cv.md spec, so a
- * cv.md written another way parses to zero
+ * Understands the Experience section names in lib/cv-markdown.mjs
+ * (`## Experience`, `## Work Experience`, `## Professional Experience`,
+ * `## Employment History`, `## Work History`) whose entry headers use an em
+ * dash, en dash, double hyphen, or single hyphen between company and
+ * location, read through Pandoc Markdown (`## **[Experience]{.smallcaps}**`,
+ * `### **Co** --- City`) as well as plain (#4879). These are common
+ * conventions, not a system-wide cv.md spec, so a cv.md written another way
+ * parses to zero
  * entries — with nothing to compare against, this reports UNVERIFIED (exit 0)
  * rather than a false "passed", so a format mismatch warns instead of either
  * silently no-opping or blocking every user whose cv.md looks different.
@@ -43,13 +47,15 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { findExperienceSections, headingText, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = 'cv.md';
 
 /**
- * Parse cv.md's `## Experience` or `## Work Experience` entries from its
- * `### Company {—|--|-} Location[ · descriptor]` headers, in file order
+ * Parse cv.md's Experience entries (any EXPERIENCE_HEADING_NAMES section)
+ * from its `### Company {—|–|--|-} Location[ · descriptor]` headers, in file
+ * order
  * (which IS the ground-truth
  * chronological order — cv.md is user-authored, never generated).
  *
@@ -64,18 +70,14 @@ const DEFAULT_SOURCE = 'cv.md';
  */
 export function parseCvMdExperience(cvMdText) {
   const entries = [];
-  const sectionHeadingRe = /^##\s+(?:Work\s+)?Experience\s*$/mi;
-  const sectionMatch = sectionHeadingRe.exec(cvMdText);
-  if (!sectionMatch) return entries;
-  const sectionStart = sectionMatch.index + sectionMatch[0].length;
-  const nextSectionRe = /^##\s+\S/m;
-  const rest = cvMdText.slice(sectionStart);
-  const nextSectionMatch = nextSectionRe.exec(rest);
-  const section = nextSectionMatch ? rest.slice(0, nextSectionMatch.index) : rest;
-  const headerRe = /^###\s+(.+?)\s+(?:—|--|-)\s+(.+)$/gm;
-  let match;
-  while ((match = headerRe.exec(section))) {
-    entries.push({ company: match[1].trim(), location: match[2].trim() });
+  // First recognized section only: its file order is the ground truth the
+  // order check compares against.
+  const [section = []] = findExperienceSections(cvMdText);
+  for (const line of section) {
+    const header = headingText(line, 3);
+    if (header === null) continue;
+    const match = header.match(/^(.+?)\s+(?:—|–|--|-)\s+(.+)$/);
+    if (match) entries.push({ company: match[1].trim(), location: match[2].trim() });
   }
   return entries;
 }
@@ -194,9 +196,9 @@ export function checkLocationDescriptors(payloadExperience, cvMdExperience) {
 /**
  * Run both structural checks against a tailored CV JSON payload.
  *
- * This gate understands `## Experience` and `## Work Experience` sections
- * whose `### Company {—|--|-} Location[ · descriptor]` headers use an em dash,
- * double hyphen, or single hyphen. Those are common conventions, not a
+ * This gate understands the EXPERIENCE_HEADING_NAMES sections whose
+ * `### Company {—|–|--|-} Location[ · descriptor]` headers use an em dash, en
+ * dash, double hyphen, or single hyphen. Those are common conventions, not a
  * system-wide cv.md spec — AGENTS.md only requires "clean markdown, standard sections."
  * A cv.md written any other way parses to zero entries, and with nothing to
  * compare the payload against, both checks trivially find no violations. A
@@ -294,8 +296,9 @@ file, invalid JSON, or a malformed payload shape (a non-object payload, or a
 non-array/non-object payload.experience) exit 1 instead: those mean the
 check itself could not run, not that it found something to review.
 
-Understands "## Experience" and "## Work Experience" sections whose company
-headers use an em dash, double hyphen, or single hyphen before the location.
+Understands ${EXPERIENCE_HEADING_NAMES.map((name) => `"## ${name}"`).join(', ')}
+sections whose company headers use an em dash, en dash, double hyphen, or
+single hyphen before the location, written plain or as Pandoc Markdown.
 A cv.md written another way parses to zero entries; the check then reports
 UNVERIFIED rather than a false "passed".`;
 }
@@ -405,6 +408,48 @@ function runSelfTest() {
     shippedEntries.map((e) => e.company), ['TechFin Corp', 'DataStartup Inc']);
   equal('shipped example format produces a real structural verdict',
     verifyStructure({ experience: shippedEntries }, shippedCvMd).verdict, 'pass');
+
+  // Pandoc-flavored cv.md (#4879): bold + span section heading, bold company,
+  // Pandoc's `---` em dash. Same entries as the plain form, so the order and
+  // descriptor checks actually run instead of reporting UNVERIFIED.
+  const pandocCvMd = [
+    '## **[Technical Platforms & Tools]{.smallcaps}**',
+    '',
+    '### **Not A Job** --- Should Be Ignored',
+    '',
+    '## **[Professional Experience]{.smallcaps}**',
+    '',
+    '### **Acme Health, Inc.** --- New York, NY (Remote) · Series B healthtech',
+    '',
+    '**Senior Director, Platform Engineering**\\',
+    '**09/2021 -- Present**',
+    '',
+    '### **Globex Corp.** --- Stamford, CT',
+    '',
+    '**Principal Infrastructure Engineer**\\',
+    '**03/2015 -- 08/2021**',
+  ].join('\n');
+  equal('Pandoc cv.md: entries parse from a bold + span Professional Experience section',
+    parseCvMdExperience(pandocCvMd), [
+      { company: 'Acme Health, Inc.', location: 'New York, NY (Remote) · Series B healthtech' },
+      { company: 'Globex Corp.', location: 'Stamford, CT' },
+    ]);
+  equal('Pandoc cv.md: a swapped pair is caught instead of UNVERIFIED',
+    verifyStructure({ experience: [
+      { company: 'Globex Corp.', location: 'Stamford, CT' },
+      { company: 'Acme Health, Inc.', location: 'New York, NY (Remote) · Series B healthtech' },
+    ] }, pandocCvMd).verdict, 'warn');
+  equal('Pandoc cv.md: a dropped descriptor is caught instead of UNVERIFIED',
+    verifyStructure({ experience: [
+      { company: 'Acme Health, Inc.', location: 'New York, NY (Remote)' },
+      { company: 'Globex Corp.', location: 'Stamford, CT' },
+    ] }, pandocCvMd).descriptorViolations.length, 1);
+  for (const heading of ['Professional Experience', 'Employment History', 'Work History']) {
+    equal(`"## ${heading}" is a recognized Experience section`,
+      parseCvMdExperience(`## ${heading}\n\n### Co — City\n`), [{ company: 'Co', location: 'City' }]);
+  }
+  equal('an en-dash company/location separator is recognized',
+    parseCvMdExperience('## Experience\n\n### Co – City\n'), [{ company: 'Co', location: 'City' }]);
 
   const singleHyphenCvMd = [
     '## Experience',
@@ -634,7 +679,7 @@ export function runCli(args = process.argv.slice(2)) {
   if (result.verdict === 'unverified') {
     console.warn(`⚠️  CV structure check UNVERIFIED: ${basename(targetPath)}`);
     console.warn(`Could not find supported company/location headers in ${sourcePath} — nothing was checked.`);
-    console.warn('Expected an Experience or Work Experience section with em-dash or hyphen-separated headers; review the tailored CV structure manually.');
+    console.warn(`Expected a ${EXPERIENCE_HEADING_NAMES.map((name) => `"## ${name}"`).join(' / ')} section with "### Company — Location" headers (em dash, en dash, or hyphens); review the tailored CV structure manually.`);
     return 0;
   }
   if (result.verdict === 'pass') {

@@ -48,6 +48,10 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 
       A key the CLI reports as ambiguous (more than one cv.md or tailored-CV entry sharing the same `{company, dates}`) is not a clean mismatch and must not be presented as one — surface it the same way but say plainly that multiple titles exist on one or both sides for "{company} ({dates})" and the automated check could not tell which pair to compare, so the user should resolve it by checking `cv.md` and the payload directly.
     - `✅` output means every matched entry's title is unchanged — continue without comment.
+    - `⚠️ ... title check did not run` means nothing was compared: either `cv.md`'s Experience section could not be parsed, or no payload entry paired with a cv.md entry by `{company, dates}`. This is not a pass. Surface it before continuing:
+
+      > ⚠️ **Title check did not run:** [Render in {language.output}: state that the title-consistency check compared no entries, so no job title in this tailored CV was checked against cv.md; repeat the CLI's reason; ask the user to verify every title against cv.md directly, and suggest running `node doctor.mjs` if the reason is that cv.md could not be parsed.]
+
     - Entries the check could not pair to a cv.md entry (e.g. a date phrasing that doesn't line up character-for-character) are reported separately as unmatched, not as a mismatch — they were not checked, so do not present them to the user as a pass. Surface each one:
 
       > ⚠️ **Unmatched entry:** [Render in {language.output}: state that this experience entry for "{company} ({dates})" could not be paired to a cv.md entry, so its title was not checked, and ask the user to verify it directly against cv.md; keep `{company}` and `{dates}` as literal data — never translate or paraphrase them.]
