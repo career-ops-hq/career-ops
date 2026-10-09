@@ -338,22 +338,27 @@ function extractInlineStyles(html) {
 /**
  * Split an inline style into its declarations the way a browser reads them. A
  * `;` ends a declaration only outside a quoted string, a comment, and any open
- * parentheses, brackets or braces. A backslash escapes the next character, a
- * comment counts as whitespace, and a raw newline ends a string early, as CSS
- * does with a bad string. One forward pass, so it stays linear on any input,
- * including an unterminated string, comment or block.
+ * parentheses, brackets or braces. A backslash escapes the next character (CRLF
+ * counts as one), a comment counts as whitespace, and a raw newline ends a
+ * string early, as CSS does with a bad string. The body of an unquoted `url(` is
+ * raw text up to the first unescaped `)`, so a quote inside it opens nothing.
+ * One forward pass, so it stays linear on any input, including an unterminated
+ * string, comment, block or url.
  * @param {string} style
  * @returns {string[]}
  */
 function cssDeclarations(style) {
   const declarations = [];
   const closers = [];
+  const isCssSpace = ch => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f';
   let current = '';
   let quote = null;
   for (let i = 0; i < style.length; i++) {
     const c = style[i];
     if (c === '\\' && i + 1 < style.length) {
-      current += c + style[++i];
+      const escaped = style[i + 1] === '\r' && style[i + 2] === '\n' ? '\r\n' : style[i + 1];
+      current += c + escaped;
+      i += escaped.length;
       continue;
     }
     if (quote) {
@@ -371,6 +376,17 @@ function cssDeclarations(style) {
       declarations.push(current);
       current = '';
       continue;
+    }
+    if (c === '(' && /(?:^|[^\w\u0080-\uffff-])url$/i.test(style.slice(Math.max(0, i - 4), i))) {
+      let bodyStart = i + 1;
+      while (bodyStart < style.length && isCssSpace(style[bodyStart])) bodyStart++;
+      if (style[bodyStart] !== '"' && style[bodyStart] !== "'") {
+        let end = i + 1;
+        while (end < style.length && style[end] !== ')') end += style[end] === '\\' ? 2 : 1;
+        current += style.slice(i, end + 1);
+        i = Math.min(end, style.length - 1);
+        continue;
+      }
     }
     if (c === '"' || c === "'") quote = c;
     else if (c === '(') closers.push(')');
@@ -1018,6 +1034,12 @@ function runSelfTest() {
   const auditStarted = performance.now();
   auditAts(buildCleanHtml({ extraBody: manyComments }));
   check('a long run of comments does not backtrack catastrophically', performance.now() - auditStarted < 1000);
+  // Looking back for `url` on every open paren must not flatten the text built
+  // so far each time: that made a long run of `(` quadratic, seconds at 400k.
+  const manyParens = `<span style="${'('.repeat(400000)}">Senior engineer</span>`;
+  const parensStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: manyParens }));
+  check('a long run of open parentheses stays linear', performance.now() - parensStarted < 1000);
   // An unterminated comment must not be rescanned from every semicolon. That
   // made a long `;/*;/*` run quadratic: seconds at 100k characters.
   const unterminated = `<span style="${';/*'.repeat(33334)}colour:#fff">Senior engineer</span>`;
@@ -1048,6 +1070,48 @@ function runSelfTest() {
     const broken = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x${nl};color:white">python kubernetes aws rust golang</span>` }));
     check(`white text after a string broken by ${label} is flagged as hidden text`, hasIssue(broken.issues, 'hidden text'));
   }
+  // An escaped newline inside a string is a continuation, and CRLF is one
+  // newline, so the backslash takes both characters. Taking only the CR left
+  // the LF to end the string early, and the quote after it opened a new one
+  // that swallowed the real declaration behind it.
+  for (const [label, nl] of [['LF', '\n'], ['CR', '\r'], ['FF', '\f'], ['CRLF', '\r\n']]) {
+    const continued = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x\\${nl}';color:white">python kubernetes aws rust golang</span>` }));
+    check(`white text after a string continued over an escaped ${label} is flagged as hidden text`, hasIssue(continued.issues, 'hidden text'));
+  }
+  // A style holding a double quote has to sit in a single-quoted attribute,
+  // or the attribute ends at that quote and the CSS under test is never seen.
+  const attrQuote = style => (style.includes('"') ? "'" : '"');
+  // The body of an unquoted url() is raw text up to the first `)`, so a quote
+  // inside it does not open a string. A browser treats that as a bad url and
+  // resumes after the `)`; reading the quote as a string swallowed everything
+  // after it, white declaration included.
+  for (const [label, style] of [
+    ['a double quote in an unquoted url()', 'background:url(foo";x);color:white'],
+    ['a single quote in an unquoted url()', "background:url(foo';x);color:white"],
+    ['an uppercase URL() with a quote in it', 'background:URL(foo";x);color:white'],
+    ['an escaped paren inside an unquoted url()', 'background:url(a\\);b";x);color:white'],
+    ['a stray open paren in an unquoted url()', 'background:url(a(b";x);color:white'],
+  ]) {
+    const badUrl = auditAts(buildCleanHtml({ extraBody: `<span style=${attrQuote(style)}${style}${attrQuote(style)}>python kubernetes aws rust golang</span>` }));
+    check(`white text after ${label} is flagged as hidden text`, hasIssue(badUrl.issues, 'hidden text'));
+  }
+  // The same raw-text rule must not release a `;` that really is inside the
+  // url, nor treat a quoted url() argument or a lookalike name as unquoted.
+  for (const [label, style] of [
+    ['inside an unquoted url()', 'background:url(data:x;color:white)'],
+    ['inside a quoted url()', `background:url("data:x;color:white")`],
+    ['inside an unterminated unquoted url()', 'background:url(foo;color:white'],
+    ['after a function whose name only ends in url', 'background:myurl(foo";x);color:white'],
+  ]) {
+    const inertUrl = auditAts(buildCleanHtml({ extraBody: `<span style=${attrQuote(style)}${style}${attrQuote(style)}>Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(inertUrl.issues, 'hidden text'));
+  }
+  // url() with whitespace and a quote after the paren is a normal function
+  // with a string argument, not an unquoted url. The `)` inside the string is
+  // what tells the two readings apart: read as raw text, the url would end at
+  // that `)` and the rest of the string would open a new one.
+  const spacedQuoted = auditAts(buildCleanHtml({ extraBody: `<span style="background:url(  'a)b'  );color:white">python kubernetes aws rust golang</span>` }));
+  check('white text after a quoted url() argument with leading space is flagged as hidden text', hasIssue(spacedQuoted.issues, 'hidden text'));
   // A `;` inside parentheses or brackets belongs to that value, not to the
   // declaration list, so it cannot start a new declaration.
   for (const [label, style] of [
