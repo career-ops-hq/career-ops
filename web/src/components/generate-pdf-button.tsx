@@ -17,12 +17,12 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
     [jobs, n],
   );
   const generate = () =>
-    startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}` });
+    startJob({ title: `CV PDF · ${company}`, subtitle: "adaptado a esta função", kind: "pdf", input: n, page: `/pipeline/${n}` });
 
   if (job?.status === "running")
     return (
       <Link href={`/jobs/${job.id}`} className="inline-flex items-center justify-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-medium text-brand max-sm:min-h-[44px]">
-        <Loader2 className="size-3.5 animate-spin" /> Generating CV…
+        <Loader2 className="size-3.5 animate-spin" /> A gerar o CV…
       </Link>
     );
 
@@ -36,11 +36,11 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
           rel="noreferrer"
           className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
         >
-          <FileText className="size-3.5" /> View tailored CV
+          <FileText className="size-3.5" /> Ver CV adaptado
         </a>
         <button
           onClick={generate}
-          title="Regenerate the tailored CV"
+          title="Gerar novamente o CV adaptado"
           className="inline-flex items-center justify-center rounded-full p-1 text-faint transition-colors hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]"
         >
           <RotateCcw className="size-3" />
@@ -56,9 +56,9 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
       <button
         onClick={generate}
         className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
-        title="Generate an ATS-optimized CV tailored to this role"
+        title="Gerar um CV adaptado a esta função"
       >
-        <FileDown className="size-3.5" /> Generate tailored CV (PDF)
+        <FileDown className="size-3.5" /> Gerar CV adaptado (PDF)
       </button>
       <CostBadge kind="spend" size="xs" />
     </span>

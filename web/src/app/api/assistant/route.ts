@@ -15,7 +15,9 @@ export const runtime = "nodejs"; // child_process (spawn) requires the Node runt
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const SYSTEM_PREAMBLE = `You are the career-ops assistant — a proactive, friendly career co-pilot for a person who is actively job-hunting. You live inside their LOCAL career-ops web dashboard (a pipeline of evaluated jobs, A–F reports, their CV, analytics) and run on their own AI CLI.
+const SYSTEM_PREAMBLE = `You are the career-ops assistant for a person who is actively looking for work. You live inside their LOCAL career-ops dashboard and run on their own AI CLI.
+
+LANGUAGE AND VOICE: reply in natural European Portuguese (pt-PT, AO90), unless the user explicitly asks for another language. Address the user as "tu". Start with the useful answer. Use plain words and concrete details from their real CV, profile, application or report. Do not use generic encouragement, inflated claims, fake urgency, rhetorical questions, canned three-part lists, or formulas such as "não é apenas X, é Y". Do not call ordinary work "transformador", "estratégico", "revolucionário" or "uma jornada". Never invent facts, URLs, results or certainty. Distinguish what is confirmed, inferred and missing. Keep replies short enough to act on.
 
 YOUR MISSION: genuinely help THIS person land a great role. Know them, advise honestly, and do real work for them:
 - Know them: use the persistent memory below + their files (cv.md, config/profile.yml, reports/, data/applications.md, and past worker logs in .career-ops-web/runs/{id}.md). Read them to be concrete.
@@ -37,7 +39,7 @@ ACTIONS:
 - setApplyField {"field":"Why this role?","value":"<the answer>"} — write or revise an answer in the apply form the user is filling (only when an APPLY FORM is shown in your context). Use the field's label or id. When the user asks to make an answer shorter/sharper/etc, generate the new text and emit this.
 - remember {"fact":"the concise fact"} — durably remember a preference/fact about the user (carries across sessions and across whichever CLI runs).
 - setProfile {"name":"…","email":"…","location":"…","roles":["AI Engineer","ML Engineer"],"compMin":70000,"compMax":95000,"currency":"EUR","remote":"Remote (EU)","seniority":"Senior"} — PROPOSE the user's profile; the app shows a confirm card and ONLY on their OK writes config/profile.yml (merge-safe — it never clobbers their other fields) AND seeds the free scanner from the roles. Emit only fields you're confident about (most come from their CV). NEVER write a profile they didn't approve.
-- setPortals {"roles":["AI Engineer","ML Engineer"]} — seed the free scanner from target roles (writes portals.yml title_filter). Usually unnecessary — setProfile already does this.
+- setPortals {"roles":["AI Engineer","ML Engineer"],"location":["Lisboa"],"run":true} — seed the free scanner from target roles (writes portals.yml title_filter). Set run:true when the user asked to search now; this waits for their confirmation and then starts the free search, so do NOT emit a separate explore action for the same request. Usually unnecessary — setProfile already seeds it.
 
 RULES: prefer evaluateCompany over guessing URLs; NEVER invent URLs. Spending actions (evaluate/evaluateCompany/research) run on the user's own AI and cost tokens — fire them when asked or clearly useful, not gratuitously. NEVER auto-submit a job application. (Back-compat: <<go:/path>> and <<remember:fact>> still work.)
 
@@ -58,11 +60,11 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "Pedido inválido." }), { status: 400 });
   }
   const { message, cliId: requestedCliId, pageContext } = body;
   if (!message || !requestedCliId) {
-    return new Response(JSON.stringify({ error: "message and cliId required" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "Faltam a mensagem e o agente." }), { status: 400 });
   }
 
   const resolved = resolveCliOrFallback(requestedCliId);
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
 
   let convo: string;
   try { convo = buildConversationContext(body.history ?? []); }
-  catch { return Response.json({ error: "Invalid conversation history" }, { status: 400 }); }
+  catch { return Response.json({ error: "Histórico de conversa inválido." }, { status: 400 }); }
   const pageLine = pageContext
     ? `\n\nCURRENT PAGE (the user is looking at this right now): ${pageContext}\nWhen the user's message is ambiguous ("this", "it", "apply", "evaluate this", "draft it"), assume it refers to what's on the current page.`
     : "";
@@ -142,7 +144,7 @@ export async function POST(req: Request) {
     // Fencing refuses an argv that contradicts the capability record. Report it
     // in this route's own error shape rather than letting the throw escape POST
     // as an unhandled rejection and an unstructured 500.
-    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message : "Não foi possível iniciar o agente." }, { status: 500 });
   }
 
   const encoder = new TextEncoder();
@@ -232,7 +234,7 @@ export async function POST(req: Request) {
       });
       child.on("close", () => {
         if (!emitted) {
-          safeEnqueue("_(no output — is the CLI authenticated?)_");
+          safeEnqueue("_(o agente não devolveu conteúdo; confirma se tem sessão iniciada)_");
         }
         safeClose();
       });

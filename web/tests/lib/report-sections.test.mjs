@@ -219,9 +219,9 @@ test("verdictReason reads the header lede above ---", () => {
 
 test("applyLineLabel: 4.0 is the apply line", () => {
   assert.equal(APPLY_LINE, 4.0);
-  assert.equal(applyLineLabel(4.0), "Recommended");
-  assert.equal(applyLineLabel("4.0/5"), "Recommended");
-  assert.equal(applyLineLabel(3.9), "Below the apply line");
+  assert.equal(applyLineLabel(4.0), "Recomendada");
+  assert.equal(applyLineLabel("4.0/5"), "Recomendada");
+  assert.equal(applyLineLabel(3.9), "Abaixo do limite de candidatura");
   assert.equal(applyLineLabel(null), null);
 });
 

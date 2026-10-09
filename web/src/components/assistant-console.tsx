@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2 } from "lucide-react";
+import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Maximize2, Minimize2 } from "lucide-react";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
 import { usePipeline } from "@/components/pipeline/pipeline-provider";
@@ -19,6 +19,8 @@ import { scoreNum } from "@/lib/format";
 import { pendingActOpenerStart } from "@/lib/act-envelope.mjs";
 import { cleanMessages } from "@/lib/assistant-history.mjs";
 import { cn } from "@/lib/cn";
+import { persistCliId, pickDefaultInstalled, readSavedCliId } from "@/lib/saved-cli";
+import { keepIfInstalled } from "@/lib/cli-pick.mjs";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -29,8 +31,8 @@ type Part =
   | { type: "batch"; batchId: string; jobIds: string[] }
   | { type: "confirm"; cid: string; summary: string; state: "pending" | "done" | "cancelled" };
 type Msg = { role: "user" | "assistant"; parts: Part[] };
+type AssistantCli = { id: string; name: string; installed: boolean };
 
-const CONFIG_KEY = "career-ops:config";
 const CHAT_KEY = "career-ops:chat";
 const SIZE_KEY = "career-ops:assistant-size";
 
@@ -48,13 +50,13 @@ const PANEL_CLASS: Record<PanelSize, string> = {
 // The composer grows with its content (a pasted CV, a long answer) up to a cap
 // that scales with the panel, instead of staying a one-line box that scrolls.
 const INPUT_MAX_PX: Record<PanelSize, number> = { compact: 128, wide: 240, full: 360 };
-const SIZE_LABEL: Record<PanelSize, string> = { compact: "Wider", wide: "Full screen", full: "Compact" };
+const SIZE_LABEL: Record<PanelSize, string> = { compact: "Aumentar largura", wide: "Ecrã inteiro", full: "Tamanho compacto" };
 // back-compat shims — the old directives still work, mapped onto the registry
 const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
 const REMEMBER_RE = /<<\s*remember:\s*([^>]+?)\s*>>/gi;
 
 const GREETING =
-  "Hi — I'm your career-ops assistant. I can walk you through onboarding, answer questions about your pipeline, or take you where you need to go. What would you like to do?";
+  "Posso ajudar-te a configurar o career-ops, analisar as candidaturas e executar tarefas com o agente escolhido. Por onde queres começar?";
 
 // ── envelope parsing: act ONLY on complete <<act:ID {json}>> envelopes ────────
 function codeRanges(s: string): [number, number][] {
@@ -136,6 +138,7 @@ function msgText(m: Msg): string {
 export function AssistantConsole() {
   const [open, setOpen] = useState(false);
   const [cliId, setCliId] = useState<string | null>(null);
+  const [availableClis, setAvailableClis] = useState<AssistantCli[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [chats, setChats] = useState<{ id: string; title: string; revision: number }[]>([]);
   const [chatReady, setChatReady] = useState(false);
@@ -203,25 +206,43 @@ export function AssistantConsole() {
     if (input) el.style.height = `${Math.min(el.scrollHeight, INPUT_MAX_PX[size])}px`;
   }, [input, size, open]);
 
-  // selected CLI from Config (reacts to changes in other tabs)
+  // Detect installed CLIs here as well as in Config. A first-time user with
+  // several installed CLIs must not land in a disabled assistant.
   useEffect(() => {
     function read() {
+      setCliId(readSavedCliId());
+    }
+    async function detect() {
       try {
-        const raw = localStorage.getItem(CONFIG_KEY);
-        setCliId(raw ? JSON.parse(raw).cliId || null : null);
+        const response = await fetch("/api/clis");
+        if (!response.ok) return;
+        const data = (await response.json()) as { clis?: AssistantCli[] };
+        const list = (data.clis ?? []).filter((cli) => cli.installed);
+        setAvailableClis(list);
+        const saved = readSavedCliId();
+        const next = keepIfInstalled(saved, list) ?? pickDefaultInstalled(list);
+        if (next && next !== saved) persistCliId(next);
+        setCliId(next);
       } catch {
-        setCliId(null);
+        // Keep a saved choice usable when detection has a transient failure.
       }
     }
     read();
+    void detect();
     window.addEventListener("storage", read);
     return () => window.removeEventListener("storage", read);
   }, []);
 
+  function chooseCli(next: string) {
+    if (!availableClis.some((cli) => cli.id === next)) return;
+    persistCliId(next);
+    setCliId(next);
+  }
+
   async function chatRequest(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Conversation request failed");
+    if (!response.ok) throw new Error(data.error || "O pedido da conversa falhou");
     return data;
   }
   async function refreshChats() {
@@ -234,7 +255,7 @@ export function AssistantConsole() {
     let snapshot: Msg[];
     try { snapshot = cleanMessages(messagesRef.current) as Msg[]; }
     catch (e) {
-      const error = e instanceof Error ? e : new Error("Conversation could not be saved");
+      const error = e instanceof Error ? e : new Error("Não foi possível guardar a conversa");
       setSaveError(error.message);
       return Promise.reject(error);
     }
@@ -253,7 +274,7 @@ export function AssistantConsole() {
         setSaveError("");
         await refreshChats();
       } catch (e) {
-        setSaveError(e instanceof Error ? e.message : "Conversation was not saved");
+        setSaveError(e instanceof Error ? e.message : "A conversa não foi guardada");
         throw e;
       }
     });
@@ -297,7 +318,7 @@ export function AssistantConsole() {
         setMessages(next);
         await refreshChats();
         setChatReady(true);
-      } catch (e) { if (!cancelled) setSaveError(e instanceof Error ? e.message : "Could not load conversations"); }
+      } catch (e) { if (!cancelled) setSaveError(e instanceof Error ? e.message : "Não foi possível carregar as conversas"); }
     }
     void restore();
     return () => { cancelled = true; };
@@ -331,7 +352,7 @@ export function AssistantConsole() {
       setMessages(next);
       setInput("");
       confirmRuns.current.clear();
-    } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not switch conversations"); }
+    } catch (e) { setSaveError(e instanceof Error ? e.message : "Não foi possível mudar de conversa"); }
     finally { setChatPending(false); }
   }
   function exportChat() {
@@ -346,7 +367,7 @@ export function AssistantConsole() {
   }
   async function discardAndStartChat() {
     if (busy || chatPending || !chatReady) return;
-    if (!window.confirm("Discard unsaved changes and start a new conversation? Saved conversations stay on disk. Export this conversation first if you want to keep the unsaved text.")) return;
+    if (!window.confirm("Apagar as alterações por guardar e iniciar uma conversa nova? As conversas já guardadas permanecem no disco.")) return;
     setChatPending(true);
     try {
       // Let writes already in flight finish before changing the active id.
@@ -361,14 +382,14 @@ export function AssistantConsole() {
     } finally { setChatPending(false); }
   }
   async function renameChat() {
-    const title = window.prompt("Conversation name", activeChat.current.title || "");
+    const title = window.prompt("Nome da conversa", activeChat.current.title || "");
     if (!title?.trim()) return;
     setChatPending(true);
     try { await flushChat(title.trim()); } catch { /* shown by flushChat */ }
     finally { setChatPending(false); }
   }
   async function removeChat() {
-    if (!window.confirm("Delete this conversation?")) return;
+    if (!window.confirm("Eliminar esta conversa?")) return;
     setChatPending(true);
     try {
       await flushChat();
@@ -380,7 +401,7 @@ export function AssistantConsole() {
       setMessages([]);
       confirmRuns.current.clear();
       await refreshChats();
-    } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not delete conversation"); }
+    } catch (e) { setSaveError(e instanceof Error ? e.message : "Não foi possível eliminar a conversa"); }
     finally { setChatPending(false); }
   }
 
@@ -467,8 +488,16 @@ export function AssistantConsole() {
           .then(() => router.refresh())
           .catch(() => {});
       },
-      writePortals: (roles, location) => {
-        fetch("/api/portals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roles, location }) }).catch(() => {});
+      writePortals: async (roles, location) => {
+        try {
+          const response = await fetch("/api/portals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roles, location }) });
+          if (response.ok) return;
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || `erro ${response.status}`);
+        } catch (error) {
+          appendParts([{ type: "note", text: `Não foi possível guardar a pesquisa: ${error instanceof Error ? error.message : "erro de ligação"}.` }]);
+          throw error;
+        }
       },
     };
   }
@@ -548,7 +577,7 @@ export function AssistantConsole() {
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
-        setStreamText(`⚠️ ${err.error || "Assistant unavailable."}`);
+        setStreamText(`⚠️ ${err.error || "O assistente não está disponível."}`);
         return;
       }
       const reader = res.body.getReader();
@@ -604,9 +633,9 @@ export function AssistantConsole() {
           }
         }
       }
-      if (!acc.trim()) setStreamText("_(no output — is the CLI authenticated?)_");
+      if (!acc.trim()) setStreamText("_(sem resposta; confirma se a sessão do agente está iniciada)_");
     } catch {
-      setStreamText("⚠️ Connection error.");
+      setStreamText("⚠️ Erro de ligação.");
     } finally {
       setBusy(false);
       router.refresh();
@@ -633,28 +662,28 @@ export function AssistantConsole() {
     const chips: { label: string; send: string }[] = [];
     const rep = pathname.match(/^\/pipeline\/(.+)$/);
     if (rep) {
-      chips.push({ label: "Why this score?", send: "Walk me through why this offer scored the way it did — strengths and red flags." });
-      chips.push({ label: "Should I apply?", send: "Given my profile, should I apply to this one? Be honest." });
-      chips.push({ label: "Draft a cover letter", send: "Draft a short, sharp cover letter for this role." });
+      chips.push({ label: "Explicar a pontuação", send: "Explica a pontuação desta oferta, incluindo pontos fortes e sinais de risco." });
+      chips.push({ label: "Vale a pena candidatar-me?", send: "Tendo em conta o meu perfil, devo candidatar-me a esta oferta? Responde com franqueza." });
+      chips.push({ label: "Preparar carta de apresentação", send: "Prepara uma carta de apresentação curta e concreta para esta função." });
       return chips;
     }
     const pending = pipeline.inbox.filter((j) => !j.done);
     if (!pipeline.applications.length && !pending.length) {
       return [
-        { label: "Help me get set up", send: "Help me get started with career-ops — what do you need from me?" },
-        { label: "Improve my CV", send: "Look at my CV and suggest the highest-impact improvements." },
+        { label: "Concluir a configuração", send: "Ajuda-me a concluir a configuração do career-ops. De que informação precisas?" },
+        { label: "Melhorar o CV", send: "Analisa o meu CV e sugere as alterações com maior utilidade." },
       ];
     }
     if (pending.length) {
       const counts = new Map<string, number>();
       for (const j of pending) counts.set(j.company, (counts.get(j.company) ?? 0) + 1);
       const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (top && top[1] > 1) chips.push({ label: `Evaluate all ${top[0]} (${top[1]})`, send: `Evaluate all the pending ${top[0]} postings in my inbox.` });
-      chips.push({ label: `Triage inbox (${pending.length})`, send: `I have ${pending.length} postings in my inbox — which should I evaluate first, and why?` });
+      if (top && top[1] > 1) chips.push({ label: `Avaliar ofertas da ${top[0]} (${top[1]})`, send: `Avalia todas as ofertas pendentes da ${top[0]}.` });
+      chips.push({ label: `Ordenar pendentes (${pending.length})`, send: `Tenho ${pending.length} ofertas pendentes. Quais devo avaliar primeiro e porquê?` });
     }
     const strong = pipeline.applications.filter((a) => scoreNum(a.score) >= 4.5).length;
-    if (strong) chips.push({ label: "Strong matches to act on", send: "Show me my strongest matches (4.5+) I haven't applied to yet, and tell me which to prioritise." });
-    chips.push({ label: "What should I do today?", send: "Look at my pipeline and tell me the 3 highest-leverage things I should do today." });
+    if (strong) chips.push({ label: "Melhores correspondências", send: "Mostra as ofertas com 4,5 ou mais às quais ainda não me candidatei e diz quais devo priorizar." });
+    chips.push({ label: "Prioridades de hoje", send: "Analisa as minhas candidaturas e diz o que devo fazer hoje, por ordem de prioridade." });
     return chips.slice(0, 4);
   }, [pathname, pipeline.inbox, pipeline.applications]);
 
@@ -663,11 +692,11 @@ export function AssistantConsole() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
-          aria-label="Open assistant"
+          className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:size-11 max-sm:p-0"
+          aria-label="Abrir assistente"
         >
           <CoMark size={26} />
-          <span className="text-sm font-medium">Ask</span>
+          <span className="hidden text-sm font-medium sm:inline">Assistente</span>
         </button>
       )}
 
@@ -676,36 +705,48 @@ export function AssistantConsole() {
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
             <CoMark size={26} />
             <div className="flex-1">
-              <div className="text-sm font-semibold tracking-tight">Assistant</div>
-              <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
+              <div className="text-sm font-semibold tracking-tight">Assistente</div>
+              {availableClis.length ? (
+                <select
+                  aria-label="Agente de IA"
+                  value={cliId ?? ""}
+                  onChange={(event) => chooseCli(event.target.value)}
+                  disabled={busy}
+                  className="max-w-44 bg-transparent text-xs text-faint outline-none"
+                >
+                  {availableClis.map((cli) => <option key={cli.id} value={cli.id}>{cli.name}</option>)}
+                </select>
+              ) : (
+                <div className="text-xs text-faint">Sem agente configurado</div>
+              )}
             </div>
             <Button variant="ghost" size="icon" onClick={cycleSize} className="text-muted" aria-label={SIZE_LABEL[size]} title={SIZE_LABEL[size]}>
               {size === "full" ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => void selectChat()} disabled={busy || chatPending || !chatReady} className="text-muted" aria-label="New chat" title="New chat">
+            <Button variant="ghost" size="icon" onClick={() => void selectChat()} disabled={busy || chatPending || !chatReady} className="text-muted" aria-label="Nova conversa" title="Nova conversa">
               <RotateCcw className="size-4" />
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="text-muted" aria-label="Close assistant">
+            <Button variant="ghost" size="icon" onClick={() => setOpen(false)} className="text-muted" aria-label="Fechar assistente">
               <X className="size-4" />
             </Button>
           </header>
 
           <div className="flex gap-2 border-b border-border px-4 py-2">
-            <select aria-label="Conversation history" className="min-w-0 flex-1 bg-surface text-sm" value={chats.some(c => c.id === activeChat.current.id) ? activeChat.current.id : ""} disabled={busy || chatPending || !chatReady} onChange={e => void selectChat(e.target.value || undefined)}>
-              <option value="">New chat</option>
+            <select aria-label="Histórico de conversas" className="min-w-0 flex-1 bg-surface text-sm" value={chats.some(c => c.id === activeChat.current.id) ? activeChat.current.id : ""} disabled={busy || chatPending || !chatReady} onChange={e => void selectChat(e.target.value || undefined)}>
+              <option value="">Nova conversa</option>
               {chats.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
             </select>
-            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void renameChat()}>Rename</button>
-            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Delete</button>
+            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void renameChat()}>Mudar nome</button>
+            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Eliminar</button>
           </div>
-          {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-600">{warning.error}. Other conversations are still available.</div>)}
+          {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-600">{warning.error}. As restantes conversas continuam disponíveis.</div>)}
           {saveError && <div role="alert" className="space-y-2 px-4 py-2 text-sm text-amber-600">
             <p>{saveError}</p>
             {chatReady ? <div className="flex flex-wrap gap-3">
-              <button className="underline" disabled={busy || chatPending} onClick={() => void flushChat().catch(() => {})}>Retry save</button>
-              <button className="underline" disabled={busy || chatPending} onClick={exportChat}>Export conversation</button>
-              <button className="underline" disabled={busy || chatPending} onClick={() => void discardAndStartChat()}>Discard unsaved changes and start new chat</button>
-            </div> : <button className="underline" onClick={() => window.location.reload()}>Reload</button>}
+              <button className="underline" disabled={busy || chatPending} onClick={() => void flushChat().catch(() => {})}>Tentar guardar novamente</button>
+              <button className="underline" disabled={busy || chatPending} onClick={exportChat}>Exportar conversa</button>
+              <button className="underline" disabled={busy || chatPending} onClick={() => void discardAndStartChat()}>Apagar alterações e iniciar nova conversa</button>
+            </div> : <button className="underline" onClick={() => window.location.reload()}>Recarregar</button>}
           </div>}
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {messages.map((m, i) => {
@@ -745,7 +786,6 @@ export function AssistantConsole() {
                   onClick={() => send(s.send)}
                   className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
                 >
-                  <Sparkles className="size-3 text-brand/70" />
                   {s.label}
                 </button>
               ))}
@@ -758,7 +798,7 @@ export function AssistantConsole() {
               onClick={() => setOpen(false)}
               className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface/50 px-3 py-2 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              <Settings className="size-3.5" /> Pick a CLI in Config to enable the assistant →
+              <Settings className="size-3.5" /> Escolhe um agente em Configuração para usar o assistente
             </Link>
           )}
 
@@ -774,7 +814,7 @@ export function AssistantConsole() {
                     send();
                   }
                 }}
-                placeholder={cliId ? "Ask anything…" : "Configure a CLI first"}
+                placeholder={cliId ? "Escreve uma mensagem…" : "Escolhe primeiro um agente"}
                 rows={1}
                 disabled={!cliId}
                 style={{ maxHeight: INPUT_MAX_PX[size] }}
@@ -784,7 +824,7 @@ export function AssistantConsole() {
                 onClick={() => send()}
                 disabled={busy || chatPending || !chatReady || !input.trim() || !cliId}
                 className="rounded-xl bg-brand p-2 text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-40"
-                aria-label="Send"
+                aria-label="Enviar"
               >
                 {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
               </button>
@@ -823,7 +863,7 @@ function PartView({
     if (!job)
       return (
         <Link href={`/jobs/${part.jobId}`} className="block rounded-xl border border-border bg-surface/40 p-2.5 text-xs text-faint hover:text-foreground">
-          Worker finished earlier — open log →
+          A tarefa já terminou — abrir registo
         </Link>
       );
     return (
@@ -831,7 +871,7 @@ function PartView({
         job={job}
         variant="inline"
         trailing={
-          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
+          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Abrir tarefa">
             <ArrowUpRight className="size-3.5" />
           </Link>
         }
@@ -844,10 +884,9 @@ function PartView({
     return (
       <div className="rounded-xl border border-border bg-surface/40 p-2.5">
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
-          <Sparkles className="size-3.5 text-brand" />
-          {part.jobIds.length} evaluations
+          {part.jobIds.length} avaliações
           <span className="ml-auto tabular-nums text-faint">
-            {done}/{part.jobIds.length} done
+            {done}/{part.jobIds.length} concluídas
           </span>
         </div>
         <div className="space-y-1.5">
@@ -857,7 +896,7 @@ function PartView({
               job={j!}
               variant="inline"
               trailing={
-                <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Open worker">
+                <Link href={`/jobs/${j!.id}`} className="text-faint transition-colors hover:text-brand" aria-label="Abrir tarefa">
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               }
@@ -877,17 +916,17 @@ function PartView({
               onClick={() => onConfirm(part.cid, true)}
               className="rounded-full bg-brand px-3 py-1 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
             >
-              Confirm
+              Confirmar
             </button>
             <button
               onClick={() => onConfirm(part.cid, false)}
               className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              Cancel
+              Cancelar
             </button>
           </div>
         ) : (
-          <div className="mt-1 text-xs text-faint">{part.state === "done" ? "✓ started" : "cancelled"}</div>
+          <div className="mt-1 text-xs text-faint">{part.state === "done" ? "✓ confirmado" : "cancelada"}</div>
         )}
       </div>
     );

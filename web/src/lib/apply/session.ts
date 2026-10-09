@@ -272,7 +272,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     // the agent reach the form live (/api/apply/drive). Otherwise abort.
     if (cliId && why.code === "no-form") {
       const id = `apply-${crypto.randomUUID()}`;
-      const title = form.title || (await page.title().catch(() => "")) || "Application";
+      const title = form.title || (await page.title().catch(() => "")) || "Candidatura";
       SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
       return { id, title, fields: [], shots, issues: [], needsDrive: true };
     }
@@ -285,7 +285,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   const issues: ApplyIssue[] = [...consentIssues];
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
-  if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
+  if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "O formulário tem uma estrutura pouco habitual e o agente leu os campos diretamente na página. Revê-os antes do envio." });
   // agentInterpretForm just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
@@ -296,7 +296,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
-  if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
+  if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} ${unlabeled > 1 ? "campos não têm" : "campo não tem"} um rótulo claro. ${unlabeled > 1 ? "Revê-os" : "Revê-o"} antes do envio.` });
 
   const id = `apply-${crypto.randomUUID()}`;
   SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
@@ -357,8 +357,8 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   s.frame = frame;
   s.fields = form.fields;
   if (form.title) s.title = form.title;
-  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
-  if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
+  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "O agente navegou até este formulário no teu computador. Revê os campos antes do envio." }];
+  if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "O agente também leu diretamente os campos devido à estrutura pouco habitual da página. Confirma-os com atenção." });
   // agentInterpretForm just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its

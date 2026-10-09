@@ -19,10 +19,10 @@ const ERROR_HTTP: Record<string, number> = {
 };
 
 const ERROR_MSG: Record<string, string> = {
-  "invalid-url": "url must be an http(s) posting URL",
-  "unmatched": "no pipeline row for that URL",
-  "not-found": "pipeline.md not found",
-  "busy": "The pipeline is being written right now (CLI or another tab). Try again.",
+  "invalid-url": "O endereço da oferta tem de começar por http:// ou https://.",
+  "unmatched": "Não foi encontrada uma oportunidade com esse endereço.",
+  "not-found": "O ficheiro pipeline.md não foi encontrado.",
+  "busy": "As oportunidades estão a ser atualizadas por outro processo. Volta a tentar.",
 };
 
 export async function POST(req: Request) {
@@ -30,12 +30,12 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "bad json" }, { status: 400 });
+    return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
   }
 
   const url = typeof body.url === "string" ? body.url : "";
   if (body.done !== undefined && typeof body.done !== "boolean") {
-    return NextResponse.json({ error: "done must be a boolean" }, { status: 400 });
+    return NextResponse.json({ error: "O estado concluído tem de ser verdadeiro ou falso." }, { status: 400 });
   }
   const done = body.done !== false;
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   const lockModule = path.join(root, "pipeline-lock.mjs");
   if (!fs.existsSync(lockModule)) {
     return NextResponse.json(
-      { error: "inbox skip needs the career-ops scripts; this root has data only", code: "core-script-missing" },
+      { error: "Esta ação exige os scripts do career-ops; a instalação atual contém apenas dados.", code: "core-script-missing" },
       { status: 503 },
     );
   }
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     if (!result.ok) {
       const code = result.error;
       return NextResponse.json(
-        { error: ERROR_MSG[code] ?? "skip failed", code },
+        { error: ERROR_MSG[code] ?? "Não foi possível alterar a oportunidade.", code },
         {
           status: ERROR_HTTP[code] ?? 400,
           ...(code === "busy" ? { headers: { "Retry-After": "5" } } : {}),
@@ -63,6 +63,6 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ ok: true, done, matched: result.matched, changed: result.changed });
   } catch {
-    return NextResponse.json({ error: "write failed" }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível guardar a alteração." }, { status: 500 });
   }
 }

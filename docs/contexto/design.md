@@ -1,0 +1,3 @@
+# Design
+
+A interface usa o laranja da marca `hsl(26 73% 51%)`, texto escuro `hsl(30 10% 11%)`, fundo claro `#f7f6f3`, superfícies brancas e bordas `hsl(40 9% 86%)`. Em modo escuro usa fundo `#0a0a0a`, superfície `#161616` e texto `#fafafa`. Inter é a fonte de leitura; Instrument Serif fica reservada para títulos editoriais. A hierarquia depende de tipografia, espaço, alinhamento, bordas e estados reais. Evitam-se brilhos, grelhas decorativas, ícones de faísca, gradientes sem função, cartões em excesso e promessas vagas. As ações devem dizer o que acontece a seguir e todos os controlos mantêm nome acessível, contraste e estado de foco.

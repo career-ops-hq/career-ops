@@ -105,7 +105,7 @@ export function MobileNav() {
       <style>{STYLE}</style>
 
       <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
-        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="career-ops home">
+        <Link href="/" className="flex min-h-[44px] items-center gap-2" aria-label="Início do career-ops">
           <CoMark size={26} />
           <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
         </Link>
@@ -114,7 +114,7 @@ export function MobileNav() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            aria-label="Open menu"
+            aria-label="Abrir menu"
             aria-expanded={open}
             className="relative inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-2 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
@@ -130,7 +130,7 @@ export function MobileNav() {
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Navigation menu"
+        aria-label="Menu de navegação"
         inert={!open}
         className={cn("co-mdrawer border-l border-border bg-surface md:hidden", open && "open")}
         onTouchStart={onTouchStart}
@@ -142,7 +142,7 @@ export function MobileNav() {
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="Close menu"
+            aria-label="Fechar menu"
             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md p-1.5 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
           >
             <X className="size-5" />
@@ -166,7 +166,7 @@ export function MobileNav() {
                 <Icon className="size-5" />
                 {label}
                 {chip && (
-                  <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
+                  <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-foreground">
                     {chip}
                   </span>
                 )}
@@ -183,8 +183,8 @@ export function MobileNav() {
           <UsageMeter />
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              <span className="font-mono text-[10px] text-faint">THEME</span>
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>dados locais · v0</span>
+              <span className="font-mono text-[10px] text-faint">TEMA</span>
             </div>
             <ThemeToggle showLabel className="bg-surface-hover/40" />
           </div>

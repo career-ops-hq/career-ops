@@ -5,6 +5,10 @@ import { AlertCircle, CheckCircle2, Clock, Edit3, Globe, Loader2, MoreVertical, 
 import type { ScheduledJob } from "@/lib/scheduled-jobs";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
+import { PT_PT_LOCALE } from "@/lib/pt-pt";
+
+const UNIT_LABEL: Record<string, string> = { minutes: "minutos", hours: "horas", days: "dias" };
+const STATUS_LABEL: Record<string, string> = { active: "ativa", paused: "em pausa" };
 
 export function JobCard({
   job,
@@ -50,12 +54,12 @@ export function JobCard({
     try {
       const res = await fetch(`/api/scheduled-jobs/${job.id}/run`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Run failed");
+      if (!res.ok) throw new Error(data.error || "A execução falhou");
 
-      setRunMessage(` Completed! Found ${data.rolesFound || 0} matching roles.`);
+      setRunMessage(`Concluída. Foram encontradas ${data.rolesFound || 0} ofertas.`);
       onRunFinished();
     } catch (err) {
-      setRunMessage(` Error: ${err instanceof Error ? err.message : "Run failed"}`);
+      setRunMessage(`Erro: ${err instanceof Error ? err.message : "A execução falhou"}`);
     } finally {
       setRunning(false);
     }
@@ -67,7 +71,7 @@ export function JobCard({
   const letter = (job.name || "S").trim().charAt(0).toUpperCase();
 
   return (
-    <div className="co-rise group flex min-w-0 flex-col justify-between h-full gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
+    <div className="group flex min-w-0 flex-col justify-between h-full gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-colors hover:border-brand/30">
       <div className="space-y-2.5">
         {/* Top Header: Logo + Title + 3-Dots Menu */}
         <div className="flex items-start gap-3">
@@ -80,7 +84,7 @@ export function JobCard({
             </h3>
             <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-muted">
               <Clock className="size-3.5 text-faint" />
-              Every {job.every} {job.unit} · {job.timezone}
+              A cada {job.every} {UNIT_LABEL[job.unit] ?? job.unit} · {job.timezone}
             </p>
           </div>
 
@@ -89,11 +93,11 @@ export function JobCard({
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              aria-label={`Options for ${job.name}`}
+              aria-label={`Opções de ${job.name}`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               className="rounded p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground"
-              title="Options"
+              title="Opções"
             >
               <MoreVertical className="size-4" />
             </button>
@@ -109,7 +113,7 @@ export function JobCard({
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
                 >
-                  <Edit3 className="size-3.5" /> Edit Scan
+                  <Edit3 className="size-3.5" /> Editar
                 </button>
                 <button
                   type="button"
@@ -120,7 +124,7 @@ export function JobCard({
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-rose-500 transition-colors hover:bg-rose-500/10"
                 >
-                  <Trash2 className="size-3.5" /> Delete Scan
+                  <Trash2 className="size-3.5" /> Eliminar
                 </button>
               </div>
             )}
@@ -136,7 +140,7 @@ export function JobCard({
             )}
           >
             {isFull ? <Globe className="size-3" /> : <Zap className="size-3" />}
-            {isFull ? "Full ATS Sweep" : "Zero-Token Portals"}
+            {isFull ? "Bases públicas de ATS" : "Empresas de portals.yml"}
           </span>
 
           <span
@@ -148,14 +152,14 @@ export function JobCard({
             )}
           >
             <span className={cn("size-1.5 rounded-full", isActive ? "bg-emerald-500" : "bg-zinc-400")} />
-            {job.status}
+            {STATUS_LABEL[job.status] ?? job.status}
           </span>
         </div>
 
         {/* Keywords clamped to max 2 lines */}
         {positiveList.length > 0 && (
           <div className="max-h-12 overflow-hidden flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span className="text-faint shrink-0">matched:</span>
+            <span className="text-faint shrink-0">critérios:</span>
             {positiveList.map((kw, i) => (
               <span key={i} className="rounded border border-border px-1.5 py-0.5 font-medium text-muted truncate max-w-[140px]">
                 {kw}
@@ -169,16 +173,16 @@ export function JobCard({
           {job.lastError ? (
             <p className="flex items-start gap-1.5 text-rose-500">
               <AlertCircle className="mt-0.5 size-3 shrink-0" />
-              <span className="truncate">Last error: {job.lastError}</span>
+              <span className="truncate">Último erro: {job.lastError}</span>
             </p>
           ) : job.lastRunAt ? (
             <p className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="size-3.5 shrink-0" />
-              Last run {new Date(job.lastRunAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·{" "}
-              {job.rolesFoundCount || 0} roles found
+              Última execução às {new Date(job.lastRunAt).toLocaleTimeString(PT_PT_LOCALE, { hour: "2-digit", minute: "2-digit" })} ·{" "}
+              {job.rolesFoundCount || 0} ofertas encontradas
             </p>
           ) : (
-            <p className="text-faint">No runs recorded yet</p>
+            <p className="text-faint">Ainda não há execuções</p>
           )}
           {runMessage && <p className="mt-1 font-medium text-brand">{runMessage}</p>}
         </div>
@@ -193,7 +197,7 @@ export function JobCard({
           className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-50 max-sm:min-h-[44px]"
         >
           {running ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
-          {running ? "Scanning…" : "Run now"}
+          {running ? "A pesquisar…" : "Executar agora"}
         </button>
 
         <button
@@ -205,7 +209,7 @@ export function JobCard({
           )}
         >
           {isActive ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-          {isActive ? "Pause" : "Resume"}
+          {isActive ? "Pausar" : "Retomar"}
         </button>
       </div>
     </div>

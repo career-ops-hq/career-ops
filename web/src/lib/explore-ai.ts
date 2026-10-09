@@ -1,5 +1,5 @@
 // Client-safe (NO node imports) tolerant streaming parser for the AI-search
-// `<<offer:{...}>>` envelopes emitted by modes/discover.md. Modeled on the
+// `<<offer:{...}>>` envelopes emitted by modes/web-search.md. Modeled on the
 // assistant console's <<act:>> envelope parsing, factored out so the grammar
 // can't drift. The load-bearing requirement: an envelope (or its opener) split
 // across stream chunk boundaries must BUFFER, never flush as garbage or drop.
@@ -9,10 +9,12 @@ import { pendingOpenerLen } from "./stream-parse.mjs";
 import { normalizeUrl } from "./core/url-key.mjs";
 
 const OPEN = "<<offer:";
+const TERMINAL_OPEN = "<<search-result:";
 const CLOSE = ">>";
 
 export type AiTraceChunk =
   | { kind: "offer"; offer: DiscoveredOffer }
+  | { kind: "terminal"; status: "success" | "partial" | "error"; message?: string }
   | { kind: "narration"; text: string }
   | { kind: "malformed"; raw: string };
 
@@ -63,14 +65,17 @@ export function makeAiStreamParser(opts?: { knownUrls?: Set<string> }) {
       buf += delta;
       const out: AiTraceChunk[] = [];
       for (;;) {
-        const open = buf.indexOf(OPEN);
+        const offerOpen = buf.indexOf(OPEN);
+        const terminalOpen = buf.indexOf(TERMINAL_OPEN);
+        const open = offerOpen < 0 ? terminalOpen : terminalOpen < 0 ? offerOpen : Math.min(offerOpen, terminalOpen);
+        const marker = open === terminalOpen ? TERMINAL_OPEN : OPEN;
         if (open === -1) {
           // No opener in view. Flush as narration — but hold back the longest
           // trailing run that could be the start of a split opener ("<<offe…"),
           // so an offer whose marker straddles a chunk boundary is never dropped
           // as garbage (#2290). A fixed-length tail check missed the shorter
           // partial openers ("<<", "<<off") preceded by other text.
-          const hold = pendingOpenerLen(buf, OPEN);
+          const hold = Math.max(pendingOpenerLen(buf, OPEN), pendingOpenerLen(buf, TERMINAL_OPEN));
           const text = hold ? buf.slice(0, buf.length - hold) : buf;
           if (text.trim()) out.push({ kind: "narration", text });
           buf = hold ? buf.slice(buf.length - hold) : "";
@@ -78,14 +83,29 @@ export function makeAiStreamParser(opts?: { knownUrls?: Set<string> }) {
         }
         const before = buf.slice(0, open);
         if (before.trim()) out.push({ kind: "narration", text: before });
-        const close = buf.indexOf(CLOSE, open + OPEN.length);
+        const close = buf.indexOf(CLOSE, open + marker.length);
+        // A server terminal event must survive an unfinished model envelope.
+        if (marker === OPEN && terminalOpen > open && (close < 0 || terminalOpen < close)) {
+          out.push({ kind: "malformed", raw: buf.slice(open + marker.length, terminalOpen).slice(0, 120) });
+          buf = buf.slice(terminalOpen);
+          continue;
+        }
         if (close === -1) {
           // Envelope still streaming — keep from the opener onward and wait.
           buf = buf.slice(open);
           break;
         }
-        const json = buf.slice(open + OPEN.length, close);
+        const json = buf.slice(open + marker.length, close);
         buf = buf.slice(close + CLOSE.length);
+        if (marker === TERMINAL_OPEN) {
+          try {
+            const result = JSON.parse(json);
+            if (["success", "partial", "error"].includes(result?.status)) {
+              out.push({ kind: "terminal", status: result.status, ...(typeof result.message === "string" ? { message: result.message } : {}) });
+            } else out.push({ kind: "malformed", raw: json.slice(0, 120) });
+          } catch { out.push({ kind: "malformed", raw: json.slice(0, 120) }); }
+          continue;
+        }
         let offer: DiscoveredOffer | null = null;
         try {
           offer = toOffer(JSON.parse(json));

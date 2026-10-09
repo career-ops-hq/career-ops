@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ApplyLoading() {
   return (
-    <div className="relative min-h-screen" aria-label="Loading application assistant">
+    <div className="relative min-h-screen" aria-label="A carregar a candidatura">
       <div className="relative z-10 mx-auto max-w-3xl px-6 py-8">
         <div className="flex items-center gap-3">
           <Skeleton className="size-6 rounded-full" />

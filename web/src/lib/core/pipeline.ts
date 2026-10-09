@@ -28,6 +28,7 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
       title: o.title || "",
       location: o.location || "",
       source: o.source || o.ats || "explorer",
+      opportunityType: o.opportunityType,
       // Preserve the optional per-offer signal so it survives to pipeline.md.
       // The core writer treats an empty note as absent (byte-identical output).
       note: o.note || "",
@@ -36,12 +37,13 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
 
   // Data-only / pre-scan-ats checkout has no scan.mjs writers → fail with an
   // actionable message instead of a silent added:0.
-  if (!fs.existsSync(rootScript("scan"))) {
-    return Promise.resolve({ added: 0, error: "This checkout is data-only — the pipeline writer (scan.mjs) isn't available." });
+  const scanScript = rootScript("scan");
+  if (!fs.existsSync(scanScript)) {
+    return Promise.resolve({ added: 0, error: "Esta instalação contém apenas dados e não inclui o módulo que atualiza as oportunidades (scan.mjs)." });
   }
 
-  const scanUrl = pathToFileURL(rootScript("scan")).href;
-  const localTodayUrl = pathToFileURL(path.join(careerOpsRoot(), "lib", "local-today.mjs")).href;
+  const scanUrl = pathToFileURL(scanScript).href;
+  const localTodayUrl = pathToFileURL(path.join(path.dirname(scanScript), "lib", "local-today.mjs")).href;
   const code = `
 import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
 import { localToday } from ${JSON.stringify(localTodayUrl)};
@@ -74,12 +76,25 @@ process.stdin.on("end", async () => {
     child.stdout.on("data", (d: Buffer) => (out += d.toString()));
     child.stderr.on("data", (d: Buffer) => (err += d.toString()));
     child.on("error", (e) => resolve({ added: 0, error: e instanceof Error ? e.message : "spawn failed" }));
-    child.on("close", () => {
+    child.on("close", (code, signal) => {
+      const stderr = err.trim().slice(0, 200);
+      if (code !== 0 || signal) {
+        resolve({ added: 0, error: stderr || (signal ? `O processo de escrita terminou com ${signal}.` : `O processo de escrita terminou com o código ${code}.`) });
+        return;
+      }
+      if (!out.trim()) {
+        resolve({ added: 0, error: stderr || "O processo de escrita não devolveu um resultado." });
+        return;
+      }
       try {
-        const parsed = JSON.parse(out.trim() || "{}") as AddResult;
-        resolve({ added: parsed.added ?? 0, error: parsed.error });
+        const parsed = JSON.parse(out.trim()) as AddResult;
+        if (!Number.isFinite(parsed.added) || parsed.added < 0) {
+          resolve({ added: 0, error: stderr || "O processo de escrita devolveu um resultado inválido." });
+          return;
+        }
+        resolve({ added: parsed.added, error: parsed.error });
       } catch {
-        resolve({ added: 0, error: err.trim().slice(0, 200) || "writer returned no result" });
+        resolve({ added: 0, error: stderr || "O processo de escrita devolveu um resultado inválido." });
       }
     });
     child.stdin.write(JSON.stringify(clean));

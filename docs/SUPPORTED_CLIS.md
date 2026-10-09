@@ -5,7 +5,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | CLI | Entry File | How to Invoke |
 | --- | --- | --- |
 | Claude Code | `CLAUDE.md` | Interactive: `claude` (then `/career-ops`). Headless/Batch: `claude -p "prompt"` |
-| Cursor | `AGENTS.md` | Interactive: open the project in Cursor and ask for `career-ops` (skill entrypoint at `.cursor/skills/career-ops/SKILL.md`) |
+| Cursor Agent | `AGENTS.md` | Interactive: `agent`. Headless read-only: `agent -p --mode ask --trust "prompt"` (uses the signed-in Cursor account) |
 | Codex | `CODEX.md` (see [`docs/CODEX.md`](CODEX.md)) | Interactive: `codex` (then use plain text). Headless/Batch: `codex exec "prompt"` |
 | OpenCode | `OPENCODE.md` | Interactive: `opencode` (then `/career-ops`). Headless/Batch: `opencode run "prompt"` |
 | Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p "prompt"` |
@@ -14,7 +14,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
 | Kimi | `KIMI.md` | Interactive: `kimi` |
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
-| Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
+| Gemini CLI | `AGENTS.md` | Interactive: `gemini`. Headless/Batch: `gemini -p "prompt"` (uses the signed-in Google account). `GEMINI.md` remains a legacy wrapper. |
 | Hermes Agent | `AGENTS.md` | Interactive: `hermes` (then ask for a career-ops task). Web read-only workers: `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd`. Batch ranking: unsupported. |
 
 ## Hermes Agent

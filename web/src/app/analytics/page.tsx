@@ -7,14 +7,14 @@ import { cumulativeTilesWithHistory } from "@/lib/funnel-tiles.mjs";
 export const dynamic = "force-dynamic";
 
 const STAGES: { key: string; label: string }[] = [
-  { key: "EVALUATED", label: "Evaluated" },
-  { key: "APPLIED", label: "Applied" },
-  { key: "RESPONDED", label: "Responded" },
-  { key: "INTERVIEW", label: "Interview" },
-  { key: "OFFER", label: "Offer" },
-  { key: "HIRED", label: "Hired" },
-  { key: "REJECTED", label: "Rejected" },
-  { key: "DISCARDED", label: "Discarded" },
+  { key: "EVALUATED", label: "Avaliadas" },
+  { key: "APPLIED", label: "Candidaturas" },
+  { key: "RESPONDED", label: "Com resposta" },
+  { key: "INTERVIEW", label: "Entrevistas" },
+  { key: "OFFER", label: "Propostas" },
+  { key: "HIRED", label: "Contratações" },
+  { key: "REJECTED", label: "Recusadas" },
+  { key: "DISCARDED", label: "Descartadas" },
 ];
 
 export default async function Analytics() {
@@ -55,28 +55,28 @@ export default async function Analytics() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
-      <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
-      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluation{total === 1 ? "" : "s"}.</p>
+      <h1 className="font-display text-2xl tracking-tight text-landing">Análise</h1>
+      <p className="mt-1 text-sm text-muted">{total === 1 ? "1 oportunidade acompanhada." : `${total} oportunidades acompanhadas.`}</p>
 
       {/* headline stats */}
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat value={total} label="evaluated" />
-        <Stat value={avg ? avg.toFixed(2) : "—"} label="avg score" />
+        <Stat value={total} label="avaliadas" />
+        <Stat value={avg ? avg.toFixed(2) : "—"} label="pontuação média" />
         <Stat
           value={interviews}
-          label="interviews"
-          hint={interviews === 0 ? "Interviews follow replies — keep follow-ups warm →" : undefined}
+          label="entrevistas"
+          hint={interviews === 0 ? "Ainda não há entrevistas registadas." : undefined}
         />
         <Stat
           value={offers}
-          label="offers"
-          hint={offers === 0 ? "Offers follow interviews — keep the conversations going →" : undefined}
+          label="propostas"
+          hint={offers === 0 ? "Ainda não há propostas registadas." : undefined}
         />
       </div>
 
       <PipelineSankey applications={applications} statusLog={statusLog} />
 
-      <Section title="Pipeline by stage">
+      <Section title="Estado das oportunidades">
         {stageCounts.map((s) => (
           <Bar
             key={s.key}
@@ -89,13 +89,13 @@ export default async function Analytics() {
         ))}
       </Section>
 
-      <Section title="Score distribution">
+      <Section title="Distribuição das pontuações">
         {buckets.map((b) => (
           <Bar key={b.label} label={b.label} value={b.n} pct={(b.n / maxBucket) * 100} total={scores.length} />
         ))}
       </Section>
 
-      <Section title="Top companies" id="companies">
+      <Section title="Empresas com mais oportunidades" id="companies">
         {topCompanies.map(([name, n]) => (
           <Bar key={name} label={name} value={n} pct={(n / maxCompany) * 100} />
         ))}
@@ -141,10 +141,7 @@ function Bar({
   tone?: "neutral" | "positive";
 }) {
   const share = total && total > 0 ? Math.round((value / total) * 100) : null;
-  const fill =
-    tone === "positive"
-      ? "bg-gradient-to-r from-emerald-500/60 to-emerald-500/30"
-      : "bg-gradient-to-r from-foreground/25 to-foreground/10";
+  const fill = tone === "positive" ? "bg-emerald-500/50" : "bg-foreground/20";
   return (
     <div className="flex items-center gap-3">
       <div className="w-32 shrink-0 truncate text-sm text-muted">{label}</div>

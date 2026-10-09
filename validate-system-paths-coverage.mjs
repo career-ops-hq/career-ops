@@ -32,6 +32,7 @@ if (!existsSync(sourcePath)) {
 const source = readFileSync(sourcePath, 'utf-8');
 
 const SYSTEM_PATHS = extractArrayFromSource(source, 'SYSTEM_PATHS');
+const BOOTSTRAP_PATHS = extractArrayFromSource(source, 'BOOTSTRAP_PATHS');
 const USER_PATHS = extractArrayFromSource(source, 'USER_PATHS');
 
 if (SYSTEM_PATHS.length === 0 || USER_PATHS.length === 0) {
@@ -106,9 +107,11 @@ const REPO_ONLY = ['SIGNATURES.md'];
 
 // Trees that live in the repo but deliberately OUTSIDE the updater's world:
 // web/ is the experimental web UI — its own release-please component, never
-// shipped by update-system.mjs, never in the npm package. Excluding it here is
-// part of that isolation contract, not a coverage gap.
-const EXCLUDE_PREFIXES = ['web/'];
+// shipped by update-system.mjs, never in the npm package. macos/ is a local,
+// non-distributed wrapper source tree that depends on web/; shipping it through
+// update-system while web/ stays out would install unusable source on core-only
+// clients. Excluding both here is part of that isolation contract, not a gap.
+const EXCLUDE_PREFIXES = ['web/', 'macos/'];
 
 function covered(file) {
   // If explicitly excluded, it is covered
@@ -177,6 +180,13 @@ if (process.argv.includes('--self-test')) {
   // Test sibling mismatch (strict prefix match)
   assert(covered('providers-sibling/justjoin.mjs') === false, 'providers-sibling/justjoin.mjs must NOT be covered');
   assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
+  assert(EXCLUDE_PREFIXES.includes('macos/'), 'macos/ must stay covered through the isolation-contract prefix exclude');
+  assert(covered('macos/CareerOpsApp.swift') === true, 'macos source must stay covered through the isolation-contract prefix exclude');
+  assert(
+    ![...SYSTEM_PATHS, ...BOOTSTRAP_PATHS].some((path) => path === 'macos' || path.startsWith('macos/')),
+    'macos/ must NOT be shipped through SYSTEM_PATHS or BOOTSTRAP_PATHS',
+  );
+  assert(covered('macos-sibling/stray.swift') === false, 'macos-sibling/ must NOT ride the macos/ prefix exclude');
   assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
   assert(covered('.npmignore') === true, '.npmignore must be covered (excluded)');
   // Asserted through the MECHANISM as well as covered(): if SIGNATURES.md ever

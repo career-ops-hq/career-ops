@@ -52,11 +52,11 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
   // raw string is also used verbatim below to build cv-web-${input}.html —
   // path.join would then honor those ".." segments and escape scratchDir.
   if (!/^\d+$/.test(input)) {
-    return { ok: false, error: `Invalid report selector: "${input}"` };
+    return { ok: false, error: `Referência de relatório inválida: «${input}».` };
   }
   const reportFile = findReportFile(input);
   if (!reportFile) {
-    return { ok: false, error: `No report #${input} found — evaluate this posting first.` };
+    return { ok: false, error: `Não foi encontrado o relatório #${input}. Avalia primeiro esta oferta.` };
   }
   const companyMatch = path.basename(reportFile).match(/^\d+-(.+)-\d{4}-\d{2}-\d{2}\.md$/);
   const companySlug = companyMatch ? companyMatch[1] : "company";

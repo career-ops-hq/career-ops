@@ -82,7 +82,7 @@ export const CV_ENVELOPE_INSTRUCTION =
  */
 export function parseCvEnvelope(text) {
   if (typeof text !== "string") {
-    return { ok: false, error: "No agent output to read a CV envelope from." };
+    return { ok: false, error: "O agente não devolveu conteúdo para o CV." };
   }
   // Normalize CRLF once so the line-anchored markers match on a Windows stream
   // and no stray \r rides into the HTML handed to the renderer.
@@ -90,33 +90,33 @@ export function parseCvEnvelope(text) {
 
   const openers = [...normalized.matchAll(OPENER)];
   if (openers.length === 0) {
-    return { ok: false, error: "The agent emitted no <<cv-html>> envelope, so there is no CV to render." };
+    return { ok: false, error: "O agente não devolveu o bloco <<cv-html>> necessário para criar o CV." };
   }
   if (openers.length > 1) {
     // Choosing one would be choosing blind — an injected envelope looks exactly
     // like the real one from here.
-    return { ok: false, error: `Found ${openers.length} <<cv-html>> envelopes; refusing to guess which is the real CV.` };
+    return { ok: false, error: `Foram encontrados ${openers.length} blocos <<cv-html>>. Não é possível determinar qual contém o CV correto.` };
   }
 
   const opener = openers[0];
   const afterOpener = normalized.slice(opener.index + opener[0].length);
   const closer = CLOSER.exec(afterOpener);
   if (!closer) {
-    return { ok: false, error: "The <<cv-html>> envelope was never closed — the CV output is incomplete." };
+    return { ok: false, error: "O bloco <<cv-html>> não foi fechado e o CV está incompleto." };
   }
 
   // The opener match stops before its newline and the closer starts on its own
   // line, so exactly one delimiting newline sits on each side of the body.
   const html = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
   if (!html.trim()) {
-    return { ok: false, error: "The <<cv-html>> envelope was empty — no CV was tailored." };
+    return { ok: false, error: "O bloco <<cv-html>> está vazio. Não foi criado um CV adaptado." };
   }
   // A closing </html> is what distinguishes a whole document from one the agent
   // cut off mid-emission — the realistic failure when emitting 15-25 KB inline.
   // This belongs here, not in the caller: the caller reports THIS error string, so
   // splitting the rule out would leave the user with a generic message.
   if (!/<\/html\s*>/i.test(html)) {
-    return { ok: false, error: "The CV was cut off before its closing </html> tag — the output is incomplete." };
+    return { ok: false, error: "O CV terminou antes da marca </html> e está incompleto." };
   }
 
   const warnings = [];

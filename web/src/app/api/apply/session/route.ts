@@ -14,10 +14,10 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const url = (body.url ?? "").trim();
-  if (!/^https?:\/\//i.test(url)) return Response.json({ error: "A valid application URL (https://…) is required" }, { status: 400 });
+  if (!/^https?:\/\//i.test(url)) return Response.json({ error: "Indica um endereço válido do formulário (https://…)." }, { status: 400 });
   // A stale saved id falls back to the sole installed CLI, as on every other AI
   // route (#4607). Unresolvable → pass it through unchanged: the interpreter
   // already treats a missing CLI as "no agentic fallback".
@@ -29,6 +29,6 @@ export async function POST(req: Request) {
     if (substitution) session.issues.push({ level: "info", code: "cli-substituted", message: substitution });
     return Response.json(session);
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "could not open the form" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "Não foi possível abrir o formulário." }, { status: 500 });
   }
 }

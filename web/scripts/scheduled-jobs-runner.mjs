@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
 import {
   isSafeScheduledId,
@@ -14,6 +14,9 @@ import {
 import { nextScheduledRun } from "../src/lib/scheduled-cadence.mjs";
 import { isMainModule } from "../../lib/is-main-module.mjs";
 import { scheduledRunnerResourcePath, scheduledStorePath } from "../src/lib/scheduled-runner-path.mjs";
+import { buildMarketPlan, classifyMarketLocation, cleanMarkets } from "../src/lib/market-presets.mjs";
+import { serializePortals } from "../src/lib/core/portals-serialize.mjs";
+import { mergeDiscoveredOffers, parseMarketReceipt } from "../src/lib/core/market-merge.mjs";
 import { getCareerOpsRoot } from "../../path-resolver.mjs";
 
 const CODE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -107,24 +110,42 @@ function numericFilter(value, fallback, minimum, maximum = Number.POSITIVE_INFIN
   return Math.min(maximum, Math.max(minimum, Math.round(number)));
 }
 
-export function buildScanCommand(job) {
+export function buildScanCommands(job) {
   const filters = job.filters || {};
   const sinceDays = numericFilter(filters.sinceDays, 7, 1);
+  const freelance = filters.opportunityType === "freelance";
+  const marketScoped = freelance || cleanMarkets(filters.markets).length > 0;
+  if (freelance) return [{
+    script: "scan.mjs",
+    args: ["--dry-run", "--json", "--since", String(sinceDays)],
+  }];
   if (job.engine === "portals") {
-    return {
+    return [{
       script: "scan.mjs",
-      args: ["--since", String(sinceDays), "--quiet"],
-    };
+      args: marketScoped
+        ? ["--dry-run", "--json", "--since", String(sinceDays)]
+        : ["--since", String(sinceDays), "--quiet"],
+    }];
   }
 
-  const ats = Array.isArray(filters.ats) && filters.ats.length
+  const ats = Array.isArray(filters.ats)
     ? filters.ats.join(",")
     : "greenhouse,lever,ashby,workday";
   const limit = numericFilter(filters.limitPerAts, 150, 50, 500);
-  return {
+  const commands = [];
+  if (ats) commands.push({
     script: "scan-ats-full.mjs",
-    args: ["--since", String(sinceDays), "--ats", ats, "--limit", String(limit), "--json"],
-  };
+    args: [...(marketScoped ? ["--dry-run"] : []), "--since", String(sinceDays), "--ats", ats, "--limit", String(limit), "--json"],
+  });
+  if (marketScoped) commands.push({
+    script: "scan.mjs",
+    args: ["--dry-run", "--json", "--since", String(sinceDays)],
+  });
+  return commands;
+}
+
+export function buildScanCommand(job) {
+  return buildScanCommands(job)[0];
 }
 
 export function extractRolesFound(engine, stdout) {
@@ -140,25 +161,27 @@ export function extractRolesFound(engine, stdout) {
   return match ? Number(match[1]) : 0;
 }
 
-function writeJobPortals(root, job) {
+function writeJobPortals(root, job, marketOnly = false) {
   if (!isSafeScheduledId(job.id)) throw new Error("Invalid scheduled job identifier.");
   const portalsPath = path.join(root, "portals.yml");
   const base = yaml.load(fs.readFileSync(portalsPath, "utf8"));
   if (!base || typeof base !== "object") throw new Error("portals.yml must contain a mapping");
 
   const filters = job.filters || {};
-  const positive = Array.isArray(filters.positive)
-    ? filters.positive.filter((value) => typeof value === "string" && value.trim())
+  const list = (value) => Array.isArray(value)
+    ? value.filter((item) => typeof item === "string" && item.trim())
     : [];
+  const positive = list(filters.positive);
   const fallbackPositive = Array.isArray(base.title_filter?.positive)
     ? base.title_filter.positive.filter((value) => typeof value === "string" && value.trim())
     : [];
-  if (!positive.length && !fallbackPositive.length) {
+  const searchTerms = positive.length ? positive : filters.opportunityType === "freelance" ? [] : fallbackPositive;
+  if (filters.opportunityType !== "freelance" && !positive.length && !fallbackPositive.length) {
     throw new Error("Scheduled scans require title keywords in the job or portals.yml title_filter.positive.");
   }
   base.title_filter = {
     ...(base.title_filter || {}),
-    positive: positive.length ? positive : fallbackPositive,
+    positive: searchTerms,
     negative: Array.isArray(filters.negative) ? filters.negative : [],
   };
   if (base.title_filter_full) base.title_filter_full = { ...base.title_filter_full, ...base.title_filter };
@@ -170,16 +193,90 @@ function writeJobPortals(root, job) {
     always_allow: Array.isArray(filters.alwaysAllow) ? filters.alwaysAllow : [],
   };
 
+  const plan = buildMarketPlan(filters.markets, searchTerms, filters.opportunityType);
+
   const tempDir = path.join(root, "data", "tmp");
   fs.mkdirSync(tempDir, { recursive: true });
   const tempPath = path.join(tempDir, `scheduled-${job.id}-${randomUUID()}.yml`);
-  fs.writeFileSync(tempPath, yaml.dump(base, { lineWidth: 120, noRefs: true }), "utf8");
+  if (marketOnly) {
+    fs.writeFileSync(tempPath, serializePortals({
+      positive: searchTerms,
+      negative: list(filters.negative),
+      allow: list(filters.allow),
+      block: list(filters.block),
+      blockHard: list(filters.blockHard),
+      alwaysAllow: list(filters.alwaysAllow),
+    }, plan.jobBoards, plan.locationPolicy.strict), "utf8");
+  } else {
+    if (plan.jobBoards.length) {
+      base.job_boards = plan.jobBoards;
+      if (plan.locationPolicy.strict) base.location_filter.strict = true;
+      else delete base.location_filter.strict;
+    }
+    fs.writeFileSync(tempPath, yaml.dump(base, { lineWidth: 120, noRefs: true }), "utf8");
+  }
   return tempPath;
 }
 
 function firstErrorLine(result) {
   const raw = result.stderr || result.error?.message || `scanner exit ${result.status ?? "unknown"}`;
   return String(raw).split(/\r?\n/).find(Boolean)?.slice(0, 300) || "Scan failed";
+}
+
+function acceptedAtsOffers(stdout, plan) {
+  let receipt;
+  try {
+    receipt = JSON.parse(stdout);
+  } catch {
+    throw new Error("The ATS scanner did not return valid JSON.");
+  }
+  if (!receipt || !Array.isArray(receipt.offers)) throw new Error("The ATS scanner did not return an offers list.");
+  return receipt.offers.map((offer) => {
+    const source = typeof offer?.source === "string" && offer.source.trim() ? offer.source.trim() : "ats-full";
+    return { ...offer, source, ats: source.replace(/-full$/, "") };
+  }).filter((offer) => offer && typeof offer.url === "string" && typeof offer.company === "string" &&
+    typeof offer.title === "string" && classifyMarketLocation(offer, plan).accepted);
+}
+
+function persistOffers(root, offers, spawnFn = spawnSync) {
+  if (!offers.length) return 0;
+  const writerOffers = offers.map(({ postedAt, ...offer }) => {
+    if (typeof postedAt === "number" && Number.isFinite(postedAt) && postedAt > 0) return { ...offer, postedAt };
+    if (typeof postedAt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(postedAt)) {
+      const epoch = Date.parse(`${postedAt}T00:00:00.000Z`);
+      if (Number.isFinite(epoch)) return { ...offer, postedAt: epoch };
+    }
+    return offer;
+  });
+  const scanUrl = pathToFileURL(path.join(CODE_ROOT, "scan.mjs")).href;
+  const localTodayUrl = pathToFileURL(path.join(CODE_ROOT, "lib", "local-today.mjs")).href;
+  const code = `
+import fs from "node:fs";
+import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
+import { localToday } from ${JSON.stringify(localTodayUrl)};
+const offers = JSON.parse(fs.readFileSync(0, "utf8"));
+await appendToPipeline(offers);
+await appendToScanHistory(offers, localToday(), "added");
+process.stdout.write(JSON.stringify({ added: offers.length }));
+`;
+  const result = spawnFn(process.execPath, ["--input-type=module", "-e", code], {
+    cwd: CODE_ROOT,
+    env: { ...process.env, CAREER_OPS_ROOT: root },
+    input: JSON.stringify(writerOffers),
+    encoding: "utf8",
+    timeout: SCAN_TIMEOUT_MS,
+    maxBuffer: MAX_OUTPUT_BYTES,
+    windowsHide: true,
+  });
+  if (result.status !== 0) throw new Error(firstErrorLine(result));
+  let receipt;
+  try {
+    receipt = JSON.parse(result.stdout || "");
+  } catch {
+    throw new Error("The pipeline writer did not return valid JSON.");
+  }
+  if (receipt.added !== writerOffers.length) throw new Error("The pipeline writer did not confirm every accepted offer.");
+  return receipt.added;
 }
 
 /*
@@ -190,29 +287,66 @@ function firstErrorLine(result) {
 
 export function executeJob(root, job, options = {}) {
   const spawnFn = options.spawnFn || spawnSync;
+  const writerSpawnFn = options.writerSpawnFn || spawnSync;
   const startedAt = Date.now();
   let lastError = "Scan failed";
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    let tempPortals = null;
     try {
-      tempPortals = writeJobPortals(root, job);
-      const command = buildScanCommand(job);
-      const result = spawnFn(
-        process.execPath,
-        [command.script, ...command.args],
-        {
-          cwd: CODE_ROOT,
-          env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_PORTALS: tempPortals },
-          encoding: "utf8",
-          timeout: SCAN_TIMEOUT_MS,
-          maxBuffer: MAX_OUTPUT_BYTES,
-          windowsHide: true,
-        },
-      );
+      const commands = buildScanCommands(job);
+      if (!commands.length) throw new Error("Scheduled scans require at least one ATS or market.");
+      const plan = buildMarketPlan(job.filters?.markets, job.filters?.positive, job.filters?.opportunityType);
+      const marketScoped = plan.opportunityType === "freelance" || plan.markets.length > 0;
+      let accepted = [];
+      let rolesFound = 0;
+      let completed = true;
+      for (const command of commands) {
+        let tempPortals = null;
+        try {
+          tempPortals = writeJobPortals(root, job, plan.opportunityType === "freelance" || (job.engine !== "portals" && command.script === "scan.mjs"));
+          const result = spawnFn(
+            process.execPath,
+            [command.script, ...command.args],
+            {
+              cwd: CODE_ROOT,
+              env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_PORTALS: tempPortals },
+              encoding: "utf8",
+              timeout: SCAN_TIMEOUT_MS,
+              maxBuffer: MAX_OUTPUT_BYTES,
+              windowsHide: true,
+            },
+          );
+          if (result.status !== 0) {
+            lastError = firstErrorLine(result);
+            completed = false;
+            break;
+          }
+          if (marketScoped) {
+            let offers;
+            if (command.script === "scan-ats-full.mjs") {
+              offers = acceptedAtsOffers(result.stdout || "", plan);
+            } else {
+              const marketRun = parseMarketReceipt(result.stdout || "", result.status, plan);
+              if (!marketRun.valid || marketRun.status === "failed") throw new Error("The market scanner did not complete a valid run.");
+              offers = marketRun.offers;
+            }
+            accepted = mergeDiscoveredOffers(accepted, offers);
+          } else {
+            rolesFound += extractRolesFound(command.script === "scan-ats-full.mjs" ? "full" : "portals", result.stdout || "");
+          }
+        } finally {
+          if (tempPortals) {
+            try {
+              fs.rmSync(tempPortals, { force: true });
+            } catch {
+              // Temporary filter cleanup is best effort.
+            }
+          }
+        }
+      }
 
-      if (result.status === 0) {
-        const rolesFound = extractRolesFound(job.engine || "full", result.stdout || "");
+      if (completed) {
+        if (marketScoped) rolesFound = persistOffers(root, accepted, writerSpawnFn);
         return {
           state: "success",
           attempt,
@@ -221,17 +355,8 @@ export function executeJob(root, job, options = {}) {
           message: `Scan finished with ${rolesFound} matching role${rolesFound === 1 ? "" : "s"}.`,
         };
       }
-      lastError = firstErrorLine(result);
     } catch (error) {
       lastError = firstErrorLine({ error });
-    } finally {
-      if (tempPortals) {
-        try {
-          fs.rmSync(tempPortals, { force: true });
-        } catch {
-          // Temporary filter cleanup is best effort.
-        }
-      }
     }
   }
 

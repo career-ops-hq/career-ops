@@ -111,13 +111,13 @@ export const APPLY_LINE = 4.0;
 
 /**
  * @param {unknown} score
- * @returns {string | null} "Recommended" | "Below the apply line" | null
+ * @returns {string | null} "Recomendada" | "Abaixo do limite de candidatura" | null
  */
 export function applyLineLabel(score) {
   if (score == null || score === "") return null;
   const n = typeof score === "number" ? score : Number(String(score).match(/(\d+(?:\.\d+)?)/)?.[1]);
   if (!Number.isFinite(n)) return null;
-  return n >= APPLY_LINE ? "Recommended" : "Below the apply line";
+  return n >= APPLY_LINE ? "Recomendada" : "Abaixo do limite de candidatura";
 }
 
 /**
@@ -129,7 +129,7 @@ export function applyLineLabel(score) {
  * @returns {boolean}
  */
 export function applyCtaQuiet(opts) {
-  if (applyLineLabel(opts?.score) === "Below the apply line") return true;
+  if (applyLineLabel(opts?.score) === "Abaixo do limite de candidatura") return true;
   const s = String(opts?.legitimacy ?? "").toLowerCase();
   if (s.includes("caution") || s.includes("precau") || s.includes("caut")) return true;
   if (s.includes("suspic") || s.includes("sospech") || s.includes("scam") || s.includes("fake")) return true;

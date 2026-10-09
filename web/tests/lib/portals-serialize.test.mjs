@@ -50,3 +50,24 @@ test("a keyword that could break YAML is quoted, not injected", () => {
   const doc = yaml.load(serializePortals({ ...empty, blockHard: ["a: b", "- x", '"q"'] }));
   assert.deepEqual(doc.location_filter.block_hard, ["a: b", "- x", '"q"']);
 });
+
+test("selected board objects and nested WTTJ queries survive YAML without injection", () => {
+  const boards = [
+    { name: "getManfred (ES)", provider: "manfred", lang: "ES", enabled: true },
+    { name: 'Board: "test"\nlocation_filter: false', provider: "wttj", enabled: true, wttj: { queries: ['design: "lead"', "- creative", "true", "a\nb"], max_hits: 100 } },
+  ];
+  const doc = yaml.load(serializePortals(empty, boards, true));
+  assert.deepEqual(doc.job_boards, boards);
+  assert.deepEqual(doc.location_filter, { strict: true });
+});
+
+test("strict mode retains each user location tier", () => {
+  const doc = yaml.load(serializePortals({ ...empty, allow: ["Portugal"], blockHard: ["US"] }, [], true));
+  assert.deepEqual(doc.location_filter, { strict: true, block_hard: ["US"], allow: ["Portugal"] });
+  assert.equal(doc.job_boards, undefined);
+});
+
+test("no-market serialization keeps its existing byte shape", () => {
+  assert.equal(serializePortals({ ...empty, positive: ["designer"], allow: ["Lisbon"] }, [], false),
+    '# Ephemeral Explorer filters — generated per-search, safe to delete.\ntitle_filter:\n  positive:\n    - "designer"\nlocation_filter:\n  allow:\n    - "Lisbon"\n');
+});

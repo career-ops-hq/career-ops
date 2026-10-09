@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function PortalsLoading() {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8" aria-label="Loading portals">
+    <div className="mx-auto max-w-3xl px-6 py-8" aria-label="A carregar os portais">
       <div className="flex items-center gap-3">
         <Skeleton className="size-6 rounded-full" />
         <Skeleton className="h-8 w-32" />

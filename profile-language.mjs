@@ -1,6 +1,6 @@
 import * as yaml from 'js-yaml';
 
-const DEFAULT_OUTPUT_LANGUAGE = 'en';
+const DEFAULT_OUTPUT_LANGUAGE = 'pt-PT';
 
 function normalizeOutputLanguage(value) {
   if (typeof value !== 'string') return DEFAULT_OUTPUT_LANGUAGE;
@@ -14,9 +14,9 @@ function normalizeOutputLanguage(value) {
 /**
  * language.output, plus WHY that is the answer.
  *
- * The catch below folds three different situations into `en`: no profile, no
+ * The catch below folds three different situations into `pt-PT`: no profile, no
  * language key, and a profile that does not parse. The first two are correct —
- * English is the documented default. The third is not something the caller
+ * Portuguese is this local installation's default. The third is not something the caller
  * should be unable to distinguish: a user who set `output: ja` and has a YAML
  * typo elsewhere in the file gets every report, cover letter and outreach
  * message in English, and the only signal is noticing the wrong language in
@@ -47,7 +47,7 @@ export function describeOutputLanguage(profileYaml) {
 }
 
 /**
- * Parse language.output from profile YAML, falling back to English.
+ * Parse language.output from profile YAML, falling back to Portuguese (Portugal).
  *
  * Contract unchanged — returns the language string. Use describeOutputLanguage
  * when the reason matters.

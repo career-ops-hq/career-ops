@@ -36,10 +36,10 @@ export function ApplyButton({
       <button
         type="button"
         disabled
-        title={!hasUrl ? "No application URL on this report" : "Generate the tailored CV (PDF) first to apply"}
+        title={!hasUrl ? "Este relatório não tem ligação para candidatura" : "Gera primeiro o CV adaptado em PDF"}
         className="inline-flex cursor-not-allowed items-center justify-center gap-1.5 rounded-full border border-border bg-surface/40 px-3.5 py-1 text-xs font-medium text-faint max-sm:min-h-[44px]"
       >
-        <Lock className="size-3.5" /> Apply
+        <Lock className="size-3.5" /> Candidatar
       </button>
     );
   }
@@ -63,11 +63,11 @@ export function ApplyButton({
       }
       title={
         quiet
-          ? "Apply — below the apply line or caution; opens the form pre-filled, you review and submit yourself"
-          : "Apply — opens the form pre-filled, you review and submit yourself"
+          ? "Abrir o formulário preenchido para reveres e enviares; a pontuação está abaixo da referência ou exige cautela"
+          : "Abrir o formulário preenchido para reveres e enviares"
       }
     >
-      <Send className="size-3.5" /> Apply
+      <Send className="size-3.5" /> Candidatar
     </button>
   );
 }

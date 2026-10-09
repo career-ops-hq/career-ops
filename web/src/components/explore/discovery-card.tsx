@@ -1,17 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Coins } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
+import { type DiscoveredOffer } from "@/lib/explore";
+import { offerProvenance } from "@/lib/explore-state.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 
 function freshness(postedAt: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt)) return "";
   const days = Math.max(0, Math.round((Date.now() - new Date(postedAt + "T00:00:00Z").getTime()) / 86_400_000));
-  return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
+  return days === 0 ? "hoje" : days === 1 ? "ontem" : `há ${days} d`;
 }
 
 // Real company logo (favicon) via the localhost proxy, cached on disk FOREVER per
@@ -36,7 +37,8 @@ function Logo({ company }: { company: string }) {
 }
 
 // What a running worker is doing on this exact posting → the live CTA label.
-const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "Preparing CV…", research: "Researching…", apply: "Filling…" };
+const WORKER_LABEL: Record<string, string> = { evaluate: "A avaliar…", pdf: "A preparar o CV…", research: "A pesquisar…", apply: "A preencher…" };
+const FIT_LABEL = { strong: "forte", related: "relacionado", weak: "baixo" } as const;
 
 export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
   const { added, adding, addToPipeline } = useExplore();
@@ -50,16 +52,28 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   );
   const working = job?.status === "running";
   const doneEval = job?.status === "done" && job.kind === "evaluate";
-  const statusLabel = WORKER_LABEL[job?.kind ?? ""] ?? "Working…";
+  const workerLabel = WORKER_LABEL[job?.kind ?? ""] ?? "Em curso…";
 
   const isAdded = added.has(offer.url) || inPipeline || working || doneEval;
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
-  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+  const freelance = offer.opportunityType === "freelance";
+  const fresh = freshness(offer.postedAt) || "Data não indicada";
+  const provenance = offerProvenance(offer);
+  const match = offer.match;
+  const band = match ? match.total >= 85 ? "Muito próxima" : match.total >= 65 ? "Próxima" : "Possível" : "";
+  const salary = [offer.salary?.min, offer.salary?.max].filter((value) => typeof value === "number").map((value) => value!.toLocaleString("pt-PT")).join("–");
+  const facts = [
+    salary ? `Salário: ${salary}${offer.salary?.currency ? ` ${offer.salary.currency}` : ""}${offer.salary?.period ? ` / ${offer.salary.period}` : ""}` : "",
+    offer.contractType?.trim() ? `Contrato: ${offer.contractType}` : "",
+    offer.hours?.trim() ? `Horário: ${offer.hours}` : "",
+    offer.applicationDeadline ? `Prazo: ${offer.applicationDeadline}` : "",
+    typeof offer.vacancyCount === "number" ? `Vagas: ${offer.vacancyCount}` : "",
+  ].filter(Boolean);
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
-    startJob({ title: `Evaluate · ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
+    startJob({ title: `Avaliar · ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
   };
 
   return (
@@ -77,8 +91,8 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           href={offer.url}
           target="_blank"
           rel="noopener noreferrer"
-          title="Open the posting"
-          aria-label="Open the posting"
+          title="Abrir a oferta"
+          aria-label="Abrir a oferta"
           className="-m-1 inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition-colors hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
         >
           <ExternalLink className="size-4" />
@@ -86,22 +100,25 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>
-        {fresh && <span className="text-faint">{fresh}</span>}
+        <span className="text-muted">{fresh}</span>
+        {match && <span role="note" className="rounded border border-brand/25 bg-brand-soft px-1.5 py-0.5 font-medium text-foreground" title={`Proximidade aos critérios: ${match.total}/100`} aria-label={`${band}. Proximidade aos critérios: ${match.total}/100`}>{band}</span>}
+        {freelance && (
+          <span className="rounded border border-brand/25 bg-brand-soft px-1.5 py-0.5 font-medium text-brand">Freelance</span>
+        )}
         {unverified && (
           <span
-            className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-300"
-            title="Found by AI on the public web — we can't confirm it's still live without opening it. Evaluating runs a real browser check and sets the verdict."
+            className="inline-flex items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-medium text-foreground"
+            title={freelance ? "Encontrada na web pública. Abre a página para confirmar se a oportunidade continua disponível." : "Encontrada na web pública. A avaliação abre a página para confirmar se a oferta continua disponível."}
           >
-            <ShieldQuestion className="size-3" /> unverified
+            <ShieldQuestion className="size-3" /> por confirmar
           </span>
         )}
         {offer.matchedKeyword && (
-          <span className="text-faint" title="Keyword match — not yet scored. Evaluate to get an A–F fit score.">
-            · matched <span className="text-brand/80">{offer.matchedKeyword}</span>
+          <span className="text-faint" title={freelance ? "Correspondência por palavra-chave no título." : "Correspondência por palavra-chave. Ainda não foi avaliada de A a F."}>
+            · corresponde a <span className="text-brand-text">{offer.matchedKeyword}</span>
           </span>
         )}
-        {offer.fit && (
+        {offer.fit && !match && (
           <span
             className={cn(
               "rounded border px-1 py-0.5 text-[11px] font-medium",
@@ -109,33 +126,48 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
                 ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                 : "text-faint",
             )}
-            title="Free keyword-level estimate: posting title vs your profile's target roles (config/profile.yml). Not an evaluation — Evaluate still gives the real A–F fit score."
+            title={freelance ? "Estimativa por palavras-chave entre o título e as funções do perfil." : "Estimativa por palavras-chave entre o título e as funções do perfil. A avaliação de A a F é feita separadamente."}
           >
-            · {offer.fit.band} fit
+            · correspondência {FIT_LABEL[offer.fit.band]}
           </span>
         )}
       </div>
 
+      <p className="text-[12px] leading-snug text-muted">{provenance.origins.length === 1 ? "Origem" : "Origens"}: {provenance.origins.join(" · ") || "Não indicada"}</p>
+      {provenance.eligibilityUnknown && <p className="text-[12px] leading-snug text-muted">Países elegíveis não indicados</p>}
+      {match?.reasons.filter(reason => reason.trim()).slice(0, 2).map(reason => <p key={reason} className="text-[12px] leading-snug text-muted">{reason}</p>)}
+      {facts.length > 0 && <p className="text-[12px] leading-snug text-muted">{facts.join(" · ")}</p>}
+
       {offer.why && (
-        <p className="flex items-start gap-1.5 text-[12px] leading-snug text-brand/80">
-          <Sparkles className="mt-0.5 size-3 shrink-0" />
-          {offer.why}
-        </p>
+        <p className="text-[12px] leading-snug text-brand/80">{offer.why}</p>
       )}
 
       <div className="mt-0.5">
-        {evaluatedN || doneEval ? (
+        {freelance ? (
+          <button
+            type="button"
+            disabled={isAdded || isAdding}
+            onClick={() => addToPipeline([offer])}
+            className={cn(
+              "inline-flex w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+              isAdded ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand",
+            )}
+          >
+            {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
+            {isAdded ? "Oportunidade guardada" : "Guardar oportunidade"}
+          </button>
+        ) : evaluatedN || doneEval ? (
           <a
             href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand max-sm:min-h-[44px]"
           >
-            <Check className="size-3.5" /> Evaluated · view report
+            <Check className="size-3.5" /> Avaliada · ver relatório
           </a>
         ) : working ? (
           <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand">
             <Loader2 className="size-3.5 animate-spin" />
-            {statusLabel}
-            <span className="text-brand/60">· in pipeline</span>
+            {workerLabel}
+            <span className="text-brand/60">· nas candidaturas</span>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -149,15 +181,15 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
               )}
             >
               {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
-              {isAdded ? "In pipeline" : "Add to pipeline"}
+              {isAdded ? "Adicionada" : "Adicionar"}
             </button>
             <button
               type="button"
               onClick={evaluate}
-              title={unverified ? "Runs a real evaluation — and verifies the posting is live. Uses tokens." : "Runs a real A–F evaluation. Uses tokens."}
-              className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand transition-colors hover:bg-brand-soft max-sm:min-h-[44px]"
+              title={unverified ? "Avalia de A a F e confirma se a oferta está disponível. Usa tokens." : "Faz uma avaliação de A a F. Usa tokens."}
+              className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft max-sm:min-h-[44px]"
             >
-              Evaluate <Coins className="size-3.5 opacity-80" />
+              Avaliar <Coins className="size-3.5 opacity-80" />
             </button>
           </div>
         )}

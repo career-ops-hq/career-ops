@@ -10,7 +10,7 @@ type ScheduleUnit = "minutes" | "hours" | "days";
 
 export function ScheduleJobAction({ filters }: { filters: ExploreFilters }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("Scheduled scan");
+  const [name, setName] = useState("Pesquisa guardada");
   const [every, setEvery] = useState(3);
   const [unit, setUnit] = useState<ScheduleUnit>("hours");
   const [state, setState] = useState("");
@@ -19,7 +19,7 @@ export function ScheduleJobAction({ filters }: { filters: ExploreFilters }) {
 
   const save = async () => {
     setSaving(true);
-    setState("Saving...");
+    setState("A guardar…");
     try {
       await createScheduledJobRequest({
           name,
@@ -29,10 +29,10 @@ export function ScheduleJobAction({ filters }: { filters: ExploreFilters }) {
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           startAt: new Date().toISOString(),
       });
-      setState("Scheduled scan created.");
+      setState("Pesquisa guardada.");
       setOpen(false);
     } catch (error) {
-      setState(error instanceof Error ? error.message : "Could not create the scheduled scan.");
+      setState(error instanceof Error ? error.message : "Não foi possível guardar a pesquisa.");
     } finally {
       setSaving(false);
     }
@@ -42,12 +42,12 @@ export function ScheduleJobAction({ filters }: { filters: ExploreFilters }) {
     <div className="inline-flex flex-wrap items-center gap-2">
       <Button type="button" variant="outline" onClick={() => setOpen((value) => !value)}>
         <CalendarPlus className="size-4" />
-        Schedule
+        Guardar pesquisa
       </Button>
       {open && (
         <div className="flex flex-wrap items-end gap-2 rounded-xl border border-border bg-surface p-3 text-sm">
           <label className="grid gap-1 text-xs text-muted">
-            Name
+            Nome
             <input
               className="rounded-md border border-border bg-background px-2 py-1.5 text-foreground"
               value={name}
@@ -56,7 +56,7 @@ export function ScheduleJobAction({ filters }: { filters: ExploreFilters }) {
             />
           </label>
           <label className="grid gap-1 text-xs text-muted">
-            Repeat every
+            Repetir a cada
             <input
               className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-foreground"
               type="number"
@@ -66,21 +66,21 @@ export function ScheduleJobAction({ filters }: { filters: ExploreFilters }) {
             />
           </label>
           <select
-            aria-label="Schedule unit"
+            aria-label="Unidade da repetição"
             className="rounded-md border border-border bg-background px-2 py-1.5 text-foreground"
             value={unit}
             onChange={(event) => setUnit(event.target.value as ScheduleUnit)}
           >
-            <option value="minutes">minutes</option>
-            <option value="hours">hours</option>
-            <option value="days">days</option>
+            <option value="minutes">minutos</option>
+            <option value="hours">horas</option>
+            <option value="days">dias</option>
           </select>
           <Button
             type="button"
             disabled={saving || !name.trim() || !Number.isFinite(every) || every < minimum}
             onClick={() => void save()}
           >
-            {saving ? "Saving..." : "Add scheduled scan"}
+            {saving ? "A guardar…" : "Guardar"}
           </Button>
           {state && <span className="text-xs text-muted">{state}</span>}
         </div>

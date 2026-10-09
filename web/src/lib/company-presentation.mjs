@@ -19,11 +19,11 @@ export function companyPresentation({ company = "", via = "" } = {}) {
   if (companyName !== "?") return { label: company, logoName: company };
   if (intermediary && !DIRECT_VIA.test(intermediary)) {
     return {
-      label: `Confidential · via ${intermediary}`,
+      label: `Empresa confidencial · via ${intermediary}`,
       logoName: intermediary,
     };
   }
-  return { label: "Confidential employer", logoName: "Confidential employer" };
+  return { label: "Empresa confidencial", logoName: "Empresa confidencial" };
 }
 
 /** @param {{ company?: string, via?: string, role?: string }} application */

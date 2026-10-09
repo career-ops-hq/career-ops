@@ -52,7 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <Icon className="size-4" />
                   {label}
                   {chip && (
-                    <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-text">
+                    <span className="ml-auto rounded-full border border-brand/30 bg-brand-soft px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-foreground">
                       {chip}
                     </span>
                   )}
@@ -67,17 +67,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <UsageMeter />
             <div className="space-y-1.5">
               <div className="flex items-center justify-between px-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
-                <span className="font-mono text-[10px] text-faint">THEME</span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Aspeto</span>
+                <span className="font-mono text-[10px] text-faint">TEMA</span>
               </div>
               <ThemeToggle showLabel />
               <div className="px-1">
-                <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+                <span className={`${instrumentSerif.className} text-sm text-faint`}>dados locais · v0</span>
               </div>
             </div>
           </div>
         </aside>
-        <main className="flex-1 overflow-x-hidden">{children}</main>
+        <main className="flex-1 overflow-x-hidden max-sm:pb-20">{children}</main>
         <AssistantConsole />
         <BackToTop />
         <FirstScoreView />

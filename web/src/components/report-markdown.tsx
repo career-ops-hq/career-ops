@@ -53,11 +53,11 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
   const iRef = colIndex(header, ["reflection"]);
 
   const fields = [
-    { label: "Situation", i: iS },
-    { label: "Task", i: iT },
-    { label: "Action", i: iA },
-    { label: "Result", i: iR },
-    { label: "Reflection", i: iRef },
+    { label: "Situação", i: iS },
+    { label: "Tarefa", i: iT },
+    { label: "Ação", i: iA },
+    { label: "Resultado", i: iR },
+    { label: "Reflexão", i: iRef },
   ].filter((f) => f.i >= 0);
 
   return (
@@ -72,7 +72,7 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
               <summary className="flex min-h-[44px] cursor-pointer list-none items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
                 <span className="mt-0.5 shrink-0 font-mono text-xs tabular-nums text-faint">{num}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-foreground">{req || story || `Story ${num}`}</span>
+                  <span className="block text-sm font-medium text-foreground">{req || story || `Exemplo ${num}`}</span>
                   {req && story ? <span className="mt-0.5 block text-xs text-muted">{story}</span> : null}
                 </span>
                 <ChevronDown className="mt-0.5 size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
@@ -82,7 +82,7 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
                   const value = row[f.i] ?? "";
                   if (!value) return null;
                   return (
-                    <div key={f.label} className={f.label === "Reflection" ? "sm:col-span-2" : undefined}>
+                    <div key={f.label} className={f.label === "Reflexão" ? "sm:col-span-2" : undefined}>
                       <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">{f.label}</dt>
                       <dd className="mt-1 text-sm text-foreground">{value}</dd>
                     </div>

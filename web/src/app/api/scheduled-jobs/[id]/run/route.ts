@@ -41,7 +41,7 @@ function runJob(runner: string, id: string) {
         windowsHide: true,
       });
     } catch (error) {
-      finish({ code: 1, stdout, stderr: error instanceof Error ? error.message : "Could not start scheduled scan.", timedOut });
+      finish({ code: 1, stdout, stderr: error instanceof Error ? error.message : "Não foi possível iniciar a pesquisa agendada.", timedOut });
       return;
     }
 
@@ -70,26 +70,26 @@ function runJob(runner: string, id: string) {
 
 export async function POST(_req: Request, { params }: RouteContext) {
   const { id } = await params;
-  if (!isSafeScheduledId(id)) return NextResponse.json({ error: "Invalid scheduled job identifier." }, { status: 400 });
+  if (!isSafeScheduledId(id)) return NextResponse.json({ error: "Identificador de pesquisa inválido." }, { status: 400 });
   let job;
   try {
     job = getScheduledJob(id);
-    if (!job || job.status === "deleted") return NextResponse.json({ error: "Scheduled job not found" }, { status: 404 });
+    if (!job || job.status === "deleted") return NextResponse.json({ error: "Pesquisa agendada não encontrada." }, { status: 404 });
   } catch {
-    return NextResponse.json({ error: "Could not read scheduled jobs." }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível ler as pesquisas agendadas." }, { status: 500 });
   }
 
   const runner = path.join(resolveCodeRoot(process.cwd(), process.env), "web", "scripts", "scheduled-jobs-runner.mjs");
   if (!fs.existsSync(runner)) {
-    return NextResponse.json({ error: "Scheduled job runner is not installed." }, { status: 404 });
+    return NextResponse.json({ error: "O executor de pesquisas agendadas não está instalado." }, { status: 404 });
   }
 
   const result = await runJob(runner, id);
   if (result.timedOut) {
-    return NextResponse.json({ error: "Scheduled scan timed out." }, { status: 504 });
+    return NextResponse.json({ error: "A pesquisa agendada excedeu o tempo limite." }, { status: 504 });
   }
   if (result.code !== 0) {
-    const message = result.stderr.split(/\r?\n/).find(Boolean)?.slice(0, 300) || "Scan failed.";
+    const message = result.stderr.split(/\r?\n/).find(Boolean)?.slice(0, 300) || "A pesquisa falhou.";
     const status = /lock timeout/i.test(message) ? 409 : 500;
     return NextResponse.json({ error: message }, { status });
   }
@@ -99,6 +99,6 @@ export async function POST(_req: Request, { params }: RouteContext) {
     const rolesFound = Number.isFinite(Number(summary.rolesFound)) ? Number(summary.rolesFound) : 0;
     return NextResponse.json({ success: true, rolesFound, summary });
   } catch {
-    return NextResponse.json({ error: "Scheduled scan returned an invalid result." }, { status: 500 });
+    return NextResponse.json({ error: "A pesquisa agendada devolveu um resultado inválido." }, { status: 500 });
   }
 }

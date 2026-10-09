@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import fs from "node:fs";
 import { runDiscovery } from "@/lib/core/scan";
 import { rootScript } from "@/lib/career-ops";
@@ -20,11 +20,14 @@ export async function POST(req: NextRequest) {
   }
 
   const filters = parseExplorePatch(body, DEFAULT_FILTERS);
+  const ats = filters.opportunityType === "freelance" ? [] : filters.ats;
+  const usesMarketScanner = filters.opportunityType === "freelance" || filters.markets.length > 0;
 
   // Guard: a data-only checkout (or pre-onboarding) has no scanner. Fail soft.
   // The body carries an explicit code because 400 is a shared channel: the
   // client cannot tell this apart from a malformed request by status alone.
-  if (!fs.existsSync(rootScript("scan-ats-full"))) {
+  if (!(ats.length && fs.existsSync(rootScript("scan-ats-full"))) &&
+      !(usesMarketScanner && fs.existsSync(rootScript("scan")))) {
     return Response.json(scannerMissingBody(), { status: SCANNER_MISSING_STATUS });
   }
 
@@ -38,12 +41,13 @@ export async function POST(req: NextRequest) {
           /* stream closed */
         }
       };
-      send({ kind: "start", ats: filters.ats, sinceDays: filters.sinceDays, limit: filters.limitPerAts, free: true } satisfies ScanEvent);
+      send({ kind: "start", ats, sinceDays: filters.sinceDays, limit: filters.limitPerAts, free: true } satisfies ScanEvent);
       let offers: DiscoveredOffer[] = [];
       try {
-        offers = await runDiscovery(filters, (e: ScanEvent) => send(e));
+        // Phase and expansion events share the stream; only this route closes it.
+        offers = await runDiscovery(filters, (e: ScanEvent) => { if (e.kind !== "done") send(e); });
       } catch (err) {
-        send({ kind: "error", message: err instanceof Error ? err.message : "discovery failed" } satisfies ScanEvent);
+        send({ kind: "error", message: err instanceof Error ? err.message : "Não foi possível procurar ofertas." } satisfies ScanEvent);
       }
       send({ kind: "done", count: offers.length, offers, cost: { tokens: 0, usd: 0 } } satisfies ScanEvent);
       controller.close();

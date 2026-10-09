@@ -40,10 +40,10 @@ const LABELED_SEGMENT = /^([a-z][a-z_-]*):\s*(.*)$/i;
  *  Positional split for the first columns (the optional 4th `location` #1015
  *  and 5th `compensation` #1017 must NOT bleed into `role`); labeled segments
  *  (posted:/trust:/note:/…) are filtered out of positional assignment wherever
- *  they appear and surfaced when useful (posted: → postedAt). Unknown labels
+ *  they appear and surfaced when useful (posted: → postedAt, type: → opportunityType). Unknown labels
  *  and further trailing columns are ignored gracefully.
  *  @param {string} md - content of data/pipeline.md.
- *  @returns {{url: string, company: string, role: string, location?: string, compensation?: string, done: boolean, postedAt?: string}[]}
+ *  @returns {{url: string, company: string, role: string, location?: string, compensation?: string, done: boolean, postedAt?: string, opportunityType?: "freelance"}[]}
  */
 export function parseInbox(md) {
   const jobs = [];
@@ -71,6 +71,7 @@ export function parseInbox(md) {
       // the row's own posting date (scan.mjs `posted:` label) — a more direct
       // freshness signal than the scan-history join, which stays as fallback
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
+      opportunityType: labels.get("type") === "freelance" ? "freelance" : undefined,
     });
   }
   return jobs;

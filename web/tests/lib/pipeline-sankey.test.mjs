@@ -6,8 +6,91 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { loadBindings, transform } from "next/dist/build/swc/index.js";
 import "../helpers/web-ts-alias-loader.mjs";
-import { classifyLeaf, buildPipelineSankey, layoutSankey, parseStatusLog, statusToken } from "../../src/lib/pipeline-sankey.mjs";
+import { cn } from "../../src/lib/cn.ts";
+import { classifyLeaf, buildPipelineSankey, layoutSankey, NODE_DEFS, parseStatusLog, statusToken } from "../../src/lib/pipeline-sankey.mjs";
+
+test("PipelineSankey renders every canonical node label in PT-PT", async () => {
+  const expected = {
+    Tracked: "Acompanhadas",
+    SKIP: "Ignoradas",
+    "Still evaluated": "Avaliadas",
+    "Discarded (no application recorded)": "Descartadas sem candidatura",
+    Submitted: "Enviadas",
+    Waiting: "À espera",
+    "Company engaged": "Empresa respondeu",
+    "Rejected (no interview)": "Recusadas sem entrevista",
+    Discarded: "Descartadas",
+    Screening: "Triagem",
+    Interview: "Entrevista",
+    Offer: "Proposta",
+    Hired: "Contratação",
+    "Rejected after interview": "Recusadas após entrevista",
+    "Discarded after interview": "Descartadas após entrevista",
+  };
+  assert.deepEqual(NODE_DEFS.map(({ label }) => label), Object.keys(expected));
+
+  await loadBindings();
+  const source = fs.readFileSync(new URL("../../src/components/analytics/pipeline-sankey.tsx", import.meta.url), "utf8");
+  const { code } = await transform(source, {
+    filename: "pipeline-sankey.tsx",
+    jsc: { parser: { syntax: "typescript", tsx: true }, transform: { react: { runtime: "automatic" } } },
+    module: { type: "commonjs" },
+  });
+  const links = NODE_DEFS.slice(1).map((node, index) => ({
+    source: NODE_DEFS[index].id,
+    target: node.id,
+    value: 1,
+  }));
+  const graph = {
+    nodes: NODE_DEFS.map((node) => ({ ...node, value: 1 })),
+    links,
+    total: NODE_DEFS.length,
+  };
+  const graphBoundary = {
+    buildPipelineSankey: () => graph,
+    layoutSankey: () => ({
+      width: 920,
+      height: 440,
+      nodes: graph.nodes.map((node, index) => ({ ...node, x: index * 4, y: index * 4, width: 12, height: 30 })),
+      links: graph.links.map((link) => ({ ...link, d: "M0,0 C1,1 2,2 3,3", thickness: 1 })),
+    }),
+  };
+  const require = createRequire(import.meta.url);
+  const module = { exports: {} };
+  new Function("require", "module", "exports", code)(
+    (id) => id === "@/lib/pipeline-sankey.mjs" ? graphBoundary
+      : id === "@/lib/cn" ? { cn }
+        : require(id),
+    module,
+    module.exports,
+  );
+
+  const html = renderToStaticMarkup(createElement(module.exports.PipelineSankey, {
+    applications: [{ n: "1", status: "Applied" }],
+    statusLog: [],
+  }));
+  const visible = html.match(/<text\b[^>]*>[\s\S]*?<\/text>/g).join(" ");
+  const titles = html.match(/<title>[\s\S]*?<\/title>/g).join(" ");
+  const table = html.match(/<tbody>[\s\S]*?<\/tbody>/)?.[0] ?? "";
+  for (const label of Object.values(expected)) {
+    assert.ok(visible.includes(label), `visible SVG text must include ${label}`);
+    assert.ok(titles.includes(label), `native SVG title text must include ${label}`);
+    assert.ok(table.includes(`<td>${label}</td>`), `screen-reader table must include ${label}`);
+  }
+  for (const [index, link] of links.entries()) {
+    const sourceLabel = expected[NODE_DEFS[index].label];
+    const targetLabel = expected[NODE_DEFS[index + 1].label];
+    assert.ok(
+      titles.includes(`<title>1 oportunidades: ${sourceLabel} → ${targetLabel}</title>`),
+      `SVG link title must translate ${sourceLabel} → ${targetLabel}`,
+    );
+  }
+});
 
 test("statusToken uses canonStatus aliases (same map as Analytics)", () => {
   assert.equal(statusToken("Interview"), "INTERVIEW");

@@ -30,11 +30,11 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "Pedido inválido." }), { status: 400 });
   }
   const { kind = "evaluate", input, cliId: requestedCliId } = body;
   if (!input || !requestedCliId) {
-    return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+    return new Response(JSON.stringify({ error: "Faltam os dados da tarefa e o agente." }), { status: 400 });
   }
   const resolved = resolveCliOrFallback(requestedCliId);
   if (!resolved) {
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   const capabilities = capabilitiesFor(kind);
   if (!isCliAllowedForCapabilities(cliId, capabilities)) {
     return new Response(
-      JSON.stringify({ error: `CLI '${cliId}' cannot run write-capable worker '${kind}' without a verified permission adapter.` }),
+      JSON.stringify({ error: `O agente «${cliId}» não pode executar a tarefa «${kind}», que permite escrita, sem um adaptador de permissões verificado.` }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
   if (required && !fs.existsSync(/* turbopackIgnore: true */ requiredPath)) {
     return new Response(
       JSON.stringify({
-        error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
+        error: `Esta tarefa exige uma instalação completa do career-ops (${required}). CAREER_OPS_ROOT aponta apenas para dados; aponta-o para uma instalação completa.`,
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
   // wrong portal.
   if (kind === "fix-portal" && !isShellSafeCompanyName(input)) {
     return new Response(
-      JSON.stringify({ error: "That company name has characters I can't safely pass to the portal checker — rename it in portals.yml first." }),
+      JSON.stringify({ error: "O nome da empresa contém caracteres que não podem ser enviados em segurança ao verificador. Altera-o primeiro em portals.yml." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -92,7 +92,7 @@ export async function POST(req: Request) {
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
   if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
     return new Response(
-      JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
+      JSON.stringify({ error: "Adiciona primeiro o teu CV na página inicial para a oferta poder ser avaliada em relação ao teu perfil." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -194,7 +194,7 @@ export async function POST(req: Request) {
     // a refused argv would take the tracker down with it.
     if (writeToken !== null) releaseTrackerWrite(writeToken);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "failed to start the CLI" }),
+      JSON.stringify({ error: e instanceof Error ? e.message : "Não foi possível iniciar o agente." }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
@@ -422,7 +422,7 @@ export async function POST(req: Request) {
       // successful render, not optimistically — same honesty-gate discipline as
       // the evaluate path below.
       const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
-        send({ type: "status", label: "Rendering PDF…" });
+        send({ type: "status", label: "A criar o PDF…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
         // the one place nothing else awaits or catches this promise (cancel()
         // only attaches a .finally for the write-token release), so an
@@ -446,7 +446,7 @@ export async function POST(req: Request) {
           sendWarnings(result.warnings);
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         } catch (e) {
-          send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+          send({ type: "error", msg: `A criação do PDF falhou: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
         } finally {
           close();
         }
@@ -492,7 +492,7 @@ export async function POST(req: Request) {
             const detail = stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
             return `The CLI exited with an error — is it installed and authenticated?${detail}`;
           }
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
+          if (!emittedText && !sawError) return "O agente não devolveu qualquer resultado. Confirma se está instalado e autenticado.";
           return null;
         };
 
@@ -519,7 +519,7 @@ export async function POST(req: Request) {
             // Kept for narrowing, but it must REPORT rather than fall through to a
             // bare close() — a stream that ends with neither error nor done is the
             // one outcome this handler exists to prevent.
-            send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
+            send({ type: "error", msg: "Erro interno: a criação do PDF terminou sem um CV para guardar. Comunica este erro." });
           } else {
             sendWarnings(envelope.warnings);
             if (saveCv(pdfPaths, envelope)) {
@@ -543,7 +543,7 @@ export async function POST(req: Request) {
         } else if (persists && !wroteReport) {
           // The worker ran but never wrote the report/tracker row (e.g. a CLI
           // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
+          send({ type: "error", msg: "Esta avaliação não guardou um relatório e não foi adicionada às candidaturas. A avaliação completa está verificada com Claude Code." });
         } else if (!cleanExit || sawError) {
           // Produced output (maybe even a report) but did NOT finish cleanly — flag it
           // instead of recording a confident score off a half-finished run. sawError
@@ -551,7 +551,7 @@ export async function POST(req: Request) {
           // message above; a bare non-clean exit gets the stderr snippet instead,
           // when the heuristic classifier found one.
           const detail = !sawError && stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-          send({ type: "error", msg: `This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify.${detail}`.slice(0, 200) });
+          send({ type: "error", msg: `A execução terminou com erro e o resultado não foi registado. Volta a executá-la para confirmar.${detail}`.slice(0, 200) });
         } else {
           send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         }

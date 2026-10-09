@@ -68,7 +68,7 @@ export function EditJobModal({
       onUpdated();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error updating job");
+      setError(err instanceof Error ? err.message : "Não foi possível atualizar a pesquisa.");
     } finally {
       setSubmitting(false);
     }
@@ -82,8 +82,8 @@ export function EditJobModal({
               <Edit3 className="size-5" />
             </div>
             <div>
-              <h2 id="edit-scheduled-scan-title" className="text-lg font-semibold text-foreground">Edit Scheduled Scan</h2>
-              <p className="text-xs text-muted">Update name, filters, schedule, and location scope.</p>
+              <h2 id="edit-scheduled-scan-title" className="text-lg font-semibold text-foreground">Editar pesquisa agendada</h2>
+              <p className="text-xs text-muted">Altera o nome, os filtros e a frequência.</p>
             </div>
           </div>
           <button
@@ -100,7 +100,7 @@ export function EditJobModal({
 
           {/* ─── Name + Engine + Cadence ─── */}
           <div>
-            <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Name</label>
+            <label className="mb-1 block text-[13px] font-medium text-foreground">Nome</label>
             <input
               ref={nameRef}
               type="text"
@@ -108,25 +108,25 @@ export function EditJobModal({
               onChange={(e) => setName(e.target.value)}
               required
               className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60 focus:ring-2 focus:ring-brand/20"
-              placeholder="e.g. Roles matching my profile"
+              placeholder="Ex.: Apoio ao cliente em Lisboa"
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Método de pesquisa</label>
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">Bases públicas de ATS</option>
+                <option value="portals">Empresas de portals.yml</option>
               </select>
             </div>
 
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Repeat Cadence</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Repetir a cada</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -144,9 +144,9 @@ export function EditJobModal({
                   }}
                   className="flex-1 rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
                 >
-                  <option value="hours">Hours</option>
-                  <option value="days">Days</option>
-                  <option value="minutes">Minutes</option>
+                  <option value="hours">horas</option>
+                  <option value="days">dias</option>
+                  <option value="minutes">minutos</option>
                 </select>
               </div>
             </div>
@@ -164,7 +164,7 @@ export function EditJobModal({
               onClick={onClose}
               className="rounded-xl border border-border px-4 py-2 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              Cancel
+              Cancelar
             </button>
             <button
               type="submit"
@@ -172,7 +172,7 @@ export function EditJobModal({
               className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2 text-xs font-medium text-brand-foreground shadow transition-colors hover:bg-brand-200 disabled:opacity-50"
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : <Edit3 className="size-4" />}
-              {submitting ? "Saving…" : "Save Changes"}
+              {submitting ? "A guardar…" : "Guardar alterações"}
             </button>
           </div>
         </form>

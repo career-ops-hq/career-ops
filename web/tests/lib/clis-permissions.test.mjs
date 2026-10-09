@@ -22,6 +22,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { fenceArgs } from "../../src/lib/cli-fencing.mjs";
+import { CAPS } from "../../src/lib/worker-capabilities.mjs";
+
+test("Gemini generic argv is not certified for assisted web search", async () => {
+  const { KNOWN } = await import("../../src/lib/clis.ts");
+  const args = KNOWN.find((cli) => cli.id === "gemini").args("PROMPT");
+  assert.deepEqual(args, ["-p", "PROMPT"], "unrelated Gemini workers keep their generic argv");
+  assert.throws(() => fenceArgs({ cliId: "gemini", args, capabilities: CAPS.webSearchOnly }), /Gemini/);
+});
 
 const CLIS_TS = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "lib", "clis.ts");
 const src = readFileSync(CLIS_TS, "utf8");

@@ -85,7 +85,7 @@ test("parseCvEnvelope: no envelope at all is a failure", () => {
 
   // Then the run must fail rather than render nothing and report success
   assert.equal(result.ok, false);
-  assert.match(result.error, /no .*envelope/i);
+  assert.match(result.error, /não devolveu o bloco/i);
 });
 
 test("parseCvEnvelope: an unterminated envelope is a failure", () => {
@@ -94,7 +94,7 @@ test("parseCvEnvelope: an unterminated envelope is a failure", () => {
 
   // Then a half-emitted CV is never rendered as if it were whole
   assert.equal(result.ok, false);
-  assert.match(result.error, /clos/i);
+  assert.match(result.error, /não foi fechado/i);
 });
 
 test("parseCvEnvelope: an empty body is a failure", () => {
@@ -103,7 +103,7 @@ test("parseCvEnvelope: an empty body is a failure", () => {
 
   // Then it fails instead of writing a zero-byte HTML file for the renderer
   assert.equal(result.ok, false);
-  assert.match(result.error, /empty/i);
+  assert.match(result.error, /está vazio/i);
 });
 
 test("parseCvEnvelope: html containing markup and template braces survives byte-exact", () => {
@@ -145,8 +145,8 @@ test("parseCvEnvelope: more than one envelope is a failure, not a guess", () => 
 
   // Then it fails closed: picking either one would be picking a winner blind
   assert.equal(result.ok, false);
-  assert.match(result.error, /2 <<cv-html>> envelopes/);
-  assert.match(result.error, /refusing to guess/i);
+  assert.match(result.error, /2 blocos <<cv-html>>/);
+  assert.match(result.error, /não é possível determinar/i);
 });
 
 test("parseCvEnvelope: a mid-line marker is not an envelope", () => {
@@ -158,7 +158,7 @@ test("parseCvEnvelope: a mid-line marker is not an envelope", () => {
 
   // Then the marker only counts on a line of its own, so this is no envelope
   assert.equal(result.ok, false);
-  assert.match(result.error, /no .*envelope/i);
+  assert.match(result.error, /não devolveu o bloco/i);
 });
 
 test("parseCvEnvelope: a CLI echoing the prompt does not create a second envelope", () => {
@@ -314,7 +314,7 @@ test("parseCvEnvelope: a body with no closing </html> is a failure", () => {
   // Then it fails, naming what was missing
   assert.equal(result.ok, false);
   assert.match(result.error, /<\/html>/);
-  assert.match(result.error, /cut off|incomplete/i);
+  assert.match(result.error, /incompleto/i);
 });
 
 test("parseCvEnvelope: an injected closer that truncates the document is caught", () => {
@@ -398,7 +398,7 @@ test("parseCvEnvelope: the format attribute must be double-quoted", () => {
     // than an unrecognized format. Pinned because the message is misleading: the
     // agent is told the exact spelling, so this only happens if it improvises.
     assert.equal(result.ok, false, opener);
-    assert.match(result.error, /no .*envelope/i, opener);
+    assert.match(result.error, /não devolveu o bloco/i, opener);
   }
 });
 

@@ -2,6 +2,33 @@
 import { pass, fail, warn, run, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseWorkdayResponse } from '../../providers/workday.mjs';
+
+for (const [label, expected] of [
+  ['Publicado hoje', 1791453600000],
+  ['Publicado ontem', 1791367200000],
+  ['Publicado há 2 dias', 1791280800000],
+  [' PUBLICADO HÁ 2 DIAS ', 1791280800000],
+  ['Posted Today', 1791453600000],
+  ['Posted Yesterday', 1791367200000],
+  ['Posted 1 Day Ago', 1791367200000],
+  ['Posted 2 Days Ago', 1791280800000],
+  ['Posted 30+ Days Ago', undefined],
+  ['Publicado há 30+ dias', undefined],
+  ['Atualizado recentemente', undefined],
+  ['Publicado hoje numa nova plataforma', undefined],
+  ['2026-10-08', undefined],
+]) {
+  test(`Workday posting date: ${label}`, t => {
+    t.mock.method(Date, 'now', () => 1791453600000);
+    const [job] = parseWorkdayResponse({ jobPostings: [{
+      title: 'Operador/a de loja', externalPath: '/job/Lisboa/Operador_JR123', postedOn: label,
+    }] }, { name: 'Auchan Portugal', careers_url: 'https://auchanportugal.wd3.myworkdayjobs.com/auchan-retail' });
+    assert.equal(job.postedAt, expected);
+  });
+}
 
 console.log('\nProvider — workday');
 

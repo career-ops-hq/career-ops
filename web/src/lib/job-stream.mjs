@@ -24,10 +24,10 @@ export async function readJobStream(stream, onProgress) {
     try {
       event = JSON.parse(line);
     } catch {
-      return { status: "error", message: "Invalid response from the local server. Check the pipeline before retrying." };
+      return { status: "error", message: "Resposta inválida do servidor local. Verifica as candidaturas antes de tentares novamente." };
     }
     if (event?.type === "error") {
-      return { status: "error", message: typeof event.msg === "string" && event.msg ? event.msg : "Error" };
+      return { status: "error", message: typeof event.msg === "string" && event.msg ? event.msg : "Erro" };
     }
     if (event?.type === "done") {
       return {
@@ -59,14 +59,14 @@ export async function readJobStream(stream, onProgress) {
         // A final record need not have a trailing newline.
         return consume(buffer) ?? {
           status: "error",
-          message: "Connection ended before the server confirmed completion. Check the pipeline before retrying.",
+          message: "A ligação terminou antes de o servidor confirmar a conclusão. Verifica as candidaturas antes de tentares novamente.",
         };
       }
     }
   } catch (error) {
     return {
       status: "error",
-      message: error instanceof Error && error.name === "AbortError" ? "Interrupted. Check the pipeline before retrying." : "Connection error",
+      message: error instanceof Error && error.name === "AbortError" ? "Tarefa interrompida. Verifica as candidaturas antes de tentares novamente." : "Erro de ligação",
     };
   } finally {
     // A terminal error can arrive while the worker is still streaming. Release

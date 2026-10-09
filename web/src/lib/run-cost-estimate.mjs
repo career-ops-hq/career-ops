@@ -42,7 +42,7 @@ export function formatTokenCount(tokens) {
   return String(Math.round(tokens));
 }
 
-export function formatRunCostEstimate(estimate, fallback = "uses your tokens") {
+export function formatRunCostEstimate(estimate, fallback = "usa os teus tokens") {
   if (!positiveFinite(estimate?.tokens)) return fallback;
   const usd = positiveFinite(estimate?.usd) ? ` · ≈ $${estimate.usd.toFixed(2)}` : "";
   return `≈ ${formatTokenCount(estimate.tokens)} tokens${usd}`;
@@ -53,7 +53,7 @@ export function requiresBatchSpendConfirmation(count) {
 }
 
 export function formatBatchSpendConfirmation(subject, count, estimate) {
-  const workers = `${count} worker${count === 1 ? "" : "s"}`;
-  const cost = formatRunCostEstimate(estimate, "token estimate available after the first completed run");
+  const workers = count === 1 ? "1 tarefa" : `${count} tarefas`;
+  const cost = formatRunCostEstimate(estimate, "a estimativa fica disponível depois da primeira execução");
   return `${subject}? (${workers} · ${cost})`;
 }

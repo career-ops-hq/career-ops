@@ -50,7 +50,7 @@ test("formats token and optional dollar estimates for pre-run copy", () => {
   assert.equal(formatTokenCount(12_400), "12k");
   assert.equal(formatTokenCount(1_250_000), "1.3M");
   assert.equal(formatRunCostEstimate({ tokens: 36_000, usd: 0.36 }), "≈ 36k tokens · ≈ $0.36");
-  assert.equal(formatRunCostEstimate({}), "uses your tokens");
+  assert.equal(formatRunCostEstimate({}), "usa os teus tokens");
 });
 
 test("requires confirmation whenever an action fans out into multiple paid workers", () => {
@@ -62,7 +62,7 @@ test("requires confirmation whenever an action fans out into multiple paid worke
 test("batch confirmation names worker count and the local estimate", () => {
   assert.equal(
     formatBatchSpendConfirmation("Evaluate 3 Acme postings", 3, { tokens: 36_000, usd: 0.36 }),
-    "Evaluate 3 Acme postings? (3 workers · ≈ 36k tokens · ≈ $0.36)",
+    "Evaluate 3 Acme postings? (3 tarefas · ≈ 36k tokens · ≈ $0.36)",
   );
-  assert.match(formatBatchSpendConfirmation("Evaluate 2 Acme postings", 2, {}), /estimate available after/);
+  assert.match(formatBatchSpendConfirmation("Evaluate 2 Acme postings", 2, {}), /estimativa fica disponível depois/);
 });

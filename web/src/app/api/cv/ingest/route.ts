@@ -77,13 +77,13 @@ export async function POST(req: Request) {
       const body = (await req.json()) as { text?: string; cliId?: string };
       cliId = body.cliId || "";
       const text = (body.text || "").trim();
-      if (!text) return Response.json({ error: "empty cv text" }, { status: 400 });
+      if (!text) return Response.json({ error: "O texto do CV está vazio." }, { status: 400 });
       promptSource = TEXT_SRC(text);
     } else if (ctype.includes("multipart/form-data")) {
       const form = await req.formData();
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
-      if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
+      if (!(file instanceof File)) return Response.json({ error: "Não foi recebido nenhum ficheiro." }, { status: 400 });
       // Resolve first: if no CLI can run, that is the error to show, not the PDF
       // one below, which would wrongly say Claude is missing (#4607).
       resolved = resolveCliOrFallback(cliId);
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
       // Judged on the CLI that will actually run: a stale saved id falls back to
       // the sole installed CLI, and that may well be Claude.
       if (resolved.spec.id !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
+        return Response.json({ error: "A leitura de um PDF exige Claude Code. Em alternativa, cola o texto do CV." }, { status: 400 });
       }
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
@@ -101,10 +101,10 @@ export async function POST(req: Request) {
       fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
       promptSource = FILE_SRC(tempFile);
     } else {
-      return Response.json({ error: "unsupported content-type" }, { status: 400 });
+      return Response.json({ error: "Este formato de conteúdo não é suportado." }, { status: 400 });
     }
   } catch {
-    return Response.json({ error: "bad request" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
 
   resolved ??= resolveCliOrFallback(cliId);
@@ -150,7 +150,7 @@ export async function POST(req: Request) {
     );
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
-    return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message : "Não foi possível iniciar o agente." }, { status: 500 });
   }
 
   const encoder = new TextEncoder();

@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const { sessionId, cliId: requestedCliId } = body;
   const t0 = Date.now();
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
       }
 
       const s = sessionId ? getSession(sessionId) : undefined;
-      if (!s) return fail("apply session not found (it may have expired)");
+      if (!s) return fail("A sessão de candidatura não foi encontrada ou expirou.");
       const resolved = requestedCliId ? resolveCliOrFallback(requestedCliId) : null;
       if (!resolved) return fail(cliUnavailableError(requestedCliId ?? "").error);
       const { spec, binPath } = resolved;
@@ -108,7 +108,7 @@ export async function POST(req: Request) {
       log(`output tail: ${result.buf.slice(-100).replace(/\s+/g, " ") || "(empty)"}`);
 
       if (!result.buf.trim()) {
-        return fail(result.signal ? "planner was killed before producing any output (try again / smaller form)" : "planner produced no output (check the CLI works in this folder)");
+        return fail(result.signal ? "O agente foi interrompido antes de devolver respostas. Volta a tentar." : "O agente não devolveu respostas. Confirma se funciona nesta pasta.");
       }
 
       const { obj, truncated } = extractJsonObject(result.buf);
@@ -119,7 +119,7 @@ export async function POST(req: Request) {
         );
       }
       const count = Object.keys(obj).length;
-      log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
+      log(`Foram lidas ${count} respostas${truncated ? "; a resposta ficou incompleta e podem faltar campos" : ""}.`);
       emit({ t: "done", answers: obj, truncated, count });
       controller.close();
     },

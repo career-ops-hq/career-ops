@@ -79,6 +79,12 @@ const CALL_SITES = [
     probe: 'flags-only',
   },
   {
+    source: 'web/src/lib/core/market-scan.ts',
+    script: 'scan.mjs',
+    args: ['--dry-run', '--json', '--since', '7'],
+    probe: 'flags-only',
+  },
+  {
     source: 'web/src/lib/core/pipeline.ts',
     script: null,
     args: [],

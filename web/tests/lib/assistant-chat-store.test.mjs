@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'n
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { readChat, listChats, saveChat, deleteChat } from '../../src/lib/assistant-chat-store.mjs';
+import { ChatError, readChat, listChats, saveChat, deleteChat } from '../../src/lib/assistant-chat-store.mjs';
 const messages = [{ role: 'user', parts: [{ type: 'text', text: 'My first conversation' }] }];
 function fixture(t) { const root = mkdtempSync(join(tmpdir(), 'assistant-chats-')); t.after(() => rmSync(root, { recursive: true, force: true })); return root; }
 test('disk conversations survive independent reads, rename, switching and delete', t => {
@@ -59,7 +59,10 @@ test('an in-progress writer is reported rather than bypassed', t => {
   const root = fixture(t), id = randomUUID();
   saveChat(root, id, { revision: 0, messages });
   writeFileSync(join(root, '.career-ops-web', 'chats', `${id}.json.lock`), '');
-  assert.throws(() => saveChat(root, id, { revision: 1, messages }), /busy/);
+  assert.throws(
+    () => saveChat(root, id, { revision: 1, messages }),
+    error => error instanceof ChatError && error.code === 'busy' && error.message === 'Conversation is busy; retry saving' && error.status === 409,
+  );
   assert.equal(readChat(root, id).revision, 1);
 });
 

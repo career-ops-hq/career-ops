@@ -408,11 +408,13 @@ function resolveEndpoint(entry) {
 }
 
 function parsePostedOn(label) {
-  if (!label) return undefined;
-  if (/posted\s+today/i.test(label)) return Date.now();
-  if (/posted\s+yesterday/i.test(label)) return Date.now() - 86_400_000;
-  const m = label.match(/posted\s+(\d+)(\+?)\s*day/i);
-  if (!m || m[2] === '+') return undefined; // "30+ Days Ago" — unbounded, no usable date
+  if (typeof label !== 'string') return undefined;
+  const normalized = label.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+  if (/^(posted\s+today|publicado\s+hoje)$/.test(normalized)) return Date.now();
+  if (/^(posted\s+yesterday|publicado\s+ontem)$/.test(normalized)) return Date.now() - 86_400_000;
+  const m = normalized.match(/^posted\s+(\d+)\s*days?\s+ago$/)
+    || normalized.match(/^publicado\s+ha\s+(\d+)\s+dias?$/);
+  if (!m) return undefined; // Unbounded "30+" labels and unknown prose have no usable date.
   return Date.now() - Number(m[1]) * 86_400_000;
 }
 
@@ -1142,6 +1144,9 @@ export default {
     // stopReason to 'cap'), so it is the one place that opts out.
     const syntheticEntries = ctx?.syntheticEntries === true;
     if (stopReason === STOP_REASON.CAP && !root.clamped) {
+      // A main-query cap with unread postings is the same fixed bound as a
+      // capped split. Keep recovered offers, but never certify full coverage.
+      if (total === null || jobs.length < total) jobs.workdayTruncated = WORKDAY_TRUNCATED_REASON.STRUCTURAL;
       const jobsSummary = `${jobs.length}${total !== null ? ` of ${total}` : ''} jobs`;
       if (!syntheticEntries) {
         console.error(`⚠️  workday: ${entry.name} truncated at max_pages=${maxPages} (${jobsSummary}) — raise max_pages on this entry for more`);

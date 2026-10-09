@@ -22,15 +22,15 @@ export async function POST(req: Request) {
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const appNum = parseFollowupId(body.appNum);
   if (appNum === null) {
-    return Response.json({ error: "appNum (application #) required" }, { status: 400 });
+    return Response.json({ error: "Falta o número da candidatura." }, { status: 400 });
   }
   const date = (body.date ?? "").trim();
   if (!isRealISODate(date)) {
-    return Response.json({ error: "date must be a real calendar date (YYYY-MM-DD)" }, { status: 400 });
+    return Response.json({ error: "A data tem de ser válida e usar o formato AAAA-MM-DD." }, { status: 400 });
   }
 
   const file = followupsLogPath();
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       return Response.json({ ok: true, appNum, date });
     });
   } catch (e) {
-    return followupsWriteError(e, "write failed");
+    return followupsWriteError(e, "Não foi possível guardar a próxima data.");
   }
 }
 
@@ -58,26 +58,26 @@ export async function DELETE(req: Request) {
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const appNum = parseFollowupId(body.appNum);
   if (appNum === null) {
-    return Response.json({ error: "appNum (application #) required" }, { status: 400 });
+    return Response.json({ error: "Falta o número da candidatura." }, { status: 400 });
   }
 
   const file = followupsLogPath();
-  if (!fs.existsSync(file)) return Response.json({ error: "no follow-up log" }, { status: 404 });
+  if (!fs.existsSync(file)) return Response.json({ error: "Não existe um registo de contactos." }, { status: 404 });
   try {
     return await withFollowupsWrite(() => {
       const lines = fs.readFileSync(file, "utf8").split("\n");
       const kept = lines.filter((line) => !pinRe(appNum).test(line));
       if (kept.length === lines.length) {
-        return Response.json({ error: `no pinned next-date for application #${appNum}` }, { status: 404 });
+        return Response.json({ error: `A candidatura #${appNum} não tem uma próxima data fixa.` }, { status: 404 });
       }
       atomicWrite(file, kept.join("\n"));
       return Response.json({ ok: true, appNum });
     });
   } catch (e) {
-    return followupsWriteError(e, "delete failed");
+    return followupsWriteError(e, "Não foi possível remover a próxima data.");
   }
 }

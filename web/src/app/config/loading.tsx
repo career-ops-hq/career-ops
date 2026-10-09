@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ConfigLoading() {
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10" aria-label="Loading configuration">
+    <div className="mx-auto max-w-2xl px-6 py-10" aria-label="A carregar a configuração">
       <Skeleton className="h-8 w-28" />
       <Skeleton className="mt-2 h-4 w-96 max-w-full" />
 

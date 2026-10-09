@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function LoginLoading() {
   return (
-    <main className="min-h-screen bg-background px-4 py-12 sm:py-20" aria-label="Loading sign in">
+    <main className="min-h-screen bg-background px-4 py-12 sm:py-20" aria-label="A carregar o início de sessão">
       <div className="mx-auto grid max-w-5xl gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
         <section>
           <div className="flex items-center gap-3"><Skeleton className="size-[38px] rounded-md" /><Skeleton className="h-9 w-40" /></div>

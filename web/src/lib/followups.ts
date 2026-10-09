@@ -98,10 +98,10 @@ export function followupStatusTone(status: string): "good" | "info" | "muted" {
 
 /** "today" / "tomorrow" / "in N days" / "N days ago" from a daysUntil delta. */
 export function relativeDays(daysUntil: number): string {
-  if (daysUntil === 0) return "today";
-  if (daysUntil === 1) return "tomorrow";
-  if (daysUntil > 1) return `in ${daysUntil} days`;
-  return daysUntil === -1 ? "1 day ago" : `${-daysUntil} days ago`;
+  if (daysUntil === 0) return "hoje";
+  if (daysUntil === 1) return "amanhã";
+  if (daysUntil > 1) return `daqui a ${daysUntil} dias`;
+  return daysUntil === -1 ? "há 1 dia" : `há ${-daysUntil} dias`;
 }
 
 /** 7/14-day escalation for "days since" cells: amber bold ≥7, red bold ≥14. */
@@ -131,6 +131,6 @@ export function isRealISODate(s: string): boolean {
 /** Oxford-style join: "A", "A and B", "A, B, and C". */
 export function oxfordJoin(parts: string[]): string {
   if (parts.length <= 1) return parts.join("");
-  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+  if (parts.length === 2) return `${parts[0]} e ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}`;
 }

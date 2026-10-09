@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { cleanMessages, conversationTitle, MAX_CHAT_BYTES } from './assistant-history.mjs';
 
 export class ChatError extends Error {
-  constructor(message, status = 400) { super(message); this.status = status; }
+  constructor(code, message, status = 400) { super(message); this.code = code; this.status = status; }
 }
 function chatPath(root, id) {
-  if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new ChatError('Invalid conversation id');
+  if (typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id)) throw new ChatError('invalid-id', 'Invalid conversation id');
   return join(root, '.career-ops-web', 'chats', `${id}.json`);
 }
 export function readChat(root, id) {
@@ -19,7 +19,7 @@ export function readChat(root, id) {
     const chat = JSON.parse(raw);
     if (chat.id !== id || chat.version !== 1 || !Number.isSafeInteger(chat.revision) || chat.revision < 1 || typeof chat.title !== 'string' || typeof chat.updatedAt !== 'string') throw new Error('Invalid document');
     return { ...chat, messages: cleanMessages(chat.messages) };
-  } catch { throw new ChatError(`Conversation ${id} is damaged; its file was not changed`, 409); }
+  } catch { throw new ChatError('damaged', `Conversation ${id} is damaged; its file was not changed`, 409); }
 }
 export function listChats(root) {
   let files;
@@ -37,7 +37,7 @@ export function listChats(root) {
     } catch (err) {
       // Isolate damaged documents, but do not disguise filesystem failures.
       if (!(err instanceof ChatError)) throw err;
-      errors.push({ id, error: err.message });
+      errors.push({ id, code: err.code, error: err.message });
     }
   }
   return { chats: chats.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), errors };
@@ -47,7 +47,7 @@ function withLock(root, id, operation) {
   mkdirSync(join(root, '.career-ops-web', 'chats'), { recursive: true });
   let fd;
   try { fd = openSync(`${file}.lock`, 'wx', 0o600); }
-  catch (err) { if (err.code === 'EEXIST') throw new ChatError('Conversation is busy; retry saving', 409); throw err; }
+  catch (err) { if (err.code === 'EEXIST') throw new ChatError('busy', 'Conversation is busy; retry saving', 409); throw err; }
   try { return operation(file); }
   finally {
     try { closeSync(fd); } catch { /* best effort */ }
@@ -55,16 +55,16 @@ function withLock(root, id, operation) {
   }
 }
 export function saveChat(root, id, input) {
-  if (!input || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new ChatError('Conversation revision required');
+  if (!input || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new ChatError('revision-required', 'Conversation revision required');
   let messages;
-  try { messages = cleanMessages(input.messages); } catch (err) { throw new ChatError(err.message); }
-  if (!messages.some(m => m.role === 'user')) throw new ChatError('Empty conversations are not saved');
-  if (input.title !== undefined && (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 100)) throw new ChatError('Title must contain 1–100 characters');
-  if (Buffer.byteLength(JSON.stringify(messages)) > MAX_CHAT_BYTES) throw new ChatError('Conversation is too large to save', 413);
+  try { messages = cleanMessages(input.messages); } catch (err) { throw new ChatError('invalid-messages', err.message); }
+  if (!messages.some(m => m.role === 'user')) throw new ChatError('empty', 'Empty conversations are not saved');
+  if (input.title !== undefined && (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 100)) throw new ChatError('invalid-title', 'Title must contain 1–100 characters');
+  if (Buffer.byteLength(JSON.stringify(messages)) > MAX_CHAT_BYTES) throw new ChatError('too-large', 'Conversation is too large to save', 413);
   return withLock(root, id, file => {
     const prior = readChat(root, id);
     if (input.revision === 0 && prior && JSON.stringify(prior.messages) === JSON.stringify(messages) && (!input.title || input.title.trim() === prior.title)) return prior;
-    if ((prior?.revision ?? 0) !== input.revision) throw new ChatError('Conversation changed in another tab. Reload before editing; your unsaved text is still visible.', 409);
+    if ((prior?.revision ?? 0) !== input.revision) throw new ChatError('changed', 'Conversation changed in another tab. Reload before editing; your unsaved text is still visible.', 409);
     const chat = { version: 1, id, revision: input.revision + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), messages };
     const temp = `${file}.${randomUUID()}.tmp`;
     try { writeFileSync(temp, JSON.stringify(chat), { mode: 0o600, flag: 'wx' }); renameSync(temp, file); }
@@ -76,7 +76,7 @@ export function deleteChat(root, id, revision) {
   return withLock(root, id, file => {
     const prior = readChat(root, id);
     if (!prior) return;
-    if (prior.revision !== revision) throw new ChatError('Conversation changed in another tab; reload before deleting', 409);
+    if (prior.revision !== revision) throw new ChatError('changed', 'Conversation changed in another tab; reload before deleting', 409);
     unlinkSync(file);
   });
 }

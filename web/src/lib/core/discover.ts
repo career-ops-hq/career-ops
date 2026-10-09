@@ -4,7 +4,7 @@ import { careerOpsRoot, readInbox, readApplications } from "@/lib/career-ops";
 import { canon } from "@/lib/explore-ai";
 
 /**
- * Dedup context for AI search (modes/discover.md). The maintainer contract says
+ * Dedup context for AI search (modes/web-search.md). The maintainer contract says
  * dedup the AI PROPOSALS against what's already known BEFORE showing them. We
  * give the agent a COMPACT "already known" block (companies/roles + a URL count,
  * token-cheap — not thousands of raw URLs) so it skips known employers, AND a

@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function JobsLoading() {
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10" aria-label="Loading workers">
+    <div className="mx-auto max-w-4xl px-6 py-10" aria-label="A carregar as tarefas">
       <div className="flex items-end justify-between gap-4">
         <div className="space-y-2">
           <Skeleton className="h-8 w-32" />

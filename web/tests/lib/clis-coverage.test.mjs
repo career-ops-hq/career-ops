@@ -62,6 +62,16 @@ test("Grok Build CLI is wired up", () => {
   assert.match(src, /bin:\s*"grok"/, "the grok entry must spawn the `grok` binary");
 });
 
+test("Cursor Agent is wired up in read-only headless mode", () => {
+  assert.match(src, /id:\s*"cursor"/, "KNOWN is missing the Cursor Agent entry");
+  assert.match(src, /bin:\s*"agent"/, "the Cursor entry must spawn the official `agent` binary");
+  assert.match(
+    src,
+    /\["-p",\s*"--mode",\s*"ask",\s*"--trust",\s*p\]/,
+    "Cursor must use non-interactive Ask mode so the dashboard cannot edit files through it",
+  );
+});
+
 test("no CLI is listed twice", () => {
   const ids = [...src.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]);
   assert.equal(new Set(ids).size, ids.length, `duplicate id in KNOWN: ${ids.join(", ")}`);

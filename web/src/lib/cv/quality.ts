@@ -11,7 +11,7 @@ export function cvReadiness(md: string): CvReadiness {
   const hasSkills = /(^|\n)#{1,3}\s*(skills|technologies|competenc|habilidad)/i.test(text);
   const scoreable = words >= 80 && (hasExperience || hasSkills || words >= 200);
   let hint: string | undefined;
-  if (!scoreable) hint = words < 40 ? "That's very short — add your experience for real matches (you can save anyway)." : "Looks thin — add a role or two for better matches (you can save anyway).";
+  if (!scoreable) hint = words < 40 ? "O CV tem pouco conteúdo. Acrescenta a tua experiência para melhorar a avaliação; ainda assim, podes guardá-lo." : "Acrescenta uma ou duas experiências profissionais para melhorar a avaliação; ainda assim, podes guardá-lo.";
   return { scoreable, words, hasExperience, hasSkills, hint };
 }
 

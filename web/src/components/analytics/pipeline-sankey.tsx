@@ -22,6 +22,24 @@ const TONE_LINK: Record<string, string> = {
 type AppRow = { n: string; status: string };
 type LogRow = { num: number; from: string; to: string };
 
+const LABELS: Record<string, string> = {
+  Tracked: "Acompanhadas",
+  SKIP: "Ignoradas",
+  "Still evaluated": "Avaliadas",
+  "Discarded (no application recorded)": "Descartadas sem candidatura",
+  Submitted: "Enviadas",
+  Waiting: "À espera",
+  "Company engaged": "Empresa respondeu",
+  "Rejected (no interview)": "Recusadas sem entrevista",
+  Screening: "Triagem",
+  Interview: "Entrevista",
+  Offer: "Proposta",
+  Hired: "Contratação",
+  "Rejected after interview": "Recusadas após entrevista",
+  "Discarded after interview": "Descartadas após entrevista",
+  Discarded: "Descartadas",
+};
+
 export function PipelineSankey({
   applications,
   statusLog,
@@ -34,18 +52,17 @@ export function PipelineSankey({
   const graph = buildPipelineSankey(applications, statusLog);
   const layout = layoutSankey(graph, { width: 920, height: 440, padding: { top: 24, right: 188, bottom: 24, left: 100 } });
   const toneById = new Map(layout.nodes.map((n) => [n.id, n.tone]));
-  const labelById = new Map(graph.nodes.map((n) => [n.id, n.label]));
+  const labelById = new Map(graph.nodes.map((n) => [n.id, LABELS[n.label] ?? n.label]));
   const firstRank = Math.min(...layout.nodes.map((n) => n.rank));
   const lastRank = Math.max(...layout.nodes.map((n) => n.rank));
 
   return (
     <section id="pipeline-sankey" className="mt-10 scroll-mt-8" aria-labelledby="sankey-heading">
       <h2 id="sankey-heading" className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">
-        Pipeline Sankey
+        Fluxo das candidaturas
       </h2>
       <p className="mt-2 max-w-2xl text-sm text-muted">
-        Current tracker snapshot. Status-log transitions keep interview-then-reject
-        on the interview path — a later Rejected does not erase the stage.
+        Estado atual das oportunidades. Uma recusa posterior não apaga uma entrevista já realizada.
       </p>
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-surface/50 p-3">
@@ -55,10 +72,9 @@ export function PipelineSankey({
           role="img"
           aria-labelledby="sankey-title sankey-desc"
         >
-          <title id="sankey-title">Application pipeline Sankey</title>
+          <title id="sankey-title">Fluxo das candidaturas</title>
           <desc id="sankey-desc">
-            {graph.total} tracked roles flowing from tracked through submitted to waiting,
-            company-engaged, and terminal outcomes.
+            {graph.total} oportunidades, desde o registo até ao envio, resposta e resultado final.
           </desc>
 
           {layout.links.map((link) => {
@@ -67,7 +83,7 @@ export function PipelineSankey({
             const targetLabel = labelById.get(link.target) ?? link.target;
             return (
               <g key={`${link.source}-${link.target}`}>
-                <title>{`${link.value} roles: ${sourceLabel} → ${targetLabel}`}</title>
+                <title>{`${link.value} oportunidades: ${sourceLabel} → ${targetLabel}`}</title>
                 <path d={link.d} className={cn(TONE_LINK[tone] ?? TONE_LINK.neutral, "outline-none")} />
               </g>
             );
@@ -81,7 +97,7 @@ export function PipelineSankey({
             const anchor = labelOnRight ? "start" : "end";
             return (
               <g key={node.id}>
-                <title>{`${node.label}: ${node.value}`}</title>
+                <title>{`${labelById.get(node.id) ?? node.label}: ${node.value}`}</title>
                 <rect
                   x={node.x}
                   y={node.y}
@@ -100,7 +116,7 @@ export function PipelineSankey({
                   strokeWidth={4}
                   paintOrder="stroke"
                 >
-                  {node.label}
+                  {labelById.get(node.id) ?? node.label}
                   <tspan className="fill-muted font-normal" stroke="var(--bg)" strokeWidth={4} paintOrder="stroke">
                     {`  ${node.value}`}
                   </tspan>
@@ -112,12 +128,12 @@ export function PipelineSankey({
       </div>
 
       <table className="sr-only">
-        <caption>Pipeline Sankey flows</caption>
+        <caption>Fluxos das candidaturas</caption>
         <thead>
           <tr>
-            <th>From</th>
-            <th>To</th>
-            <th>Roles</th>
+            <th>Origem</th>
+            <th>Destino</th>
+            <th>Oportunidades</th>
           </tr>
         </thead>
         <tbody>

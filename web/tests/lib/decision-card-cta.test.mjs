@@ -9,11 +9,11 @@ const src = readFileSync(
   "utf8",
 );
 
-test("Today primary action opens the report, not Mark applied", () => {
+test("a ação principal de Hoje abre o relatório, não regista a candidatura", () => {
   const primary = src.indexOf('href={`/pipeline/${app.n}`}');
   const mark = src.indexOf('setStatus("Applied")');
   assert.notEqual(primary, -1);
   assert.notEqual(mark, -1);
-  assert.ok(primary < mark, "report link must come before the Applied writer");
-  assert.match(src, /> Review\s*</);
+  assert.ok(primary < mark, "a ligação ao relatório deve aparecer antes da escrita do estado Applied");
+  assert.match(src, /> Rever\s*</);
 });

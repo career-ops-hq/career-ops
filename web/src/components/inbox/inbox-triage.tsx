@@ -48,7 +48,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   useEffect(() => {
     try {
       const s = localStorage.getItem(SHORTLIST_KEY);
-      if (s) setShortlist(JSON.parse(s));
+      if (s) {
+        const evaluable = new Set(inbox.filter((job) => job.opportunityType !== "freelance").map((job) => job.url));
+        setShortlist((JSON.parse(s) as ShortItem[]).filter((item) => evaluable.has(item.url)));
+      }
       const h = localStorage.getItem(HIDDEN_KEY);
       if (h) {
         const parsed = JSON.parse(h) as unknown;
@@ -152,6 +155,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const capped = !showAll && !anyFacet;
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
+  const hasEmployment = enriched.some((e) => e.job.opportunityType !== "freelance");
 
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
 
@@ -175,13 +179,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   };
 
   const save = (job: InboxJob) => {
-    if (isShortlisted(job.url)) return;
+    if (job.opportunityType === "freelance" || isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
   const skip = (job: InboxJob) => {
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     setUndo({
-      label: `Skipped ${job.company}`,
+      label: `${job.company} retirada`,
       fn: () => {
         setHidden((h) => h.filter((u) => u !== job.url));
         void persistSkip(job.url, false);
@@ -194,16 +198,18 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     setHidden([]);
     for (const url of urls) void persistSkip(url, false);
   };
-  const toggleSelect = (url: string) =>
+  const toggleSelect = (job: InboxJob) => {
+    if (job.opportunityType === "freelance") return;
     setSelected((s) => {
       const n = new Set(s);
-      if (n.has(url)) n.delete(url);
-      else n.add(url);
+      if (n.has(job.url)) n.delete(job.url);
+      else n.add(job.url);
       return n;
     });
+  };
   const saveSelected = () => {
     const add = enriched
-      .filter((e) => selected.has(e.job.url) && !isShortlisted(e.job.url))
+      .filter((e) => e.job.opportunityType !== "freelance" && selected.has(e.job.url) && !isShortlisted(e.job.url))
       .map((e) => ({ url: e.job.url, company: e.job.company, role: e.job.role }));
     if (add.length) setShortlist((s) => [...s, ...add]);
     setSelected(new Set());
@@ -217,7 +223,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
     for (const it of shortlist) {
-      startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
+      startJob({ title: `Avaliar · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
     }
     setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
@@ -250,11 +256,11 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* batch header: fresh slice by default, or the full filtered set */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
+          {capped ? "Ofertas recentes" : anyFacet ? `${filtered.length} ${filtered.length === 1 ? "resultado" : "resultados"}` : "Todas as ofertas"}
         </p>
         {hiddenCount > 0 && (
           <button type="button" onClick={restoreHidden} className="text-xs text-faint transition-colors hover:text-foreground">
-            {hiddenCount} hidden · restore
+            {hiddenCount} {hiddenCount === 1 ? "retirada" : "retiradas"} · repor
           </button>
         )}
       </div>
@@ -262,12 +268,12 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* multi-select action bar */}
       {selected.size > 0 && (
         <div className="mt-2 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
-          <span className="font-medium text-brand tabular-nums">{selected.size} selected</span>
+          <span className="font-medium text-brand tabular-nums">{selected.size} {selected.size === 1 ? "selecionada" : "selecionadas"}</span>
           <button type="button" onClick={saveSelected} className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground max-sm:min-h-[44px]">
-            Save to shortlist
+            Guardar na seleção
           </button>
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground max-sm:min-h-[44px]">
-            Clear
+            Limpar
           </button>
         </div>
       )}
@@ -280,10 +286,10 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               job={e.job}
               source={e.source}
               age={e.age}
-              scored={scoreByUrl.get(e.job.url)}
+              scored={e.job.opportunityType === "freelance" ? undefined : scoreByUrl.get(e.job.url)}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
-              onToggleSelect={() => toggleSelect(e.job.url)}
+              onToggleSelect={() => toggleSelect(e.job)}
               onSave={() => save(e.job)}
               onSkip={() => skip(e.job)}
             />
@@ -291,8 +297,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         </ul>
       ) : (
         <div className="mt-3 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-10 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Loosen the filters to see more of your inbox.</p>
+          <p className="font-display text-lg">Sem resultados</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Altera os filtros para veres mais ofertas.</p>
         </div>
       )}
 
@@ -303,13 +309,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           onClick={() => setShowAll(true)}
           className="mt-3 inline-flex w-full items-center justify-center gap-1 rounded-xl border border-border bg-surface/40 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
         >
-          See all {ordered.length} in inbox →
+          Ver todas ({ordered.length}) →
         </button>
       )}
 
       {/* empty-shortlist guidance (only once there's nothing saved) */}
-      {shortlist.length === 0 && (
-        <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
+      {hasEmployment && shortlist.length === 0 && (
+        <p className="mt-4 text-center text-xs text-faint">Guarda as ofertas que queres comparar e avalia-as em conjunto.</p>
       )}
 
       {/* undo toast (sits above the tray) */}
@@ -318,7 +324,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           <div className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <span className="text-muted">{undo.label}</span>
             <button type="button" onClick={() => { undo.fn(); setUndo(null); }} className="inline-flex items-center gap-1 font-medium text-brand max-sm:min-h-[44px]">
-              <Undo2 className="size-3.5" /> Undo
+              <Undo2 className="size-3.5" /> Anular
             </button>
           </div>
         </div>

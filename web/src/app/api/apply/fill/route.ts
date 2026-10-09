@@ -14,15 +14,15 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const { sessionId, answers = {}, fields = [], handoff, company, application } = body;
-  if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+  if (!sessionId) return Response.json({ error: "Falta a sessão de candidatura." }, { status: 400 });
   if (company !== undefined && typeof company !== "string") {
-    return Response.json({ error: "company must be a string" }, { status: 400 });
+    return Response.json({ error: "O nome da empresa é inválido." }, { status: 400 });
   }
   if (application !== undefined && typeof application !== "string") {
-    return Response.json({ error: "application must be a string" }, { status: 400 });
+    return Response.json({ error: "A referência da candidatura é inválida." }, { status: 400 });
   }
 
   // Resolve the tailored CV server-side (never trust a client path): by the
@@ -35,6 +35,6 @@ export async function POST(req: Request) {
     if (handoff) await handoffSession(sessionId).catch(() => {});
     return Response.json({ ...result, handedOff: !!handoff, cvAttached: !!cvPath });
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "fill failed" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "Não foi possível preencher o formulário." }, { status: 500 });
   }
 }

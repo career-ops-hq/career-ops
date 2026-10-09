@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CalendarPlus, Loader2, Sparkles, X } from "lucide-react";
+import { CalendarPlus, Loader2, X } from "lucide-react";
 import type { ScanEngine } from "@/lib/scheduled-jobs";
 import { DEFAULT_FILTERS, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "@/components/explore/filter-builder";
@@ -17,7 +17,7 @@ export function CreateJobModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const [name, setName] = useState("Scheduled scan");
+  const [name, setName] = useState("Pesquisa agendada");
   const [engine, setEngine] = useState<ScanEngine>("full");
   const [every, setEvery] = useState(6);
   const [unit, setUnit] = useState<"minutes" | "hours" | "days">("hours");
@@ -44,7 +44,7 @@ export function CreateJobModal({
       onCreated();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error creating job");
+      setError(err instanceof Error ? err.message : "Não foi possível criar a pesquisa.");
     } finally {
       setSubmitting(false);
     }
@@ -58,8 +58,8 @@ export function CreateJobModal({
               <CalendarPlus className="size-5" />
             </div>
             <div>
-              <h2 id="create-scheduled-scan-title" className="text-lg font-semibold text-foreground">Create Scheduled Scan</h2>
-              <p className="text-xs text-muted">Configure a persistent background job for automatic role discovery.</p>
+              <h2 id="create-scheduled-scan-title" className="text-lg font-semibold text-foreground">Nova pesquisa agendada</h2>
+              <p className="text-xs text-muted">Guarda filtros e a frequência com que pretendes repetir a pesquisa.</p>
             </div>
           </div>
           <button
@@ -76,7 +76,7 @@ export function CreateJobModal({
 
           {/* ─── Name + Engine + Cadence ─── */}
           <div>
-            <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Name</label>
+            <label className="mb-1 block text-[13px] font-medium text-foreground">Nome</label>
             <input
               ref={nameRef}
               type="text"
@@ -84,30 +84,30 @@ export function CreateJobModal({
               onChange={(e) => setName(e.target.value)}
               required
               className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60 focus:ring-2 focus:ring-brand/20"
-              placeholder="e.g. Roles matching my profile"
+              placeholder="Ex.: Apoio ao cliente em Lisboa"
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Método de pesquisa</label>
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">Bases públicas de ATS</option>
+                <option value="portals">Empresas de portals.yml</option>
               </select>
               <p className="mt-1 text-[11px] text-faint">
                 {engine === "full"
-                  ? "Sweeps public Greenhouse/Lever/Ashby datasets."
-                  : "Scans pre-configured portals.yml companies (0 AI cost)."}
+                  ? "Pesquisa dados públicos da Greenhouse, Lever e Ashby."
+                  : "Pesquisa apenas as empresas configuradas em portals.yml, sem usar o agente."}
               </p>
             </div>
 
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Repeat Cadence</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Repetir a cada</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -125,9 +125,9 @@ export function CreateJobModal({
                   }}
                   className="flex-1 rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
                 >
-                  <option value="hours">Hours</option>
-                  <option value="days">Days</option>
-                  <option value="minutes">Minutes</option>
+                  <option value="hours">horas</option>
+                  <option value="days">dias</option>
+                  <option value="minutes">minutos</option>
                 </select>
               </div>
             </div>
@@ -145,15 +145,15 @@ export function CreateJobModal({
               onClick={onClose}
               className="rounded-xl border border-border px-4 py-2 text-xs font-medium text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             >
-              Cancel
+              Cancelar
             </button>
             <button
               type="submit"
               disabled={submitting}
               className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2 text-xs font-medium text-brand-foreground shadow transition-colors hover:bg-brand-200 disabled:opacity-50"
             >
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {submitting ? "Creating…" : "Save Scheduled Scan"}
+              {submitting ? <Loader2 className="size-4 animate-spin" /> : <CalendarPlus className="size-4" />}
+              {submitting ? "A criar…" : "Guardar pesquisa"}
             </button>
           </div>
         </form>

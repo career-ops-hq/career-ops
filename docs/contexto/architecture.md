@@ -1,0 +1,3 @@
+# Arquitetura
+
+O núcleo do projeto é composto por scripts Node em ficheiros `.mjs`, modos em Markdown e dados do utilizador resolvidos através de `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR` ou do diretório do repositório. A aplicação web vive em `web/` e usa Next.js, React e TypeScript. As rotas em `web/src/app/` carregam dados e expõem APIs locais; os componentes em `web/src/components/` apresentam e alteram esse estado; os helpers em `web/src/lib/` preservam contratos partilhados. O assistente chama agentes instalados no computador através da linha de comandos. Estados, identificadores, envelopes de ação e valores persistidos permanecem canónicos em inglês; a interface e o texto produzido nesta instalação usam português de Portugal.

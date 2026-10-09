@@ -89,7 +89,7 @@ test("cv/ingest/route.ts reports an unavailable CLI before judging PDF eligibili
   assert.equal(calls.length, 2, "expected one call for uploads and one `??=` for pasted text");
   assert.match(src, /resolved \?\?= resolveCliOrFallback\(cliId\)/, "pasted text must reuse an upload's resolution, not resolve again");
   const unavailable = src.search(/cliUnavailableError\(cliId\)/);
-  const pdfCheck = src.search(/PDF upload needs Claude Code/);
+  const pdfCheck = src.search(/leitura de um PDF exige Claude Code/);
   assert.ok(unavailable !== -1 && pdfCheck !== -1);
   assert.ok(unavailable < pdfCheck, "the 404 for an unavailable CLI must come before the PDF check");
   assert.doesNotMatch(src, /\?\.spec\.id \?\? cliId/, "the PDF check must not fall back to the stale id");

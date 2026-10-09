@@ -6,6 +6,8 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
+import { inferMarketsFromLocations } from "@/lib/market-presets.mjs";
+import { resolveScanTimeoutMs } from "./scan-timeout.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -34,9 +36,9 @@ export { serializePortals } from "./portals-serialize.mjs";
 import { serializePortals } from "./portals-serialize.mjs";
 
 /** Write the ephemeral filter file to a temp path; caller cleans it up. */
-export function writeTempPortals(f: FilterLists): string {
+export function writeTempPortals(f: FilterLists, jobBoards: object[] = [], strictLocation = false): string {
   const file = path.join(os.tmpdir(), `career-ops-explore-${randomUUID()}.yml`);
-  fs.writeFileSync(file, serializePortals(f), "utf8");
+  fs.writeFileSync(file, serializePortals(f, jobBoards, strictLocation), "utf8");
   return file;
 }
 
@@ -57,6 +59,15 @@ function loadYaml(rel: string): Record<string, unknown> | null {
   }
 }
 
+/** Shared tolerant profile read for targeting and the scanner's existing budget. */
+export function loadProfileTargets(): string[] {
+  return profileTargetKeywords(loadYaml("config/profile.yml"));
+}
+
+export function readScanTimeoutMs(): number {
+  return resolveScanTimeoutMs(loadYaml("config/profile.yml"));
+}
+
 /**
  * Tolerantly seed first-search defaults from the user's real config. Reads
  * portals.yml (title_filter / location_filter) and falls back to
@@ -64,7 +75,7 @@ function loadYaml(rel: string): Record<string, unknown> | null {
  * portals has none. Never throws — a bare checkout just yields DEFAULT_FILTERS.
  */
 export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[] } {
-  const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
+  const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats], markets: [] };
   const seededFrom: string[] = [];
 
   const portals = loadYaml("portals.yml");
@@ -86,12 +97,14 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     // core on BOTH fields — `primary` read as a string when it is a list,
     // `archetypes` spread raw when its entries are objects — so this fallback
     // returned nothing for every profile.yml the app itself writes.
-    const fromRoles = listFrom(profileTargetKeywords(loadYaml("config/profile.yml")));
+    const fromRoles = listFrom(loadProfileTargets());
     if (fromRoles.length) {
       filters.positive = fromRoles;
       seededFrom.push("profile.yml");
     }
   }
+
+  filters.markets = inferMarketsFromLocations(filters.markets, filters.allow);
 
   return { filters, seededFrom };
 }

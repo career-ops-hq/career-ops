@@ -59,7 +59,7 @@ test("resolvePdfPaths: path-traversal selector is rejected before any path is bu
 
     // Then it fails closed with a clear error, never calling findReportFile or touching disk
     assert.equal(result.ok, false);
-    assert.match(result.error, /Invalid report selector/);
+    assert.match(result.error, /Referência de relatório inválida/);
     assert.equal(existsSync(scratchDir), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -76,7 +76,7 @@ test("resolvePdfPaths: no matching report -> ok:false, no directories created", 
 
     // Then it fails with a user-facing error and never touches the filesystem
     assert.equal(result.ok, false);
-    assert.match(result.error, /No report #999 found/);
+    assert.match(result.error, /Não foi encontrado o relatório #999/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

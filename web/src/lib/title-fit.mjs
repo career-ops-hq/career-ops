@@ -43,7 +43,7 @@ const TOKEN_RE = /[\p{L}\p{N}+#.]+/gu;
 // spirit of LEVELS / SENIORITY_TOKENS in jd-similarity.mjs.
 const SENIORITY = new Set([
   "junior", "jr", "mid", "middle", "senior", "sr", "staff", "principal",
-  "lead", "head", "chief", "associate", "assistant", "intern", "internship",
+  "lead", "head", "chief", "associate", "intern", "internship",
   "entry", "level", "ii", "iii", "iv",
 ]);
 

@@ -13,11 +13,11 @@ export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "
 
 function agoLabel(age: number | null): string | null {
   if (age == null) return null;
-  if (age <= 0) return "today";
-  if (age === 1) return "yesterday";
-  if (age < 7) return `${age}d ago`;
-  if (age < 30) return `${Math.floor(age / 7)}w ago`;
-  return `${Math.floor(age / 30)}mo ago`;
+  if (age <= 0) return "hoje";
+  if (age === 1) return "ontem";
+  if (age < 7) return `há ${age} d`;
+  if (age < 30) return `há ${Math.floor(age / 7)} sem.`;
+  return `há ${Math.floor(age / 30)} m`;
 }
 
 // One raw posting in the triage list. Shows ONLY cheap, free signals + an honest
@@ -45,7 +45,8 @@ export function TriageRow({
   onSkip: () => void;
 }) {
   const ago = agoLabel(age);
-  const evaluated = !!scored && (scored.running || scored.score != null);
+  const freelance = job.opportunityType === "freelance";
+  const evaluated = !freelance && !!scored && (scored.running || scored.score != null);
 
   return (
     <li
@@ -56,13 +57,15 @@ export function TriageRow({
       )}
     >
       {/* multi-select — power-user batch to shortlist */}
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggleSelect}
-        aria-label={`Select ${job.company} ${job.role}`}
-        className="size-4 shrink-0 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
-      />
+      {!freelance && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          aria-label={`Selecionar ${job.company} ${job.role}`}
+          className="size-4 shrink-0 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
+        />
+      )}
 
       <CompanyLogo name={job.company} size={20} />
 
@@ -74,19 +77,29 @@ export function TriageRow({
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-faint">
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
+          {freelance && <span className="rounded bg-brand-soft px-1 py-px font-medium text-brand">Freelance</span>}
           {ago && <span>{ago}</span>}
           {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
-          {!evaluated && <span className="italic text-muted">not scored</span>}
+          {!freelance && !evaluated && <span className="italic text-muted">por avaliar</span>}
         </p>
       </div>
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
-      {evaluated ? (
+      {freelance ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <a href={job.url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-brand hover:bg-brand-soft max-sm:min-h-[44px]">
+            Abrir
+          </a>
+          <button type="button" onClick={onSkip} className="rounded-md px-2 py-1 text-xs text-faint hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px]">
+            Retirar
+          </button>
+        </div>
+      ) : evaluated ? (
         <Link href={`/jobs/${scored!.jobId}`} className="flex shrink-0 items-center gap-1.5 text-xs">
           {scored!.running ? (
             <>
               <Loader2 className="size-3.5 animate-spin text-brand" />
-              <span className="text-brand max-sm:hidden">Scoring…</span>
+              <span className="text-brand max-sm:hidden">A avaliar…</span>
             </>
           ) : (
             <Badge tone={scored!.tone}>{scored!.score}/5</Badge>
@@ -97,7 +110,7 @@ export function TriageRow({
           <button
             type="button"
             onClick={onSave}
-            title={shortlisted ? "In your shortlist" : "Save to shortlist"}
+            title={shortlisted ? "Guardada na seleção" : "Guardar na seleção"}
             aria-pressed={shortlisted}
             className={cn(
               "inline-flex items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px] max-sm:min-w-[44px]",
@@ -105,12 +118,12 @@ export function TriageRow({
             )}
           >
             {shortlisted ? <BookmarkCheck className="size-4" /> : <Bookmark className="size-4" />}
-            <span className="max-sm:hidden">{shortlisted ? "Saved" : "Save"}</span>
+            <span className="max-sm:hidden">{shortlisted ? "Guardada" : "Guardar"}</span>
           </button>
           <button
             type="button"
             onClick={onSkip}
-            title="Skip — hide from the inbox"
+            title="Retirar desta lista"
             className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
           >
             <X className="size-4" />

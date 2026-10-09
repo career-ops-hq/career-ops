@@ -53,7 +53,7 @@ export function pdfRunOutcome({ envelope, noOutputMessage, sawError, cleanExit, 
     const why = envelope && envelope.ok === false ? ` (${envelope.error})` : "";
     return {
       ok: false,
-      message: `This run didn't produce a tailored CV to render, so no PDF was generated — re-run it to verify.${why}`,
+      message: `A execução não produziu um CV adaptado e não foi criado um PDF. Volta a executá-la para confirmar.${why}`,
     };
   }
   return { ok: true };
@@ -84,7 +84,7 @@ export function writeCvHtml({ pdfPaths, html }) {
     // err.path when the platform gives it: a non-fs throw (an oversized-content
     // RangeError, a bad argument type) carries none, and "could not save to
     // undefined" tells the user nothing.
-    return { ok: false, error: `Could not save the tailored CV to ${err.path ?? pdfPaths.html}: ${err.message}` };
+    return { ok: false, error: `Não foi possível guardar o CV adaptado em ${err.path ?? pdfPaths.html}: ${err.message}` };
   }
 }
 

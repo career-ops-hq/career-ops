@@ -1,0 +1,3 @@
+# Produto
+
+O career-ops é uma aplicação local para pessoas que procuram emprego e querem reunir procura, avaliação, candidaturas, contactos, entrevistas e resultados no mesmo lugar. O utilizador deve conseguir perceber o estado de cada oportunidade, voltar a executar pesquisas guardadas e preparar materiais com um agente de IA já autenticado no computador. A aplicação ajuda a decidir e a preparar; não envia candidaturas nem mensagens sem uma ação explícita do utilizador. O resultado esperado é um processo de procura de emprego rastreável, com dados locais e afirmações profissionais sustentadas pelas fontes autorizadas do projeto.

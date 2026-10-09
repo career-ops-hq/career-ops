@@ -69,7 +69,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
         // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
+        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrompida ao recarregar a página", ts: Date.now() }] } : j)));
       }
     } catch {
       /* ignore */
@@ -103,7 +103,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         kind: opts.kind,
         batchId: opts.batchId,
         status: "running",
-        steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],
+        steps: [{ kind: "status", label: "A iniciar…", ts: Date.now() }],
         text: "",
         startedAt: Date.now(),
       };
@@ -121,8 +121,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         // choice without a record.
         const cliId = await resolveCliId((stale, replacement) => {
           const label = replacement
-            ? `Saved CLI '${stale}' is not installed — using '${replacement}'`
-            : `Saved CLI '${stale}' is not installed`;
+            ? `O agente guardado «${stale}» não está instalado; será usado «${replacement}»`
+            : `O agente guardado «${stale}» não está instalado`;
           const step: JobStep = { kind: "status", label, ts: Date.now() };
           steps.push(step);
           patch(id, (j) => ({ ...j, steps: [...j.steps, step] }));
@@ -132,7 +132,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             ...j,
             status: "error",
             endedAt: Date.now(),
-            steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config and click Save config", ts: Date.now() }],
+            steps: [...j.steps, { kind: "status", label: "Nenhum agente configurado. Abre Configuração e guarda a escolha.", ts: Date.now() }],
           }));
           return;
         }
@@ -174,7 +174,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
-            finish("error", e.error || "Failed to start");
+            finish("error", e.error || "Não foi possível iniciar");
             return;
           }
           const completion = await readJobStream(res.body, (ev) => {
@@ -198,9 +198,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }
           doneTokens = completion.tokens ?? 0;
           doneCostUsd = completion.costUsd ?? null;
-          finish("done", "Done");
+          finish("done", "Concluída");
         } catch {
-          finish("error", "Connection error");
+          finish("error", "Erro de ligação");
         }
       })();
 

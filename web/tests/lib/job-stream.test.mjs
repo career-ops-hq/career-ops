@@ -33,7 +33,7 @@ test("a verdict followed by EOF is an interrupted run, never a confirmed score",
   const { result, progress } = await read([record({ type: "text", text: "VERDICT: 4.8/5 — Fixture fit" })]);
   assert.equal(progress[0].text, "VERDICT: 4.8/5 — Fixture fit");
   assert.equal(result.status, "error");
-  assert.match(result.message, /before the server confirmed completion/);
+  assert.match(result.message, /antes de o servidor confirmar a conclusão/);
 });
 
 test("an empty successful HTTP response does not mean the worker completed", async () => {
@@ -93,17 +93,17 @@ test("a terminal error cannot be replaced by a later done record", async () => {
 test("malformed JSON cannot be skipped on the way to a successful completion", async () => {
   const { result } = await read(['{"type":"error",\n' + record({ type: "done" })]);
   assert.equal(result.status, "error");
-  assert.match(result.message, /Invalid response/);
+  assert.match(result.message, /Resposta inválida/);
 });
 
 test("a connection failure before confirmation stays a connection error", async () => {
   const { result } = await read([record({ type: "text", text: "Almost done" })], { error: new TypeError("network failed") });
-  assert.deepEqual(result, { status: "error", message: "Connection error" });
+  assert.deepEqual(result, { status: "error", message: "Erro de ligação" });
 });
 
 test("an aborted reader reports interruption rather than completion", async () => {
   const { result } = await read([], { error: new DOMException("The operation was aborted", "AbortError") });
-  assert.deepEqual(result, { status: "error", message: "Interrupted. Check the pipeline before retrying." });
+  assert.deepEqual(result, { status: "error", message: "Tarefa interrompida. Verifica as candidaturas antes de tentares novamente." });
 });
 
 test("a terminal error releases a response whose producer has not closed", async () => {

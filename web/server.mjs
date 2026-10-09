@@ -10,7 +10,7 @@
 // and coverage contracts (validate-system-paths-coverage.mjs EXCLUDE_PREFIXES),
 // so lib/cli-flags.mjs and lib/is-main-module.mjs are out of reach by design.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import os from "node:os";
 import { dirname, join } from "node:path";
@@ -89,18 +89,39 @@ try {
 // resolves the checkout as `resolve(process.cwd(), "..")`, so a run started from
 // the repo root would otherwise read the repo's PARENT as the career-ops root.
 //
-// spawnSync because the child runs until Ctrl-C and this process has nothing to
-// do meanwhile. The terminal delivers SIGINT to the whole foreground group, so
-// next shuts itself down; re-signalling it from here would only double up.
-const result = spawnSync(process.execPath, [nextEntry, ...plan.argv], {
+// The app signals this wrapper's PID, so it owns forwarding and bounded cleanup
+// of the exact child it starts. No shell or process-group termination is needed.
+const child = spawn(process.execPath, [nextEntry, ...plan.argv], {
   cwd: dirname(fileURLToPath(import.meta.url)),
   stdio: "inherit",
 });
 
-if (result.error) {
-  console.error(`Could not start next: ${result.error.message}`);
-  process.exit(1);
+let stopping = false;
+let shutdownTimer;
+let startFailed = false;
+
+function stopChild(signal) {
+  if (stopping || child.exitCode !== null || child.signalCode !== null) return;
+  stopping = true;
+  child.kill(signal);
+  shutdownTimer = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  }, 5_000);
 }
-// A signalled child reports status null. Exiting 128+signal keeps a SIGTERM
-// distinguishable from a startup failure.
-process.exit(result.signal ? 128 + (os.constants.signals[result.signal] ?? 0) : result.status ?? 1);
+
+const onInterrupt = () => stopChild("SIGINT");
+const onTerminate = () => stopChild("SIGTERM");
+process.on("SIGINT", onInterrupt);
+process.on("SIGTERM", onTerminate);
+
+child.once("error", (error) => {
+  startFailed = true;
+  console.error(`Could not start next: ${error.message}`);
+});
+child.once("close", (code, signal) => {
+  clearTimeout(shutdownTimer);
+  process.removeListener("SIGINT", onInterrupt);
+  process.removeListener("SIGTERM", onTerminate);
+  // Keep signal termination distinct from a startup failure on each platform.
+  process.exitCode = startFailed ? 1 : signal ? 128 + (os.constants.signals[signal] ?? 0) : code ?? 1;
+});

@@ -10,17 +10,17 @@ import { isFencingNotice } from "@/lib/cli-fencing.mjs";
 // Humanize raw agent tool names into what the user actually cares about, so a
 // multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
 const STEP_LABELS: Record<string, string> = {
-  WebFetch: "Reading the posting",
-  WebSearch: "Searching the web",
-  Read: "Reading your CV & profile",
-  Glob: "Looking through your files",
-  Grep: "Looking through your files",
-  Write: "Writing the report",
-  Edit: "Updating the report",
-  NotebookEdit: "Updating the report",
-  Bash: "Saving to your tracker",
-  TodoWrite: "Planning the steps",
-  Task: "Working",
+  WebFetch: "A ler a oferta",
+  WebSearch: "A pesquisar na Internet",
+  Read: "A ler o CV e o perfil",
+  Glob: "A consultar os ficheiros",
+  Grep: "A consultar os ficheiros",
+  Write: "A escrever o relatório",
+  Edit: "A atualizar o relatório",
+  NotebookEdit: "A atualizar o relatório",
+  Bash: "A guardar nas candidaturas",
+  TodoWrite: "A preparar os passos",
+  Task: "A trabalhar",
 };
 const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
 
@@ -131,7 +131,7 @@ export function WorkerCard({
       </div>
       {(bottom || running) && (
         <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
-          {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
+          {running ? `${last ?? "A trabalhar"} · ${fmtElapsed(elapsed)}` : bottom}
         </div>
       )}
       {errorHint && (

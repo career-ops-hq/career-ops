@@ -94,21 +94,21 @@ test("a runtime argv that contradicts the capability record is refused, not spaw
 });
 
 test("a runtime with no verified fencing mechanism runs and the notice reaches the log", { skip }, async () => {
-  // Given: gemini has no fencer, so its argv passes through untouched and the
+  // Given: opencode has no fencer, so its argv passes through untouched and the
   // run is graded with a notice; a node one-liner stands in for the binary.
   const spec = {
-    id: "gemini",
-    name: "Gemini CLI",
+    id: "opencode",
+    name: "OpenCode",
     args: () => ["-e", "process.stdout.write('PLANNED')"],
   };
 
-  const { run, lines } = await plan({ cliId: "gemini", spec, binPath: process.execPath });
+  const { run, lines } = await plan({ cliId: "opencode", spec, binPath: process.execPath });
 
   assert.equal(run.refused, undefined);
   assert.equal(run.buf, "PLANNED");
   assert.equal(run.code, 0);
   assert.ok(
-    lines.some((l) => l.includes("Gemini CLI") && l.includes("cannot be permission-restricted")),
+    lines.some((l) => l.includes("OpenCode") && l.includes("cannot be permission-restricted")),
     `unfenced-runtime notice is emitted through log(), got ${JSON.stringify(lines)}`,
   );
 });

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, AlertTriangle } from "lucide-react";
 import { ApplyBackdrop } from "@/components/apply/apply-backdrop";
 import { instrumentSerif } from "@/lib/fonts";
-import { ATS_LABEL, ATS_SOURCES, type AtsSource } from "@/lib/explore";
+import { sourceLabel, SOURCE_STATE_LABEL } from "@/lib/explore-state.mjs";
 import { useExplore, type SourceState } from "./explore-provider";
 
 const STYLE = `
@@ -45,22 +45,30 @@ export function useCountUp(target: number): number {
   return Math.round(val);
 }
 
-function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
-  const state = s?.state ?? "queued";
-  const pct = s?.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "swept" || state === "noisy" ? 100 : 0;
+function SourceChip({ source, s }: { source: string; s: SourceState }) {
+  const state = s.state;
+  const pct = s.total ? Math.min(100, Math.round(((s.done ?? 0) / s.total) * 100)) : state === "ok" ? 100 : 0;
   return (
-    <div className="co-src__chip" data-state={state === "noisy" ? "active" : state}>
+    <div className="co-src__chip" data-state={state}>
       {state === "active" ? (
         <span className="co-src__orb" />
-      ) : state === "swept" || state === "noisy" ? (
+      ) : state === "ok" ? (
         <Check className="size-3.5 text-emerald-500" />
+      ) : state === "error" || state === "partial" ? (
+        <AlertTriangle className="size-3.5 text-amber-600 dark:text-amber-300" />
       ) : (
         <span className="size-2.5 rounded-full border border-current opacity-40" />
       )}
-      <span className="text-[13px] font-medium text-foreground">{ATS_LABEL[ats]}</span>
+      <div className="text-left">
+        <span className="text-[13px] font-medium text-foreground">{sourceLabel(source)}</span>
+        <p className="text-[11px] text-muted">{SOURCE_STATE_LABEL[state]}</p>
+        {typeof s.matches === "number" && <p className="text-[11px] text-muted">{s.matches.toLocaleString("pt-PT")} anúncios</p>}
+        {typeof s.done === "number" && <p className="text-[11px] text-muted">{s.done.toLocaleString("pt-PT")}{typeof s.total === "number" ? ` de ${s.total.toLocaleString("pt-PT")}` : ""} empresas</p>}
+        {s.message && <p className="max-w-52 text-[11px] text-muted">{s.message === "missing-search-terms" ? "Indica uma função para consultar esta fonte" : s.message}</p>}
+      </div>
       <div className="ml-auto flex flex-col items-end gap-1">
-        {state === "noisy" && <span className="text-[10px] text-faint">~{s?.unreachable} skipped</span>}
-        <div className="co-src__track">
+        {!!s.unreachable && <span className="text-[11px] text-muted">{s.unreachable} indisponíveis</span>}
+        <div className="co-src__track" aria-hidden="true">
           <div className="co-src__bar" style={{ width: `${pct}%` }} />
         </div>
       </div>
@@ -68,8 +76,25 @@ function SourceChip({ ats, s }: { ats: AtsSource; s?: SourceState }) {
   );
 }
 
+export function SearchReceipt() {
+  const { searchPhase, expansion, sources, mode, companiesScanned, companiesAvailable, capHit, droppedNoDate } = useExplore();
+  if (mode === "ai" || (!expansion && Object.keys(sources).length === 0)) return null;
+  return (
+    <section aria-label="Recibo da pesquisa e cobertura" className="my-4 space-y-2 rounded-lg border border-border bg-surface/30 p-3 text-[12px] text-muted">
+      <style>{STYLE}</style>
+      <p className="font-medium text-foreground">{searchPhase === "broad" ? "Pesquisa alargada" : "Pesquisa precisa"}</p>
+      {expansion?.changes.map(change => <p key={change}>{change}</p>)}
+      {companiesScanned > 0 && <p>{companiesScanned.toLocaleString("pt-PT")}{companiesAvailable > companiesScanned ? ` de ${companiesAvailable.toLocaleString("pt-PT")}` : ""} empresas pesquisadas{capHit ? " · limite atingido" : ""}</p>}
+      {droppedNoDate > 0 && <p>{droppedNoDate.toLocaleString("pt-PT")} anúncios descartados sem data de publicação</p>}
+      <div className="co-src justify-start">
+        {Object.entries(sources).map(([source, s]) => <SourceChip key={source} source={source} s={s} />)}
+      </div>
+    </section>
+  );
+}
+
 export function DiscoveringState() {
-  const { sources, matchCount, companiesScanned, status, phase } = useExplore();
+  const { sources, matchCount, companiesScanned, status, phase, partial } = useExplore();
   const shown = useCountUp(matchCount);
   const companies = useCountUp(companiesScanned);
 
@@ -81,25 +106,21 @@ export function DiscoveringState() {
 
         <div className="co-ledger">
           <span className="size-1.5 rounded-full bg-emerald-500" />
-          0 tokens · $0.00 {companies > 0 && <span className="opacity-70">· {companies.toLocaleString()} companies</span>}
+          0 tokens · 0,00 € {companies > 0 && <span className="opacity-70">· {companies.toLocaleString("pt-PT")} empresas</span>}
         </div>
 
         <div>
           <div className={`${instrumentSerif.className} co-disc__counter text-foreground`}>{shown}</div>
           <p className="mt-1 text-sm text-muted">
-            {phase === "revealing" ? "fresh roles found — free" : matchCount > 0 ? "fresh roles and counting…" : "scanning the network…"}
+            {phase === "revealing" ? partial ? "ofertas encontradas · resultados parciais" : "ofertas encontradas" : matchCount > 0 ? "ofertas encontradas; a pesquisa continua…" : "a pesquisar nas fontes…"}
           </p>
         </div>
 
-        <div className="co-src">
-          {ATS_SOURCES.map((a) => (
-            <SourceChip key={a} ats={a} s={sources[a]} />
-          ))}
-        </div>
+        <SearchReceipt />
 
         <p className="flex items-center gap-2 text-[13px] text-faint">
           <Loader2 className="size-3.5 animate-spin" />
-          {status || "Casting the net across the ATS network…"}
+          {status || "A consultar as fontes selecionadas…"}
         </p>
       </div>
     </>

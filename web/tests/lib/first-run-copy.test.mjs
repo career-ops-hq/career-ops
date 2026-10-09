@@ -6,10 +6,10 @@ import { test } from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
-test("first-run home does not claim no setup", () => {
+test("o início explica que um PDF requer um agente configurado", () => {
   const src = readFileSync(join(root, "src/components/home/first-run-home.tsx"), "utf8");
   assert.doesNotMatch(src, /No setup/);
-  assert.match(src, /PDF needs an AI CLI/);
+  assert.match(src, /Para ler um PDF, escolhe primeiro um agente de IA/);
 });
 
 test("pasted CV text can start without a CLI", () => {

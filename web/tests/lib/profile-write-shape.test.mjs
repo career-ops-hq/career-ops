@@ -77,7 +77,7 @@ for (const route of routes) {
         const beforeFiles = readdirSync(config).sort();
         const response = await route.post(request(route));
         assert.equal(response.status, 409);
-        assert.match((await response.json()).error, /refusing to overwrite/i);
+        assert.match((await response.json()).error, /não foi substituído/i);
         assert.equal(readFileSync(file, "utf8"), source);
         assert.deepEqual(readdirSync(config).sort(), beforeFiles, "no backup or temp files on rejection");
       });

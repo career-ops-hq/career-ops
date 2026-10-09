@@ -23,7 +23,7 @@ function errorJob(label, text = "") {
 test("no CLI configured -> auth hint", () => {
   const hint = jobErrorHint(errorJob("No CLI configured — open Config"));
   assert.equal(hint?.kind, "auth");
-  assert.equal(hint?.text, "Sign your CLI in from Config, then re-run.");
+  assert.equal(hint?.text, "Inicia sessão no agente em Configuração e volta a executar.");
 });
 
 test("raw CLI stderr mentioning auth -> auth hint", () => {
@@ -75,13 +75,13 @@ test("only the TERMINAL step is classified: an earlier auth label is ignored", (
 test("connection error -> connection hint, NOT auth", () => {
   const hint = jobErrorHint(errorJob("Connection error"));
   assert.equal(hint?.kind, "connection");
-  assert.equal(hint?.text, "Lost connection to the local server — re-run.");
+  assert.equal(hint?.text, "A ligação ao servidor local foi interrompida. Volta a executar.");
 });
 
 test("page-reload interruption -> interrupted hint, NOT auth", () => {
   const hint = jobErrorHint(errorJob("Interrupted (page reloaded)"));
   assert.equal(hint?.kind, "interrupted");
-  assert.equal(hint?.text, "The run was interrupted — re-run it.");
+  assert.equal(hint?.text, "A execução foi interrompida. Volta a executá-la.");
 });
 
 test("connection error with unrelated auth-flavored assistant text -> still connection, NOT auth (the bug this fixes)", () => {

@@ -19,11 +19,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -274,6 +275,101 @@ test("an unknown command prints usage and exits 1 without starting next", () => 
   assert.equal(run.status, 1);
   assert.equal(run.argv, null, "next must not run for an unknown command");
   assert.ok(run.stderr.includes("Usage: node server.mjs"), "usage should be printed");
+});
+
+// --- owned asynchronous lifecycle -----------------------------------------
+
+async function waitFor(predicate, message, timeout = 3_000) {
+  const deadline = Date.now() + timeout;
+  while (!predicate() && Date.now() < deadline) await delay(20);
+  assert.ok(predicate(), message);
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+/** Real launcher and child, with files recording readiness and delivered signals. */
+async function launchLifecycle(t, { ignore = false, direct = false } = {}) {
+  const root = stubbedWebRoot({
+    body: `
+      const fs = require('node:fs');
+      fs.writeFileSync('signals.log', '');
+      for (const signal of ['SIGTERM', 'SIGINT']) {
+        process.on(signal, () => {
+          fs.appendFileSync('signals.log', signal + '\\n');
+          ${ignore ? "" : "setTimeout(() => process.exit(7), 200);"}
+        });
+      }
+      fs.writeFileSync('ready.json', JSON.stringify({ pid: process.pid }));
+      setInterval(() => {}, 1_000);
+    `,
+  });
+  const entry = direct ? join(root, "node_modules/next/dist/bin/next.js") : join(root, "server.mjs");
+  const wrapper = spawn(process.execPath, [entry, "start"], {
+    cwd: root,
+    env: { PATH: process.env.PATH },
+    stdio: "ignore",
+  });
+  let result;
+  wrapper.once("exit", (code, signal) => { result = { code, signal }; });
+  const ready = join(root, "ready.json");
+  t.after(async () => {
+    if (!result) wrapper.kill("SIGKILL");
+    if (existsSync(ready)) {
+      const { pid } = JSON.parse(readFileSync(ready, "utf8"));
+      if (isAlive(pid)) process.kill(pid, "SIGKILL");
+    }
+    await waitFor(() => result, "fixture process did not exit");
+    rmSync(root, { recursive: true, force: true });
+  });
+  await waitFor(() => existsSync(ready), "Next fixture did not become ready");
+  const { pid } = JSON.parse(readFileSync(ready, "utf8"));
+  return {
+    wrapper,
+    pid,
+    events: () => readFileSync(join(root, "signals.log"), "utf8").trim().split("\n").filter(Boolean),
+    result: () => result,
+  };
+}
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  test(`wrapper forwards ${signal} once and waits for its child's graceful exit`, {
+    skip: process.platform === "win32", // Windows cannot deliver POSIX graceful signals.
+  }, async (t) => {
+    const run = await launchLifecycle(t);
+    run.wrapper.kill(signal);
+    await waitFor(() => run.events().length > 0, `Next did not receive ${signal}`);
+    run.wrapper.kill(signal);
+    await waitFor(run.result, "wrapper did not wait for graceful child shutdown");
+    assert.deepEqual(run.events(), [signal], "repeated termination must not be forwarded twice");
+    assert.deepEqual(run.result(), { code: 7, signal: null }, "preserve the child's graceful status");
+    await waitFor(() => !isAlive(run.pid), "owned child survived wrapper exit");
+  });
+}
+
+test("wrapper escalates a stubborn child within a bounded grace period, leaving another process alive", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const sibling = await launchLifecycle(t, { direct: true, ignore: true });
+  const run = await launchLifecycle(t, { ignore: true });
+  const started = Date.now();
+  run.wrapper.kill("SIGTERM");
+  await waitFor(() => run.events().length > 0, "stubborn Next did not receive SIGTERM");
+  run.wrapper.kill("SIGINT");
+  await waitFor(run.result, "wrapper did not escalate stubborn Next", 10_000);
+  assert.ok(Date.now() - started >= 1_000, "allow graceful shutdown before escalating");
+  assert.deepEqual(run.events(), ["SIGTERM"], "forward only the first shutdown signal");
+  assert.deepEqual(run.result(), { code: 128 + os.constants.signals.SIGKILL, signal: null });
+  await waitFor(() => !isAlive(run.pid), "stubborn child survived SIGKILL escalation");
+  assert.ok(isAlive(sibling.pid), "shutdown must target only the launcher's own child");
+  assert.deepEqual(sibling.events(), [], "an independent process must receive no shutdown signal");
 });
 
 // --- the scripts that reach it --------------------------------------------

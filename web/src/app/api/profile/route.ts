@@ -62,12 +62,12 @@ export async function POST(req: Request) {
   try {
     payload = await req.json();
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const error = profilePatchError(payload);
   if (error) return Response.json({ error }, { status: 400 });
   const proposed = patchToProfile(payload as ProfilePatch);
-  if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
+  if (Object.keys(proposed).length === 0) return Response.json({ error: "Não há alterações para guardar." }, { status: 400 });
 
   const root = careerOpsRoot();
   const file = path.join(root, "config", "profile.yml");
@@ -88,12 +88,12 @@ export async function POST(req: Request) {
     try {
       parsed = yaml.load(fs.readFileSync(file, "utf8"));
     } catch {
-      return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
+      return Response.json({ error: "config/profile.yml existe, mas não contém YAML válido. O ficheiro não foi substituído." }, { status: 409 });
     }
     // Valid YAML can still be a list, scalar, or null. Treating those as an
     // empty profile would discard the existing document on this partial write.
     if (!isMapping(parsed)) {
-      return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });
+      return Response.json({ error: "config/profile.yml tem de conter definições com nome, não uma lista nem um valor isolado. O ficheiro não foi substituído." }, { status: 409 });
     }
     base = parsed as Record<string, unknown>;
   }
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
     // reformats — comments are not preserved; the .bak is the safety net).
     atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message : "Não foi possível guardar o perfil." }, { status: 500 });
   }
   return Response.json({ ok: true, seeded });
 }

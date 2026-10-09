@@ -14,7 +14,7 @@ import { CAPS } from "../../src/lib/worker-capabilities.mjs";
 // its argv is passed through untouched, keeping the spawned command line exactly
 // what each case wrote. (claude would be wrong here — it now VERIFIES the argv
 // carries a deny list, which a bare `node -e` script does not.)
-const PASSTHROUGH = { cliId: "gemini", capabilities: CAPS.localReadOnly };
+const PASSTHROUGH = { cliId: "opencode", capabilities: CAPS.localReadOnly };
 
 test("spawnHeadlessCli closes stdin so a headless CLI can start", async () => {
   // Given: a child that only speaks once its stdin has reached EOF — a stand-in

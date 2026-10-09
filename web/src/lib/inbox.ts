@@ -30,12 +30,12 @@ export function sourceFromUrl(url: string): AtsSource | null {
 export type Seniority = "lead" | "staff" | "senior" | "mid" | "junior" | "intern";
 export const SENIORITY_ORDER: Seniority[] = ["lead", "staff", "senior", "mid", "junior", "intern"];
 export const SENIORITY_LABEL: Record<Seniority, string> = {
-  lead: "Lead / Mgr",
+  lead: "Direção / chefia",
   staff: "Staff+",
   senior: "Senior",
-  mid: "Mid",
+  mid: "Intermédio",
   junior: "Junior",
-  intern: "Intern",
+  intern: "Estágio",
 };
 
 export function seniorityFromTitle(title: string): Seniority | null {

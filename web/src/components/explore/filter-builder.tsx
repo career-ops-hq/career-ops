@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, MARKET_IDS, cleanChips, type AtsSource, type MarketId, type ExploreFilters } from "@/lib/explore";
+import { MARKET_LABEL } from "@/lib/explore-state.mjs";
+import { inferMarketsFromLocations } from "@/lib/market-presets.mjs";
+import { applyFreelanceShortcut, FREELANCE_SHORTCUTS } from "@/lib/freelance-presets.mjs";
 
 const RECENCY = [
   { label: "24h", days: 1 },
@@ -17,7 +20,8 @@ const STYLE = `
 .co-fb__chip{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.2rem .5rem .2rem .6rem;font-size:12.5px;line-height:1.2;border:1px solid transparent}
 .co-fb__chip button{display:inline-flex;opacity:.6;transition:opacity .15s}
 .co-fb__chip button:hover{opacity:1}
-.co-fb__chip.inc{color:hsl(26 78% 42%);background:hsl(26 73% 51% / .11);border-color:hsl(26 73% 51% / .26)}
+.co-fb__chip button:focus-visible{outline:2px solid hsl(26 73% 51%);outline-offset:2px}
+.co-fb__chip.inc{color:var(--brand-text);background:hsl(26 73% 51% / .11);border-color:hsl(26 73% 51% / .26)}
 html.dark .co-fb__chip.inc{color:hsl(26 86% 70%);background:hsl(26 80% 55% / .14);border-color:hsl(26 80% 55% / .28)}
 .co-fb__field{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;min-height:2.6rem;padding:.45rem .55rem;border-radius:.7rem}
 .co-fb__field input{flex:1;min-width:7rem;background:transparent;border:none;outline:none;font-size:13.5px;color:inherit}
@@ -54,7 +58,7 @@ function KeywordField({
         <span key={v} className={cn("co-fb__chip", tone === "inc" ? "inc" : "border-border bg-surface-hover text-muted")}>
           {tone === "exc" && <Ban className="size-3 opacity-70" />}
           {v}
-          <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
+          <button type="button" aria-label={`Retirar ${v}`} onClick={() => onChange(values.filter((x) => x !== v))}>
             <X className="size-3" />
           </button>
         </span>
@@ -111,11 +115,15 @@ export function FilterBuilder({
   seededFrom?: string[];
 }) {
   const [advanced, setAdvanced] = useState(false);
+  const inferredPortugal = filters.markets.includes("portugal") && inferMarketsFromLocations([], filters.allow).includes("portugal");
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
   const toggleAts = (a: AtsSource) => {
     const has = filters.ats.includes(a);
     const next = has ? filters.ats.filter((x) => x !== a) : [...filters.ats, a];
-    set({ ats: next.length ? next : filters.ats });
+    set({ ats: next });
+  };
+  const toggleMarket = (market: MarketId) => {
+    set({ markets: filters.markets.includes(market) ? filters.markets.filter((m) => m !== market) : [...filters.markets, market] });
   };
 
   return (
@@ -123,38 +131,72 @@ export function FilterBuilder({
       <style>{STYLE}</style>
 
       <div>
-        <Label hint={filters.positive.length === 0 ? "empty = every fresh posting" : undefined}>Roles to find</Label>
-        <KeywordField values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
-        {seededFrom.length > 0 && filters.positive.length > 0 && (
-          <p className="mt-1 text-[11px] text-faint">Seeded from your {seededFrom.join(" + ")} — edit freely.</p>
+        <Label>Tipo de oportunidade</Label>
+        <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5" role="group" aria-label="Tipo de oportunidade">
+          {([['employment', 'Emprego'], ['freelance', 'Freelance']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={filters.opportunityType === value}
+              onClick={() => set({ opportunityType: value })}
+              className={cn(
+                "min-h-[44px] rounded-md px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+                filters.opportunityType === value ? "bg-brand-soft text-brand-text" : "text-muted hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <Label hint={filters.positive.length === 0 ? "vazio = todas as ofertas recentes" : undefined}>Funções a procurar</Label>
+        <KeywordField values={filters.positive} tone="inc" placeholder="apoio ao cliente, pastelaria, marketing…" ariaLabel="Funções a procurar" onChange={(v) => set({ positive: v })} />
+        {filters.opportunityType === "freelance" && (
+          <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Atalhos freelance">
+            {Object.keys(FREELANCE_SHORTCUTS).map((label) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => set({ positive: applyFreelanceShortcut(filters.positive, label) })}
+                className="min-h-[44px] rounded-full border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {filters.opportunityType === "employment" && seededFrom.length > 0 && filters.positive.length > 0 && (
+          <p className="mt-1 text-[11px] text-faint">Preenchido a partir de {seededFrom.join(" + ")}. Podes alterar.</p>
         )}
       </div>
 
       <div>
-        <Label>Exclude</Label>
-        <KeywordField values={filters.negative} tone="exc" placeholder="manager, sales, contract…" onChange={(v) => set({ negative: v })} />
+        <Label>Excluir</Label>
+        <KeywordField values={filters.negative} tone="exc" placeholder="direção, vendas, contrato…" onChange={(v) => set({ negative: v })} />
       </div>
 
       <div>
-        <Label hint="matches any city, region, country, or Remote">
+        <Label hint="aceita cidade, região, país ou remoto">
           <span className="inline-flex items-center gap-1.5">
-            <MapPin className="size-3.5 text-muted" /> City or location
+            <MapPin className="size-3.5 text-muted" /> Localização
           </span>
         </Label>
         <KeywordField
           values={filters.allow}
           tone="inc"
-          placeholder="Toronto, New York, Remote…"
-          ariaLabel="City or location"
+          placeholder="Lisboa, Porto, remoto…"
+          ariaLabel="Localização"
           onChange={(v) => set({ allow: v })}
         />
       </div>
 
       <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
         <div className="min-w-[18rem]">
-          <Label hint="postings published in this window">
+          <Label hint="ofertas publicadas neste período">
             <span className="inline-flex items-center gap-1.5">
-              <Clock className="size-3.5 text-muted" /> Posted within
+              <Clock className="size-3.5 text-muted" /> Publicadas há
             </span>
           </Label>
           <div className="inline-flex rounded-lg border border-border bg-surface/40 p-0.5">
@@ -164,8 +206,8 @@ export function FilterBuilder({
                 type="button"
                 onClick={() => set({ sinceDays: r.days })}
                 className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                  filters.sinceDays === r.days ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
+                  "min-h-[44px] min-w-[44px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+                  filters.sinceDays === r.days ? "bg-brand-soft text-brand-text" : "text-muted hover:text-foreground",
                 )}
               >
                 {r.label}
@@ -175,26 +217,53 @@ export function FilterBuilder({
         </div>
 
         <div>
-          <Label hint={filters.ats.length === 0 ? "pick at least one" : undefined}>Sources</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {ATS_SOURCES.map((a) => {
-              const on = filters.ats.includes(a);
-              return (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => toggleAts(a)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                    on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
-                  )}
-                >
-                  {ATS_LABEL[a]}
-                </button>
-              );
-            })}
-          </div>
+          <Label>Plataformas ATS</Label>
+          {filters.opportunityType === "freelance" ? (
+            <p className="max-w-md text-[12px] leading-relaxed text-faint">
+              As plataformas ATS de emprego não são consultadas. A pesquisa freelance usa o Welcome to the Jungle e respeita os mercados escolhidos.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Plataformas ATS">
+              {ATS_SOURCES.map((a) => {
+                const on = filters.ats.includes(a);
+                return (
+                  <button
+                    key={a}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleAts(a)}
+                    className={cn(
+                      "min-h-[44px] min-w-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
+                      on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
+                    )}
+                  >
+                    {ATS_LABEL[a]}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
+      </div>
+
+      <div>
+        <Label>Mercados</Label>
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Mercados">
+          {MARKET_IDS.map((market) => {
+            const on = filters.markets.includes(market);
+            return (
+              <button key={market} type="button" aria-pressed={on} onClick={() => toggleMarket(market)}
+                className={cn("min-h-[44px] min-w-[44px] rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand", on ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground")}>
+                {MARKET_LABEL[market]}
+              </button>
+            );
+          })}
+        </div>
+        {inferredPortugal && (
+          <p className="mt-1.5 text-[11px] text-faint">
+            Incluímos Portugal a partir da localização para consultar também fontes deste mercado. Clica em Portugal para o retirar.
+          </p>
+        )}
       </div>
 
       <button
@@ -203,7 +272,7 @@ export function FilterBuilder({
         className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors max-sm:min-h-[44px]"
       >
         <SlidersHorizontal className="size-3.5" />
-        More location controls &amp; scan depth
+        Mais opções de localização e alcance
         <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
       </button>
 
@@ -211,20 +280,20 @@ export function FilterBuilder({
         <div className="space-y-3 rounded-xl border border-border bg-surface/30 p-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label hint="rescues a multi-location posting">Always include</Label>
-              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="Toronto…" onChange={(v) => set({ alwaysAllow: v })} />
+              <Label hint="mantém ofertas com várias localizações">Incluir sempre</Label>
+              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="Lisboa…" onChange={(v) => set({ alwaysAllow: v })} />
             </div>
             <div>
-              <Label hint="unless Always include also matches">Exclude locations</Label>
-              <KeywordField values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
+              <Label hint="exceto quando «Incluir sempre» também corresponde">Excluir localizações</Label>
+              <KeywordField values={filters.block} tone="exc" placeholder="Índia…" onChange={(v) => set({ block: v })} />
             </div>
           </div>
           <div>
-            <Label hint="hard reject — overrides Always include">Never include</Label>
-            <KeywordField values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+            <Label hint="tem prioridade sobre «Incluir sempre»">Nunca incluir</Label>
+            <KeywordField values={filters.blockHard} tone="exc" placeholder="EUA, Brasil…" onChange={(v) => set({ blockHard: v })} />
           </div>
           <div>
-            <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
+            <Label hint={`${filters.limitPerAts} empresas por fonte`}>Alcance da pesquisa</Label>
             <input
               type="range"
               min={50}

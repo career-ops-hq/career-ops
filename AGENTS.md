@@ -1,5 +1,9 @@
 # Career-Ops -- AI Job Search Pipeline
 
+## Contexto do projeto
+
+Antes de alterar código, lê integralmente os seis ficheiros em `docs/contexto/`. Atualiza `docs/contexto/memory.md` quando uma decisão, tentativa falhada ou limitação mudar a forma de trabalhar neste projeto.
+
 ## Origin
 
 Built and used by [santifer](https://santifer.io) to evaluate 740+ offers, generate 100+ tailored CVs, and land a Head of Applied AI role. The archetypes, scoring, and negotiation scripts reflect that search; his portfolio is also open source: [cv-santiago](https://github.com/santifer/cv-santiago).
@@ -333,13 +337,13 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 
 ```yaml
 language:
-  output: en
+  output: pt-PT
   modes_dir: modes/de
 ```
 
 Two separate axes:
 
-- `language.output` controls **human-facing output**: reports, tracker notes, PDFs, cover letters, outreach, interview prep, form answers, any user-visible prose. Default: `en` when absent.
+- `language.output` controls **human-facing output**: reports, tracker notes, PDFs, cover letters, outreach, interview prep, form answers, any user-visible prose. Default in this local installation: `pt-PT` when absent.
 - `language.modes_dir` controls **market vocabulary and local evaluation rules** (e.g. `modes/de` supplies DACH concepts like 13. Monatsgehalt).
 
 **Composition rule:** `language.output` is authoritative for prose; `modes_dir` only supplies market context. English output with DACH vocabulary, French output with Japan-market vocabulary — any combination is valid.
@@ -359,7 +363,7 @@ Two separate axes:
 
 ```yaml
 language:
-  output: en
+  output: pt-PT
   modes_dir: [modes/de, modes/zh] # DACH and China
 ```
 

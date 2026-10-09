@@ -1,36 +1,24 @@
 "use client";
 
 import { instrumentSerif } from "@/lib/fonts";
-import { HeroGlow } from "@/components/hero-glow";
 import { CvIngest } from "@/components/cv/cv-ingest";
 
 // The first-run takeover: when cv.md is missing, the CV-upload hero IS the home.
-// One input, value-coming framing (not a form), the same product chrome (HeroGlow
-// + dot-bg) so it feels like the app, not a gate. The whole aha (CV → free matches
-// → first score) flows from here.
+// One input, value-coming framing (not a form), so the first step feels like part
+// of the app rather than a gate. The path is CV → free matches → first score.
 export function FirstRunHome() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-10 md:py-16">
-      <section className="dot-bg relative overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
-        <HeroGlow />
-        {/* Readability scrim between the animated glow (z-0) and the copy (z-10):
-            the glow still reads at the edges, but text always sits on a surface that
-            clears WCAG AA contrast instead of washing out over a bright corner. */}
-        <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-surface/55 backdrop-blur-[2px] dark:bg-background/45" />
-        <div className="relative z-10">
-          <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
-            <span className="text-faint">//</span> local-first · your machine
-          </p>
-          <h1 className={`${instrumentSerif.className} mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
-            Drop your CV. See who&apos;s hiring you in 60 seconds.
+      <section className="relative overflow-hidden rounded-xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
+        <div>
+          <h1 className={`${instrumentSerif.className} text-4xl leading-[1.05] text-landing md:text-5xl`}>
+            Começa pelo teu CV.
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted">
-            No account. Paste text or drop a .md / .txt file to start. A PDF needs an AI CLI in{" "}
+            Cola o texto do CV ou escolhe um ficheiro .md ou .txt. Para ler um PDF, escolhe primeiro um agente de IA nas{" "}
             <a href="/config" className="text-foreground underline-offset-2 hover:underline">
-              Config
-            </a>{" "}
-            first. The market scan is <span className="text-foreground">free</span>. You only spend tokens when you
-            choose to score a role.
+              Definições
+            </a>. A pesquisa inicial não usa tokens; só a avaliação detalhada de uma oferta usa o agente.
           </p>
           <div className="mt-7">
             <CvIngest />

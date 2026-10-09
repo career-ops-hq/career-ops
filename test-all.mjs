@@ -1822,7 +1822,13 @@ try {
 
   // 2. The guard is registered on the context for every request, not just the
   //    page's first hop — a page-scoped route wouldn't cover the whole flow.
-  const registration = await runGuard('https://example.com/assets/logo.png');
+  const restorePublicResolver = setHostResolver(async () => ['93.184.216.34']);
+  let registration;
+  try {
+    registration = await runGuard('https://example.com/assets/logo.png');
+  } finally {
+    restorePublicResolver();
+  }
   if (registration.registered && registration.pattern === '**/*') {
     pass('archive-posting registers the egress guard on the context for all requests');
   } else {
@@ -2651,7 +2657,7 @@ const outputLanguageClaudeDoc = readTextLF('CLAUDE.md');
 const careerOpsSkill = readTextLF('.agents/skills/career-ops/SKILL.md');
 const batchPrompt = readTextLF('batch/batch-prompt.md');
 
-if (/language:\s*\n(?:\s*#.*\n)*\s*output:\s*["']?en["']?/.test(profileExample)) {
+if (/language:\s*\n(?:\s*#.*\n)*\s*output:\s*["']?pt-PT["']?/.test(profileExample)) {
   pass('profile.example.yml documents language.output default');
 } else {
   fail('profile.example.yml is missing language.output default');

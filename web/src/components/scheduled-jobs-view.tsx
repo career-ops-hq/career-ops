@@ -11,7 +11,6 @@ import {
   Loader2,
   RefreshCw,
   Search,
-  Sparkles,
   Zap,
 } from "lucide-react";
 import { CreateJobModal } from "./scheduled-scans/create-job-modal";
@@ -22,6 +21,7 @@ import type { ScheduledJob, JobRun } from "@/lib/scheduled-jobs";
 import { instrumentSerif } from "@/lib/fonts";
 import { updateScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
 import { isSchedulerStatusPayload } from "@/lib/scheduled-scheduler-status.mjs";
+import { PT_PT_LOCALE, scheduledSuccessRate } from "@/lib/pt-pt";
 
 type Store = { jobs: ScheduledJob[]; runs: JobRun[] };
 type SchedulerStatus = {
@@ -32,9 +32,9 @@ type SchedulerStatus = {
 };
 
 function formatTaskTime(value: string | null) {
-  if (!value) return "Not reported";
+  if (!value) return "Sem informação";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(PT_PT_LOCALE);
 }
 
 export function ScheduledJobsView() {
@@ -59,7 +59,7 @@ export function ScheduledJobsView() {
       ]);
       const resJobs = await jobsResponse.json().catch(() => ({}));
       const resScheduler = await schedulerResponse.json().catch(() => null);
-      if (!jobsResponse.ok) throw new Error(resJobs.error || "Could not load scheduled scans.");
+      if (!jobsResponse.ok) throw new Error(resJobs.error || "Não foi possível carregar as pesquisas agendadas.");
       if (!schedulerResponse.ok && resScheduler?.error) setError(resScheduler.error);
       setStore({
         jobs: Array.isArray(resJobs.jobs) ? resJobs.jobs : [],
@@ -67,7 +67,7 @@ export function ScheduledJobsView() {
       });
       if (schedulerResponse.ok && isSchedulerStatusPayload(resScheduler)) setScheduler(resScheduler as SchedulerStatus);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load scheduled scans.");
+      setError(cause instanceof Error ? cause.message : "Não foi possível carregar as pesquisas agendadas.");
     } finally {
       setLoading(false);
     }
@@ -83,22 +83,22 @@ export function ScheduledJobsView() {
       await updateScheduledJobRequest(id, { status: nextStatus });
       await loadData();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update scheduled scan.");
+      setError(cause instanceof Error ? cause.message : "Não foi possível atualizar a pesquisa agendada.");
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this scheduled scan?")) return;
+    if (!confirm("Queres eliminar esta pesquisa agendada?")) return;
     try {
       const response = await fetch(`/api/scheduled-jobs/${id}`, { method: "DELETE" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        setError(body.error || "Could not delete scheduled scan.");
+        setError(body.error || "Não foi possível eliminar a pesquisa agendada.");
         return;
       }
       await loadData();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete scheduled scan.");
+      setError(cause instanceof Error ? cause.message : "Não foi possível eliminar a pesquisa agendada.");
     }
   };
 
@@ -107,10 +107,10 @@ export function ScheduledJobsView() {
     try {
       const response = await fetch("/api/scheduler", { method: "POST" });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || "Could not start scheduler.");
+      if (!response.ok) throw new Error(body.error || "Não foi possível iniciar o agendador.");
       await loadData();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not start scheduler.");
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar o agendador.");
     } finally {
       setOsRunning(false);
     }
@@ -139,7 +139,7 @@ export function ScheduledJobsView() {
   const successRuns = store.runs.filter((r) => r.state === "success").length;
   const failedRuns = store.runs.filter((r) => r.state === "failed").length;
   const totalRolesFound = store.runs.reduce((acc, r) => acc + (r.rolesFound || 0), 0);
-  const successRate = totalRuns > 0 ? Math.round((successRuns / totalRuns) * 100) : 100;
+  const successRate = scheduledSuccessRate(totalRuns, successRuns);
 
   return (
     <div className="mx-auto max-w-5xl px-5 py-8 md:px-8 space-y-8">
@@ -148,10 +148,10 @@ export function ScheduledJobsView() {
         <div>
           <div className="flex items-center gap-2.5">
             <CalendarClock className="size-6 text-brand" />
-            <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Scheduled Scans</h1>
+            <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Pesquisas agendadas</h1>
           </div>
           <p className="mt-1.5 max-w-2xl text-sm text-muted">
-            Persistent, automated crawler jobs supporting Zero-Token and Full ATS Dataset sweeps.
+            Pesquisas guardadas que podes executar novamente com os mesmos filtros.
           </p>
         </div>
 
@@ -159,10 +159,10 @@ export function ScheduledJobsView() {
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-lg transition-all hover:bg-brand-200"
+            className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
           >
             <CalendarPlus className="size-4" />
-            New Scheduled Scan
+            Nova pesquisa agendada
           </button>
           <button
             type="button"
@@ -170,14 +170,14 @@ export function ScheduledJobsView() {
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
           >
             <History className="size-4 text-brand" />
-            Run Logs ({store.runs.length})
+            Histórico ({store.runs.length})
           </button>
           <button
             type="button"
             onClick={loadData}
             disabled={loading}
             className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-surface/60 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-            title="Refresh list"
+            title="Atualizar lista"
           >
             <RefreshCw className={`size-4 ${loading ? "animate-spin text-brand" : ""}`} />
           </button>
@@ -186,12 +186,14 @@ export function ScheduledJobsView() {
       {error && <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-600 dark:text-rose-400">{error}</div>}
 
       {/* Stats Cards */}
-      <div className="grid gap-3.5 sm:grid-cols-4">
-        <StatCard label="Active Scans" value={activeJobs.length} subtitle={`${jobsList.length} total jobs`} icon={<Zap className="size-4 text-emerald-500" />} />
-        <StatCard label="Executed Runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand" />} />
-        <StatCard label="Roles Discovered" value={totalRolesFound} subtitle="Pushed to pipeline" icon={<Sparkles className="size-4 text-amber-500" />} />
-        <StatCard label="Success Rate" value={`${successRate}%`} subtitle={`${failedRuns} failed runs`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
-      </div>
+      {(jobsList.length > 0 || totalRuns > 0) && (
+        <div className="grid gap-3.5 sm:grid-cols-4">
+          <StatCard label="Pesquisas ativas" value={activeJobs.length} subtitle={`${jobsList.length} no total`} icon={<Zap className="size-4 text-emerald-500" />} />
+          <StatCard label="Execuções" value={totalRuns} subtitle={`${successRuns} concluídas`} icon={<Layers className="size-4 text-brand" />} />
+          <StatCard label="Ofertas encontradas" value={totalRolesFound} subtitle="Adicionadas às candidaturas" icon={<Search className="size-4 text-amber-500" />} />
+          <StatCard label="Taxa de sucesso" value={successRate} subtitle={`${failedRuns} com erro`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
+        </div>
+      )}
 
       {/* OS Task Scheduler Banner */}
       {scheduler && (
@@ -203,7 +205,7 @@ export function ScheduledJobsView() {
               </div>
               <div>
                 <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  {scheduler.platform === "win32" ? "Windows Task Scheduler Integration" : "Manual scans"}
+                  {scheduler.platform === "win32" ? "Agendador de tarefas do Windows" : "Execução manual"}
                   <span
                     className={
                       scheduler.task.exists && scheduler.task.enabled
@@ -212,18 +214,18 @@ export function ScheduledJobsView() {
                     }
                   >
                     {scheduler.platform !== "win32"
-                      ? "No automatic schedule"
+                      ? "Sem execução automática"
                       : scheduler.task.exists
-                        ? scheduler.task.enabled ? "Task enabled" : "Task disabled"
-                        : "Task not installed"}
+                        ? scheduler.task.enabled ? "Tarefa ativa" : "Tarefa desativada"
+                        : "Tarefa não instalada"}
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs text-muted">
                   {scheduler.platform !== "win32"
-                    ? "On macOS and Linux, saved scans only run when you choose Run now."
+                    ? "Em macOS e Linux, as pesquisas guardadas só correm quando escolheres «Executar agora»."
                     : scheduler.task.exists
-                      ? "Next OS check: " + formatTaskTime(scheduler.task.nextRun) + " · Last OS check: " + formatTaskTime(scheduler.task.lastRun)
-                      : "Install the Windows task with web/scripts/install-scan-schedule.ps1 to run due jobs automatically."}
+                      ? "Próxima verificação: " + formatTaskTime(scheduler.task.nextRun) + " · Última verificação: " + formatTaskTime(scheduler.task.lastRun)
+                      : "Instala a tarefa do Windows com web/scripts/install-scan-schedule.ps1 para executar pesquisas automaticamente."}
                 </div>
               </div>
             </div>
@@ -234,7 +236,7 @@ export function ScheduledJobsView() {
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50"
             >
               {osRunning ? <Loader2 className="size-3.5 animate-spin text-brand" /> : <Zap className="size-3.5 text-brand" />}
-              {osRunning ? "Checking..." : "Check due jobs now"}
+              {osRunning ? "A verificar…" : "Verificar agora"}
             </button>}
           </div>
         </div>
@@ -250,7 +252,7 @@ export function ScheduledJobsView() {
               filterTab === "all" ? "bg-brand text-brand-foreground shadow" : "text-muted hover:text-foreground"
             }`}
           >
-            All Scans ({jobsList.length})
+            Todas ({jobsList.length})
           </button>
           <button
             type="button"
@@ -259,7 +261,7 @@ export function ScheduledJobsView() {
               filterTab === "active" ? "bg-brand text-brand-foreground shadow" : "text-muted hover:text-foreground"
             }`}
           >
-            Active ({activeJobs.length})
+            Ativas ({activeJobs.length})
           </button>
           <button
             type="button"
@@ -268,7 +270,7 @@ export function ScheduledJobsView() {
               filterTab === "paused" ? "bg-brand text-brand-foreground shadow" : "text-muted hover:text-foreground"
             }`}
           >
-            Paused ({pausedJobs.length})
+            Em pausa ({pausedJobs.length})
           </button>
         </div>
 
@@ -278,7 +280,7 @@ export function ScheduledJobsView() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search scans or keywords…"
+            placeholder="Procurar por nome ou palavra…"
             className="w-full rounded-full border border-border bg-surface/60 pl-8 pr-3 py-1.5 text-xs text-foreground outline-none focus:border-brand/60"
           />
         </div>
@@ -288,14 +290,14 @@ export function ScheduledJobsView() {
       {filteredJobs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-12 text-center">
           <CalendarClock className="mx-auto size-8 text-faint" />
-          <h3 className="mt-3 text-sm font-semibold text-foreground">No scheduled scans found</h3>
-          <p className="mt-1 text-xs text-muted">Create a new scan to start automatically discovering matching jobs.</p>
+          <h3 className="mt-3 text-sm font-semibold text-foreground">Ainda não há pesquisas agendadas</h3>
+          <p className="mt-1 text-xs text-muted">Cria uma pesquisa para guardar os filtros e voltar a executá-la.</p>
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
             className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-xs font-medium text-brand-foreground shadow"
           >
-            <CalendarPlus className="size-3.5" /> New Scheduled Scan
+            <CalendarPlus className="size-3.5" /> Nova pesquisa agendada
           </button>
         </div>
       ) : (
@@ -348,7 +350,7 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="co-rise flex items-center justify-between rounded-xl border border-border bg-surface/40 p-4 shadow-sm transition-all hover:border-brand/30 hover:shadow-md">
+    <div className="flex items-center justify-between rounded-xl border border-border bg-surface/40 p-4">
       <div>
         <span className="text-xs font-medium text-muted">{label}</span>
         <div className="mt-1 text-2xl font-bold tracking-tight text-foreground">{value}</div>

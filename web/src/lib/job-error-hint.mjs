@@ -25,12 +25,12 @@
 // authenticat\w* matches authenticate/authenticated/authentication (the
 // actual terminal-label forms listed above) without matching author/authority.
 const AUTH_PATTERN =
-  /authenticat\w*|login|sign[ -]?in|credential|api[ -]?key|unauthorized|no cli configured/i;
+  /authenticat\w*|autenticad\w*|iniciar? sessão|inicia sessão|login|sign[ -]?in|credential|credencia\w*|api[ -]?key|chave de api|unauthorized|no cli configured|nenhum agente configurado/i;
 
 const HINTS = {
-  auth: { kind: "auth", text: "Sign your CLI in from Config, then re-run." },
-  connection: { kind: "connection", text: "Lost connection to the local server — re-run." },
-  interrupted: { kind: "interrupted", text: "The run was interrupted — re-run it." },
+  auth: { kind: "auth", text: "Inicia sessão no agente em Configuração e volta a executar." },
+  connection: { kind: "connection", text: "A ligação ao servidor local foi interrompida. Volta a executar." },
+  interrupted: { kind: "interrupted", text: "A execução foi interrompida. Volta a executá-la." },
 };
 
 /** The message set on the job's last step — the authoritative terminal cause. */
@@ -44,8 +44,8 @@ function lastStepLabel(job) {
 export function jobErrorHint(job) {
   const label = lastStepLabel(job);
   if (!label) return null;
-  if (label === "Connection error") return HINTS.connection;
-  if (label === "Interrupted (page reloaded)") return HINTS.interrupted;
+  if (label === "Connection error" || label === "Erro de ligação") return HINTS.connection;
+  if (label === "Interrupted (page reloaded)" || label === "Interrompida ao recarregar a página") return HINTS.interrupted;
   if (AUTH_PATTERN.test(label)) return HINTS.auth;
   return null;
 }

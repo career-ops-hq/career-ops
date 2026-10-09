@@ -57,7 +57,7 @@ import ashby from './providers/ashby.mjs';
 import workday, { WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import bamboohr from './providers/bamboohr.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, normalizeSourceFields, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -584,6 +584,8 @@ export function formatLiveOfferLine(job, source) {
     location: job.location || null,
     postedAt,
     source: source || job.source || '',
+    ...(job.salary && typeof job.salary === 'object' ? { salary: job.salary } : {}),
+    ...normalizeSourceFields(job),
   });
 }
 
@@ -609,7 +611,7 @@ export function emitLiveOffer(job, source, { json } = {}) {
 }
 
 export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
-  const kept = { ...job, source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
+  const kept = { ...job, source, ...(opts.observedAt ? { observedAt: opts.observedAt } : {}), dateStatus: job.postedAt ? 'dated' : 'unknown' };
   sink.push(kept);
   const live = filterBlacklistedOffers([kept], blacklist, { includeBlacklisted: opts.includeBlacklisted });
   if (live.offers.length) emitLiveOffer(live.offers[0], source, { json: opts.json });
@@ -902,6 +904,7 @@ function isoDay(v) {
 
 async function main() {
   const opts = parseArgs(process.argv);
+  opts.observedAt = new Date().toISOString();
   let checkpoint = null;
   if (opts.resume) {
     const cp = loadCheckpoint();
@@ -1084,6 +1087,8 @@ async function main() {
           postedAt: isoDay(o.postedAt),
           dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
           source: o.source,
+          ...(o.salary && typeof o.salary === 'object' ? { salary: o.salary } : {}),
+          ...normalizeSourceFields({ ...o, observedAt: opts.observedAt }),
         }));
         process.stdout.write(JSON.stringify({
           date,
@@ -1521,6 +1526,8 @@ async function main() {
         blacklisted: Boolean(o.blacklisted),
         note: o.note || null,
         source: o.source,
+        ...(o.salary && typeof o.salary === 'object' ? { salary: o.salary } : {}),
+        ...normalizeSourceFields({ ...o, observedAt: opts.observedAt }),
       })),
     }) + '\n');
     return;

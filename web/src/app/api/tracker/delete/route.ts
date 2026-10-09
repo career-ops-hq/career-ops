@@ -28,17 +28,17 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const num = String(body.n ?? "").trim();
   if (!/^\d+$/.test(num)) {
-    return Response.json({ error: "a numeric application number is required" }, { status: 400 });
+    return Response.json({ error: "É necessário indicar um número de candidatura válido." }, { status: 400 });
   }
   const dryRun = !!body.dryRun;
 
   if (!trackerCanDelete()) {
     return Response.json(
-      { error: "Removing a tracker row needs a newer career-ops — update to delete rows from here." },
+      { error: "A remoção de candidaturas exige uma versão mais recente do career-ops." },
       { status: 400 },
     );
   }
@@ -46,12 +46,12 @@ export async function POST(req: Request) {
   // (tracker.mjs delete doesn't share a lock with merge-tracker yet).
   if (isTrackerWriting()) {
     return Response.json(
-      { error: "An evaluation is updating your tracker right now — try again in a moment." },
+      { error: "Uma avaliação está a atualizar as candidaturas. Volta a tentar dentro de instantes." },
       { status: 409 },
     );
   }
   if (!dryRun && deleting) {
-    return Response.json({ error: "Another delete is already in progress — try again in a moment." }, { status: 409 });
+    return Response.json({ error: "Já está em curso outra remoção. Volta a tentar dentro de instantes." }, { status: 409 });
   }
   if (!dryRun) deleting = true;
 
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
       try {
         child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env });
       } catch (e) {
-        resolve({ code: 1, err: e instanceof Error ? e.message : "failed to start tracker.mjs" });
+        resolve({ code: 1, err: e instanceof Error ? e.message : "Não foi possível iniciar tracker.mjs." });
         return;
       }
       child.stderr.on("data", (d: Buffer) => {
@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     if (result.code !== 0) {
       const notFound = /No application numbered/i.test(result.err);
       return Response.json(
-        { error: result.err.trim().split("\n")[0] || "delete failed" },
+        { error: result.err.trim().split("\n")[0] || "Não foi possível remover a candidatura." },
         { status: notFound ? 404 : 400 },
       );
     }

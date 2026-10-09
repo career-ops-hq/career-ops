@@ -109,17 +109,17 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "bad json" }, { status: 400 });
+    return NextResponse.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const { n, status } = body;
   if (!n || typeof status !== "string" || !status.trim()) {
-    return NextResponse.json({ error: "n and status required" }, { status: 400 });
+    return NextResponse.json({ error: "Faltam o número da candidatura e o estado." }, { status: 400 });
   }
   // Rejected here rather than left to the CLI: these characters would break the
   // markdown row, and refusing them before spawning keeps the failure cheap and
   // the message specific.
   if (/[|\r\n*]/.test(status)) {
-    return NextResponse.json({ error: "invalid status (table-breaking characters)" }, { status: 400 });
+    return NextResponse.json({ error: "O estado contém caracteres inválidos." }, { status: 400 });
   }
   // Resolving aliases here lets the response echo the canonical label without
   // waiting on the CLI, and costs no process spawn for an unknown state.
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
   // not the authority.
   const canon = canonicalizeStatus(status);
   if (!canon) {
-    return NextResponse.json({ error: `not a canonical status: ${status}` }, { status: 400 });
+    return NextResponse.json({ error: `Estado não reconhecido: ${status}.` }, { status: 400 });
   }
   // Same reason the status is checked above: answer a bad request before paying
   // for a process spawn and a tracker lock. `n` is typed as a string but arrives
@@ -135,7 +135,7 @@ export async function POST(req: Request) {
   // would send "[object Object]" to --row and return the CLI's usage text.
   const row = trackerRowArg(n);
   if (!row) {
-    return NextResponse.json({ error: "n must be a tracker row number" }, { status: 400 });
+    return NextResponse.json({ error: "O número tem de corresponder a uma linha das candidaturas." }, { status: 400 });
   }
 
   // The web can run against a CAREER_OPS_ROOT that holds data and no scripts.
@@ -147,7 +147,7 @@ export async function POST(req: Request) {
   if (!fs.existsSync(script)) {
     return NextResponse.json(
       {
-        error: "status updates need the career-ops scripts; this root has data only",
+        error: "A alteração de estado exige os scripts do career-ops; a instalação atual contém apenas dados.",
         code: "core-script-missing",
       },
       { status: 503 },
@@ -171,7 +171,7 @@ export async function POST(req: Request) {
     // Child stderr is a Node stack trace carrying absolute server paths. It
     // belongs in the server log, never in the response body.
     console.error(`/api/status: set-status.mjs failed to run: ${stderr.trim()}`);
-    return NextResponse.json({ error: "status update failed to run" }, { status: 500 });
+    return NextResponse.json({ error: "Não foi possível iniciar a alteração de estado." }, { status: 500 });
   }
 
   // Killed by our own timeout. The child gets a shorter lock wait than this, so
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
   // implying the change was rejected.
   if (timedOut) {
     return NextResponse.json(
-      { error: "status update timed out; the change may or may not have been applied" },
+      { error: "A alteração de estado excedeu o tempo limite. Confirma o estado antes de repetires a operação." },
       { status: 504, headers: { "Retry-After": "5" } },
     );
   }
@@ -208,7 +208,7 @@ export async function POST(req: Request) {
   }
 
   if (!parsed) {
-    return NextResponse.json({ error: "status update returned no result" }, { status: 500 });
+    return NextResponse.json({ error: "A alteração de estado não devolveu um resultado." }, { status: 500 });
   }
 
   // Response shape is unchanged for existing callers; `changed` and

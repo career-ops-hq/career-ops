@@ -7,9 +7,11 @@
  * newly introduced system paths without touching user data.
  */
 
-import { readFileSync, existsSync, rmSync, realpathSync } from 'fs';
+import { copyFileSync, readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, realpathSync } from 'fs';
 import { execFileSync, spawnSync } from 'child_process';
 import { dirname, join, sep } from 'path';
+import { tmpdir } from 'os';
+import { pathToFileURL } from 'url';
 import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
 
 let passed = 0;
@@ -126,6 +128,43 @@ function extractArray(name) {
 const systemPaths = extractArray('SYSTEM_PATHS');
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
+
+// Ship only the shared matcher's manifest entries, as a data-only upgrade does.
+// Creating web/src accidentally activates test-all's full-web missing-file gates.
+{
+  const install = mkdtempSync(join(tmpdir(), 'title-matcher-install-'));
+  try {
+    const matcherPaths = systemPaths.filter(path => path === 'title-keywords.mjs' || path.endsWith('/title-keywords.mjs'));
+    for (const path of matcherPaths) {
+      mkdirSync(dirname(join(install, path)), { recursive: true });
+      copyFileSync(path, join(install, path));
+    }
+    const suite = readFileSync('test-all.mjs', 'utf8');
+    for (const [name, path, guard] of [
+      ['pdf write-scope', ['web', 'src', 'lib'], 'if (!existsSync(webLib))'],
+      ['company-key parity', ['web', 'src'], "if (!existsSync(join(ROOT, 'web', 'src')))"],
+      ['key-source freeze', ['web', 'src'], "if (existsSync(join(ROOT, 'web', 'src')))"],
+    ]) {
+      if (!suite.includes(guard)) fail(`minimal matcher install must track test-all's ${name} guard`);
+      else if (existsSync(join(install, ...path))) fail(`minimal matcher install activates test-all's ${name} full-web guard`);
+      else pass(`minimal matcher install leaves test-all's ${name} full-web guard inactive`);
+    }
+    const { buildTitleFilter } = await import(pathToFileURL(join(install, 'title-keywords.mjs')).href);
+    for (const [query, accepted, rejected] of [
+      ['word:agent', 'AI Agent Engineer', 'Agentic Engineer'],
+      ['stem:agent', 'Agentic Engineer', 'Reagents Engineer'],
+      ['Python + SQL', 'Python Developer with SQL', 'Python Developer'],
+    ]) {
+      const matches = buildTitleFilter({ positive: [query] });
+      if (matches(accepted) && !matches(rejected)) pass(`minimal matcher install imports canonical ${query} semantics`);
+      else fail(`minimal matcher install loses canonical ${query} semantics`);
+    }
+  } catch (error) {
+    fail(`minimal matcher install could not load the shipped matcher: ${error.message}`);
+  } finally {
+    rmSync(install, { recursive: true, force: true });
+  }
+}
 
 if (/const updateConfirmed = process\.argv\.includes\('--confirm'\)[\s\S]{0,160}isReexec/.test(source) &&
     /Installation requires explicit confirmation/.test(source) &&
@@ -278,6 +317,8 @@ for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PA
 }
 
 const requiredSystemPaths = [
+  'title-keywords.mjs',
+  'web/title-keywords.mjs',
   'modes/email.md',
   'modes/followup.md',
   'modes/interview.md',

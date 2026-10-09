@@ -15,14 +15,14 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
   const { sessionId, goal = "reach", answers } = body;
   // Same fallback as the session open that precedes every drive, which is where
   // a substitution is reported (#4607); driveSession() itself needs Claude.
   const cliId = (body.cliId && resolveCliOrFallback(body.cliId)?.spec.id) || body.cliId || "";
   const s = sessionId ? getSession(sessionId) : undefined;
-  if (!s) return Response.json({ error: "apply session not found (it may have expired)" }, { status: 404 });
+  if (!s) return Response.json({ error: "A sessão de candidatura não foi encontrada ou expirou." }, { status: 404 });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -62,10 +62,10 @@ export async function POST(req: Request) {
           }
         }
         // Didn't reach a real form → classify why for a clear message.
-        const why = await classifyEmpty(page, s.url).catch(() => ({ message: "Couldn't reach a fillable form on this page." }));
+        const why = await classifyEmpty(page, s.url).catch(() => ({ message: "Não foi possível chegar a um formulário nesta página." }));
         emit({ t: "error", reason: result.reason, message: result.reason === "stuck" ? result.steps.at(-1)?.detail || why.message : why.message });
       } catch (e) {
-        emit({ t: "error", message: e instanceof Error ? e.message.slice(0, 160) : "drive failed" });
+        emit({ t: "error", message: e instanceof Error ? e.message.slice(0, 160) : "Não foi possível navegar até ao formulário." });
       } finally {
         controller.close();
       }

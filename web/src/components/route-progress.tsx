@@ -78,7 +78,7 @@ export function RouteProgress() {
   return (
     <>
       <div className="sr-only" role="status" aria-live="polite">
-        {state === "loading" ? "Loading page" : ""}
+        {state === "loading" ? "A carregar a página" : ""}
       </div>
       <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 top-0 z-[100] h-0.5">
         <div data-state={state} className="route-bar h-full w-full rounded-r-full" />

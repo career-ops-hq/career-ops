@@ -9,6 +9,7 @@
 import { canonStatus } from "@/lib/status-alias.mjs";
 
 export { canonStatus };
+export { PT_PT_LOCALE, scheduledSuccessRate, statusLabel } from "@/lib/pt-pt";
 
 export const CANONICAL_STATES = [
   "Evaluated",

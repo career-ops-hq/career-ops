@@ -10,12 +10,12 @@ import { cn } from "@/lib/cn";
 // followup-cadence.mjs reads the same keys — the CLI and the web must agree.
 
 const FIELDS: { key: ProfileCadenceKey; label: string; hint: string }[] = [
-  { key: "applied_first_days", label: "First follow-up", hint: "days after applying before the 1st nudge is due" },
-  { key: "applied_subsequent_days", label: "Between follow-ups", hint: "days between nudges while Applied" },
-  { key: "applied_max_followups", label: "Max follow-ups", hint: "after this many with no reply the lead goes cold" },
-  { key: "responded_initial_days", label: "Reply window", hint: "answer a company response within this many days" },
-  { key: "responded_subsequent_days", label: "Responded cadence", hint: "days between touches while in Responded" },
-  { key: "interview_thankyou_days", label: "Thank-you note", hint: "due within this many days of reaching Interview" },
+  { key: "applied_first_days", label: "Primeiro contacto", hint: "dias após o envio da candidatura" },
+  { key: "applied_subsequent_days", label: "Entre contactos", hint: "dias entre contactos enquanto aguardas resposta" },
+  { key: "applied_max_followups", label: "Máximo de contactos", hint: "ao atingir este número sem resposta, deixa de haver lembretes" },
+  { key: "responded_initial_days", label: "Prazo de resposta", hint: "dias para responder a uma mensagem da empresa" },
+  { key: "responded_subsequent_days", label: "Após resposta", hint: "dias entre contactos depois de a empresa responder" },
+  { key: "interview_thankyou_days", label: "Agradecimento", hint: "dias para enviar uma nota depois da entrevista" },
 ];
 
 export function CadenceSettings() {
@@ -57,7 +57,7 @@ export function CadenceSettings() {
       const raw = values[k].trim();
       const n = raw === "" ? Number.NaN : Number(raw);
       if (!Number.isInteger(n) || n < 0) {
-        setError(`"${FIELDS.find((f) => f.key === k)?.label}" must be a whole number ≥ 0.`);
+        setError(`«${FIELDS.find((f) => f.key === k)?.label}» tem de ser um número inteiro igual ou superior a zero.`);
         return;
       }
       payload[k] = n;
@@ -72,13 +72,13 @@ export function CadenceSettings() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(typeof j.error === "string" ? j.error : "Could not save.");
+        setError(typeof j.error === "string" ? j.error : "Não foi possível guardar.");
       } else {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }
     } catch {
-      setError("Could not save.");
+      setError("Não foi possível guardar.");
     }
     setSaving(false);
   };
@@ -86,17 +86,17 @@ export function CadenceSettings() {
   return (
     <div>
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-        Follow-up cadence
+        Frequência dos contactos
       </label>
       <div className="rounded-xl border border-border bg-surface/50 p-4">
         <p className="text-xs leading-relaxed text-faint">
-          When the <span className="text-muted">Follow-ups</span> tracker nudges you. Saved to{" "}
-          <span className="font-mono text-muted">config/profile.yml</span> — the CLI uses the same values.
+          Define quando surgem os lembretes. Os valores são guardados em{" "}
+          <span className="font-mono text-muted">config/profile.yml</span> e também são usados no terminal.
         </p>
         {loadError ? (
           <div className="mt-3 text-sm text-muted">
             <p className="text-red-500">
-              Couldn&apos;t read your current cadence settings — not showing defaults, to avoid overwriting real values in{" "}
+              Não foi possível ler os valores atuais. Os valores predefinidos ficam ocultos para evitar alterações em{" "}
               <span className="font-mono">config/profile.yml</span>.
             </p>
             <button
@@ -104,12 +104,12 @@ export function CadenceSettings() {
               onClick={load}
               className="mt-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover"
             >
-              Retry
+              Tentar novamente
             </button>
           </div>
         ) : values === null ? (
           <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="size-4 animate-spin" /> Loading…
+            <Loader2 className="size-4 animate-spin" /> A carregar…
           </div>
         ) : (
           <>
@@ -140,7 +140,7 @@ export function CadenceSettings() {
               )}
             >
               {saving ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-emerald-400" /> : null}
-              {saved ? "Saved" : "Save cadence"}
+              {saved ? "Guardado" : "Guardar frequência"}
             </button>
           </>
         )}

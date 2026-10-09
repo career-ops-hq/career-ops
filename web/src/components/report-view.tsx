@@ -42,7 +42,7 @@ function preview(md: string): string {
   const table = parsePipeTable(md);
   if (table && isStarTableHeader(table.header)) {
     const n = table.rows.length;
-    return `${n} interview stor${n === 1 ? "y" : "ies"}`;
+    return n === 1 ? "1 exemplo para a entrevista" : `${n} exemplos para a entrevista`;
   }
   const text = md
     .replace(/^#+\s.*$/gm, "")
@@ -83,7 +83,7 @@ export function ReportView({
   const url = field("URL");
   const decision = field("Decision");
   const line = applyLineLabel(score ?? "");
-  const recommended = line === "Recommended";
+  const recommended = line === "Recomendada";
   const quietApply = applyCtaQuiet({ score, legitimacy: meta?.legitimacy });
   const applyUrl = httpUrl(url);
   const pdfReady = (app?.pdf ?? "").includes("✅") || pdfReadyFromIndex;
@@ -96,15 +96,15 @@ export function ReportView({
         href="/pipeline"
         className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
       >
-        <ArrowLeft className="size-4" /> Pipeline
+        <ArrowLeft className="size-4" /> Candidaturas
       </Link>
 
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
         <div className="mt-2 flex items-center gap-3">
-          <CompanyLogo name={company?.logoName ?? meta?.title ?? `Report #${id}`} size={40} />
+          <CompanyLogo name={company?.logoName ?? meta?.title ?? `Relatório #${id}`} size={40} />
           <h1 className="font-display text-3xl tracking-tight text-landing">
-            {company?.label ?? meta?.title ?? `Report #${id}`}
+            {company?.label ?? meta?.title ?? `Relatório #${id}`}
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}
@@ -119,7 +119,7 @@ export function ReportView({
               rel="noreferrer"
               className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
             >
-              <FileText className="size-3.5" /> View cover
+              <FileText className="size-3.5" /> Ver carta
             </a>
           )}
         </div>
@@ -141,7 +141,7 @@ export function ReportView({
                 rel="noreferrer"
                 className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
               >
-                posting <ExternalLink className="size-3" />
+                ver oferta <ExternalLink className="size-3" />
               </a>
             )}
           </div>
@@ -166,14 +166,14 @@ export function ReportView({
               : "border-border bg-surface/50";
             const callout = (
               <div className={`rounded-2xl border px-5 py-5 ${verdictClass}`}>
-                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">Verdict</p>
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">Resultado</p>
                 <div className="mt-2 flex flex-wrap items-end gap-x-3 gap-y-1">
                   {score ? (
                     <p className="font-display text-4xl tabular-nums tracking-tight text-landing">{score}</p>
                   ) : (
-                    <p className="text-sm text-muted">No score on this report.</p>
+                    <p className="text-sm text-muted">Este relatório não tem pontuação.</p>
                   )}
-                  <p className="pb-1 text-xs text-muted">Apply line is {APPLY_LINE.toFixed(1)}</p>
+                  <p className="pb-1 text-xs text-muted">Referência para candidatura: {APPLY_LINE.toFixed(1)}</p>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
@@ -235,7 +235,7 @@ export function ReportView({
                   <>
                     <div className="mt-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-faint">
                       <span className="h-px flex-1 bg-border" />
-                      Technical details · for developers
+                      Detalhes técnicos
                       <span className="h-px flex-1 bg-border" />
                     </div>
                     {machine.map((s, i) => (
@@ -259,7 +259,7 @@ export function ReportView({
       ) : (
         <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">
           <FileText className="size-5 shrink-0 text-faint" />
-          No report file found for #{id} in <code className="text-foreground">reports/</code>.
+          Não foi encontrado o relatório #{id} em <code className="text-foreground">reports/</code>.
         </div>
       )}
     </div>

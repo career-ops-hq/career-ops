@@ -40,13 +40,13 @@ export async function GET(req: NextRequest) {
   // apart and would open the wrong report's PDF.
   if (n) {
     // A malformed n (typo, tampered query string) must not silently fall
-    if (!/^\d+$/.test(n)) return new Response("invalid report number", { status: 400 });
+    if (!/^\d+$/.test(n)) return new Response("Número de relatório inválido.", { status: 400 });
     const exact = await pdfPathStatusForReport(n);
     if (exact.status === "found") {
       try {
         return servePdf(exact.path);
       } catch {
-        return new Response("could not read the PDF", { status: 500 });
+        return new Response("Não foi possível ler o PDF.", { status: 500 });
       }
     }
     if (exact.status === "rejected") return new Response("indexed tailored CV is unavailable", { status: 404 });
@@ -63,18 +63,18 @@ export async function GET(req: NextRequest) {
       try {
         return servePdf(exact);
       } catch {
-        return new Response("could not read the PDF", { status: 500 });
+        return new Response("Não foi possível ler o PDF.", { status: 500 });
       }
     }
     // No resolvable report for this tracker row — fall through to the
     // company-slug heuristic below, same as the "n" path.
   }
 
-  if (!company) return new Response("company required", { status: 400 });
+  if (!company) return new Response("Falta indicar a empresa.", { status: 400 });
   // Same invariant as the apply lookup: a company with no usable key serves
   // nothing rather than the newest unrelated CV (#2352).
   const key = companySlug(company);
-  if (!key) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!key) return new Response("Não foi encontrado um CV adaptado a esta oferta.", { status: 404 });
   const { slug } = key;
   const dir = path.join(careerOpsRoot(), "output");
 
@@ -90,15 +90,15 @@ export async function GET(req: NextRequest) {
       // the same one the indexed path above applies.
       .filter((f) => isRegularContainedFile(path.join(dir, f), dir));
   } catch {
-    return new Response("no output directory", { status: 404 });
+    return new Response("Não foi encontrada a pasta de resultados.", { status: 404 });
   }
-  if (!files.length) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!files.length) return new Response("Não foi encontrado um CV adaptado a esta oferta.", { status: 404 });
 
   const sorted = sortNewestFirst(dir, files);
-  if (!sorted.length) return new Response("no tailored CV found for this offer", { status: 404 });
+  if (!sorted.length) return new Response("Não foi encontrado um CV adaptado a esta oferta.", { status: 404 });
   try {
     return servePdf(path.join(dir, sorted[0]));
   } catch {
-    return new Response("could not read the PDF", { status: 500 });
+    return new Response("Não foi possível ler o PDF.", { status: 500 });
   }
 }

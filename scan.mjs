@@ -65,7 +65,7 @@ import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
-import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
+import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl, WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -1658,7 +1658,7 @@ const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
 
 /**
  * A labeled trailing segment of a pipeline entry, as written by the two writers
- * that emit one: `formatPipelineOffer` here (`posted:`, `trust:`, `note:`) and
+ * that emit one: `formatPipelineOffer` here (`type:`, `posted:`, `trust:`, `note:`) and
  * `appendRankAnnotation` in `rank-pipeline.mjs` (`rank:`).
  *
  * Labeled segments are appended after the positional columns, so one slides into
@@ -1685,7 +1685,7 @@ const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
  * segment invents a city for a role and lets it resurface, while a genuine
  * location beginning `Posted: ` / `Rank: ` does not occur.
  */
-const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|note|rank):\s/iu;
+const PIPELINE_LABELED_SEGMENT_RE = /^(?:posted|trust|note|rank|type):\s/iu;
 
 /**
  * The `~~…~~` wrapper an expired entry is written with.
@@ -2861,6 +2861,7 @@ export function formatPipelineOffer(offer) {
   let line = base;
   if (compensation) line = `${base} | ${location} | ${compensation}`;
   else if (location) line = `${base} | ${location}`;
+  if (offer.opportunityType === 'freelance') line = `${line} | type: freelance`;
   // Optional labeled posting-date segment (like note:) — keeps the positional
   // 1/3/4/5-column contract in modes/pipeline.md intact.
   const posted = postedAtIsoDate(offer.postedAt);
@@ -2884,6 +2885,32 @@ function postedAtIsoDate(postedAt) {
   if (typeof postedAt !== 'number' || !Number.isFinite(postedAt) || postedAt <= 0) return '';
   return new Date(postedAt).toISOString().slice(0, 10);
 }
+
+export function normalizeSourceFields(offer) {
+  const fields = {};
+  if (Array.isArray(offer.sources)) fields.sources = [...new Set(offer.sources.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim()))];
+  for (const key of ['contractType', 'hours', 'applicationDeadline']) {
+    if (typeof offer[key] === 'string' && offer[key].trim()) fields[key] = offer[key].trim();
+  }
+  if (Number.isSafeInteger(offer.vacancyCount) && offer.vacancyCount > 0) fields.vacancyCount = offer.vacancyCount;
+  if (typeof offer.observedAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(offer.observedAt) && Number.isFinite(Date.parse(offer.observedAt))) fields.observedAt = offer.observedAt.trim();
+  if (['feed-seen', 'confirmed-active', 'unconfirmed'].includes(offer.availabilityEvidence)) fields.availabilityEvidence = offer.availabilityEvidence;
+  return fields;
+}
+
+export function normalizeReceiptOffer(offer) {
+  return {
+    company: normalizeScanScalar(offer.company),
+    title: normalizeScanScalar(offer.title),
+    location: normalizeScanScalar(offer.location),
+    postedAt: postedAtIsoDate(offer.postedAt),
+    url: normalizeScanUrl(offer.url),
+    source: normalizeScanScalar(offer.source),
+    ...(offer.salary && typeof offer.salary === 'object' ? { salary: offer.salary } : {}),
+    ...normalizeSourceFields(offer),
+  };
+}
+
 export function formatScanHistoryRow(offer, date, status = 'added') {
   const record = {
     url: normalizeScanUrl(offer.url),
@@ -3596,6 +3623,7 @@ const USAGE = `Usage:
   node scan.mjs --help                       # print this usage block and exit`;
 
 async function main() {
+  const observedAt = new Date().toISOString();
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   const dryRun = args.includes('--dry-run');
@@ -3995,6 +4023,12 @@ async function main() {
       }
       if (!Array.isArray(jobs)) {
         throw new Error(`${provider.id}: fetch() did not return an array`);
+      }
+      if (provider.id === 'workday' && jobs.workdayTruncated !== undefined) {
+        const reason = jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT
+          || jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.STRUCTURAL
+          ? jobs.workdayTruncated : 'unknown';
+        errors.push({ company: company.name, error: `workday: incomplete pagination (${reason})` });
       }
       totalFound += jobs.length;
       if (!company._isBoard && jobs.length === 0) {
@@ -4552,6 +4586,7 @@ async function main() {
       duplicates: totalDupes,
       added: verifiedOffers.length,
       added_urls: verifiedOffers.map(offer => offer.url),
+      offers: verifiedOffers.map(offer => normalizeReceiptOffer({ ...offer, observedAt })),
       errors: errors.map(({ company, error }) => ({ company, error })),
       unverified_zero: unverifiedZeroTargets,
       dry_run: dryRun,

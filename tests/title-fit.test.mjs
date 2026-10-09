@@ -6,6 +6,7 @@ import { pass, fail, warn, ROOT } from './helpers.mjs';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import assert from 'node:assert/strict';
 
 console.log('\ntitle-fit.mjs — free banded title/profile overlap hint (#3260)');
 
@@ -23,6 +24,12 @@ if (!existsSync(join(ROOT, 'web', 'src'))) {
   try {
     const m = await import(pathToFileURL(TITLE_FIT).href);
     const { titleFit } = m;
+
+    // Assistant is part of the occupation, rather than generic seniority.
+    assert.deepEqual(titleFit('Sales Assistant', ['Sales Assistant']), { band: 'strong', score: 1 });
+    pass('Sales Assistant exact target keeps strong/1');
+    assert.deepEqual(titleFit('Sales Manager', ['Sales Assistant']), { band: 'related', score: 0.5 });
+    pass('Sales Manager only partly overlaps Sales Assistant (related/0.5)');
 
     // Word order + punctuation insensitivity — exactly what firstMatch()'s
     // substring test misses ("platform engineer" chip vs "Engineer, Platform").
@@ -114,5 +121,8 @@ if (!existsSync(join(ROOT, 'web', 'src'))) {
     }
   } catch (e) {
     fail(`title-fit tests crashed: ${e.message}`);
+    // This file also runs directly under node --test; helper counters alone
+    // would otherwise print the regression but leave its process exit green.
+    process.exitCode = 1;
   }
 }

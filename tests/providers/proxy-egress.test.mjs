@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { fetchText, fetchResponse } from '../../providers/_http.mjs';
+import net from 'node:net';
+import { fetchJson, fetchTextHead, fetchText, fetchResponse } from '../../providers/_http.mjs';
 
 async function listening(server) {
   server.listen(0, '127.0.0.1');
@@ -32,23 +33,28 @@ test(`opted-in provider request uses a scoped proxy (empty lowercase: ${emptyLow
   skip: emptyLowercase && process.platform === 'win32',
 }, async () => {
   const destinations = [];
-  const proxy = http.createServer();
+  const proxy = http.createServer((_req, res) => res.end('DIRECT'));
   proxy.on('connect', (req, socket) => {
     destinations.push(req.url);
     socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{"via":"proxy"}'));
   });
   const proxyUrl = await listening(proxy);
   try {
     await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl.replace('127.0.0.1', 'localhost'), NO_PROXY: 'localhost,127.0.0.1', ...(emptyLowercase ? { http_proxy: '', no_proxy: '' } : {}) }, async () => {
-      assert.equal(await fetchText('http://unresolvable.invalid/job', { redirect: 'error' }), 'PROXIED!');
-      assert.deepEqual(destinations, ['unresolvable.invalid:80']);
+      const url = 'http://unresolvable.invalid/job';
+      assert.equal(await fetchText(url), '{"via":"proxy"}');
+      assert.deepEqual(await fetchJson(url), { via: 'proxy' });
+      assert.equal(await fetchTextHead(url), '{"via":"proxy"}');
+      assert.equal(await (await fetchResponse(url)).text(), '{"via":"proxy"}');
+      assert.deepEqual(destinations, Array(4).fill('unresolvable.invalid:80'));
+      assert.equal(await (await fetch(proxyUrl)).text(), 'DIRECT');
       // NO_PROXY goes direct and still meets the private-address guard.
       await assert.rejects(fetchText('http://localhost:8080/'), (err) =>
         (err.cause ?? err).code === 'ECAREEROPS_BLOCKED_ADDRESS');
       await assert.rejects(fetchText('http://127.0.0.1:8080/'), (err) =>
         (err.cause ?? err).code === 'ECAREEROPS_BLOCKED_ADDRESS');
-      assert.equal(destinations.length, 1);
+      assert.equal(destinations.length, 4);
     });
   } finally { proxy.close(); }
 });
@@ -57,9 +63,14 @@ test(`opted-in provider request uses a scoped proxy (empty lowercase: ${emptyLow
 
 test('unrelated fetch is never assigned the provider proxy', async () => {
   const server = http.createServer((_req, res) => res.end('LOCAL'));
+  server.on('connect', (_req, socket) => {
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+  });
   const url = await listening(server);
   try {
     await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: url, NO_PROXY: '' }, async () => {
+      assert.equal(await fetchText('http://unresolvable.invalid/job'), 'PROXIED!');
       assert.equal(await (await fetch(url)).text(), 'LOCAL');
     });
   } finally { server.close(); }
@@ -149,17 +160,23 @@ test('credential-bearing HTTP proxies are rejected without exposing their creden
   }
 });
 
-test('credential-bearing HTTPS proxies remain available to provider requests', async () => {
-  const originalFetch = globalThis.fetch;
+test('credential-bearing HTTPS proxies start TLS without sending plaintext credentials', async () => {
+  let greeting;
+  const proxy = net.createServer(socket => {
+    socket.once('data', data => {
+      greeting = data;
+      socket.destroy(); // the TLS greeting proves transport selection; no certificate is needed
+    });
+  });
+  const proxyUrl = (await listening(proxy)).replace('http:', 'https:').replace('127.0.0.1', 'localhost').replace('://', '://user:secret@');
   try {
-    globalThis.fetch = async (_url, options) => {
-      assert.ok(options.dispatcher);
-      return new Response('TLS PROXY CONFIGURED');
-    };
-    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: 'https://user:secret@proxy.example:3128' }, async () => {
-      assert.equal(await fetchText('https://public.example/'), 'TLS PROXY CONFIGURED');
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: proxyUrl }, async () => {
+      await assert.rejects(fetchText('https://unresolvable.invalid/job', { timeoutMs: 1000 }));
+      assert.equal(greeting?.[0], 0x16); // TLS handshake record
+      assert.ok(!greeting.includes(Buffer.from('user:secret')));
+      assert.ok(!greeting.includes(Buffer.from('dXNlcjpzZWNyZXQ=')));
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    proxy.close();
   }
 });

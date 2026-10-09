@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleExecutable</key><string>CareerOps</string>
+    <key>CFBundleIdentifier</key><string>io.career-ops.local</string>
+    <key>CFBundleName</key><string>Career Ops</string>
+    <key>CFBundleDisplayName</key><string>Career Ops</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleIconFile</key><string>CareerOps</string>
+    <key>CFBundleDevelopmentRegion</key><string>pt-PT</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSMultipleInstancesProhibited</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict></plist>

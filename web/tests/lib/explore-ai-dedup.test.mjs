@@ -76,3 +76,15 @@ test("two scheme-valid but URL-unparseable offers BOTH survive — an empty key 
   assert.equal(offers[0].offer.url, unparseableA);
   assert.equal(offers[1].offer.url, unparseableB);
 });
+
+test('terminal status buffers across every chunk split and survives an unfinished offer', () => {
+  const terminal = '<<search-result:{"status":"error","message":"Bounded failure"}>>';
+  for (let split = 1; split < terminal.length; split++) {
+    const parser = makeAiStreamParser();
+    const chunks = [...parser.feed(terminal.slice(0, split)), ...parser.feed(terminal.slice(split)), ...parser.flush()];
+    assert.deepEqual(chunks, [{kind:'terminal',status:'error',message:'Bounded failure'}], `split ${split}`);
+  }
+  const chunks = makeAiStreamParser().feed('Searching <<offer:{"url":"https://acme.test/job"' + terminal);
+  assert.deepEqual(chunks.at(-1), {kind:'terminal',status:'error',message:'Bounded failure'});
+  assert.equal(chunks.filter(chunk => chunk.kind === 'offer').length, 0);
+});

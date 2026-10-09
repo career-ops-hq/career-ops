@@ -96,7 +96,7 @@ export async function POST(req: Request) {
   try {
     body = (await req.json()) as Record<string, unknown>;
   } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
+    return Response.json({ error: "Pedido inválido." }, { status: 400 });
   }
 
   const cadence: Record<string, number> = {};
@@ -104,11 +104,11 @@ export async function POST(req: Request) {
     if (body[key] == null) continue;
     const n = Number.parseInt(String(body[key]), 10);
     if (!Number.isInteger(n) || n < 0) {
-      return Response.json({ error: `${key} must be a non-negative integer` }, { status: 400 });
+      return Response.json({ error: `${key} tem de ser um número inteiro igual ou superior a zero.` }, { status: 400 });
     }
     cadence[key] = n;
   }
-  if (Object.keys(cadence).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
+  if (Object.keys(cadence).length === 0) return Response.json({ error: "Não há alterações para guardar." }, { status: 400 });
 
   const root = careerOpsRoot();
   const file = path.join(root, "config", "profile.yml");
@@ -128,12 +128,12 @@ export async function POST(req: Request) {
     try {
       parsed = yaml.load(fs.readFileSync(file, "utf8"));
     } catch {
-      return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
+      return Response.json({ error: "config/profile.yml existe, mas não contém YAML válido. O ficheiro não foi substituído." }, { status: 409 });
     }
     // A parseable list/scalar is still an invalid profile. Never replace its
     // contents with a document containing only the cadence patch.
     if (!isMapping(parsed)) {
-      return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });
+      return Response.json({ error: "config/profile.yml tem de conter definições com nome, não uma lista nem um valor isolado. O ficheiro não foi substituído." }, { status: 409 });
     }
     base = parsed as Record<string, unknown>;
   }
@@ -145,7 +145,7 @@ export async function POST(req: Request) {
   try {
     atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
   } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
+    return Response.json({ error: e instanceof Error ? e.message : "Não foi possível guardar a frequência dos contactos." }, { status: 500 });
   }
   return Response.json({ ok: true, followup_cadence: merged.followup_cadence });
 }

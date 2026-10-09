@@ -34,6 +34,16 @@ test("mergeScanResults falls back to the surfaced offer count, and omits fields 
   assert.equal("postingsDroppedNoDate" in merged, false);
 });
 
+test("ATS health counters survive merging even when the final eligible zero is smaller", () => {
+  const summary = mergeScanResults([
+    { companiesScanned: 1, companiesAvailable: 10, capHit: true, unreachableBoards: 2, postingsDroppedNoDate: 3, postingsKept: 1, datasetStatus: { workday: "stale" } },
+  ], 0);
+  assert.equal(summary.capHit, true);
+  assert.equal(summary.unreachable, 2);
+  assert.equal(summary.postingsDroppedNoDate, 3);
+  assert.equal(summary.datasetStatus.workday, "stale");
+});
+
 test("timedOutMessage names the source, the deadline and the fix", () => {
   const one = timedOutMessage(["Workday"], 230);
   assert.match(one, /^Workday didn't finish within 230s, so its results are incomplete\./);
@@ -69,5 +79,6 @@ test("a scan that ends in an error keeps its results as partial and shows the re
   const withResults = src.slice(start, src.indexOf("} else if (sawError) {", start));
   assert.match(withResults, /if \(sawError\) \{\s*setPartial\(true\);\s*setError\(sawError\);/);
   const list = readFileSync(join(SRC, "components/explore/results-list.tsx"), "utf8");
-  assert.match(list, /!isAi && error && </);
+  assert.match(list, /\{error && <p/);
+  assert.doesNotMatch(list, /!isAi && error && </);
 });

@@ -4,7 +4,13 @@
 // can never drift between the two halves. Server-only logic (spawning the scanner,
 // writing temp files) lives in lib/core/{scan,portals,pipeline}.ts.
 
+import { cleanMarkets, encodeMarkets, decodeMarkets, inferMarketsFromLocations } from "./market-presets.mjs";
+import { MARKET_LABEL } from "./explore-state.mjs";
+export type MarketId = "portugal" | "spain" | "united-kingdom" | "switzerland" | "luxembourg" | "netherlands" | "europe" | "remote";
+export { MARKET_IDS } from "./market-presets.mjs";
+
 export type AtsSource = "greenhouse" | "lever" | "ashby" | "workday";
+export type OpportunityType = "employment" | "freelance";
 export const ATS_SOURCES: AtsSource[] = ["greenhouse", "lever", "ashby", "workday"];
 export const ATS_LABEL: Record<AtsSource, string> = {
   greenhouse: "Greenhouse",
@@ -17,6 +23,7 @@ export const ATS_LABEL: Record<AtsSource, string> = {
  *  buildTitleFilter / buildLocationFilter semantics; sinceDays/ats/limitPerAts map
  *  to scan-ats-full.mjs's --since / --ats / --limit. */
 export type ExploreFilters = {
+  opportunityType: OpportunityType;
   positive: string[];
   negative: string[];
   allow: string[];
@@ -25,10 +32,12 @@ export type ExploreFilters = {
   alwaysAllow: string[];
   sinceDays: number;
   ats: AtsSource[];
+  markets: MarketId[];
   limitPerAts: number;
 };
 
 export const DEFAULT_FILTERS: ExploreFilters = {
+  opportunityType: "employment",
   positive: [],
   negative: [],
   allow: [],
@@ -37,8 +46,37 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   alwaysAllow: [],
   sinceDays: 7,
   ats: [...ATS_SOURCES],
+  markets: [],
   limitPerAts: 150,
 };
+
+export type OpportunitySnapshots = Record<OpportunityType, ExploreFilters>;
+
+export function createOpportunitySnapshots(active: ExploreFilters, employmentSeed: ExploreFilters = DEFAULT_FILTERS): OpportunitySnapshots {
+  return updateOpportunitySnapshot({
+    employment: structuredClone({ ...employmentSeed, opportunityType: "employment" }),
+    freelance: {
+      opportunityType: "freelance", positive: [], negative: [], allow: [], block: [], blockHard: [], alwaysAllow: [],
+      sinceDays: DEFAULT_FILTERS.sinceDays, ats: [...DEFAULT_FILTERS.ats], markets: [], limitPerAts: DEFAULT_FILTERS.limitPerAts,
+    },
+  }, active);
+}
+
+export function updateOpportunitySnapshot(snapshots: OpportunitySnapshots, next: ExploreFilters): OpportunitySnapshots {
+  return { ...snapshots, [next.opportunityType]: structuredClone(next) };
+}
+
+export function switchOpportunitySnapshot(snapshots: OpportunitySnapshots, current: ExploreFilters, target: OpportunityType): { snapshots: OpportunitySnapshots; filters: ExploreFilters } {
+  const updated = updateOpportunitySnapshot(snapshots, current);
+  return { snapshots: updated, filters: structuredClone(updated[target]) };
+}
+
+export function applyOpportunityPatch(snapshots: OpportunitySnapshots, current: ExploreFilters, raw: Record<string, unknown>, merge = false): { snapshots: OpportunitySnapshots; filters: ExploreFilters } {
+  const target = raw.opportunityType === undefined ? current.opportunityType : cleanOpportunityType(raw.opportunityType);
+  const state = switchOpportunitySnapshot(snapshots, current, target);
+  const filters = parseExplorePatch(raw, state.filters, merge);
+  return { snapshots: updateOpportunitySnapshot(state.snapshots, filters), filters };
+}
 
 /** Banded title-vs-profile overlap (web/src/lib/title-fit.mjs). Words, not
  *  numbers, so it can't be mistaken for the evaluation's real 1–5 / A–F. */
@@ -53,6 +91,17 @@ export type DiscoveredOffer = {
   postedAt: string;
   ats: string;
   source: string;
+  opportunityType?: OpportunityType;
+  sources?: string[];
+  salary?: { min?: number; max?: number; currency?: string; period?: string };
+  contractType?: string;
+  hours?: string;
+  applicationDeadline?: string;
+  vacancyCount?: number;
+  /** Discovery time; never a publication date. */
+  observedAt?: string;
+  availabilityEvidence?: "feed-seen" | "confirmed-active" | "unconfirmed";
+  match?: import("./opportunity-rank.mjs").OpportunityMatch;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */
   matchedKeyword?: string;
   /** free, zero-token triage hint computed at discovery time from the posting
@@ -64,7 +113,7 @@ export type DiscoveredOffer = {
    *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
    *  importer can attach a note; the deterministic scan omits it. */
   note?: string;
-  // ── AI-search (modes/discover.md) additions — all optional, so the
+  // ── AI-search (modes/web-search.md) additions — all optional, so the
   //    deterministic scan offer is unaffected (fields simply absent). ──
   /** present ONLY on AI offers → drives the "unverified" badge. AI finds can't be
    *  liveness-confirmed (AGENTS.md); the scan hits a live ATS API so it omits this. */
@@ -78,20 +127,31 @@ export type DiscoveredOffer = {
 
 /** The two discovery surfaces: free deterministic Scan vs token-spending AI search. */
 export type ExploreMode = "scan" | "ai";
+export type SearchPhase = "precise" | "broad";
+export type SearchExpansion = import("./search-plan.mjs").SearchExpansion;
+export type SearchPlan = import("./search-plan.mjs").SearchPlan;
 
 /** Stream event grammar (NDJSON). `kind` discriminates. Discovery is FREE — the
  *  terminal `done` always carries cost {tokens:0, usd:0}. */
 export type ScanEvent =
   | { kind: "start"; ats: string[]; sinceDays: number; limit: number; free: true }
+  | { kind: "phaseStart"; phase: SearchPhase; sinceDays: number; free: true }
+  | ({ kind: "expansion" } & SearchExpansion)
   | { kind: "atsStart"; ats: string; companies: number }
   | { kind: "progress"; ats: string; scanned: number; total: number; matches: number }
   | { kind: "atsDone"; ats: string; unreachable: number }
+  | { kind: "sourceStart"; source: string }
+  | { kind: "sourceDone"; source: string; count: number }
+  | { kind: "sourceError"; source: string; message: string }
   | { kind: "offer"; offer: DiscoveredOffer }
   | {
       kind: "summary";
       companiesScanned: number;
       unreachable: number;
       matches: number;
+      status?: "ok" | "partial" | "failed";
+      sources?: { source: string; state: "ok" | "partial" | "error" | "skipped"; message?: string }[];
+      missingLocation?: number;
       // Authoritative degraded-vs-empty signals from the scanner's --json mode (#1199).
       // Absent on older local checkouts (the legacy human-stdout parse can't supply them).
       companiesAvailable?: number;
@@ -120,10 +180,15 @@ function clampNum(v: unknown, lo: number, hi: number, fallback: number): number 
 
 function cleanAts(v: unknown): AtsSource[] {
   if (!Array.isArray(v)) return [...ATS_SOURCES];
+  if (v.length === 0) return [];
   const out = v
     .map((a) => String(a).toLowerCase())
     .filter((a): a is AtsSource => (ATS_SOURCES as string[]).includes(a));
   return out.length ? Array.from(new Set(out)) : [...ATS_SOURCES];
+}
+
+function cleanOpportunityType(value: unknown): OpportunityType {
+  return value === "freelance" ? "freelance" : "employment";
 }
 
 /** Apply a (possibly partial) action/assistant patch onto a base. The assistant
@@ -135,7 +200,7 @@ export function parseExplorePatch(
   base: ExploreFilters = DEFAULT_FILTERS,
   merge = false,
 ): ExploreFilters {
-  const next: ExploreFilters = { ...base, ats: [...base.ats] };
+  const next: ExploreFilters = { ...base, ats: [...base.ats], markets: [...(base.markets ?? [])] };
   const lists: [keyof ExploreFilters, string][] = [
     ["positive", "positive"],
     ["negative", "negative"],
@@ -154,12 +219,35 @@ export function parseExplorePatch(
   if (raw.limit !== undefined) next.limitPerAts = clampNum(raw.limit, 50, 500, base.limitPerAts);
   if (raw.limitPerAts !== undefined) next.limitPerAts = clampNum(raw.limitPerAts, 50, 500, base.limitPerAts);
   if (raw.ats !== undefined) next.ats = cleanAts(raw.ats);
+  if (raw.opportunityType !== undefined) next.opportunityType = cleanOpportunityType(raw.opportunityType);
+  if (raw.markets !== undefined) next.markets = cleanMarkets(merge ? [...next.markets, ...cleanMarkets(raw.markets)] : raw.markets);
+  else if (raw.allow !== undefined) next.markets = inferMarketsFromLocations(next.markets, next.allow);
   return next;
+}
+
+/** Prepare an editable intent from the active filters; no discovery is started. */
+export function filtersToAssistedIntent(f: ExploreFilters): string {
+  const clauses = [f.opportunityType === "freelance" ? "Procura oportunidades freelance." : "Procura ofertas de emprego."];
+  const lists: [string, string[]][] = [
+    ["Funções", f.positive],
+    ["Excluir funções", f.negative],
+    ["Localizações", f.allow],
+    ["Excluir localizações", f.block],
+    ["Excluir sempre localizações", f.blockHard],
+    ["Permitir sempre localizações", f.alwaysAllow],
+    ["Mercados", f.markets.map((market) => MARKET_LABEL[market])],
+  ];
+  for (const [label, values] of lists) {
+    if (values.length) clauses.push(`${label}: ${values.join(", ")}.`);
+  }
+  if (f.sinceDays > 0) clauses.push(f.sinceDays === 1 ? "Publicadas no último dia." : `Publicadas nos últimos ${f.sinceDays} dias.`);
+  return clauses.join(" ");
 }
 
 /** URL <-> filters codec (so a search is shareable/restorable). */
 export function filtersToParams(f: ExploreFilters): string {
   const sp = new URLSearchParams();
+  if (f.opportunityType === "freelance") sp.set("opportunity", "freelance");
   if (f.positive.length) sp.set("q", f.positive.join(","));
   if (f.negative.length) sp.set("not", f.negative.join(","));
   if (f.allow.length) sp.set("loc", f.allow.join(","));
@@ -168,6 +256,9 @@ export function filtersToParams(f: ExploreFilters): string {
   if (f.alwaysAllow.length) sp.set("home", f.alwaysAllow.join(","));
   if (f.sinceDays !== DEFAULT_FILTERS.sinceDays) sp.set("since", String(f.sinceDays));
   if (f.ats.length !== ATS_SOURCES.length) sp.set("ats", f.ats.join(","));
+  const markets = encodeMarkets(f.markets);
+  if (markets) sp.set("markets", markets);
+  else if (inferMarketsFromLocations([], f.allow).length) sp.set("markets", "");
   if (f.limitPerAts !== DEFAULT_FILTERS.limitPerAts) sp.set("limit", String(f.limitPerAts));
   return sp.toString();
 }
@@ -183,7 +274,9 @@ export function paramsToFilters(sp: URLSearchParams, base: ExploreFilters = DEFA
       blockHard: split(sp.get("hardno")),
       alwaysAllow: split(sp.get("home")),
       since: sp.get("since") ?? undefined,
-      ats: split(sp.get("ats")),
+      ats: sp.has("ats") ? (split(sp.get("ats")) ?? []) : undefined,
+      markets: sp.has("markets") ? decodeMarkets(sp.get("markets")) : undefined,
+      opportunityType: sp.get("opportunity") ?? undefined,
       limit: sp.get("limit") ?? undefined,
     },
     base,

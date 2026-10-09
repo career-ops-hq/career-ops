@@ -119,7 +119,7 @@ language:
   # `en` or `zh-CN`; `zh-CN` also enables Chinese PDF typography rules.
   # This is separate from language.modes_dir: modes_dir selects market
   # vocabulary/rules, while output selects the prose language.
-  output: en
+  output: pt-PT
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
   # modes_dir can also be a LIST of declared candidate markets, for a
   # candidate genuinely running parallel campaigns in more than one market at

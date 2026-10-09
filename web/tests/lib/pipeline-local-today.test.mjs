@@ -10,22 +10,20 @@
 // but pipeline.ts always passes an explicit `date` argument, which overrides
 // that default — so this call site needed its own fix and its own guard.
 //
-// pipeline.ts is TypeScript, imports via the `@/` path alias (which plain
-// `node --test` cannot resolve without the Next.js build), and computes the
-// date inside a template-literal string executed in a SEPARATE spawned
-// process — so, same as tests/lib/core-writer-await.test.mjs, it cannot be
-// imported and exercised here. This reads the source and asserts the shape.
-// The fix itself was verified by execution in a frozen-clock scratch child
-// (see the PR description) before this guard was written.
+// The source-shape checks pin the local-date call inside the generated child
+// snippet. The integration check below imports the real module through the
+// test alias loader and exercises that child against a separate data root.
 //
 // Run (from web/, as `npm test` does):  node --test tests/lib/pipeline-local-today.test.mjs
 // From the repo root:                   node --test web/tests/lib/pipeline-local-today.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import fs, { readFileSync } from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import path, { dirname, join } from "node:path";
+import "../helpers/web-ts-alias-loader.mjs";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "lib", "core", "pipeline.ts");
 const src = readFileSync(SRC, "utf8");
@@ -85,11 +83,76 @@ test("localToday is imported into the spawned child from lib/local-today.mjs", (
   );
 });
 
-test("localTodayUrl is built the same way scanUrl is: an absolute file:// URL under careerOpsRoot()", () => {
+test("localTodayUrl is built beside the scan script in the code root", () => {
   assert.match(
     src,
-    /const localTodayUrl = pathToFileURL\(path\.join\(careerOpsRoot\(\),\s*["']lib["'],\s*["']local-today\.mjs["']\)\)\.href;/,
-    `${SRC}: localTodayUrl must resolve lib/local-today.mjs under careerOpsRoot(), so the import ` +
-      `works regardless of the checkout the web dashboard is pointed at.`,
+    /const localTodayUrl = pathToFileURL\(path\.join\(path\.dirname\(scanScript\),\s*["']lib["'],\s*["']local-today\.mjs["']\)\)\.href;/,
+    `${SRC}: localTodayUrl must resolve lib/local-today.mjs beside scan.mjs in the code root, ` +
+      `not under the independently configured data root.`,
   );
+});
+
+test("a separate data root receives both writes and writer failures use non-2xx responses", async t => {
+  const dataRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pipeline-data-root-")));
+  const codeRoot = path.resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const missingCodeRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pipeline-route-code-")));
+  const brokenCodeRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pipeline-child-code-")));
+  fs.writeFileSync(
+    path.join(brokenCodeRoot, "scan.mjs"),
+    "export async function appendToPipeline() {}\nexport async function appendToScanHistory() {}\n",
+  );
+  const saved = {
+    CAREER_OPS_ROOT: process.env.CAREER_OPS_ROOT,
+    CAREER_OPS_CODE_ROOT: process.env.CAREER_OPS_CODE_ROOT,
+  };
+  process.env.CAREER_OPS_ROOT = dataRoot;
+  process.env.CAREER_OPS_CODE_ROOT = codeRoot;
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+    fs.rmSync(missingCodeRoot, { recursive: true, force: true });
+    fs.rmSync(brokenCodeRoot, { recursive: true, force: true });
+  });
+
+  const { addOffersToPipeline } = await import("@/lib/core/pipeline");
+  const result = await addOffersToPipeline([{
+    url: "https://jobs.example.com/platform-engineer",
+    company: "Exemplo",
+    title: "Platform Engineer",
+    location: "Lisboa, Portugal",
+    source: "teste",
+  }]);
+
+  assert.equal(result.added, 1);
+  assert.equal(result.error, undefined);
+  assert.match(fs.readFileSync(path.join(dataRoot, "data", "pipeline.md"), "utf8"), /https:\/\/jobs\.example\.com\/platform-engineer/);
+  assert.match(fs.readFileSync(path.join(dataRoot, "data", "scan-history.tsv"), "utf8"), /https:\/\/jobs\.example\.com\/platform-engineer/);
+
+  process.env.CAREER_OPS_CODE_ROOT = missingCodeRoot;
+  const { POST } = await import("@/app/api/explore/add/route");
+  const response = await POST(new Request("http://localhost/api/explore/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ offers: [{ url: "https://jobs.example.com/unwritable" }] }),
+  }));
+  const body = await response.json();
+
+  assert.equal(response.status, 500);
+  assert.equal(body.added, 0);
+  assert.match(body.error, /não inclui o módulo/i);
+
+  process.env.CAREER_OPS_CODE_ROOT = brokenCodeRoot;
+  const childFailure = await POST(new Request("http://localhost/api/explore/add", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ offers: [{ url: "https://jobs.example.com/child-failure" }] }),
+  }));
+  const childFailureBody = await childFailure.json();
+
+  assert.equal(childFailure.status, 500);
+  assert.equal(childFailureBody.added, 0);
+  assert.match(childFailureBody.error, /local-today|ERR_MODULE_NOT_FOUND|Cannot find module/i);
 });

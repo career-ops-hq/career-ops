@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, ArrowLeft, ClipboardCheck } from "lucide-react";
+import { Loader2, Wand2, Asterisk, Paperclip, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, ArrowLeft, ClipboardCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
@@ -18,11 +18,7 @@ const STYLE = `
 .co-flash{animation:co-flash 1.15s ease both;border-radius:.6rem}
 @keyframes co-shim{0%{background-position:-200% 0}100%{background-position:200% 0}}
 .co-skel{background:linear-gradient(90deg, color-mix(in srgb,var(--fg) 5%, transparent) 25%, color-mix(in srgb,var(--fg) 12%, transparent) 37%, color-mix(in srgb,var(--fg) 5%, transparent) 63%);background-size:200% 100%;animation:co-shim 1.6s linear infinite;border-radius:.5rem}
-@keyframes co-orb{0%,100%{transform:scale(1);opacity:.55}50%{transform:scale(1.35);opacity:.9}}
-.co-orb{animation:co-orb 2.4s ease-in-out infinite}
-@keyframes co-spin{to{transform:rotate(360deg)}}
-.co-ring{animation:co-spin 3s linear infinite}
-@media (prefers-reduced-motion: reduce){.co-rise,.co-flash,.co-skel,.co-orb,.co-ring{animation:none}}
+@media (prefers-reduced-motion: reduce){.co-rise,.co-flash,.co-skel{animation:none}}
 `;
 
 // The form-proxy UI: the real employer form is opened headlessly on the user's
@@ -36,19 +32,19 @@ export function ApplyView() {
   if (a.status === "idle" || a.status === "error") {
     return (
       <div>
-        <div className="flex max-w-2xl items-center gap-2 rounded-full border border-border bg-surface/70 py-1.5 pl-4 pr-1.5 shadow-sm transition focus-within:border-brand/50 focus-within:shadow-md">
+        <div className="flex max-w-2xl flex-col gap-2 rounded-2xl border border-border bg-surface/70 p-2 shadow-sm transition focus-within:border-brand/50 sm:flex-row sm:items-center sm:rounded-full sm:py-1.5 sm:pl-4 sm:pr-1.5">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && a.open(input.trim())}
-            placeholder="Paste an application form URL (Ashby, Lever, Greenhouse…)"
-            className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-faint"
+            placeholder="Cola o endereço do formulário (Ashby, Lever, Greenhouse…)"
+            className="min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-faint sm:px-0"
           />
           <button
             onClick={() => a.open(input.trim())}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 sm:py-1.5"
           >
-            <Wand2 className="size-4" /> Read form
+            <Wand2 className="size-4" /> Ler formulário
           </button>
         </div>
         {a.error && (
@@ -59,7 +55,7 @@ export function ApplyView() {
                 <p className="text-sm text-amber-800 dark:text-amber-300">{a.error}</p>
                 {a.url && /^https?:\/\//.test(a.url) && (
                   <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
-                    Open the form directly <ExternalLink className="size-3" />
+                    Abrir o formulário diretamente <ExternalLink className="size-3" />
                   </a>
                 )}
               </div>
@@ -90,9 +86,9 @@ export function ApplyView() {
 
       {!busy && (
         <div className="co-rise mb-4 flex items-baseline justify-between gap-3">
-          <h2 className="font-display text-xl text-landing drop-shadow-sm">{a.title || "Application"}</h2>
+          <h2 className="font-display text-xl text-landing">{a.title || "Candidatura"}</h2>
           <button onClick={a.reset} className="inline-flex items-center gap-1 text-xs text-faint transition-colors hover:text-foreground">
-            <RotateCcw className="size-3" /> new
+            <RotateCcw className="size-3" /> nova
           </button>
         </div>
       )}
@@ -100,7 +96,7 @@ export function ApplyView() {
       {/* opening: big magic hero + skeleton fields (no layout jump when real ones arrive) */}
       {opening && (
         <>
-          <ProcessingHero title="Reading your form…" subtitle="Opening the real application on your machine and reading every field." />
+          <ProcessingHero title="A ler o formulário…" subtitle="A abrir a página da empresa neste computador e a identificar os campos." />
           <FieldSkeleton />
         </>
       )}
@@ -119,13 +115,10 @@ export function ApplyView() {
           <ApplyIssues issues={a.issues} />
           {/* drafting banner while the planner writes the answers */}
           {prefilling && (
-            <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/60 px-4 py-3 backdrop-blur-sm">
-              <span className="relative grid size-8 shrink-0 place-items-center">
-                <span className="co-orb absolute inset-0 rounded-full bg-brand/40 blur-[6px]" />
-                <Sparkles className="size-4 text-brand" />
-              </span>
+            <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/60 px-4 py-3">
+              <PenLine className="size-4 shrink-0 text-brand" />
               <div className="min-w-0">
-                <div className="text-sm font-medium text-foreground">Drafting your answers…</div>
+                <div className="text-sm font-medium text-foreground">A preparar as respostas…</div>
                 <RotatingStatus />
               </div>
               <Loader2 className="ml-auto size-4 shrink-0 animate-spin text-brand" />
@@ -138,18 +131,18 @@ export function ApplyView() {
               disabled={prefilling || filling}
               className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 text-sm font-medium text-brand transition-colors hover:bg-brand/15 disabled:opacity-50"
             >
-              {prefilling ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {prefilling ? "Drafting from your CV…" : "Pre-fill from my CV"}
+              {prefilling ? <Loader2 className="size-4 animate-spin" /> : <FileCheck2 className="size-4" />}
+              {prefilling ? "A usar o CV…" : "Preencher a partir do CV"}
             </button>
-            <span className="text-xs text-muted">…or ask the corner assistant to write/revise any answer.</span>
+            <span className="text-xs text-muted">Também podes pedir ao assistente para rever uma resposta.</span>
           </div>
 
           {(prefilling || a.prefillLog.length > 0) && (
             <details className="mb-4 rounded-lg border border-border bg-surface/60 backdrop-blur-sm" open={false}>
               <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted">
-                <Terminal className="size-3.5" /> Pre-fill diagnostics
+                <Terminal className="size-3.5" /> Registo do preenchimento
                 {prefilling && <Loader2 className="size-3 animate-spin text-brand" />}
-                <span className="ml-auto text-faint">{a.prefillLog.length} steps</span>
+                <span className="ml-auto text-faint">{a.prefillLog.length} passos</span>
               </summary>
               <div className="max-h-52 overflow-y-auto border-t border-border px-3 py-2">
                 <ol className="space-y-0.5 font-mono text-[11px] leading-relaxed text-muted">
@@ -166,7 +159,7 @@ export function ApplyView() {
 
           {/* the questions — float on the blurred form image, cascade in, each
               flashes brand-orange the instant its drafted answer lands */}
-          <div className="space-y-1 rounded-2xl border border-border/70 bg-surface/80 p-2 shadow-2xl shadow-black/10 backdrop-blur-md sm:p-3">
+          <div className="space-y-1 rounded-2xl border border-border/70 bg-surface/80 p-2 sm:p-3">
             {a.fields.map((f, i) => (
               <div key={f.id} className="co-rise rounded-xl px-3 py-2.5" style={{ animationDelay: `${Math.min(i * 45, 700)}ms` }}>
                 <FieldRow
@@ -188,18 +181,18 @@ export function ApplyView() {
               className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-lg shadow-brand/25 transition-all hover:bg-brand-200 hover:shadow-brand/40 disabled:opacity-50"
             >
               {filling ? <Loader2 className="size-4 animate-spin" /> : <ArrowUpRight className="size-4" />}
-              {filling ? "Filling the real form…" : "Fill the real form & review"}
+              {filling ? "A preencher o formulário…" : "Preencher o formulário e rever"}
             </button>
             <button
               onClick={a.agentFill}
               disabled={filling || prefilling}
-              title="Let the AI drive the real form and fill it field-by-field (for tricky / multi-step forms). It never submits."
+              title="Permitir que o agente preencha os campos do formulário; o envio continua a ser manual"
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
             >
-              <MousePointerClick className="size-4" /> Let the AI fill it
+              <MousePointerClick className="size-4" /> Preencher com o agente
             </button>
             <p className="inline-flex items-center gap-1.5 text-xs text-muted">
-              <ShieldCheck className="size-3.5 text-emerald-500" /> Never submits — you click Submit yourself.
+              <ShieldCheck className="size-3.5 text-emerald-500" /> O envio final é sempre feito por ti.
             </p>
           </div>
 
@@ -208,7 +201,7 @@ export function ApplyView() {
 
           {(filling || done) && a.steps.length > 0 && (
             <div className="co-rise mt-6">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">Behind the scenes</div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">Campos preenchidos</div>
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {a.steps.map((s, i) => (
                   <figure key={i} className="shrink-0">
@@ -218,7 +211,7 @@ export function ApplyView() {
                     ) : (
                       <div className="flex h-24 w-36 items-center justify-center rounded-md border border-dashed border-border text-faint">…</div>
                     )}
-                    <figcaption className={cn("mt-1 w-36 truncate text-[10px]", s.ok ? "text-faint" : "text-amber-500")}>{s.label || "field"}</figcaption>
+                    <figcaption className={cn("mt-1 w-36 truncate text-[10px]", s.ok ? "text-faint" : "text-amber-500")}>{s.label || "campo"}</figcaption>
                   </figure>
                 ))}
               </div>
@@ -228,8 +221,8 @@ export function ApplyView() {
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>
-                <span className="font-medium text-emerald-700 dark:text-emerald-400">The real form is now in front, pre-filled.</span>{" "}
-                <span className="text-muted">Review it and click Submit yourself — career-ops never submits for you.</span>
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">O formulário original está preenchido e aberto.</span>{" "}
+                <span className="text-muted">Revê as respostas e faz o envio.</span>
               </div>
             </div>
           )}
@@ -297,7 +290,7 @@ function ApplyExitBar() {
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         if (!onPage.current) return; // moved on already; the row is unchanged
-        setError(d.error || "Couldn't mark it applied — the tracker row is unchanged.");
+        setError(d.error || "Não foi possível marcar a candidatura como enviada. O registo não foi alterado.");
         setMarking(false);
         return;
       }
@@ -307,7 +300,7 @@ function ApplyExitBar() {
       // The route writes the tracker before it answers, so a connection that
       // drops on the way back leaves the write's fate genuinely unknown —
       // claiming the row is untouched here would be a guess.
-      setError("Couldn't confirm the update — check the row in your tracker before relying on it.");
+      setError("Não foi possível confirmar a atualização. Verifica o estado da candidatura antes de continuares.");
       setMarking(false);
     }
   }
@@ -315,20 +308,20 @@ function ApplyExitBar() {
   if (confirming) {
     return (
       <div className="co-rise mt-8 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 backdrop-blur-sm">
-        <p className="text-sm font-medium text-foreground">Leave this application?</p>
-        <p className="mt-1 text-xs text-muted">Your drafted answers live only on this page. Going back discards them and closes the form.</p>
+        <p className="text-sm font-medium text-foreground">Sair desta candidatura?</p>
+        <p className="mt-1 text-xs text-muted">As respostas ainda não foram guardadas. Ao voltar atrás, serão apagadas e o formulário será fechado.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             onClick={leave}
             className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600 max-sm:min-h-[44px]"
           >
-            <ArrowLeft className="size-3.5" /> Leave and discard
+            <ArrowLeft className="size-3.5" /> Sair e apagar
           </button>
           <button
             onClick={() => setConfirming(false)}
             className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]"
           >
-            Stay here
+            Ficar aqui
           </button>
         </div>
       </div>
@@ -342,20 +335,20 @@ function ApplyExitBar() {
           onClick={() => (needsLeaveConfirmation({ status: a.status, answers: a.answers }) ? setConfirming(true) : leave())}
           className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
         >
-          <ArrowLeft className="size-4" /> Back
+          <ArrowLeft className="size-4" /> Voltar
         </button>
         {a.n && (
           <button
             onClick={markApplied}
             disabled={marking}
-            title={`Set tracker row #${a.n} to Applied and go back`}
+            title={`Marcar a candidatura #${a.n} como enviada e voltar`}
             className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400 max-sm:min-h-[44px]"
           >
             {marking ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}
-            {marking ? "Updating your tracker…" : "Mark applied"}
+            {marking ? "A atualizar o registo…" : "Marcar como enviada"}
           </button>
         )}
-        {a.n && <span className="text-xs text-muted">Click this once you have submitted the real form yourself.</span>}
+        {a.n && <span className="text-xs text-muted">Usa esta opção depois de enviares o formulário da empresa.</span>}
       </div>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
@@ -363,19 +356,17 @@ function ApplyExitBar() {
 }
 
 // ── Watch the agent reach the form live (it navigates, never submits) ───────
-const DRIVE_VERB: Record<string, string> = { click: "Clicked", type: "Typed into", select: "Selected", scroll: "Scrolled", "parse-error": "Thinking…", stuck: "Stuck", reached_form: "Reached the form" };
+const DRIVE_VERB: Record<string, string> = { click: "Clicou em", type: "Preencheu", select: "Selecionou", scroll: "Deslocou", "parse-error": "A processar…", stuck: "Sem progresso", reached_form: "Chegou ao formulário" };
 function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean }) {
   const last = steps[steps.length - 1];
   return (
     <div className="co-rise">
       <div className="flex flex-col items-center gap-3 py-7 text-center">
-        <span className="relative grid size-14 place-items-center">
-          <span className="co-orb absolute inset-0 rounded-full bg-brand/30 blur-lg" />
-          <span className="co-ring absolute inset-0 rounded-full border-2 border-brand/30 border-t-brand" />
+        <span className="grid size-14 place-items-center rounded-full border border-brand/30 bg-brand-soft">
           <MousePointerClick className="size-6 text-brand" />
         </span>
-        <div className="font-display text-2xl text-landing">{filling ? "AI is filling the form…" : "Reaching your form…"}</div>
-        <p className="max-w-sm text-sm text-muted">{filling ? "The AI is driving the real form field-by-field on your machine — it never submits; you review and submit." : "The AI is navigating the real application on your machine to reach the form — it never submits."}</p>
+        <div className="font-display text-2xl text-landing">{filling ? "O agente está a preencher o formulário…" : "A abrir o formulário…"}</div>
+        <p className="max-w-sm text-sm text-muted">{filling ? "O agente preenche os campos neste computador. Revês tudo antes do envio manual." : "O agente está a navegar até ao formulário da empresa. Não fará o envio."}</p>
       </div>
       {last?.thumb ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -409,7 +400,7 @@ function ApplyIssues({ issues }: { issues: ApplyIssue[] }) {
       {warns.length > 0 && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 backdrop-blur-sm">
           <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="size-4" /> A few things to check
+            <AlertTriangle className="size-4" /> Pontos a confirmar
           </div>
           <ul className="space-y-1 text-xs text-amber-800/90 dark:text-amber-300/90">
             {warns.map((i, k) => (
@@ -432,9 +423,9 @@ function ApplyIssues({ issues }: { issues: ApplyIssue[] }) {
 // ── Journey rail: Reading → Drafting → Review ───────────────────────────────
 function PhaseRail({ phase }: { phase: number }) {
   const steps = [
-    { label: "Reading form", icon: ScanLine },
-    { label: "Drafting answers", icon: PenLine },
-    { label: "Review & submit", icon: CheckCircle2 },
+    { label: "Ler formulário", icon: ScanLine },
+    { label: "Preparar respostas", icon: PenLine },
+    { label: "Rever e enviar", icon: CheckCircle2 },
   ];
   return (
     <div className="mb-6 flex items-center gap-2.5">
@@ -472,11 +463,11 @@ function PhaseRail({ phase }: { phase: number }) {
 // Honest, calming rotation of what the planner is actually doing, so the (~1-2min)
 // draft doesn't feel stalled. Crossfades every ~2.8s.
 const DRAFT_MSGS = [
-  "Reading your CV…",
-  "Reading the role and company…",
-  "Matching your experience to each question…",
-  "Writing every answer in your own voice…",
-  "Flagging anything that needs your call…",
+  "A ler o teu CV…",
+  "A analisar a função e a empresa…",
+  "A relacionar a tua experiência com cada pergunta…",
+  "A preparar as respostas…",
+  "A assinalar o que precisa da tua confirmação…",
 ];
 function RotatingStatus() {
   const [i, setI] = useState(0);
@@ -494,10 +485,8 @@ function RotatingStatus() {
 function ProcessingHero({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="co-rise flex flex-col items-center gap-3 py-14 text-center">
-      <span className="relative grid size-16 place-items-center">
-        <span className="co-orb absolute inset-0 rounded-full bg-brand/30 blur-lg" />
-        <span className="co-ring absolute inset-0 rounded-full border-2 border-brand/30 border-t-brand" />
-        <Sparkles className="size-7 text-brand" />
+      <span className="grid size-16 place-items-center rounded-full border border-brand/30 bg-brand-soft">
+        <Loader2 className="size-7 animate-spin text-brand" />
       </span>
       <div className="font-display text-3xl text-landing">{title}</div>
       <p className="max-w-sm text-sm text-muted">{subtitle}</p>
@@ -557,17 +546,17 @@ function FieldRow({
   return (
     <div className={flash ? "co-flash" : ""} style={flash ? { animationDelay: `${Math.min(index * 70, 900)}ms` } : undefined}>
       <label className="mb-1.5 flex items-center gap-1 text-sm font-medium">
-        {f.label || <span className="text-faint">Untitled field</span>}
+        {f.label || <span className="text-faint">Campo sem título</span>}
         {f.required && <Asterisk className="size-3 text-brand" />}
-        {needs && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
+        {needs && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">confirmar</span>}
       </label>
       {writing ? (
         <div className={cn("co-skel", f.type === "textarea" ? "h-[68px]" : "h-9")} />
       ) : f.type === "textarea" ? (
-        <textarea rows={3} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={cn(base, "resize-none")} />
+        <textarea rows={3} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "Preenche este campo." : "…"} className={cn(base, "resize-none")} />
       ) : (f.type === "select" || f.type === "radio") && f.options && f.options.length > 0 ? (
         <select value={value} onChange={(e) => onChange(e.target.value)} className={base}>
-          <option value="">Choose…</option>
+          <option value="">Escolher…</option>
           {f.options.map((o, i) => (
             <option key={i} value={o}>
               {o}
@@ -576,20 +565,20 @@ function FieldRow({
         </select>
       ) : f.type === "checkbox" ? (
         <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Yes"}
+          <input type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Sim"}
         </label>
       ) : f.type === "file" ? (
         /resume|résumé|\bcv\b|curriculum|currículum|lebenslauf/i.test(f.label || "") ? (
           <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400">
-            <FileCheck2 className="size-4 shrink-0" /> Your tailored CV (PDF) will be attached automatically — you can swap it on the real form.
+            <FileCheck2 className="size-4 shrink-0" /> O CV adaptado em PDF será anexado. Podes substituí-lo no formulário original.
           </div>
         ) : (
           <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
-            <Paperclip className="size-4 shrink-0" /> Attach this file yourself on the real form at the handoff.
+            <Paperclip className="size-4 shrink-0" /> Anexa este ficheiro no formulário original.
           </div>
         )
       ) : (
-        <input type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={base} />
+        <input type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "Preenche este campo." : "…"} className={base} />
       )}
     </div>
   );
