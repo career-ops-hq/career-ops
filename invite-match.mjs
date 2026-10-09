@@ -41,6 +41,7 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './tracker-utils.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Sibling scripts live next to this file in the *code* checkout, which is a
@@ -143,27 +144,12 @@ function normalizeStatusKey(status) {
     .toLowerCase();
 }
 
-// True legal-entity suffixes, stripped repeatedly (chained) since a name can
-// legitimately carry more than one ("Acme Holdings Inc." → "acme holdings").
-// These are unambiguous enough that removing several in a row is safe.
-// Exported so merge-tracker.mjs can share the vocabulary rather than keep a
-// second copy of it: a private list there is exactly the identity drift #2445
-// set out to remove.
-export const LEGAL_SUFFIXES = [
-  'incorporated', 'inc', 'corporation', 'corp', 'company', 'co',
-  'limited', 'ltd', 'llc', 'llp', 'lp', 'plc',
-];
-
-// Generic business-descriptor words that vary between how a recruiter signs
-// an email and how the tracker recorded the company, but are common enough
-// as substantive parts of a name (e.g. "Data Solutions" vs "Data Corp") that
-// chaining their removal risks collapsing two different companies to the
-// same key. Stripped at most once, and only after legal suffixes are gone —
-// never chained with each other or with LEGAL_SUFFIXES.
-export const GENERIC_DESCRIPTORS = [
-  'group', 'holdings', 'technologies', 'technology', 'solutions',
-  'canada', 'international',
-];
+// Legal-entity suffixes and generic business descriptors live in
+// tracker-utils.mjs next to companiesMatchIgnoringCorporateForm(), which shares
+// the vocabulary. Re-exported here so `import { LEGAL_SUFFIXES } from
+// './invite-match.mjs'` keeps working for existing callers while there is a
+// single definition. normalizeCompanyName() below chain-strips LEGAL_SUFFIXES.
+export { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS };
 
 /**
  * Normalize a company name for matching: lowercase, strip punctuation and
