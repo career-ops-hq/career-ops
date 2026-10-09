@@ -102,6 +102,18 @@ test('main() calls the recorder, and does not gate it behind an opt-in flag', ()
   assert.doesNotMatch(src, /includes\(['"]--record['"]\)/, 'recording must not be gated behind an opt-in flag');
 });
 
+test('main() hands the verdict code to the recorder, from both rungs', () => {
+  // The planner skips an `insufficient_content` verdict, and that filter does
+  // nothing if the CLI drops `code` before the verdict gets there. Same
+  // source-level check as the call-site test above, for the same reason:
+  // driving main() needs a live fetch or a browser launch.
+  const src = readFileSync(join(ROOT, 'check-liveness.mjs'), 'utf-8');
+  const body = src.slice(src.indexOf('async function main('));
+  assert.match(body, /verdicts\.push\(\{[^}]*\bcode\b[^}]*\}\)/, 'the pushed verdict drops its code');
+  assert.match(body, /\(\{ result, reason, code \} = api\)/, 'the API rung drops the verdict code');
+  assert.match(body, /\(\{ result, reason, code \} = await checkUrlLivenessWithFallback/, 'the browser rung drops the verdict code');
+});
+
 test('--help documents the opt-out', () => {
   const out = spawnSync(process.execPath, [join(ROOT, 'check-liveness.mjs'), '--help'], {
     encoding: 'utf-8',
@@ -127,6 +139,25 @@ test('only an expired verdict is planned — never uncertain, never active', () 
     { url: DEAD, result: 'expired' },
     { url: 'https://boards.example.com/acme/jobs/2', result: 'uncertain' },
     { url: 'https://boards.example.com/acme/jobs/3', result: 'active' },
+  ]);
+  assert.deepEqual(planned.map((r) => r.url), [DEAD]);
+});
+
+test('an expired verdict that is only an unrendered page is not planned', () => {
+  // `insufficient_content` is a page under 300 characters with no closure
+  // notice and no apply control, which is mostly a page that had not rendered
+  // yet. AGENTS.md calls a loading placeholder unconfirmed, not closed, so it
+  // is no more a death certificate than `uncertain` is. A dead posting that
+  // reads this way gets no row, exactly as it did before this PR.
+  const live = 'https://boards.example.com/acme/jobs/2';
+  const rows = [
+    HEADER,
+    `${DEAD}\t2026-09-01\tgreenhouse\tStaff Engineer\tAcme\tadded\tRemote`,
+    `${live}\t2026-09-01\tgreenhouse\tStaff SRE\tAcme\tadded\tRemote`,
+  ];
+  const planned = plan(rows, [
+    { url: DEAD, result: 'expired', code: 'http_gone' },
+    { url: live, result: 'expired', code: 'insufficient_content' },
   ]);
   assert.deepEqual(planned.map((r) => r.url), [DEAD]);
 });

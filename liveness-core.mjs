@@ -281,11 +281,17 @@ const EXPIRED_HISTORY_STATUS = /expired/i;
  * Plan the `skipped_expired` scan-history rows for a batch of liveness verdicts.
  *
  * The pure half of recording a liveness sweep (#3891). Kept here rather than in
- * the CLI so its three invariants are testable without a browser:
+ * the CLI so its four invariants are testable without a browser:
  *
  *   - **Only `expired`.** `uncertain` is a timeout or a bot wall, never a death
  *     certificate; recording it would bury a live posting behind a network
  *     hiccup, a strictly worse failure than the one this closes.
+ *   - **Not an unrendered page.** The browser rung reads a page under 300
+ *     characters with no closure notice and no apply control as
+ *     `insufficient_content`, which is mostly a page that had not rendered yet.
+ *     AGENTS.md calls a loading placeholder unconfirmed, not closed, and
+ *     batch-evaluate-gemini.mjs skips the same code. A dead posting that reads
+ *     this way gets no row, as it did before this recorder existed.
  *   - **Only URLs the history already knows.** A liveness sweep is not a
  *     discovery channel: a URL scan-history never saw has no row to retire, and
  *     inventing one would put a posting nothing surfaced into the dedup set.
@@ -300,7 +306,7 @@ const EXPIRED_HISTORY_STATUS = /expired/i;
  * free of scan.mjs — liveness-browser.mjs imports it.
  *
  * @param {string} scanHistoryText - Raw data/scan-history.tsv contents ('' when absent).
- * @param {{url: string, result: string}[]} verdicts - One entry per checked URL.
+ * @param {{url: string, result: string, code?: string}[]} verdicts - One entry per checked URL.
  * @param {(url: string) => string} [normalizeUrl] - Dedup-key normalizer.
  * @returns {{url: string, source: string, title: string, company: string, location: string, fingerprint: string}[]}
  *   Offer-shaped rows for `appendToScanHistory(rows, date, 'skipped_expired')`.
@@ -331,7 +337,7 @@ export function planExpiredHistoryRows(scanHistoryText = '', verdicts = [], norm
   const rows = [];
   const claimed = new Set();
   for (const verdict of verdicts ?? []) {
-    if (verdict?.result !== 'expired') continue;
+    if (verdict?.result !== 'expired' || verdict.code === 'insufficient_content') continue;
     const candidate = typeof verdict.url === 'string' ? verdict.url.trim() : '';
     if (!candidate) continue;
     const known = knownByKey.get(normalizeUrl(candidate));
