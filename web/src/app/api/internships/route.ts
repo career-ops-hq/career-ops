@@ -1,149 +1,288 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { execFileSync } from "node:child_process";
+import { careerOpsRoot, readApplications, rootScript, type Application } from "@/lib/career-ops";
 
 export const dynamic = "force-dynamic";
 
-const INTERNSHIPS_FILE = () => path.join(careerOpsRoot(), "data", "internships.json");
-
+/**
+ * The Internship type is a VIEW over Application rows in data/applications.md.
+ * Extended fields (track, source, etc.) are encoded in the Notes column as
+ * pipe-delimited tags: "track:DS | source:simplify-github | Posted: 3d ago"
+ */
 export type Internship = {
-  id: string;
+  id: string;        // maps to Application.n
   company: string;
   role: string;
   location: string;
-  status: "wishlist" | "applied" | "interviewing" | "offered" | "rejected" | "accepted" | "closed" | "not_posted" | "unknown";
-  dateAdded: string;
-  dateApplied?: string;
-  deadline?: string;
-  url?: string;
+  status: string;    // canonical states from states.yml
+  dateAdded: string; // Application.date
+  url?: string;      // Application.applyLink
   notes: string;
-  resumeFile?: string;
   score?: string;
-  // Extended fields from CSV tracker
-  track?: string; // DS, DA, BIE, SWE
-  term?: string; // e.g. "Summer 2027"
-  opened?: string; // date posting opened
-  dateConfidence?: string; // Confirmed, Reported, Unknown
-  gradEligibility?: string;
-  workAuth?: string;
-  requirements?: string;
-  priority?: string;
+  // Extended fields parsed from Notes tags
+  track?: string;
   source?: string;
-  lastVerified?: string;
-  statusLog?: { date: string; from: string; to: string; note?: string }[];
+  requirements?: string;
+  deadline?: string;
+  workAuth?: string;
+  gradEligibility?: string;
 };
 
-const VALID_STATUSES = new Set<Internship["status"]>(["wishlist", "applied", "interviewing", "offered", "rejected", "accepted", "closed", "not_posted", "unknown"]);
+/** Status mapping: internship UI statuses → canonical tracker states */
+const STATUS_TO_CANONICAL: Record<string, string> = {
+  wishlist: "Evaluated",
+  applied: "Applied",
+  interviewing: "Interview",
+  offered: "Offer",
+  rejected: "Rejected",
+  accepted: "Hired",
+  closed: "Discarded",
+  not_posted: "SKIP",
+  unknown: "Evaluated",
+};
 
-const WRITABLE_FIELDS = new Set([
-  "company", "role", "location", "status", "dateApplied",
-  "deadline", "url", "notes", "resumeFile", "score",
-  "track", "term", "opened", "dateConfidence", "gradEligibility",
-  "workAuth", "requirements", "priority", "source", "lastVerified",
-]);
+/** Reverse mapping: canonical tracker states → internship UI statuses */
+const CANONICAL_TO_STATUS: Record<string, string> = {
+  Evaluated: "wishlist",
+  Applied: "applied",
+  Responded: "applied",
+  Interview: "interviewing",
+  Offer: "offered",
+  Hired: "accepted",
+  Rejected: "rejected",
+  Discarded: "closed",
+  SKIP: "not_posted",
+};
 
-function readInternships(): { data: Internship[]; error?: string } {
-  const file = INTERNSHIPS_FILE();
-  try {
-    fs.accessSync(file);
-  } catch {
-    return { data: [] }; // file doesn't exist yet — valid empty state
+/** Parse extended fields from the Notes column. Tags are "key:value" separated by " | ". */
+function parseNoteTags(notes: string): Record<string, string> {
+  const tags: Record<string, string> = {};
+  const parts = notes.split(" | ");
+  const plainParts: string[] = [];
+  for (const part of parts) {
+    const m = part.match(/^(\w+):(.+)$/);
+    if (m) {
+      tags[m[1]] = m[2].trim();
+    } else {
+      plainParts.push(part);
+    }
   }
-  try {
-    const raw = fs.readFileSync(file, "utf8");
-    return { data: JSON.parse(raw) };
-  } catch {
-    return { data: [], error: "corrupt" };
-  }
+  tags._plain = plainParts.join(" | ");
+  return tags;
 }
 
-function writeInternships(data: Internship[]): void {
-  const dir = path.dirname(INTERNSHIPS_FILE());
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(INTERNSHIPS_FILE(), JSON.stringify(data, null, 2));
-}
-
-export async function GET() {
-  const { data, error } = readInternships();
-  if (error) return NextResponse.json({ error: "data file is corrupt, please fix or delete data/internships.json" }, { status: 500 });
-  return NextResponse.json(data);
-}
-
-export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { data: internships, error } = readInternships();
-  if (error) return NextResponse.json({ error: "data file is corrupt" }, { status: 500 });
-
-  const status = body.status ?? "wishlist";
-  if (!VALID_STATUSES.has(status)) {
-    return NextResponse.json({ error: `invalid status: ${status}` }, { status: 400 });
+/** Encode extended fields back into Notes tags. */
+function encodeNoteTags(fields: Record<string, string | undefined>, plainNotes: string): string {
+  const parts: string[] = [];
+  for (const [key, val] of Object.entries(fields)) {
+    if (val) parts.push(`${key}:${val}`);
   }
+  if (plainNotes) parts.push(plainNotes);
+  return parts.join(" | ");
+}
 
-  const newEntry: Internship = {
-    id: crypto.randomUUID(),
-    company: body.company ?? "",
-    role: body.role ?? "",
-    location: body.location ?? "",
-    status,
-    dateAdded: body.dateAdded ?? new Date().toISOString().slice(0, 10),
-    dateApplied: body.dateApplied,
-    deadline: body.deadline,
-    url: body.url,
-    notes: body.notes ?? "",
-    resumeFile: body.resumeFile,
-    score: body.score,
-    track: body.track,
-    term: body.term,
-    opened: body.opened,
-    dateConfidence: body.dateConfidence,
-    gradEligibility: body.gradEligibility,
-    workAuth: body.workAuth,
-    requirements: body.requirements,
-    priority: body.priority,
-    source: body.source,
-    lastVerified: body.lastVerified,
-    statusLog: body.statusLog,
+/** Convert an Application row to an Internship view. */
+export function appToInternship(app: Application): Internship {
+  const tags = parseNoteTags(app.notes);
+  return {
+    id: app.n,
+    company: app.company,
+    role: app.role,
+    location: app.location,
+    status: CANONICAL_TO_STATUS[app.status] ?? "unknown",
+    dateAdded: app.date,
+    url: app.applyLink || undefined,
+    notes: tags._plain || "",
+    score: app.score || undefined,
+    track: tags.track,
+    source: tags.source,
+    requirements: tags.requirements,
+    deadline: tags.deadline,
+    workAuth: tags.workAuth,
+    gradEligibility: tags.gradEligibility,
   };
-
-  internships.push(newEntry);
-  writeInternships(internships);
-  return NextResponse.json(newEntry, { status: 201 });
 }
 
+// GET: return all internships (optionally filtered by source)
+export async function GET(req: NextRequest) {
+  const apps = readApplications();
+  const { searchParams } = new URL(req.url);
+  const sourceFilter = searchParams.get("source");
+
+  let internships = apps.map(appToInternship);
+  if (sourceFilter) {
+    internships = internships.filter((i) => i.source === sourceFilter);
+  }
+  return NextResponse.json(internships);
+}
+
+// POST: add a new internship by writing a TSV and running merge-tracker
+export async function POST(req: NextRequest) {
+  let body: Record<string, string | undefined>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad json" }, { status: 400 });
+  }
+
+  const company = body.company ?? "";
+  const role = body.role ?? "";
+  if (!company || !role) {
+    return NextResponse.json({ error: "company and role required" }, { status: 400 });
+  }
+
+  // Dedup: check if company+role already exists
+  const apps = readApplications();
+  const normC = company.toLowerCase();
+  const normR = role.toLowerCase();
+  const existing = apps.find(
+    (a) => a.company.toLowerCase() === normC && a.role.toLowerCase() === normR,
+  );
+  if (existing) {
+    return NextResponse.json(appToInternship(existing), { status: 200 });
+  }
+
+  const status = STATUS_TO_CANONICAL[body.status ?? "wishlist"] ?? "Evaluated";
+  const date = body.dateAdded ?? new Date().toISOString().slice(0, 10);
+
+  // Encode extended fields in notes
+  const noteTags = encodeNoteTags(
+    {
+      track: body.track,
+      source: body.source,
+      requirements: body.requirements,
+      deadline: body.deadline,
+      workAuth: body.workAuth,
+      gradEligibility: body.gradEligibility,
+    },
+    body.notes ?? "",
+  );
+
+  // Reserve a report number for the new row
+  const root = careerOpsRoot();
+  let num: string;
+  try {
+    num = execFileSync(process.execPath, [rootScript("reserve-report-num"), "--count", "1"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10000,
+    }).trim().split("-")[0];
+  } catch {
+    // Fallback: find max # from existing apps + 1
+    const maxN = apps.reduce((m, a) => Math.max(m, parseInt(a.n) || 0), 0);
+    num = String(maxN + 1);
+  }
+
+  // Write TSV with header
+  const tsvDir = path.join(root, "batch", "tracker-additions");
+  fs.mkdirSync(tsvDir, { recursive: true });
+  const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+  const tsvFile = path.join(tsvDir, `${num.padStart(3, "0")}-${slug}.tsv`);
+  const header = "num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl";
+  const row = [
+    num,
+    date,
+    company,
+    role,
+    status,
+    body.score ?? "N/A",
+    "❌",
+    "—",
+    noteTags,
+    body.url ?? "",
+  ].join("\t");
+  fs.writeFileSync(tsvFile, `${header}\n${row}\n`);
+
+  // Run merge-tracker
+  try {
+    execFileSync(process.execPath, [rootScript("merge-tracker")], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 30000,
+    });
+  } catch (err) {
+    // Clean up TSV on merge failure
+    try { fs.unlinkSync(tsvFile); } catch { /* ignore */ }
+    return NextResponse.json(
+      { error: `merge failed: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 },
+    );
+  }
+
+  // Read back the merged result
+  const updated = readApplications();
+  const added = updated.find(
+    (a) => a.company.toLowerCase() === normC && a.role.toLowerCase() === normR,
+  );
+  return NextResponse.json(added ? appToInternship(added) : { id: num, company, role, status: body.status ?? "wishlist" }, { status: 201 });
+}
+
+// PUT: update status via set-status.mjs
 export async function PUT(req: NextRequest) {
-  const body = await req.json();
-  if (!body.id) return NextResponse.json({ error: "id required" }, { status: 400 });
-
-  if (body.status && !VALID_STATUSES.has(body.status)) {
-    return NextResponse.json({ error: `invalid status: ${body.status}` }, { status: 400 });
+  let body: Record<string, string>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
 
-  const { data: internships, error } = readInternships();
-  if (error) return NextResponse.json({ error: "data file is corrupt" }, { status: 500 });
+  const id = body.id; // tracker row #
+  const newStatus = body.status;
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const idx = internships.findIndex((i) => i.id === body.id);
-  if (idx === -1) return NextResponse.json({ error: "not found" }, { status: 404 });
-
-  // Only allow known fields to be updated, never overwrite id or dateAdded
-  const updates: Record<string, unknown> = {};
-  for (const key of Object.keys(body)) {
-    if (WRITABLE_FIELDS.has(key)) updates[key] = body[key];
+  if (newStatus) {
+    const canonStatus = STATUS_TO_CANONICAL[newStatus] ?? newStatus;
+    try {
+      execFileSync(process.execPath, [
+        rootScript("set-status"),
+        "--row", id,
+        canonStatus,
+        "--source", "web",
+        "--json",
+      ], {
+        cwd: careerOpsRoot(),
+        encoding: "utf8",
+        timeout: 30000,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `status update failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 },
+      );
+    }
   }
 
-  internships[idx] = { ...internships[idx], ...updates };
-  writeInternships(internships);
-  return NextResponse.json(internships[idx]);
+  // Read back updated row
+  const apps = readApplications();
+  const app = apps.find((a) => a.n === id);
+  if (!app) return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json(appToInternship(app));
 }
 
+// DELETE: delegate to tracker.mjs delete
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const { data: internships, error } = readInternships();
-  if (error) return NextResponse.json({ error: "data file is corrupt" }, { status: 500 });
+  try {
+    execFileSync(process.execPath, [
+      rootScript("tracker"),
+      "delete",
+      "--num", id,
+    ], {
+      cwd: careerOpsRoot(),
+      encoding: "utf8",
+      timeout: 30000,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: `delete failed: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 },
+    );
+  }
 
-  writeInternships(internships.filter((i) => i.id !== id));
   return NextResponse.json({ ok: true });
 }

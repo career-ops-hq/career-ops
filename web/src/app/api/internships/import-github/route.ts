@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { execFileSync } from "node:child_process";
+import { careerOpsRoot, readApplications, rootScript } from "@/lib/career-ops";
 import type { Internship } from "../route";
 
 export const dynamic = "force-dynamic";
 
 const README_URL =
   "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/README.md";
-
-const INTERNSHIPS_FILE = () =>
-  path.join(careerOpsRoot(), "data", "internships.json");
 
 /** Known section headers in the README and their short labels. */
 const SECTION_HEADERS: Record<string, string> = {
@@ -236,61 +233,76 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Read existing internships for dedup
-  let existing: Internship[] = [];
-  const file = INTERNSHIPS_FILE();
-  if (fs.existsSync(file)) {
-    try {
-      existing = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      return NextResponse.json(
-        {
-          error:
-            "data file is corrupt, fix or delete data/internships.json before importing",
-        },
-        { status: 500 },
-      );
-    }
-  }
-
+  // Read existing applications for dedup
+  const apps = readApplications();
   const existingKeys = new Set(
-    existing.map((i) => `${i.company.toLowerCase()}|${i.role.toLowerCase()}`),
+    apps.map((a) => `${a.company.toLowerCase()}|${a.role.toLowerCase()}`),
   );
 
   const today = new Date().toISOString().slice(0, 10);
+  const root = careerOpsRoot();
+  const tsvDir = path.join(root, "batch", "tracker-additions");
+  fs.mkdirSync(tsvDir, { recursive: true });
+
   const imported: Internship[] = [];
   let skipped = 0;
   let closed = 0;
   let filtered = 0;
   const sectionNames: string[] = [];
 
+  // Reserve report numbers for all imports at once
+  let nextNum = apps.reduce((m, a) => Math.max(m, parseInt(a.n) || 0), 0) + 1;
+  try {
+    // Count importable rows first for reservation
+    let importCount = 0;
+    for (const { rows } of sections) {
+      for (const row of rows) {
+        if (row.closed) continue;
+        if (usOnly && !isUsLocation(row.location)) continue;
+        const key = `${row.company.toLowerCase()}|${row.role.toLowerCase()}`;
+        if (!existingKeys.has(key)) importCount++;
+      }
+    }
+    if (importCount > 0) {
+      const reserved = execFileSync(process.execPath, [
+        rootScript("reserve-report-num"), "--count", String(importCount),
+      ], { cwd: root, encoding: "utf8", timeout: 30000 }).trim();
+      nextNum = parseInt(reserved.split("-")[0]);
+    }
+  } catch {
+    // fallback: use max+1 from existing apps
+  }
+
   for (const { section, rows } of sections) {
     sectionNames.push(section);
     const track = sectionToTrack(section);
 
     for (const row of rows) {
-      // Skip closed listings
-      if (row.closed) {
-        closed++;
-        continue;
-      }
+      if (row.closed) { closed++; continue; }
+      if (usOnly && !isUsLocation(row.location)) { filtered++; continue; }
 
-      // Filter by US location if requested
-      if (usOnly && !isUsLocation(row.location)) {
-        filtered++;
-        continue;
-      }
-
-      // Dedup by company + role
       const key = `${row.company.toLowerCase()}|${row.role.toLowerCase()}`;
-      if (existingKeys.has(key)) {
-        skipped++;
-        continue;
-      }
+      if (existingKeys.has(key)) { skipped++; continue; }
       existingKeys.add(key);
 
-      const entry: Internship = {
-        id: crypto.randomUUID(),
+      const num = String(nextNum++);
+      const noteParts: string[] = [];
+      noteParts.push(`track:${track}`);
+      noteParts.push("source:simplify-github");
+      if (row.age) noteParts.push(`Posted: ${row.age} ago`);
+
+      // Write TSV for this row
+      const slug = row.company.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+      const tsvFile = path.join(tsvDir, `${num.padStart(3, "0")}-${slug}.tsv`);
+      const header = "num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl";
+      const tsvRow = [
+        num, today, row.company, row.role, "Evaluated", "N/A", "❌", "—",
+        noteParts.join(" | "), row.url || "",
+      ].join("\t");
+      fs.writeFileSync(tsvFile, `${header}\n${tsvRow}\n`);
+
+      imported.push({
+        id: num,
         company: row.company,
         role: row.role,
         location: row.location,
@@ -300,25 +312,30 @@ export async function POST(req: NextRequest) {
         notes: row.age ? `Posted: ${row.age} ago` : "",
         source: "simplify-github",
         track,
-        statusLog: [],
-      };
-
-      imported.push(entry);
+      });
     }
   }
 
-  // Write merged array
-  const merged = [...existing, ...imported];
-  const dir = path.dirname(file);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(merged, null, 2));
+  // Run merge-tracker to incorporate all new rows
+  if (imported.length > 0) {
+    try {
+      execFileSync(process.execPath, [rootScript("merge-tracker")], {
+        cwd: root, encoding: "utf8", timeout: 60000,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `merge failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 },
+      );
+    }
+  }
 
   return NextResponse.json({
     imported: imported.length,
     skipped,
     closed,
     filtered,
-    total: merged.length,
+    total: apps.length + imported.length,
     sections: sectionNames,
   });
 }

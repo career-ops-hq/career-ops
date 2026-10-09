@@ -1,26 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
-import type { Internship } from "../route";
+import { execFileSync } from "node:child_process";
+import { careerOpsRoot, readApplications, rootScript } from "@/lib/career-ops";
 
 export const dynamic = "force-dynamic";
 
-const INTERNSHIPS_FILE = () => path.join(careerOpsRoot(), "data", "internships.json");
-
 type CsvRow = Record<string, string>;
 
-function mapStatus(raw: string): Internship["status"] {
+function mapStatus(raw: string): string {
   const s = raw.trim().toLowerCase();
-  if (s === "open" || s === "rolling") return "wishlist";
-  if (s === "applied") return "applied";
-  if (s === "interviewing" || s === "interview") return "interviewing";
-  if (s === "offered" || s === "offer") return "offered";
-  if (s === "accepted") return "accepted";
-  if (s === "rejected") return "rejected";
-  if (s === "closed") return "closed";
-  if (s === "not yet posted") return "not_posted";
-  return "unknown";
+  if (s === "open" || s === "rolling") return "Evaluated";
+  if (s === "applied") return "Applied";
+  if (s === "interviewing" || s === "interview") return "Interview";
+  if (s === "offered" || s === "offer") return "Offer";
+  if (s === "accepted") return "Hired";
+  if (s === "rejected") return "Rejected";
+  if (s === "closed") return "Discarded";
+  if (s === "not yet posted") return "SKIP";
+  return "Evaluated";
 }
 
 function parseCSV(text: string): CsvRow[] {
@@ -73,24 +71,17 @@ export async function POST(req: NextRequest) {
   const rows = parseCSV(csv);
   if (rows.length === 0) return NextResponse.json({ error: "no data rows found" }, { status: 400 });
 
-  // Read existing to dedup by company+role
-  let existing: Internship[] = [];
-  const file = INTERNSHIPS_FILE();
-  try {
-    fs.accessSync(file);
-  } catch {
-    // no file yet — valid empty state
-  }
-  if (fs.existsSync(file)) {
-    try {
-      existing = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      return NextResponse.json({ error: "data file is corrupt, fix or delete data/internships.json before importing" }, { status: 500 });
-    }
-  }
-  const existingKeys = new Set(existing.map((i) => `${i.company.toLowerCase()}|${i.role.toLowerCase()}`));
+  // Read existing applications for dedup
+  const apps = readApplications();
+  const existingKeys = new Set(apps.map((a) => `${a.company.toLowerCase()}|${a.role.toLowerCase()}`));
 
-  const imported: Internship[] = [];
+  const today = new Date().toISOString().slice(0, 10);
+  const root = careerOpsRoot();
+  const tsvDir = path.join(root, "batch", "tracker-additions");
+  fs.mkdirSync(tsvDir, { recursive: true });
+
+  let nextNum = apps.reduce((m, a) => Math.max(m, parseInt(a.n) || 0), 0) + 1;
+  let importedCount = 0;
   let skipped = 0;
 
   for (const row of rows) {
@@ -105,41 +96,52 @@ export async function POST(req: NextRequest) {
     }
     existingKeys.add(key);
 
-    const entry: Internship = {
-      id: crypto.randomUUID(),
+    const num = String(nextNum++);
+    const noteParts: string[] = [];
+    if (row["Track"]) noteParts.push(`track:${row["Track"]}`);
+    if (row["Source"]) noteParts.push(`source:${row["Source"]}`);
+    if (row["Key Requirements"]) noteParts.push(`requirements:${row["Key Requirements"]}`);
+    if (row["Deadline"]) noteParts.push(`deadline:${row["Deadline"]}`);
+    if (row["Work Auth / Sponsorship"]) noteParts.push(`workAuth:${row["Work Auth / Sponsorship"]}`);
+    if (row["Grad Year Eligibility"]) noteParts.push(`gradEligibility:${row["Grad Year Eligibility"]}`);
+    if (row["My Notes"]) noteParts.push(row["My Notes"]);
+
+    const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
+    const tsvFile = path.join(tsvDir, `${num.padStart(3, "0")}-${slug}.tsv`);
+    const header = "num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl";
+    const tsvRow = [
+      num,
+      row["Last Verified"] || today,
       company,
       role,
-      location: row["Locations"] ?? "",
-      status: mapStatus(row["Status"] ?? ""),
-      dateAdded: row["Last Verified"] || new Date().toISOString().slice(0, 10),
-      dateApplied: row["App Date"] || undefined,
-      deadline: row["Deadline"] || undefined,
-      url: undefined,
-      notes: row["My Notes"] ?? "",
-      track: row["Track"] || undefined,
-      term: row["Term"] || undefined,
-      opened: row["Opened"] || undefined,
-      dateConfidence: row["Date Confidence"] || undefined,
-      gradEligibility: row["Grad Year Eligibility"] || undefined,
-      workAuth: row["Work Auth / Sponsorship"] || undefined,
-      requirements: row["Key Requirements"] || undefined,
-      priority: row["Priority"] || undefined,
-      source: row["Source"] || undefined,
-      lastVerified: row["Last Verified"] || undefined,
-      statusLog: [],
-    };
-
-    imported.push(entry);
+      mapStatus(row["Status"] ?? ""),
+      "N/A",
+      "❌",
+      "—",
+      noteParts.join(" | "),
+      "",
+    ].join("\t");
+    fs.writeFileSync(tsvFile, `${header}\n${tsvRow}\n`);
+    importedCount++;
   }
 
-  const merged = [...existing, ...imported];
-  const dir = path.dirname(INTERNSHIPS_FILE());
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(INTERNSHIPS_FILE(), JSON.stringify(merged, null, 2));
+  // Run merge-tracker
+  if (importedCount > 0) {
+    try {
+      execFileSync(process.execPath, [rootScript("merge-tracker")], {
+        cwd: root, encoding: "utf8", timeout: 60000,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `merge failed: ${err instanceof Error ? err.message : String(err)}` },
+        { status: 500 },
+      );
+    }
+  }
 
   return NextResponse.json({
-    imported: imported.length,
+    imported: importedCount,
     skipped,
-    total: merged.length,
+    total: apps.length + importedCount,
   });
 }

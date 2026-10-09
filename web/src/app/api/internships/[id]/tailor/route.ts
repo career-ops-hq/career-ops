@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { careerOpsRoot, readApplications } from "@/lib/career-ops";
 import type { Internship } from "../../route";
+import { appToInternship } from "../../route";
 
 export const dynamic = "force-dynamic";
 
-const INTERNSHIPS_FILE = () => path.join(careerOpsRoot(), "data", "internships.json");
 const PROFILE_FILE = () => path.join(careerOpsRoot(), "data", "resume-profile.json");
 
 type ResumeExperience = {
@@ -228,17 +228,11 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  // Read internship
-  let internships: Internship[] = [];
-  try {
-    const raw = fs.readFileSync(INTERNSHIPS_FILE(), "utf8");
-    internships = JSON.parse(raw);
-  } catch {
-    return NextResponse.json({ error: "could not read internships" }, { status: 500 });
-  }
-
-  const internship = internships.find((i) => i.id === id);
-  if (!internship) return NextResponse.json({ error: "not found" }, { status: 404 });
+  // Read internship from applications.md
+  const apps = readApplications();
+  const app = apps.find((a) => a.n === id);
+  if (!app) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const internship = appToInternship(app);
 
   const resumeProfile = loadResumeProfile();
   const track = internship.track;
