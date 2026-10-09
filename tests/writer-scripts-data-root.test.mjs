@@ -155,7 +155,11 @@ const CLOSURE = {
     'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs', 'templates/states.yml',
     // session-activity.mjs (#4532): advisory in-progress claim taken before
     // the write below.
-    'session-activity.mjs', 'lib/is-main-module.mjs',
+    'session-activity.mjs',
+    // check-jd-archive.mjs / jd-capture.mjs: the transition into Interview
+    // triggers a JD-archive check via these two (#4523), which in turn need
+    // their own two lib/ helpers.
+    'check-jd-archive.mjs', 'jd-capture.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs',
     // Runtime assets, not imports: an import scan does not see these and each
     // one only announces itself by crashing the child.
     'tracker-aliases.json',

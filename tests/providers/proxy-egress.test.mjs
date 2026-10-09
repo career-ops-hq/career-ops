@@ -150,16 +150,43 @@ test('credential-bearing HTTP proxies are rejected without exposing their creden
 });
 
 test('credential-bearing HTTPS proxies remain available to provider requests', async () => {
-  const originalFetch = globalThis.fetch;
+  // The request must be sent to the configured HTTPS proxy, not rejected up
+  // front. A bare TCP accept is enough: the TLS handshake fails, but the
+  // connection proves the proxy was used.
+  let connections = 0;
+  const proxy = http.createServer();
+  proxy.on('connection', (socket) => {
+    connections++;
+    socket.destroy();
+  });
+  const { port } = new URL(await listening(proxy));
   try {
-    globalThis.fetch = async (_url, options) => {
-      assert.ok(options.dispatcher);
-      return new Response('TLS PROXY CONFIGURED');
-    };
-    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: 'https://user:secret@proxy.example:3128' }, async () => {
-      assert.equal(await fetchText('https://public.example/'), 'TLS PROXY CONFIGURED');
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: `https://user:secret@localhost:${port}` }, async () => {
+      await assert.rejects(fetchText('https://public.example/', { timeoutMs: 2000 }), (error) => {
+        assert.doesNotMatch(error.message, /credentials must use HTTPS/);
+        return true;
+      });
     });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.ok(connections > 0);
+  } finally { proxy.close(); }
+});
+
+test('proxy path does not use globalThis.fetch', async () => {
+  const destinations = [];
+  const proxy = http.createServer();
+  proxy.on('connect', (req, socket) => {
+    destinations.push(req.url);
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+  });
+  const proxyUrl = await listening(proxy);
+  const realFetch = globalThis.fetch;
+  // The proxy agent must be paired with undici's own fetch, never Node's bundled one.
+  globalThis.fetch = () => { throw new Error('global fetch must not be used on the proxy path'); };
+  try {
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: proxyUrl.replace('127.0.0.1', 'localhost'), NO_PROXY: 'localhost,127.0.0.1' }, async () => {
+      assert.equal(await fetchText('http://unresolvable.invalid/job', { redirect: 'error' }), 'PROXIED!');
+      assert.deepEqual(destinations, ['unresolvable.invalid:80']);
+    });
+  } finally { globalThis.fetch = realFetch; proxy.close(); }
 });

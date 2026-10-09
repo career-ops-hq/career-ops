@@ -12,6 +12,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify` | `verify-pipeline.mjs` | Check pipeline data integrity |
 | `npm run normalize` | `normalize-statuses.mjs` | Fix non-canonical statuses |
 | `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
+| `npm run fix-report-links` | `fix-report-links.mjs` | Rewrite tracker Report cells whose link points at a missing file to `—` |
 | `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
 | `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
 | `npm run jd:similarity` | `jd-similarity.mjs` | Compare a new JD with a previous JD/CV and recommend reuse, edits, or regeneration |
@@ -113,6 +114,21 @@ npm run dedup -- --dry-run  # preview without writing
 Creates a `.bak` backup before writing.
 
 **Exit codes:** `0` always.
+
+---
+
+## fix-report-links
+
+Repairs the rows `verify-pipeline.mjs` reports as `Report not found: ...` (Check 3). Rewrites **only** the Report cell of a row whose markdown link does not resolve to a regular file to `—`, the tracker's existing "no report" value. Every other cell, the row order, cell padding and the file's line endings (LF or CRLF) stay byte-for-byte as they were; nothing is re-sorted or re-formatted. "Broken" is decided by `findDeadReportLink()` in `tracker-utils.mjs` (the link is resolved from the tracker's directory, then from the data root; a directory is not a report), the same function `verify-pipeline.mjs` and `merge-tracker.mjs` use, so the tools always agree. The Report column is located by header name, so extra columns (`Via`, `URL`, `Location`) or aliased headers are fine; a tracker without a Report column is reported and left alone.
+
+```bash
+npm run fix-report-links             # apply changes
+npm run fix-report-links -- --dry-run  # list the rows (#, company, role, dead link), write nothing
+```
+
+A Report cell that is anything other than exactly one link (two links, or a link plus text) is never rewritten; it is listed under "skipped, please check by hand". Cells that are `—`, `N/A` or empty are left alone. Creates a `.bak` backup before writing and writes through the shared tracker lock. It does not guess why a report is missing and does not regenerate it. A second run changes nothing.
+
+**Exit codes:** `0` always (changes or no changes), `1` on an unknown flag or when the tracker lock cannot be acquired.
 
 ---
 
@@ -649,7 +665,7 @@ career-ops v1.32.0
 
 ## update
 
-Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches the latest published release from the canonical repo (`--channel main`: main's tip instead), checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-layer files (`cv.md`, `config/profile.yml`, `data/`, etc.) are never touched.
+Applies the upstream update. Creates a timestamped backup branch (`backup-pre-update-<version>-<YYYYMMDDTHHMMSSZ>`), fetches the latest published release from the canonical repo (`--channel main`: main's tip instead), checks out only system-layer files, runs `npm install`, and commits. The timestamp is derived from UTC ISO time with separators and milliseconds removed (for example, `backup-pre-update-1.8.1-20260608T071302Z`). User-owned files (`cv.md`, `config/profile.yml`, and files in `data/`, `reports/`, `output/`, and `jds/`) are preserved; only the exact system-owned `.gitkeep` scaffolds listed in `DATA_CONTRACT.md` may be replaced.
 
 ```bash
 npm run update
@@ -676,6 +692,8 @@ npm run rollback
 ## liveness
 
 Tests whether job posting URLs are still live. Two rungs: a zero-token API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday, LinkedIn), falling back to headless Chromium (`liveness-browser.mjs`) for everything else or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
+
+Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that is still empty or still has no recognised apply control at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more.
 
 The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
@@ -706,6 +724,10 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 `scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
 
 The location component is the canonical **set** of the places a posting names, not the provider's display string. That field is free text and is often not one place: live Greenhouse boards pack several into one value with `;`, `|`, `/` or the word `or`, sometimes mixing two separators in the same value, and several providers here (greenhouse, ashby, eightfold, gem, ibm, echojobs) fold a multi-site role's extra cities into the string themselves in whatever order the upstream array arrived. Keying that string verbatim is stable only while the order holds, so a re-ordered list would read as a new posting and re-enter the pipeline. Splitting on those separators, normalizing each place, deduplicating and sorting makes the key depend on which places a posting names rather than the order it names them in. `,` is not a separator - it delimits city from region inside one place.
+
+When a provider reads the employer's requisition id from a dedicated ATS field (`Job.requisitionId`, e.g. SmartRecruiters `refNumber`), company+role dedup uses it the way it uses a Workday requisition: two postings with one title but different requisitions stay two entries, while an unknown requisition on either side keeps the duplicate. The id is recorded in scan-history (`requisition_id`), and tracker and pipeline rows pick it up from the scan-history row with the same URL, so the check also holds across runs.
+
+`scan_history.dedup_include_language` (optional, opt-in, default off) keeps language versions of one posting apart. An employer can publish one requisition in more than one language (for example German and English) with the same title and location in each; off, the scan keeps whichever version the ATS returned first. On, two postings whose languages are both known (`Job.language`, recorded in scan-history's `language` column) and differ are not duplicates. A language code is reduced to its canonical language subtag with `Intl.Locale`, so `en-GB`, `en-US` and `en` are one language and so are `deu` and `de`; anything that isn't a language tag, such as a display name, is compared whole, ignoring case. Turn it on when you only apply to postings in some languages and discard the rest: the discarded version may otherwise be the one the scan kept. An unknown language on either side keeps the duplicate, so a provider that doesn't report a language behaves exactly as before.
 
 For custom SSR pages, configure a tracked company with `scan_method: local_parser` and a `parser` block. The parser can be written in JavaScript, Python, or any language available as a local executable. Company-specific parsers usually already know their source URL and only need to print JSON jobs to stdout:
 

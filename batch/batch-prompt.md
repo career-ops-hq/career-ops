@@ -95,6 +95,17 @@ value from that job message.
 
 ---
 
+## Template Placeholders
+
+The HTML CV templates (`templates/cv-template.html`, `templates/resume-template.html`, and the five named variants) use placeholder tokens that `build-cv-html.mjs` fills from the JSON payload. The full list lives in `modes/pdf.md` under "JSON Input Schema"; the opt-in slots below are the ones a worker may set or leave empty without breaking the layout.
+
+| Placeholder | Source field | Opt-in? | Notes |
+|-------------|--------------|---------|-------|
+| `{{PHOTO}}` | `candidate.photo` | Yes | Off by default; US/UK/many-market ATS penalize photos. See #264. |
+| `{{CONSENT}}` | `consent` | Yes | Off by default; GDPR/RODO consent footer. Empty/absent renders no visible footer (the `.cv-consent:empty { display: none }` CSS rule hides the empty div). |
+
+---
+
 ## Pipeline
 
 Run these steps in order.
@@ -580,7 +591,7 @@ If score is greater than or equal to the threshold:
 8. Reorder experience bullets by relevance.
 9. Build a 6-8 item competency grid.
 10. Inject keywords ethically into existing achievements; never invent skills or metrics.
-11. Write HTML to `output/cv-candidate-{company-slug}.html`.
+11. If consent is absent, replace `{{CONSENT}}` with an empty string. If consent is present, replace `{{CONSENT}}` with its HTML-escaped value. Write HTML to `output/cv-candidate-{company-slug}.html`.
 12. Run:
 
 ```bash

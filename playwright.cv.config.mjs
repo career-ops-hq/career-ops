@@ -2,10 +2,12 @@ import { defineConfig } from 'playwright/test';
 
 export default defineConfig({
   testDir: './tests/cv-visual',
-  testMatch: '**/*.spec.mjs',
+  testMatch: ['**/*.spec.mjs', '**/*.test.mjs'],
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  // Missing baselines require an explicit, reviewed Linux update.
+  updateSnapshots: 'none',
   timeout: 60_000,
   expect: { timeout: 10_000 },
   outputDir: 'test-results/cv-visual-results',

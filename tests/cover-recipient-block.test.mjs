@@ -108,3 +108,19 @@ test('recipient values are HTML-escaped', () => {
   assert.ok(!html.includes('<script>'), 'a script tag must not survive into the letter');
   assert.match(html, /A &amp; B/);
 });
+
+test('a company supplied by the letter sits above the street address', () => {
+  // The fallback company is appended only when the recipient did not name one.
+  // Appending it at the END of the block put it BELOW the street, which is not
+  // an address block. Its place is straight after the name and title (#4069
+  // review). The city keeps its position at the bottom.
+  const payload = base({ name: 'Jane Reviewer', title: 'Head of Talent', address_lines: ['123 Main St'] });
+  payload.letter.company = 'Example Corp';
+  payload.letter.city = 'Boston, MA';
+
+  const html = buildHtml(payload, packTemplate());
+  const lines = [...html.matchAll(/<div>([^<]*)<\/div>/g)].map(m => m[1]);
+
+  assert.deepEqual(lines, ['Jane Reviewer', 'Head of Talent', 'Example Corp', '123 Main St', 'Boston, MA'],
+    'name, title, company, street, city');
+});

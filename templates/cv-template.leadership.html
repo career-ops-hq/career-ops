@@ -92,7 +92,8 @@ version: 1.0.0
   .header h1 {
     font-size: 24px;
     font-weight: 700;
-    letter-spacing: 0.11em;
+    /* Wide tracking inserts spaces inside names in extracted PDF text. */
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--accent-color);
     line-height: 1.1;
@@ -126,7 +127,7 @@ version: 1.0.0
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.04em;
     color: var(--accent-color);
     border-bottom: 0.7px solid #bcc5d1;
     padding-bottom: 2.5px;
@@ -296,6 +297,22 @@ version: 1.0.0
     color: var(--accent-color);
   }
 
+  /* === GDPR / RODO CONSENT (footer) === */
+  /* Opt-in footer slot filled from payload.consent. Empty by default — the
+     :empty rule hides the div (and its border-top) when no consent text is
+     set, so existing CVs render byte-identical to a pre-consent layout.
+     Mirrors the {{PHOTO}} opt-in slot pattern (#264). */
+  .cv-consent {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    font-size: 8.5px;
+    line-height: 1.4;
+    color: #777;
+    text-align: left;
+  }
+  .cv-consent:empty { display: none; }
+
   /* === PAGE BREAK CONTROL === */
   .header,
   .edu-item,
@@ -433,6 +450,9 @@ version: 1.0.0
   </div>
 
   <!-- END -->
+
+  <!-- GDPR / RODO consent -->
+  <div class="cv-consent">{{CONSENT}}</div>
 
 </div>
 </body>

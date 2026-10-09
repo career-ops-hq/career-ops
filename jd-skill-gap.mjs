@@ -430,21 +430,25 @@ function classifySkillGaps(jdSkills, cvText) {
 
   for (const skill of jdSkills) {
     const canon = canonicalize(skill);
-    // "Known" = skill-extract recognizes this token (canonicalize rewrote it,
-    // or SKILL_PATTERN matches it). For known skills the canonical-set lookup
-    // is authoritative and alias-safe. Unknown/free tokens canonicalize to
-    // themselves and fall through to the word-boundary heuristic below, which
-    // is byte-for-byte the prior behavior — jd-skill-gap keeps its own
-    // heuristics for free tokens (#1896 answer 2).
-    const known = canon !== skill || extractSkills(skill).size > 0;
+    // "Known" = skill-extract reads this token as its own canonical skill. For
+    // known skills the canonical-set lookup is authoritative and alias-safe.
+    // Unknown/free tokens canonicalize to themselves and fall through to the
+    // word-boundary heuristic below, which is byte-for-byte the prior behavior
+    // — jd-skill-gap keeps its own heuristics for free tokens (#1896 answer 2).
+    // A known skill must not reach that heuristic: it matches the JD's spelling
+    // anywhere, including the prose skill-extract declines to count ("go the
+    // extra mile", "a safe environment", "Fine-tuning the funnel"). Containing
+    // a skill is not being one: "React.js" extracts as React, never as itself,
+    // so it stays a free token and the heuristic still finds it in a CV.
+    const known = extractSkills(skill).has(canon);
 
     if (known && namedCanon.has(canon)) {
       existing.push(skill);
     } else if (known && proseCanon.has(canon)) {
       supportedByResume.push(skill);
-    } else if (skillMentionedInText(skill, namedSkillsText)) {
+    } else if (!known && skillMentionedInText(skill, namedSkillsText)) {
       existing.push(skill);
-    } else if (skillMentionedInText(skill, proseText)) {
+    } else if (!known && skillMentionedInText(skill, proseText)) {
       supportedByResume.push(skill);
     } else {
       gap.push(skill);
@@ -757,6 +761,42 @@ Maintained the internal Fabrikam-SDK build.
   const freeResult = classifySkillGaps(['Fabrikam-SDK', 'Contoso-Cloud'], freeTokenCv);
   eq('unknown token present in CV still matches (word-boundary fallback preserved)', freeResult.existing.includes('Fabrikam-SDK'), true);
   eq('unknown token absent from CV is still a real gap', freeResult.gap.includes('Contoso-Cloud'), true);
+
+  // Regression: a known skill is decided by the canonical sets alone. Falling
+  // through to the word-boundary search matched the JD's spelling in prose that
+  // skill-extract declines to count, so a marketing CV "fine-tuning the funnel"
+  // read as support for an ML requirement, and Go and SAFe had the same hole.
+  const everydayCv = `
+# Skills
+HubSpot, Google Ads
+
+# Experience
+Fine-tuning the funnel to lift ROAS. Willing to go the extra mile; a safe pair of hands.
+`;
+  const everydayResult = classifySkillGaps(['Fine-tuning', 'Go', 'SAFe'], everydayCv);
+  eq('CV prose "Fine-tuning the funnel" leaves JD "Fine-tuning" a gap', everydayResult.gap.includes('Fine-tuning'), true);
+  eq('CV prose "go the extra mile" leaves JD "Go" a gap', everydayResult.gap.includes('Go'), true);
+  eq('CV prose "a safe pair of hands" leaves JD "SAFe" a gap', everydayResult.gap.includes('SAFe'), true);
+
+  const mlCv = `
+# Skills
+PyTorch, Fine-tuning, RAG
+
+# Experience
+Shipped a support assistant on Llama 3.
+`;
+  eq('a Skills entry "Fine-tuning" still satisfies JD "Fine-tuning"', classifySkillGaps(['Fine-tuning'], mlCv).existing, ['Fine-tuning']);
+
+  // The edge of "known": a token that only contains a skill is not that skill.
+  // "React.js" extracts as React, so the canonical sets never hold "React.js";
+  // counting it as known left a CV that lists it with a false gap.
+  const reactJdSkills = extractJdSkills('## Requirements\n- React.js and TypeScript\n');
+  eq('the JD tokenizer yields "React.js" as one token', reactJdSkills, ['React.js', 'TypeScript']);
+  eq(
+    'JD "React.js" is satisfied by a Skills entry "React.js"',
+    classifySkillGaps(reactJdSkills, '# Skills\nReact.js, TypeScript\n').existing,
+    ['React.js', 'TypeScript']
+  );
 
   // Regression (#2278): a JD the extractor cannot read returns zero skills, and
   // the three buckets then print exactly like "checked, no gaps found".
