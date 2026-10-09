@@ -1552,8 +1552,7 @@ search_queries:
 #     workplace_types: [remote, hybrid]  # optional: remote / hybrid / on-site
 #     # job_types: [vacancy_type_effective]  # optional: platform job-type ids
 #     # state: São Paulo  # optional state filter
-#     # country: Brasil   # optional country filter
-#   max_pages: 5          # optional page cap per keyword (100 jobs/page, default 5, max 200)
+#   max_pages: 5          # optional page cap per keyword (100 jobs/page, default 5, max 100)
 #   enabled: true
 #
 # - name: Arbeitsagentur — AI Roles      # German federal jobs API

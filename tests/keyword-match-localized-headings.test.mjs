@@ -77,6 +77,16 @@ for (const { rel, text } of modes) {
   });
 }
 
+// batch/batch-prompt.md lists its report headings rather than defining Block F,
+// so the walk above never sees it; its reports went unread until this check.
+check('batch/batch-prompt.md: the keyword heading it writes is read', () => {
+  const text = readFileSync(join(ROOT, 'batch', 'batch-prompt.md'), 'utf-8');
+  const heading = text.match(/^- `(## [^`]*Keywords[^`]*)`$/m)?.[1];
+  assert.ok(heading, 'no `## ...Keywords...` heading listed in batch/batch-prompt.md');
+  assert.deepEqual(keywordsUnder(heading), KEYWORDS,
+    `"${heading}" is not read: add its title to KEYWORDS_HEADINGS in keyword-match.mjs`);
+});
+
 // ---- The reader -------------------------------------------------------------
 
 check('every title in KEYWORDS_HEADINGS is read, with or without a suffix after it', () => {

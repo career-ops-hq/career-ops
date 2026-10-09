@@ -23,6 +23,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseFollowups } from './followup-cadence.mjs';
 
 // Every file here is user layer, so it resolves against the data root
 // (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data marker), never the
@@ -123,28 +124,7 @@ function loadFollowups() {
   if (!fs.existsSync(FOLLOWUPS_FILE)) {
     return [];
   }
-  const content = fs.readFileSync(FOLLOWUPS_FILE, 'utf-8');
-  const lines = content.split('\n');
-  const followups = [];
-  for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 8) continue;
-    const num = parseInt(parts[1], 10);
-    const appNum = parseInt(parts[2], 10);
-    if (isNaN(num) || isNaN(appNum)) continue;
-    followups.push({
-      num,
-      appNum,
-      date: parts[3],
-      company: parts[4],
-      role: parts[5],
-      channel: parts[6],
-      contact: parts[7],
-      notes: parts[8] || ''
-    });
-  }
-  return followups;
+  return parseFollowups(fs.readFileSync(FOLLOWUPS_FILE, 'utf-8'));
 }
 
 // Apply an approved batch in one locked read/modify/write transaction. Reading

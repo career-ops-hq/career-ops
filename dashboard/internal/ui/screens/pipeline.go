@@ -79,6 +79,12 @@ type PipelineUpdateStatusMsg struct {
 	NewStatus     string
 }
 
+// StatusUpdateFailedMsg exposes a failed tracker write in the active screen.
+// Stderr is hidden while the dashboard occupies the terminal's alt-screen.
+type StatusUpdateFailedMsg struct {
+	Err string
+}
+
 // PipelineUpdateStatusAndNotesMsg requests an atomic status + notes update.
 // Used by the discard reason picker (Issue 1380) to commit both changes in a
 // single tracker write.
@@ -109,6 +115,8 @@ type PipelineOpenProgressMsg struct{}
 // PipelineOpenStatsMsg is emitted when the stats (dimension breakdown) screen should open.
 type PipelineOpenStatsMsg struct{}
 
+// Mirrors the ids in templates/discard-reasons.yml, in order.
+// tests/discard-reasons-vocabulary.test.mjs fails when the two drift.
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
@@ -179,7 +187,7 @@ type ColumnID int
 
 const (
 	// Optional columns — user-toggleable via the column picker (C key).
-	ColDate        ColumnID = iota // APPLIED date
+	ColDate        ColumnID = iota // DATE: latest status change (ledger), else the tracker's evaluation date
 	ColLocation                    // LOCATION city+state
 	ColPay                         // PAY range
 	ColHasReport                   // RPT: ✓/—
@@ -199,7 +207,7 @@ type colDef struct {
 
 func getOptionalCols() []colDef {
 	return []colDef{
-		{ColDate, i18n.Current.ColApplied, "", 10, true},
+		{ColDate, i18n.Current.ColDate, "", 10, true},
 		{ColLocation, i18n.Current.ColLocation, "", 20, true},
 		{ColPay, i18n.Current.ColPay, "", 16, true},
 		{ColHasReport, i18n.Current.ColReport, "✓/—", 4, false},
@@ -497,6 +505,8 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	case PipelineOpenFailedMsg:
 		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 		return m, nil
+	case StatusUpdateFailedMsg:
+		m.flash = "Could not update status: " + msg.Err
 	case PipelineHistoryFailedMsg:
 		m.flash = "Status history unavailable; progress uses previous data: " + msg.Err
 		return m, nil
@@ -834,17 +844,6 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 		if app, ok := m.CurrentApp(); ok {
 			newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 			norm := data.NormalizeStatus(newStatus)
-			if norm == "hired" {
-				m.hiredApp = app
-				m.hiredStep = 1
-				return m, func() tea.Msg {
-					return PipelineUpdateStatusMsg{
-						CareerOpsPath: m.careerOpsPath,
-						App:           app,
-						NewStatus:     newStatus,
-					}
-				}
-			}
 			if norm == "discarded" || norm == "skip" {
 				return m, func() tea.Msg {
 					return m.startDiscardFlow(app, newStatus)
@@ -1206,12 +1205,24 @@ func (m *PipelineModel) applyFilterAndSort() {
 	m.filtered = filtered
 }
 
+// effectiveDate is what the DATE column shows and what the date sort orders
+// by: the row's latest status transition from status-log.tsv when it has one,
+// otherwise the tracker's own Date cell (the evaluation date). Other readers
+// of app.Date — the hired-flow weeks math, the LAST column's "same as date"
+// elision — mean the evaluation date on purpose and do not go through here.
+func effectiveDate(app model.CareerApplication) string {
+	if app.StatusDate != "" {
+		return app.StatusDate
+	}
+	return app.Date
+}
+
 // sortLess returns the comparator for the active sort mode. Shared by the flat
 // sort and the within-group tiebreaker in grouped view.
 func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	switch m.sortMode {
 	case sortDate:
-		return func(a, b model.CareerApplication) bool { return a.Date > b.Date }
+		return func(a, b model.CareerApplication) bool { return effectiveDate(a) > effectiveDate(b) }
 	case sortCompany:
 		return func(a, b model.CareerApplication) bool {
 			return strings.ToLower(a.Company) < strings.ToLower(b.Company)
@@ -1771,7 +1782,7 @@ func (m PipelineModel) renderColumnHeader() string {
 		h.Render(i18n.Current.ColFit), // score cell is unpadded, always 3 runes wide
 	}
 	if cw.date != 0 {
-		segments = append(segments, cell(i18n.Current.ColApplied, cw.date))
+		segments = append(segments, cell(i18n.Current.ColDate, cw.date))
 	}
 	segments = append(segments, cell(i18n.Current.ColCompany, cw.company))
 	segments = append(segments, cell(i18n.Current.ColRole, cw.role))
@@ -1831,8 +1842,9 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	company := truncateRunes(app.Company, cw.company)
 	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
-	// Date (fixed width)
-	dateText := app.Date
+	// Date (fixed width): latest status change when the ledger has one, else
+	// the tracker's own (evaluation) date.
+	dateText := effectiveDate(app)
 	if dateText == "" {
 		dateText = "—"
 	}

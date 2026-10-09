@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { localToday } from '../lib/local-today.mjs';
-import { walkTree } from '../lib/walk-tree.mjs';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { codeMask, isCodeRange } from './helpers.mjs';
 import { shouldDedupScanHistoryRow } from '../scan.mjs';
 import { parseScanHistory, detectReposts } from '../detect-reposts.mjs';
@@ -358,22 +358,23 @@ function topLevelArgs({ list, isCode }) {
   return out;
 }
 
-/** Every .mjs source file in the repo, at any depth. */
-function sourceFiles(dir) {
-  return walkTree(dir, {
-    // Vendored code and build output would otherwise be walked.
-    //
-    // Both kinds of second copy of the repository are walkTree's job, not this
-    // list's. The suite's own scratch copy (test-all.mjs mkdtemps it under
-    // ROOT) is recognised by isScratchDir inside the walk (#3940). Git's copy
-    // is too: the `\.git` below matches a directory NAME, which a linked
-    // worktree does not have — it marks itself with a `.git` file. This gate
-    // read a worktree's stale sources as repo source and failed, naming files
-    // that are correct on the branch under test (#3499).
-    skip: (entry) => entry.isDirectory()
-      && /^(node_modules|\.git|\.next|coverage|dist|build)$/.test(entry.name),
-  }).filter((f) => f.endsWith('.mjs') && !f.endsWith('.test.mjs'));
-}
+/**
+ * Every tracked .mjs source file in the repo, at any depth, tests excluded.
+ *
+ * Enumerated through lib/mjs-files.mjs (#3890) rather than a private walk. The
+ * walk this replaces named `node_modules`, `.git`, `.next`, `coverage`, `dist`,
+ * `build`, `.tmp-script-test-*` and — via isNestedCheckout() — a linked
+ * worktree, whose stale sources once failed this very gate by naming files that
+ * are correct on the branch under test (#3499). Git tracks none of those, so
+ * the index excludes all of them without a list anyone has to keep current.
+ *
+ * That matters here specifically: this gate is DERIVED, not a hard-coded list
+ * of writers, so a new scan script is covered the day it lands — but only if
+ * the enumerator can see it. A skip-list that silently stops covering a
+ * directory turns a derived gate back into a hard-coded one without saying so.
+ */
+const sourceFiles = () =>
+  trackedFiles(ROOT, (rel) => rel.endsWith('.mjs') && !rel.endsWith('.test.mjs'));
 
 // The census above is only as good as its scanner, and every shape below was
 // found by review rather than by the scanner's own tests. So the scanner gets
@@ -425,7 +426,21 @@ test('every scan-history writer stamps the local day', () => {
   // `scripts/scan-foo.mjs` counts, not just a direct child of ROOT. That is the
   // shape tests/lock-rm-contention.test.mjs used to finally pin its own family
   // shut after two reintroductions.
-  const writers = sourceFiles(ROOT)
+  const sources = sourceFiles();
+
+  // The four known writers all sit at the repository ROOT, so the floor below
+  // ("at least four") stays true even when the enumeration has narrowed to the
+  // root and stopped covering `scripts/`, `providers/` and everything else —
+  // the derived gate quietly reverts to the hard-coded list it was written to
+  // replace, and reads exactly as green. That is #3419's failure shape, here.
+  // So assert the REACH separately from the count.
+  assert.ok(
+    sources.some((f) => relative(ROOT, f).split('\\').join('/').includes('/')),
+    'the enumeration stopped at the repository root — a scan-history writer added under any ' +
+      'subdirectory would silently leave this gate while it kept reporting the four it already knew',
+  );
+
+  const writers = sources
     .map((file) => ({ file, calls: scanHistoryCallArgs(readFileSync(file, 'utf-8')), src: readFileSync(file, 'utf-8') }))
     .filter((w) => w.calls.length > 0);
 

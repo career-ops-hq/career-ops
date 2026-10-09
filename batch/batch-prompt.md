@@ -95,6 +95,17 @@ value from that job message.
 
 ---
 
+## Template Placeholders
+
+The HTML CV templates (`templates/cv-template.html`, `templates/resume-template.html`, and the five named variants) use placeholder tokens that `build-cv-html.mjs` fills from the JSON payload. The full list lives in `modes/pdf.md` under "JSON Input Schema"; the opt-in slots below are the ones a worker may set or leave empty without breaking the layout.
+
+| Placeholder | Source field | Opt-in? | Notes |
+|-------------|--------------|---------|-------|
+| `{{PHOTO}}` | `candidate.photo` | Yes | Off by default; US/UK/many-market ATS penalize photos. See #264. |
+| `{{CONSENT}}` | `consent` | Yes | Off by default; GDPR/RODO consent footer. Empty/absent renders no visible footer (the `.cv-consent:empty { display: none }` CSS rule hides the empty div). |
+
+---
+
 ## Pipeline
 
 Run these steps in order.
@@ -425,7 +436,7 @@ confidence_gaps: []
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
-  - "{predicted reason if final_decision is Skip/Consider, e.g. salary_too_low, hybrid_required, tech_stack_mismatch, seniority_mismatch, geo_restriction, size_mismatch, company_culture, or other specific reason}"
+  - "{predicted reason if final_decision is Skip/Consider: a canonical id from templates/discard-reasons.yml, or a short free-text reason when none fits}"
 via: {agency/recruiter firm as a quoted string, or null for direct applications}
 company_confidential: {true when the end employer is unknown (company is "?"), else false}
 advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
@@ -449,6 +460,7 @@ risk_summary:
 Rules:
 - Populate `confidence_gaps` with up to three non-empty strings naming the verification priorities; the examples show the empty form, `confidence_gaps: []`.
 - Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, `discard_reasons`, `requirement_importance`, or `confidence_gaps` when empty.
+- `discard_reasons` items are canonical ids from `templates/discard-reasons.yml`: `salary_too_low`, `hybrid_required`, `tech_stack_mismatch`, `seniority_mismatch`, `geo_restriction`, `size_mismatch`, `company_culture`. Read that file for when each applies. When no id fits, write a short free-text reason instead of forcing the nearest id: `analyze-patterns.mjs` lists it as `other`, apart from the canonical shares, and a reason that keeps recurring there is how the vocabulary grows.
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
@@ -518,7 +530,7 @@ confidence_gaps: []
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
 discard_reasons:
-  - "{predicted reason if final_decision is Skip/Consider, e.g. salary_too_low, hybrid_required, tech_stack_mismatch, seniority_mismatch, geo_restriction, size_mismatch, company_culture, or other specific reason}"
+  - "{predicted reason if final_decision is Skip/Consider: a canonical id from templates/discard-reasons.yml, or a short free-text reason when none fits}"
 via: {agency/recruiter firm as a quoted string, or null for direct applications}
 company_confidential: {true when the end employer is unknown (company is "?"), else false}
 advertised_comp: {verbatim JD salary/range as a quoted string (e.g. "80-90k EUR"), or null when the JD states nothing}
@@ -580,7 +592,7 @@ If score is greater than or equal to the threshold:
 8. Reorder experience bullets by relevance.
 9. Build a 6-8 item competency grid.
 10. Inject keywords ethically into existing achievements; never invent skills or metrics.
-11. Write HTML to `output/cv-candidate-{company-slug}.html`.
+11. If consent is absent, replace `{{CONSENT}}` with an empty string. If consent is present, replace `{{CONSENT}}` with its HTML-escaped value. Write HTML to `output/cv-candidate-{company-slug}.html`.
 12. Run:
 
 ```bash

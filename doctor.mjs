@@ -19,6 +19,7 @@ import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -87,30 +88,7 @@ const yellow = (s) => isTTY ? `\x1b[33m${s}\x1b[0m` : s;
 const dim = (s) => isTTY ? `\x1b[2m${s}\x1b[0m` : s;
 
 function checkNodeVersion() {
-  const versionStr = process.versions.node;
-  const [major, minor] = versionStr.split('.').map(Number);
-  const hasSqlite = major > 22 || (major === 22 && minor >= 5);
-
-  if (hasSqlite) {
-    return { pass: true, label: `Node.js >= 22.5 (v${versionStr})` };
-  }
-
-  if (major >= 18) {
-    return {
-      warn: true,
-      label: `Node.js v${versionStr} detected. Node >= 22.5.0 is highly recommended because tracker.mjs (SQLite database indexing) requires node:sqlite.`,
-      fix: [
-        'Upgrade Node.js to v22.5.0 or later to enable full tracker database support.',
-        'The markdown tracker keeps working without it — the index is optional.',
-      ],
-    };
-  }
-
-  return {
-    pass: false,
-    label: `Node.js >= 18 (found v${versionStr})`,
-    fix: 'Install Node.js 22.5.0 or later from https://nodejs.org',
-  };
+  return nodeFloor(process.versions.node);
 }
 
 // El check mas frecuente de la comunidad, medido: 8 personas en 4 semanas

@@ -135,6 +135,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text) |
 | `fetch-jd.mjs` | JD text from a known ATS API (Greenhouse/Lever/Ashby/Workday — `liveness-api.mjs`'s `JD_TEXT_API_ATS`), no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
+| `fix-report-links.mjs` | Repairs tracker rows whose Report link points at a missing file: rewrites only that cell to `—` (single-link cells only; others listed for hand review), same broken-link rule as `verify-pipeline.mjs` Check 3 via `findDeadReportLink()` in `tracker-utils.mjs`; `--dry-run` previews, otherwise `.bak` backup + locked atomic write; idempotent |
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
@@ -437,12 +438,14 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 
 ## Offer Verification -- MANDATORY
 
-**NEVER trust WebSearch/WebFetch to verify if an offer is still active.** ALWAYS use Playwright:
+**NEVER decide whether an offer is active from a bare WebSearch/WebFetch snippet.** Start with `node check-liveness.mjs <url>`: it checks free public ATS APIs first, then falls back to Playwright only when the API returns `null`. A non-null `uncertain` result does not trigger Playwright; it remains unconfirmed.
+
+When checking the browser fallback manually:
 1. `browser_navigate` to the URL
 2. `browser_snapshot` to read content
 3. Explicit expired/closed evidence or 404/410 = closed. An unreadable JD, loading placeholder, or login/error page is **unconfirmed**, not closed. Check embedded iframes before judging a footer/navbar-only page. Title + description + Apply = active; an Apply button alone is not a JD.
 
-**Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
+**Exception for batch workers (headless mode):** use public API verification where available. If the API cannot confirm the posting and browser verification is unavailable, WebFetch may supply JD text, but mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
 
 ### LinkedIn JD loading guard (#4121)
 
@@ -502,6 +505,10 @@ Headless worker command per CLI:
 - Output in `output/` (gitignored) · Reports in `reports/` · JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md) · Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
 
+**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
+- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
+- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
+
 ### JD captures (`jds/`)
 
 `local:jds/{file}` is the reference form everywhere a JD is cited — `data/pipeline.md` entries, `triage`, `pipeline`, and the tracker notes column. Any filename is valid behind it; several writers coexist and none is canonical:
@@ -530,9 +537,6 @@ If they say yes: run `node hired-share.mjs --report N --anonymity <their choice>
 **Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
 
 **Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
-**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
-- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 
@@ -574,7 +578,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 2. **UPDATE status/notes of existing entries via `node set-status.mjs <report#|company> <State> [--note]`** — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF), and `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs`
+5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs` · Repair dead report links: `node fix-report-links.mjs --dry-run`, then without `--dry-run`
 6. **Portal coverage is a separate health axis from portal reachability.** `node verify-portals.mjs` proves each board answers; `node audit-portals.mjs` audits each board's content, since a well-formed board can still belong to the wrong entity and no heuristic catches that — see its own "Honest limit" note. The offline half of the audit — *which enabled entries does no provider claim?* — is pure config matching, so it runs inside `verify-pipeline.mjs` (check 15) at zero network cost; the live half stays a separate command because it needs a fetch per board. Run the audit after adding companies and periodically thereafter — an entry can rot into uselessness in two ways that reachability checks call healthy: no provider claims its `careers_url` (so `scan.mjs` skips it on every run while it reads as coverage), or it points at a real board belonging to the wrong entity (a parent company, a regional subsidiary, a same-named unrelated tenant). Keep a `--json` snapshot around and pass it as `--baseline` next time to catch ATS migrations, which show up as a board collapsing toward zero rather than 404ing.
 
 ### Canonical States (applications.md)
