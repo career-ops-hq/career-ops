@@ -48,7 +48,7 @@ const appliedDaysRaw = flagValue(args, '--applied-days');
 // effect can be asserted directly, rather than only "the CLI didn't error".
 const APPLIED_DAYS_RE = /^\d+$/;
 export function parseAppliedDaysOverride(raw) {
-  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? parseInt(raw, 10) : null;
+  return raw !== undefined && APPLIED_DAYS_RE.test(raw) ? positiveInteger(raw) : null;
 }
 const appliedDaysOverride = parseAppliedDaysOverride(appliedDaysRaw);
 
@@ -72,8 +72,12 @@ const PROFILE_CADENCE_KEYS = {
 };
 
 function positiveInteger(value) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  if (typeof value === 'string') {
+    value = value.trim();
+    if (!/^\+?\d+$/.test(value)) return null;
+    value = Number(value);
+  }
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 export function loadProfileCadence(profilePath = PROFILE_FILE) {
