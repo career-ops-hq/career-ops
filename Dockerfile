@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Optional: Go toolchain for the dashboard TUI (./dashboard).
 # Small footprint, keeps full feature parity with the README setup.
-# Must be >= the `go` line in dashboard/go.mod (checked by test-all.mjs), or
+# Must be >= the `go` line in dashboard/go.mod (checked by tests/go-floor.test.mjs), or
 # `go build` fetches a newer toolchain over the network and fails offline.
 ARG GO_VERSION=1.27.2
 RUN set -eux; \
