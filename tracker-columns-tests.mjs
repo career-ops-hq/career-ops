@@ -1997,6 +1997,48 @@ ${PIPED}
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
+// A tab is the one whitespace character whose percent-encoding is NOT
+// key-neutral: URL parsing strips an ASCII tab instead of encoding it, so
+// `…/a<TAB>b` keys as `…/ab` while `…/a%09b` keys as `…/a%09b`. The writer
+// verifies every rendered cell's key against the original, so such a URL stays
+// bare — through --migrate-urls here, and through any merge rebuild, which uses
+// the same writer. A space alongside proves the encoding path still links.
+{
+  const { normalizeUrl } = await import('./url-key.mjs');
+  const { extractCellUrl, resolveColumns, parseTrackerRow } = await import('./tracker-parse.mjs');
+  const TABBED = 'https://example.com/jobs/a\tb';
+  const SPACED = 'https://example.com/jobs/a b';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-01-01 | Acme | Eng | 4.0/5 | Applied | ✅ | — | tab in url | ${TABBED} |
+| 2 | 2026-01-02 | Globex | PM | 3.5/5 | Applied | ❌ | — | space in url | ${SPACED} |
+`,
+  );
+  const keysOf = () => {
+    const lines = readFileSync(sb.tracker, 'utf-8').split('\n');
+    const cols = resolveColumns(lines);
+    return ['1', '2'].map(n => normalizeUrl(parseTrackerRow(lines.find(l => l.startsWith(`| ${n} `)), cols).url));
+  };
+  const before = keysOf();
+  const run = runScript('merge-tracker.mjs', ['--migrate-urls'], sb);
+  const after = keysOf();
+  const text = readFileSync(sb.tracker, 'utf-8');
+  const ok = run.code === 0
+    && before.every(k => k !== '') && after.join() === before.join()
+    && text.includes(`| tab in url | ${TABBED} |`)
+    && text.includes('[example.com](https://example.com/jobs/a%20b)')
+    && /rendered 1 URL cell/.test(run.stdout);
+  if (ok) {
+    pass('#3516: --migrate-urls keeps a tab-bearing URL bare (its key would change); a spaced URL is linked with %20 and keeps its key');
+  } else {
+    fail(`#3516 tab/space key preservation — keys ${JSON.stringify(before)} → ${JSON.stringify(after)}:\n${text}\n${run.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the
 // href is the dedup key, so a migration that touched it would re-key the table.
 {

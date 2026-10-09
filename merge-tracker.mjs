@@ -611,12 +611,14 @@ function isLinkedUrlCell(value) {
  * Serialize a posting URL for a markdown link destination, WITHOUT changing the
  * key it produces.
  *
- * Whitespace is the only hazard that can be fixed here. A markdown destination
- * ends at the first space, so an unencoded one truncates the href on read-back
- * — and a truncated href still parses, which makes it a WRONG key rather than
- * an absent one. `%20` is safe to substitute because `new URL()` performs the
- * same substitution, so the encoded and unencoded spellings normalize to one
- * key (url-key.mjs rebuilds path and query through the URL object).
+ * Whitespace is the hazard addressed here. A markdown destination ends at the
+ * first space, so an unencoded one truncates the href on read-back — and a
+ * truncated href still parses, which makes it a WRONG key rather than an
+ * absent one. For most whitespace, percent-encoding is key-neutral: `new URL()`
+ * encodes a space, vertical tab, form feed or Unicode space to the same bytes.
+ * NOT a tab: the URL parser STRIPS ASCII tab rather than encoding it, so
+ * `a\tb` keys as `ab` while `a%09b` keys as `a%09b`. That is why formatUrlCell
+ * verifies the round trip instead of trusting this function — see there.
  *
  * Nothing else may be rewritten. `%7C` and a literal `|` normalize alike in the
  * query but NOT in the path, and `%28`/`%29` never normalize to `(`/`)` at all,
@@ -738,7 +740,15 @@ function formatUrlCell(raw, previousCell = '') {
       && normalizeUrl(extractCellUrl(previous)) === normalizeUrl(href)) return previous;
 
   const label = trackerUrlLabel(href);
-  return label ? `[${label}](${destination})` : destination;
+  const rendered = label ? `[${label}](${destination})` : destination;
+  // Post-condition, not reasoning. Every rule above argues that the rendered
+  // cell reads back to the same key, and one of those arguments was wrong: a
+  // tab is stripped by URL parsing, not encoded, so `%09` silently re-keyed the
+  // row (#3854 review). Read the cell back through the real extractor and
+  // require the identical normalized key; anything that fails is written bare,
+  // which reads back verbatim. This holds for cases nobody has thought of yet.
+  if (normalizeUrl(extractCellUrl(rendered)) !== normalizeUrl(href)) return cell(href);
+  return rendered;
 }
 
 /**
@@ -1410,7 +1420,7 @@ if (MIGRATE_URLS) {
     console.log(`🔎 Migration (dry-run): ${changed} URL cell(s) would be rendered as markdown links in ${basename(APPS_FILE)}.${skippedNote}`);
   } else {
     writeFileAtomic(APPS_FILE, migrated.join('\n'));
-    console.log(`✅ Migration: rendered ${changed} URL cell(s) as markdown links in ${basename(APPS_FILE)}. The href is unchanged, so every dedup key is unchanged.${skippedNote}`);
+    console.log(`✅ Migration: rendered ${changed} URL cell(s) as markdown links in ${basename(APPS_FILE)}. Every row's dedup key is unchanged (verified per cell).${skippedNote}`);
   }
   process.exit(0);
 }
