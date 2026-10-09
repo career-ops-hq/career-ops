@@ -46,12 +46,16 @@ if (!floor) {
   if (dockerGo) pins.push(['Dockerfile ARG GO_VERSION', dockerGo]);
   else fail('Dockerfile missing the expected "ARG GO_VERSION=X.Y.Z" line');
   for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f)).sort()) {
-    for (const m of read(`.github/workflows/${wf}`).matchAll(/^\s*go-version:\s*['"]?([\d.]+)['"]?/gm)) {
-      pins.push([`.github/workflows/${wf} go-version`, m[1]]);
+    // Capture the whole value (minus quotes and a trailing YAML comment), so a
+    // pin like '1.27.2-rc1' or '${{ matrix.go }}' is reported, not skipped.
+    for (const m of read(`.github/workflows/${wf}`).matchAll(/^\s*go-version:\s*(.*?)\s*(?:#.*)?$/gm)) {
+      pins.push([`.github/workflows/${wf} go-version`, m[1].replace(/^(['"])(.*)\1$/, '$2')]);
     }
   }
   for (const [where, v] of pins) {
-    if (atLeast(v, floor)) pass(`${where} (${v}) satisfies dashboard/go.mod's go ${floor}`);
+    if (v === 'stable') pass(`${where} (stable) always resolves to the latest Go, above dashboard/go.mod's go ${floor}`);
+    else if (!/^\d+(\.\d+){1,2}$/.test(v)) fail(`${where} is "${v}", which cannot be checked against dashboard/go.mod's go ${floor} — use a numeric X.Y[.Z] pin or go-version-file`);
+    else if (atLeast(v, floor)) pass(`${where} (${v}) satisfies dashboard/go.mod's go ${floor}`);
     else fail(`${where} is ${v} but dashboard/go.mod requires go ${floor} — bump it`);
   }
 }
