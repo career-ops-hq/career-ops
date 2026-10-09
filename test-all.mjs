@@ -492,26 +492,6 @@ const scripts = [
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
-  // An outlier, measured on Windows CI the way tracker-writer-lock-tests.mjs
-  // once was (#2906). It spawns five node subprocesses
-  // (merge-tracker, verify-pipeline) against throwaway mkdtempSync trees, and
-  // that cost is the behaviour under test rather than slack to be trimmed.
-  //
-  // Measured on windows-latest across six green runs: 10.9s, 11.7s, 11.9s,
-  // 12.0s, 12.4s, 13.8s, which makes it the SLOWEST script in this section
-  // there, a hair above tracker-writer-lock-tests.mjs at 11.6s on the same run.
-  // A seventh run ran past the 30s default and was killed mid-suite
-  // (`exit null, signal SIGTERM`) while ubuntu, macos and every other check on
-  // that commit passed (#4010, same shape as #2906). Locally on an idle box it
-  // is 4.2s, so the spread is Windows process creation under runner load.
-  //
-  // SLOW_SCRIPT_WARN_FRACTION could not have given notice: at a typical 12s of
-  // 30s this never reaches the 75% warning, so it goes from silent to killed
-  // with nothing in between. The ceiling is the only signal it has.
-  //
-  // The writer-lock suite has since been made fast and moved into tests/ under
-  // the shared cap (#4759); #4758 is the same work for this one.
-  { name: 'tracker-columns-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -8165,6 +8145,8 @@ try {
 
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const history = parseScanHistoryLine(historyRow);
+  // The stored cells carry the formula escaping; parseScanHistoryLine undoes it.
+  const stored = Object.fromEntries(SCAN_HISTORY_COLUMNS.map((name, i) => [name, historyRow.split('\t')[i]]));
   if (
     historyRow.split('\t').length === SCAN_HISTORY_COLUMNS.length && // every declared column, empty ones included
     !historyRow.includes('\n') && !historyRow.includes('\r') &&
@@ -8172,14 +8154,18 @@ try {
     history.trust_score === '' && history.trust_flags === '' && // no trust signal
     history.url === 'https://jobs.example.com/123|evil' &&
     history.title.includes('- [ ] https://evil.example/job') &&
-    history.company === "'=ACME\\Corp | R&D" &&
-    history.location === "'@Remote EU" &&
-    history.requisition_id === "'=R1 DROP x" &&
-    history.language === "'@en -GB"
+    stored.company === "'=ACME\\Corp | R&D" &&
+    stored.location === "'@Remote EU" &&
+    stored.requisition_id === "'=R1 DROP x" &&
+    stored.language === "'@en -GB" &&
+    history.company === '=ACME\\Corp | R&D' &&
+    history.location === '@Remote EU' &&
+    history.requisition_id === '=R1 DROP x' &&
+    history.language === '@en -GB'
   ) {
-    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas');
+    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas; the reader gets the values back');
   } else {
-    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(history)}`);
+    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify({ stored, history })}`);
   }
 
   // ── postedAt persistence ──

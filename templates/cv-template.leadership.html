@@ -36,6 +36,12 @@ version: 1.0.0
     --page-margin: 0.6in;
     /* #3242: unchanged default — see templates/cv-template.html. */
     --job-break-inside: auto;
+    /* Whether a Projects entry may split across a page break. Unchanged
+       default — a project may still split, keeping the CV compact. Override via
+       config/profile.yml `style.project_break_inside: avoid` for "a project is
+       one unit, never split", which removes the one-word widow a description
+       can leave above its tech line, at the cost of a bottom gap. */
+    --project-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -118,7 +124,20 @@ version: 1.0.0
 
   .contact-row a { color: #414141; text-decoration: none; }
 
-  .separator { margin: 0 6px; color: #a8a8a8; }
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    /* Replaces the markup whitespace that sat before the old separator element;
+       without it every item after the first shifts left.
+       NO-BREAK space (U+00A0), not a plain one: a plain space here is a break
+       opportunity and Chromium takes it, leaving the bar alone at the start of
+       the next line -- the artifact this rule exists to prevent. Measured: with
+       a plain space, tests/cv-visual/contact-row-wrap.spec.mjs fails on
+       compact, executive, jake and modern in LTR. */
+    content: "\00a0|";
+    margin-inline: 6px;
+    color: #a8a8a8;
+  }
 
   /* === SECTIONS === */
   .section { margin-bottom: 12px; }
@@ -329,6 +348,12 @@ version: 1.0.0
     break-inside: var(--job-break-inside, auto);
   }
 
+  /* Opt-in — see the --project-break-inside default above. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
+  }
+
   .section-title,
   .job-company,
   .job-role,
@@ -388,13 +413,9 @@ version: 1.0.0
     {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>

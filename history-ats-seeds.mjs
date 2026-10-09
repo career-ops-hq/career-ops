@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { atsVendorOf } from './ats-vendor.mjs';
+import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { detectColumns, extractCellUrl, extractTrackerReportNumbers, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
@@ -125,9 +126,9 @@ export function parseScanHistoryAtsSeeds(text) {
   const seeds = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const cells = line.split('\t');
-    if (String(cells[0]).trim().toLowerCase() === 'url') continue;
-    const seed = seedOf(cells[4], cells[0], 'scan-history');
+    const row = parseScanHistoryLine(line);
+    if (row.url.trim().toLowerCase() === 'url') continue;
+    const seed = seedOf(row.company, row.url, 'scan-history');
     if (seed) seeds.push(seed);
   }
   return seeds;

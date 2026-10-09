@@ -24,6 +24,12 @@
        keep the CV compact (see #1145). Override via config/profile.yml
        `style.job_break_inside: avoid` for "a role is one unit, never split". */
     --job-break-inside: auto;
+    /* Whether a Projects entry may split across a page break. Unchanged
+       default — a project may still split, keeping the CV compact. Override via
+       config/profile.yml `style.project_break_inside: avoid` for "a project is
+       one unit, never split", which removes the one-word widow a description
+       can leave above its tech line, at the cost of a bottom gap. */
+    --project-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -124,8 +130,16 @@
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* The separator is generated content on the item BEFORE it, not an element of
+     its own. As its own flex item it was an independent box, so `flex-wrap`
+     could place it first on a new line — and attaching it to the following item
+     instead would only move the problem, since that item starts the wrapped
+     line. Trailing the preceding item, it leaves with that item or not at all.
+     margin-inline-start (logical) keeps RTL — html[lang="ar"] — correct. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -500,6 +514,12 @@
     break-inside: var(--job-break-inside, auto);
   }
 
+  /* Opt-in — see the --project-break-inside default above. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
+  }
+
   /* Keep a heading attached to the content that follows it, so headings are not
      orphaned at the bottom of a page. */
   .section-title,
@@ -711,13 +731,9 @@
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>
