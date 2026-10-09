@@ -53,14 +53,14 @@ async function proxyFor(url) {
     process.env.HTTPS_PROXY, process.env.no_proxy, process.env.NO_PROXY].join('\0');
   // Existing installations can keep direct transport without installing undici.
   // Resolve the optional transport only after both the trust flag and proxy URL.
-  const { EnvHttpProxyAgent } = await import('undici').catch((cause) => {
+  const { EnvHttpProxyAgent, fetch: undiciFetch } = await import('undici').catch((cause) => {
     throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
   });
   if (signature !== proxySignature) {
     proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy });
     proxySignature = signature;
   }
-  return { dispatcher: proxyAgent, proxyHost };
+  return { dispatcher: proxyAgent, proxyHost, fetchImpl: undiciFetch };
 }
 
 /**
@@ -76,7 +76,7 @@ async function proxyFor(url) {
  */
 async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResponse = false) {
   const targetHost = new URL(url).hostname.replace(/^\[|\]$/g, '');
-  const { dispatcher, proxyHost } = await proxyFor(url);
+  const { dispatcher, proxyHost, fetchImpl } = await proxyFor(url);
   if (dispatcher && isIP(targetHost) && isBlockedAddress(targetHost)) throw blockedAddressError(targetHost, targetHost);
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
@@ -89,7 +89,7 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
   // synchronous part of fetch() has returned, and the context has to still be
   // entered when it does.
   return providerFetchContext.run({ url: String(url), targetHost, proxyHost },
-    () => fetchInContext(url, opts, consume, dispatcher, allowManualRedirectResponse));
+    () => fetchInContext(url, opts, consume, dispatcher, allowManualRedirectResponse, fetchImpl));
 }
 
 // redirect defaults to 'error': a provider fetch must never follow a 3xx, or a
@@ -102,9 +102,10 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
  * @param {(res: Response) => Promise<any>} consume
  * @param {import('undici').Dispatcher} [dispatcher]
  * @param {boolean} [allowManualRedirectResponse]
+ * @param {typeof fetch} [fetchImpl] undici's fetch when a proxy dispatcher is used; global fetch otherwise.
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher, allowManualRedirectResponse = false) {
+async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -123,7 +124,7 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     if (!requestHeaders.has('accept-encoding')) requestHeaders.set('accept-encoding', 'gzip, deflate, br');
     let res;
     try {
-      res = await fetch(url, {
+      res = await fetchImpl(url, {
         method,
         headers: requestHeaders,
         body,

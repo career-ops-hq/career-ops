@@ -6,6 +6,7 @@ type CareerApplication struct {
 	// Display numbers synthesized for backfill rows must never join ledger IDs.
 	TrackerNumberMissing bool
 	Date                 string
+	StatusDate           string // latest status-log.tsv transition date (data.ApplyStatusDates); "" when none
 	Company              string
 	Role                 string
 	Status               string

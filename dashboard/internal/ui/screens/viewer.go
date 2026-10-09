@@ -1,10 +1,12 @@
 package screens
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -41,8 +43,12 @@ type ViewerModel struct {
 	app             model.CareerApplication
 	careerOpsPath   string
 	coverLetterPath string
+	jobURL          string
 	statusPicker    bool
 	statusCursor    int
+	// flash is a one-shot notice rendered in place of the footer, cleared on
+	// the next key press (same contract as the pipeline screen's flash).
+	flash string
 }
 
 // NewViewerModel creates a new file viewer for the given path.
@@ -66,6 +72,7 @@ func NewViewerModel(t theme.Theme, careerOpsPath, path, title string, width, hei
 		app:             app,
 		careerOpsPath:   careerOpsPath,
 		coverLetterPath: parseCoverLetterPath(lines, careerOpsPath),
+		jobURL:          resolveJobURL(app, lines),
 	}
 	m.rebuildRender()
 	return m
@@ -95,6 +102,28 @@ func parseCoverLetterPath(lines []string, careerOpsPath string) string {
 		}
 	}
 	return ""
+}
+
+// resolveJobURL returns the posting URL for the open report: the tracker row's
+// JobURL when it is a usable web URL, else the first usable **URL:** header
+// line in the report. Anything else (a hostless "https://?x", a local:jds/
+// pointer) is skipped rather than handed to the platform opener.
+func resolveJobURL(app model.CareerApplication, lines []string) string {
+	if isWebURL(app.JobURL) {
+		return app.JobURL
+	}
+	for _, line := range lines {
+		if sm := reReportURLLine.FindStringSubmatch(strings.TrimSpace(line)); sm != nil && isWebURL(sm[1]) {
+			return sm[1]
+		}
+	}
+	return ""
+}
+
+// isWebURL reports whether raw is an absolute http(s) URL with a host.
+func isWebURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // rebuildRender recomputes renderedLines from raw lines using the current width.
@@ -128,13 +157,25 @@ func (m *ViewerModel) Resize(width, height int) {
 
 func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case StatusUpdateFailedMsg:
+		m.flash = "Could not update status: " + msg.Err
+		return m, nil
 	case tea.KeyMsg:
+		m.flash = ""
 		if m.statusPicker {
 			return m.handleStatusPicker(msg)
 		}
 		switch msg.String() {
 		case "q", "esc":
 			return m, func() tea.Msg { return ViewerClosedMsg{} }
+
+		case "o":
+			if m.jobURL == "" {
+				m.flash = "No URL found for this application"
+				break
+			}
+			url := m.jobURL
+			return m, func() tea.Msg { return PipelineOpenURLMsg{URL: url} }
 
 		case "c":
 			m.statusPicker = true
@@ -197,6 +238,11 @@ func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.rebuildRender()
+
+	case PipelineOpenFailedMsg:
+		// Issue 3913: main.go routes this to the active screen; while the
+		// viewer is open, the pipeline's flash line is not on screen.
+		m.flash = "Could not open " + msg.Target + ": " + msg.Err
 	}
 
 	return m, nil
@@ -368,7 +414,7 @@ func (m ViewerModel) renderAll() []string {
 			flat = append(flat, s)
 		}
 	}
-	return flat
+	return balanceHyperlinks(flat)
 }
 
 func isTableLine(line string) bool {
@@ -488,11 +534,12 @@ func (m ViewerModel) renderTableBlock(lines []string) []string {
 
 var (
 	reBold           = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	reLink           = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	reLink           = regexp.MustCompile(`\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)`) // one level of balanced parens in the destination, as CommonMark allows
 	reBareURL        = regexp.MustCompile(`https?://\S*[^\s\)\]\.,;:!?]`)
 	reInlineCode     = regexp.MustCompile("`([^`]+)`")
 	reListNumber     = regexp.MustCompile(`^(\s*\d+\.\s+)(.*)$`)
 	reCoverLetterPDF = regexp.MustCompile(`PDF generated:\s*(output/[^\s]+\.pdf)`)
+	reReportURLLine  = regexp.MustCompile(`^\*\*URL:\*\*\s*(\S+)`)
 	reRelPDFPath     = regexp.MustCompile(`output/cv-[^\s\)\]\.,;:!?"']+\.pdf`)
 )
 
@@ -579,14 +626,17 @@ func findInlineMatch(s string, codeStyle, boldStyle, linkStyle lipgloss.Style, c
 	if loc := reLink.FindStringIndex(s); loc != nil {
 		consider(loc, func() string {
 			sm := reLink.FindStringSubmatch(s[loc[0]:loc[1]])
-			if len(sm) >= 2 {
-				return linkStyle.Render(sm[1])
+			if len(sm) >= 3 {
+				return webHyperlink(markdownLinkTarget(sm[2]), linkStyle.Render(sm[1]))
 			}
 			return s[loc[0]:loc[1]]
 		})
 	}
 	if loc := reBareURL.FindStringIndex(s); loc != nil {
-		consider(loc, func() string { return linkStyle.Render(s[loc[0]:loc[1]]) })
+		consider(loc, func() string {
+			bare := s[loc[0]:loc[1]]
+			return webHyperlink(bare, linkStyle.Render(bare))
+		})
 	}
 	if loc := reRelPDFPath.FindStringIndex(s); loc != nil {
 		consider(loc, func() string {
@@ -604,11 +654,119 @@ func findInlineMatch(s string, codeStyle, boldStyle, linkStyle lipgloss.Style, c
 			if !strings.HasPrefix(forward, "/") {
 				forward = "/" + forward // Windows: C:/... → /C:/...
 			}
-			// OSC 8 hyperlink: ESC ] 8 ; ; URL BEL text ESC ] 8 ; ; BEL
-			return "\x1b]8;;" + "file://" + forward + "\x07" + styled + "\x1b]8;;\x07"
+			return hyperlink("file://"+forward, styled)
 		})
 	}
 	return best
+}
+
+// OSC 8 hyperlinks: ESC ] 8 ; params ; URI BEL text ESC ] 8 ; ; BEL.
+// Terminals that support them (iTerm2, WezTerm, kitty, VS Code, Windows
+// Terminal, recent GNOME Terminal) make the text clickable; others ignore the
+// sequence and show the text as before.
+const osc8Close = "\x1b]8;;\x07"
+
+const upperHex = "0123456789ABCDEF"
+
+// reOSC8 matches one OSC 8 sequence, terminated by BEL or ST (pipeline.go's
+// manifesto link uses ST). Group 2 is the URI; an empty URI closes the link.
+var reOSC8 = regexp.MustCompile("\x1b\\]8;([^;\x07\x1b]*);([^\x07\x1b]*)(?:\x07|\x1b\\\\)")
+
+// hyperlink wraps already-styled text in an OSC 8 hyperlink to target. When
+// the target cannot be carried safely it returns styled unchanged, so the text
+// still renders, just not as a link.
+func hyperlink(target, styled string) string {
+	uri, ok := osc8URI(target)
+	if !ok {
+		return styled
+	}
+	return "\x1b]8;;" + uri + "\x07" + styled + osc8Close
+}
+
+// webHyperlink links styled to rawURL only when rawURL is an absolute http(s)
+// URL. Report text is derived from job postings, which are untrusted input, so
+// a markdown link to javascript:, file:, data: or a relative path stays plain.
+func webHyperlink(rawURL, styled string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return styled
+	}
+	return hyperlink(rawURL, styled)
+}
+
+// markdownLinkTarget extracts the destination from a markdown link's (...)
+// part, dropping an optional title (`[x](https://a "Title")`) and the angle
+// brackets of `[x](<https://a>)`.
+func markdownLinkTarget(dest string) string {
+	dest = strings.TrimSpace(dest)
+	if strings.HasPrefix(dest, "<") {
+		if end := strings.IndexByte(dest, '>'); end > 0 {
+			return dest[1:end]
+		}
+	}
+	if fields := strings.Fields(dest); len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
+}
+
+// osc8URI makes target safe to embed in an OSC 8 sequence. Any control
+// character (C0, DEL, C1) rejects the target outright: ESC or BEL would end
+// the sequence early and let the rest of the URL reach the terminal as
+// commands (see sanitizeFlash, #4027). The OSC 8 spec limits URIs to bytes
+// 32-126, so spaces and non-ASCII bytes are percent-encoded rather than
+// dropped, which keeps file:// links to paths like "My Drive" working.
+func osc8URI(target string) (string, bool) {
+	if target == "" || !utf8.ValidString(target) {
+		return "", false
+	}
+	var b strings.Builder
+	for _, r := range target {
+		switch {
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return "", false
+		case r == ' ' || r > 0x7e:
+			for _, c := range []byte(string(r)) {
+				b.WriteByte('%')
+				b.WriteByte(upperHex[c>>4])
+				b.WriteByte(upperHex[c&0x0f])
+			}
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String(), true
+}
+
+// balanceHyperlinks makes every rendered line carry its own complete OSC 8
+// hyperlinks. ansi.Wrap keeps a link's opening and closing sequences where
+// they were, so a URL wrapped over three lines opens on the first and closes
+// on the last. The viewer draws and scrolls lines independently, so when the
+// first line is scrolled off the rest is not clickable, and when the last is
+// off the link never closes and the footer becomes part of it. This closes an
+// open link at the end of each line and reopens it at the start of the next.
+// Lines that are already balanced (lipgloss tables do this) are unchanged.
+func balanceHyperlinks(lines []string) []string {
+	out := make([]string, len(lines))
+	open := "" // opening sequence of the link still active at end of line
+	for i, line := range lines {
+		carried := open
+		for _, sm := range reOSC8.FindAllStringSubmatch(line, -1) {
+			if sm[2] == "" {
+				open = ""
+			} else {
+				open = sm[0]
+			}
+		}
+		if carried != "" {
+			line = carried + line
+		}
+		if open != "" {
+			line += osc8Close
+		}
+		out[i] = line
+	}
+	return out
 }
 
 func (m ViewerModel) styleLine(line string) string {
@@ -707,8 +865,21 @@ func (m ViewerModel) renderFooter() string {
 		Width(m.width).
 		Padding(0, 1)
 
+	if m.flash != "" {
+		return style.Foreground(m.theme.Yellow).Render(sanitizeFlash(m.flash))
+	}
+
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Text)
 	descStyle := lipgloss.NewStyle().Foreground(m.theme.Subtext)
+
+	if m.flash != "" {
+		flashStyle := lipgloss.NewStyle().
+			Foreground(m.theme.Yellow).
+			Background(m.theme.Surface).
+			Width(m.width).
+			Padding(0, 1)
+		return flashStyle.Render(sanitizeFlash(m.flash))
+	}
 
 	if m.statusPicker {
 		return style.Render(
@@ -722,6 +893,7 @@ func (m ViewerModel) renderFooter() string {
 		keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage) + // pagination
 		keyStyle.Render("g/G") + descStyle.Render(i18n.Current.HelpTopEnd) + // top/bottom
 		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) + // status
+		m.openURLHint(keyStyle, descStyle) + // job posting
 		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) + // language
 		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack) // exit
 
@@ -730,6 +902,14 @@ func (m ViewerModel) renderFooter() string {
 	}
 
 	return style.Render(footer)
+}
+
+// openURLHint shows the `o` shortcut only when the report has a posting URL.
+func (m ViewerModel) openURLHint(keyStyle, descStyle lipgloss.Style) string {
+	if m.jobURL == "" {
+		return ""
+	}
+	return keyStyle.Render("o") + descStyle.Render(i18n.Current.HelpOpenURL)
 }
 
 func (m ViewerModel) handleStatusPicker(msg tea.KeyMsg) (ViewerModel, tea.Cmd) {

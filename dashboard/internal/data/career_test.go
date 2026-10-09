@@ -295,6 +295,25 @@ func TestParseApplicationsMapsColumnsByHeader(t *testing.T) {
 	}
 }
 
+// An explicit tracker Location column is shown as-is, even for a town no
+// built-in city list knows and with nothing location-like in Notes.
+func TestParseApplicationsReadsLocationColumn(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|----------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Engineer | Cardiff, UK | 4.0/5 | Applied | | | |
+`)
+
+	apps := ParseApplications(tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 application, got %d", len(apps))
+	}
+	if apps[0].Location != "Cardiff, UK" {
+		t.Errorf("Location = %q, want \"Cardiff, UK\"", apps[0].Location)
+	}
+}
+
 func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 	tempDir, _ := writeTracker(t, `# Applications Tracker
 
