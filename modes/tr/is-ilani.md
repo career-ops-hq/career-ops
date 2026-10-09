@@ -4,7 +4,22 @@ Aday bir ilan yapıştırdığında (metin veya URL) HER ZAMAN 7 bloğun tamamı
 
 ## Adım 0 — Arketip Tespiti
 
-İlanı `_shared.md`'deki arketiplerden birine sınıflandır. Hibrit ise en yakın ikisini belirt. Bu tespite göre:
+İlanı `_shared.md`'deki arketiplere göre sınıflandır — yani, tanımlı olduğu
+yerde, kullanıcının `modes/_profile.md` → *Your Target Roles* altındaki kendi
+arketiplerine göre. `_profile.md` yoksa, *Your Target Roles* bölümü yoksa ya da
+o tabloda hiç satır yoksa, `_shared.md`'deki varsayılan tabloya göre sınıflandır
+ve oradaki bir eşleşmeyi hedef say. Kullanıcının hedeflerinden ikisinin hibritiyse
+ikisini de belirt.
+
+**"Hiçbiri" geçerli bir sonuçtur ve öyle raporlanmalıdır.** Rol, kullanıcının
+hedeflediği hiçbir şeyle eşleşmiyorsa en yakın etiketi seçme ve hibrit deme:
+bunu açıkça söyle, North Star'a 1 ver ve değerlendirmeye diğer boyutlarda devam
+et — raporun geri kalanı yine de işe yarar; dürüst bir gerekçeyle verilmiş düşük
+bir uyum puanı, kullanıcının başvurmadığı bir iş için kendinden emin bir uyum
+anlatısından daha faydalıdır. `_profile.md`'de hedefler tanımlıysa, yalnızca
+`_shared.md`'deki varsayılan tabloyla eşleşmek onlarla eşleşmek demek değildir.
+
+Bu tespite göre:
 - B bloğunda hangi kanıt noktalarını öne çıkaracağın belirlenir
 - E bloğunda CV özeti nasıl yeniden yazılacağı belirlenir
 - F bloğunda hangi STAR hikayeleri hazırlanacağı belirlenir
@@ -112,6 +127,15 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 
 **Tarih:** {YYYY-MM-DD}
 **Arketip:** {tespit edilen}
+<!-- Rol kullanıcının hedeflerinden biriyle eşleşiyorsa onun adını yaz. Hiçbiriyle
+     eşleşmiyorsa bu alan boş BIRAKILMAZ ve muğlak geçilmez — boş bir alan aracın
+     çalışmadığı gibi okunur, "muhtemelen X ile Y'nin hibriti" ise burada önlenmek
+     istenen zorlamanın ta kendisidir. Şunlardan birini yaz:
+       Hedef değil — en yakın varsayılan: {_shared.md tablosundaki satır}
+       Hedef değil — yakın eşleşme yok
+     Varsayılan satırı adlandırmak okuyucunun rolü konumlandırmasına yine yardım
+     eder; yapmaması gereken, kullanıcının gerçekten sahip olduğu bir hedefin yerine
+     geçmektir. -->
 **Puan:** {X.X}/5
 **URL:** {ilan URL'si}
 **PDF:** ✅/❌
@@ -154,17 +178,21 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 
 ### 2. Takipçiye Kaydet
 
-**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `batch/tracker-additions/{num}-{sirket-slug}.tsv` dosyasına tek satır TSV yaz (8 veya 9 sekme ile ayrılmış sütun):
+**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `batch/tracker-additions/{num}-{sirket-slug}.tsv` dosyasına sekmeyle ayrılmış **iki** satır yaz: önce **sütun adları** satırı, hemen altına tam olarak bir veri satırı.
 
 ```tsv
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
+{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
 ```
+
+Her iki satırı da **tam olarak yukarıdaki gibi** yaz: sütun adları İngilizce, değerler ise **üstlerindeki adlarla aynı sırada**. `merge-tracker.mjs` alanları ADA göre çözer; tam da bu yüzden adların altlarındaki satırı tarif etmesi gerekir — satırlardan yalnızca birini yeniden sıralarsan `company` ile `role` sessizce yer değiştirir (ikisi de serbest metin olduğu için içerik kontrolü bunu yakalayamaz).
 
 - `{num}` = sıradaki numara (tam sayı, `reports/` klasöründen hesapla)
 - `{status}` = `Evaluated`
 - `{score}` = `X.X/5` formatı (örn. `4.2/5`)
 - `{pdf_emoji}` = `✅` veya `❌`
-- `{note}` = kısa not (isteğe bağlı, sütun atlanabilir)
+- `{note}` = kısa not (hücre boş bırakılabilir)
+- `{url}` = ilanın URL'si. Bu **belirleyici yinelenen-kayıt anahtarıdır**: `merge-tracker.mjs` satırları önce buna göre eşler, yalnızca URL yoksa şirket+rol bulanık eşleşmesine düşer. URL yoksa hücreyi **boş** bırak — asla `N/A` veya `-` yazma; bu yer tutucular atılır ve satır anahtarsız kalır.
 
 Ardından `node merge-tracker.mjs` çalıştır.
 

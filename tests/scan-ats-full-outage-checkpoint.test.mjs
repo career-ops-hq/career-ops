@@ -114,6 +114,15 @@ function sweep(dir, dnsCode, extraArgs = []) {
 {
   const dir = makeSandbox();
   try {
+    // A history-derived Greenhouse board is present, but the directory sweep's
+    // resolver breaker must stop the run before this second network phase.
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(
+      join(dir, 'data', 'scan-history.tsv'),
+      'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n'
+        + 'https://job-boards.greenhouse.io/history-co/jobs/1\t2026-09-01\tgreenhouse\tEngineer\tHistory Co\tadded\tRemote\n',
+      'utf-8',
+    );
     const out = sweep(dir, 'EAI_AGAIN');
     const cpPath = join(dir, CHECKPOINT_REL);
     let resumeAt = null;
@@ -166,6 +175,10 @@ function sweep(dir, dnsCode, extraArgs = []) {
     // A checkpoint that stored the full slice instead of the attempted part
     // would double-count the portion the first run completed.
     if (resumeAt !== null) {
+      // This second run tests checkpoint accounting, not history seeding. The
+      // history fixture above exists only to prove the outage-stopped run never
+      // starts that network phase; remove it before the clean resume.
+      rmSync(join(dir, 'data', 'scan-history.tsv'), { force: true });
       const resumed = sweep(dir, 'ENOTFOUND', ['--resume']);
       if (resumed === null) {
         fail(`--resume after an outage stop failed${formatRunFailure()}`);

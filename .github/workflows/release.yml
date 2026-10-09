@@ -16,19 +16,37 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      # release-please opens and updates its release PR with a GitHub App token,
+      # not GITHUB_TOKEN. This repository does not let Actions create pull
+      # requests, and that stays off (the same setting would let workflows
+      # approve them), so with GITHUB_TOKEN the run failed at "create pull
+      # request" and no release could be cut. The App (secrets RELEASE_APP_ID,
+      # its client ID, and RELEASE_APP_PRIVATE_KEY) has Contents, Pull requests
+      # and Issues read/write on this repository only. Side effects worth
+      # knowing: its release PR runs CI like any other PR, and the releases it
+      # creates trigger `on: release` workflows (sbom.yml), which releases
+      # created with GITHUB_TOKEN never did.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        if: ${{ github.event_name == 'push' }}
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v5
         id: release
         if: ${{ github.event_name == 'push' }}
         with:
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Publish the npm scaffolder when a release was just created, OR on a
-      # manual dispatch (to recover from a failed publish). Runs in the same job
-      # because a release created via GITHUB_TOKEN does not trigger separate
-      # `on: release` workflows.
+      # Publish the npm scaffolder when a career-ops release was just created,
+      # OR on a manual dispatch (to recover from a failed publish). Kept in this
+      # job so the publish stays tied to the run that cut the release. The
+      # checkout also runs when only the `web` component was released: the
+      # Latest step at the bottom reads the manifest from it.
       - uses: actions/checkout@v7
-        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+        if: ${{ steps.release.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
       - uses: actions/setup-node@v7
         if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         with:
@@ -55,8 +73,16 @@ jobs:
       # Re-assert it explicitly so ordering stops deciding. Reads the version
       # from the manifest rather than an action output, so it cannot drift from
       # what was actually released.
+      #
+      # `releases_created` is the string 'true'/'false' (release_created is
+      # unset when false, so the bare form works for it and not for this one).
+      #
+      # Runs on ANY release, not only a career-ops one: a web-only release
+      # would otherwise become Latest, and update-system.mjs resolves what to
+      # install from /releases/latest — it refuses a web-* tag, so every
+      # install would stop getting updates until the next career-ops release.
       - name: Keep the career-ops release marked as Latest
-        if: ${{ steps.release.outputs.release_created }}
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

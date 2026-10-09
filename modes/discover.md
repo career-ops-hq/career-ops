@@ -43,6 +43,26 @@ reusable tool that feeds the scanner.
 - `portals.yml` — dedupe target and write destination (user layer). Honors the
   `CAREER_OPS_PORTALS` env override for scratch/testing.
 
+### Generating the input list from scan history
+
+You don't have to hand-write `companies.yml`. The scanners already log every
+company they touch in `data/scan-history.tsv`, including employers not yet in
+`portals.yml`. `discover-new-companies.mjs` reads that log, subtracts everything
+already tracked, and emits the remainder in exactly the `companies: [{name}]`
+shape this mode consumes:
+
+```bash
+node discover-new-companies.mjs --out /tmp/new.yml   # candidate list, writes nothing else
+node discover-ats.mjs --in /tmp/new.yml --summary     # preview boards, writes nothing
+node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
+```
+
+It writes only the candidate list; `portals.yml` stays touched exclusively by
+`discover-ats.mjs --write`. Companies are deduped on their canonical name (via
+`buildCompanyCanonicalizer`), so alias drift doesn't resurface a configured
+board. Useful flags: `--since <days>`, `--min-rows <n>`, `--added-only`,
+`--limit <n>`, `--summary`, `--json`.
+
 ## Step 1 — Run the script
 
 Preview (the default — writes nothing, prints the entries it would add):
@@ -66,7 +86,15 @@ node discover-ats.mjs Stripe Ramp Mollie          # names as positional args
 node discover-ats.mjs --in companies.yml --summary # human-readable table
 node discover-ats.mjs --in companies.yml --vendors gh,ashby  # restrict probes
 node discover-ats.mjs --in companies.yml --vendors workday   # Workday only
+node discover-ats.mjs --in companies.yml --small-threshold 10 # what counts as a small board
 ```
+
+A resolved board that lists few postings (5 or fewer by default, the same
+threshold `audit-portals.mjs` uses; `--small-threshold 0` turns it off) is still
+resolved, but it is flagged: `smallBoard: true` in the JSON, a
+`[small board — verify ownership]` marker in `--summary`, and a `# verify:`
+comment on the entry `--write` appends. It is a prompt to check the board is the
+company's main one, not an error, and exit codes do not change.
 
 Vendor keywords for `--vendors`: `gh`, `ashby`, `lever`, `workable`,
 `smartrecruiters`, `recruitee`, `bamboohr`, `breezy`, `pinpoint`, `rippling`,
@@ -115,8 +143,7 @@ careers_url) and the unresolved list with reasons. Call out:
 
 ## Step 3 — Handoff
 
-After writing, tell the user to run `/career-ops scan` (or a regional preset
-like `eu-fintech`) to pull matching roles from the newly tracked boards.
+After writing, tell the user to run `/career-ops scan` to pull matching roles from the newly tracked boards.
 
 ## Rules
 

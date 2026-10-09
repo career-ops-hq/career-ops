@@ -6,15 +6,23 @@ Standalone Go TUI for browsing the career-ops pipeline.
 
 A terminal UI over the application tracker: filter tabs, sort modes,
 grouped/flat views, lazy-loaded report previews, and an inline status picker.
+The report viewer opens the job posting with `o`, using the tracker row's URL
+or, failing that, the report's `**URL:**` header.
 It is isolated from the Node core — optional, never required by any other
 component.
+
+The list's DATE column shows a row's most recent transition in the ledger
+beside the tracker, `status-log.tsv` — when its status last changed — and
+falls back to the tracker's own Date cell (the evaluation date, which nothing
+rewrites) for rows with no ledger history. The date sort orders by the same
+value.
 
 ## Prerequisites and running
 
 Requires Go 1.24+ (`go.mod`). From the repo root:
 
 ```bash
-npm run serve:dashboard    # go run . --path .. (launch against the repo root)
+npm run serve:dashboard    # go run . --path .. (The script automatically resolves external data directories by falling back through CAREER_OPS_ROOT and CAREER_OPS_DATA_DIR enviornment variables,defaulting to repository root.)
 npm run build:dashboard    # build the standalone binary
 ```
 
@@ -25,6 +33,12 @@ output name (`career-dashboard.exe` on Windows, `career-dashboard` elsewhere).
 The binary accepts `--path <dir>` pointing at a career-ops directory
 (default `.`). The data loader tries both `{path}/applications.md` and
 `{path}/data/applications.md` for layout compatibility.
+
+In the report viewer, `http(s)` links (bare URLs and markdown links) are
+clickable in terminals that support OSC 8 hyperlinks (iTerm2, WezTerm, kitty,
+VS Code, Windows Terminal, recent GNOME Terminal). Other terminals show the
+same text, unlinked. Other link schemes stay plain, because report text comes
+from untrusted job postings.
 
 ## Package layout
 

@@ -22,11 +22,16 @@ import { normalizeTextKey } from "./normalize-text-key.mjs";
  *  v2: curated brand domains (notion.so, zoom.us, …) now precede slug guesses.
  *  v3: normalization switched from `[^a-z0-9]` to the Unicode-safe
  *  normalizeTextKey (#2369/#2666's own lesson, reintroduced here independently)
+ *  v4: companyDomains() folds to ASCII instead of deleting non-ASCII letters,
+ *  so "Telefónica" now tries telefonica.com rather than telefnica.com. The bump
+ *  is mandatory per requirement 1 above and not merely tidy: every miss the old
+ *  resolver cached is an EMPTY SENTINEL, so an unchanged version would keep
+ *  serving that permanent "no logo" to exactly the companies the fix is for.
  *  — v2 stripped every non-ASCII letter, so "Škoda" and "Koda" hashed to the
  *  IDENTICAL key and one silently wore the other's logo forever (requirement 2,
  *  violated). Bumping discards any v2 entry poisoned this way rather than
  *  leaving it reachable under an unchanged "koda" key. */
-export const COMPANY_KEY_VERSION = "v3";
+export const COMPANY_KEY_VERSION = "v4";
 
 /** Cache key for a company name, or null if the name carries nothing to key on.
  *

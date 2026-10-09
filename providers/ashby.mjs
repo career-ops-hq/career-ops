@@ -12,6 +12,7 @@
 // requests out to dodge rate-limiting).
 // See .planning/codebase/ashby-scan-abort-diagnosis.md.
 import { fetchJsonWithRetry } from './_http.mjs';
+import { coerceId } from './_ids.mjs';
 
 const ASHBY_TIMEOUT_MS = 30_000;
 const ASHBY_RETRIES = 2;
@@ -35,6 +36,20 @@ const INTERVAL_MULTIPLIERS = {
  * Parse compensation data from Ashby job object.
  * Returns structured salary object with min, max, and currency,
  * or null if no valid compensation data exists.
+ *
+ * Ashby's posting-api does not put min/max on the compensation object itself.
+ * A real payload carries tiers, and each tier carries components:
+ *
+ *   compensationTiers[].components[] = {
+ *     compensationType: 'Salary', interval: '1 YEAR',
+ *     minValue, maxValue, currencyCode, summary
+ *   }
+ *
+ * The salary component is the one with min/max; `EquityPercentage` and bonus
+ * components carry `summary` text instead and must not be read as a range.
+ * The flat shape is still accepted because the existing fixtures and any
+ * hand-built job object use it.
+ *
  * @param {any} job - Ashby job object
  * @returns {{min: number, max: number, currency: string}|null}
  */
@@ -42,11 +57,6 @@ export function parseCompensation(job) {
   const comp = job?.compensation;
   if (!comp) return null;
 
-  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (comp.interval || '1 YEAR');
-  const multiplier = INTERVAL_MULTIPLIERS[interval];
-  if (!multiplier) return null;
-
-  // Coerce and validate numeric fields — malformed API payloads must not propagate
   /** @param {any} v */
   const normalizeNum = (v) => {
     if (v == null) return null;
@@ -54,9 +64,74 @@ export function parseCompensation(job) {
     const n = Number(v);
     return Number.isFinite(n) && n >= 0 ? n : null;
   };
-  const minValue = normalizeNum(comp.minValue);
-  const maxValue = normalizeNum(comp.maxValue);
-  const currency = typeof comp.currency === 'string' ? comp.currency.trim() : '';
+
+  // A real payload nests the numbers under tiers[].components[]; the flat shape
+  // puts them on `comp` directly.
+  let source = comp;
+  let nested = false;
+  /** @type {any[]} */
+  const components = (Array.isArray(comp.compensationTiers) ? comp.compensationTiers : [])
+    .flatMap((tier) => (Array.isArray(tier?.components) ? tier.components : []));
+  if (components.length) {
+    // Only a Salary component carries the role's range. An EquityPercentage or
+    // bonus component may still hold a number, and reading it as salary would
+    // report a percentage or a one-off as an annual figure.
+    const salaryComponents = components.filter(
+      (c) => String(c?.compensationType ?? '').toLowerCase() === 'salary',
+    );
+    if (!salaryComponents.length) return null;
+    const withRange = salaryComponents.filter(
+      (c) => normalizeNum(c?.minValue) != null || normalizeNum(c?.maxValue) != null,
+    );
+    if (!withRange.length) return null;
+    // A board can post several salary components; the widest range is the role's
+    // band, and the others are usually a narrower sub-tier of the same posting.
+    //
+    // Choose among the components that can actually be read, not among all of
+    // them. Picking the widest first and validating its interval afterwards made
+    // a wider component with an unusable interval fatal: the function returned
+    // null instead of falling through to a narrower component that parses, in
+    // either array order.
+    //
+    // A missing interval is unusable here, not merely unvalidated. The nested
+    // branch refuses a component with no interval of its own rather than
+    // annualizing it, so admitting one as a candidate only lets it win the width
+    // contest and then fail that check, which returns null with a readable
+    // narrower component sitting right there. That is the same masking failure
+    // this filter exists to prevent, one field over.
+    const readable = (c) => {
+      const raw = c?.interval;
+      return typeof raw === 'string'
+        && raw.trim() !== ''
+        && Object.hasOwn(INTERVAL_MULTIPLIERS, raw);
+    };
+    const candidates = withRange.filter(readable);
+    if (!candidates.length) return null;
+    source = candidates.reduce((best, c) => {
+      const span = (normalizeNum(c?.maxValue) ?? normalizeNum(c?.minValue) ?? 0)
+        - (normalizeNum(c?.minValue) ?? normalizeNum(c?.maxValue) ?? 0);
+      const bestSpan = (normalizeNum(best?.maxValue) ?? normalizeNum(best?.minValue) ?? 0)
+        - (normalizeNum(best?.minValue) ?? normalizeNum(best?.maxValue) ?? 0);
+      return span > bestSpan ? c : best;
+    }, candidates[0]);
+    nested = true;
+  }
+
+  // A component states its own interval, so a nested component with none is not
+  // the same as a flat object with none. The `1 YEAR` default is a convenience
+  // for the legacy flat shape; applying it here would annualize a monthly figure
+  // and present it as a salary with nothing signalling the substitution.
+  const rawInterval = nested ? source.interval : (source.interval || comp.interval || '1 YEAR');
+  if (typeof rawInterval !== 'string' || !rawInterval.trim()) return null;
+  const interval = /** @type {keyof typeof INTERVAL_MULTIPLIERS} */ (rawInterval);
+  const multiplier = INTERVAL_MULTIPLIERS[interval];
+  if (!multiplier) return null;
+
+  // Coerce and validate numeric fields — malformed API payloads must not propagate
+  const minValue = normalizeNum(source.minValue ?? comp.minValue);
+  const maxValue = normalizeNum(source.maxValue ?? comp.maxValue);
+  const rawCurrency = source.currencyCode ?? source.currency ?? comp.currency;
+  const currency = typeof rawCurrency === 'string' ? rawCurrency.trim() : '';
 
   // If neither min nor max is provided, no valid compensation
   if (minValue == null && maxValue == null) return null;
@@ -116,7 +191,10 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-// Build the full location string from primary + secondary locations.
+// Build the full location string from primary + secondary locations: the
+// posting's `location` name, the primary `address.postalAddress` locality and
+// country (the country only when `location` doesn't already name it), then
+// each secondary location.
 // Ashby's posting-api puts extra hiring regions in `secondaryLocations[]`
 // (each with a region label + a postalAddress). Using only `j.location` drops
 // them, so an EU-eligible role whose PRIMARY label is e.g. "Canada" reads as
@@ -141,10 +219,42 @@ function toEpochMs(value) {
 //
 // Mirrors existing behavior in bamboohr.mjs, gem.mjs, and thehub.mjs, which
 // already append "Remote" from their own providers' remote flags.
+/**
+ * Whole-word, case-insensitive containment (same check as recruitee's and
+ * breezy's containsWholeWord).
+ * @param {string} text
+ * @param {string} word
+ */
+function containsWholeWord(text, word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
 /** @param {any} j */
 function formatLocation(j) {
   const parts = [];
   if (typeof j.location === 'string' && j.location.trim()) parts.push(j.location.trim());
+  // Fold the PRIMARY location's own address block too, mirroring what we
+  // already do for secondaryLocations below. Ashby's `location` field is
+  // often a first-level subdivision name ("England", "Scotland") rather than
+  // the country ("United Kingdom") that location_filter.allow/always_allow
+  // actually match on — j.address.postalAddress.addressCountry carries the
+  // country string that's missing. Added 2026-09-29: this silently dropped
+  // live UK-primary + US-secondary remote postings (Docker Ashby board,
+  // reqs f7beef23.../9c8d86d4...) — "England · United States · Remote" hit
+  // location_filter.block's "United States" entry with no "United Kingdom"
+  // in the string to rescue it via always_allow.
+  const primaryPa = j.address && j.address.postalAddress;
+  if (primaryPa) {
+    for (const k of ['addressLocality', 'addressCountry']) {
+      const v = typeof primaryPa[k] === 'string' ? primaryPa[k].trim() : '';
+      if (!v) continue;
+      // "London, United Kingdom" already names its country; appending it again
+      // would only repeat it.
+      if (k === 'addressCountry' && parts.some((p) => containsWholeWord(p, v))) continue;
+      parts.push(v);
+    }
+  }
   if (Array.isArray(j.secondaryLocations)) {
     for (const s of j.secondaryLocations) {
       if (!s || typeof s !== 'object') continue;
@@ -211,6 +321,10 @@ export default {
       title: j.title || '',
       url: j.jobUrl || '',
       company: entry.name,
+      // Ashby's posting uuid — the only stable id this board API exposes
+      // (no separate employer requisition field), so requisitionId is left unset
+      // rather than guessed at.
+      externalId: coerceId(j.id),
       location: formatLocation(j),
       // Ashby's posting-api list ships `descriptionPlain` for free (same
       // payload, no per-job request) — mirrors lever. Enables scan.mjs's

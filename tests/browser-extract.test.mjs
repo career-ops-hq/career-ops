@@ -15,7 +15,7 @@ try {
   const {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
-    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob,
+    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
@@ -360,6 +360,41 @@ try {
   if (ghNulls.every((v) => v === null)) pass('normalizeGreenhouseJob returns null without a description body');
   else fail(`normalizeGreenhouseJob nulls => ${JSON.stringify(ghNulls)}`);
 
+  // normalizeSmartRecruitersJob — the JD is jobAd.sections (HTML blocks in page
+  // order); location carries remote/hybrid flags, often the only work-model signal.
+  const sr = normalizeSmartRecruitersJob(
+    {
+      name: 'Senior Engineer',
+      location: { city: 'Bengaluru', country: 'in', fullLocation: 'Bengaluru, KA, India', remote: false, hybrid: true },
+      jobAd: { sections: {
+        companyDescription: { title: 'Company', text: '<p>We make things.</p>' },
+        jobDescription: { title: 'Job Description', text: '&lt;p&gt;Own the API.&lt;/p&gt;' },
+        qualifications: { title: 'Qualifications', text: '<ul><li>5+ years</li></ul>' },
+        additionalInformation: { title: '', text: '' },
+      } },
+    },
+    'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer',
+  );
+  if (sr
+      && sr.title === 'Senior Engineer'
+      && sr.text.includes('Location: Bengaluru, KA, India')
+      && sr.text.includes('Work model: Hybrid')
+      && sr.text.indexOf('We make things.') < sr.text.indexOf('Own the API.')
+      && sr.text.includes('- 5+ years')
+      && !sr.text.includes('&lt;')) {
+    pass('normalizeSmartRecruitersJob joins sections in page order and surfaces location + work model');
+  } else {
+    fail(`normalizeSmartRecruitersJob => ${JSON.stringify(sr)}`);
+  }
+
+  const srNulls = [
+    normalizeSmartRecruitersJob(null, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X' }, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X', jobAd: { sections: { jobDescription: { text: '<p> </p>' } } } }, 'https://x/1'),
+  ];
+  if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
+  else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
+
   // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
   // etc.) as separate HTML blocks; dropping them loses half the JD.
   const lever = normalizeLeverJob(
@@ -496,6 +531,8 @@ try {
     ['lever', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
     ['ashby', 'https://jobs.ashbyhq.com/acme/some-job-id'],
     ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
+    ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
+    ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);
