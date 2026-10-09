@@ -154,7 +154,10 @@ const COUNT_CLAIM_RE = new RegExp(
   // "ERC-4626 vaults" one of 4626 vaults. Without the lookbehind, a tailored
   // bullet that drops a word the source had inside the modifier window (so
   // the source yields no claim and the bullet does) fails the gate.
-  String.raw`(?<![A-Za-z]-)\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
+  // 1C is an ERP software name, not a count. With a zero-width separator,
+  // its C became a modifier and "1C warehouse and order workflows" became
+  // the invented metric "1 workflows". Keep ordinary counts/units intact.
+  String.raw`(?<![A-Za-z]-)\b(?!1C\b)(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
