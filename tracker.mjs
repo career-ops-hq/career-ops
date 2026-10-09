@@ -49,6 +49,7 @@ import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
 } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const MD_PATH = resolveTrackerPath(CAREER_OPS);
@@ -970,14 +971,69 @@ async function deleteApp(args) {
 
 const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };
 
+const TOP_LEVEL_USAGE = 'Usage: node tracker.mjs <sync|query|history|export|delete> [flags]\n'
+  + 'See the header comment of this file for examples, or docs/SCRIPTS.md.';
+
+// Every flag each subcommand accepts, from the header comment (lines 24-32).
+// #4602: unvalidated flags let a mistyped `--dryrun` (missing the hyphen)
+// fall through `delete`'s `args.includes('--dry-run')` check unseen, so the
+// row was removed for real instead of failing fast. validateFlags() rejects
+// an unrecognized flag before the subcommand ever sees args, and also
+// answers `--help`/`-h` per subcommand — assessment-log.mjs picks its valid
+// flags by subcommand the same way.
+const SUBCOMMAND_FLAGS = {
+  sync: {
+    known: ['--check', '--help', '-h'],
+    valueFlags: [],
+    usage: 'Usage: node tracker.mjs sync [--check]\n'
+      + '  (re)build applications.db from applications.md\n'
+      + '  --check: diagnose only, no write; exit 1 if issues found',
+  },
+  query: {
+    known: ['--status', '--company', '--role', '--since', '--id', '--limit', '--json', '--help', '-h'],
+    valueFlags: ['--status', '--company', '--role', '--since', '--id', '--limit'],
+    usage: 'Usage: node tracker.mjs query [--status Applied] [--company acme] [--role designer]\n'
+      + '                              [--since 2026-01-01] [--id N] [--limit 20] [--json]',
+  },
+  history: {
+    known: ['--id', '--help', '-h'],
+    valueFlags: ['--id'],
+    usage: 'Usage: node tracker.mjs history --id N\n'
+      + '  status transition log observed across syncs',
+  },
+  export: {
+    known: ['--out', '--force', '--help', '-h'],
+    valueFlags: ['--out'],
+    usage: 'Usage: node tracker.mjs export [--out FILE] [--force]\n'
+      + '  inverse: applications.db → markdown (stdout by default)\n'
+      + '  --force: write even when columns would be dropped',
+  },
+  delete: {
+    known: ['--num', '--dry-run', '--help', '-h'],
+    valueFlags: ['--num'],
+    usage: 'Usage: node tracker.mjs delete --num N [--dry-run]\n'
+      + '  remove one application row from applications.md + reindex',
+  },
+};
+
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+  // A bare top-level `--help`/`-h` (no subcommand) used to fall into the
+  // "unknown command" branch below, which treats any truthy `command` as an
+  // error and exits 1 — so `node tracker.mjs --help` printed usage and still
+  // failed. Handled first and separately, since SUBCOMMAND_FLAGS has no entry
+  // for a missing subcommand for validateFlags to key off of.
+  if (command === '--help' || command === '-h') {
+    console.log(TOP_LEVEL_USAGE);
+    process.exit(0);
+  }
   const fn = COMMANDS[command];
   if (!fn) {
-    console.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
-    console.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
+    console.log(TOP_LEVEL_USAGE);
     process.exit(command ? 1 : 0);
   }
+  const { known, valueFlags, usage } = SUBCOMMAND_FLAGS[command];
+  validateFlags(args, known, usage, { valueFlags });
   await fn(args);
 }
 
