@@ -20,8 +20,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -37,14 +38,22 @@ const AGENT_DOCS = [
 // code fence can hold an example invocation; a backticked path is a reference.
 const MJS_REF = /`([A-Za-z0-9_./-]+\.mjs)`/g;
 
+// The updater does not ship the optional web application. Keep checking its
+// script references in full checkouts, while CLI-only installs omit that tree.
+function missingScriptRefs(src, root) {
+  const webInstalled = existsSync(join(root, 'web'));
+  return [...new Set([...src.matchAll(MJS_REF)].map((m) => m[1]))]
+    .filter((ref) => !(ref.startsWith('web/') && !webInstalled))
+    .filter((ref) => !existsSync(join(root, ref)))
+    .sort();
+}
+
 for (const doc of AGENT_DOCS) {
   test(`${doc} names no script that does not exist`, () => {
     const path = join(ROOT, doc);
     if (!existsSync(path)) return;   // not every CLI's file ships in every fork
     const src = readFileSync(path, 'utf-8');
-    const missing = [...new Set([...src.matchAll(MJS_REF)].map((m) => m[1]))]
-      .filter((ref) => !existsSync(join(ROOT, ref)))
-      .sort();
+    const missing = missingScriptRefs(src, ROOT);
     assert.deepEqual(
       missing,
       [],
@@ -53,3 +62,36 @@ for (const doc of AGENT_DOCS) {
     );
   });
 }
+
+function fixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'co-agent-doc-script-refs-'));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10 }));
+  return root;
+}
+
+test('CLI-only installs allow references to the absent optional web tree', (t) => {
+  const root = fixture(t);
+  writeFileSync(join(root, 'core.mjs'), '');
+  assert.deepEqual(missingScriptRefs('`core.mjs` and `web/scripts/optional.mjs`', root), []);
+});
+
+test('CLI-only installs still report missing core scripts', (t) => {
+  const root = fixture(t);
+  assert.deepEqual(
+    missingScriptRefs('`missing-core.mjs` and `web/scripts/optional.mjs`', root),
+    ['missing-core.mjs'],
+  );
+});
+
+test('full checkouts still report missing web scripts', (t) => {
+  const root = fixture(t);
+  mkdirSync(join(root, 'web'));
+  assert.deepEqual(missingScriptRefs('`web/scripts/missing.mjs`', root), ['web/scripts/missing.mjs']);
+});
+
+test('full checkouts accept existing web scripts', (t) => {
+  const root = fixture(t);
+  mkdirSync(join(root, 'web', 'scripts'), { recursive: true });
+  writeFileSync(join(root, 'web', 'scripts', 'present.mjs'), '');
+  assert.deepEqual(missingScriptRefs('`web/scripts/present.mjs`', root), []);
+});

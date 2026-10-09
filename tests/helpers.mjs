@@ -4,15 +4,31 @@
 import { execFileSync } from 'child_process';
 import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, dirname } from 'path';
+import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// The suite must never follow a developer's own tracker override into their
+// real data. CAREER_OPS_TRACKER outranks the CAREER_OPS_ROOT that fixtures pin,
+// so with it set in the shell a test that runs normalize-statuses.mjs against
+// its fixture root rewrote the developer's tracker instead (and left a .bak
+// beside it), and a dozen checks failed on rows that were not theirs.
+//
+// Blanked here because test-all.mjs imports this module before it runs
+// anything, so the runner and each child it spawns start without the override;
+// a suite that imports these helpers is covered when run on its own as well.
+// Blanked rather than deleted: every reader trims the value and treats an empty
+// one as unset, which is also how the Go tests neutralise it
+// (`t.Setenv("CAREER_OPS_TRACKER", "")`), and a variable that is set is not
+// overwritten by a later .env load (#4707 did the same for one test and
+// CAREER_OPS_PIPELINE). A test that needs the override sets its own.
+process.env.CAREER_OPS_TRACKER = '';
 
 /**
  * A merge-tracker fixture must not consult the install's batch history.
@@ -408,40 +424,41 @@ export function formatRunFailure(maxChars = 2000) {
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
 /**
- * Recursively collect files under `dir` whose basename matches `match`.
+ * Every TRACKED file under `dir` whose basename matches `match`.
  *
- * Deterministic by construction: entries are sorted lexicographically at every
- * level, so the result is identical on every run and every OS — the same
- * property test-all.mjs's own `tests/` discovery relies on (#1440).
+ * Enumerated through lib/mjs-files.mjs (#3890), not a private walk. This used
+ * to recurse the working tree with a skip-list its one caller passed in
+ * (`node_modules`, `.next`, `.git`, `out`, `dist`, `coverage`) — the same
+ * hand-maintained shape #3419 removed from the syntax gate, and the same silent
+ * narrowing: a suite added under a directory somebody forgot to un-skip never
+ * enters the guard, and the run is exactly as green as one that read it. Git
+ * already knows which of those trees is repository content, so the skip-list
+ * parameter is gone rather than reproduced here.
+ *
+ * That also retires the `isNestedCheckout` guard this walk used to need, and
+ * retires it rather than losing it: a name-matching skip-list never fired on a
+ * linked worktree, which marks itself with a `.git` FILE, so the walk descended
+ * into a whole second checkout of this repository (#3499, #3762). Nothing in
+ * that second checkout is tracked HERE, so the index cannot name it — the
+ * hazard is gone by construction instead of by a rule each walker remembers.
+ *
+ * Deterministic by construction (sorted), which is the property test-all.mjs's
+ * own `tests/` discovery relies on (#1440).
  *
  * A missing `dir` yields `[]` rather than throwing, so the caller reports its
- * own contract failure (e.g. "discovery is empty") instead of the run dying
- * mid-traversal with an ENOENT that says nothing about what was expected.
+ * own contract failure (e.g. "discovery is empty") instead of the run dying on
+ * an ENOENT that says nothing about what was expected. A `dir` that EXISTS but
+ * that git can see nothing in is a different thing entirely — that is a scan
+ * that could not look, and trackedFiles throws rather than let it read as a
+ * clean sweep.
  *
- * @param {string} dir - Absolute directory to walk.
- * @param {RegExp} match - Tested against each entry's basename.
- * @param {Set<string>} [skipDirs] - Directory names never descended into.
- * @returns {string[]} Absolute paths, parents before children.
+ * @param {string} dir - Absolute directory inside a git working tree.
+ * @param {RegExp} match - Tested against each tracked file's basename.
+ * @returns {string[]} Absolute paths, lexicographically sorted.
  */
-export function walkFiles(dir, match, skipDirs = new Set()) {
+export function walkFiles(dir, match) {
   if (!existsSync(dir)) return [];
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true })
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
-      // which matches by NAME — never fires on one, and the walk descends into a
-      // whole second checkout of this repository (#3499, #3762). The caller's
-      // own set stays authoritative for everything else.
-      if (isNestedCheckout(full)) continue;
-      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
-    } else if (match.test(entry.name)) {
-      out.push(full);
-    }
-  }
-  return out;
+  return trackedFiles(dir, (rel) => match.test(basename(rel)));
 }
 
 /**

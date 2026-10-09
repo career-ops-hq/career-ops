@@ -8,7 +8,7 @@
 import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
@@ -19,6 +19,7 @@ import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -87,30 +88,7 @@ const yellow = (s) => isTTY ? `\x1b[33m${s}\x1b[0m` : s;
 const dim = (s) => isTTY ? `\x1b[2m${s}\x1b[0m` : s;
 
 function checkNodeVersion() {
-  const versionStr = process.versions.node;
-  const [major, minor] = versionStr.split('.').map(Number);
-  const hasSqlite = major > 22 || (major === 22 && minor >= 5);
-
-  if (hasSqlite) {
-    return { pass: true, label: `Node.js >= 22.5 (v${versionStr})` };
-  }
-
-  if (major >= 18) {
-    return {
-      warn: true,
-      label: `Node.js v${versionStr} detected. Node >= 22.5.0 is highly recommended because tracker.mjs (SQLite database indexing) requires node:sqlite.`,
-      fix: [
-        'Upgrade Node.js to v22.5.0 or later to enable full tracker database support.',
-        'The markdown tracker keeps working without it — the index is optional.',
-      ],
-    };
-  }
-
-  return {
-    pass: false,
-    label: `Node.js >= 18 (found v${versionStr})`,
-    fix: 'Install Node.js 22.5.0 or later from https://nodejs.org',
-  };
+  return nodeFloor(process.versions.node);
 }
 
 // El check mas frecuente de la comunidad, medido: 8 personas en 4 semanas
@@ -159,13 +137,48 @@ function checkBillingSource() {
   };
 }
 
+// Whether each package.json dependency resolves from the code checkout the way
+// Node will at run time — not whether a node_modules directory exists. That
+// was wrong both ways: a git worktree with no node_modules of its own resolves
+// through the main checkout's (Node walks up parent directories), and a
+// node_modules installed before a dependency was added (undici, #4445) still
+// exists while the import fails. Every script loads its dependencies with ESM
+// `import`, whose bare-specifier lookup is node_modules in the code root and
+// each ancestor directory — and nothing else: unlike require(), it ignores
+// NODE_PATH and the global folders, so a package found only there would pass
+// here and still fail to import. A package counts as installed when one of
+// those node_modules holds it. Checking for its package.json, rather than
+// resolving the package, never consults an `exports` map that refuses the
+// lookup and never loads the package — doctor runs on every session's first
+// message.
+function findMissingDependencies(root) {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+  const lookupDirs = [];
+  for (let dir = resolve(root); ; dir = dirname(dir)) {
+    lookupDirs.push(join(dir, 'node_modules'));
+    if (dirname(dir) === dir) break;
+  }
+  return Object.keys(manifest.dependencies || {}).filter((name) =>
+    !lookupDirs.some((dir) => existsSync(join(dir, name, 'package.json'))));
+}
+
 function checkDependencies() {
-  if (existsSync(join(codeRoot, 'node_modules'))) {
+  let missing;
+  try {
+    missing = findMissingDependencies(codeRoot);
+  } catch (err) {
+    return {
+      pass: false,
+      label: `Dependencies could not be checked: package.json unreadable (${err.message})`,
+      fix: 'Run doctor from a career-ops checkout, or pass --target <checkout>',
+    };
+  }
+  if (missing.length === 0) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
     pass: false,
-    label: 'Dependencies not installed',
+    label: `Dependencies missing: ${missing.join(', ')}`,
     fix: 'Run: npm install',
   };
 }

@@ -12,6 +12,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run verify` | `verify-pipeline.mjs` | Check pipeline data integrity |
 | `npm run normalize` | `normalize-statuses.mjs` | Fix non-canonical statuses |
 | `npm run dedup` | `dedup-tracker.mjs` | Remove duplicate tracker entries |
+| `npm run fix-report-links` | `fix-report-links.mjs` | Rewrite tracker Report cells whose link points at a missing file to `—` |
 | `npm run merge` | `merge-tracker.mjs` | Merge batch TSVs into applications.md |
 | `npm run pdf` | `generate-pdf.mjs` | Convert HTML to ATS-optimized PDF |
 | `npm run jd:similarity` | `jd-similarity.mjs` | Compare a new JD with a previous JD/CV and recommend reuse, edits, or regeneration |
@@ -64,7 +65,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 
 ## doctor
 
-Validates that all prerequisites are in place: Node.js >= 18, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
 
 ```bash
 npm run doctor
@@ -113,6 +114,21 @@ npm run dedup -- --dry-run  # preview without writing
 Creates a `.bak` backup before writing.
 
 **Exit codes:** `0` always.
+
+---
+
+## fix-report-links
+
+Repairs the rows `verify-pipeline.mjs` reports as `Report not found: ...` (Check 3). Rewrites **only** the Report cell of a row whose markdown link does not resolve to a regular file to `—`, the tracker's existing "no report" value. Every other cell, the row order, cell padding and the file's line endings (LF or CRLF) stay byte-for-byte as they were; nothing is re-sorted or re-formatted. "Broken" is decided by `findDeadReportLink()` in `tracker-utils.mjs` (the link is resolved from the tracker's directory, then from the data root; a directory is not a report), the same function `verify-pipeline.mjs` and `merge-tracker.mjs` use, so the tools always agree. The Report column is located by header name, so extra columns (`Via`, `URL`, `Location`) or aliased headers are fine; a tracker without a Report column is reported and left alone.
+
+```bash
+npm run fix-report-links             # apply changes
+npm run fix-report-links -- --dry-run  # list the rows (#, company, role, dead link), write nothing
+```
+
+A Report cell that is anything other than exactly one link (two links, or a link plus text) is never rewritten; it is listed under "skipped, please check by hand". Cells that are `—`, `N/A` or empty are left alone. Creates a `.bak` backup before writing and writes through the shared tracker lock. It does not guess why a report is missing and does not regenerate it. A second run changes nothing.
+
+**Exit codes:** `0` always (changes or no changes), `1` on an unknown flag or when the tracker lock cannot be acquired.
 
 ---
 
@@ -677,6 +693,8 @@ npm run rollback
 
 Tests whether job posting URLs are still live. Two rungs: a zero-token API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday, LinkedIn), falling back to headless Chromium (`liveness-browser.mjs`) for everything else or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
 
+Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that is still empty or still has no recognised apply control at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more.
+
 The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
 Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the posting is live; Ashby's public API is org-level (the whole job board), so that rung parses the board and confirms the specific job id is still listed. A definitive 404/410 from any ATS API is authoritative and short-circuits the browser check entirely — zero tokens, no browser launch.
@@ -703,6 +721,10 @@ An `expired` verdict is also written to `data/scan-history.tsv` as a `skipped_ex
 ## scan
 
 Zero-token portal scanner. Runs configured local parsers for SSR/static career pages and hits ATS APIs (Greenhouse, Ashby, Lever) directly — no LLM tokens consumed. Reads `portals.yml` for target companies, outputs matching listings to stdout, and optionally appends to `data/pipeline.md`.
+
+`--verify` checks new URLs through the shared liveness API rung first, with up to 10 concurrent checks and each provider's own rate limit. API verdicts need no browser; unsupported cases or API checks that return `null` fall back to sequential Playwright checks. An explicit `uncertain` API verdict, such as LinkedIn's ambiguous response, is final and does not fall through. Chromium is loaded and launched only when needed. `--throttle[=ms]` spaces browser checks, and `--headed-fallback` still retries browser challenges. If browser verification is needed but Chromium is unavailable, the scan fails with installation guidance rather than silently skipping verification.
+
+`--rediscover-404` also recognizes authoritative API 404/410 verdicts: for a tracked company with a careers domain, it searches that domain and requires a confirmed live replacement before migrating the URL. Soft closure signals do not trigger rediscovery.
 
 `scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
 
@@ -779,6 +801,29 @@ BambooHR's and iCIMS's list pages both carry no publish date, so every match fro
 Postings without a usable publish date are dropped by default — a reverse scan targets fresh postings, and an undated flood would defeat that — but `--include-undated` keeps them (each marked `dateStatus: "unknown"` in `--json` output; the human log shows `n/a` for the date). New matches are appended to `data/pipeline.md` and `data/scan-history.tsv` in the same format as `scan.mjs`.
 
 `data/blacklist.md` is respected here too: blacklisted companies are skipped by default and reported in the summary. Pass `--include-blacklisted` to audit them instead; matching postings flow through annotated (`note: blacklisted: {reason}` in `data/pipeline.md`).
+
+### Domain filter — gating boards on the company (opt-in)
+
+Out here `title_filter` runs on the wrong axis. It asks the title to answer both *is this the right role* and *is this employer in my industry*, and a title cannot answer the second one — "Senior Backend Engineer" is character-for-character identical at a Solana infrastructure company and at a supermarket chain. `scan.mjs` never has that problem, because `tracked_companies` settles the employer before any title is read. The sweep deletes that premise, which leaves a choice with no good branch: keep broad keywords and every board matches, or drop them and go blind to exactly the roles the sweep exists to discover.
+
+An optional `domain_filter` list in `portals.yml` gates the **board** instead. Before any title is filtered, the sweep asks whether *any* posting on that board matches a domain keyword; if none does, the board is skipped whole.
+
+```yaml
+domain_filter:
+  - "solana"
+  - "defi"
+  - "stem:smart contract"
+```
+
+- **Opt-in.** No `domain_filter` key, no gate — every existing `portals.yml` sweeps exactly as before.
+- **Free.** The board is already fully in memory when filtering starts, so the gate costs one pass over an array and no HTTP request. A skipped board is *cheaper* than a scanned one: its postings are never title-filtered and never date-enriched, and undated providers (iCIMS) issue a detail request per surviving job that a gated board never pays for.
+- **The threshold is one matching posting**, and that is measured rather than cautious. Over 546 postings on 249 boards, raising it to two kept twelve boards and lost every genuine one: ten of the twelve qualified on `defi` appearing repeatedly inside a Portuguese "Deficiência" or an Ohio "Defiance". A repeated false-positive substring is a property of big boards, while a real find is one opening at a small company.
+- **Entries are matched as whole words by default** — the opposite of `title_filter`, where a plain keyword is a substring. A plain substring admitted 32 boards on one sweep of which 28 were junk, and one bad match admits a whole catalogue rather than one row. Prefix with `stem:` when the longer form is the common spelling (`stem:smart contract` for "Smart Contracts"); `word:` is accepted and is the default said explicitly. Both prefixes mean what they mean in `title_filter`.
+- **A truncated board is not gated on the truncated page.** Workday can cut a response short, and the sweep retries a *transient* cut sequentially. A board whose fetched page carries no domain term is therefore *deferred*, not skipped: it stays queued for the retry and the fuller result decides it. A *structural* cut (a fixed slice, depth or page budget) is never retried, since a repeat run reaches the same bound, so a structurally truncated board with no domain term is admitted ungated at once rather than deferred to a retry that would never run. This is the one case where the gate is not free — a board that ends up skipped has been fetched twice — and it is the price of not dropping an employer on evidence the code knew was incomplete. A truncated board that already matches is admitted immediately, and the retry never takes that back. A deferred board whose retry comes back truncated again is admitted ungated, not skipped: there is no third fetch, and the skipped-board count must only ever mean a board the gate could actually judge. It is still counted as an error for staying truncated. If the retry fetch fails outright, the deferred board's first page is processed ungated, so a match it already carried is not lost. A deferred board survives an interruption: the checkpoint records it, and `--resume` retries it even though the resume offset has moved past it. An iCIMS board stopped at the provider's page cap is never retried either, so, like a structural Workday cut, it is admitted ungated when its fetched pages carry no domain term.
+- **Skipped boards are counted, never silent.** The run summary reports how many boards were skipped and how many postings were never filtered; `--verbose` names each one, and `--json` carries `domainFilterActive`, `domainGatedBoards` and `domainGatedPostings`. The gate's real failure mode is a domain term you forgot, and a missing term costs a board — so keep the list generous and read the count.
+- **Not applied to `--seeds`.** A VC portfolio is already a curated corpus; gating it would be redundant.
+
+**Known limit — aggregators.** The gate assumes one board is one employer. A job aggregator carrying some in-domain roles passes at every threshold under every matcher and brings its unrelated postings with it. No threshold fixes that: the board is simply not an employer, and there the gate degrades to the ungated behaviour.
 
 ### Cross-listing detection
 
@@ -866,7 +911,7 @@ SQLite **derived index** for the applications tracker (RFC #918, phase 1). `data
 
 Why: at hundreds of rows a markdown table degrades structurally (encoding corruption, column drift, `|` inside cells shifting columns), and agents grepping it get model-dependent results. The index normalizes on sync, so a query returns the same rows for every model on every CLI — and corruption is detected at sync time instead of propagating silently.
 
-Zero new dependencies — uses `node:sqlite`, built into Node ≥ 22.5.
+Zero new dependencies — uses `node:sqlite`, built into Node (no flag needed from 22.13).
 
 ```bash
 node tracker.mjs sync                     # (re)build applications.db from applications.md
@@ -887,7 +932,7 @@ node tracker.mjs export --out repaired.md --force  # write even when columns wou
 
 **The round-trip carries the layout, not only the values (#3703).** `sync` maps columns by header NAME, so a customized tracker (a `Location`, `Via` or `URL` column, or one of your own) indexes correctly — but `export` used to write nine fixed columns in a fixed order under a fixed `# Applications Tracker` title, so adopting its output cost you those columns with no warning, right after `sync` reported a clean index. Losing the `URL` column in particular disables `merge-tracker.mjs`'s deterministic dedup pass, which is not visible in the file either. `export` now replays the header row it read, puts unmapped cells back in their own columns, and keeps the lines before and after the table (your own title, a legend, a trailing note) plus the file's line endings. The schema itself is still the canonical nine fields — extra columns ride along by position, so they are preserved by `export` but not queryable via `query`.
 
-**What "lossless" covers, exactly.** The guarantee is about *structure*, not bytes: `export` preserves the layout and every value it does not deliberately repair. Concretely it keeps the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, the column set and every row's position in it, and CRLF vs LF. Enforced by `tracker-columns-tests.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose.
+**What "lossless" covers, exactly.** The guarantee is about *structure*, not bytes: `export` preserves the layout and every value it does not deliberately repair. Concretely it keeps the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, the column set and every row's position in it, and CRLF vs LF. Enforced by `tests/tracker-columns.test.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose.
 
 The round-trip `md → db → md` is **byte-identical** only for a one-table file that is already in canonical form and where `export` reports no losses. Three things change bytes without being losses, because each is either the point of the tool or cosmetic:
 
@@ -908,7 +953,7 @@ Everything else that cannot be reproduced is reported, never quietly changed. `e
 
 Data loss is a decision you make, not a side effect of adopting a repaired copy.
 
-**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
+**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.13, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
 
 ---
 

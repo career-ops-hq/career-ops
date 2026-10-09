@@ -86,7 +86,15 @@ node discover-ats.mjs Stripe Ramp Mollie          # names as positional args
 node discover-ats.mjs --in companies.yml --summary # human-readable table
 node discover-ats.mjs --in companies.yml --vendors gh,ashby  # restrict probes
 node discover-ats.mjs --in companies.yml --vendors workday   # Workday only
+node discover-ats.mjs --in companies.yml --small-threshold 10 # what counts as a small board
 ```
+
+A resolved board that lists few postings (5 or fewer by default, the same
+threshold `audit-portals.mjs` uses; `--small-threshold 0` turns it off) is still
+resolved, but it is flagged: `smallBoard: true` in the JSON, a
+`[small board — verify ownership]` marker in `--summary`, and a `# verify:`
+comment on the entry `--write` appends. It is a prompt to check the board is the
+company's main one, not an error, and exit codes do not change.
 
 Vendor keywords for `--vendors`: `gh`, `ashby`, `lever`, `workable`,
 `smartrecruiters`, `recruitee`, `bamboohr`, `breezy`, `pinpoint`, `rippling`,

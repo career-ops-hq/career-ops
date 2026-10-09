@@ -27,6 +27,14 @@ console.log('\nweb → core argv contract');
 //                  --help, so an argv the script rejects still exits 1 naming
 //                  the flag, and exit 0 with usage means every flag was
 //                  accepted. Same verdict on the flags, no network.
+//   'json-any-exit' — spawn the exact argv and require stdout to parse as JSON,
+//                  WHATEVER the exit status. For scripts whose contract is "you
+//                  always get a payload": analyze-patterns.mjs exits 1 when it
+//                  is under its minimum sample while still printing the object
+//                  that explains why, and /api/patterns renders that object. A
+//                  'run' probe would read the by-design exit 1 as a break; not
+//                  probing at all would miss the core dropping the payload,
+//                  which is the one change that silently empties the panel.
 //   'none'       — the call site spawns node with an inline module rather than
 //                  a root script with flags; listed so the enumeration at the
 //                  bottom stays complete.
@@ -77,6 +85,25 @@ const CALL_SITES = [
     // The values are the route's own defaults; only the flag names matter here.
     args: ['--dry-run', '--since', '7', '--ats', 'greenhouse', '--limit', '150', '--json'],
     probe: 'flags-only',
+  },
+  {
+    source: 'web/src/app/api/stats/route.ts',
+    script: 'stats.mjs',
+    // NO FLAGS. stats.mjs prints JSON by default and rejects `--json` outright
+    // ("unrecognized flag(s): --json"), unlike every other route here — which is
+    // exactly the drift this file exists to catch, so the empty argv is the
+    // assertion.
+    args: [],
+    probe: 'json-any-exit',
+  },
+  {
+    source: 'web/src/app/api/patterns/route.ts',
+    script: 'analyze-patterns.mjs',
+    // Exits 1 on this one-row fixture, by design: it is under its minimum
+    // sample and says so in a JSON payload the route renders. The contract is
+    // the payload, not the status.
+    args: [],
+    probe: 'json-any-exit',
   },
   {
     source: 'web/src/lib/core/pipeline.ts',
@@ -197,6 +224,23 @@ export function runWebCoreArgvContract() {
 
       if (result.error || result.signal) {
         fail(`${label} — did not run (${result.error?.message || `killed by ${result.signal}`})`);
+        continue;
+      }
+      if (site.probe === 'json-any-exit') {
+        // The status is deliberately not asserted; the payload is the contract.
+        // A rejected flag still fails here, because the script then prints usage
+        // to stderr and nothing parseable to stdout.
+        const start = (result.stdout || '').indexOf('{');
+        try {
+          if (start < 0) throw new Error('no JSON object on stdout');
+          JSON.parse(result.stdout.slice(start));
+          pass(`${label} — stdout parses as JSON at exit ${result.status} (${site.source})`);
+        } catch (e) {
+          const why = /unrecognized flag/.test(result.stderr || '')
+            ? `${site.script} rejects a flag ${site.source} passes — ${result.stderr.trim()}`
+            : `${e.message}; stderr: ${(result.stderr || '').trim().split('\n').slice(0, 2).join(' | ')}`;
+          fail(`${label} — exit ${result.status} and ${why}`);
+        }
         continue;
       }
       if (result.status !== 0) {

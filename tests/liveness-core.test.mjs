@@ -370,3 +370,62 @@ for (const { text, label } of [
     ? pass(`${label} -> expired/expired_body`)
     : fail(`${label} classified ${verdict.result}/${verdict.code}, expected expired/expired_body`);
 }
+
+console.log('\nliveness-core — a banner on its own line is not read as part of the line above');
+
+// Page chrome above a banner often ends in a clause of its own, with no
+// punctuation, and its "if", "when" or "before" is within ten words of the
+// banner's end. With the lines joined, that word opened the banner's clause
+// and a closed posting with an Apply control on the page read as active.
+for (const { text, label } of [
+  {
+    text: 'Sign in if you have an account\nThis job has been filled.',
+    label: 'a filled banner under "Sign in if you have an account"',
+  },
+  {
+    text: 'Get notified when new jobs are posted\nNo longer accepting applications',
+    label: '"No longer accepting applications" under "Get notified when new jobs are posted"',
+  },
+  {
+    text: 'Please read the full posting before you apply\nThis position is no longer available.',
+    label: '"This position is no longer available" under a line ending "before you apply"',
+  },
+  {
+    // A line break inside the banner does not stop the pattern: patterns
+    // still match on the joined text.
+    text: 'We are no longer accepting\napplications for this role.',
+    label: 'a banner broken over two lines',
+  },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${jdBody}\n${text}`,
+    applyControls: ['Apply'],
+  });
+  verdict.result === 'expired' && verdict.code === 'expired_body'
+    ? pass(`${label} -> expired/expired_body`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected expired/expired_body`);
+}
+
+// A closing line on a line of its own is still one clause.
+for (const { text, label } of [
+  {
+    text: 'Salary: $80,000\nApplications will be accepted until the position has been filled.\nBenefits',
+    label: '"accepted until the position has been filled" between two other lines',
+  },
+  {
+    text: 'How to apply\nYou will receive final notification via email when this vacancy has been filled.',
+    label: '"when this vacancy has been filled" under a heading',
+  },
+]) {
+  const verdict = classifyLiveness({
+    status: 200,
+    finalUrl: 'https://careers.example.com/job/123',
+    bodyText: `${jdBody}\n${text}`,
+    applyControls: ['Apply'],
+  });
+  verdict.result === 'active' && verdict.code === 'apply_control_visible'
+    ? pass(`${label} -> active/apply_control_visible`)
+    : fail(`${label} classified ${verdict.result}/${verdict.code}, expected active/apply_control_visible`);
+}

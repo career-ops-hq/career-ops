@@ -102,6 +102,7 @@ Scripts maintain data consistency:
 | `verify-pipeline.mjs` | Health check: statuses, duplicates, links |
 | `dedup-tracker.mjs` | Removes duplicate entries by company+role |
 | `normalize-statuses.mjs` | Maps status aliases to canonical values |
+| `fix-report-links.mjs` | Rewrites Report cells that link to a missing file to `—` (previewable, backed up) |
 | `cv-sync-check.mjs` | Validates setup consistency |
 
 ## Dashboard TUI

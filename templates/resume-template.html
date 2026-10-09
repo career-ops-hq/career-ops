@@ -154,8 +154,12 @@
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -421,6 +425,22 @@
     font-size: 10.5px;
   }
 
+  /* === GDPR / RODO CONSENT (footer) === */
+  /* Opt-in footer slot filled from payload.consent. Empty by default — the
+     :empty rule hides the div (and its border-top) when no consent text is
+     set, so existing resumes render byte-identical to a pre-consent layout.
+     Mirrors the {{PHOTO}} opt-in slot pattern (#264). */
+  .cv-consent {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    font-size: 8.5px;
+    line-height: 1.4;
+    color: #777;
+    text-align: left;
+  }
+  .cv-consent:empty { display: none; }
+
   /* === PRINT === */
   @media print {
     body {
@@ -630,13 +650,9 @@
     <div class="header-gradient"></div>
     <div class="contact-row">
       <span>{{PHONE}}</span>
-      <span class="separator">|</span>
       <span>{{EMAIL}}</span>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>
@@ -686,6 +702,9 @@
   </div>
 
   <!-- END -->
+
+  <!-- GDPR / RODO consent -->
+  <div class="cv-consent">{{CONSENT}}</div>
 
 </div>
 </body>
