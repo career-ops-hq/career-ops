@@ -471,7 +471,6 @@ const SYSTEM_PATHS = [
   '.editorconfig',
   '.agents/',
   '.claude/skills/',
-  '.cursor/skills/',
   '.opencode/skills/',
   '.opencode/commands/',
   '.claude-plugin/',
@@ -571,7 +570,6 @@ const SYSTEM_PATHS = [
 
 const BOOTSTRAP_PATHS = [
   '.agents/',
-  '.cursor/skills/',
   '.opencode/skills/',
   '.antigravitycli/skills/',
   '.grok/skills/',

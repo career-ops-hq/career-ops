@@ -366,7 +366,7 @@ agy
 /career-ops tracker
 ```
 
-Der Skill ist nach dem offenen Standard in `.agents/skills/career-ops/SKILL.md` definiert und für jede unterstützte CLI verlinkt oder referenziert (z. B. `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+Der Skill ist nach dem offenen Standard in `.agents/skills/career-ops/SKILL.md` definiert und für jede unterstützte CLI verlinkt oder referenziert (z. B. `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`). Cursor entdeckt den gemeinsamen Skill in `.agents/skills/` automatisch.
 
 ## Codex-Integration
 
