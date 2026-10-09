@@ -19,7 +19,7 @@ import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
-import { findExperienceSections, headingText, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -708,7 +708,9 @@ function checkCvShape(root) {
     return { warn: true, label: `cv.md could not be read (${err.message})` };
   }
   const sections = findExperienceSections(text);
-  const entries = sections.flat().filter((line) => headingText(line, 3) !== null).length;
+  // Same entry rule verify-cv-structure.mjs parses with, so a stray
+  // "### Notes" under Experience is not counted as a job.
+  const entries = sections.flat().filter((line) => parseCompanyHeading(line) !== null).length;
   if (entries > 0) {
     return { pass: true, label: `cv.md: Experience section recognized (${entries} entr${entries === 1 ? 'y' : 'ies'})` };
   }

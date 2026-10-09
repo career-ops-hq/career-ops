@@ -47,7 +47,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { findExperienceSections, headingText, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SOURCE = 'cv.md';
@@ -59,7 +59,7 @@ const DEFAULT_SOURCE = 'cv.md';
  * (which IS the ground-truth
  * chronological order — cv.md is user-authored, never generated).
  *
- * Scoped to the recognized Experience section only, up to the next level-2
+ * Scoped to the recognized Experience sections only, each up to the next level-2
  * heading: a `### University — City, ST`-shaped header under `## Education`
  * (or any other section) would otherwise parse as a phantom experience
  * entry, capable of triggering a false order/descriptor warning if its name
@@ -69,17 +69,11 @@ const DEFAULT_SOURCE = 'cv.md';
  * @returns {{ company: string, location: string }[]}
  */
 export function parseCvMdExperience(cvMdText) {
-  const entries = [];
-  // First recognized section only: its file order is the ground truth the
-  // order check compares against.
-  const [section = []] = findExperienceSections(cvMdText);
-  for (const line of section) {
-    const header = headingText(line, 3);
-    if (header === null) continue;
-    const match = header.match(/^(.+?)\s+(?:—|–|--|-)\s+(.+)$/);
-    if (match) entries.push({ company: match[1].trim(), location: match[2].trim() });
-  }
-  return entries;
+  // Every recognized section, in file order: a cv.md split into, say,
+  // "## Professional Experience" and "## Work History" is still one
+  // chronology, and stopping at the first would let a dropped descriptor or a
+  // swap in the second pass unchecked.
+  return findExperienceSections(cvMdText).flat().map(parseCompanyHeading).filter(Boolean);
 }
 
 /**
@@ -450,6 +444,21 @@ function runSelfTest() {
   }
   equal('an en-dash company/location separator is recognized',
     parseCvMdExperience('## Experience\n\n### Co – City\n'), [{ company: 'Co', location: 'City' }]);
+
+  // Two recognized sections are one chronology: entries in the second are
+  // parsed and checked, not dropped (CodeRabbit on #4880).
+  const twoSectionCvMd = [
+    '## Professional Experience', '', '### Acme — Austin, TX · Series B fintech', '',
+    '## Education', '', '### State University — Austin, TX', '',
+    '## Work History', '', '### Beta — Chicago, IL · logistics SaaS', '',
+  ].join('\n');
+  equal('every recognized Experience section is parsed, in file order (Education skipped)',
+    parseCvMdExperience(twoSectionCvMd).map((e) => e.company), ['Acme', 'Beta']);
+  equal('a dropped descriptor in the second section is caught',
+    verifyStructure({ experience: [
+      { company: 'Acme', location: 'Austin, TX · Series B fintech' },
+      { company: 'Beta', location: 'Chicago, IL' },
+    ] }, twoSectionCvMd).descriptorViolations.length, 1);
 
   const singleHyphenCvMd = [
     '## Experience',
