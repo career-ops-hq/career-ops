@@ -37,7 +37,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -692,6 +692,7 @@ export function matchInvite(signals, trackerRows) {
 
   const targetKey = normalizeCompanyName(signals.company);
   if (!targetKey) return [];
+  const reqId = signals.reqId?.toLowerCase();
 
   const scored = [];
   for (const row of trackerRows) {
@@ -703,12 +704,21 @@ export function matchInvite(signals, trackerRows) {
 
     // A req/job ID appearing in the row's notes is a near-certain match —
     // boost it above any name-only match (including another exact name
-    // match without the req ID). Compared case-insensitively: the invite
+    // match without the req ID). Match the whole ID token, so JR1234 cannot
+    // also boost a different requisition JR12345 or JR1234-A. Preserve the
+    // shared parser's explicit glued labels (req_JR1234), but require the
+    // whole suffix. A bare JR1234 is an ID, not a label for numeric ID 1234;
+    // after a separate label, REQ-1234 is itself the ID, not another label.
+    // Compared case-insensitively: the invite
     // and the notes may case the same ID differently ("jr12352" vs
     // "JR12352"). matchConfidence is a ranking score, not a probability,
     // so it's intentionally allowed to exceed 1 here.
-    if (signals.reqId && row.notes
-      && row.notes.toLowerCase().includes(signals.reqId.toLowerCase())) {
+    if (reqId && row.notes
+      && row.notes.toLowerCase().split(/[^a-z0-9_-]+/)
+        .filter(token => /[a-z0-9]/.test(token)).some((token, index, tokens) =>
+        token === reqId || (!/^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?|jr|id)[_-]*|r_[_-]*)$/.test(tokens[index - 1] || '')
+          && /^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?)[_-]|r_)/.test(token)
+          && token.endsWith(reqId) && extractReqNumber(token)?.toLowerCase() === reqId))) {
       confidence += 0.5;
     }
 
