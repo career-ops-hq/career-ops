@@ -1964,6 +1964,39 @@ if (!existsSync(PARITY_FIXTURE)) {
   }
 }
 
+// --migrate-urls leaves a MIS-SPLIT row alone. A literal `|` inside a
+// hand-typed URL splits the row one cell wider than the header for every
+// reader; linking whichever fragment sits under URL would bake that damage into
+// link syntax and bury the original URL. Such a row is left byte for byte and
+// named — while a row merely missing its trailing pipe is complete and migrates.
+{
+  const PIPED = '| 1 | 2026-01-01 | Acme | Eng | 4.0/5 | Applied | ✅ | — | pipe in url | https://example.com/jobs?team=eng|ml |';
+  const sb = makeSandbox(
+    `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+${PIPED}
+| 2 | 2026-01-02 | Globex | PM | 3.5/5 | Applied | ❌ | — | normal | https://jobs.ashbyhq.com/globex/2 |
+| 3 | 2026-01-03 | Initech | Lead | 3.0/5 | Applied | ❌ | — | no trailing pipe | https://careers.initech.example/3
+`,
+  );
+  const run = runScript('merge-tracker.mjs', ['--migrate-urls'], sb);
+  const text = readFileSync(sb.tracker, 'utf-8');
+  const ok = run.code === 0
+    && text.includes(PIPED)
+    && /Left 1 row\(s\) untouched[^]*line\(s\) 5\b/.test(run.stdout)
+    && /rendered 2 URL cell/.test(run.stdout)
+    && text.includes('[ashby](https://jobs.ashbyhq.com/globex/2)')
+    && text.includes('[careers.initech.example](https://careers.initech.example/3)');
+  if (ok) {
+    pass('#3516: --migrate-urls leaves a pipe-split row byte for byte and names it; a row missing only its trailing pipe still migrates');
+  } else {
+    fail(`#3516 migrate on a mis-split row (code ${run.code}):\n${text}\n${run.stdout}`);
+  }
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the
 // href is the dedup key, so a migration that touched it would re-key the table.
 {

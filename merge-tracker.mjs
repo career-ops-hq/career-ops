@@ -1368,10 +1368,28 @@ if (MIGRATE_URLS) {
     console.error('❌ --migrate-urls: this tracker has no URL column. Add a `URL` header column first (additive), then re-run.');
     process.exit(1);
   }
+  // Cells in a table line, not raw split parts: a hand-edited row without its
+  // trailing pipe is one part shorter but still complete, and must migrate.
+  const cellCount = (line) => {
+    const parts = line.split('|');
+    return parts.length - 1 - (line.trimEnd().endsWith('|') ? 1 : 0);
+  };
+  const headerLine = lines.find(line => isHeaderRow(line));
+  const headerCells = headerLine ? cellCount(headerLine) : null;
   let changed = 0;
-  const migrated = lines.map(line => {
+  const skipped = [];
+  const migrated = lines.map((line, i) => {
     if (!line.startsWith('|')) return line;
     if (isHeaderRow(line) || SEPARATOR_ROW_RE.test(line)) return line;
+    // A row wider or narrower than the header is already mis-split — most often
+    // a URL containing a literal `|`, which every reader splits into two cells
+    // (cell() exists to stop merge-tracker writing one). Linking the fragment
+    // that happens to sit under URL would bake that damage into link syntax and
+    // bury the original URL. Leave the row byte for byte and name it instead.
+    if (headerCells != null && cellCount(line) !== headerCells) {
+      skipped.push(i + 1);
+      return line;
+    }
     const parts = line.split('|').map(s => s.trim());
     // Only the URL cell's VALUE changes; every other cell is carried across
     // verbatim, including columns career-ops has no field for. A row whose URL
@@ -1385,11 +1403,14 @@ if (MIGRATE_URLS) {
     changed++;
     return rebuildRow(parts);
   });
+  const skippedNote = skipped.length
+    ? ` Left ${skipped.length} row(s) untouched because their cell count does not match the header — usually a \`|\` inside a URL: line(s) ${skipped.join(', ')}. Fix those by hand (a URL may not contain a literal \`|\`), then re-run.`
+    : '';
   if (DRY_RUN) {
-    console.log(`🔎 Migration (dry-run): ${changed} URL cell(s) would be rendered as markdown links in ${basename(APPS_FILE)}`);
+    console.log(`🔎 Migration (dry-run): ${changed} URL cell(s) would be rendered as markdown links in ${basename(APPS_FILE)}.${skippedNote}`);
   } else {
     writeFileAtomic(APPS_FILE, migrated.join('\n'));
-    console.log(`✅ Migration: rendered ${changed} URL cell(s) as markdown links in ${basename(APPS_FILE)}. The href is unchanged, so every dedup key is unchanged.`);
+    console.log(`✅ Migration: rendered ${changed} URL cell(s) as markdown links in ${basename(APPS_FILE)}. The href is unchanged, so every dedup key is unchanged.${skippedNote}`);
   }
   process.exit(0);
 }
