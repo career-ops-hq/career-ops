@@ -27,7 +27,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
      │                    Output Pipeline                      │
      │  ┌──────────┐  ┌────────────┐  ┌───────────────────┐  │
      │  │ Report.md│  │  PDF (HTML  │  │ Tracker TSV       │  │
-     │  │ (A-G eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
+     │  │ (A-H eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
      │  └──────────┘  └────────────┘  └───────────────────┘  │
      └────────────────────────────────────────────────────────┘
                                │
