@@ -2,6 +2,7 @@ package data
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -699,8 +700,7 @@ func TestParseApplicationsReadsLinkedURLCells(t *testing.T) {
 // byte (merge-tracker.mjs isLinkableDestination); everything else is written
 // bare. Both forms must read back whole HERE too — the Node parser and this
 // regex disagreeing about a row's URL is the drift the shared extractor exists
-// to prevent, and it is why backslash-escaping the destination was rejected:
-// the Node side unescapes, this side does not.
+// to prevent. TestExtractCellURLMatchesNodeReader pins the full parity table.
 func TestExtractCellURLAgreesWithTheWriterOnUnlinkableHrefs(t *testing.T) {
 	cases := []struct {
 		name string
@@ -719,6 +719,38 @@ func TestExtractCellURLAgreesWithTheWriterOnUnlinkableHrefs(t *testing.T) {
 	for _, tc := range cases {
 		if got := extractCellURL(tc.cell); got != tc.want {
 			t.Errorf("%s: extractCellURL(%q) = %q, want %q", tc.name, tc.cell, got, tc.want)
+		}
+	}
+}
+
+// One table, two readers: test-fixtures/url-cell-parity.json is asserted here
+// against extractCellURL and in tracker-columns-tests.mjs against Node's
+// extractCellUrl. Its expectations were generated from the Node reader, so this
+// test failing means the Go port has drifted from the parser merge-tracker keys
+// on — and a hand-edited cell would show the dashboard one posting while dedup
+// matched another. The table includes every cell the earlier regex-based reader
+// got wrong (#3854 review). Same shape as tracker_aliases_test.go.
+func TestExtractCellURLMatchesNodeReader(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "test-fixtures", "url-cell-parity.json"))
+	if err != nil {
+		t.Fatalf("read shared URL-cell parity fixture: %v", err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name string `json:"name"`
+			Cell string `json:"cell"`
+			Href string `json:"href"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(content, &fixture); err != nil {
+		t.Fatalf("parse shared URL-cell parity fixture: %v", err)
+	}
+	if len(fixture.Cases) == 0 {
+		t.Fatal("shared URL-cell parity fixture has no cases")
+	}
+	for _, tc := range fixture.Cases {
+		if got := extractCellURL(tc.Cell); got != tc.Href {
+			t.Errorf("%s: extractCellURL(%q) = %q, Node reader gives %q", tc.Name, tc.Cell, got, tc.Href)
 		}
 	}
 }

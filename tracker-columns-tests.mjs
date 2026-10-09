@@ -1865,9 +1865,10 @@ Last reviewed 2026-09-01.
 // changes what comes back: `…/a)b` reads back as `…/a` (a shorter, still
 // parseable key for a broader path) and `…/a(b` reads back as nothing at all.
 // Balanced parens are fine and stay linked — Workday slugs carry them routinely.
-// Backslash-escaping instead was the reviewer's suggestion and is not viable:
-// this module's parser unescapes `\(` on read-back and the Go dashboard's regex
-// does not, so the two surfaces would disagree about the row's URL.
+// Backslash-escaping instead was suggested and not taken: escapes make the
+// stored bytes differ from the href, so every reader — ours, the Go port, and
+// any markdown tool a user points at the file — must undo them identically to
+// recover the key. A bare cell needs no undoing.
 {
   const { extractCellUrl } = await import('./tracker-parse.mjs');
   const { normalizeUrl } = await import('./url-key.mjs');
@@ -1936,6 +1937,31 @@ Last reviewed 2026-09-01.
     fail(`#3516 sync/export round-trip (sync ${sync.code}, export ${exported.code})\n--- got ---\n${exported.stdout}--- want ---\n${BOTH_FORMS}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// One table, two readers. test-fixtures/url-cell-parity.json is asserted here
+// against Node's extractCellUrl and in dashboard/internal/data/career_test.go
+// against the Go port. merge-tracker keys dedup on the Node reading and the
+// dashboard shows the Go one, so a cell the two read differently shows the user
+// one posting while dedup matched another. The Go reader used to be two
+// regexes and disagreed on 9 of these cells (#3854 review); it is now a port.
+//
+// test-fixtures/ is in SYSTEM_PATHS but not BOOTSTRAP_PATHS, while this file is
+// in both — so a bootstrap-only install has the test without the table. Skip
+// there, like HAS_WEB above. A full checkout cannot skip silently: the Go half
+// fails outright when the fixture is missing, and CI runs it.
+const PARITY_FIXTURE = join(ROOT, 'test-fixtures', 'url-cell-parity.json');
+if (!existsSync(PARITY_FIXTURE)) {
+  console.log('SKIP #3516 URL-cell parity — test-fixtures/ not present (bootstrap-only install)');
+} else {
+  const { extractCellUrl } = await import('./tracker-parse.mjs');
+  const fixture = JSON.parse(readFileSync(PARITY_FIXTURE, 'utf-8'));
+  const drift = (fixture.cases || []).filter(({ cell, href }) => extractCellUrl(cell) !== href);
+  if (fixture.cases?.length > 0 && drift.length === 0) {
+    pass(`#3516: Node reader matches the shared URL-cell parity table (${fixture.cases.length} cases, also asserted against the Go reader)`);
+  } else {
+    fail(`#3516 URL-cell parity — ${drift.map(c => `${c.name}: got ${JSON.stringify(extractCellUrl(c.cell))}, table says ${JSON.stringify(c.href)}`).join(' | ') || 'fixture has no cases'}`);
+  }
 }
 
 // --migrate-urls: opt-in, idempotent, and it must never change a href — the

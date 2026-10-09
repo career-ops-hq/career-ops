@@ -621,9 +621,10 @@ function isLinkedUrlCell(value) {
  * Nothing else may be rewritten. `%7C` and a literal `|` normalize alike in the
  * query but NOT in the path, and `%28`/`%29` never normalize to `(`/`)` at all,
  * so encoding any of those would silently re-key the row. Backslash-escaping
- * them is not an option either: this module's parser unescapes `\(` on
- * read-back, the Go dashboard's regex does not, and two readers disagreeing
- * about a row's URL is the exact drift the shared extractor exists to prevent.
+ * them is not taken either: escapes make the stored bytes differ from the
+ * href, so every reader — tracker-parse.mjs, the Go dashboard's port of it,
+ * and any markdown tool a user points at the file — must undo them
+ * identically to recover the key. A bare cell needs no undoing.
  * A href carrying those characters is written BARE instead — see
  * isLinkableDestination.
  *
@@ -647,10 +648,10 @@ function urlForCellDestination(href) {
  * path — and the second drops the row to fuzzy matching. BALANCED parens are
  * fine and stay linked; Workday-style slugs carry them routinely.
  *
- * A backslash is excluded for a different reason: this module's parser
- * unescapes `\(`, `\)` and `\\` on read-back while the Go dashboard's regex does
- * not, so a linked href containing one means the two surfaces disagree about
- * the row's URL.
+ * A backslash is excluded for a different reason: both readers undo the
+ * escapes `\(`, `\)`, `\\`, `\<`, `\>` inside a destination, so a href that
+ * genuinely contains one of those sequences would come back altered — a
+ * changed key. Excluding every backslash is the simple superset of that.
  *
  * @param {string} href
  * @returns {boolean}
