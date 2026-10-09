@@ -42,10 +42,13 @@ type appModel struct {
 func (m *appModel) reloadPipelineData() {
 	apps := data.ParseApplications(m.careerOpsPath)
 	metrics := data.ComputeMetrics(apps)
-	history, historyErr := data.ReadFunnelHistory(m.careerOpsPath)
+	ledger, historyErr := data.ReadStatusLedger(m.careerOpsPath)
 	if historyErr == nil {
-		m.progressMetrics = data.ComputeProgressMetrics(apps, history)
+		m.progressMetrics = data.ComputeProgressMetrics(apps, ledger.Reached)
 	}
+	// After a failed ledger read LatestDate is nil, so the DATE column falls
+	// back to each row's tracker date while current statuses still refresh.
+	data.ApplyStatusDates(apps, ledger.LatestDate)
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
@@ -267,7 +270,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // openCmd wraps openWithDefaultApp (OS-specific) as a tea.Cmd. Shared by the
-// job-URL (`o`) and CV-PDF (`d`) actions.
+// job-URL (`o`, pipeline and report viewer) and CV-PDF (`d`) actions.
 func openCmd(target string) tea.Cmd {
 	return func() tea.Msg {
 		if err := openWithDefaultApp(target); err != nil {
@@ -398,13 +401,14 @@ func main() {
 	}
 
 	// Compute metrics
-	history, err := data.ReadFunnelHistory(careerOpsPath)
+	ledger, err := data.ReadStatusLedger(careerOpsPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	data.ApplyStatusDates(apps, ledger.LatestDate)
 	metrics := data.ComputeMetrics(apps)
-	progressMetrics := data.ComputeProgressMetrics(apps, history)
+	progressMetrics := data.ComputeProgressMetrics(apps, ledger.Reached)
 
 	// Batch-load all report summaries
 	t := theme.NewTheme("auto")

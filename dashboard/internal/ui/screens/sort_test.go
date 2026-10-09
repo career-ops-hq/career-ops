@@ -57,6 +57,29 @@ func TestSortByPayLocationAndLastContact(t *testing.T) {
 	}
 }
 
+// The date sort orders by what the DATE column shows: the ledger's latest
+// transition when there is one, else the tracker date.
+func TestSortByDateUsesStatusDate(t *testing.T) {
+	apps := []model.CareerApplication{
+		{Company: "OldEvalRecentChange", Status: "Interview", Date: "2026-05-01", StatusDate: "2026-06-20"},
+		{Company: "NewEvalNoChange", Status: "Evaluated", Date: "2026-06-10"},
+		{Company: "MidEvalMidChange", Status: "Applied", Date: "2026-05-15", StatusDate: "2026-06-15"},
+		{Company: "NoDates", Status: "Evaluated"},
+	}
+
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
+	pm.viewMode = "flat"
+	pm.sortMode = sortDate
+	pm.applyFilterAndSort()
+
+	wantOrder := []string{"OldEvalRecentChange", "MidEvalMidChange", "NewEvalNoChange", "NoDates"}
+	for i, w := range wantOrder {
+		if pm.filtered[i].Company != w {
+			t.Fatalf("date sort: position %d = %s, want %s", i, pm.filtered[i].Company, w)
+		}
+	}
+}
+
 func TestSortByPosted(t *testing.T) {
 	apps := []model.CareerApplication{
 		{Company: "Old", Status: "Applied", PostedOn: "2026-05-01"},
