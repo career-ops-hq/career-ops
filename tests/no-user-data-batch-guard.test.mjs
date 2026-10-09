@@ -62,11 +62,11 @@ function loadGuard() {
   )();
 }
 
-/** @returns {string[]} Repo-relative paths git tracks under batch/. */
-function trackedBatchFiles() {
+/** @returns {string[]} Repo-relative paths git tracks under `dir`. */
+function trackedFiles(dir) {
   // -z for the same reason the rest of the suite uses it: a path containing a
   // newline must not split into two records and drop a file from the sweep.
-  return execFileSync('git', ['-C', ROOT, 'ls-files', '-z', '--', 'batch/'], { encoding: 'utf-8' })
+  return execFileSync('git', ['-C', ROOT, 'ls-files', '-z', '--', dir], { encoding: 'utf-8' })
     .split('\0')
     .filter(Boolean);
 }
@@ -103,18 +103,51 @@ test('the guard blocks generated batch/ worker output', () => {
   );
 });
 
-test('the generic scaffold exemptions still apply outside batch/', () => {
+test('the guard blocks scaffold-shaped files nested under documents/', () => {
   const isBlocked = loadGuard();
 
-  // batch/ narrows isScaffold to an exact allowlist. The other guarded
-  // directories keep the filename exemption they have always had, and several
-  // of them track a real .gitkeep or README.md, so narrowing it globally would
-  // fail every PR that touches those files.
+  // documents/ is the intake drop zone. An unpacked export or a folder of
+  // references may carry its own README.md, and under the filename rule it
+  // would pass carrying the user's identity data. Only the two tracked
+  // scaffold files at the top of documents/ are exempt.
+  const nested = [
+    'documents/private/README.md',
+    'documents/linkedin-export/README.md',
+    'documents/references/.gitkeep',
+  ];
+  const passed = nested.filter((f) => !isBlocked(f));
+  assert.deepEqual(passed, [], `the no-user-data guard would merge nested documents/ files: ${passed.join(', ')}`);
+});
+
+test('the guard exempts every tracked file under documents/', () => {
+  const isBlocked = loadGuard();
+  const tracked = trackedFiles('documents/');
+
+  assert.ok(
+    tracked.length >= 2,
+    `git ls-files found only ${tracked.length} tracked files under documents/ — the exemption ` +
+      'check would pass vacuously',
+  );
+
+  const blocked = tracked.filter(isBlocked);
+  assert.deepEqual(
+    blocked,
+    [],
+    `the no-user-data guard would block tracked documents/ scaffolding, failing every PR that ` +
+      `edits it: ${blocked.join(', ')}`,
+  );
+});
+
+test('the generic scaffold exemptions still apply outside batch/ and documents/', () => {
+  const isBlocked = loadGuard();
+
+  // batch/ and documents/ narrow isScaffold to an exact allowlist. The other
+  // guarded directories keep the filename exemption they have always had, and
+  // several of them track a real .gitkeep or README.md, so narrowing it
+  // globally would fail every PR that touches those files.
   const scaffoldElsewhere = [
     'data/.gitkeep',
     'reports/.gitkeep',
-    'documents/.gitkeep',
-    'documents/README.md',
     'interview-prep/sessions/README.md',
     'writing-samples/README.md',
   ];
@@ -122,14 +155,14 @@ test('the generic scaffold exemptions still apply outside batch/', () => {
   assert.deepEqual(
     overblocked,
     [],
-    `the batch/ narrowing leaked into other directories and would block tracked ` +
+    `the batch/ and documents/ narrowing leaked into other directories and would block tracked ` +
       `scaffolding there: ${overblocked.join(', ')}`,
   );
 });
 
 test('the guard exempts every tracked source under batch/', () => {
   const isBlocked = loadGuard();
-  const tracked = trackedBatchFiles();
+  const tracked = trackedFiles('batch/');
 
   // Without this the assertion below is satisfied by an empty list, which is
   // what a failed git call or a renamed directory produces.

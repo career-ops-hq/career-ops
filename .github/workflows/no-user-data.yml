@@ -63,32 +63,42 @@ jobs:
             ];
             // Tracked scaffolding that legitimately lives under those dirs.
             //
-            // batch/ gets an exact allowlist instead of the filename rule. The
-            // workers write user-layer output into it (tailored CV and
-            // cover-letter JSON, prefetched JD text, per-run state), and a
-            // filename-shaped exemption is exactly what that output can be
-            // named: a worker scratch dir may hold a README.md, and nothing
-            // stops private content being committed as batch/tmp/README.md or
-            // batch/anything/.gitkeep. So under batch/ a path is exempt only by
-            // being on this list, which also means a new tracked file there has
-            // to be added on purpose.
+            // batch/ and documents/ get an exact allowlist instead of the
+            // filename rule. The batch workers write user-layer output into
+            // batch/ (tailored CV and cover-letter JSON, prefetched JD text,
+            // per-run state), and documents/ is where the user drops their own
+            // files for intake (a LinkedIn export, a folder of references). A
+            // filename-shaped exemption is exactly what that content can be
+            // named: a worker scratch dir or an unpacked export may hold a
+            // README.md, and nothing stops private content being committed as
+            // batch/tmp/README.md or documents/private/README.md. So under these
+            // dirs a path is exempt only by being on its list, which also means
+            // a new tracked file there has to be added on purpose.
             //
             // Everywhere else the filename rule stands: data/, reports/, jds/,
-            // output/, documents/, interview-prep/ and writing-samples/ track
-            // real .gitkeep keepers and dir READMEs, and narrowing this globally
-            // would fail every PR that touches one.
-            const BATCH_SOURCES = new Set([
-              'batch/README.md',
-              'batch/aggregate-tokens.mjs',
-              'batch/batch-prompt.md',
-              'batch/batch-runner.sh',
-              'batch/logs/.gitkeep',
-              'batch/tracker-additions/.gitkeep',
-            ]);
-            const isScaffold = (f) =>
-              f.startsWith('batch/')
-                ? BATCH_SOURCES.has(f)
+            // output/, interview-prep/ and writing-samples/ track real .gitkeep
+            // keepers and dir READMEs, and narrowing this globally would fail
+            // every PR that touches one.
+            const EXACT_SCAFFOLD = {
+              'batch/': new Set([
+                'batch/README.md',
+                'batch/aggregate-tokens.mjs',
+                'batch/batch-prompt.md',
+                'batch/batch-runner.sh',
+                'batch/logs/.gitkeep',
+                'batch/tracker-additions/.gitkeep',
+              ]),
+              'documents/': new Set([
+                'documents/.gitkeep',
+                'documents/README.md',
+              ]),
+            };
+            const isScaffold = (f) => {
+              const dir = Object.keys(EXACT_SCAFFOLD).find((d) => f.startsWith(d));
+              return dir
+                ? EXACT_SCAFFOLD[dir].has(f)
                 : /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f);
+            };
 
             const bad = files
               .filter((f) => f.status !== 'removed')
