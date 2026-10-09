@@ -1152,15 +1152,46 @@ function recordedDiscardReasons(entry) {
     .filter(Boolean));
 }
 
+// The vocabulary ships with the code, not with the user's data, so it resolves
+// from this file's directory rather than CAREER_OPS_ROOT.
+const DISCARD_REASONS_FILE = join(dirname(fileURLToPath(import.meta.url)), 'templates/discard-reasons.yml');
+
+/**
+ * Canonical discard-reason ids from templates/discard-reasons.yml (#2785).
+ * Returns null when the file is missing, malformed, or lists no id; callers
+ * then report every label as `other` instead of inventing a vocabulary.
+ */
+export function loadDiscardReasonVocabulary(file = DISCARD_REASONS_FILE) {
+  try {
+    const parsed = yamlLoad(readFileSync(file, 'utf8'));
+    const reasons = Array.isArray(parsed?.reasons) ? parsed.reasons : [];
+    const ids = reasons.map(reason => reason?.id).filter(id => typeof id === 'string' && id);
+    return ids.length > 0 ? new Set(ids) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Spelling only: case, surrounding whitespace, and space/hyphen vs underscore.
+// Synonyms are never guessed; an unmatched label stays `other`.
+function discardReasonKey(label) {
+  return label.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
 /**
  * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
  * entries whose linked report explicitly supplies prediction data, including
  * an empty list; a missing or malformed field is unknown, not an empty forecast.
  * All statuses remain eligible: advancing later does not erase a prediction.
- * Labels stay open-ended; only case and surrounding whitespace are normalized.
+ * Only canonical ids from templates/discard-reasons.yml enter the shares. Every
+ * other label is listed under `predictedDiscardReasonOther` with its own
+ * spelling (case and surrounding whitespace normalized) and is never counted
+ * in `predictedDiscardReasonStats`.
  */
-export function buildPredictedDiscardReasonSignals(enriched) {
+export function buildPredictedDiscardReasonSignals(enriched, vocabulary = loadDiscardReasonVocabulary()) {
   const counts = new Map();
+  const otherCounts = new Map();
+  let entriesWithOther = 0;
   const coverage = {
     entriesWithReports: 0,
     entriesWithPredictionData: 0,
@@ -1185,13 +1216,33 @@ export function buildPredictedDiscardReasonSignals(enriched) {
     const reasons = new Set((entry.report.discardReasons || [])
       .map(reason => reason.trim().toLowerCase()).filter(Boolean));
     if (reasons.size > 0) coverage.entriesWithPredictions++;
-    for (const reason of reasons) counts.set(reason, (counts.get(reason) || 0) + 1);
+    const canonical = new Set();
+    const other = new Set();
+    for (const reason of reasons) {
+      const key = discardReasonKey(reason);
+      if (vocabulary?.has(key)) canonical.add(key);
+      else other.add(reason);
+    }
+    for (const reason of canonical) counts.set(reason, (counts.get(reason) || 0) + 1);
+    for (const reason of other) otherCounts.set(reason, (otherCounts.get(reason) || 0) + 1);
+    if (other.size > 0) entriesWithOther++;
   }
   const base = coverage.entriesWithPredictionData;
+  const byFrequency = (a, b) => b.frequency - a.frequency || a.reason.localeCompare(b.reason);
   return {
     predictedDiscardReasonStats: [...counts.entries()]
       .map(([reason, frequency]) => ({ reason, frequency, percentage: Math.round(frequency / base * 100) }))
-      .sort((a, b) => b.frequency - a.frequency || a.reason.localeCompare(b.reason)),
+      .sort(byFrequency),
+    // Reported beside the shares, never inside them. A growing `entries` share
+    // is the signal that the vocabulary needs a new member.
+    predictedDiscardReasonOther: {
+      vocabularyLoaded: vocabulary !== null,
+      entries: entriesWithOther,
+      percentage: base ? Math.round(entriesWithOther / base * 100) : 0,
+      reasons: [...otherCounts.entries()]
+        .map(([reason, frequency]) => ({ reason, frequency }))
+        .sort(byFrequency),
+    },
     predictedDiscardReasonBase: base,
     discardReasonCoverage: coverage,
   };
@@ -1656,14 +1707,24 @@ function printSummary(result) {
   console.log(`  Prediction data: ${coverage.entriesWithPredictionData}/${coverage.entriesWithReports} entries with linked reports; ${coverage.entriesWithPredictions} contain reasons.`);
   console.log(`  Recorded reasons: ${coverage.entriesWithRecordedReasons}/${result.discardReasonBase} eligible entries; ${coverage.entriesWithBothSources} entries have both sources.`);
   console.log('  Forecasts cover all statuses; recorded reasons cover skipped, discarded, and rejected entries.');
-  console.log('  Predictions are not outcomes. Missing data is unknown; labels are grouped by spelling, not meaning.');
+  console.log('  Predictions are not outcomes. Missing data is unknown; canonical ids are matched by spelling, not meaning.');
+  const other = result.predictedDiscardReasonOther;
+  if (!other.vocabularyLoaded) {
+    console.log('  templates/discard-reasons.yml could not be read; every predicted reason is listed as other.');
+  }
   if (result.predictedDiscardReasonBase === 0) {
     console.log('  No prediction data recorded yet.');
-  } else if (result.predictedDiscardReasonStats.length === 0) {
+  } else if (result.predictedDiscardReasonStats.length === 0 && other.reasons.length === 0) {
     console.log('  No reasons predicted in the recorded data.');
   } else {
     for (const d of result.predictedDiscardReasonStats.slice(0, 10)) {
       console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+    if (other.entries > 0) {
+      console.log(`  other (outside the vocabulary, not counted above): ${other.entries} entries (${other.percentage}%)`);
+      for (const d of other.reasons.slice(0, 10)) {
+        console.log(`    ${d.reason.padEnd(28)} ${String(d.frequency).padStart(2)}x`);
+      }
     }
   }
 

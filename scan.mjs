@@ -1837,7 +1837,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   const recheckCandidates = new Set();
 
   // scan-history.tsv
-  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+  // Skip line 0 only when it is the header; a headerless legacy file starts with a data row.
+  const historyLines = scanHistoryText.split('\n');
+  if (historyLines[0].startsWith('url\t')) historyLines.shift();
+  for (const line of historyLines) {
     const { url, first_seen: firstSeen, portal, status: rawStatus } = parseScanHistoryLine(line);
     const status = rawStatus || 'added';
     if (!url) continue;

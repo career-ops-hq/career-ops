@@ -65,7 +65,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 
 ## doctor
 
-Validates that all prerequisites are in place: Node.js >= 18, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
+Validates that all prerequisites are in place: Node.js >= 22.13, dependencies installed, Playwright chromium, required files (`cv.md`, `config/profile.yml`, `portals.yml`), fonts directory, and auto-creates `data/`, `output/`, `reports/` if missing.
 
 ```bash
 npm run doctor
@@ -693,6 +693,8 @@ npm run rollback
 
 Tests whether job posting URLs are still live. Two rungs: a zero-token API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday, LinkedIn), falling back to headless Chromium (`liveness-browser.mjs`) for everything else or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
 
+Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that is still empty or still has no recognised apply control at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more.
+
 The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
 Per-job ATS endpoints (Greenhouse, Lever, Workday) treat a 200 as proof the posting is live; Ashby's public API is org-level (the whole job board), so that rung parses the board and confirms the specific job id is still listed. A definitive 404/410 from any ATS API is authoritative and short-circuits the browser check entirely — zero tokens, no browser launch.
@@ -879,7 +881,7 @@ SQLite **derived index** for the applications tracker (RFC #918, phase 1). `data
 
 Why: at hundreds of rows a markdown table degrades structurally (encoding corruption, column drift, `|` inside cells shifting columns), and agents grepping it get model-dependent results. The index normalizes on sync, so a query returns the same rows for every model on every CLI — and corruption is detected at sync time instead of propagating silently.
 
-Zero new dependencies — uses `node:sqlite`, built into Node ≥ 22.5.
+Zero new dependencies — uses `node:sqlite`, built into Node (no flag needed from 22.13).
 
 ```bash
 node tracker.mjs sync                     # (re)build applications.db from applications.md
@@ -921,7 +923,7 @@ Everything else that cannot be reproduced is reported, never quietly changed. `e
 
 Data loss is a decision you make, not a side effect of adopting a repaired copy.
 
-**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.5, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
+**Exit codes:** `0` success, `1` validation error, missing prerequisites (Node < 22.13, no `applications.md` to index), corruption found by `sync --check`, or `export --out` refusing to overwrite an existing file because something in it cannot be reproduced (re-run with `--force` to accept the loss). Nothing is written in that last case, so `1` from `export --out` always means the target is untouched.
 
 ---
 

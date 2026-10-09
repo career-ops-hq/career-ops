@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useEffect, useMemo, useOptimistic, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
@@ -13,6 +13,8 @@ import { applicationKey, applySavedStatus } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
+import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
+import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
@@ -44,6 +46,8 @@ export function PipelineView({
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const [isPending, startNavigation] = useTransition();
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
   // Starts AFTER the POST succeeds. React replays the confirmed save over
   // intervening snapshots and discards it when the refresh transition settles.
   const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
@@ -55,6 +59,7 @@ export function PipelineView({
   // the table identically (no useState mirror → no desync).
   const pTab = (params.get("tab") ?? "").toUpperCase();
   const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  const visibleTab = isPending && pendingTab ? pendingTab : tab;
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
@@ -81,10 +86,22 @@ export function PipelineView({
         else sp.set(k, String(v));
       }
       const qs = sp.toString();
-      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      if (qs === params.toString()) return;
+      if (Object.prototype.hasOwnProperty.call(updates, "tab")) {
+        const nextTab = String(updates.tab ?? "INBOX").toUpperCase();
+        if ((TABS as readonly string[]).includes(nextTab)) setPendingTab(nextTab as Tab);
+      }
+      startRouteProgress();
+      startNavigation(() => {
+        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      });
     },
-    [params, router, pathname],
+    [params, router, pathname, startNavigation],
   );
+
+  useEffect(() => {
+    if (!isPending) setPendingTab(null);
+  }, [isPending]);
 
   // Pending + deduped by URL (pipeline.md can list the same posting twice) so the
   // header count, the tab count and the triage list all agree on one number.
@@ -134,7 +151,7 @@ export function PipelineView({
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
-        {tab !== "INBOX" && (
+        {visibleTab !== "INBOX" && (
           <div className="relative w-64 max-w-[40vw]">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
             <input
@@ -165,7 +182,7 @@ export function PipelineView({
                 // gap-1, not a whitespace text node: flex containers drop
                 // whitespace-only anonymous items, which rendered "INBOX0".
                 "-mb-px inline-flex items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                tab === t
+                visibleTab === t
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
               )}
@@ -178,7 +195,7 @@ export function PipelineView({
 
       <p role="status" className="sr-only">{announcement}</p>
 
-      {tab !== "INBOX" && minFilter != null && (
+      {visibleTab !== "INBOX" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
           <span className="text-xs text-faint">Filtered:</span>
           <button
@@ -193,14 +210,14 @@ export function PipelineView({
         </div>
       )}
 
-      {tab === "INBOX" ? (
+      {visibleTab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
           <InboxTriage inbox={pendingInbox} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
-      ) : filtered.length > 0 ? (
+      ) : isPending || filtered.length > 0 ? (
         /* ── Tracker table ──
            overflow-x-auto, not overflow-hidden: the rounded corners still clip,
            but a table too wide for the viewport can now be scrolled to instead
@@ -231,7 +248,9 @@ export function PipelineView({
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            {/* Keep editors mounted while query navigation is pending: sorting
+                must not discard an open editor or an in-flight status save. */}
+            <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
               {filtered.map((r) => {
                 const company = companyPresentation(r);
                 const key = applicationKey(r);
@@ -280,6 +299,11 @@ export function PipelineView({
                 );
               })}
             </tbody>
+            {isPending && (
+              <tbody className="divide-y divide-border" aria-busy="true">
+                <PipelineTableRowsSkeleton trackerColumn />
+              </tbody>
+            )}
           </table>
         </div>
       ) : (

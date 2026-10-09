@@ -492,8 +492,8 @@ const scripts = [
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
-  // The second outlier, on the same grounds as tracker-writer-lock-tests.mjs
-  // below and measured the same way. It spawns five node subprocesses
+  // An outlier, measured on Windows CI the way tracker-writer-lock-tests.mjs
+  // once was (#2906). It spawns five node subprocesses
   // (merge-tracker, verify-pipeline) against throwaway mkdtempSync trees, and
   // that cost is the behaviour under test rather than slack to be trimmed.
   //
@@ -508,22 +508,10 @@ const scripts = [
   // SLOW_SCRIPT_WARN_FRACTION could not have given notice: at a typical 12s of
   // 30s this never reaches the 75% warning, so it goes from silent to killed
   // with nothing in between. The ceiling is the only signal it has.
+  //
+  // The writer-lock suite has since been made fast and moved into tests/ under
+  // the shared cap (#4759); #4758 is the same work for this one.
   { name: 'tracker-columns-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
-  // The one script in this list that genuinely needs longer than the shared
-  // budget. It spawns competing writer processes for 27 contention cases, and
-  // that cost is the behaviour under test rather than slack to be trimmed.
-  //
-  // Measured on current main on a 24-core Windows box, four consecutive runs:
-  // 13.4s, 17.8s, 19.8s, 20.1s — already 67% of the default 30s before a
-  // 2-core CI runner's load is added. On windows-latest it crossed the line and
-  // was killed mid-matrix (`exit null, signal SIGTERM`), while every other
-  // check on the same commit passed (#2906).
-  //
-  // Raised here rather than in run()'s default so the outlier is treated as an
-  // outlier: every other script keeps the 30s bound, and a NEW script that
-  // starts taking half a minute still fails loudly instead of inheriting a
-  // budget sized for this one.
-  { name: 'tracker-writer-lock-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -1265,8 +1253,9 @@ try {
 
   // Headed-fallback-on-challenge path (liveness-browser.mjs). Fake Playwright
   // pages script the goto/evaluate calls so we can exercise the wrapper without
-  // launching a browser. checkUrlLiveness reads body text first, apply controls
-  // second — the fake returns them in that order.
+  // launching a browser. checkUrlLiveness reads the page repeatedly while it
+  // hydrates, so the fakes tell the two reads apart by the extractor passed in:
+  // only the apply-control extractor calls querySelectorAll.
   const { checkUrlLiveness, checkUrlLivenessWithFallback, isChallengeResult, jitteredDelayMs } =
     await import(pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href);
 
@@ -1282,15 +1271,13 @@ try {
     fail(`jitteredDelayMs out of spec (disabled=${disabled}, inRange=${inRange})`);
   }
 
-  const fakePage = ({ status, finalUrl, bodyText, applyControls }) => {
-    let evalCall = 0;
-    return {
-      async goto() { return { status: () => status }; },
-      async waitForTimeout() {},
-      url() { return finalUrl; },
-      async evaluate() { evalCall += 1; return evalCall === 1 ? bodyText : applyControls; },
-    };
-  };
+  const isControlsRead = (fn) => String(fn).includes('querySelectorAll');
+  const fakePage = ({ status, finalUrl, bodyText, applyControls }) => ({
+    async goto() { return { status: () => status }; },
+    async waitForTimeout() {},
+    url() { return finalUrl; },
+    async evaluate(fn) { return isControlsRead(fn) ? applyControls : bodyText; },
+  });
   const URL = 'https://www.pracuj.pl/praca/sap-consultant,oferta,1004870954';
   const challengePage = () => fakePage({
     status: 403,
@@ -1324,7 +1311,7 @@ try {
         async evaluate(fn) {
           // Both extractors mention innerText, so discriminate on the selector
           // call that only the apply-control extractor makes.
-          const isControls = String(fn).includes('querySelectorAll');
+          const isControls = isControlsRead(fn);
           const filled = textReads >= (spec.fillAfter ?? 0);
           if (!isControls) textReads += 1;
           if (isControls) return filled ? (spec.controls ?? []) : [];
@@ -1332,14 +1319,13 @@ try {
         },
       };
     });
-    let evalCall = 0;
     Object.assign(page, {
       async goto() { return { status: () => status }; },
       async waitForTimeout() {},
       url() { return finalUrl; },
       frames() { return [main, ...built]; },
       mainFrame() { return main; },
-      async evaluate() { evalCall += 1; return evalCall === 1 ? shellText : []; },
+      async evaluate(fn) { return isControlsRead(fn) ? [] : shellText; },
     });
     return page;
   };
@@ -1376,10 +1362,10 @@ try {
     fail(`410 precedence lost to frame aggregation: ${JSON.stringify(goneWithFrame)}`);
   }
 
-  // A 410 must not pay the frame poll: the status already decided it, and a
+  // A 410 must not pay the frame wait: the status already decided it, and a
   // dead posting whose error page renders into an iframe would otherwise wait
   // for that error page to fill before saying what it knew at byte one.
-  // Count only the 500ms poll waits; the 2000ms hydration wait always happens.
+  // Count only the 500ms frame-wait ticks.
   let pollWaits = 0;
   const gonePage = framedPage({
     status: 410,
@@ -1389,7 +1375,7 @@ try {
   gonePage.waitForTimeout = async (ms) => { if (ms === 500) pollWaits += 1; };
   const goneFast = await checkUrlLiveness(gonePage, SHELL);
   if (goneFast.result === 'expired' && goneFast.code === 'http_gone' && pollWaits === 0) {
-    pass('HTTP 410 short-circuits before the frame poll (no wait spent)');
+    pass('HTTP 410 short-circuits before the frame wait (no wait spent)');
   } else {
     fail(`410 did not short-circuit: ${JSON.stringify(goneFast)}, poll waits=${pollWaits}`);
   }
@@ -1411,20 +1397,17 @@ try {
   // bamboohr.com posting URL, not point at a real, permanently-live one.
   const BAMBOO_URL = 'https://example-co.bamboohr.com/careers/1';
   const bambooRetryPage = ({ reloadBodyText, reloadApplyControls = [] }) => {
-    let evalCall = 0;
+    // Empty render until reload() is called, the given render after it.
+    let reloaded = false;
     return {
       async goto() { return { status: () => 200 }; },
       async waitForTimeout() {},
       url() { return BAMBOO_URL; },
-      async evaluate() {
-        evalCall += 1;
-        // 1st/2nd calls: initial (empty) render. 3rd/4th: post-reload render.
-        if (evalCall === 1) return '';
-        if (evalCall === 2) return [];
-        if (evalCall === 3) return reloadBodyText;
-        return reloadApplyControls;
+      async evaluate(fn) {
+        if (isControlsRead(fn)) return reloaded ? reloadApplyControls : [];
+        return reloaded ? reloadBodyText : '';
       },
-      async reload() { return { status: () => 200 }; },
+      async reload() { reloaded = true; return { status: () => 200 }; },
     };
   };
 
@@ -1704,9 +1687,8 @@ try {
         },
         async waitForTimeout() {},
         url: () => 'https://careers.example.com/jobs/1',
-        async evaluate() {
-          this._n = (this._n || 0) + 1;
-          return this._n === 1 ? 'Senior Analyst. '.repeat(30) : ['Apply for this job'];
+        async evaluate(fn) {
+          return String(fn).includes('querySelectorAll') ? ['Apply for this job'] : 'Senior Analyst. '.repeat(30);
         },
       };
     };
@@ -5641,24 +5623,23 @@ try {
     fail(`tracker writers bypass shared transaction scope: ${unsafeWriters.join(', ')}`);
   }
 
-  const dashboardWriter = readFile('dashboard/internal/data/career.go');
-  const dashboardStart = dashboardWriter.indexOf('func UpdateApplicationStatusAndNotes(');
-  const dashboardTail = dashboardStart === -1 ? '' : dashboardWriter.slice(dashboardStart);
-  const nextDashboardFunction = dashboardTail.indexOf('\nfunc ', 1);
-  const dashboardBody = nextDashboardFunction === -1
-    ? dashboardTail
-    : dashboardTail.slice(0, nextDashboardFunction);
-  const acquireAt = dashboardBody.indexOf('acquireTrackerLock(');
-  const deferredReleaseAt = dashboardBody.indexOf('defer func()');
-  const readAt = dashboardBody.indexOf('os.ReadFile(filePath)');
-  const replaceAt = dashboardBody.indexOf('writeFileAtomic(filePath');
-  if (acquireAt >= 0 && deferredReleaseAt > acquireAt && readAt > deferredReleaseAt
-      && replaceAt > readAt
-      && !/os\.WriteFile\(filePath,\s*\[\]byte\(strings\.Join\(lines/.test(dashboardBody)) {
-    pass('dashboard tracker update structurally holds the lock across read and atomic replacement');
+  // The dashboard must use the same canonical writer as the CLI. Keep this
+  // boundary check beside the root-writer contract so a future UI refactor
+  // cannot silently reintroduce a direct tracker mutation that skips the
+  // shared lock, lifecycle ledger, or follow-up transaction.
+  const dashboardWriter = readFile('dashboard/internal/data/status_writer.go');
+  const runWriterStart = dashboardWriter.indexOf('func runStatusWriter(');
+  const runWriterBody = runWriterStart === -1 ? '' : dashboardWriter.slice(runWriterStart);
+  const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
+    && runWriterBody.includes('exec.CommandContext')
+    && runWriterBody.includes('"--report-link"')
+    && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
+  if (delegatesToCanonicalWriter) {
+    pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
   } else {
-    fail('dashboard tracker update escapes the cross-runtime transaction scope');
+    fail('dashboard status writer bypasses the shared set-status transaction scope');
   }
+
 } catch (e) {
   fail(`tracker writer lock contract tests crashed: ${e.message}`);
 }
@@ -10067,13 +10048,15 @@ try {
 // ── RESERVE-REPORT-NUM RANGE RESERVATION (#1426) ────────────────
 // Manual multi-agent fan-outs need N report numbers up front. --count N
 // reserves a contiguous range (per-slot atomic sentinels); tests run against
-// a temp dir via the CAREER_OPS_REPORTS_DIR override.
+// a temp dir via the CAREER_OPS_REPORTS_DIR override. CAREER_OPS_BATCH_STATE
+// points every run at a fixture-local batch-state.tsv, so failed rows in the
+// install's real batch/batch-state.tsv cannot occupy fixture numbers (#4391).
 console.log('\n🧪 Testing reserve-report-num env override and range reservation...');
 try {
   const RESERVE = join(ROOT, 'reserve-report-num.mjs');
   const reserveRun = (args, dir, tracker = join(dir, 'applications.md')) => execFileSync(NODE, [RESERVE, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: tracker },
+    env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: tracker, CAREER_OPS_BATCH_STATE: join(dir, 'batch-state.tsv') },
   }).trim();
 
   // Importing the module must expose the same allocator used by the CLI,
@@ -10120,7 +10103,7 @@ try {
     }));
   `], {
     encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_REPORTS_DIR: apiTmp, CAREER_OPS_TRACKER: apiTracker },
+    env: { ...process.env, CAREER_OPS_REPORTS_DIR: apiTmp, CAREER_OPS_TRACKER: apiTracker, CAREER_OPS_BATCH_STATE: join(apiTmp, 'batch-state.tsv') },
   }).trim();
   let apiResult = null;
   try { apiResult = JSON.parse(apiProbe); } catch {}
@@ -10203,6 +10186,7 @@ try {
     await allocatorApi.reserveReportNumbers(2, {
       reportsDir: unsafeRangeReports,
       trackerPath: unsafeRangeTracker,
+      batchStateFile: join(unsafeRangeTmp, 'batch-state.tsv'),
     });
   } catch (err) {
     unsafeRangeError = err;
@@ -10462,7 +10446,7 @@ try {
     try {
       const spawnReserve = () => new Promise(resolve => {
         const child = spawn(NODE, [RESERVE, '--count', '4'], {
-          env: { ...process.env, CAREER_OPS_REPORTS_DIR: concTmp },
+          env: { ...process.env, CAREER_OPS_REPORTS_DIR: concTmp, CAREER_OPS_BATCH_STATE: join(concTmp, 'batch-state.tsv') },
         });
         let stdout = '';
         child.stdout.on('data', chunk => { stdout += chunk; });
@@ -10499,7 +10483,7 @@ try {
       execFileSync(NODE, [RESERVE, ...args], {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: join(dir, 'applications.md') },
+        env: { ...process.env, CAREER_OPS_REPORTS_DIR: dir, CAREER_OPS_TRACKER: join(dir, 'applications.md'), CAREER_OPS_BATCH_STATE: join(dir, 'batch-state.tsv') },
       });
       return null;
     } catch (err) {
@@ -13450,7 +13434,7 @@ console.log('\n15. Tracker derived index (sync/query/export round-trip)');
 
 const sqliteAvailable = run(NODE, ['--no-warnings', '-e', "import('node:sqlite').then(()=>process.exit(0),()=>process.exit(1))"]) !== null;
 if (!sqliteAvailable) {
-  warn('node:sqlite unavailable (Node < 22.5) — tracker index tests skipped');
+  warn('node:sqlite unavailable (Node < 22.13) — tracker index tests skipped');
 } else {
   try {
     const idxTmp = mkdtempSync(join(tmpdir(), 'career-ops-index-'));
@@ -16736,7 +16720,7 @@ try {
   //
   // In the REQUIRED suite on purpose: web-ci.yml is informative-only, so asserting
   // this only there would gate nothing. Importing is safe — these are
-  // dependency-free ESM modules and the root suite runs on Node >= 18.
+  // dependency-free ESM modules and the root suite runs on Node >= 22.13.
   const webLib = join(ROOT, 'web', 'src', 'lib');
   const runRoutePath = join(ROOT, 'web', 'src', 'app', 'api', 'run', 'route.ts');
   if (!existsSync(webLib)) {

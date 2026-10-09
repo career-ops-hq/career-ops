@@ -438,12 +438,14 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 
 ## Offer Verification -- MANDATORY
 
-**NEVER trust WebSearch/WebFetch to verify if an offer is still active.** ALWAYS use Playwright:
+**NEVER decide whether an offer is active from a bare WebSearch/WebFetch snippet.** Start with `node check-liveness.mjs <url>`: it checks free public ATS APIs first, then falls back to Playwright only when the API returns `null`. A non-null `uncertain` result does not trigger Playwright; it remains unconfirmed.
+
+When checking the browser fallback manually:
 1. `browser_navigate` to the URL
 2. `browser_snapshot` to read content
 3. Explicit expired/closed evidence or 404/410 = closed. An unreadable JD, loading placeholder, or login/error page is **unconfirmed**, not closed. Check embedded iframes before judging a footer/navbar-only page. Title + description + Apply = active; an Apply button alone is not a JD.
 
-**Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
+**Exception for batch workers (headless mode):** use public API verification where available. If the API cannot confirm the posting and browser verification is unavailable, WebFetch may supply JD text, but mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
 
 ### LinkedIn JD loading guard (#4121)
 
@@ -503,6 +505,10 @@ Headless worker command per CLI:
 - Output in `output/` (gitignored) · Reports in `reports/` · JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md) · Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
 
+**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
+- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
+- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
+
 ### JD captures (`jds/`)
 
 `local:jds/{file}` is the reference form everywhere a JD is cited — `data/pipeline.md` entries, `triage`, `pipeline`, and the tracker notes column. Any filename is valid behind it; several writers coexist and none is canonical:
@@ -531,9 +537,6 @@ If they say yes: run `node hired-share.mjs --report N --anonymity <their choice>
 **Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
 
 **Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
-**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
-- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 

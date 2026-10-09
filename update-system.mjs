@@ -232,6 +232,7 @@ const SYSTEM_PATHS = [
   'modes/ko/interview/',
   'modes/nl/',
   'modes/pl/',
+  'modes/pl/interview/',
   'modes/pt/',
   'modes/pt/interview/',
   'modes/ru/',
@@ -265,11 +266,14 @@ const SYSTEM_PATHS = [
   'lib/ascii-fold.mjs',
   'lib/cli-flags.mjs',
   'lib/gemini-node-floor.mjs',
+  'lib/node-floor.mjs',
   'lib/local-today.mjs',
+  'lib/parse-date.mjs',
   'lib/placeholder-cell.mjs',
   'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
   'lib/scan-history-columns.mjs',
+  'lib/small-board.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/scratch-dirs.mjs',
@@ -430,6 +434,9 @@ const SYSTEM_PATHS = [
   'jd-similarity.mjs',
   'test-all.mjs',
   'tracker-columns-tests.mjs',
+  // Retired 2026-10-04: the suite moved to tests/tracker-writer-lock.test.mjs
+  // (#4759). The entry stays so staleSystemFiles() prunes the orphan on an
+  // upgraded install; drop it once a release has shipped past that move.
   'tracker-writer-lock-tests.mjs',
   'validate-portals.mjs',
   'validate-profile.mjs',
