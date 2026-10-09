@@ -64,6 +64,18 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9+#/\- ]/g, "").trim();
 }
 
+// Short terms that must match as whole words to avoid false positives
+// (e.g. "r" matching "intern", "go" matching "google")
+const SHORT_TERMS = new Set(["r", "go", "sql", "nlp", "css", "html", "etl", "elt", "gcp", "api"]);
+
+// Track-based default keywords when the internship has no requirements text
+const TRACK_DEFAULTS: Record<string, string[]> = {
+  DS: ["python", "sql", "statistics", "machine learning", "data visualization", "pandas", "tableau", "hypothesis testing", "regression", "classification"],
+  DA: ["python", "sql", "excel", "tableau", "data visualization", "dashboard", "reporting", "statistical analysis", "data modeling"],
+  BIE: ["python", "sql", "etl", "data pipeline", "data modeling", "data warehousing", "airflow", "aws"],
+  SWE: ["python", "javascript", "algorithms", "data structures", "api", "git", "web development"],
+};
+
 // Extract requirement keywords from internship data
 function extractRequirementKeywords(internship: Internship): string[] {
   const sources = [
@@ -94,7 +106,17 @@ function extractRequirementKeywords(internship: Internship): string[] {
   ];
 
   for (const term of techTerms) {
-    if (text.includes(term)) keywords.push(term);
+    if (SHORT_TERMS.has(term)) {
+      // Word-boundary match for short terms to avoid "r" matching "intern"
+      if (new RegExp(`\\b${term}\\b`).test(text)) keywords.push(term);
+    } else {
+      if (text.includes(term)) keywords.push(term);
+    }
+  }
+
+  // If no requirements text, infer from track
+  if (keywords.length <= 2 && internship.track && TRACK_DEFAULTS[internship.track]) {
+    return [...new Set([...keywords, ...TRACK_DEFAULTS[internship.track]])];
   }
 
   return [...new Set(keywords)];
