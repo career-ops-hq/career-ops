@@ -42,7 +42,8 @@
 //     keywords: ["AI", "大模型"]
 //     max_pages: 5
 
-import { MACOS_BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { MACOS_BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
@@ -89,6 +90,10 @@ export function parseFeishuJobsResponse(json, companyName, origin) {
     const title = p?.title;
     const id = p?.id;
     if (!title || id == null) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     const cities = Array.isArray(p.city_list)
       ? p.city_list.map((c) => c?.name).filter(Boolean).join('/')
       : '';
@@ -97,8 +102,8 @@ export function parseFeishuJobsResponse(json, companyName, origin) {
     jobs.push({
       title,
       url: origin === 'https://jobs.bytedance.com'
-        ? `${origin}/experienced/position/${encodeURIComponent(id)}/detail`
-        : `${origin}/index/position/${encodeURIComponent(id)}/detail`,
+        ? `${origin}/experienced/position/${encodedId}/detail`
+        : `${origin}/index/position/${encodedId}/detail`,
       company: companyName,
       location: cities,
       description: [
@@ -144,13 +149,12 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         const offset = (page - 1) * PAGE_SIZE;
         let json;
         try {

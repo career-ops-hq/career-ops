@@ -22,8 +22,14 @@ Node.js (`tests/helpers.mjs`).
   Underscore-prefixed files (e.g. `_html-entities.test.mjs`) test shared
   helper modules.
 - Other `*.test.mjs` files at this level (e.g. `stats.test.mjs`) cover root
-  scripts. Note: standalone `*.test.mjs` files in the repo root are run by
-  `test-all.mjs`'s inline script list, not by this directory's discovery.
+  scripts. Note: standalone `*.test.mjs` files in the repo root are not
+  discovered and will not run — `tests/no-root-suites.test.mjs` fails the
+  build if one shows up (see "Why the flat root" in ARCHITECTURE.md).
+  A handful of `*-tests.mjs` suites do remain at the root (a flag-driven CI
+  harness, a suite that asserts on its own filename, two needing a per-script
+  timeout, and one added after the convention was written); those are registered in
+  `test-all.mjs`'s `scripts` list or invoked by a workflow, and
+  `root-tests-registration.test.mjs` asserts every one of them is reachable.
 
 **Web tests do not live here.** `web/` runs its own `npm test` over
 `web/tests/**/*.test.mjs` (see [../web/README.md](../web/README.md)); this

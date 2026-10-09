@@ -9,11 +9,45 @@ import { classifyLiveness } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
-const HYDRATION_WAIT_MS = 2_000;
-// Upper bound on the extra wait for a same-origin child frame to populate, and
-// the poll interval inside it. Only spent when such a frame exists at all.
+// Single-page-app ATS render the posting after domcontentloaded, so the page
+// is read repeatedly until the verdict stops being a "not rendered yet" code;
+// a single early read would call a live posting insufficient_content.
+// Measured over 386 loads of 188 posting URLs: the first decisive verdict
+// arrived at p50 1785ms, p95 3071ms and at most 3308ms outside iCIMS (whose
+// frames have their own poll below); 17 reads 250ms apart cover 4000ms. Bounded by a count rather than a clock so a
+// page double whose waitForTimeout returns at once still terminates.
+// Once a read is decisive no later read flipped a live posting to closed, so
+// stopping at the first decisive read is safe. Stopping when the text stops
+// changing is NOT: a spinner holds the text constant on live pages.
+const HYDRATION_POLL_MS = 250;
+const HYDRATION_MAX_POLLS = 16;
+const HYDRATING_CODES = new Set(['insufficient_content', 'no_apply_control']);
+// Upper bound on the extra wait for same-origin child frames to populate, and
+// the poll interval inside it. Only spent when the page poll ends undecided
+// while such a frame is present.
 const FRAME_CONTENT_TIMEOUT_MS = 6_000;
 const FRAME_CONTENT_POLL_MS = 500;
+
+// BambooHR's client bundle can throw during first paint — a failed
+// /globals/locale request followed by an uncaught TypeError reading
+// `hasPasskey` on null — which halts the SPA on its bare loading spinner for
+// the whole hydration poll, so a live posting reads as insufficient_content. The
+// posting itself is untouched; a reload clears it. This is a shared
+// front-end bug across every *.bamboohr.com tenant (not one company's
+// board) and common enough to matter: rerun checkUrlLiveness in a loop
+// against any live *.bamboohr.com posting URL with this branch disabled to
+// see the current failure rate.
+//
+// Scoped to this one host on purpose, not a generic "flaky ATS" mechanism: no
+// other provider has shown this failure signature, and retrying every
+// insufficient-content verdict on every host would pay an extra page load on
+// every genuinely dead posting for no evidence of benefit elsewhere. If a
+// second ATS turns up the same symptom, generalize then.
+const BAMBOOHR_HOSTS = [/(^|\.)bamboohr\.com$/];
+
+function isBambooHrHost(hostname) {
+  return BAMBOOHR_HOSTS.some((pattern) => pattern.test(hostname));
+}
 
 /**
  * Same-origin test used to decide whether a child frame is part of the posting
@@ -300,12 +334,10 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
     const status = response?.status() ?? 0;
 
-    // Give SPAs (Ashby, Lever, Workday) time to hydrate. extraSettleMs adds slack
-    // for the headed retry, where a JS anti-bot interstitial needs a moment to clear.
-    await page.waitForTimeout(HYDRATION_WAIT_MS + extraSettleMs);
+    // extraSettleMs is slack for the headed retry, where a JS anti-bot
+    // interstitial needs a moment to clear before the first read.
+    if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
 
-    const finalUrl = page.url();
-    const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
     const extractApplyControls = () => {
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
@@ -339,8 +371,77 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         .filter(Boolean);
     };
 
-    let applyControls = await page.evaluate(extractApplyControls);
-    let frameText = '';
+    // Frame aggregation is an enhancement, never a requirement. Callers may pass
+    // a lightweight page object that only implements goto/url/evaluate — the
+    // test doubles in test-all.mjs do — and such a caller must keep getting the
+    // top-level verdict rather than a navigation_error.
+    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
+
+    const childFrames = (topUrl) =>
+      !supportsFrames
+        ? []
+        : page.frames().filter((frame) => {
+            if (frame === page.mainFrame()) return false;
+            try {
+              return sameOrigin(frame.url() || '', topUrl); // excludes about:blank, ads, tag managers
+            } catch {
+              return false;
+            }
+          });
+
+    // One reading of the page: the top-level document plus every same-origin
+    // child frame, so a posting rendered inside a frame and one rendered inline
+    // are judged the same way. A top-level read that throws propagates; a frame
+    // that detaches or turns cross-origin mid-read is skipped.
+    const readPage = async () => {
+      const finalUrl = page.url();
+      let bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+      let applyControls = await page.evaluate(extractApplyControls);
+      for (const frame of childFrames(finalUrl)) {
+        try {
+          const text = await frame.evaluate(() => document.body?.innerText ?? '');
+          if (text && text.trim()) bodyText += '\n' + text;
+          applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
+        } catch {
+          // detached or cross-origin mid-read; the rest of the reading still stands
+        }
+      }
+      return { finalUrl, bodyText, applyControls };
+    };
+
+    // Read the page until the verdict is decisive, the request guard has
+    // already decided it, or HYDRATION_MAX_POLLS waits have passed. A frame
+    // appearing does not end the poll: it may be a sign-in, chat or consent
+    // widget rather than the posting, and the posting can still render on the
+    // top level. A read that throws (the SPA rebuilding its DOM) is retried. If
+    // the poll ends on a failed read while the last good reading still looked
+    // unrendered, that reading is stale evidence, so the error propagates and
+    // becomes a navigation_error instead of an expired verdict; the same
+    // happens when no read succeeded at all.
+    const pollPage = async (pageStatus) => {
+      let reading = null;
+      let hydrating = true;
+      let lastError = null;
+      for (let poll = 0; ; poll += 1) {
+        try {
+          reading = await readPage();
+          lastError = null;
+          const { code } = classifyLiveness({ status: pageStatus, requestedUrl: url, ...reading });
+          hydrating = HYDRATING_CODES.has(code);
+          if (!hydrating) break;
+        } catch (err) {
+          lastError = err;
+        }
+        if (page._blockedByGuard || poll >= HYDRATION_MAX_POLLS) break;
+        await page.waitForTimeout(HYDRATION_POLL_MS);
+      }
+      if (lastError && hydrating) throw lastError;
+      if (hydrating && childFrames(reading.finalUrl).length > 0) {
+        await waitForFramesToFill(reading.finalUrl);
+        reading = await readPage();
+      }
+      return reading;
+    };
 
     // Some ATS render the whole posting inside a same-origin iframe and leave the
     // top-level document as an empty shell. iCIMS is the reference case: measured
@@ -356,43 +457,17 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     // before any content check, and its error frame carries zero apply controls.
     // The frame ATTACHES fast but FILLS late. Measured on iCIMS 2026-08-14: the
     // same-origin child frame is present at 2000ms with 0 characters and only
-    // populates between 3000 and 4000ms, so reading it at HYDRATION_WAIT_MS gets
-    // an empty document and changes nothing. Poll until it has content, bounded.
-    // The cost is only paid on pages that actually have a same-origin child
-    // frame, so the ATS that render inline are unaffected.
-    // Frame aggregation is an enhancement, never a requirement. Callers may pass
-    // a lightweight page object that only implements goto/url/evaluate — the
-    // test doubles in test-all.mjs do — and such a caller must keep getting the
-    // top-level verdict rather than a navigation_error.
-    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
-
-    const childFrames = () =>
-      !supportsFrames
-        ? []
-        : page.frames().filter((frame) => {
-            if (frame === page.mainFrame()) return false;
-            try {
-              return sameOrigin(frame.url() || '', finalUrl); // excludes about:blank, ads, tag managers
-            } catch {
-              return false;
-            }
-          });
-
-    // A 404/410 is decided by the status line alone, so no amount of frame
-    // content can change it. Without this, a dead posting whose error page also
-    // renders into an iframe pays the poll while that error page fills, purely
-    // to be told what the status already said. Measured on two dead iCIMS
-    // postings: 5822ms and 3314ms end to end, the spread being poll iterations.
+    // populates between 3000 and 4000ms, so reading it as soon as it attaches
+    // gets an empty document and changes nothing. The page poll reads the frame
+    // on every pass, so a frame that fills within the poll is caught there; a
+    // poll that ends still undecided with a same-origin frame present waits for
+    // the frames to fill, bounded, then takes one fresh reading. The cost is
+    // only paid on pages that actually have a same-origin child frame, so the
+    // ATS that render inline are unaffected.
     //
-    // The status rule is NOT restated here. classifyLiveness owns it, so this
-    // asks it and keys off the code it returns; a duplicated `status === 410`
-    // would be a second copy of that rule waiting to drift.
-    const topLevelVerdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
-    if (topLevelVerdict.code === 'http_gone') {
-      return topLevelVerdict;
-    }
-
-    if (childFrames().length > 0) {
+    // A 404/410 is decided on the first read: classifyLiveness checks the status
+    // before any content, so the poll stops there and no frame wait is paid.
+    const waitForFramesToFill = async (topUrl) => {
       const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
       // Wait for EVERY qualifying frame, not merely the first one to fill: with
       // two same-origin frames the posting could otherwise be read while still
@@ -400,7 +475,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       // qualifying frame per page, so in practice this is the same loop.
       for (;;) {
         let anyEmpty = false;
-        for (const frame of childFrames()) {
+        for (const frame of childFrames(topUrl)) {
           try {
             const probe = await frame.evaluate(() => document.body?.innerText ?? '');
             if (!probe.trim()) anyEmpty = true;
@@ -411,15 +486,40 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         if (!anyEmpty || Date.now() >= deadline) break;
         await page.waitForTimeout(FRAME_CONTENT_POLL_MS);
       }
-    }
+    };
 
-    for (const frame of childFrames()) {
-      try {
-        const text = await frame.evaluate(() => document.body?.innerText ?? '');
-        if (text && text.trim()) frameText += '\n' + text;
-        applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
-      } catch {
-        // detached or cross-origin mid-read; the top-level reading still stands
+    const reading = await pollPage(status);
+    const { finalUrl } = reading;
+    let verdict = classifyLiveness({ status, requestedUrl: url, ...reading });
+
+    // See BAMBOOHR_HOSTS above. Only fires on the specific verdict this
+    // render race produces (a short/empty body, not an explicit closure
+    // banner or a 404/410, both of which are trusted as-is).
+    if (verdict.code === 'insufficient_content' && typeof page.reload === 'function') {
+      let host = '';
+      try { host = new URL(finalUrl || url).hostname; } catch { /* leave empty, retry test below just fails closed */ }
+      if (isBambooHrHost(host)) {
+        try {
+          const reloadResponse = await page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
+          const reloadStatus = reloadResponse?.status() ?? status;
+          const reloaded = await pollPage(reloadStatus);
+          const reloadVerdict = classifyLiveness({ status: reloadStatus, requestedUrl: url, ...reloaded });
+          const stillNotFound = reloadVerdict.code === 'insufficient_content' || reloadVerdict.code === 'listing_page';
+          verdict = !stillNotFound
+            ? { ...reloadVerdict, reason: `${reloadVerdict.reason} (after BambooHR reload retry)` }
+            : {
+                result: 'uncertain',
+                code: 'bamboohr_render_retry_failed',
+                reason: 'BambooHR page did not render content even after a reload retry — not trusted as evidence of removal',
+              };
+        } catch (err) {
+          // Reload itself failed — still never let this surface as `expired`.
+          verdict = {
+            result: 'uncertain',
+            code: 'bamboohr_render_retry_failed',
+            reason: `BambooHR reload retry failed: ${err.message.split('\n')[0]}`,
+          };
+        }
       }
     }
 
@@ -427,13 +527,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
     }
 
-    return classifyLiveness({
-      status,
-      requestedUrl: url,
-      finalUrl,
-      bodyText: bodyText + frameText,
-      applyControls,
-    });
+    return verdict;
   } catch (err) {
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
@@ -465,8 +559,36 @@ export function createHeadedPageProvider(chromium) {
   let browser = null;
   let page = null;
   let launchFailed = false;
+  // A cached page is only reusable while its browser is still up. If the headed
+  // Chromium goes away mid-run (the user closes the window, the process dies),
+  // the cached handle stays non-null, so every later get() hands back a dead
+  // page and each anti-bot retry fails with "Target page, context or browser has
+  // been closed" instead of a real verdict. Guarded defensively because the
+  // provider is handed a chromium in tests, not necessarily a real Playwright one.
+  const isCachedPageUsable = () => {
+    if (!page) return false;
+    if (typeof page.isClosed === 'function' && page.isClosed()) return false;
+    if (browser && typeof browser.isConnected === 'function' && !browser.isConnected()) return false;
+    return true;
+  };
+
   return {
     async get() {
+      if (page && !isCachedPageUsable()) {
+        // Drop the dead handles and fall through to a fresh launch below. If the
+        // page went away but its Chromium is still up, tear that browser down
+        // first: close() only knows the current handle, so a replacement launch
+        // would otherwise leave the stale process running until exit.
+        if (browser && (typeof browser.isConnected !== 'function' || browser.isConnected())) {
+          try {
+            await browser.close();
+          } catch {
+            // best-effort teardown
+          }
+        }
+        page = null;
+        browser = null;
+      }
       if (page) return page;
       if (launchFailed) return null;
       try {

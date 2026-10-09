@@ -30,6 +30,8 @@ version: 1.0.0
     /* Must match generate-pdf.mjs's PDF_PAGE_MARGIN — the real @page margin is
        appended later by injectPrintPageCss reading this same variable. */
     --page-margin: 0.6in;
+    /* #3242: unchanged default — see templates/cv-template.html. */
+    --job-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -87,6 +89,15 @@ version: 1.0.0
     line-height: 1.02;
   }
 
+  .header-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--accent-color, #0d0f13);
+    margin-top: 3px;
+    line-height: 1.15;
+  }
+
   /* Short accent rule under the name, not a full-width gradient. */
   .header-gradient {
     width: 46px;
@@ -113,27 +124,17 @@ version: 1.0.0
   /* === SECTIONS === */
   .section { margin-bottom: 14px; }
 
-  /* Accent bar sits to the left of the heading text via a pseudo-element, so
-     the heading remains a single inline text run for extraction. */
+  /* Keep the accent bar in normal flow so PDF text follows section order. */
   .section-title {
-    position: relative;
+    border-left: 3px solid var(--accent-color);
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.13em;
+    /* Keep section names intact in the PDF text layer. */
+    letter-spacing: 0.04em;
     color: #0d0f13;
-    padding-left: 10px;
+    padding-left: 7px;
     margin-bottom: 8px;
-  }
-  .section-title::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 1px;
-    bottom: 1px;
-    width: 3px;
-    background: var(--accent-color);
-    border-radius: 2px;
   }
 
   .summary-text {
@@ -203,6 +204,14 @@ version: 1.0.0
     font-size: 9px;
     color: #7b8391;
     margin-top: 0.5px;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 9.5px;
+    line-height: 1.5;
+    color: #55606d;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -304,6 +313,22 @@ version: 1.0.0
     color: var(--accent-color);
   }
 
+  /* === GDPR / RODO CONSENT (footer) === */
+  /* Opt-in footer slot filled from payload.consent. Empty by default — the
+     :empty rule hides the div (and its border-top) when no consent text is
+     set, so existing CVs render byte-identical to a pre-consent layout.
+     Mirrors the {{PHOTO}} opt-in slot pattern (#264). */
+  .cv-consent {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    font-size: 8.5px;
+    line-height: 1.4;
+    color: #777;
+    text-align: left;
+  }
+  .cv-consent:empty { display: none; }
+
   /* === PAGE BREAK CONTROL === */
   .header,
   .edu-item,
@@ -314,10 +339,17 @@ version: 1.0.0
     page-break-inside: avoid;
   }
 
+  /* #3242: opt-in — see the --job-break-inside default above. */
+  .job {
+    page-break-inside: var(--job-break-inside, auto);
+    break-inside: var(--job-break-inside, auto);
+  }
+
   .section-title,
   .job-company,
   .job-role,
   .job-location,
+  .job-context,
   .edu-location,
   .project-title {
     break-after: avoid;
@@ -337,8 +369,7 @@ version: 1.0.0
     text-align: right;
     font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
   }
-  html[lang="ar"] .section-title { padding-left: 0; padding-right: 10px; }
-  html[lang="ar"] .section-title::before { left: auto; right: 0; }
+  html[lang="ar"] .section-title { padding-left: 0; padding-right: 7px; border-left: none; border-right: 3px solid var(--accent-color); }
   html[lang="ar"] .summary-text {
     border-left: none;
     border-right: 2px solid var(--accent-color);
@@ -381,6 +412,7 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
@@ -446,6 +478,9 @@ version: 1.0.0
   </div>
 
   <!-- END -->
+
+  <!-- GDPR / RODO consent -->
+  <div class="cv-consent">{{CONSENT}}</div>
 
 </div>
 </body>

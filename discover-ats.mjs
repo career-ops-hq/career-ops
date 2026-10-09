@@ -52,6 +52,7 @@ import rippling from './providers/rippling.mjs';
 import joinProvider from './providers/join.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { DEFAULT_SMALL_THRESHOLD, isSmallBoard, smallBoardDetail } from './lib/small-board.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -128,6 +129,7 @@ const USAGE = `Usage:
   node discover-ats.mjs --in companies.yml --summary  # human-readable table
   node discover-ats.mjs --in companies.yml --vendors gh,ashby,lever  # restrict probes
   node discover-ats.mjs --in companies.yml --vendors workday         # Workday only
+  node discover-ats.mjs --in companies.yml --small-threshold 10  # what counts as a small board (default ${DEFAULT_SMALL_THRESHOLD}, 0 = off)
   node discover-ats.mjs --self-test                   # inline test suite
   node discover-ats.mjs --help                        # print this usage block
 
@@ -415,7 +417,25 @@ export function renderPortalEntry(match) {
   if (match.provider) lines.push(`    provider: ${match.provider}`);
   lines.push(`    enabled: true`);
   if (match.notes) lines.push(`    notes: ${yamlScalar(match.notes)}`);
+  // A comment, not a key: portals.yml still parses to the same fields, but the
+  // user sees the prompt next to the entry when they open the file (#4772).
+  if (match.smallBoard) lines.push(`    # verify: ${smallBoardDetail(match.jobCount)}`);
   return '\n' + lines.join('\n') + '\n';
+}
+
+/**
+ * Flag resolved boards that list few postings. Purely advisory: it adds a
+ * `smallBoard: true` field and never changes what resolves (#4772).
+ *
+ * @param {any[]} resolved
+ * @param {number} [threshold]
+ * @returns {any[]} the same array, entries mutated in place
+ */
+export function flagSmallBoards(resolved, threshold = DEFAULT_SMALL_THRESHOLD) {
+  for (const r of resolved) {
+    if (isSmallBoard(r.jobCount, threshold)) r.smallBoard = true;
+  }
+  return resolved;
 }
 
 /** Normalize a careers_url/api for dedupe comparison: lowercase, strip trailing slash. */
@@ -639,7 +659,21 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       if (cfg.api) resolved.api = cfg.api(candidate.slug);
       return { resolved };
     }
-    if (result.status === 'empty') {
+    if (result.status === 'empty' && candidate.vendor === 'smartrecruiters') {
+      // SmartRecruiters' public postings API answers 200 with totalFound:0
+      // for ANY slug, including one that does not exist — unlike every other
+      // probed vendor, "empty" here establishes nothing. Counting it in
+      // emptyBoards let a single phantom hit outrank a real "not found"
+      // verdict from every other vendor, since emptyBoards is checked first
+      // in the reason ladder below: an unmatched company name would read as
+      // "board(s) found but currently list 0 jobs — re-run later", advising
+      // a retry that can never produce a different answer (#4179). Silently
+      // excluded from both emptyBoards and errors[] — the vendor still shows
+      // up in triedVendors, it just contributes no verdict either way. The
+      // accepted cost: a genuinely existing SmartRecruiters board with zero
+      // OPEN postings right now also reads as "not found" instead of "found,
+      // empty" — cheaper than every unmatched name reading as "found".
+    } else if (result.status === 'empty') {
       emptyBoards.push({ vendor: candidate.vendor, careers_url: candidate.careers_url });
     } else {
       /** @type {any} */
@@ -792,7 +826,8 @@ function printSummary({ resolved, unresolved, duplicates }) {
     console.log('  ' + '-'.repeat(90));
     for (const r of resolved) {
       console.log('  ' + String(r.name).substring(0, 22).padEnd(24)
-        + String(r.vendor).padEnd(12) + String(r.jobCount).padEnd(7) + r.careers_url);
+        + String(r.vendor).padEnd(12) + String(r.jobCount).padEnd(7) + r.careers_url
+        + (r.smallBoard ? `  [small board — verify ownership]` : ''));
     }
     console.log('');
   }
@@ -914,6 +949,12 @@ function runSelfTest() {
   const q = renderPortalEntry({ name: 'Foo: Bar', careers_url: 'https://jobs.ashbyhq.com/foo' });
   check(q.includes('name: "Foo: Bar"'), 'renderPortalEntry quotes name with colon');
 
+  // small-board flag (#4772): advisory field + `# verify:` comment, only when flagged
+  const sb = flagSmallBoards([{ name: 'A', jobCount: 1 }, { name: 'B', jobCount: 6 }]);
+  check(sb[0].smallBoard === true && sb[1].smallBoard === undefined, 'flagSmallBoards flags only boards at or under the threshold');
+  check(renderPortalEntry({ name: 'A', careers_url: 'https://x', smallBoard: true, jobCount: 1 }).includes('# verify:'), 'renderPortalEntry adds # verify: for a small board');
+  check(!renderPortalEntry({ name: 'B', careers_url: 'https://x', jobCount: 6 }).includes('# verify:'), 'renderPortalEntry omits # verify: for a larger board');
+
   // dedupeAgainstPortals
   const existing = [{ name: 'Adyen', careers_url: 'https://job-boards.greenhouse.io/adyen/' }];
   const d1 = dedupeAgainstPortals([{ name: 'Adyen', careers_url: 'x' }], existing);
@@ -976,8 +1017,8 @@ function runSelfTest() {
 // --write is the explicit opt-in to modify portals.yml (a user-layer file);
 // without it the run is preview-only. --dry-run is accepted as a harmless alias
 // for "don't write" (the default) so an older invocation never surprises anyone.
-const KNOWN_FLAGS = ['--in', '--vendors', '--write', '--dry-run', '--summary', '--self-test', '--help', '-h'];
-const VALUE_FLAGS = ['--in', '--vendors'];
+const KNOWN_FLAGS = ['--in', '--vendors', '--small-threshold', '--write', '--dry-run', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--in', '--vendors', '--small-threshold'];
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -1028,7 +1069,16 @@ function parseArgs(argv) {
   // Positional args (not flags, not a consumed flag value) are company names.
   const names = args.filter((a, idx) => !a.startsWith('-') && !consumedValueIndices.has(idx));
 
+  // Same shape check as audit-portals.mjs: a non-negative number, 0 = off.
+  const rawThreshold = valueOf('--small-threshold');
+  const smallThreshold = rawThreshold === null ? DEFAULT_SMALL_THRESHOLD : Number(rawThreshold);
+  if (!Number.isFinite(smallThreshold) || smallThreshold < 0 || String(rawThreshold).trim() === '') {
+    console.error(`Error: --small-threshold expects a non-negative number, got "${rawThreshold}"`);
+    process.exit(1);
+  }
+
   return {
+    smallThreshold,
     inPath: valueOf('--in'),
     vendors,
     includeWorkday,
@@ -1076,6 +1126,8 @@ async function main() {
   }
 
   const { resolved, unresolved } = await runDiscovery(companies, { vendors: opts.vendors, includeWorkday: opts.includeWorkday });
+  // Advisory only: resolution and exit codes are unchanged (#4772).
+  flagSmallBoards(resolved, opts.smallThreshold);
 
   // Dedupe resolved matches against the existing tracker.
   let existingEntries = [];

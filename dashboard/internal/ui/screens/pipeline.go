@@ -39,6 +39,15 @@ type PipelineOpenPDFMsg struct {
 	Path string
 }
 
+// PipelineOpenFailedMsg reports that an external open (job URL, manifesto or
+// CV PDF) failed. The dashboard runs under an alt-screen, so the failure has to
+// travel back to the pipeline screen as a flash: anything written to stderr is
+// never seen. Target is the URL or path that could not be opened.
+type PipelineOpenFailedMsg struct {
+	Target string
+	Err    string
+}
+
 // PipelineGeneratePDFMsg requests a PDF regeneration via generate-pdf.mjs
 // from the application's recorded source HTML. Paths are relative to
 // CareerOpsPath (as recorded in the manifest).
@@ -70,6 +79,12 @@ type PipelineUpdateStatusMsg struct {
 	NewStatus     string
 }
 
+// StatusUpdateFailedMsg exposes a failed tracker write in the active screen.
+// Stderr is hidden while the dashboard occupies the terminal's alt-screen.
+type StatusUpdateFailedMsg struct {
+	Err string
+}
+
 // PipelineUpdateStatusAndNotesMsg requests an atomic status + notes update.
 // Used by the discard reason picker (Issue 1380) to commit both changes in a
 // single tracker write.
@@ -89,12 +104,19 @@ type PipelineDiscardReasonsLoadedMsg struct {
 // PipelineRefreshMsg requests a full tracker reload from disk.
 type PipelineRefreshMsg struct{}
 
+// PipelineHistoryFailedMsg reports that progress still uses the previous data.
+type PipelineHistoryFailedMsg struct {
+	Err string
+}
+
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
 // PipelineOpenStatsMsg is emitted when the stats (dimension breakdown) screen should open.
 type PipelineOpenStatsMsg struct{}
 
+// Mirrors the ids in templates/discard-reasons.yml, in order.
+// tests/discard-reasons-vocabulary.test.mjs fails when the two drift.
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
@@ -123,6 +145,7 @@ const (
 	sortLocation = "location"
 	sortPay      = "pay"
 	sortLast     = "last"
+	sortPosted   = "posted"
 )
 
 // Filter modes
@@ -157,14 +180,14 @@ func getPipelineTabs() []pipelineTab {
 	}
 }
 
-var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast}
+var sortCycle = []string{sortScore, sortDate, sortCompany, sortStatus, sortLocation, sortPay, sortLast, sortPosted}
 
 // ColumnID identifies an optional table column in the pipeline view.
 type ColumnID int
 
 const (
 	// Optional columns — user-toggleable via the column picker (C key).
-	ColDate        ColumnID = iota // APPLIED date
+	ColDate        ColumnID = iota // DATE: latest status change (ledger), else the tracker's evaluation date
 	ColLocation                    // LOCATION city+state
 	ColPay                         // PAY range
 	ColHasReport                   // RPT: ✓/—
@@ -184,7 +207,7 @@ type colDef struct {
 
 func getOptionalCols() []colDef {
 	return []colDef{
-		{ColDate, i18n.Current.ColApplied, "", 10, true},
+		{ColDate, i18n.Current.ColDate, "", 10, true},
 		{ColLocation, i18n.Current.ColLocation, "", 20, true},
 		{ColPay, i18n.Current.ColPay, "", 16, true},
 		{ColHasReport, i18n.Current.ColReport, "✓/—", 4, false},
@@ -478,6 +501,14 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		} else {
 			m.flash = "PDF regenerated and opened: " + filepath.Base(msg.Path)
 		}
+		return m, nil
+	case PipelineOpenFailedMsg:
+		m.flash = "Could not open " + msg.Target + ": " + msg.Err
+		return m, nil
+	case StatusUpdateFailedMsg:
+		m.flash = "Could not update status: " + msg.Err
+	case PipelineHistoryFailedMsg:
+		m.flash = "Status history unavailable; progress uses previous data: " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
@@ -813,17 +844,6 @@ func (m PipelineModel) handleStatusPicker(msg tea.KeyMsg) (PipelineModel, tea.Cm
 		if app, ok := m.CurrentApp(); ok {
 			newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 			norm := data.NormalizeStatus(newStatus)
-			if norm == "hired" {
-				m.hiredApp = app
-				m.hiredStep = 1
-				return m, func() tea.Msg {
-					return PipelineUpdateStatusMsg{
-						CareerOpsPath: m.careerOpsPath,
-						App:           app,
-						NewStatus:     newStatus,
-					}
-				}
-			}
 			if norm == "discarded" || norm == "skip" {
 				return m, func() tea.Msg {
 					return m.startDiscardFlow(app, newStatus)
@@ -1185,12 +1205,24 @@ func (m *PipelineModel) applyFilterAndSort() {
 	m.filtered = filtered
 }
 
+// effectiveDate is what the DATE column shows and what the date sort orders
+// by: the row's latest status transition from status-log.tsv when it has one,
+// otherwise the tracker's own Date cell (the evaluation date). Other readers
+// of app.Date — the hired-flow weeks math, the LAST column's "same as date"
+// elision — mean the evaluation date on purpose and do not go through here.
+func effectiveDate(app model.CareerApplication) string {
+	if app.StatusDate != "" {
+		return app.StatusDate
+	}
+	return app.Date
+}
+
 // sortLess returns the comparator for the active sort mode. Shared by the flat
 // sort and the within-group tiebreaker in grouped view.
 func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	switch m.sortMode {
 	case sortDate:
-		return func(a, b model.CareerApplication) bool { return a.Date > b.Date }
+		return func(a, b model.CareerApplication) bool { return effectiveDate(a) > effectiveDate(b) }
 	case sortCompany:
 		return func(a, b model.CareerApplication) bool {
 			return strings.ToLower(a.Company) < strings.ToLower(b.Company)
@@ -1214,8 +1246,26 @@ func (m PipelineModel) sortLess() func(a, b model.CareerApplication) bool {
 	case sortLast:
 		// Most recent contact first; empty dates sink to the bottom.
 		return func(a, b model.CareerApplication) bool { return a.LastContact > b.LastContact }
+	case sortPosted:
+		// Freshest requisition first; rows with no posted date sink to the bottom.
+		return func(a, b model.CareerApplication) bool {
+			if (a.PostedOn == "") != (b.PostedOn == "") {
+				return a.PostedOn != ""
+			}
+			return a.PostedOn > b.PostedOn
+		}
 	default: // sortScore
-		return func(a, b model.CareerApplication) bool { return a.Score > b.Score }
+		// Unevaluated rows float to the TOP, not the bottom. Their Score is
+		// Go's zero value, so a plain `a.Score > b.Score` ranks them below the
+		// worst-scoring role in the pipeline — which reads as "these are the
+		// weakest" when it means "these have not been looked at yet".
+		// "Needs evaluating" is more actionable than "scored badly".
+		return func(a, b model.CareerApplication) bool {
+			if a.HasScore != b.HasScore {
+				return !a.HasScore
+			}
+			return a.Score > b.Score
+		}
 	}
 }
 
@@ -1732,7 +1782,7 @@ func (m PipelineModel) renderColumnHeader() string {
 		h.Render(i18n.Current.ColFit), // score cell is unpadded, always 3 runes wide
 	}
 	if cw.date != 0 {
-		segments = append(segments, cell(i18n.Current.ColApplied, cw.date))
+		segments = append(segments, cell(i18n.Current.ColDate, cw.date))
 	}
 	segments = append(segments, cell(i18n.Current.ColCompany, cw.company))
 	segments = append(segments, cell(i18n.Current.ColRole, cw.role))
@@ -1771,16 +1821,30 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	}
 	numStyle := lipgloss.NewStyle().Foreground(m.theme.Blue).Bold(true).Width(cw.num)
 
-	// Score with color
+	// Score with color. An unevaluated row carries no number: print the
+	// sentinel rather than %.1f of a zero value, which reads as a 0.0 fit.
 	scoreStyle := m.scoreStyle(app.Score)
-	score := scoreStyle.Render(fmt.Sprintf("%.1f", app.Score))
+	scoreText := fmt.Sprintf("%.1f", app.Score)
+	if !app.HasScore {
+		// Show the tracker's own sentinel (— / N/A / -). Fall back to an em
+		// dash when the cell is empty or too wide for the score column.
+		scoreStyle = lipgloss.NewStyle().Foreground(m.theme.Subtext)
+		scoreText = strings.TrimSpace(app.ScoreRaw)
+		if scoreText == "" || lipgloss.Width(scoreText) > 3 {
+			scoreText = "\u2014"
+		}
+	}
+	// Width(3) so the sentinel occupies the same column as "4.2" and the
+	// row keeps its measured width.
+	score := scoreStyle.Width(3).Render(scoreText)
 
 	// Company (truncate)
 	company := truncateRunes(app.Company, cw.company)
 	companyStyle := lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company)
 
-	// Date (fixed width)
-	dateText := app.Date
+	// Date (fixed width): latest status change when the ledger has one, else
+	// the tracker's own (evaluation) date.
+	dateText := effectiveDate(app)
 	if dateText == "" {
 		dateText = "—"
 	}
@@ -1947,6 +2011,44 @@ func previewOutcome(app model.CareerApplication) string {
 	return outcome
 }
 
+// sanitizeFlash neutralizes control characters in the flash line.
+//
+// Every flash reaches the terminal through the single lipgloss.Render below,
+// and lipgloss wraps the string it is given without escaping it. Most of what
+// the flash line carries is not the program's own words: a tracker URL or a
+// manifest path read out of a file, or the last line a failed child process
+// printed. A control byte in any of those reaches the terminal as an
+// instruction rather than as text, which is how a cell that renders correctly
+// everywhere else can still move the cursor or repaint the help bar.
+//
+// The range is the one tracker-utils.mjs strips at the tracker write path
+// (CONTROL_CHARS, #3892): C0, DEL and C1. It differs deliberately in one
+// respect. cell() keeps \t, \r and \n because it has already folded them to a
+// space and dropping them there would glue words together; the help bar is a
+// single line, so they are folded to a space here instead of being kept.
+//
+// Stripping at the write path stops new bytes entering the tracker. It cannot
+// speak for a report header, a scan TSV, or a child process's stderr, none of
+// which pass through cell() -- and the flash renders all three.
+//
+// Text from those sources need not be valid UTF-8. strings.Map hands the
+// mapping function utf8.RuneError for a byte it cannot decode and writes
+// U+FFFD, so a raw 0x9b -- the byte an 8-bit terminal reads as CSI -- is
+// replaced rather than passed through. That is the property the guard needs;
+// it shows as a replacement character rather than disappearing, which is the
+// honest rendering of a byte nothing can decode.
+func sanitizeFlash(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func (m PipelineModel) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Foreground(m.theme.Subtext).
@@ -1963,7 +2065,7 @@ func (m PipelineModel) renderHelp() string {
 			Background(m.theme.Surface).
 			Width(m.width).
 			Padding(0, 1)
-		return flashStyle.Render(m.flash)
+		return flashStyle.Render(sanitizeFlash(m.flash))
 	}
 
 	if m.colPicker {

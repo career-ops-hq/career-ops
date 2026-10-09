@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync, chmodSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -56,6 +56,50 @@ export function rebuildRow(parts) {
 }
 
 /**
+ * The ONE rule for "this Report cell links to a report that is not on disk",
+ * shared by verify-pipeline.mjs (Check 3), merge-tracker.mjs (merge-time
+ * warning, #4748) and fix-report-links.mjs (#4750) so the three can never
+ * disagree about which rows are broken.
+ *
+ * The link is the first markdown `](target)` in the cell. It resolves when it
+ * names a REGULAR FILE from the tracker's own directory (markdown links are
+ * relative to the file holding them, see #760) or, for legacy root-relative
+ * links, from the data root. A directory is not a report. A cell with no link
+ * (`—`, `N/A`, empty) is the documented "no report" convention and is never
+ * broken.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @param {string} trackerDir - Directory containing the tracker file.
+ * @param {string} dataRoot - Data root (getCareerOpsRoot()).
+ * @param {{onInspectionError?: Function, stat?: Function}} [options]
+ * @returns {string|null} The unresolved link target, or null when there is no link,
+ *   it resolves, or its targets could not be inspected conclusively.
+ */
+export function findDeadReportLink(reportCell, trackerDir, dataRoot, options = {}) {
+  const match = String(reportCell ?? '').match(/\]\(([^)]+)\)/);
+  if (!match) return null;
+  const link = match[1];
+  const inspect = options.stat ?? statSync;
+  const errors = [];
+  const candidates = [...new Set([join(trackerDir, link), join(dataRoot, link)])];
+  for (const path of candidates) {
+    try {
+      if (inspect(path).isFile()) return null;
+    } catch (err) {
+      // ENOENT/ENOTDIR prove that this candidate is absent. Permission errors,
+      // transient I/O failures and every other error do not prove that, so an
+      // explicit repair must preserve the tracker cell instead of deleting it.
+      if (err?.code !== 'ENOENT' && err?.code !== 'ENOTDIR') errors.push({ path, error: err });
+    }
+  }
+  if (errors.length > 0) {
+    options.onInspectionError?.({ link, errors });
+    return null;
+  }
+  return link;
+}
+
+/**
  * Normalize company names for same-company lookups across tracker scripts.
  *
  * Company names can contain spaces, punctuation, or branding variants in the
@@ -79,6 +123,27 @@ export function normalizeCompany(name) {
 }
 
 /**
+ * Control characters that are invisible in every rendered view of the tracker.
+ *
+ * C0 and DEL and C1, minus the three whitespace controls: `\t` is ordinary
+ * whitespace inside a cell, and `\r`/`\n` are folded to a single space by
+ * cell() before this runs — stripping any of the three would glue words
+ * together instead of separating them.
+ *
+ * Deliberately NOT shared with the plugin token/display sanitizer, which strips
+ * the same idea but a different range: it collapses all whitespace first and so
+ * can take `\t`/`\r`/`\n` with the rest, which here would destroy word breaks.
+ * Two ranges that must differ are two constants; only the ranges that must
+ * agree are shared, which is the single export below.
+ *
+ * Exported because verify-pipeline.mjs has to recognize exactly what cell()
+ * removes: stripping only stops NEW bytes entering, and a second copy of this
+ * range would let the write path and the detector disagree about what counts.
+ */
+// eslint-disable-next-line no-control-regex
+export const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g;
+
+/**
  * Neutralize characters that would corrupt the applications.md table.
  *
  * Tracker rows are read with a raw `line.split('|')`, so a literal pipe or a
@@ -87,11 +152,26 @@ export function normalizeCompany(name) {
  * on the inner pipe. Additive — normal cells are unchanged; only values that
  * would already break the table get sanitized.
  *
+ * Control characters (#3892) get the same treatment for the same reason, and
+ * here rather than in each writer: this is the one sanitizer every tracker
+ * writer passes through — merge-tracker's buildRow (and so the web, which
+ * dictates its rows through the same merge path), set-status's note. A guard
+ * added per writer is a guard the next writer is free to reintroduce the bug
+ * around. They are DELETED, not replaced with a space: the byte renders as
+ * nothing in markdown, on GitHub and in the dashboard, so a substitution would
+ * change text a human has already read. The asymmetry is the point — a byte
+ * that costs one regex to reject costs an unrelated arithmetic discrepancy
+ * much later to find, because every view of the table hides it.
+ *
  * @param {*} v - Free-text value headed for a table cell.
  * @returns {string} Table-safe value.
  */
 export function cell(v) {
-  return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
+  return String(v ?? '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(CONTROL_CHARS, '')
+    .replace(/\s*\|\s*/g, ' / ')
+    .trim();
 }
 
 /**
@@ -129,6 +209,27 @@ export function resolveWorkspaceRoot(trackerPath) {
 }
 
 /**
+ * Workspace root for a script started from `rootDir`, derived from the
+ * *uncanonicalized* tracker path. Unlike `resolveWorkspaceRoot(resolveTrackerPath(rootDir))`,
+ * this does not realpath the tracker first, so a workspace that only symlinks its
+ * `data/` directory (the natural workaround for #524) still resolves to the repo
+ * rather than the symlink's target (#3169). Pointing `CAREER_OPS_TRACKER` at a
+ * genuinely external workspace keeps moving the whole set together (#2471), since
+ * the raw path is then the external tracker itself.
+ *
+ * The returned root is left in its lexical form, exactly as
+ * `resolveWorkspaceRoot(resolveTrackerPath(rootDir))` was, so it keeps the same
+ * spelling the module's containment checks compare against (they realpath both
+ * sides themselves for the symlinked-ancestor case, e.g. /tmp -> /private/tmp).
+ *
+ * @param {string} rootDir - The career-ops data root directory.
+ * @returns {string} Absolute workspace root directory.
+ */
+export function resolveWorkspaceRootFor(rootDir) {
+  return resolveWorkspaceRoot(resolve(rawTrackerPath(rootDir)));
+}
+
+/**
  * Resolve the PDF manifest (`data/pdf-index.tsv`) for the workspace that owns
  * a tracker. `CAREER_OPS_PDF_INDEX` overrides it explicitly.
  *
@@ -158,7 +259,7 @@ export function resolvePdfIndexPath(trackerPath) {
  * @param {string} path - Raw tracker path from config, env, or the default.
  * @returns {string} Absolute canonical path when the file exists, else resolved path.
  */
-import { canonicalizeTrackerPath } from './path-resolver.mjs';
+import { canonicalizeTrackerPath, rawTrackerPath } from './path-resolver.mjs';
 export { canonicalizeTrackerPath };
 
 /**
@@ -349,10 +450,12 @@ export async function acquireTrackerLock(lockDir, options = {}) {
   // from the definition: waiters woke in lockstep and re-raced, and a caller
   // waiting on a healthy lock being handed round briskly was killed anyway.
   //
-  // There is no separate maxWaitMs knob here, so the ceiling is the same
-  // multiple of timeoutMs the definition defaults to.
+  // There is no separate maxWaitMs knob here, so no hardDeadline is passed and
+  // the policy applies its own ceiling. Writing one out here would put a fourth
+  // copy of that bound in the tree, and a copy that drifts changes retry timing
+  // silently — nothing fails, so nothing reports it (#3895).
   const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs,
   });
   for (;;) {
     if (holderStillWedged() || ceilingReached()) break;
@@ -489,6 +592,26 @@ export async function acquireTrackerLock(lockDir, options = {}) {
       }
 
       if (hasRecoverGuard) {
+        // Test-only ordering signal for the cross-process writer-lock suite.
+        // It is emitted only after this process successfully creates the
+        // recover guard, and remains on disk after that short-lived directory
+        // is removed. The parent can therefore prove both contention and
+        // guard creation without sampling a sub-millisecond window. Production
+        // callers have no marker path and keep the existing lock behavior.
+        const testWaitingMarker = process.env.NODE_ENV === 'test'
+          ? process.env.CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER
+          : undefined;
+        if (testWaitingMarker) {
+          try {
+            writeFileSync(testWaitingMarker, JSON.stringify({
+              pid: process.pid, lockDir, guardCreated: true,
+            }), { flag: 'wx' });
+          } catch {
+            // The hook is observational only; the bounded test wait reports a
+            // marker-write failure without changing lock acquisition behavior.
+          }
+        }
+
         try {
           // STALE only. VANISHED means the lock was absent when we looked, and
           // by the time this line runs another acquirer may have won the mkdir
@@ -640,14 +763,27 @@ export function renameSyncWithRetry(tmpPath, path, rename = renameSync) {
  * `renameSyncWithRetry`). If the write or rename ultimately fails, the temporary
  * file is cleaned up before the original error is rethrown.
  *
+ * The replacement is a NEW file, so it takes the process umask rather than the
+ * original's permissions. Pass `mode` to carry them over: it is applied to the
+ * temporary file before the rename, so the destination is never observable with
+ * wider permissions than it had.
+ *
  * @param {string} path - Final file path to replace.
  * @param {string} content - Complete file content to write.
+ * @param {{mode?: number}} [options] - `mode`: permission bits for the replacement.
  * @returns {void}
  */
-export function writeFileAtomic(path, content) {
+export function writeFileAtomic(path, content, { mode } = {}) {
   const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(tmpPath, content);
+    if (mode === undefined) {
+      writeFileSync(tmpPath, content);
+    } else {
+      // Creation honours the umask, so it can only narrow `mode`; chmod then
+      // sets it exactly.
+      writeFileSync(tmpPath, content, { mode });
+      chmodSync(tmpPath, mode);
+    }
     renameSyncWithRetry(tmpPath, path);
   } catch (err) {
     rmSync(tmpPath, { force: true });
@@ -662,8 +798,12 @@ export function writeFileAtomic(path, content) {
  * their aliases. Parsing it here (instead of hardcoding the list) means a new
  * state or alias lands in one file and every consumer follows.
  *
+ * `description` and `terminal` are passed through for callers that EXPLAIN the
+ * states rather than list them (set-status.mjs --help). Both default rather
+ * than throw: an entry omitting them is still a usable state.
+ *
  * @param {string} statesPath - Path to templates/states.yml.
- * @returns {{id:string,label:string,aliases:string[]}[]} Parsed state entries.
+ * @returns {{id:string,label:string,aliases:string[],description:string,terminal:boolean}[]} Parsed state entries.
  */
 export function loadCanonicalStates(statesPath) {
   const doc = yaml.load(readFileSync(statesPath, 'utf-8'));
@@ -674,6 +814,8 @@ export function loadCanonicalStates(statesPath) {
     id: String(s.id ?? ''),
     label: String(s.label ?? ''),
     aliases: Array.isArray(s.aliases) ? s.aliases.map(String) : [],
+    description: String(s.description ?? ''),
+    terminal: s.terminal === true,
   }));
 }
 

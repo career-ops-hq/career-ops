@@ -2,6 +2,8 @@
  * reply-matcher.mjs — deterministic matcher that maps email reply candidates to application tracker entries.
  */
 
+import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
+
 export function extractDomain(emailStr) {
   if (!emailStr) return null;
   const match = emailStr.match(/@([\w.-]+)/);
@@ -28,9 +30,8 @@ export function normalizeChinese(s) {
 // replies ask questions, `?` matched almost every mail, scoring 2, corroborating
 // partial role matches, and reaching confidence `high` next to any
 // post-application keyword.
-function isPlaceholderCompany(company) {
-  return !/[\p{L}\p{N}]/u.test(company);
-}
+// Definition in lib/placeholder-cell.mjs — it lived here and in
+// process-quality.mjs, and a third reader of the same files had neither.
 
 // Short names must land on a word boundary. The normalized check further down
 // has always required more than two characters, but the two substring checks
@@ -73,8 +74,17 @@ export function checkCompanyMatch(text, company) {
   // Length is counted in CODE POINTS — `String.length` counts UTF-16 units, so a
   // three-character supplementary-plane name reported 4 and slipped past the
   // threshold into the substring path its BMP equivalent was refused.
-  const alphanumeric = company.replace(/[^\p{L}\p{N}]/gu, '');
-  const isShortName = Array.from(alphanumeric).length <= SHORT_NAME_MAX;
+  //
+  // \p{M} counts, for the same reason it counts in matchesOnWordBoundary's
+  // lookarounds: a combining mark is word material. This gate exists to measure
+  // how much distinctive material a needle carries, and stripping marks measures
+  // it in a unit whose size depends on the script. Devanagari and Bengali write
+  // most vowels as marks, so `विप्रो` (Wipro, 6 code points) counted 3 and
+  // `টাটা` (Tata, 4) counted 2 — both were handed the rule written for two- and
+  // three-letter Latin acronyms, while their own transliterations, `Wipro` and
+  // `Tata`, were long enough to skip it. See the fourth-predicate note below.
+  const wordMaterial = company.replace(/[^\p{L}\p{M}\p{N}]/gu, '');
+  const isShortName = Array.from(wordMaterial).length <= SHORT_NAME_MAX;
   if (isShortName && !NO_WORD_SEPARATOR_RE.test(company)) {
     return matchesOnWordBoundary(text, company);
   }
@@ -237,9 +247,11 @@ export function checkRoleMatch(text, role) {
     // the result, because the mark still sitting in the text makes that position
     // mid-grapheme. The word stops matching itself.
     //
-    // Three predicates define "word material" here (this strip, LATIN_WORD_RE,
-    // and matchesOnWordBoundary's lookarounds) and they have to move as a unit.
-    // Updating two of the three is what produced that bug (CodeRabbit, #3535).
+    // FOUR predicates define "word material" in this file (this strip,
+    // LATIN_WORD_RE, matchesOnWordBoundary's lookarounds, and the length gate in
+    // checkCompanyMatch) and they have to move as a unit. Updating two of them is
+    // what produced that bug (CodeRabbit, #3535); the length gate was the one
+    // left behind, and it is counted with \p{M} now.
     const stripped = part.replace(/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, '');
     const bare = stripped.toLowerCase();
 

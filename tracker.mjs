@@ -19,7 +19,7 @@
  * Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered
  * view) is a separate, explicit per-user opt-in — not implemented here.
  *
- * Zero new dependencies — uses node:sqlite (built into Node >= 22.5).
+ * Zero new dependencies — uses node:sqlite (built into Node; unflagged from 22.13).
  *
  * Usage:
  *   node tracker.mjs sync [--check]             # (re)build applications.db from applications.md
@@ -40,6 +40,7 @@ import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import * as yaml from 'js-yaml';
 import {
   resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP,
@@ -138,7 +139,7 @@ async function loadSqlite() {
     const { DatabaseSync } = await import('node:sqlite');
     return DatabaseSync;
   } catch {
-    console.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.5 (you are on ' + process.version + ').');
+    console.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.13 (you are on ' + process.version + ').');
     console.error('The markdown tracker keeps working without it — the index is optional.');
     process.exit(1);
   } finally {
@@ -549,7 +550,11 @@ function reportDiagnostics(diag) {
 
 function syncIndex(db, states) {
   const { apps, diag, layout } = parseTracker(states);
-  const today = new Date().toISOString().slice(0, 10);
+  // LOCAL calendar day (#3070). This dates a row in the status_events table,
+  // and that table is the one part of the index a resync does NOT rebuild
+  // identically — the comment below says events "persist across rebuilds, keyed
+  // by id", so a wrong day is written once and then sticks.
+  const today = localToday();
 
   db.exec('BEGIN');
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit

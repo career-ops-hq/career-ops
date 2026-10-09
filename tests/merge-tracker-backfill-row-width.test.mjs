@@ -11,7 +11,7 @@
 // Driven as a CLI integration test through the CAREER_OPS_TRACKER /
 // CAREER_OPS_ADDITIONS overrides, matching tests/merge-tracker.test.mjs:
 // importing merge-tracker.mjs runs the CLI at import time.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, isolatedBatchStatePath } from './helpers.mjs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
@@ -40,7 +40,7 @@ function runBackfill({ rows, reports }) {
     const out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--backfill-urls'], {
       cwd: dir,
       encoding: 'utf-8',
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none') },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none'), CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(join(dir, 'none')) },
     });
     return { tracker: readFileSync(tracker, 'utf-8'), output: out, dir };
   } finally {
@@ -166,7 +166,7 @@ const urlCell = (text, n) => {
     ].join('\n'));
     const out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--backfill-urls'], {
       cwd: dir, encoding: 'utf-8',
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none') },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none'), CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(join(dir, 'none')) },
     });
     const text = readFileSync(tracker, 'utf-8');
     const parsed = readable(text, 7);

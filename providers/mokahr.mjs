@@ -14,8 +14,10 @@
 //     "limit": <=50, "offset": N }
 //   → { "data": "<base64 AES-128-CBC ciphertext>", "necromancer": "<16-byte hex key>" }
 //
-// The response body is ENCRYPTED, not plain JSON — this is the one thing
-// that makes this provider unlike every other provider in this directory.
+// On app.mokahr.com the response body is ENCRYPTED, not plain JSON — this is
+// the one thing that makes this provider unlike every other provider in this
+// directory. (hire-r1.mokahr.com returns the same shape as plaintext JSON; see
+// ALLOWED_HOSTS below.)
 // Decryption (verified live, Node's built-in crypto, no new dependency):
 //   key = Buffer.from(necromancer, 'utf8')        // 16 bytes, changes per request
 //   iv  = Buffer.from('de7c21ed8d6f50fe', 'utf8')  // fixed, see IV note below
@@ -72,12 +74,23 @@
 //   - name: 智谱AI
 //     careers_url: https://app.mokahr.com/social-recruitment/zphz/148983
 //     keywords: ["AI", "大模型", "Agent"]
+//
+//   - name: RedotPay
+//     careers_url: https://hire-r1.mokahr.com/social-recruitment/redotpay/100008889
 
 import { createDecipheriv } from 'crypto';
+import { sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
-const API = 'https://app.mokahr.com/api/outer/ats-apply/website/jobs/v2';
-const DETAIL_HOST = 'app.mokahr.com';
+const API_PATH = '/api/outer/ats-apply/website/jobs/v2';
+// Explicit allowlist, not a `*.mokahr.com` wildcard: hire-r1-ats.mokahr.com is a
+// static CDN (403 on the API), and the set of regional deployments is small.
+// hire-r1 is Moka's international deployment (AWS Singapore), same API path and
+// request body (verified live 2026-09-29). A tenant on one host is unknown to
+// the other ("未找到对应的官网"), so the API call must go to the careers_url's
+// own host.
+const ALLOWED_HOSTS = new Set(['app.mokahr.com', 'hire-r1.mokahr.com']);
 // See "IV note" above — identical across every tenant checked live.
 const AES_IV = Buffer.from('de7c21ed8d6f50fe', 'utf8');
 const MAX_LIMIT = 50; // hard server-side ceiling — see "Quirks" above
@@ -101,19 +114,19 @@ const ROBOTS_EXCLUDED_PATHS = new Set([
 
 /**
  * @param {string} url
- * @returns {{ orgId: string, siteId: number, baseUrl: string } | null}
+ * @returns {{ orgId: string, siteId: number, baseUrl: string, apiUrl: string } | null}
  */
 function parseTenantUrl(url) {
   let u;
   try { u = new URL(url); } catch { return null; }
-  if (u.protocol !== 'https:' || u.hostname !== DETAIL_HOST) return null;
+  if (u.protocol !== 'https:' || !ALLOWED_HOSTS.has(u.hostname)) return null;
   const m = TENANT_PATH_RE.exec(u.pathname);
   if (!m) return null;
   const siteId = Number(m[2]);
   if (!Number.isSafeInteger(siteId) || siteId <= 0) return null;
   const pathname = u.pathname.replace(/\/$/, '');
   if (ROBOTS_EXCLUDED_PATHS.has(pathname)) return null;
-  return { orgId: m[1], siteId, baseUrl: `${u.origin}${pathname}` };
+  return { orgId: m[1], siteId, baseUrl: `${u.origin}${pathname}`, apiUrl: `${u.origin}${API_PATH}` };
 }
 
 /**
@@ -138,6 +151,18 @@ export function decryptMokaHrEnvelope(envelope) {
 }
 
 /**
+ * Return the plaintext response body: hire-r1 already sends `data` as a JSON
+ * object; app.mokahr.com sends it as a ciphertext string to decrypt.
+ * @param {any} envelope
+ * @returns {any}
+ */
+function unwrapMokaHrResponse(envelope) {
+  const data = envelope?.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) return envelope;
+  return decryptMokaHrEnvelope(envelope);
+}
+
+/**
  * @param {any} decrypted - Already-decrypted response body.
  * @param {string} companyName
  * @param {string} tenantBaseUrl - Validated tenant careers URL without a trailing slash.
@@ -152,7 +177,10 @@ export function parseMokaHrJobs(decrypted, companyName, tenantBaseUrl) {
     const title = j?.title;
     const id = j?.id;
     if (!title || id == null) continue;
-    const encodedId = encodeURIComponent(String(id));
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     // locations[].cityName is DISTRICT-level ("海淀区", "拱墅区"), not the
     // city/province — a plain cityName join produces a location string with
     // no "北京"/"China" substring at all, which portals.yml's location_filter
@@ -205,7 +233,7 @@ export default {
   async fetch(entry, ctx) {
     const tenant = parseTenantUrl(entry.careers_url);
     if (!tenant) {
-      throw new Error('mokahr: careers_url must be an allowed HTTPS app.mokahr.com tenant URL with a positive site ID');
+      throw new Error(`mokahr: careers_url must be an allowed HTTPS tenant URL on ${[...ALLOWED_HOSTS].join(' or ')} with a positive site ID`);
     }
 
     const keywords = Array.isArray(entry.keywords) && entry.keywords.length
@@ -216,19 +244,18 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     let firstRequest = true;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
         const offset = (page - 1) * MAX_LIMIT;
 
         let envelope;
         try {
-          envelope = /** @type {any} */ (await ctx.fetchJson(API, {
+          envelope = /** @type {any} */ (await ctx.fetchJson(tenant.apiUrl, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
@@ -249,7 +276,7 @@ export default {
 
         let decrypted;
         try {
-          decrypted = decryptMokaHrEnvelope(envelope);
+          decrypted = unwrapMokaHrResponse(envelope);
           if (decrypted?.success === false) {
             throw new Error(`API error: ${decrypted.msg || decrypted.code || 'success=false'}`);
           }

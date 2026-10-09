@@ -20,7 +20,9 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { atsVendorOf } from './ats-vendor.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
@@ -40,6 +42,11 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'top_strengths',
   'risk_level',
   'confidence',
+  // Evidence states and unresolved checks behind the existing confidence tier.
+  // Preserved for report consumers; historical outcome analysis does not use
+  // them to change the Global Score or calibration rates.
+  'score_evidence',
+  'confidence_gaps',
   'next_action',
   // Optional context fields accepted for future reports.
   'domain',
@@ -79,21 +86,11 @@ const USAGE = `Usage:
 
 // --- CLI args ---
 const summaryMode = args.includes('--summary');
-const MIN_THRESHOLD = (() => {
-  const raw = flagValue(args, '--min-threshold');
-  if (raw === undefined) return 5;
 
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) ? 5 : value;
-})();
-
-const MIN_VENDOR_N = (() => {
-  const raw = flagValue(args, '--min-vendor-n');
-  if (raw === undefined) return 8;
-
-  const value = parseInt(raw, 10);
-  return Number.isNaN(value) || value < 1 ? 8 : value;
-})();
+// CLI values stay at their defaults when this module is imported by tests.
+// Parsing/validation is performed only in the main-module guard below.
+let MIN_THRESHOLD = 5;
+let MIN_VENDOR_N = 8;
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
@@ -266,6 +263,17 @@ export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
   };
 }
 
+// Vendor outcome analysis intentionally stays on the five URL-fingerprintable
+// community ATS families it has always reported. The shared detector knows
+// more providers for scan routing, but those do not widen this analysis.
+const VENDOR_ANALYSIS_SCOPE = Object.freeze(['greenhouse', 'lever', 'ashby', 'workday', 'icims']);
+
+/** Keep vendor analysis inside its declared taxonomy, not arbitrary hosts. */
+export function knownAtsVendorOf(rawUrl) {
+  const vendor = atsVendorOf(rawUrl);
+  return VENDOR_ANALYSIS_SCOPE.includes(vendor) ? vendor : null;
+}
+
 // Statuses that count as a submitted application for channel-yield analysis.
 // 'evaluated' was never sent, 'skip' is self-filtered, and 'discarded' (withdrawn
 // or the posting closed) proves neither a submission nor an answer — the same
@@ -295,7 +303,7 @@ function normalizeScalar(value) {
   return null;
 }
 
-function parseMachineSummary(content) {
+export function parseMachineSummary(content) {
   const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
 
@@ -533,14 +541,15 @@ requirement_importance:
     ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
     ['https://careers.icims.com/jobs/9/x', 'icims'],
-    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
+    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', 'dayforce'],
+    ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['not a url', null],
     ['', null],
     [null, null],
   ];
   for (const [url, expected] of vendorCases) {
-    const got = detectVendor(url);
-    if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+    const got = atsVendorOf(url);
+    if (got !== expected) failures.push(`atsVendorOf(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
 
   // Report header fields survive the locale they were written in. French output
@@ -1106,28 +1115,6 @@ function classifyRemote(raw) {
 // (which needs the full posting path to build an API URL) — a tracker report's
 // URL may point at a board/careers page, not a canonical posting.
 //
-// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
-// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
-// NOT detectable from the URL alone and are deferred until the community adds a
-// reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
-const VENDOR_HOST_PATTERNS = [
-  { id: 'greenhouse', test: (h) => /(^|\.)greenhouse\.io$/.test(h) },
-  { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
-  { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
-  { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
-  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
-];
-
-function detectVendor(rawUrl) {
-  if (!rawUrl || typeof rawUrl !== 'string') return null;
-  let u;
-  try { u = new URL(rawUrl.trim()); } catch { return null; }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-  const host = u.hostname.toLowerCase();
-  for (const v of VENDOR_HOST_PATTERNS) if (v.test(host)) return v.id;
-  return null;
-}
-
 // --- Classify company size ---
 function classifyCompanySize(teamSize) {
   if (!teamSize) return 'unknown';
@@ -1155,6 +1142,110 @@ function extractBlockerType(gap) {
   if (/\b(senior|staff|lead|principal|director|manager|head)\b/.test(desc)) return 'seniority-mismatch';
   if (/\b(hybrid|on-?site|office|relocat)\b/.test(desc)) return 'onsite-requirement';
   return 'other';
+}
+
+function recordedDiscardReasons(entry) {
+  if (!REASON_BEARING.has(entry.outcome)) return new Set();
+  const matches = (entry.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi) || [];
+  return new Set(matches
+    .map(match => match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase())
+    .filter(Boolean));
+}
+
+// The vocabulary ships with the code, not with the user's data, so it resolves
+// from this file's directory rather than CAREER_OPS_ROOT.
+const DISCARD_REASONS_FILE = join(dirname(fileURLToPath(import.meta.url)), 'templates/discard-reasons.yml');
+
+/**
+ * Canonical discard-reason ids from templates/discard-reasons.yml (#2785).
+ * Returns null when the file is missing, malformed, or lists no id; callers
+ * then report every label as `other` instead of inventing a vocabulary.
+ */
+export function loadDiscardReasonVocabulary(file = DISCARD_REASONS_FILE) {
+  try {
+    const parsed = yamlLoad(readFileSync(file, 'utf8'));
+    const reasons = Array.isArray(parsed?.reasons) ? parsed.reasons : [];
+    const ids = reasons.map(reason => reason?.id).filter(id => typeof id === 'string' && id);
+    return ids.length > 0 ? new Set(ids) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Spelling only: case, surrounding whitespace, and space/hyphen vs underscore.
+// Synonyms are never guessed; an unmatched label stays `other`.
+function discardReasonKey(label) {
+  return label.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+/**
+ * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
+ * entries whose linked report explicitly supplies prediction data, including
+ * an empty list; a missing or malformed field is unknown, not an empty forecast.
+ * All statuses remain eligible: advancing later does not erase a prediction.
+ * Only canonical ids from templates/discard-reasons.yml enter the shares. Every
+ * other label is listed under `predictedDiscardReasonOther` with its own
+ * spelling (case and surrounding whitespace normalized) and is never counted
+ * in `predictedDiscardReasonStats`.
+ */
+export function buildPredictedDiscardReasonSignals(enriched, vocabulary = loadDiscardReasonVocabulary()) {
+  const counts = new Map();
+  const otherCounts = new Map();
+  let entriesWithOther = 0;
+  const coverage = {
+    entriesWithReports: 0,
+    entriesWithPredictionData: 0,
+    entriesWithPredictions: 0,
+    entriesWithRecordedReasons: 0,
+    // Valid prediction data (even []) plus an eligible recorded reason. This
+    // measures comparison coverage, never agreement between the two sources.
+    entriesWithBothSources: 0,
+  };
+  for (const entry of enriched) {
+    const hasRecordedReasons = recordedDiscardReasons(entry).size > 0;
+    if (hasRecordedReasons) coverage.entriesWithRecordedReasons++;
+    if (!entry.report) continue;
+    coverage.entriesWithReports++;
+    const raw = entry.report.machineSummary?.discard_reasons;
+    // normalizeList accepts scalars for older reports, but also stringifies
+    // objects inside lists. Do not publish those coercions as predicted reasons.
+    if (typeof raw !== 'string'
+        && !(Array.isArray(raw) && raw.every(reason => typeof reason === 'string'))) continue;
+    coverage.entriesWithPredictionData++;
+    if (hasRecordedReasons) coverage.entriesWithBothSources++;
+    const reasons = new Set((entry.report.discardReasons || [])
+      .map(reason => reason.trim().toLowerCase()).filter(Boolean));
+    if (reasons.size > 0) coverage.entriesWithPredictions++;
+    const canonical = new Set();
+    const other = new Set();
+    for (const reason of reasons) {
+      const key = discardReasonKey(reason);
+      if (vocabulary?.has(key)) canonical.add(key);
+      else other.add(reason);
+    }
+    for (const reason of canonical) counts.set(reason, (counts.get(reason) || 0) + 1);
+    for (const reason of other) otherCounts.set(reason, (otherCounts.get(reason) || 0) + 1);
+    if (other.size > 0) entriesWithOther++;
+  }
+  const base = coverage.entriesWithPredictionData;
+  const byFrequency = (a, b) => b.frequency - a.frequency || a.reason.localeCompare(b.reason);
+  return {
+    predictedDiscardReasonStats: [...counts.entries()]
+      .map(([reason, frequency]) => ({ reason, frequency, percentage: Math.round(frequency / base * 100) }))
+      .sort(byFrequency),
+    // Reported beside the shares, never inside them. A growing `entries` share
+    // is the signal that the vocabulary needs a new member.
+    predictedDiscardReasonOther: {
+      vocabularyLoaded: vocabulary !== null,
+      entries: entriesWithOther,
+      percentage: base ? Math.round(entriesWithOther / base * 100) : 0,
+      reasons: [...otherCounts.entries()]
+        .map(([reason, frequency]) => ({ reason, frequency }))
+        .sort(byFrequency),
+    },
+    predictedDiscardReasonBase: base,
+    discardReasonCoverage: coverage,
+  };
 }
 
 /**
@@ -1187,15 +1278,7 @@ function buildPatternSignals(enriched) {
 
   const discardReasonCounts = new Map();
   for (const e of enriched) {
-    if (!REASON_BEARING.has(e.outcome)) continue;
-    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
-    if (!notesMatch) continue;
-    const entryReasons = new Set();
-    for (const match of notesMatch) {
-      const key = match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
-      if (key) entryReasons.add(key);
-    }
-    for (const key of entryReasons) {
+    for (const key of recordedDiscardReasons(e)) {
       discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
     }
   }
@@ -1246,11 +1329,11 @@ function buildPatternSignals(enriched) {
 }
 
 // --- Main analysis ---
-function analyze() {
-  const entries = parseTracker();
-
+export function analyze(entries = parseTracker()) {
   if (entries.length === 0) {
-    return { error: 'No applications found in tracker.' };
+    // noData marks this as the empty-tracker case rather than a failure, so the
+    // exit status below does not have to match on the message text.
+    return { error: 'No applications found in tracker.', noData: true };
   }
 
   // Enrich entries with report data and classification
@@ -1291,7 +1374,7 @@ function analyze() {
       report: reportData,
       remoteBucket: classifyRemote(remoteSource),
       companySize: classifyCompanySize(teamSource),
-      vendor: detectVendor(reportData?.url),
+      vendor: knownAtsVendorOf(reportData?.url),
     };
   });
 
@@ -1399,7 +1482,7 @@ function analyze() {
 
   const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
   const vendorAnalysis = {
-    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
+    scope: [...VENDOR_ANALYSIS_SCOPE],
     minSampleForClaim: MIN_VENDOR_N,
     submitted: submitted.length,
     identified: identifiedCount,
@@ -1522,7 +1605,7 @@ function analyze() {
     metadata: {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
-      analysisDate: new Date().toISOString().split('T')[0],
+      analysisDate: localToday(),
       byOutcome,
       // The same rates as every breakdown row, over the whole tracker — the
       // one honest place to quote "X% of what I sent advanced".
@@ -1539,6 +1622,7 @@ function analyze() {
     scoreThreshold,
     techStackGaps,
     discardReasonStats,
+    ...buildPredictedDiscardReasonSignals(enriched),
     // Populations the percentages above are shares of. Exported because a
     // consumer cannot sanity-check a rate whose denominator is invisible —
     // that opacity is precisely what let the wrong base survive unnoticed.
@@ -1617,6 +1701,33 @@ function printSummary(result) {
     }
   }
 
+  const coverage = result.discardReasonCoverage;
+  console.log(`\nPREDICTED DISCARD / SKIP REASONS (of ${result.predictedDiscardReasonBase} entries with prediction data)`);
+  console.log('-'.repeat(40));
+  console.log(`  Prediction data: ${coverage.entriesWithPredictionData}/${coverage.entriesWithReports} entries with linked reports; ${coverage.entriesWithPredictions} contain reasons.`);
+  console.log(`  Recorded reasons: ${coverage.entriesWithRecordedReasons}/${result.discardReasonBase} eligible entries; ${coverage.entriesWithBothSources} entries have both sources.`);
+  console.log('  Forecasts cover all statuses; recorded reasons cover skipped, discarded, and rejected entries.');
+  console.log('  Predictions are not outcomes. Missing data is unknown; canonical ids are matched by spelling, not meaning.');
+  const other = result.predictedDiscardReasonOther;
+  if (!other.vocabularyLoaded) {
+    console.log('  templates/discard-reasons.yml could not be read; every predicted reason is listed as other.');
+  }
+  if (result.predictedDiscardReasonBase === 0) {
+    console.log('  No prediction data recorded yet.');
+  } else if (result.predictedDiscardReasonStats.length === 0 && other.reasons.length === 0) {
+    console.log('  No reasons predicted in the recorded data.');
+  } else {
+    for (const d of result.predictedDiscardReasonStats.slice(0, 10)) {
+      console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+    if (other.entries > 0) {
+      console.log(`  other (outside the vocabulary, not counted above): ${other.entries} entries (${other.percentage}%)`);
+      for (const d of other.reasons.slice(0, 10)) {
+        console.log(`    ${d.reason.padEnd(28)} ${String(d.frequency).padStart(2)}x`);
+      }
+    }
+  }
+
   // ATS vendor / channel analysis
   const va = result.vendorAnalysis;
   if (va && va.breakdown.length > 0) {
@@ -1678,6 +1789,27 @@ if (isMainModule(import.meta.url)) {
     requireOperand: true,
   });
 
+  const rawMinThreshold = flagValue(args, '--min-threshold');
+  const rawMinVendorN = flagValue(args, '--min-vendor-n');
+
+  if (hasFlag(args, '--min-threshold')) {
+    if (rawMinThreshold === undefined || !/^\d+$/.test(String(rawMinThreshold)) ||
+        !Number.isSafeInteger(Number(rawMinThreshold))) {
+      console.error(`Error: --min-threshold requires a non-negative integer, got "${rawMinThreshold ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_THRESHOLD = Number(rawMinThreshold);
+  }
+
+  if (hasFlag(args, '--min-vendor-n')) {
+    if (rawMinVendorN === undefined || !/^\d+$/.test(String(rawMinVendorN)) ||
+        !Number.isSafeInteger(Number(rawMinVendorN)) || Number(rawMinVendorN) < 1) {
+      console.error(`Error: --min-vendor-n requires a positive integer, got "${rawMinVendorN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_VENDOR_N = Number(rawMinVendorN);
+  }
+
   if (args.includes('--self-test')) {
     runSelfTest();
   }
@@ -1690,5 +1822,16 @@ if (isMainModule(import.meta.url)) {
     console.log(JSON.stringify(result, null, 2));
   }
 
-  if (result.error) process.exit(1);
+  // "No applications found" is the state of a NEW USER, not a failure. Every
+  // other analysis script over the same tracker — stats, upskill, salary-gap,
+  // process-quality, rejection-latency, detect-reposts, company-history,
+  // calibrate, funnel-velocity, tracker-sync-check — reports it and exits 0.
+  // This one exited 1, which breaks `&&` chaining and makes the batch runners
+  // treat an empty tracker as a broken command.
+  //
+  // Still non-zero for a genuine failure: the check is on the KIND of error, so
+  // a future `result.error` that is not "no data" keeps its exit 1. Written as
+  // an allowlist of no-data codes rather than a message match, so the exit
+  // status does not depend on prose.
+  if (result.error && !result.noData) process.exit(1);
 }

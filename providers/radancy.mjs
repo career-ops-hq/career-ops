@@ -2,7 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { randomUUID } from 'node:crypto';
 import { decodeEntities } from './_html-entities.mjs';
-import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
+import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 
 // Radancy (TalentBrew) provider — the career sites Radancy hosts for large
 // employers (careers.munichre.com and its ERGO brands, plus many others). The
@@ -38,6 +38,11 @@ import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 //          <button class="js-save-job-btn" data-job-id="{id}">…</button></li>
 //     Parsed by parseLegacyResults(). The save-job <button> repeats data-job-id,
 //     which is why the parser anchors on <a> and dedupes by id.
+//     search.jobs.barclays is the same family in a card layout: the title sits
+//     in <strong> inside the anchor and the location is a SIBLING
+//     <div class="job-location"> after </a>, so the parser also looks between
+//     one anchor and the next. The location element is a span, p or div
+//     depending on the tenant; the job-location class is what stays constant.
 //
 // TRANSPORT: the plain `?p=N` HTML page is the fallback, not the preference —
 // on these tenants it is catastrophically wasteful. A UHG results page is
@@ -193,6 +198,10 @@ export function readFragmentTotals(html) {
   };
 }
 
+// The element carrying the location varies per tenant (span on UHG/KP, div on
+// Barclays); the class is the stable part.
+const LEGACY_LOCATION_RE = /class="[^"]*\bjob-location\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i;
+
 /**
  * Parse the LEGACY markup: the anchor IS the row, with no list-item class to
  * split on. Anchored on <a> carrying both data-job-id and a /job/ href, so the
@@ -206,8 +215,8 @@ export function parseLegacyResults(html, origin) {
   const out = [];
   const seen = new Set();
   // Anchors never nest, so a non-greedy run to </a> is a safe row boundary.
-  const anchors = html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi);
-  for (const a of anchors) {
+  const anchors = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)];
+  for (const [n, a] of anchors.entries()) {
     const attrs = a[1];
     const inner = a[2];
     const idM = attrs.match(/data-job-id="([^"]+)"/i);
@@ -232,7 +241,11 @@ export function parseLegacyResults(html, origin) {
     } catch {
       continue;
     }
-    const locM = inner.match(/class="[^"]*job-location[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+    // Barclays puts job-location AFTER the anchor rather than inside it, so
+    // fall back to the markup up to the next anchor (to the end of the page for
+    // the last row — the results fragment carries nothing else after it).
+    const locM = inner.match(LEGACY_LOCATION_RE)
+      || html.slice(a.index + a[0].length, anchors[n + 1]?.index ?? html.length).match(LEGACY_LOCATION_RE);
     seen.add(id);
     out.push({ id, title, url, location: locM ? clean(locM[1]) : '' });
   }
@@ -312,7 +325,6 @@ export default {
     if (!listUrl) throw new Error(`radancy: cannot resolve search-jobs URL for ${entry.name}`);
     const origin = new URL(listUrl).origin;
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const maxJobs = resolveMaxJobs(entry);
     // ctx.maxPages is set only by verify-portals.mjs's bounded liveness probe
@@ -378,7 +390,7 @@ export default {
           let stopReason = 'complete';
           let page = 2;
           for (; page <= lastPage && jobs.length < maxJobs; page++) {
-            await wait(PAGE_DELAY_MS);
+            await sleep(PAGE_DELAY_MS, ctx);
             let rows;
             try {
               const json = await fetchJsonWithRetry(ctx, buildFragmentUrl(listUrl, page), {
@@ -483,7 +495,7 @@ export default {
     // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
     // failure here, keeps partials instead.
     for (let page = 1; page <= effectiveMaxPages; page++) {
-      if (page > 1) await wait(PAGE_DELAY_MS);
+      if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       let rows;
       try {
         const html = await fetchTextWithRetry(ctx, `${listUrl}?p=${page}`, { redirect: 'error', headers: { accept: 'text/html' } });

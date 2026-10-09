@@ -49,6 +49,12 @@ test("every documented headless CLI is selectable in the web UI", () => {
   assert.deepEqual(missing, [], `documented headless but absent from KNOWN in clis.ts: ${missing.join(", ")}`);
 });
 
+test("Hermes Agent is wired up with one-shot args", () => {
+  assert.match(src, /id:\s*"hermes"/, "KNOWN is missing the hermes entry");
+  assert.match(src, /bin:\s*"hermes"/, "the hermes entry must spawn the `hermes` binary");
+  assert.match(src, /\["chat",\s*"-q",\s*p,\s*"--oneshot",\s*"-Q",\s*"--no-restore-cwd"\]/, "Hermes must use non-resuming quiet one-shot mode");
+});
+
 test("Grok Build CLI is wired up", () => {
   // The regression that motivated this file. Named explicitly so a future
   // reshuffle of the docs table can't quietly drop coverage for it.

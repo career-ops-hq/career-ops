@@ -154,13 +154,16 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const DEFAULT_STORY_BANK_PATH = 'interview-prep/story-bank.md';
-const DEFAULT_CV_PATH = 'cv.md';
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_STORY_BANK_PATH = join(DATA_ROOT, 'interview-prep', 'story-bank.md');
+const DEFAULT_CV_PATH = join(DATA_ROOT, 'cv.md');
 
 // ── Numeric claim patterns ──────────────────────────────────────────
 // Each pattern extracts {kind, text, index, values}. `values` are the
@@ -243,7 +246,10 @@ function parseStoryBlocks(content) {
     const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
     const title = themeMatch ? themeMatch[2].trim() : header;
 
-    const provMatch = block.match(/\*\*Provenance:\*\*\s*(.+)/i);
+    // The marker must open its own line (optional indent, at most one list or
+    // quote marker). A `**Provenance:**` quoted inside another field's value is
+    // story text, not the story's marker (issue #4819).
+    const provMatch = block.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
     const provenance = provMatch ? provMatch[1].trim().toLowerCase() : null;
 
     stories.push({ title, provenance, body: block });

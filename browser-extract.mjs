@@ -112,10 +112,33 @@ export function compactText(s, cap = JD_TEXT_CAP) {
  * @param {string} finalUrl
  */
 export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
+  // A schema.org JobPosting, when the page ships one, beats the rendered DOM:
+  // it is the posting body as the employer published it, not as their template
+  // happened to lay it out. On Phenom boards (careers.roche.com) the rendered
+  // <main> holds title, location and Apply chrome only — ~300 characters — while
+  // the body never becomes visible text at all, so the DOM path emitted a JD
+  // with no requirements in it and reported success. Same shape on other
+  // template-driven corporate boards, which is why this keys off the standard
+  // rather than off a host.
+  //
+  // Longer wins rather than JSON-LD always winning: plenty of pages carry a
+  // stub JobPosting (a one-line summary, or just the title) alongside a fully
+  // rendered body, and preferring the stub there would break the common case to
+  // fix the rare one.
+  const ldText = jdHtmlToText(raw?.jsonLdDescription || '');
+  // Normalized length, not raw length: raw DOM text on a chrome-heavy page is
+  // mostly repeated newlines ("Apply now\n\n\n\n\n\nSave job\n\n\n\n\n\n..."), which
+  // can out-length a shorter-in-raw-HTML but substantive JSON-LD description
+  // before either side is compacted. Comparing pre-collapse defeats the whole
+  // point of "longer wins". No cap here (Infinity) — only the comparison needs
+  // normalizing; the real textCap is still applied below.
+  const domText = compactText(String(raw?.text || ''), Infinity);
+  const text = ldText.length > domText.length ? ldText : domText;
+
   return {
     url: finalUrl,
-    title: compactText(raw?.title || '', 300),
-    text: compactText(raw?.text || '', textCap),
+    title: compactText(raw?.title || raw?.jsonLdTitle || '', 300),
+    text: compactText(text, textCap),
   };
 }
 
@@ -523,6 +546,90 @@ async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
 }
 
 /**
+ * Greenhouse posting reached through a company careers page (`?gh_jid=` only,
+ * no board in the URL). The embed redirect names the board — the same
+ * `followEmbed` hop liveness uses, which also pins the redirect target to
+ * greenhouse.io — and the per-job boards-api endpoint then ships the JD.
+ */
+async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let jobApiUrl;
+  try {
+    const res = await fetch(resolved.apiUrl, {
+      headers: { 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    jobApiUrl = await resolved.followEmbed(res, resolved.parts);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+  return jobApiUrl ? fetchGreenhouseJd(jobApiUrl, postingUrl, textCap, timeoutMs) : null;
+}
+
+/**
+ * Shape one SmartRecruiters posting into a jd-mode result. Pure, same contract
+ * as the other normalizers. The body is `jobAd.sections`, HTML blocks appended
+ * in the order the rendered page shows them; the location object also carries
+ * remote/hybrid flags, surfaced because they are often the only work-model
+ * signal the posting has.
+ *
+ * @param {any} json - parsed postings-API response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const sections = json?.jobAd?.sections;
+  if (!sections || typeof sections !== 'object') return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const blocks = ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']
+    .map((key) => {
+      const body = jdHtmlToText(sections[key]?.text);
+      return body ? [str(sections[key]?.title), body].filter(Boolean).join('\n') : '';
+    })
+    .filter(Boolean);
+  if (!blocks.length) return null;
+
+  const loc = json?.location || {};
+  const meta = [];
+  const where = str(loc.fullLocation) || [str(loc.city), str(loc.country)].filter(Boolean).join(', ');
+  if (where) meta.push(`Location: ${where}`);
+  if (loc.remote === true) meta.push('Work model: Remote');
+  else if (loc.hybrid === true) meta.push('Work model: Hybrid');
+
+  return {
+    url: postingUrl,
+    title: compactText(str(json?.name), 300),
+    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return normalizeSmartRecruitersJob(json, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * ats id → fetcher. THE routing table `fetchJdViaKnownApi` dispatches through,
  * exported so the owned test can assert its key set IS `JD_TEXT_API_ATS`.
  *
@@ -544,6 +651,10 @@ export const JD_FETCHERS = {
     fetchGreenhouseJd(resolved.apiUrl, url, textCap, timeoutMs),
   lever: (resolved, url, textCap, timeoutMs) =>
     fetchLeverJd(resolved.apiUrl, url, textCap, timeoutMs),
+  'greenhouse-embedded': (resolved, url, textCap, timeoutMs) =>
+    fetchGreenhouseEmbeddedJd(resolved, url, textCap, timeoutMs),
+  smartrecruiters: (resolved, url, textCap, timeoutMs) =>
+    fetchSmartRecruitersJd(resolved.apiUrl, url, textCap, timeoutMs),
 };
 
 /**
@@ -726,7 +837,43 @@ async function readDom(page) {
       })
       .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
 
-    return { title, text, anchors };
+    // schema.org JobPosting, if present. Returned as the raw description markup
+    // so the shared jdHtmlToText() does the conversion, keeping one entity /
+    // block-break implementation rather than a second one inside the page.
+    let jsonLdDescription = '';
+    let jsonLdTitle = '';
+    for (const el of document.querySelectorAll('script[type="application/ld+json"]')) {
+      let parsed;
+      try {
+        parsed = JSON.parse(el.textContent || 'null');
+      } catch {
+        continue; // a malformed block must not cost us the well-formed one after it
+      }
+      // Publishers ship a bare object, an array, or an @graph wrapper.
+      const candidates = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.['@graph'])
+          ? parsed['@graph']
+          : [parsed];
+      // @type is the bare token in most feeds, but some publishers use the
+      // absolute schema.org IRI instead — both forms occur in the wild.
+      const isJobPostingType = (t) =>
+        t === 'JobPosting' || t === 'http://schema.org/JobPosting' || t === 'https://schema.org/JobPosting';
+      for (const node of candidates) {
+        const type = node?.['@type'];
+        const isJobPosting = Array.isArray(type) ? type.some(isJobPostingType) : isJobPostingType(type);
+        if (!isJobPosting) continue;
+        const desc = typeof node.description === 'string' ? node.description : '';
+        if (desc.length > jsonLdDescription.length) {
+          jsonLdDescription = desc;
+          // Always reset, never carry over: a stub JobPosting's title must not
+          // survive onto the description of a later, longer JobPosting node.
+          jsonLdTitle = typeof node.title === 'string' ? node.title : '';
+        }
+      }
+    }
+
+    return { title, text, anchors, jsonLdDescription, jsonLdTitle };
   });
 }
 

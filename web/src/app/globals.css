@@ -124,6 +124,63 @@ html {
   animation: job-progress 1.3s ease-in-out infinite;
 }
 
+/* ── Route transition feedback ──────────────────────────────────────────── */
+/* The skeleton remains intentionally neutral so it works in both themes and
+   keeps the page structure visible while server components/data resolve. */
+@keyframes skeleton-sheen {
+  100% { transform: translateX(100%); }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--fg) 9%, transparent),
+    transparent
+  );
+  animation: skeleton-sheen 1.5s ease-in-out infinite;
+}
+
+@keyframes route-bar-creep {
+  0% { transform: scaleX(0.02); }
+  40% { transform: scaleX(0.35); }
+  75% { transform: scaleX(0.68); }
+  100% { transform: scaleX(0.9); }
+}
+
+.route-bar {
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-brand) 70%, transparent), var(--color-brand), var(--color-brand-200));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-brand) 60%, transparent);
+  will-change: transform, opacity;
+}
+
+.route-bar[data-state="loading"] {
+  opacity: 1;
+  animation: route-bar-creep 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+}
+
+.route-bar[data-state="done"] {
+  opacity: 0;
+  transform: scaleX(1);
+  transition: transform 0.2s ease-out, opacity 0.35s ease-out 0.15s;
+}
+
+.route-bar[data-state="idle"] {
+  opacity: 0;
+  transform: scaleX(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cli-cursor,
   .animate-terminal-popup,
@@ -131,11 +188,13 @@ html {
     animation: none;
   }
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
+  .skeleton::after { animation: none; }
+  .route-bar[data-state="loading"] { animation: none; transform: scaleX(0.9); }
 }
 
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
 .report-prose {
-  color: color-mix(in srgb, var(--fg) 88%, transparent);
+  color: var(--fg);
   font-size: 0.95rem;
   line-height: 1.7;
 }
@@ -156,6 +215,14 @@ html {
 .report-prose h3 { font-weight: 600; font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
 .report-prose h4 { font-weight: 600; font-size: 0.95rem; color: var(--muted); margin: 1.25rem 0 0.4rem; }
 .report-prose p { margin: 0.9rem 0; }
+
+/* The report container widens on large screens so dense Block B/C tables get
+   room to breathe (they were pinned to ~720px on a 3440px display). Running
+   TEXT must not widen with it -- long measures are hard to read -- so prose
+   blocks keep a comfortable cap while tables use the full container width. */
+.report-prose p,
+.report-prose li,
+.report-prose blockquote { max-width: 76ch; }
 .report-prose strong { color: var(--fg); font-weight: 600; }
 .report-prose a { color: var(--color-brand); text-decoration: none; }
 .report-prose a:hover { text-decoration: underline; }
@@ -207,6 +274,7 @@ html {
   padding: 0.55rem 0.75rem;
   vertical-align: top;
   border-top: 1px solid var(--border);
+  color: var(--fg);
   /* overflow-wrap, not word-break: `word-break: break-word` makes every
      character a soft-wrap opportunity for min-content sizing, so columns
      collapsed and words split mid-syllable ("consisten/cy"). overflow-wrap

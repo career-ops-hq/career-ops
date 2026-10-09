@@ -10,9 +10,11 @@
 // halves of that contract: the system rules arrive, and nothing the user wrote
 // is modified, reordered or removed.
 
-import { readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { DEFAULT_SCRIPT_TIMEOUT_MS, pass, fail, rmSync, ROOT } from './helpers.mjs';
 import { reconcileGitignore } from '../update-system.mjs';
 
 console.log('\n🔁 .gitignore reconcile (append-if-missing)');
@@ -129,6 +131,95 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   ok(added.length > 0, 'an empty file receives the missing rules');
   ok(!text.startsWith('\n'), 'and the result does not open with blank lines');
   eq(reconcileGitignore(text, 'cv.md\n').added.length, 0, 'and is idempotent from there');
+}
+
+// ── An upstream negation keeps the precedence upstream gave it ──────────────
+// Upstream orders its own negations deliberately: `!test-fixtures/**` sits AFTER
+// `applications.md` so it wins. An install that already had the negation but not the
+// newer pattern skipped the negation as present and got the pattern appended after it,
+// which inverted upstream's intent and re-ignored files upstream's own suite requires to
+// be committed (#4127). The user's line is still never touched; the negation is repeated,
+// which git treats as a no-op.
+{
+  const local = ['node_modules/', '!test-fixtures/**', '*.log'].join('\n') + '\n';
+  const upstream = ['node_modules/', 'applications.md', 'follow-ups.md', '!test-fixtures/**'].join('\n') + '\n';
+  const { text, added } = reconcileGitignore(local, upstream);
+  const lines = text.split('\n').map((l) => l.trim());
+
+  eq(added.join(','), 'applications.md,follow-ups.md', 'the two newer rules are appended');
+  const lastNegation = lines.lastIndexOf('!test-fixtures/**');
+  ok(lastNegation > lines.lastIndexOf('applications.md'), 'the negation ends up after applications.md');
+  ok(lastNegation > lines.lastIndexOf('follow-ups.md'), 'and after follow-ups.md');
+  // The promise this function makes is that it never rewrites a local line.
+  ok(text.startsWith(local), "the user's own file is still a verbatim prefix of the result");
+  eq(lines.indexOf('!test-fixtures/**'), 1, 'and their copy of the negation stays where they put it');
+
+  const second = reconcileGitignore(text, upstream);
+  eq(second.added.length, 0, 'reconciling again adds nothing');
+  eq(second.text, text, 'and is byte-identical, so an update does not rewrite the file forever');
+}
+
+// ── A negation BETWEEN two new rules lands between them, not after both ─────
+// Order is the whole mechanism, so restoring a negation is not enough: it has to be
+// restored where upstream put it. Upstream's `*.log`, `!keep/**`, `keep/secret.md` reads
+// "ignore logs, but keep/ is yours, except keep/secret.md". Appending the negation after
+// both new rules instead of between them un-ignores `keep/secret.md` — upstream
+// deliberately re-ignores it, and several of these system rules guard files holding
+// personal data, so the inversion leaves exactly those files trackable.
+{
+  const local = '!keep/**\n';
+  const upstream = ['*.log', '!keep/**', 'keep/secret.md'].join('\n') + '\n';
+  const { text } = reconcileGitignore(local, upstream);
+  const lines = text.split('\n').map((l) => l.trim());
+
+  const negation = lines.lastIndexOf('!keep/**');
+  ok(negation > lines.lastIndexOf('*.log'), 'the negation still outranks the rule upstream put before it');
+  ok(negation < lines.lastIndexOf('keep/secret.md'), 'and does not outrank the one upstream put after it');
+}
+
+// ── ...and git agrees, which is the only reading that matters ────────────────
+// The assertions above are line order; this one asks git itself, so a future refactor
+// cannot satisfy the ordering and still hand the user the wrong ignore set.
+{
+  const local = '!keep/**\n';
+  const upstream = ['*.log', '!keep/**', 'keep/secret.md'].join('\n') + '\n';
+  const { text } = reconcileGitignore(local, upstream);
+
+  const dir = mkdtempSync(join(tmpdir(), 'co-gitignore-reconcile-'));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir, timeout: DEFAULT_SCRIPT_TIMEOUT_MS });
+    writeFileSync(join(dir, '.gitignore'), text);
+    mkdirSync(join(dir, 'keep'), { recursive: true });
+    for (const rel of ['keep/secret.md', 'keep/other.log', 'root.log']) writeFileSync(join(dir, rel), 'x');
+
+    const ignored = (rel) => {
+      try {
+        execFileSync('git', ['check-ignore', '-q', rel], { cwd: dir, timeout: DEFAULT_SCRIPT_TIMEOUT_MS });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    ok(ignored('keep/secret.md'), 'git ignores keep/secret.md, the file upstream re-ignores on purpose');
+    ok(!ignored('keep/other.log'), 'and still tracks keep/other.log, which the negation protects');
+    ok(ignored('root.log'), 'while the new rule outside keep/ applies normally');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── A negation upstream puts BEFORE the new rules is not re-appended ─────────
+// Precedence cuts both ways: repeating a negation upstream deliberately placed first
+// would hand it a win upstream never gave it.
+{
+  const local = ['!keep/**', 'node_modules/'].join('\n') + '\n';
+  const upstream = ['!keep/**', 'node_modules/', 'keep/secret.md'].join('\n') + '\n';
+  const { text, added } = reconcileGitignore(local, upstream);
+  const lines = text.split('\n').map((l) => l.trim());
+
+  eq(added.join(','), 'keep/secret.md', 'the new rule is appended');
+  eq(lines.filter((l) => l === '!keep/**').length, 1, 'the earlier negation is not repeated');
 }
 
 // ── The shipped .gitignore is self-consistent ────────────────────────────────
