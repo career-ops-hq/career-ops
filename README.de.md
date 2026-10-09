@@ -180,7 +180,7 @@ Es formuliert deinen Lebenslauf um; es darf ihn nie erfinden. Eine Prüfung im C
 | **Interview Story Bank** | Sammelt STAR+Reflection-Geschichten über Bewertungen hinweg: 5-10 Master-Stories, die du an die Behavioral Questions anpassen kannst, die dir gestellt werden |
 | **Verhandlungsskripte**  | Frameworks für Gehaltsverhandlungen, Pushback gegen geografische Abschläge, Hebel durch konkurrierende Angebote                          |
 | **Bewerbungs-E-Mail-Entwürfe** | Formelle E-Mails an Recruiter:innen, für Empfehlungen oder Initiativbewerbungen aus einem Report oder einer eingefügten Stellenbeschreibung, mit Betreff, Anhang-Checkliste, belegten Fit-Punkten und einem Kontaktblock aus deinem Profil. Nur Entwürfe: career-ops sendet, reicht ein oder klickt nie etwas. |
-| **Portal-Scanner**       | 100+ vorkonfigurierte Unternehmen (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) plus eigene Queries über Ashby, Greenhouse, Lever, Wellfound |
+| **Portal-Scanner**       | 100+ vorkonfigurierte Unternehmen (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) plus eigene Websuche-Queries über Ashby, Greenhouse, Lever, Wellfound |
 | **Finanzierte Unternehmen entdecken** | Der Befehl `company:funded` (erst prüfen, dann handeln) zeigt kürzlich finanzierte Unternehmen und Quellendiagnosen aus strukturierten öffentlichen Feeds, ohne deine Daten anzufassen |
 | **Batch-Verarbeitung**   | Parallele Bewertung mit headless CLI-Workern (`claude -p` / `opencode run`)                                                             |
 | **Dashboard TUI**        | Terminal-UI zum Durchsuchen, Filtern und Sortieren deiner Pipeline                                                                       |

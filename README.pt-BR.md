@@ -180,7 +180,7 @@ Ele reformula seu currículo; nunca deve inventá-lo. Uma verificação no códi
 | **Banco de histórias de entrevista** | Acumula histórias STAR+Reflexão ao longo das avaliações: 5-10 histórias principais que você pode adaptar às perguntas comportamentais que receber |
 | **Scripts de negociação** | Frameworks para negociação salarial, resposta a desconto geográfico, alavanca com ofertas concorrentes                                  |
 | **Rascunhos de e-mail de candidatura** | E-mails formais para recrutador, indicação ou candidatura espontânea a partir de um relatório ou de uma descrição colada, com assunto, checklist de anexos, pontos de aderência com fonte e um bloco de contato vindo do seu perfil. Só rascunho: o career-ops nunca envia, submete ou clica em nada. |
-| **Scanner de portais**   | 100+ empresas pré-configuradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + consultas customizadas em Ashby, Greenhouse, Lever, Wellfound |
+| **Scanner de portais**   | 100+ empresas pré-configuradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + consultas customizadas de busca na web em Ashby, Greenhouse, Lever, Wellfound |
 | **Descoberta de empresas financiadas** | O comando `company:funded`, feito para revisar antes de agir, traz empresas com financiamento recente e diagnósticos de fonte a partir de feeds públicos estruturados, sem editar seus dados |
 | **Processamento em lote** | Avaliação paralela com workers de CLI sem interface (`claude -p` / `opencode run`)                                                      |
 | **Dashboard TUI**        | Interface no terminal para navegar, filtrar e ordenar seu pipeline                                                                       |
