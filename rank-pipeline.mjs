@@ -245,7 +245,7 @@ export function buildPrompt(entries, cvExcerpt) {
 
 function callCli(cli, prompt, model) {
   const args = cli.args(prompt);
-  if (model && cli.bin !== 'codex' && cli.bin !== 'opencode') args.push('--model', model);
+  if (model) args.push('--model', model);
   // Explicit maxBuffer: a verbose response otherwise throws
   // ERR_CHILD_PROCESS_STDIO_MAXBUFFER and fails the batch for no good reason.
   return execFileSync(cli.bin, args, {
