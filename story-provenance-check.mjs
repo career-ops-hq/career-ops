@@ -246,7 +246,10 @@ function parseStoryBlocks(content) {
     const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
     const title = themeMatch ? themeMatch[2].trim() : header;
 
-    const provMatch = block.match(/\*\*Provenance:\*\*\s*(.+)/i);
+    // The marker must open its own line (optional indent, at most one list or
+    // quote marker). A `**Provenance:**` quoted inside another field's value is
+    // story text, not the story's marker (issue #4819).
+    const provMatch = block.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
     const provenance = provMatch ? provMatch[1].trim().toLowerCase() : null;
 
     stories.push({ title, provenance, body: block });

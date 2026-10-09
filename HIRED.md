@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=14 level=role role="Electrical Engineering Intern" sector="Top 500 Fortune Company" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/4844" -->
+### Hire #14
+
+> Forked career-ops and adjusted it into my internship needs and language barrier in Germany, and helped me apply to 250+ jobs and land one in few months (with over 10 interviews)
+
+**Electrical Engineering Intern** · Top 500 Fortune Company · 12 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4844)
+
 <!-- hire n=13 level=handle handle=RomanY467 role="Secops Engineer" sector="YC Company" geo="remote - Argentina" weeks=4 link="https://github.com/career-ops-hq/career-ops/issues/4722" -->
 ### Hire #13
 

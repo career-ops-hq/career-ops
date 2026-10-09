@@ -29,6 +29,39 @@ func TestDeriveNoteFields(t *testing.T) {
 			last:     "2026-06-05",
 		},
 		{
+			name: "labelled location outside the city list",
+			app: model.CareerApplication{
+				Notes: "Location: Cardiff, UK; via company site",
+			},
+			location: "Cardiff, UK",
+			workMode: "Full",
+		},
+		{
+			name: "labelled three-part location is kept whole",
+			app: model.CareerApplication{
+				Notes: "Location: Hook, Hampshire, UK",
+			},
+			location: "Hook, Hampshire, UK",
+			workMode: "Full",
+		},
+		{
+			name: "labelled location beats a listed city mentioned elsewhere",
+			app: model.CareerApplication{
+				Notes: "Team also in London; Location: Watford, Hertfordshire, United Kingdom",
+			},
+			location: "Watford, Hertfordshire, United Kingdom",
+			workMode: "Full",
+		},
+		{
+			name: "tracker Location column beats notes",
+			app: model.CareerApplication{
+				Location: "Cardiff, UK",
+				Notes:    "Location: London, UK",
+			},
+			location: "Cardiff, UK",
+			workMode: "Full",
+		},
+		{
 			name: "hybrid city state with estimate",
 			app: model.CareerApplication{
 				Date:  "2026-06-03",

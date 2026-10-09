@@ -53,12 +53,13 @@ const WEB = HAS_WEB ? {} : { skip: 'web/ not present (core-only install; web/ is
 // Windows (`D:\...` reads as a URL scheme).
 const webTable = () => import('../web/src/lib/tracker-table.mjs');
 
-// tracker.mjs's index is node:sqlite, which needs Node >= 22.5 while
-// package.json allows 18.17. Same gate as test-all's own tracker index
-// section: every case that syncs, queries or exports through the index (or
-// builds one directly) skips on an older runtime instead of failing.
+// tracker.mjs's index is node:sqlite. package.json now requires a Node that
+// ships it unflagged (22.13+, #4801), so this normally never skips; it stays
+// as the same guard test-all keeps on its own tracker index section, so a
+// runtime without node:sqlite skips every case that syncs, queries or exports
+// through the index (or builds one directly) instead of failing them.
 const HAS_SQLITE = await import('node:sqlite').then(() => true, () => false);
-const SQLITE = HAS_SQLITE ? {} : { skip: 'node:sqlite unavailable (Node < 22.5) — tracker index cases skipped' };
+const SQLITE = HAS_SQLITE ? {} : { skip: 'node:sqlite unavailable — tracker index cases skipped' };
 
 // ── child processes ────────────────────────────────────────────────────────
 // The few cases that need a real process. Spawned async, never spawnSync:

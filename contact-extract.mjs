@@ -67,6 +67,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseFileInput, collectInteractive } from './paste-reply.mjs';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { parseFollowups } from './followup-cadence.mjs';
 import { escapeFormulaCell, unescapeFormulaCell } from './contacts.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
@@ -205,22 +206,7 @@ function loadTrackerApps(appsFile = APPS_FILE) {
 
 function loadFollowups(followupsFile = FOLLOWUPS_FILE) {
   if (!fs.existsSync(followupsFile)) return [];
-  const content = fs.readFileSync(followupsFile, 'utf-8');
-  const lines = content.split('\n');
-  const followups = [];
-  for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map((s) => s.trim());
-    if (parts.length < 8) continue;
-    const num = parseInt(parts[1], 10);
-    const appNum = parseInt(parts[2], 10);
-    if (Number.isNaN(num) || Number.isNaN(appNum)) continue;
-    followups.push({
-      num, appNum, date: parts[3], company: parts[4], role: parts[5],
-      channel: parts[6], contact: parts[7], notes: parts[8] || '',
-    });
-  }
-  return followups;
+  return parseFollowups(fs.readFileSync(followupsFile, 'utf-8'));
 }
 
 function askYesNo(query) {

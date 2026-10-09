@@ -265,6 +265,8 @@ const ALLOWED_MISSING_ENTRIES = new Set([
   // prune still reaches an upgrading install's leftover copy.
   'contact-extract-tests.mjs',
   'tracker-columns-tests.mjs', // → tests/tracker-columns.test.mjs (#4758)
+  // Same reason: moved to tests/tracker-writer-lock.test.mjs (#4759).
+  'tracker-writer-lock-tests.mjs',
 ]);
 for (const [listName, entries] of [['SYSTEM_PATHS', systemPaths], ['BOOTSTRAP_PATHS', bootstrapPaths]]) {
   for (const entry of entries) {

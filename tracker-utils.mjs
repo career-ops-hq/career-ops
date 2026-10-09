@@ -56,6 +56,50 @@ export function rebuildRow(parts) {
 }
 
 /**
+ * The ONE rule for "this Report cell links to a report that is not on disk",
+ * shared by verify-pipeline.mjs (Check 3), merge-tracker.mjs (merge-time
+ * warning, #4748) and fix-report-links.mjs (#4750) so the three can never
+ * disagree about which rows are broken.
+ *
+ * The link is the first markdown `](target)` in the cell. It resolves when it
+ * names a REGULAR FILE from the tracker's own directory (markdown links are
+ * relative to the file holding them, see #760) or, for legacy root-relative
+ * links, from the data root. A directory is not a report. A cell with no link
+ * (`—`, `N/A`, empty) is the documented "no report" convention and is never
+ * broken.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @param {string} trackerDir - Directory containing the tracker file.
+ * @param {string} dataRoot - Data root (getCareerOpsRoot()).
+ * @param {{onInspectionError?: Function, stat?: Function}} [options]
+ * @returns {string|null} The unresolved link target, or null when there is no link,
+ *   it resolves, or its targets could not be inspected conclusively.
+ */
+export function findDeadReportLink(reportCell, trackerDir, dataRoot, options = {}) {
+  const match = String(reportCell ?? '').match(/\]\(([^)]+)\)/);
+  if (!match) return null;
+  const link = match[1];
+  const inspect = options.stat ?? statSync;
+  const errors = [];
+  const candidates = [...new Set([join(trackerDir, link), join(dataRoot, link)])];
+  for (const path of candidates) {
+    try {
+      if (inspect(path).isFile()) return null;
+    } catch (err) {
+      // ENOENT/ENOTDIR prove that this candidate is absent. Permission errors,
+      // transient I/O failures and every other error do not prove that, so an
+      // explicit repair must preserve the tracker cell instead of deleting it.
+      if (err?.code !== 'ENOENT' && err?.code !== 'ENOTDIR') errors.push({ path, error: err });
+    }
+  }
+  if (errors.length > 0) {
+    options.onInspectionError?.({ link, errors });
+    return null;
+  }
+  return link;
+}
+
+/**
  * Normalize company names for same-company lookups across tracker scripts.
  *
  * Company names can contain spaces, punctuation, or branding variants in the
@@ -548,6 +592,26 @@ export async function acquireTrackerLock(lockDir, options = {}) {
       }
 
       if (hasRecoverGuard) {
+        // Test-only ordering signal for the cross-process writer-lock suite.
+        // It is emitted only after this process successfully creates the
+        // recover guard, and remains on disk after that short-lived directory
+        // is removed. The parent can therefore prove both contention and
+        // guard creation without sampling a sub-millisecond window. Production
+        // callers have no marker path and keep the existing lock behavior.
+        const testWaitingMarker = process.env.NODE_ENV === 'test'
+          ? process.env.CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER
+          : undefined;
+        if (testWaitingMarker) {
+          try {
+            writeFileSync(testWaitingMarker, JSON.stringify({
+              pid: process.pid, lockDir, guardCreated: true,
+            }), { flag: 'wx' });
+          } catch {
+            // The hook is observational only; the bounded test wait reports a
+            // marker-write failure without changing lock acquisition behavior.
+          }
+        }
+
         try {
           // STALE only. VANISHED means the lock was absent when we looked, and
           // by the time this line runs another acquirer may have won the mkdir

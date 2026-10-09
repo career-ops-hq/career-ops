@@ -118,16 +118,36 @@ const METRIC_NOUNS = [
 // for the chain — modifiers are alphabetic only — so a wider window still
 // cannot jump across an intervening figure to bind an unrelated noun.
 const MODIFIER_WINDOW = 4;
-// The number capture takes an immediately-adjacent magnitude suffix (50k, 1.5M)
-// as part of the number, mirroring what the currency pattern below already does.
-// Without it the modifier window re-consumed that letter as a generic word, so
-// "50k users" normalized to the claim "50 users" and matched a CV that said 50 —
-// letting a 1000x inflation through the gate while a smaller "900 users" was
-// correctly caught.
+// The number capture takes a magnitude as part of the number, in both the
+// adjacent-suffix spelling (50k, 1.5M) and the spelled-out one (50 thousand, 1.5
+// million), mirroring what the currency pattern below already does.
 //
-// `[kKmMbB]\b` requires the suffix to END the token, so "50 million users" (space,
-// handled by the modifier window) and "50kg users" (k not at a boundary) both keep
-// their existing behaviour and still normalize to "50".
+// Without the suffix branch the modifier window re-consumed that letter as a
+// generic word, so "50k users" normalized to the claim "50 users" and matched a CV
+// that said 50 — letting a 1000x inflation through the gate while a smaller "900
+// users" was correctly caught.
+//
+// The spelled branch closes the same hole one magnitude further out. Left to the
+// modifier window, "50 million" normalized to "50", so a source saying "Served 50
+// users" was accepted as evidence for "Served 50 million users" — the 10^6 version
+// of the same miss. SPELLED_MAGNITUDES folds each word onto the suffix it
+// abbreviates, so both spellings of one quantity produce one claim and a document
+// cannot pass by writing the magnitude out in words (#4872).
+//
+// Both branches require the magnitude to END the token, so "50kg users" (k not at
+// a boundary) and "50 millionaire users" ("millionaire" is not the magnitude word)
+// keep their previous normalization and still read as "50".
+// Spelled-out magnitudes, folded onto the suffix each one abbreviates so that a
+// quantity compares equal however it is written. The words mirror the existing
+// `[kKmMbB]` suffix set exactly: a word with no suffix counterpart would be a
+// magnitude the claim key has nothing to normalize it against.
+const SPELLED_MAGNITUDES = new Map([
+  ['thousand', 'k'],
+  ['million', 'm'],
+  ['billion', 'b'],
+]);
+const SPELLED_MAGNITUDE_ALT = [...SPELLED_MAGNITUDES.keys()].join('|');
+
 const COUNT_CLAIM_RE = new RegExp(
   // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
   // rather than the farthest. Greedy, the quantifier consumed as many filler
@@ -154,7 +174,7 @@ const COUNT_CLAIM_RE = new RegExp(
   // "ERC-4626 vaults" one of 4626 vaults. Without the lookbehind, a tailored
   // bullet that drops a word the source had inside the modifier window (so
   // the source yields no claim and the bullet does) fails the gate.
-  String.raw`(?<![A-Za-z]-)\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
+  String.raw`(?<![A-Za-z]-)\b(\d[\d,.]*(?:[kKmMbB]\b|\s+(?:${SPELLED_MAGNITUDE_ALT})\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
   'gi'
 );
 const NOUN_SYNONYMS = new Map([
@@ -748,6 +768,25 @@ function countMatches(clean) {
   });
 }
 
+/**
+ * Fold a spelled-out magnitude onto the suffix the claim set compares.
+ *
+ * metricClaims() builds the claim key as `<number><magnitude> <noun>`, so
+ * "50 million users" and "50M users" only compare equal when both sides reach the
+ * same magnitude token. normalizeClaim() lowercases the adjacent-suffix branch on
+ * its own; this covers the spelled one, and leaves a number with no magnitude —
+ * and a number whose trailing word is not a magnitude at all — untouched.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+function compactMagnitude(raw) {
+  return raw.replace(/\s+([A-Za-z]+)$/, (whole, word) => {
+    const suffix = SPELLED_MAGNITUDES.get(word.toLowerCase());
+    return suffix === undefined ? whole : suffix;
+  });
+}
+
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text) {
   const clean = stripMarkup(text, { keepLineBreaks: true });
@@ -757,7 +796,7 @@ export function metricClaims(text) {
   }
   for (const match of countMatches(clean)) {
     const noun = match[2].toLowerCase();
-    claims.add(normalizeClaim(`${match[1]} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
+    claims.add(normalizeClaim(`${compactMagnitude(match[1])} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
   }
   return claims;
 }
@@ -1366,17 +1405,52 @@ function runSelfTest() {
     auditClaims('Reached 2B users', 'Reached 1B users.').invented,
     ['2b users']
   );
-  // The suffix must END the token, so a spelled-out magnitude and a unit that
-  // merely starts with k/m/b keep their previous normalization. Asserting on
-  // metricClaims directly (not auditClaims(...).invented) matters here: target
-  // and source text are identical, so an empty `invented` list would pass even
-  // if metricClaims extracted nothing at all — these assert the real claim a
-  // truthful CV would produce.
+  // A spelled-out magnitude belongs to the number for the same reason the suffix
+  // does, and folds onto that suffix so the two spellings of one quantity are one
+  // claim. Left in the modifier window it normalized away, and "Served 50 users"
+  // then read as evidence for "Served 50 million users".
+  //
+  // Asserting on metricClaims directly (not auditClaims(...).invented) matters
+  // here: target and source text are identical, so an empty `invented` list would
+  // pass even if metricClaims extracted nothing at all — these assert the real
+  // claim a truthful CV would produce.
   equal(
-    'a spelled-out magnitude is unaffected',
+    'a spelled-out magnitude joins the number',
     [...metricClaims('Reached 50 million users')],
+    ['50m users']
+  );
+  equal(
+    'the two spellings of one quantity compare equal',
+    auditClaims('Reached 50M users', 'Reached 50 million users.').invented,
+    []
+  );
+  equal(
+    'a spelled-out inflation is caught',
+    auditClaims('Reached 50 million users', 'Reached 50 users.').invented,
+    ['50m users']
+  );
+  equal(
+    'a decimal spelled-out magnitude joins the number',
+    [...metricClaims('Served 1.5 million customers')],
+    ['1.5m customers']
+  );
+  equal(
+    'a thousand spelled-out magnitude joins the number',
+    [...metricClaims('Served 50 thousand users')],
+    ['50k users']
+  );
+  equal(
+    'an ordinary modifier is still not a magnitude',
+    [...metricClaims('Served 50 active users')],
     ['50 users']
   );
+  equal(
+    'a word merely starting with a magnitude word is not one',
+    [...metricClaims('Served 50 millionaire users')],
+    ['50 users']
+  );
+  // The suffix must still END the token, so a unit that merely starts with k/m/b
+  // keeps its previous normalization.
   equal(
     'a unit beginning with a suffix letter is unaffected',
     [...metricClaims('Shipped 50kg servers')],
