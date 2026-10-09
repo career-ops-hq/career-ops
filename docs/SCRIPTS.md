@@ -1163,7 +1163,7 @@ These have no `npm run` binding — modes and agents call them with
 |------------|---------|
 | `node set-status.mjs <report#\|company> <State> [--note]` | Canonical tracker write path: strict states.yml validation, shared lock, atomic write. Modes call this instead of hand-editing `applications.md` |
 | `node mark-pdf-ready.mjs <report#> [--dry-run] [--json]` | Mark the matched tracker's PDF cell ready after the web PDF render path finishes; resolves the report number, uses the shared tracker lock, and writes atomically |
-| `node sync-pdf-flags.mjs [--dry-run] [--prune [--write]] [--json]` | Reconcile tracker PDF column against data/pdf-index.tsv; `--prune` drops manifest rows whose PDF is gone from disk (dry run by default, `--write` to commit) |
+| `node sync-pdf-flags.mjs [--dry-run] [--prune [--write] [--allow-empty]] [--json]` | Reconcile tracker PDF column against data/pdf-index.tsv; `--prune` drops manifest rows whose PDF is provably gone from disk (dry run by default, `--write` to commit; emptying the manifest also needs `--allow-empty`) |
 | `node followup-cadence.mjs [--summary]` | Follow-up cadence per active application; flags overdue entries |
 | `node followup-seed.mjs [--backfill]` | Seed `data/follow-ups.md` with a pinned first follow-up date when a row turns Applied |
 | `node reply-watch.mjs` | Classify employer replies from `data/reply-candidates.json`, match to tracker rows, print a review digest |
@@ -1363,16 +1363,23 @@ and `4` means the tracker lock timed out and the operation should be retried.
 
 Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`.
 
-`--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`.
+`--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`. Prune rewrites only the manifest, never the tracker, so it does not take the tracker lock.
+
+Prune fails closed, because a dropped row is the only record of that PDF:
+
+- **Only a provably missing PDF is pruned.** A row goes when its file is reported absent (`ENOENT`, or `ENOTDIR` when part of the path is a file) or when its path lies outside `output/`, whether spelled that way (`../x.pdf`, an absolute path elsewhere) or reached through a symlink. Any other error (permissions, I/O, a symlink loop) keeps the row and reports it: on stderr, or in the `warnings` array of the `--json` result.
+- **No `output/`, no prune.** If the manifest has rows and `output/` does not exist or cannot be read, nothing is pruned and the run exits `2`, dry run included. Without it every PDF looks deleted: a fresh clone, another machine, a moved workspace, or a volume that is not mounted.
+- **Emptying the manifest takes `--allow-empty`.** When every data row would be pruned (two or more), `--write` refuses and exits `3` without writing, because that is usually the environment rather than real deletions; the dry run warns instead. If you really deleted every PDF, re-run with `--allow-empty`.
 
 ```bash
 node sync-pdf-flags.mjs                          # sync PDF flags to tracker (dry-run with --dry-run)
 node sync-pdf-flags.mjs --prune                  # preview stale manifest rows whose PDF is missing
 node sync-pdf-flags.mjs --prune --write          # prune missing manifest rows from data/pdf-index.tsv
+node sync-pdf-flags.mjs --prune --write --allow-empty  # same, even when that removes every row
 node sync-pdf-flags.mjs --prune --write --json   # JSON output of prune results
 ```
 
-Exit status: `0` success, `1` invalid option or write error, `2` missing tracker file or unreadable manifest, `4` tracker lock timeout.
+Exit status: `0` success (prune warnings included), `1` invalid option or write error, `2` missing tracker file, unreadable manifest, or (prune) a missing or unreadable `output/`, `3` prune `--write` refused because it would empty the manifest (see `--allow-empty`), `4` tracker lock timeout.
 
 ---
 
