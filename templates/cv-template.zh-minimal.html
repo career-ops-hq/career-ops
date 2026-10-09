@@ -467,6 +467,15 @@ version: 1.0.0
     break-inside: var(--job-break-inside, auto);
   }
 
+  /* Opt-in — unchanged default (a project may split across a page break).
+     Override via config/profile.yml style.project_break_inside: avoid. This
+     template's :root token block does not declare --project-break-inside, so
+     the fallback below is the only default. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
+  }
+
   /* Keep a heading attached to the content that follows it, so headings are not
      orphaned at the bottom of a page. */
   .section-title,

@@ -36,6 +36,12 @@ version: 1.0.0
     --page-margin: 0.6in;
     /* #3242: unchanged default — see templates/cv-template.html. */
     --job-break-inside: auto;
+    /* Whether a Projects entry may split across a page break. Unchanged
+       default — a project may still split, keeping the CV compact. Override via
+       config/profile.yml `style.project_break_inside: avoid` for "a project is
+       one unit, never split", which removes the one-word widow a description
+       can leave above its tech line, at the cost of a bottom gap. */
+    --project-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -340,6 +346,12 @@ version: 1.0.0
   .job {
     page-break-inside: var(--job-break-inside, auto);
     break-inside: var(--job-break-inside, auto);
+  }
+
+  /* Opt-in — see the --project-break-inside default above. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
   }
 
   .section-title,

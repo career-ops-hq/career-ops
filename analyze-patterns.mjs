@@ -56,6 +56,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Issue 1380: predicted skip/discard reasons from the agent.
   'discard_reasons',
   'advertised_comp',
+  // JD-stated work location used by salary-gap's informational relocation
+  // comparison. Preserved for report consumers; pattern scoring ignores it.
+  'posting_location',
   'via',
   'company_confidential',
   'risk_summary',
@@ -438,6 +441,7 @@ risk_level: "Medium"
 confidence: "High"
 next_action: "Follow up on ticket #42 with tailored CV"
 work_auth: "unstated"
+posting_location: "Halifax, NS"
 via: "Hays"
 company_confidential: true
 \`\`\`
@@ -452,6 +456,7 @@ company_confidential: true
   if (summary?.via !== 'Hays') failures.push('via was not preserved from Machine Summary');
   if (summary?.company_confidential !== true) failures.push('company_confidential boolean was not preserved from Machine Summary');
   if (summary?.work_auth !== 'unstated') failures.push('work_auth field was not preserved from Machine Summary');
+  if (summary?.posting_location !== 'Halifax, NS') failures.push('posting_location field was not preserved from Machine Summary');
 
   // Backward compat (#1737): summaries without risk_summary parse as before, key simply absent.
   if ('risk_summary' in (summary ?? {})) failures.push('summary without risk_summary must not gain the key');
