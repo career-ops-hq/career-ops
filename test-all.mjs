@@ -4248,6 +4248,16 @@ if (
   fail('AGENTS.md missing offer-prep mode row or CLAUDE.md is not importing AGENTS.md');
 }
 
+// The trigger table is how a free-form request reaches a mode; a mode the
+// router exposes but the table omits is reachable only by its exact name (#4901).
+for (const mode of ['discover', 'text']) {
+  if (new RegExp(`^\\|[^\\n]*\\| \`${mode}\` \\|$`, 'm').test(agentsMdDoc)) {
+    pass(`AGENTS.md trigger table has a row for ${mode}`);
+  } else {
+    fail(`AGENTS.md trigger table has no row for ${mode} (#4901)`);
+  }
+}
+
 const dataContractDoc = readFile('DATA_CONTRACT.md');
 const gitignoreDoc = readFile('.gitignore');
 const updaterSrc = readFile('update-system.mjs');

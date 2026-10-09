@@ -393,6 +393,7 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Wants a hiring-manager's read on a tailored CV before sending | `pdf --hm-audit` — opt-in pass (`modes/pdf/hm-audit.md`), off by default: researches the likely reviewer, dispatches a separate agent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict |
 | Wants the LaTeX/Overleaf CV path | `latex` |
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |
+| Wants a tailored CV as markdown instead of a PDF (to paste into their own template or editor) | `text` |
 | Wants a cover letter | `cover` |
 | Wants to add a role to the tracker manually | `add` |
 | Wants to discover CV competencies they forgot to write down | `expand` |
@@ -401,6 +402,7 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Asks about application status | `tracker` |
 | Fills out application form | `apply` |
 | Searches for new offers | `scan` |
+| Wants to turn a list of company names into scannable ATS boards / add them to `portals.yml` | `discover` |
 | Processes pending URLs | `pipeline` |
 | Wants a fast first-pass filter before full evaluation | `triage` |
 | Batch processes offers | `batch` |
