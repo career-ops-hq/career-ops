@@ -338,6 +338,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const usage = normalizeOpenAIUsage(data.usage);
 
       modelIndex = (modelIndex + attempt + 1) % active.length;
+      delete rateLimitCounts[model];
       console.log('OK');
       return { content, usage };
 
@@ -371,6 +372,10 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
   throw new Error(`All ${active.length} active models failed. Last error: ${lastError?.message}`);
 }
+
+// Exported so tests/openrouter-runner-429-reset.test.mjs can script fetch()
+// against the real rotation and blacklist logic without a network or a CLI run.
+export { callOpenRouter, rateLimitCounts, blacklistedModels };
 
 // ---------------------------------------------------------------------------
 // Context loading
