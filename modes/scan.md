@@ -327,7 +327,7 @@ Columns are append-only: readers index by position, so new columns arrive at the
 
 `skipped_location` and `skipped_age` record what `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed threshold is visible in the data rather than only as a summary counter, and they carry no dedup weight: both name a setting the user edits, so a row written under the old threshold must not suppress the same posting once it moves. Each posting gets one such row per status, not one per scan.
 
-`skipped_no_apply_control` marks a page that loaded without a recognised Apply control. It also carries no dedup weight: the check not finding a button is not proof the posting is closed, so the next scan verifies the URL again. It is recorded once per posting.
+`skipped_no_apply_control` marks a page that loaded without a recognised Apply control. It also carries no dedup weight: the check not finding a button is not proof the posting is closed, so the next scan verifies the URL again. Unlike the other two observational statuses, which are decided from data already in hand, this re-check costs a browser load every time the URL comes up. It is recorded once per posting.
 
 The scanner writes the other statuses in that list itself: `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.
 

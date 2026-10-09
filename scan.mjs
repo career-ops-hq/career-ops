@@ -1467,7 +1467,9 @@ const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
   // The browser check could not see an Apply control. That says something
   // about the check, not the posting: on boards whose button it does not
   // recognise, a live posting would otherwise be dropped once and never
-  // offered again (#4832).
+  // offered again (#4832). Unlike the other two statuses, which are decided
+  // from data already in hand, this one costs a browser load every time the
+  // URL is checked again, since nothing is remembered to skip it.
   'skipped_no_apply_control',
 ]);
 
