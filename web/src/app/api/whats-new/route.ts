@@ -30,8 +30,11 @@ export async function GET(req: Request) {
   let rows: string[];
   try {
     rows = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-history.tsv"), "utf8").split("\n");
-  } catch {
-    return Response.json({ offers: [], count: 0 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return Response.json({ offers: [], count: 0 });
+    }
+    return Response.json({ available: false, offers: [], count: 0, error: "Could not read scan history. Check the file and retry." }, { status: 500 });
   }
 
   // Roles already evaluated → don't resurface as "new". Keyed on company AND
