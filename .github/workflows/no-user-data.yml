@@ -33,15 +33,26 @@ jobs:
             });
 
             // User-layer paths from DATA_CONTRACT.md and update-system.mjs.
-            // voice-dna.md is omitted on purpose: it ships as a populated
-            // system default, so edits to it are legit.
+            // Every update-system.mjs USER_PATHS entry must be blocked here
+            // unless tests/no-user-data-batch-guard.test.mjs allowlists it with
+            // a reason (#4891). Omitted on purpose: voice-dna.md ships as a
+            // populated system default, so edits to it are legit; .claude/
+            // settings.json and .claude/hooks/ are project harness config that
+            // is not gitignored and may legitimately be committed.
             const USER_PATHS = [
               /^cv\.md$/,
               /^config\/profile\.yml$/,
+              /^config\/plugins\.yml$/,
               /^modes\/_profile\.md$/,
               /^modes\/_custom\.md$/,
+              /^modes\/_brief\.md$/,
               /^portals\.yml$/,
               /^article-digest\.md$/,
+              /^opencode\.json$/,
+              /^plugins\.lock$/,
+              /^plugins\.local\//,
+              /^\.career-ops-web\//,
+              /^documents\//,
               /^interview-prep\//,
               /^data\//,
               /^reports\//,
@@ -63,9 +74,9 @@ jobs:
             // to be added on purpose.
             //
             // Everywhere else the filename rule stands: data/, reports/, jds/,
-            // output/, interview-prep/ and writing-samples/ track real .gitkeep
-            // keepers and dir READMEs, and narrowing this globally would fail
-            // every PR that touches one.
+            // output/, documents/, interview-prep/ and writing-samples/ track
+            // real .gitkeep keepers and dir READMEs, and narrowing this globally
+            // would fail every PR that touches one.
             const BATCH_SOURCES = new Set([
               'batch/README.md',
               'batch/aggregate-tokens.mjs',
