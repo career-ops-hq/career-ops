@@ -1593,12 +1593,17 @@ export function resolveDedupIncludeLanguage(config = {}) {
   return config.scan_history?.dedup_include_language === true;
 }
 
+// Query params naming the language a page renders in. Stripped from the dedup
+// key like the rest of DEDUP_STRIP_PARAMS, and read back by
+// languageFormsFromUrl to tell a posting's language versions apart.
+const URL_LANGUAGE_PARAMS = ['language', 'lang', 'locale'];
+
 // Query params that carry no identity information for a job posting — safe to
 // strip when computing the dedup key. Deliberately an allowlist rather than
 // "strip everything": several ATSes key the posting off a query param (e.g.
 // Greenhouse's `gh_jid`), so a blanket strip would collapse distinct roles.
 const DEDUP_STRIP_PARAMS = new Set([
-  'language', 'lang', 'locale',
+  ...URL_LANGUAGE_PARAMS,
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
   'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
   'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
@@ -1649,6 +1654,91 @@ export function normalizeUrlForDedup(url) {
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
+}
+
+/**
+ * The posting language a URL asks for, as dedup forms; none when it names none.
+ *
+ * {@link normalizeUrlForDedup} drops these params, so the language versions of
+ * one posting share a URL key. Reading the param back tells those versions
+ * apart on rows that carry no `language` cell of their own (pipeline.md,
+ * applications.md, scan-history rows written without one).
+ *
+ * @param {unknown} url
+ * @returns {string[]} Zero or one form, as {@link languageFormsForDedup}.
+ */
+export function languageFormsFromUrl(url) {
+  if (typeof url !== 'string' || !url) return [];
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return [];
+  }
+  for (const [name, value] of parsed.searchParams) {
+    if (URL_LANGUAGE_PARAMS.includes(name.toLowerCase())) return languageFormsForDedup(value);
+  }
+  return [];
+}
+
+/**
+ * Title form for telling apart the language versions of one posting: the same
+ * provider wrote both sides, so only case and whitespace are folded.
+ *
+ * @param {unknown} title
+ * @returns {string}
+ */
+export function variantTitleKey(title) {
+  return String(title ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * Record one seen version of a posting under its URL key, in the shape
+ * {@link isUnseenLanguageVersion} reads.
+ *
+ * @param {Map<string, Array<{languages: string[], title: string}>>} variantsByUrl
+ * @param {string} key - From {@link normalizeUrlForDedup}.
+ * @param {string[]} languages - Language forms; empty when unknown.
+ * @param {unknown} [title] - Raw title; omitted when the source records none.
+ */
+export function recordUrlVariant(variantsByUrl, key, languages, title) {
+  let rows = variantsByUrl.get(key);
+  if (!rows) variantsByUrl.set(key, (rows = []));
+  rows.push({ languages, title: variantTitleKey(title) });
+}
+
+/**
+ * Whether a candidate whose URL key was already seen is a language version of
+ * that posting which none of the seen rows was in.
+ *
+ * Some ATSes serve every language version of a posting at one URL with a
+ * language param, which {@link normalizeUrlForDedup} drops, so the versions
+ * share a URL key. A seen row's language is its own when it recorded one.
+ * Otherwise it is resolved against `siblings`, this scan's versions of the same
+ * posting in provider order: the one sibling whose title matches the row's,
+ * else the first sibling — a provider emits a posting's own default language
+ * first. True only when every seen row resolves to a language and none is the
+ * candidate's; a candidate of unknown language stays a duplicate.
+ *
+ * @param {Array<{languages: string[], title: string}>|undefined} seenRows - From {@link recordUrlVariant}.
+ * @param {{languages: string[], title: unknown}} candidate
+ * @param {Array<{languages: string[], title: unknown}>} siblings - Including the candidate.
+ * @returns {boolean}
+ */
+export function isUnseenLanguageVersion(seenRows, candidate, siblings = []) {
+  if (!Array.isArray(seenRows) || seenRows.length === 0) return false;
+  if (!candidate.languages.length) return false;
+  const known = siblings.filter(sibling => sibling.languages.length > 0);
+  const resolve = (row) => {
+    if (row.languages.length) return row.languages;
+    const titled = row.title ? known.filter(sibling => variantTitleKey(sibling.title) === row.title) : [];
+    if (titled.length === 1) return titled[0].languages;
+    return known[0]?.languages ?? [];
+  };
+  return seenRows.every((row) => {
+    const languages = resolve(row);
+    return languages.length > 0 && !candidate.languages.some(language => languages.includes(language));
+  });
 }
 
 /**
@@ -1849,6 +1939,9 @@ function extractPipelineCompanyRole(line) {
 export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
+  // Which language versions each seen URL key stands for — read by
+  // isUnseenLanguageVersion under scan_history.dedup_include_language.
+  const variants = new Map();
   // Rows the age policy has released. Held rather than counted here: the two
   // sources parsed below carry no age policy of their own, so a row the TTL has
   // just freed can be re-pinned a few lines later. The count is taken at the end,
@@ -1860,7 +1953,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   const historyLines = scanHistoryText.split('\n');
   if (historyLines[0].startsWith('url\t')) historyLines.shift();
   for (const line of historyLines) {
-    const { url, first_seen: firstSeen, portal, status: rawStatus } = parseScanHistoryLine(line);
+    const { url, first_seen: firstSeen, portal, status: rawStatus, title, language } = parseScanHistoryLine(line);
     const status = rawStatus || 'added';
     if (!url) continue;
     // Not pinned and not a recheck candidate either: the row records a config
@@ -1869,7 +1962,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
-      seen.add(normalizeUrlForDedup(url));
+      const key = normalizeUrlForDedup(url);
+      seen.add(key);
+      const recorded = languageFormsForDedup(language);
+      recordUrlVariant(variants, key, recorded.length ? recorded : languageFormsFromUrl(url), title);
       if (extraTokensFor) {
         for (const token of [].concat(extraTokensFor(url, portal) || [])) {
           if (token) seen.add(token);
@@ -1924,11 +2020,14 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     const done = /^\s*- \[x\]/i.test(line);
     if ((done || inProcessed) && recheckCandidates.has(key)) continue;
     seen.add(key);
+    recordUrlVariant(variants, key, languageFormsFromUrl(url), extractPipelineCompanyRole(line)?.role);
   }
 
   // applications.md — extract URLs from report links and any inline URLs
   for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
-    seen.add(normalizeUrlForDedup(match[0]));
+    const key = normalizeUrlForDedup(match[0]);
+    seen.add(key);
+    recordUrlVariant(variants, key, languageFormsFromUrl(match[0]));
   }
 
   // Counted against the finished set: a released row that applications.md or an
@@ -1937,7 +2036,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   let recheckEligible = 0;
   for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
 
-  return { seen, recheckEligible };
+  return { seen, recheckEligible, variants };
 }
 
 // Path options mirror mergeIntoPipeline's seam below: the defaults are the
@@ -3013,7 +3112,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
   const scanHistoryText = readIfExists(scanHistoryPath);
   const pipelineText = readIfExists(pipelinePath);
   const applicationsText = readIfExists(applicationsPath);
-  const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
+  const { seen, recheckEligible, variants: seenUrlVariants } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
   // Preserve the exported snapshot field for existing callers. The scanner's
   // decision uses locatedRequisitionsByBase, not this legacy set.
   const seenCompanyRoleBases = new Set();
@@ -3032,7 +3131,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
     locatedLanguagesByBase,
   });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
-  return { seen, recheckEligible, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
+  return { seen, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -3946,6 +4045,7 @@ async function main() {
   const dedupIncludeLanguage = resolveDedupIncludeLanguage(config);
   const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany, { includeLocation: dedupIncludeLocation });
   const seenUrls = dedupSnapshot.seen;
+  const seenUrlVariants = dedupSnapshot.seenUrlVariants ?? new Map();
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
   const seenCompanyRoleRequisitions = dedupSnapshot.seenCompanyRoleRequisitions ?? new Map();
   const locatedRequisitionsByBase = dedupSnapshot.locatedRequisitionsByBase ?? new Map();
@@ -4048,6 +4148,9 @@ async function main() {
       sinceMs: earlyStopSinceMs,
       includeUndated: true,
       locationHints: config.location_filter,
+      // A provider that serves extra language versions of a posting at extra
+      // cost fetches them only when the scan will keep them.
+      dedupIncludeLanguage,
     };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
@@ -4073,6 +4176,21 @@ async function main() {
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
+      }
+
+      // This fetch's language versions of each posting, in provider order and
+      // before any filter: a seen row is matched against every version, also
+      // those a filter rejects (a German title can fail a title filter that its
+      // English version passes).
+      const siblingsByUrl = new Map();
+      if (dedupIncludeLanguage) {
+        for (const job of jobs) {
+          const languages = languageFormsForDedup(job?.language);
+          if (!languages.length) continue;
+          const key = normalizeUrlForDedup(job.url);
+          if (!siblingsByUrl.has(key)) siblingsByUrl.set(key, []);
+          siblingsByUrl.get(key).push({ languages, title: job.title });
+        }
       }
 
       const declaredFields = normalizeFilterOn(company.filter_on);
@@ -4178,9 +4296,22 @@ async function main() {
           continue;
         }
         const dedupUrl = normalizeUrlForDedup(job.url);
+        const language = languageFormsForDedup(job.language);
+        // A seen URL key passes only as a language version of that posting no
+        // seen row was in. Such a version skips the company+role check below as
+        // well: the row it would match there is the same posting's, already
+        // resolved here, and an unknown-language row would hold it back again.
+        let newLanguageVersion = false;
         if (seenUrls.has(dedupUrl)) {
-          totalDupes++;
-          continue;
+          newLanguageVersion = dedupIncludeLanguage && isUnseenLanguageVersion(
+            seenUrlVariants.get(dedupUrl),
+            { languages: language, title: job.title },
+            siblingsByUrl.get(dedupUrl),
+          );
+          if (!newLanguageVersion) {
+            totalDupes++;
+            continue;
+          }
         }
         // Compare requisitions only in overlapping locations: the exact key,
         // truly locationless wildcard rows, and (for a locationless candidate)
@@ -4193,8 +4324,7 @@ async function main() {
             ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
             : baseKey);
         const requisition = requisitionIdsForDedup({ url: job.url, text: job.title, requisitionId: job.requisitionId });
-        const language = languageFormsForDedup(job.language);
-        if (matchesSeenCompanyRole({ key, baseKey, seen: seenCompanyRoles,
+        if (!newLanguageVersion && matchesSeenCompanyRole({ key, baseKey, seen: seenCompanyRoles,
           requisitions: seenCompanyRoleRequisitions, locatedRequisitions: locatedRequisitionsByBase,
           languages: seenCompanyRoleLanguages, locatedLanguages: locatedLanguagesByBase },
         requisition, dedupIncludeLanguage ? language : [])) {
@@ -4215,6 +4345,7 @@ async function main() {
         // city THIS run also suppresses a locationless twin later in the run —
         // not only across runs.
         seenUrls.add(dedupUrl);
+        recordUrlVariant(seenUrlVariants, dedupUrl, language, job.title);
         if (key !== null) {
           seenCompanyRoles.add(key);
           recordForms(seenCompanyRoleRequisitions, key, requisition);
