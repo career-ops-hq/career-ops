@@ -338,7 +338,7 @@ https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	
 https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de	listing_v1_example
 ```
 
-The first row comes from a provider that reports no requisition id or language, so its last two cells are empty; the second from one that reports both.
+The first row comes from a provider that reports no requisition id or language, so its `requisition_id` and `language` cells are empty while `listing_key` still carries the key from its resolved ATS identity; the second comes from one that reports all three.
 
 ### Filtering by posted date
 

@@ -4404,7 +4404,7 @@ async function main() {
         const priorKeys = previous && verifyDedupKeys.get(previous);
         if (priorKeys) verifyDedupKeys.set(migrated, {
           ...priorKeys,
-          requisition: requisitionIdsForDedup({ url: migrated.url, text: migrated.title }),
+          requisition: requisitionIdsForDedup({ url: migrated.url, text: migrated.title, requisitionId: migrated.requisitionId }),
           language: languageFormsForDedup(migrated.language),
         });
       }
