@@ -281,7 +281,7 @@ Run this mapping **per audience pack** from Step 4 — same story can map differ
 
 For each gap, suggest: "You need a story about {topic}. Consider: {specific experience from cv.md that could become a STAR+R story}."
 
-If the user wants to draft missing stories, help them build STAR+R format and append to `interview-prep/story-bank.md`.
+If the user wants to draft missing stories, help them build STAR+R format and append to `interview-prep/story-bank.md` as a `### ` block in the exact format of `templates/story-bank.template.md` (create the file from that template if it is missing). Keep the labels in English, always include `**A (Action):**`, and add no `**Provenance:**` line.
 
 ## Step 6 — Technical Prep Checklist
 

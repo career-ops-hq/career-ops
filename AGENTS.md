@@ -122,19 +122,20 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `templates/cv-template.html` | HTML template for CVs |
 | `templates/cv-template.tex` | LaTeX/Overleaf template for CVs |
 | `article-digest.md` | Compact proof points from portfolio (optional) |
-| `interview-prep/story-bank.md` | Accumulated STAR+R stories |
+| `interview-prep/story-bank.md` | Accumulated STAR+R stories — entry format: `templates/story-bank.template.md` (one definition, read through `lib/story-bank.mjs`) |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel |
 | `generate-pdf.mjs` | Playwright: HTML to PDF |
 | `verify-cv-structure.mjs` | Non-blocking warning on the tailored-CV JSON payload (`modes/pdf.md` step 17b), before HTML/PDF rendering — flags structure silently lost or reordered vs. `cv.md` (a dropped `"· {descriptor}"` suffix, an experience entry out of cv.md's chronological order) that fact-checking alone can't see, since the surviving content is still true; reports `UNVERIFIED` rather than a false pass when `cv.md` doesn't use a supported Experience header convention |
 | `generate-latex.mjs` | LaTeX CV validator + pdflatex compiler |
 | `scan.mjs` | Zero-token portal scanner (Greenhouse/Ashby/Lever APIs, zero LLM cost) |
-| `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS) plus board seeds derived locally from tracker/scan-history URLs, filtered by portals.yml `title_filter`/`location_filter`; checkpoints every 500 companies, `--resume` continues an interrupted sweep |
+| `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner over full public ATS datasets (Greenhouse/Lever/Ashby/Workday/iCIMS) plus board seeds derived locally from tracker/scan-history URLs, filtered by portals.yml `title_filter`/`location_filter`; optional `domain_filter` gates whole boards on industry relevance before any title is tested (opt-in, #3105); checkpoints every 500 companies, `--resume` continues an interrupted sweep |
 | `scan-interamt.mjs` | Playwright browser scanner for Interamt.de (German public sector portal — Apache Wicket, no REST API) |
 | `audit-portals.mjs` | Content audit of `portals.yml` — the companion to `verify-portals.mjs`, which answers "does this board answer?" but never "*whose* postings are these?". Fetches each enabled board through the same `providers/` modules `scan.mjs` uses and reports provider + posting count + sample titles/locations per entry, verdicts worst-first: `no-provider` (enabled but nothing claims it, so `scan.mjs` skips it silently — the highest-value check), `error`, `empty`, `small`, `ok`. `--baseline prev.json` compares against an earlier `--json` run and flags boards that lost ≥50% of their postings, the shape an ATS migration takes. **It cannot detect a well-formed board belonging to the wrong entity** — a parent company's board is full of real jobs — so it surfaces the evidence a reader needs instead of pretending to a verdict (JSON, `--summary`, `--strict`) |
 | `scan-dayforce.mjs` | Playwright browser scanner for Dayforce (Ceridian) Recruiting career sites (jobs.dayforcehcm.com — Cloudflare + NextAuth CSRF gated, no bare-HTTP-reachable API); reads `dayforce_boards` from `portals.yml` |
-| `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text) |
+| `check-liveness.mjs` / `liveness-core.mjs` | Job posting liveness checker + shared logic (expired signals win over generic Apply text). An `expired` verdict is recorded back into `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead once stops resurfacing in the web "new matches this week" feed (#3891). Only URLs the history already knows are written, once each; `uncertain` is never recorded, and `--no-record` makes the run leave no trace |
 | `fetch-jd.mjs` | JD text from a known ATS API (Greenhouse/Lever/Ashby/Workday — `liveness-api.mjs`'s `JD_TEXT_API_ATS`), no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
 | `set-status.mjs` | Canonical tracker-row update: `node set-status.mjs <report#\|company> <State> [--note] [--force]` — strict states.yml validation, report-link mismatch guard, shared lock, atomic write |
+| `fix-report-links.mjs` | Repairs tracker rows whose Report link points at a missing file: rewrites only that cell to `—` (single-link cells only; others listed for hand review), same broken-link rule as `verify-pipeline.mjs` Check 3 via `findDeadReportLink()` in `tracker-utils.mjs`; `--dry-run` previews, otherwise `.bak` backup + locked atomic write; idempotent |
 | `invite-match.mjs` | Fuzzy-match a pasted interview invite (company, date, req ID) against the tracker, ranking candidates when a company has multiple entries (JSON or `--summary`) |
 | `paste-reply.mjs` | Manual/no-Gmail input into reply-watch classification — normalizes a pasted/file email (subject/from/body) and appends to `data/reply-candidates.json`; never overwrites entries, never classifies, never touches the tracker |
 | `analyze-patterns.mjs` | Pattern analysis incl. per-ATS-vendor advance rate (JSON) |
@@ -156,7 +157,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`) |
 | `ats-payload.mjs` | ATS payload transform for `build-cv-html.mjs` payloads — one safe transform (fold `competencies[]` into `skills[]`, idempotent, so the same facts ship comma-delimited under a header parsers recognise) plus three lints it reports and deliberately never applies (`employer-in-role`, `parenthetical-in-company`, `multiple-date-ranges`). Payload on stdout, findings on stderr; read-only (never writes `cv.md` / `config/profile.yml`) |
 | `jd-skill-gap.mjs` | Zero-LLM JD skill classifier vs `cv.md`: existing / supportedByResume / gap; never auto-adds claims to `cv.md` (JSON or `--summary`) |
-| `cv-title-check.mjs` | Zero-LLM job-title consistency checker — pairs each tailored-CV `{company, dates}` entry against `cv.md`'s canonical entry and flags an exact-string title mismatch (case/whitespace-normalized, never fuzzy); warn-only, never edits either file (JSON or `--summary`) |
+| `cv-title-check.mjs` | Zero-LLM job-title consistency checker — pairs each tailored-CV `{company, dates}` entry against `cv.md`'s canonical entry and flags an exact-string title mismatch (case/whitespace-normalized, never fuzzy); warn-only, never edits either file; reads `cv.md` from the data root, and reports "title check did not run" instead of ✅ when nothing could be compared (JSON or `--summary`) |
 | `contacts.mjs` | Job-search phonebook → vCard 3.0 exporter — stable UIDs so re-imports update instead of duplicating on platforms that honor vCard UID (JSON, `--summary`, `--vcf`, `--caller-id`) |
 | `contact-lookup.mjs` | Saved-contact company lookup over `data/contacts.tsv`, run by `contacto` before any cold WebSearch to surface a prior contact (e.g. a past interviewer, or a contact from an earlier application) at the same company as an internal-referral lead; exact-key matching via `normalizeCompany()` (tracker-utils.mjs), not fuzzy (`--company <name>`, `--summary`) |
 | `linkedin-join.mjs` | Warm-intro finder — joins a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?"; zero-token, offline, read-only. Operational only: never a scoring input, never a content source (JSON, `--summary`, `--company <name>`, `--tsv`) |
@@ -226,7 +227,7 @@ If `cv.md` is missing, ask:
 >
 > Which do you prefer?"
 
-Create `cv.md` from whatever they provide — clean markdown with standard sections (Summary, Experience, Projects, Education, Skills).
+Create `cv.md` from whatever they provide — clean markdown with standard sections (Summary, Experience, Projects, Education, Skills). The CV checks (`cv-title-check.mjs`, `verify-cv-structure.mjs`, `jd-skill-gap.mjs`) find jobs and skills by heading, so keep the shape `examples/cv-example.md` uses: an Experience section named `## Experience`, `## Work Experience`, `## Professional Experience`, `## Employment History` or `## Work History`; each job as `### Company — Location`, then a bold `**Title**` line, then a dates line; skills under a heading containing "Skills". Pandoc output converted from a .docx (`## **[Experience]{.smallcaps}**`, `---` dashes, trailing `\` hard breaks) is read too (#4879). `node doctor.mjs` warns when it cannot find the Experience section.
 
 #### Step 2: Profile (required)
 If `config/profile.yml` is missing, copy from `config/profile.example.yml` and ask:
@@ -388,10 +389,12 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Wants to check if a company is safe to join (red-flag analysis) | `interview-redflag` |
 | Wants to generate CV/PDF | `pdf` |
 | Wants to build, import, review, or validate a Master Career Profile | `master-profile` — source-backed CV import with explicit approval; profile selection and PDF integration are not yet implemented |
-| Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |
+| Wants to check if a generated CV is ATS-friendly (parseability score + issues), or to prepare a render payload for an ATS parser before building the HTML | `ats` — two stages: `ats-payload.mjs` on the payload (one safe fold, three lints it only reports), then `verify-ats.mjs` on the generated HTML (score + issues) |
 | Wants a hiring-manager's read on a tailored CV before sending | `pdf --hm-audit` — opt-in pass (`modes/pdf/hm-audit.md`), off by default: researches the likely reviewer, dispatches a separate agent role-playing them, and returns a bullet-by-bullet keep/cut/rewrite verdict |
+| Wants an ATS-parseable copy of the tailored CV to paste into an application form, alongside the styled PDF | `pdf --ats`: opt-in Step 21a, off by default. Folds the payload through `ats-payload.mjs`, renders it with the `ats` template to `output/cv-{candidate}-{company}-ats.html`, and fact-gates it. Not a bundle artifact and not the tracker's PDF column |
 | Wants the LaTeX/Overleaf CV path | `latex` |
 | Maintains their own hand-tuned `.tex` CV and wants it tailored in place (opt-in; cv.md stays the default) | `latex-tex` |
+| Wants a tailored CV as markdown instead of a PDF (to paste into their own template or editor) | `text` |
 | Wants a cover letter | `cover` |
 | Wants to add a role to the tracker manually | `add` |
 | Wants to discover CV competencies they forgot to write down | `expand` |
@@ -400,6 +403,7 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Asks about application status | `tracker` |
 | Fills out application form | `apply` |
 | Searches for new offers | `scan` |
+| Wants to turn a list of company names into scannable ATS boards / add them to `portals.yml` | `discover` |
 | Processes pending URLs | `pipeline` |
 | Wants a fast first-pass filter before full evaluation | `triage` |
 | Batch processes offers | `batch` |
@@ -437,12 +441,14 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 
 ## Offer Verification -- MANDATORY
 
-**NEVER trust WebSearch/WebFetch to verify if an offer is still active.** ALWAYS use Playwright:
+**NEVER decide whether an offer is active from a bare WebSearch/WebFetch snippet.** Start with `node check-liveness.mjs <url>`: it checks free public ATS APIs first, then falls back to Playwright only when the API returns `null`. A non-null `uncertain` result does not trigger Playwright; it remains unconfirmed.
+
+When checking the browser fallback manually:
 1. `browser_navigate` to the URL
 2. `browser_snapshot` to read content
 3. Explicit expired/closed evidence or 404/410 = closed. An unreadable JD, loading placeholder, or login/error page is **unconfirmed**, not closed. Check embedded iframes before judging a footer/navbar-only page. Title + description + Apply = active; an Apply button alone is not a JD.
 
-**Exception for batch workers (headless mode):** Playwright is unavailable in headless pipe mode. Use WebFetch as fallback and mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
+**Exception for batch workers (headless mode):** use public API verification where available. If the API cannot confirm the posting and browser verification is unavailable, WebFetch may supply JD text, but mark the report header `**Verification:** unconfirmed (batch mode)`; the user can verify manually later.
 
 ### LinkedIn JD loading guard (#4121)
 
@@ -502,6 +508,10 @@ Headless worker command per CLI:
 - Output in `output/` (gitignored) · Reports in `reports/` · JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md) · Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
 
+**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
+- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
+- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
+
 ### JD captures (`jds/`)
 
 `local:jds/{file}` is the reference form everywhere a JD is cited — `data/pipeline.md` entries, `triage`, `pipeline`, and the tracker notes column. Any filename is valid behind it; several writers coexist and none is canonical:
@@ -530,9 +540,6 @@ If they say yes: run `node hired-share.mjs --report N --anonymity <their choice>
 **Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
 
 **Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
-**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `--report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
-- **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
-- **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 
@@ -560,6 +567,8 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 
 **Optional posting URL — the deterministic dedup key:** label it `url` in the header, or (headerless) append it as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased with the DNS root label folded so `example.com.` and `example.com` are one key, trailing slash dropped, and only **non-identity** fragments dropped — a recognized `#/job/{id}` or `#/jobs/{id}` SPA route is promoted into the key before the fragment is cleared, so two spellings of one such posting stay one row and two different ids stay two), and otherwise falls back to the report-number / entry-number / fuzzy company+role tiers. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524) — but only while both URLs are **employer-controlled** (an ATS board or the employer's own careers page). Aggregators (LinkedIn, Indeed, Glassdoor, ZipRecruiter, …) re-list one requisition under their own URL, so a mismatch with an aggregator on either side is not by itself evidence about identity and the fuzzy company+role tier still decides (#3652) — that is how a slug-vs-id spelling (`/jobs/view/director-of-marketing-at-acme-4001` vs `/jobs/view/4001`) and a regional host variant (`uk.` vs `www.`) stay one row. The exception is the **posting ID**: on a known aggregator `url-key.mjs` extracts the requisition id from the URL (LinkedIn `/jobs/view/{id}` and `?currentJobId=`, Indeed `?jk=`/`?vjk=`), and two ids extracted from the **same** aggregator that differ *are* proof of two distinct openings, so the tier is blocked and both rows survive. Same id, an id this module cannot extract, or ids from two different aggregators all stay unknown. Staying unknown has a cost on an aggregator whose id shape is not mapped yet: two genuinely different requisitions there fuzzy-match into one row. That is a known limitation, not the intended end state — the workaround today is the req-id-in-notes rule below, and the fix is a verified id shape for that board. Where no id is extractable the fuzzy tier still cannot tell two genuinely different requisitions apart when their titles match, so put the req/job/posting ID in the **notes** column on both rows: `merge-tracker.mjs` reads it and treats rows carrying different recognizable IDs as distinct openings (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column headerless TSVs and trackers with no `URL` header column behave exactly as before. Explicitly run `node merge-tracker.mjs --backfill-urls` to append a missing trailing `URL` column and populate resolvable rows from their linked reports; ordinary merges never change the tracker schema. The migration supports `--dry-run` and is idempotent.
 
+**URL cell rendering (#3516):** in the **TSV the `url` field is always a raw URL** — that boundary is deliberate, because the first-party web writes those TSVs and never reads the tracker's URL cell. `merge-tracker.mjs` renders the cell it writes into `applications.md` as a markdown link with a short label — the ATS vendor on a multi-tenant board (`[ashby](https://jobs.ashbyhq.com/…)`), otherwise the host (`[careers.snowflake.com](https://…)`) — because a raw posting URL runs to 141 characters and pushes every other column off screen. **The href is the dedup key, so every reader must extract it before normalizing:** `normalizeUrl('[label](url)')` returns `''`, and `''` means "this row has no URL", so a reader that misses the link form does not error — it silently drops the row to fuzzy company+role matching. Use `extractCellUrl` (`tracker-parse.mjs`) — `parseTrackerRow` already applies it, so `row.url` is always the href. Rows are converted as merges rewrite them; convert a whole existing tracker with `node merge-tracker.mjs --migrate-urls [--dry-run]` (idempotent, and leaves a hand-written label alone; a row whose cell count does not match the header — usually a literal `|` inside a URL — is left untouched and named by line, for fixing by hand). **What is guaranteed is the dedup key, not the literal href:** a space inside a linked destination is written as `%20` (the same key — `new URL()` encodes it identically), so the stored text can differ while every row's normalized key cannot; the writer reads each rendered cell back and verifies this. A URL the link form cannot carry with its key intact is written as a **bare** cell instead, which reads back verbatim: one containing a `|`, a backslash, an unmatched parenthesis, or a tab (URL parsing strips a tab rather than encoding it, so `%09` would be a different key). A bare cell carries no label, hand-written or derived.
+
 **Report link normalization:** the TSV always carries a root-relative `[num](reports/...)` link; `merge-tracker.mjs` rewrites it relative to the tracker's own directory (`../reports/...` at `data/applications.md`, `reports/...` at root) so links stay clickable. Idempotent; fix an existing tracker with `node merge-tracker.mjs --migrate` (#760).
 
 **Missing report file (#4748):** at merge time `merge-tracker.mjs` checks that a report link resolves to a file from the tracker's own directory or the data root (the same two bases `verify-pipeline.mjs` Check 3 uses, so a link warned about here is one it would flag later). A row whose link points at a missing report is still merged unchanged (an application record is never dropped or rewritten over a missing report), but a `⚠️` warning names the TSV, the row and the link, and the summary counts them; `verify-pipeline.mjs` keeps flagging the row until the report exists. Cells with no link (`—`, `N/A`, empty) are the "no report" convention and are not flagged.
@@ -574,7 +583,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 2. **UPDATE status/notes of existing entries via `node set-status.mjs <report#|company> <State> [--note]`** — the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF), and `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
 4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs`
+5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs` · Repair dead report links: `node fix-report-links.mjs --dry-run`, then without `--dry-run`
 6. **Portal coverage is a separate health axis from portal reachability.** `node verify-portals.mjs` proves each board answers; `node audit-portals.mjs` audits each board's content, since a well-formed board can still belong to the wrong entity and no heuristic catches that — see its own "Honest limit" note. The offline half of the audit — *which enabled entries does no provider claim?* — is pure config matching, so it runs inside `verify-pipeline.mjs` (check 15) at zero network cost; the live half stays a separate command because it needs a fetch per board. Run the audit after adding companies and periodically thereafter — an entry can rot into uselessness in two ways that reachability checks call healthy: no provider claims its `careers_url` (so `scan.mjs` skips it on every run while it reads as coverage), or it points at a real board belonging to the wrong entity (a parent company, a regional subsidiary, a same-named unrelated tenant). Keep a `--json` snapshot around and pass it as `--baseline` next time to catch ATS migrations, which show up as a board collapsing toward zero rather than 404ing.
 
 ### Canonical States (applications.md)

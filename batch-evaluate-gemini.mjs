@@ -20,6 +20,7 @@ import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid, checkUrlLiveness, LIVENESS_CONTEXT_OPTIONS } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import {
@@ -364,6 +365,40 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
   }
 }
 
+// Applies the processed results to the CURRENT text of pipeline.md. A run takes
+// minutes and scan.mjs, plugins.mjs or agent-inbox.mjs may append to the file
+// meanwhile, so each result replaces the first line that still equals the
+// pending line it came from (`originals` is the start-of-run snapshot, indexed
+// like `results`). Every other line is kept as it is; a pending line that was
+// edited or removed during the run is reported in `unmatched`, not rewritten.
+export function mergeProcessedLines(currentText, originals, results) {
+  const lines = currentText.split('\n');
+  const unmatched = [];
+  for (const [lineIdx, res] of results.entries()) {
+    if (!res.processed) continue;
+    const at = lines.indexOf(originals[lineIdx]);
+    if (at === -1) {
+      unmatched.push(originals[lineIdx].match(/https?:\/\/\S+/)?.[0] ?? originals[lineIdx].trim());
+      continue;
+    }
+    lines[at] = res.line;
+  }
+  return { text: lines.join('\n'), unmatched };
+}
+
+// Reads, merges and writes pipeline.md under pipeline-lock.mjs, the lock every
+// other writer of the file takes. Writing back the start-of-run snapshot erased
+// anything appended during the run, and scan-history.tsv already counted it as seen.
+export async function finishPipelineBatch(pipelinePath, originals, results) {
+  await withPipelineLock(pipelinePath, () => {
+    const { text, unmatched } = mergeProcessedLines(readFileSync(pipelinePath, 'utf-8'), originals, results);
+    for (const url of unmatched) {
+      console.error(`⚠️ pipeline.md changed during the run; left ${url} as it is`);
+    }
+    writeFileSync(pipelinePath, text, 'utf-8');
+  });
+}
+
 async function main() {
   setupEnvironment();
   loadContext();
@@ -402,12 +437,7 @@ async function main() {
   await browser.close();
 
   // Rewrite pipeline.md inline
-  for (const [lineIdx, res] of results.entries()) {
-    if (res.processed) {
-      pipelineLines[lineIdx] = res.line;
-    }
-  }
-  writeFileSync(PATHS.pipeline, pipelineLines.join('\n'), 'utf-8');
+  await finishPipelineBatch(PATHS.pipeline, pipelineLines, results);
 
   console.log(`\n🎉 Batch processing complete! Merging tracker additions...`);
   try {

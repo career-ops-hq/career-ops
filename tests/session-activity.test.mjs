@@ -47,7 +47,7 @@ test('claimActivity succeeds when nothing is claimed, returning a token', () => 
     assert.ok(result.token.length > 0);
     assert.equal(result.owner.key, 'report:042');
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -63,7 +63,7 @@ test('a second claim on the same live key is refused, advisory not a throw', () 
     assert.equal(second.owner.token, first.token);
     assert.equal(second.owner.label, 'first session');
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -87,7 +87,7 @@ test('checkActivity reflects an active claim without consuming or altering it', 
     assert.equal(untouched.active, false);
     assert.equal(untouched.owner, null);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -104,7 +104,7 @@ test('releaseActivity with the correct token frees the key for reclaiming', () =
     assert.equal(reclaim.claimed, true);
     assert.notEqual(reclaim.token, claim.token);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -126,7 +126,7 @@ test('releaseActivity with a wrong or missing token does not release someone els
     // Still active after the throw too.
     assert.equal(checkActivity('report:042', { activityDir }).active, true);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -158,7 +158,7 @@ test('a stale claim (dead pid) is not active, and can be reclaimed', () => {
     assert.equal(reclaim.claimed, true);
     assert.notEqual(reclaim.token, 'stale-token');
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -180,7 +180,7 @@ test('a fresh CLI claim survives its creator PID exiting until TTL expiry', () =
     assert.equal(check.active, true);
     assert.equal(check.owner.token, 'cli-token');
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -201,7 +201,7 @@ test('a process-bound claim expires immediately when its PID is confirmed dead',
     assert.equal(checkActivity('report:process', { activityDir, ttlMs: 60_000 }).active, false);
     assert.equal(claimActivity('report:process', { activityDir, ttlMs: 60_000 }).claimed, true);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -213,7 +213,7 @@ test('claimActivity persists whether a claim is process-bound', () => {
     assert.equal(ordinary.owner.process_bound, false);
     assert.equal(bound.owner.process_bound, true);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -240,7 +240,7 @@ test('a claim past its TTL (no live pid recorded) is not active, and can be recl
     const reclaim = claimActivity('report:042', { activityDir, ttlMs: 1_000 });
     assert.equal(reclaim.claimed, true);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -264,7 +264,7 @@ test('a live PID does not keep an advisory claim active past its TTL', () => {
     assert.equal(reclaim.claimed, true);
     assert.notEqual(reclaim.token, 'old-token');
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -278,7 +278,7 @@ test('a live PID keeps an advisory claim active within its TTL', () => {
     assert.equal(check.owner.token, claim.token);
     assert.equal(claimActivity('report:live-within-ttl', { activityDir, ttlMs: 60_000 }).claimed, false);
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
@@ -323,7 +323,7 @@ test('gcStaleActivity respects the TTL ceiling and immediately removes process-b
     const survivor = JSON.parse(readFileSync(join(activityDir, remaining[0]), 'utf-8'));
     assert.equal(survivor.key, 'report:live');
   } finally {
-    rmSync(activityDir, { recursive: true, force: true });
+    rmSync(activityDir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
