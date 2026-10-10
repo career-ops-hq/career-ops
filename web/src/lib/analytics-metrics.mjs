@@ -54,6 +54,9 @@ export function computeProgressMetrics(applications = [], achievements) {
   }
 
   const count = (status) => statusCounts.get(status) ?? 0;
+  // Tracked is the inventory of every tracker row, including SKIP, as in the
+  // Go dashboard. SKIP is not an applied/active stage; do not silently change
+  // this denominator into an eligible-to-apply subset.
   const tracked = apps.length;
   const applied = achievements?.applied ?? count("APPLIED") + count("RESPONDED") + count("ASSESSMENT") + count("INTERVIEW") + count("OFFER") + count("HIRED") + count("REJECTED");
   const responded = achievements?.responded ?? count("RESPONDED") + count("ASSESSMENT") + count("INTERVIEW") + count("OFFER") + count("HIRED") + count("REJECTED");

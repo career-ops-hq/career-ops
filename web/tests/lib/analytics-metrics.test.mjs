@@ -14,6 +14,19 @@ import {
 
 const app = (status, score = "4.0/5", date = "2026-09-18", extra = {}) => ({ status, score, date, role: "Senior AI Engineer", ...extra });
 
+test("SKIP belongs to Tracked inventory, not active or advanced funnel stages", () => {
+  const before = computeProgressMetrics([app("Applied")]);
+  const after = computeProgressMetrics([app("Applied"), app("SKIP")]);
+  assert.deepEqual(after.funnel.map(stage => stage.count), [2, 1, 0, 0, 0]);
+  assert.equal(after.tracked, before.tracked + 1);
+  assert.equal(after.funnel[1].pct, 50);
+  assert.equal(after.activeApps, before.activeApps);
+  assert.equal(after.totalOffers, before.totalOffers);
+  assert.equal(after.responseRate, before.responseRate);
+  assert.equal(after.interviewRate, before.interviewRate);
+  assert.equal(after.offerRate, before.offerRate);
+});
+
 test("core ledger achievements survive the Analytics view refactor", () => {
   const metrics = computeProgressMetrics([app("Rejected")], { interviews: 1, offers: 1 });
   assert.deepEqual(metrics.funnel.map(stage => stage.count), [1, 1, 1, 1, 1]);

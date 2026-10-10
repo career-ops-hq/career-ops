@@ -36,6 +36,7 @@ export function AnalyticsView({
   insights,
   tab,
   sankey,
+  coreFunnel,
 }: {
   applications: AnalyticsApplication[];
   progress: ProgressMetrics;
@@ -43,6 +44,19 @@ export function AnalyticsView({
   insights: string[];
   tab: "progress" | "search-stats";
   sankey?: React.ReactNode;
+  coreFunnel?: React.ReactNode;
+}) {
+  return (
+    <AnalyticsShell total={applications.length} tab={tab}>
+      {tab === "progress" ? <><ProgressPanel metrics={progress} />{sankey}{coreFunnel}</> : <StatsPanel metrics={stats} insights={insights} />}
+    </AnalyticsShell>
+  );
+}
+
+export function AnalyticsShell({ total, tab, children }: {
+  total: number;
+  tab: "progress" | "search-stats" | "insights";
+  children: React.ReactNode;
 }) {
   return (
     <PageFrame>
@@ -56,20 +70,23 @@ export function AnalyticsView({
         </div>
         <div className="flex items-center gap-2 text-xs text-faint">
           <span className="size-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
-          <span className="tabular-nums">{applications.length}</span> tracked evaluations
+          <span className="tabular-nums">{total}</span> tracked evaluation{total === 1 ? "" : "s"}
         </div>
       </header>
 
       <nav aria-label="Analytics views" className="mt-5 -mb-px flex gap-1 overflow-x-auto border-b border-border">
-        <AnalyticsTab href="/analytics?tab=progress" active={tab === "progress"} icon={<BarChart3 className="size-3.5" />}>
+        <AnalyticsTab href="/analytics" active={tab === "progress"} icon={<BarChart3 className="size-3.5" />}>
           Search progress
+        </AnalyticsTab>
+        <AnalyticsTab href="/analytics?view=insights" active={tab === "insights"} icon={<Sparkles className="size-3.5" />}>
+          Insights
         </AnalyticsTab>
         <AnalyticsTab href="/analytics?tab=search-stats" active={tab === "search-stats"} icon={<Target className="size-3.5" />}>
           Search stats
         </AnalyticsTab>
       </nav>
 
-      {tab === "progress" ? <><ProgressPanel metrics={progress} />{sankey}</> : <StatsPanel metrics={stats} insights={insights} />}
+      {children}
     </PageFrame>
   );
 }
