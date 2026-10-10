@@ -156,133 +156,186 @@ try {
   if (degradedPostCalled) pass('consider.fetch() attempts the POST even when the handshake returns null');
   else fail('consider.fetch() must not skip the POST when handshake fails');
 
-  // ── Real acquireCsrfHandshake path (globalThis.fetch mock) ──────────────────
+  // ── Real acquireCsrfHandshake path (ctx.fetchResponse stub) ────────────────
   // The tests above stub _acquireHandshake and never exercise the actual GET
-  // /jobs logic. This test mocks globalThis.fetch so the real function runs
-  // and verifies that cookie and csrfToken extracted from the response reach
-  // the POST without going through _acquireHandshake.
+  // /jobs logic. These leave it unset so the real function runs, and verify
+  // that the cookie and csrfToken it extracts reach the POST.
+  //
+  // The handshake must go out through ctx.fetchResponse, not bare fetch: the
+  // provider DNS guard only covers requests made by the ctx helpers, so a bare
+  // fetch is a hop whose resolved address nothing validates. globalThis.fetch
+  // is replaced with a recorder for the whole block to prove it is never used.
   {
     const realFetch = globalThis.fetch;
-    let handshakeUrl = null;
-    let handshakeOpts = null;
-    let realHandshakePostHeaders = null;
+    const bareFetchCalls = [];
+    globalThis.fetch = async (url) => { bareFetchCalls.push(String(url)); throw new TypeError('bare fetch'); };
 
-    globalThis.fetch = async (url, opts) => {
-      handshakeUrl = url;
-      handshakeOpts = opts;
-      return {
-        ok: true,
-        url,
-        headers: {
-          getSetCookie: () => ['session=s1; Path=/; HttpOnly', 'session.sig=sig1; Path=/'],
-          get: () => null,
-        },
-        text: async () => `<script>window.__cfg={"csrfToken":"handshake-token-ok"}</script>`,
-      };
+    const handshakeResponse = (status, cookies, html) => {
+      const headers = new Headers({ 'content-type': 'text/html' });
+      for (const c of cookies) headers.append('set-cookie', c);
+      return new Response(html, { status, headers });
     };
 
     try {
+      let handshakeUrl = null;
+      let handshakeOpts = null;
+      let realHandshakePostHeaders = null;
       await consider.fetch(okEntry, {
         // No _acquireHandshake — exercises the real acquireCsrfHandshake.
+        fetchResponse: async (url, opts) => {
+          handshakeUrl = url;
+          handshakeOpts = opts;
+          return handshakeResponse(200,
+            ['session=s1; Path=/; HttpOnly', 'session.sig=sig1; Path=/'],
+            `<script>window.__cfg={"csrfToken":"handshake-token-ok"}</script>`);
+        },
         fetchJson: async (_url, opts) => {
           realHandshakePostHeaders = opts.headers;
           return { jobs: [] };
         },
       });
-    } finally {
-      globalThis.fetch = realFetch;
-    }
 
-    if (handshakeUrl === 'https://jobs.founderful.com/jobs') {
-      pass('acquireCsrfHandshake GETs {origin}/jobs');
-    } else {
-      fail(`acquireCsrfHandshake GET url = ${JSON.stringify(handshakeUrl)}`);
-    }
-    if (handshakeOpts?.redirect === 'error') {
-      pass('acquireCsrfHandshake uses redirect:"error" (SSRF guard)');
-    } else {
-      fail(`acquireCsrfHandshake redirect = ${JSON.stringify(handshakeOpts?.redirect)}`);
-    }
-    if (realHandshakePostHeaders?.cookie === 'session=s1; session.sig=sig1') {
-      pass('acquireCsrfHandshake extracts Set-Cookie and forwards it to the POST');
-    } else {
-      fail(`acquireCsrfHandshake cookie = ${JSON.stringify(realHandshakePostHeaders?.cookie)}`);
-    }
-    if (realHandshakePostHeaders?.['x-csrf-token'] === 'handshake-token-ok') {
-      pass('acquireCsrfHandshake extracts csrfToken from HTML and forwards it to the POST');
-    } else {
-      fail(`acquireCsrfHandshake x-csrf-token = ${JSON.stringify(realHandshakePostHeaders?.['x-csrf-token'])}`);
-    }
+      if (handshakeUrl === 'https://jobs.founderful.com/jobs') {
+        pass('acquireCsrfHandshake GETs {origin}/jobs through ctx.fetchResponse');
+      } else {
+        fail(`acquireCsrfHandshake GET url = ${JSON.stringify(handshakeUrl)}`);
+      }
+      if (handshakeOpts?.redirect === 'error') {
+        pass('acquireCsrfHandshake uses redirect:"error" (SSRF guard)');
+      } else {
+        fail(`acquireCsrfHandshake redirect = ${JSON.stringify(handshakeOpts?.redirect)}`);
+      }
+      if (Number.isFinite(handshakeOpts?.timeoutMs) && handshakeOpts.timeoutMs < 20_000) {
+        pass('acquireCsrfHandshake passes its own (shorter) timeout budget');
+      } else {
+        fail(`acquireCsrfHandshake timeoutMs = ${JSON.stringify(handshakeOpts?.timeoutMs)}`);
+      }
+      if (realHandshakePostHeaders?.cookie === 'session=s1; session.sig=sig1') {
+        pass('acquireCsrfHandshake extracts Set-Cookie and forwards it to the POST');
+      } else {
+        fail(`acquireCsrfHandshake cookie = ${JSON.stringify(realHandshakePostHeaders?.cookie)}`);
+      }
+      if (realHandshakePostHeaders?.['x-csrf-token'] === 'handshake-token-ok') {
+        pass('acquireCsrfHandshake extracts csrfToken from HTML and forwards it to the POST');
+      } else {
+        fail(`acquireCsrfHandshake x-csrf-token = ${JSON.stringify(realHandshakePostHeaders?.['x-csrf-token'])}`);
+      }
 
-    // A redirect on GET /jobs (e.g. redirect to a private IP) must cause the
-    // handshake to degrade gracefully — the POST is still attempted.
-    let redirectDegradedPostCalled = false;
-    const realFetch2 = globalThis.fetch;
-    globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
-    try {
+      // A redirect on GET /jobs (e.g. redirect to a private IP) must cause the
+      // handshake to degrade gracefully — the POST is still attempted.
+      let redirectDegradedPostCalled = false;
       await consider.fetch(okEntry, {
+        fetchResponse: async () => { throw new TypeError('fetch failed'); },
         fetchJson: async () => { redirectDegradedPostCalled = true; return { jobs: [] }; },
       });
-    } finally {
-      globalThis.fetch = realFetch2;
-    }
-    if (redirectDegradedPostCalled) {
-      pass('acquireCsrfHandshake degrades gracefully on redirect (redirect:"error" throws) — POST still attempted');
-    } else {
-      fail('acquireCsrfHandshake must not swallow a redirect error into a full abort');
-    }
+      if (redirectDegradedPostCalled) {
+        pass('acquireCsrfHandshake degrades gracefully on redirect (redirect:"error" throws) — POST still attempted');
+      } else {
+        fail('acquireCsrfHandshake must not swallow a redirect error into a full abort');
+      }
 
-    // !res.ok branch: a non-2xx response from GET /jobs (e.g. 403, 500) must
-    // degrade to null/null and still attempt the POST — the same outcome as the
-    // catch branch, but via a different code path (line 100 in consider.mjs).
-    //
-    // The mock returns deceptive cookies and a csrfToken in the body. If the
-    // !res.ok guard at consider.mjs:100 is removed, acquireCsrfHandshake would
-    // proceed to scrape them and forward credentials to the POST — the
-    // "no cookie/no x-csrf-token" assertions below would then fail, making this
-    // test mutation-resistant. An empty mock (getSetCookie: () => []) would yield
-    // null/null either way and cannot distinguish the guarded path.
-    let notOkGetUrl = null;
-    let notOkPostHeaders = null;
-    let notOkPostCalled = false;
-    const realFetch3 = globalThis.fetch;
-    globalThis.fetch = async (url) => {
-      notOkGetUrl = url;
-      return {
-        ok: false,
-        status: 403,
-        headers: {
-          getSetCookie: () => ['session=s_leaked; Path=/; HttpOnly', 'session.sig=sig_leaked; Path=/'],
-          get: () => null,
-        },
-        text: async () => `<script>window.__cfg={"csrfToken":"leaked-token-403"}</script>`,
-      };
-    };
-    try {
+      // Non-2xx from GET /jobs (e.g. 403, 500) must degrade to null/null and
+      // still attempt the POST. The real ctx.fetchResponse throws on a non-2xx
+      // (the catch branch above); this covers a ctx that hands the response
+      // back instead, which the `!res.ok` guard has to refuse.
+      //
+      // The stub returns deceptive cookies and a csrfToken in the body. If the
+      // `!res.ok` guard is removed, acquireCsrfHandshake would scrape them and
+      // forward credentials to the POST — the "no cookie/no x-csrf-token"
+      // assertion below would then fail, making this test mutation-resistant.
+      // An empty stub would yield null/null either way and cannot distinguish
+      // the guarded path.
+      let notOkGetUrl = null;
+      let notOkPostHeaders = null;
+      let notOkPostCalled = false;
       await consider.fetch(okEntry, {
+        fetchResponse: async (url) => {
+          notOkGetUrl = url;
+          return handshakeResponse(403,
+            ['session=s_leaked; Path=/; HttpOnly', 'session.sig=sig_leaked; Path=/'],
+            `<script>window.__cfg={"csrfToken":"leaked-token-403"}</script>`);
+        },
         fetchJson: async (_url, opts) => {
           notOkPostCalled = true;
           notOkPostHeaders = opts.headers;
           return { jobs: [] };
         },
       });
+      if (notOkGetUrl === 'https://jobs.founderful.com/jobs') {
+        pass('acquireCsrfHandshake !res.ok: GET /jobs was attempted before the guard evaluated res.ok');
+      } else {
+        fail(`acquireCsrfHandshake !res.ok: expected GET https://jobs.founderful.com/jobs, got ${JSON.stringify(notOkGetUrl)}`);
+      }
+      if (notOkPostCalled) {
+        pass('acquireCsrfHandshake !res.ok (403): POST still attempted (graceful degrade, not abort)');
+      } else {
+        fail('acquireCsrfHandshake !res.ok must not abort the POST');
+      }
+      if (!notOkPostHeaders?.cookie && !notOkPostHeaders?.['x-csrf-token']) {
+        pass('acquireCsrfHandshake !res.ok: POST carries no cookie and no x-csrf-token (guard blocks scraping the 403 body)');
+      } else {
+        fail(`acquireCsrfHandshake !res.ok: guard missing — leaked cookie=${notOkPostHeaders?.cookie} csrf=${notOkPostHeaders?.['x-csrf-token']}`);
+      }
+
+      // A ctx with no fetchResponse (older embedder, minimal stub) has no
+      // guarded way to read Set-Cookie. The handshake degrades to null/null and
+      // the POST still goes out — it must not reach for bare fetch instead.
+      let noHelperPostHeaders = null;
+      await consider.fetch(okEntry, {
+        fetchJson: async (_url, opts) => { noHelperPostHeaders = opts.headers; return { jobs: [] }; },
+      });
+      if (noHelperPostHeaders && !noHelperPostHeaders.cookie && !noHelperPostHeaders['x-csrf-token']) {
+        pass('acquireCsrfHandshake degrades (POST without credentials) when ctx has no fetchResponse');
+      } else {
+        fail(`acquireCsrfHandshake without ctx.fetchResponse: POST headers = ${JSON.stringify(noHelperPostHeaders)}`);
+      }
+
+      if (bareFetchCalls.length === 0) {
+        pass('acquireCsrfHandshake never calls bare fetch');
+      } else {
+        fail(`acquireCsrfHandshake called bare fetch for ${JSON.stringify(bareFetchCalls)} — that hop skips the provider DNS guard`);
+      }
     } finally {
-      globalThis.fetch = realFetch3;
+      globalThis.fetch = realFetch;
     }
-    if (notOkGetUrl === 'https://jobs.founderful.com/jobs') {
-      pass('acquireCsrfHandshake !res.ok: GET /jobs was attempted before the guard evaluated res.ok');
-    } else {
-      fail(`acquireCsrfHandshake !res.ok: expected GET https://jobs.founderful.com/jobs, got ${JSON.stringify(notOkGetUrl)}`);
+  }
+
+  // ── The handshake runs under the provider DNS guard ────────────────────────
+  // The point of routing through ctx: with the REAL transport context, the GET
+  // /jobs must execute inside providerFetchContext, which is what makes the
+  // patched dns.lookup validate the address the board host resolves to. The
+  // network layer is the only thing stubbed here — _http.mjs calls the global
+  // fetch from inside the context, so the stub can read the store.
+  {
+    const { makeHttpCtx } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+    const { providerFetchContext } = await import(pathToFileURL(join(ROOT, 'providers/_ip-guard.mjs')).href);
+    const realFetch = globalThis.fetch;
+    const guardedHosts = {};
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      guardedHosts[path] = providerFetchContext.getStore()?.targetHost ?? null;
+      if (path === '/jobs') {
+        return new Response(`<script>window.__cfg={"csrfToken":"guarded-token-ok"}</script>`, {
+          status: 200,
+          headers: { 'content-type': 'text/html', 'set-cookie': 'session=g1; Path=/' },
+        });
+      }
+      return new Response(JSON.stringify({ jobs: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      await consider.fetch(okEntry, makeHttpCtx());
+    } finally {
+      globalThis.fetch = realFetch;
     }
-    if (notOkPostCalled) {
-      pass('acquireCsrfHandshake !res.ok (403): POST still attempted (graceful degrade, not abort)');
+    if (guardedHosts['/jobs'] === 'jobs.founderful.com') {
+      pass('consider handshake GET runs inside providerFetchContext (resolved address is validated)');
     } else {
-      fail('acquireCsrfHandshake !res.ok must not abort the POST');
+      fail(`consider handshake GET ran outside the provider DNS guard (context host = ${JSON.stringify(guardedHosts['/jobs'])})`);
     }
-    if (!notOkPostHeaders?.cookie && !notOkPostHeaders?.['x-csrf-token']) {
-      pass('acquireCsrfHandshake !res.ok: POST carries no cookie and no x-csrf-token (guard blocks scraping the 403 body)');
+    if (guardedHosts['/api-boards/search-jobs'] === 'jobs.founderful.com') {
+      pass('consider POST runs inside providerFetchContext');
     } else {
-      fail(`acquireCsrfHandshake !res.ok: guard missing — leaked cookie=${notOkPostHeaders?.cookie} csrf=${notOkPostHeaders?.['x-csrf-token']}`);
+      fail(`consider POST context host = ${JSON.stringify(guardedHosts['/api-boards/search-jobs'])}`);
     }
   }
 } catch (e) {
