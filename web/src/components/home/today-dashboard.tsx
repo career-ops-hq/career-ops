@@ -15,6 +15,7 @@ import { QuickEvaluate } from "@/components/quick-evaluate";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
+import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -110,7 +111,24 @@ export function TodayDashboard({
   const newThisWeek = freshCount;
   const dataLoading = followupsLoading || freshLoading;
   const dataError = followupsError || freshError;
-  const allClear = !dataLoading && !dataError && newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  // Derived from the flags refetch() already maintains — no second fetch loop
+  // and no second source of truth. The only thing added is the distinction
+  // dataError cannot make: a failure with known work still has a queue to show.
+  const heroState = resolveHeroState({
+    followupsLoading,
+    freshLoading,
+    followupsError,
+    freshError,
+    overdue,
+    newThisWeek,
+    awaitingCount: awaiting.length,
+  });
+  const allClear = mayClaimAllClear(heroState);
+  const missingSources = missingSourceLabel({ followupsError, freshError });
+  // Printed instead of the raw state: refetch() leaves the previous count in
+  // place when a source fails, so `overdue` can still hold a number from before
+  // the outage. See displayCounts().
+  const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -124,30 +142,42 @@ export function TodayDashboard({
             <span className="text-faint">//</span> today · <span className="tabular-nums">{dateLabel}</span>
           </p>
           <h1 className={`${instrumentSerif.className} mt-3 text-4xl leading-[1.05] text-landing md:text-5xl`}>
-            {dataLoading ? (
+            {heroState === "loading" ? (
               <>Your career queue is loading.</>
-            ) : dataError ? (
+            ) : heroState === "unavailable" ? (
               <>Some updates are unavailable.</>
             ) : allClear ? (
               <>You&apos;re all caught up.</>
-            ) : (
+            ) : showsQueue(heroState) ? (
               <>
-                {newThisWeek > 0 && (
+                {shown.newThisWeek > 0 && (
                   <>
-                    <span className="text-brand tabular-nums">{newThisWeek}</span> new match{newThisWeek === 1 ? "" : "es"} this week
+                    <span className="text-brand tabular-nums">{shown.newThisWeek}</span> new match{shown.newThisWeek === 1 ? "" : "es"} this week
                   </>
                 )}
-                {newThisWeek > 0 && overdue > 0 && <span className="text-faint"> · </span>}
-                {overdue > 0 && (
+                {shown.newThisWeek > 0 && shown.overdue > 0 && <span className="text-faint"> · </span>}
+                {shown.overdue > 0 && (
                   <>
-                    <span className="text-brand tabular-nums">{overdue}</span> follow-up{overdue === 1 ? "" : "s"} due
+                    <span className="text-brand tabular-nums">{shown.overdue}</span> follow-up{shown.overdue === 1 ? "" : "s"} due
                   </>
                 )}
+                {/* queue-partial with work known only from the server snapshot:
+                    both loops are down but the pipeline still has decisions
+                    waiting, so the queue is real while neither count is. */}
+                {shown.newThisWeek === 0 && shown.overdue === 0 && <>Your queue is waiting.</>}
               </>
+            ) : (
+              <>Your queue is waiting.</>
             )}
           </h1>
           <p className="mt-4 max-w-xl text-sm text-muted">
-            {dataError ? "We couldn't load all of today's updates. Try again." : allClear ? "I'll keep scanning the market in the background and surface anything that fits." : "Your action queue for today — discovery and follow-ups, in one place."}
+            {heroState === "unavailable"
+              ? "We couldn't load all of today's updates. Try again."
+              : heroState === "queue-partial"
+                ? `${missingSources} could not be read, so this may be missing work. What loaded is below.`
+                : allClear
+                  ? "I'll keep scanning the market in the background and surface anything that fits."
+                  : "Your action queue for today — discovery and follow-ups, in one place."}
           </p>
           <div className="mt-6 flex flex-wrap gap-2.5">
             <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
@@ -163,7 +193,7 @@ export function TodayDashboard({
 
       {dataError && !dataLoading && (
         <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface/40 px-5 py-4 text-sm text-muted">
-          <p>{followupsError && freshError ? "Follow-ups and fresh matches" : followupsError ? "Follow-ups" : "Fresh matches"} could not be loaded.</p>
+          <p>{missingSources} could not be loaded.</p>
           <button type="button" onClick={refetch} className="font-medium text-brand hover:underline">Retry updates</button>
         </div>
       )}

@@ -92,6 +92,136 @@ try {
     fail(`connector-separated tool claims were not extracted: ${JSON.stringify(connectorTools)}`);
   }
 
+  // #4394, documented limit. The connector split above is correct for a tool
+  // list, but the same `using X in Y` shape carries a place name just as
+  // often, and a capitalized proper noun clears isLikelyTool either way. No
+  // syntax rule measured so far tells the two apart without failing open on a
+  // real tool, so the place is still extracted and a user who means it clears
+  // it with an allow_facts entry. Each check below pins both halves: the
+  // extraction happens, and allow_facts is what clears it.
+  const limitSource = join(tmp, 'cv-place-limit.md');
+  writeFileSync(limitSource, 'Built the platform using Django. Shipped the redesign using Figma.');
+  const placeAllowConfig = join(tmp, 'cv-facts-place-allow.json');
+  writeFileSync(placeAllowConfig, JSON.stringify({
+    allow_metrics: [], allow_facts: ['Berlin', 'EMEA'], forbidden_phrases: [],
+  }));
+
+  const lifted = 'if extraction stops producing the place name, this limit has been lifted: update this test, do not delete it';
+  for (const [label, text, tool, place] of [
+    ['a city after "in"', 'Built the platform using Django in Berlin.', 'django', 'berlin'],
+    ['a region after "with ... in"', 'Shipped the redesign using Figma with the brand team in EMEA.', 'figma', 'emea'],
+  ]) {
+    const extracted = factClaims(text);
+    if (extracted.some(c => c.kind === 'tool' && c.value === tool)
+        && extracted.some(c => c.kind === 'tool' && c.value === place)) {
+      pass(`#4394 documented limit: ${label} is still extracted as a tool (${place})`);
+    } else {
+      // The allow_facts check below assumes the place is extracted, so its
+      // failure would only repeat this one under a misleading message.
+      fail(`#4394 documented limit changed for ${label}; ${lifted}: ${JSON.stringify(extracted)}`);
+      continue;
+    }
+
+    const unallowed = verifyFacts(text, { sourcePaths: [limitSource], configPath: config });
+    const allowed = verifyFacts(text, { sourcePaths: [limitSource], configPath: placeAllowConfig });
+    if (unallowed.verdict === 'block'
+        && unallowed.unsupportedFacts.length === 1
+        && unallowed.unsupportedFacts[0].value === place
+        && allowed.verdict === 'pass'
+        && allowed.unsupportedFacts.length === 0) {
+      pass(`#4394 documented limit: allow_facts clears ${label} (${place}) and nothing else blocks`);
+    } else {
+      fail(`#4394 allow_facts did not clear ${label}: ${JSON.stringify({ unallowed, allowed })}`);
+    }
+  }
+
+  // Skaidon's report on #4004. The comma joins clauses here, and "building"
+  // starts the next clause. The split leaves it alone as a whole fragment, and
+  // that exact fragment is prose (PROSE_FRAGMENTS). "ai" is a real claim: "not
+  // just using AI" does say AI was used, so it stays extracted and the source
+  // decides it.
+  const commaClause = factClaims('Uses agentic workflows daily, not just using AI, building for it.');
+  if (commaClause.some(c => c.kind === 'tool' && c.value === 'ai')
+      && !commaClause.some(c => c.value === 'building')) {
+    pass('#4394 "building" after a clause comma is prose, not a tool claim');
+  } else {
+    fail(`clause prose was extracted as a tool: ${JSON.stringify(commaClause)}`);
+  }
+
+  // Case does not make the bare word a name. A title-cased "Building" would
+  // otherwise pass the tool-shape check and block on a prose fragment.
+  for (const word of ['Building', 'BUILDING']) {
+    const cased = factClaims(`Uses agentic workflows daily, not just using AI, ${word} for it.`);
+    if (cased.some(c => c.kind === 'tool' && c.value === 'ai')
+        && !cased.some(c => c.value === 'building')) {
+      pass(`#4394 a bare "${word}" after a clause comma is prose, not a tool claim`);
+    } else {
+      fail(`a bare "${word}" was extracted as a tool: ${JSON.stringify(cased)}`);
+    }
+  }
+
+  // Only the "building" fragment is dropped. The list does not end there, so a
+  // name after it is still a claim the source has to back.
+  const buildingMidList = factClaims('Shipped the app using React and Redux, building with Kubernetes.');
+  if (['react', 'redux', 'kubernetes'].every(tool => buildingMidList.some(c => c.kind === 'tool' && c.value === tool))
+      && !buildingMidList.some(c => c.value === 'building')) {
+    pass('#4394 dropping "building" does not end the tool list');
+  } else {
+    fail(`"building" ended the tool list or was kept: ${JSON.stringify(buildingMidList)}`);
+  }
+
+  // Only the bare word is prose. A fragment that starts with "building" can
+  // still name a tool, so it stays a claim the source has to back.
+  const buildingWithTool = factClaims('Built dashboards using SQL, building Looker models.');
+  const buildingName = factClaims('Built the tower using Building Information Modeling.');
+  if (buildingWithTool.some(c => c.kind === 'tool' && c.value === 'sql')
+      && buildingWithTool.some(c => c.kind === 'tool' && c.value.includes('looker'))
+      && buildingName.some(c => c.kind === 'tool' && c.value === 'building information modeling')) {
+    pass('#4394 a tool inside a "building" fragment, or named with it, is still a claim');
+  } else {
+    fail(`a tool inside a "building" fragment was dropped: ${JSON.stringify({ buildingWithTool, buildingName })}`);
+  }
+
+  // The fix is the exact word, not its ending. A lowercase product that ends
+  // in -ing is still a claim after the first item. The review regression
+  // below covers the first item.
+  for (const [text, tool] of [
+    ['Built the backend using Java and spring.', 'spring'],
+    ['Ran paid search using Google Ads and bing.', 'bing'],
+  ]) {
+    const later = factClaims(text);
+    if (later.some(c => c.kind === 'tool' && c.value === tool)) {
+      pass(`#4394 a lowercase -ing product after the first item is still a claim (${tool})`);
+    } else {
+      fail(`a lowercase -ing product after the first item was dropped: ${JSON.stringify(later)}`);
+    }
+  }
+
+  // The "ai" half of the same report is evidence, not extraction. A source
+  // that says AI as a word backs the claim, and one that never says it blocks
+  // the same sentence. "AI-native" does not back it today, because
+  // sourceContainsFact does not read a hyphen as a word boundary. That is a
+  // separate question, and this test does not settle it. The title-cased
+  // clause runs through verifyFacts too, which passes a source to
+  // isLikelyTool, so the case rule is pinned on the path rendering uses.
+  const aiSource = join(tmp, 'cv-ai.md');
+  writeFileSync(aiSource, 'Uses agentic workflows daily. Built internal AI tooling for the sales team.');
+  for (const word of ['building', 'Building']) {
+    const aiText = `Uses agentic workflows daily, not just using AI, ${word} for it.`;
+    const aiBacked = verifyFacts(aiText, { sourcePaths: [aiSource], configPath: config });
+    const aiUnbacked = verifyFacts(aiText, { sourcePaths: [source], configPath: config });
+    if (aiBacked.verdict === 'pass'
+        && aiBacked.unsupportedFacts.length === 0
+        && aiUnbacked.verdict === 'block'
+        && aiUnbacked.unsupportedFacts.length === 1
+        && aiUnbacked.unsupportedFacts[0].kind === 'tool'
+        && aiUnbacked.unsupportedFacts[0].value === 'ai') {
+      pass(`#4394 "not just using AI, ${word} for it" passes when the source says AI as a word and blocks when it does not`);
+    } else {
+      fail(`the AI claim was not decided by source evidence (${word}): ${JSON.stringify({ aiBacked, aiUnbacked })}`);
+    }
+  }
+
   const proseTools = factClaims('I worked with the team in London.');
   const contextualTool = factClaims('I built using React in production.');
   if (contextualTool.some(claim => claim.value === 'react')

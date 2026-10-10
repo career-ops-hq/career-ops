@@ -69,6 +69,29 @@ const live = { text: POSTING, controls: ['Apply for this job'] };
   }
 }
 
+// Still empty after the same full poll: nothing was read, so the check
+// concludes nothing. uncertain, never expired.
+{
+  const page = scriptedPage({ render: () => ({ text: ' \n ', controls: [] }) });
+  const verdict = await checkUrlLiveness(page, POSTING_URL);
+  if (verdict.result === 'uncertain' && verdict.code === 'empty_page' && page.waits.length === 16 && page.reads === 17) {
+    pass('a page still empty when the poll ends is uncertain (empty_page), not expired');
+  } else {
+    fail(`empty page: ${JSON.stringify(verdict)}, waits=${page.waits.length}, reads=${page.reads}`);
+  }
+}
+
+// Any text at all keeps insufficient_content: a short page can be a closure page.
+{
+  const page = scriptedPage({ render: () => ({ text: 'Careers', controls: [] }) });
+  const verdict = await checkUrlLiveness(page, POSTING_URL);
+  if (verdict.result === 'expired' && verdict.code === 'insufficient_content' && page.waits.length === 16) {
+    pass('a short page that is not empty still reads insufficient_content when the poll ends');
+  } else {
+    fail(`short page: ${JSON.stringify(verdict)}, waits=${page.waits.length}`);
+  }
+}
+
 // Decisive on the first read: no wait at all.
 {
   const page = scriptedPage({ render: () => live });

@@ -179,7 +179,7 @@ try {
   try {
     const appendTestScript = `
     import { appendCandidate, CANDIDATES_PATH } from './paste-reply.mjs';
-    appendCandidate({
+    await appendCandidate({
       message_id: 'test-cli-msg',
       subject: 'Interview Confirmation',
       from: 'talent@acme.com',

@@ -75,6 +75,10 @@ test('merge-tracker resolves executable post-hook from code root and PDF data fr
       join(dataRoot, 'data', 'pdf-index.tsv'),
       '# report\tpdf\thtml\tformat\tdate\n012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
     );
+    // The PDF lives under the external DATA_ROOT, not beside the scripts, and a
+    // manifest row only counts while its file is on disk (#4777).
+    mkdirSync(join(dataRoot, 'output'), { recursive: true });
+    writeFileSync(join(dataRoot, 'output', 'cv-acme.pdf'), '%PDF-1.4\n');
 
     const result = runMergeTrackerCli(dataRoot);
     const trackerAfter = readFileSync(tracker, 'utf-8');

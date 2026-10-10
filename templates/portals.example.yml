@@ -321,7 +321,8 @@
 #     - "wordpress"
 #
 # by_title_keyword (optional): scope a stricter positive/negative pair to only
-# the jobs matched via a specific title_filter.positive keyword, instead of
+# the jobs matched via a specific title_filter.positive keyword (or, for
+# scan-ats-full, a title_filter_full.positive keyword), instead of
 # applying it to every scanned job. Useful when a title keyword is broad
 # enough to need extra confirmation from the description (e.g. "AI Engineer"
 # roles where you want the JD to actually mention a concrete AI tool) without

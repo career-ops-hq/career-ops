@@ -77,6 +77,15 @@ handle_result
     assert.match(output, /https:\/\/jobs.example.test\/1.*Which agency/);
     assert.doesNotMatch(output, /Completed|Failed/);
   });
+  check('the reservation sentinel alone is not a worker artifact', () => {
+    writeFileSync(join(work, 'reports', '042-RESERVED.md'), '{"pid":1}\n');
+    const { fields, output } = handle({ status: 'needs_confirmation', question: 'Which agency?' });
+    assert.equal(fields[2], 'needs_confirmation');
+    assert.equal(readFileSync(join(work, 'released'), 'utf8'), '042');
+    assert.equal(existsSync(join(work, 'logs/quarantine/1-042-RESERVED.md')), false);
+    assert.match(output, /Needs confirmation:.*Which agency/);
+    rmSync(join(work, 'reports', '042-RESERVED.md'), { force: true });
+  });
   check('confirmation artifacts fail closed, keep the reservation, and quarantine tracker data', () => {
     writeFileSync(join(work, 'tracker-additions/1.tsv'), 'unconfirmed tracker row\n');
     assert.throws(() => handle({ status: 'needs_confirmation', question: 'Which agency?' }), (error) => {

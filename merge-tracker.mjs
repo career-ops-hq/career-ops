@@ -30,7 +30,7 @@ import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { parsePdfIndex } from './find.mjs';
+import { parsePdfIndex, livePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
@@ -709,12 +709,18 @@ export async function mergeTracker(options = {}) {
    * data/pdf-index.tsv is gitignored and only exists after generate-pdf.mjs has
    * written at least one PDF. Missing manifest = nothing to sync.
    *
+   * Only rows whose PDF is still on disk come back (#4777): every reader of this
+   * map turns a hit into a ✅, and a row outlives the file it names.
+   *
    * @returns {Map<string,string>} Normalized report# → PDF path.
    */
   function loadPdfIndex() {
-    return existsSync(PDF_INDEX_FILE)
-      ? parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8'))
-      : new Map();
+    if (!existsSync(PDF_INDEX_FILE)) return new Map();
+    return livePdfIndex(
+      parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8')),
+      DATA_ROOT,
+      (message) => console.warn(`⚠️  ${message}`),
+    );
   }
 
   /**
@@ -2313,6 +2319,7 @@ export async function mergeTracker(options = {}) {
         const code = await syncTrackerPdfFlags({
           appsFile: APPS_FILE,
           pdfManifest: PDF_INDEX_FILE,
+          dataRoot: DATA_ROOT,
           lockDir: TRACKER_LOCK_DIR,
           lock: options.lock,
           logger: console,

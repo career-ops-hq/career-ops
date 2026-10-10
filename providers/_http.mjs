@@ -77,7 +77,14 @@ async function proxyFor(url) {
 async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResponse = false) {
   const targetHost = new URL(url).hostname.replace(/^\[|\]$/g, '');
   const { dispatcher, proxyHost, fetchImpl } = await proxyFor(url);
-  if (dispatcher && isIP(targetHost) && isBlockedAddress(targetHost)) throw blockedAddressError(targetHost, targetHost);
+  // A literal IP host never reaches dns.lookup, so the lookup-time guard in
+  // _ip-guard.mjs never sees it: http://127.0.0.1/, http://[::ffff:127.0.0.1]/
+  // and http://2130706433/ were all dialled on the direct path while
+  // http://localhost/ was refused. Check the literal here, on every path, not
+  // only behind a proxy. `new URL()` has already normalised the integer, octal
+  // and hex spellings of IPv4 to a dotted quad, and isBlockedAddress unwraps
+  // the IPv4-mapped IPv6 form.
+  if (isIP(targetHost) && isBlockedAddress(targetHost)) throw blockedAddressError(targetHost, targetHost);
   // Mark this request as provider traffic for the whole of its async life, so
   // the patched dns.lookup validates the addresses it resolves (#3096). The
   // guard is scoped rather than global because _dns-cache.mjs patches

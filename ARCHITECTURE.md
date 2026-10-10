@@ -25,7 +25,7 @@ Settled doctrine ([#918](https://github.com/career-ops-hq/career-ops/issues/918)
 
 ## Why the flat root
 
-The repo keeps its ~70 scripts at the root deliberately ([#1386](https://github.com/career-ops-hq/career-ops/issues/1386)). Path stability is a feature here, not an accident: the updater's `SYSTEM_PATHS` allowlist, community plugins, docs, guides, and the muscle memory of thousands of users (`node scan.mjs`) all reference these paths. A cosmetic reorganization would break forks and plugins for no functional gain. The conventions that keep the flat root navigable: one script = one job, and every script is registered in `SYSTEM_PATHS` (enforced in CI by the coverage guard).
+The repo keeps its scripts at the root deliberately ([#1386](https://github.com/career-ops-hq/career-ops/issues/1386)). Path stability is a feature here, not an accident: the updater's `SYSTEM_PATHS` allowlist, community plugins, docs, guides, and the muscle memory of thousands of users (`node scan.mjs`) all reference these paths. A cosmetic reorganization would break forks and plugins for no functional gain. The conventions that keep the flat root navigable: one script = one job, and every script is registered in `SYSTEM_PATHS` (enforced in CI by the coverage guard).
 
 Tests are the one thing the flat root does not hold. Suites live in `tests/`, and `test-all.mjs` discovers `tests/**/*.test.mjs` — no registration list, so a new suite runs the moment it is written and a typo cannot silently turn CI green ([#1440](https://github.com/career-ops-hq/career-ops/issues/1440)). Write new ones there; `*.test.mjs` at the repo root is not discovered and will not run.
 

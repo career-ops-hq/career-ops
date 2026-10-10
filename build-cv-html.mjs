@@ -33,7 +33,7 @@
 //   fallback above.
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
 import { resolve, dirname, basename, join, extname, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -90,10 +90,10 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
-// Sanitize a URL for an href attribute: only allow the schemes the template's
-// contact row uses, coerce bare emails/domains, drop javascript:/data: and other
-// script-bearing schemes, then HTML-escape for the attribute context.
-function sanitizeUrl(url) {
+// Normalize a URL: only allow the schemes the template's contact row uses,
+// coerce bare emails/domains, and drop javascript:/data: and other
+// script-bearing schemes. Returns '' when the URL is rejected.
+function normalizeUrl(url) {
   if (typeof url !== 'string') return '';
   url = url.trim();
   if (!url) return '';
@@ -111,7 +111,12 @@ function sanitizeUrl(url) {
       url = 'https://' + url;
     }
   }
-  return escapeHtml(url);
+  return url;
+}
+
+// normalizeUrl(), HTML-escaped for an href attribute.
+function sanitizeUrl(url) {
+  return escapeHtml(normalizeUrl(url));
 }
 
 function sanitizeImageSrc(src) {
@@ -819,6 +824,168 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   console.log(JSON.stringify(report, null, 2));
 }
 
+// ── Markdown rendering (#4824) ──────────────────────────────────────────────
+//
+// A zero-token, read-only view of the same payload the HTML builder renders, so
+// a built CV can be reviewed or diffed against cv.md without a browser. It
+// resolves section titles exactly like renderReport() (DEFAULT_SECTION_TITLES
+// plus payload.sections) and applies the same entry filter (hasRequiredFields),
+// so the markdown lists what the PDF contains. Sections are emitted in the order
+// their {{SECTION_*}} placeholders appear in the template (the default one, or
+// the same [template.html] the HTML build was given), and a section the template
+// does not carry is left out, as it is in the HTML.
+function mdLine(value) {
+  return String(value ?? '').replace(/\s*\r?\n\s*/g, ' ').trim();
+}
+
+function mdJoin(parts, sep) {
+  return parts.map(mdLine).filter(Boolean).join(sep);
+}
+
+// A normalized URL with the characters that delimit a Markdown link
+// destination (parentheses, angle brackets, whitespace, backslash)
+// percent-encoded, so e.g. an unmatched ')' cannot end the link early.
+function mdUrl(url) {
+  return normalizeUrl(url).replace(/[()<>\\\s]/g,
+    c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
+}
+
+// Section keys in the order the template places their {{SECTION_*}} titles.
+function templateSectionOrder(template) {
+  return Object.keys(DEFAULT_SECTION_TITLES)
+    .map(key => [key, template.indexOf(`{{SECTION_${key.toUpperCase()}}}`)])
+    .filter(([, idx]) => idx !== -1)
+    .sort((a, b) => a[1] - b[1])
+    .map(([key]) => key);
+}
+
+function renderMarkdown(payload, template) {
+  const titles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
+  const candidate = payload.candidate || {};
+  const out = [];
+  const bodies = new Map();
+  const section = (key, body) => {
+    if (body.length) bodies.set(key, [`## ${mdLine(titles[key])}`, '', ...body]);
+  };
+  const link = (c) => (c && c.url ? mdLine(c.display || c.url) : '');
+
+  out.push(`# ${mdLine(candidate.name)}`, '');
+  if (mdLine(candidate.title)) out.push(mdLine(candidate.title), '');
+  const contact = mdJoin([
+    candidate.phone, candidate.email, link(candidate.linkedin),
+    link(candidate.github), link(candidate.portfolio), candidate.location,
+  ], ' | ');
+  if (contact) out.push(contact, '');
+
+  const list = (v) => (Array.isArray(v) ? v : []);
+
+  if (mdLine(payload.summary)) section('summary', [mdLine(payload.summary), '']);
+
+  const tags = list(payload.competencies).filter(Boolean).map(mdLine);
+  if (tags.length) section('competencies', [tags.join(', '), '']);
+
+  const exp = [];
+  for (const e of list(payload.experience).filter(e => hasRequiredFields(e, 'experience', 'html'))) {
+    exp.push(`### ${mdJoin([e.company, e.role], ' — ')}`, '');
+    const meta = mdJoin([e.location, e.dates || e.period], ' · ');
+    if (meta) exp.push(`*${meta}*`, '');
+    if (mdLine(e.context)) exp.push(mdLine(e.context), '');
+    const bullets = list(e.bullets).filter(Boolean);
+    for (const b of bullets) exp.push(`- ${mdLine(b)}`);
+    if (bullets.length) exp.push('');
+  }
+  section('experience', exp);
+
+  const proj = [];
+  for (const e of list(payload.projects).filter(e => hasRequiredFields(e, 'projects', 'html'))) {
+    const url = mdUrl(e.url);
+    // Escape the label's own delimiters so a name cannot close the link early.
+    const name = url ? `[${mdLine(e.name).replace(/[\\[\]]/g, '\\$&')}](${url})` : mdLine(e.name);
+    proj.push(`### ${mdJoin([name, e.badge], ' · ')}`, '');
+    const desc = e.description || list(e.bullets).filter(Boolean).join(' ');
+    if (mdLine(desc)) proj.push(mdLine(desc), '');
+    if (mdLine(e.tech)) proj.push(`*${mdLine(e.tech)}*`, '');
+  }
+  section('projects', proj);
+
+  const edu = [];
+  for (const e of list(payload.education).filter(e => hasRequiredFields(e, 'education', 'html'))) {
+    edu.push(`**${mdJoin([e.title, e.org], ' — ')}**${mdLine(e.year) ? ` · ${mdLine(e.year)}` : ''}`, '');
+    if (mdLine(e.location)) edu.push(mdLine(e.location), '');
+    if (mdLine(e.description)) edu.push(mdLine(e.description), '');
+  }
+  section('education', edu);
+
+  for (const key of ['certifications', 'awards']) {
+    const rows = list(payload[key]).filter(e => hasRequiredFields(e, key, 'html')).map(e =>
+      `- **${mdLine(e.title)}**${mdLine(e.org) ? ` — ${mdLine(e.org)}` : ''}${mdLine(e.year) ? ` · ${mdLine(e.year)}` : ''}`);
+    section(key, rows.length ? [...rows, ''] : []);
+  }
+
+  const interests = list(payload.interests).filter(Boolean).map(String)
+    .map((item, idx) => (idx === 0 ? item : item.charAt(0).toLowerCase() + item.slice(1)))
+    .join(', ');
+  if (mdLine(interests)) section('interests', [mdLine(interests), '']);
+
+  const skills = list(payload.skills).filter(c => hasRequiredFields(c, 'skills', 'html')).map(c =>
+    `- ${mdLine(c.category) ? `**${mdLine(c.category)}:** ` : ''}${mdLine(joinItems(c.items))}`);
+  section('skills', skills.length ? [...skills, ''] : []);
+
+  for (const key of templateSectionOrder(template)) {
+    if (bodies.has(key)) out.push(...bodies.get(key));
+  }
+  // The GDPR/RODO consent footer, where the template carries one (as the HTML does).
+  if (template.includes('{{CONSENT}}') && mdLine(payload.consent)) out.push('---', '', mdLine(payload.consent), '');
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+
+async function runMarkdown(args) {
+  const outIdx = args.indexOf('--markdown');
+  const outputPath = args[outIdx + 1];
+  const [inputPath, templateArg] = args.filter((a, i) => i !== outIdx && i !== outIdx + 1);
+  if (!inputPath || !outputPath || outputPath.startsWith('--')) {
+    console.error('Usage: node build-cv-html.mjs <input.json> --markdown <output.md> [template.html]');
+    process.exit(1);
+  }
+  const absInput = resolve(inputPath);
+  const absOutput = resolve(outputPath);
+  const templatePath = templateArg ? resolve(templateArg) : TEMPLATE_PATH;
+  if (!existsSync(absInput)) {
+    console.error(`Input file not found: ${absInput}`);
+    process.exit(1);
+  }
+  // Never overwrite the source payload with its own rendering (a swapped or
+  // repeated argument). realpath also catches a symlink or a ./-relative alias.
+  if (absOutput === absInput || (existsSync(absOutput) && realpathSync(absOutput) === realpathSync(absInput))) {
+    console.error(`Output path is the input file: ${absOutput}`);
+    process.exit(1);
+  }
+  if (!existsSync(templatePath)) {
+    console.error(`Template not found: ${templatePath}`);
+    process.exit(1);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(await readFile(absInput, 'utf-8'));
+  } catch (err) {
+    console.error(`Failed to read CV input: ${err.message}`);
+    process.exit(1);
+  }
+  const { errors, warnings } = validatePayload(payload, 'html');
+  if (errors.length) {
+    console.error('Invalid CV payload:');
+    for (const message of errors) console.error(`  - ${message}`);
+    console.error(JSON.stringify({ valid: false, errors, warnings }, null, 2));
+    process.exit(1);
+  }
+  for (const message of warnings) console.error(`Warning: ${message}`);
+  await mkdir(dirname(absOutput), { recursive: true });
+  const template = await readFile(templatePath, 'utf-8');
+  await writeFile(absOutput, renderMarkdown(payload, template), 'utf-8');
+  console.log(JSON.stringify({ file: basename(absOutput), path: absOutput, format: 'markdown', warnings, valid: true }, null, 2));
+  process.exit(0);
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -826,6 +993,7 @@ async function main() {
     console.error('Usage:');
     console.error('  node build-cv-html.mjs <input.json> <output.html> [template.html]');
     console.error('  node build-cv-html.mjs --preview <input.json> [template.html]');
+    console.error('  node build-cv-html.mjs <input.json> --markdown <output.md> [template.html]');
     console.error('  node build-cv-html.mjs --test');
     console.error('');
     console.error('  [template.html] defaults to templates/cv-template.html. Pass the path');
@@ -846,6 +1014,11 @@ async function main() {
 
   if (args.includes('--test')) {
     await runSelfTest();
+    return;
+  }
+
+  if (args.includes('--markdown')) {
+    await runMarkdown(args);
     return;
   }
 

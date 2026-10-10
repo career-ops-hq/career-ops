@@ -771,6 +771,9 @@ try {
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, TRACKER_HEADER + seed);
     writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    // A manifest row only counts while its PDF is on disk (#4777).
+    mkdirSync(join(work, 'output'), { recursive: true });
+    writeFileSync(join(work, 'output', '1.pdf'), '%PDF-1.4\n');
     
     // Normal run should trigger sync and flip the PDF flag
     const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
@@ -798,6 +801,10 @@ try {
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, TRACKER_HEADER + seed);
     writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    // The PDF is on disk, so without --dry-run this row would flip. That makes
+    // the unchanged ❌ below a statement about dry-run and not about a missing file.
+    mkdirSync(join(workDry, 'output'), { recursive: true });
+    writeFileSync(join(workDry, 'output', '1.pdf'), '%PDF-1.4\n');
     
     // Create a pending addition so the merge has something to "dry-run"
     writeFileSync(join(addsDir, '2-globex.tsv'), '2\t2026-01-02\tGlobex\tEng\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\t\n');
@@ -815,6 +822,81 @@ try {
     }
   } finally {
     rmSync(workDry, { recursive: true, force: true });
+  }
+
+  // A manifest row outlives its file: generate-pdf.mjs evicts a row only on
+  // re-generation, so deleting output/*.pdf leaves every row standing (#4777).
+  // Each of merge-tracker's three readers of the manifest must treat that row
+  // as absent, or the flag it was corrected from comes straight back. Every
+  // case runs twice on the same fixture, once with the PDF on disk and once
+  // without, so the ❌ cannot pass because the manifest went unread.
+  const pdfCellOf = (trackerText, rowPrefix) => {
+    const row = trackerText.split('\n').find((l) => l.startsWith(rowPrefix)) || '';
+    return { row: row.trim(), pdf: (row.split('|')[7] || '').trim() };
+  };
+  const runManifestMerge = ({ rows, manifest, additions = {}, pdfs = [] }) => {
+    const workGone = mkdtempSync(join(tmpdir(), 'cops-merge-pdf-gone-'));
+    try {
+      const tracker = join(workGone, 'applications.md');
+      const addsDir = join(workGone, 'adds');
+      const pdfIndex = join(workGone, 'pdf-index.tsv');
+      mkdirSync(addsDir, { recursive: true });
+      mkdirSync(join(workGone, 'output'), { recursive: true });
+      writeFileSync(tracker, TRACKER_HEADER + rows);
+      writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n' + manifest);
+      for (const [name, line] of Object.entries(additions)) writeFileSync(join(addsDir, name), line);
+      for (const pdf of pdfs) writeFileSync(join(workGone, 'output', pdf), '%PDF-1.4\n');
+      execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+        encoding: 'utf-8',
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
+      });
+      return readFileSync(tracker, 'utf-8');
+    } finally {
+      rmSync(workGone, { recursive: true, force: true });
+    }
+  };
+
+  // Reader 1: the flag sync over existing rows.
+  const goneRow = {
+    rows: '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](reports/012-acme-2026-01-04.md) | ok |\n',
+    manifest: '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
+  };
+  const goneRowPresent = pdfCellOf(runManifestMerge({ ...goneRow, pdfs: ['cv-acme.pdf'] }), '| 7 ');
+  const goneRowAbsent = pdfCellOf(runManifestMerge(goneRow), '| 7 ');
+  if (goneRowPresent.pdf === '✅' && goneRowAbsent.pdf === '❌') {
+    pass('merge-tracker leaves a corrected ❌ alone when the manifest row\'s PDF is gone (#4777)');
+  } else {
+    fail(`merge-tracker flag sync ignored the PDF on disk: with file "${goneRowPresent.row}", without "${goneRowAbsent.row}"`);
+  }
+
+  // Reader 2: the new-row path, which sets the flag as an addition is merged.
+  const goneAddition = {
+    rows: '',
+    manifest: '041\toutput/cv-umbrella.pdf\toutput/cv-umbrella.html\tletter\t2026-01-07\n',
+    additions: { '001-umbrella.tsv': '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](reports/041-umbrella-2026-01-07.md)\tok\n' },
+  };
+  const goneAdditionPresent = pdfCellOf(runManifestMerge({ ...goneAddition, pdfs: ['cv-umbrella.pdf'] }), '| 1 ');
+  const goneAdditionAbsent = pdfCellOf(runManifestMerge(goneAddition), '| 1 ');
+  if (goneAdditionPresent.pdf === '✅' && goneAdditionAbsent.pdf === '❌') {
+    pass('a newly merged row stays ❌ when its manifest row\'s PDF is gone (#4777)');
+  } else {
+    fail(`new-row merge ignored the PDF on disk: with file "${goneAdditionPresent.row}", without "${goneAdditionAbsent.row}"`);
+  }
+
+  // Reader 3: the duplicate-update path, where a re-eval replaces the report
+  // link and the flag has to describe the new report (#2594).
+  const goneReeval = {
+    rows: '| 3 | 2026-01-04 | Acme | Backend Engineer, Payments | 4.5/5 | Evaluated | ✅ | [1](reports/001-acme-2026-01-04.md) | first |\n',
+    manifest: '1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
+    additions: { '002-acme.tsv': '2\t2026-02-01\tAcme\tBackend Engineer, Payments\tEvaluated\t3.9/5\t❌\t[2](reports/002-acme-2026-02-01.md)\tre-eval\n' },
+  };
+  const goneReevalPresent = pdfCellOf(runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf', 'acme-2.pdf'] }), '| 3 ');
+  const goneReevalAbsent = pdfCellOf(runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf'] }), '| 3 ');
+  if (/\[2\]/.test(goneReevalPresent.row) && goneReevalPresent.pdf === '✅'
+    && /\[2\]/.test(goneReevalAbsent.row) && goneReevalAbsent.pdf === '❌') {
+    pass('a re-eval does not take ✅ from a manifest row whose new report PDF is gone (#4777)');
+  } else {
+    fail(`re-eval ignored the new report's PDF on disk: with file "${goneReevalPresent.row}", without "${goneReevalAbsent.row}"`);
   }
 } catch (e) {
   fail(`merge-tracker PDF-flag sync tests crashed: ${e.message}`);

@@ -431,6 +431,7 @@ const SYSTEM_PATHS = [
   'tracker-sync-check.mjs',
   'followup-cadence.mjs',
   'invite-match.mjs',
+  'coverage-check.mjs',
   'agent-inbox.mjs',
   'followup-seed.mjs',
   'profile-language.mjs',

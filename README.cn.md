@@ -181,7 +181,7 @@ career-ops 对求职者永久免费。这些公司赞助了本项目：
 | **面试故事库**           | 跨评估积累 STAR+反思故事：5 到 10 个主故事，可以针对你遇到的行为面试问题灵活改编                                                                         |
 | **谈判话术**             | 薪资谈判框架、应对地域折价、利用竞争 offer 作为筹码                                                                                       |
 | **申请邮件草稿**         | 从报告或粘贴的职位描述生成给招聘人员、内推或冷申请的正式邮件，包含主题、附件清单、有据可查的匹配点和来自你个人资料的联系信息块。仅限草稿：career-ops 从不发送、提交或点击任何内容。 |
-| **招聘平台扫描器**       | 预配置 100+ 家公司（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自定义查询                     |
+| **招聘平台扫描器**       | 预配置 100+ 家公司（Anthropic、OpenAI、ElevenLabs、Retool、n8n…）+ 跨 Ashby、Greenhouse、Lever、Wellfound 的自定义网页搜索查询             |
 | **已融资公司发现**       | 以审阅为先的 `company:funded` 命令从结构化的公开数据源中列出近期获得融资的公司和来源诊断，不改动你的数据                                    |
 | **批量处理**             | 用无头 CLI worker（`claude -p` / `opencode run`）并行评估                                                                                  |
 | **Dashboard TUI**        | 在终端里浏览、筛选和排序你的流水线                                                                                                        |

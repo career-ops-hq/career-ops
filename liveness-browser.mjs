@@ -345,9 +345,16 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
 
     const extractApplyControls = () => {
+      // A design-system button is a custom element: UKG Pro (UltiPro) renders
+      // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
+      // native <button> inside its shadow root has no text of its own (the
+      // label is slotted in), so the element itself is the control to read.
+      // No selector matches a tag-name suffix, hence the filter.
+      const customButtons = Array.from(document.querySelectorAll('*'))
+        .filter((element) => element.localName.endsWith('-button'));
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
-      );
+      ).concat(customButtons);
 
       return candidates
         .filter((element) => {
@@ -527,6 +534,22 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
           };
         }
       }
+    }
+
+    // A page still empty when the poll gives up (after the frame wait, if a
+    // same-origin frame is present) has shown nothing: no posting, no closure
+    // notice, no error page. AGENTS.md calls a loading placeholder unconfirmed,
+    // not closed, and a false `expired` is the expensive direction (see the
+    // iCIMS note above). Measured over 218 loads on 17 ATS: 18 were still empty
+    // when the poll ended, 16 of them live postings. Only a body with no text at
+    // all qualifies: a short page ("Page not found", a header and footer) keeps
+    // insufficient_content.
+    if (verdict.code === 'insufficient_content' && !reading.bodyText.trim()) {
+      verdict = {
+        result: 'uncertain',
+        code: 'empty_page',
+        reason: 'page still empty when the poll ended — not trusted as evidence of removal',
+      };
     }
 
     if (page && page._blockedByGuard) {

@@ -180,6 +180,25 @@ export default {
     }
   },
 
+  // Titles, URLs and dates only: the same list without content=true, and no
+  // /offices lookup. A fraction of fetch()'s bytes (5 live boards sampled
+  // 2026-10-07: 99 KB against 1.67 MB). scan-ats-full.mjs uses it to rule a
+  // board out before paying for fetch(); nothing here is filtered on.
+  async fetchListing(entry, ctx) {
+    const apiUrl = resolveApiUrl(entry);
+    if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
+    assertGreenhouseUrl(apiUrl);
+    // An entry.api that pins content=true must not turn this back into the
+    // expensive request.
+    const listUrl = new URL(apiUrl);
+    listUrl.searchParams.delete('content');
+    const json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(listUrl.href), { redirect: 'error' }));
+    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    return jobs
+      .filter(/** @param {any} j */ j => j.absolute_url)
+      .map(/** @param {any} j */ j => ({ title: j.title || '', url: j.absolute_url, postedAt: toEpochMs(j.first_published) }));
+  },
+
   async fetch(entry, ctx) {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);

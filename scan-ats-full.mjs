@@ -467,6 +467,25 @@ export function classifyPostingDate(job, cutoff) {
   return 'keep';
 }
 
+// Can this board hold a match? Asked of a provider's cheap listing (titles and
+// dates, no posting bodies) before its full fetch. Only the two checks that
+// need no body run here, the same ones processJobs() starts with, so a board
+// that might match still goes through fetch() and processJobs() unchanged.
+// Undated postings count as possible: processJobs() decides them.
+export function listingMayMatch(listing, { cutoff, titleFilter, companySlug }) {
+  return listing.some(job => job.url && job.title
+    && classifyPostingDate(job, cutoff) !== 'stale'
+    && titleFilter(job.title, companySlug));
+}
+
+// Undated postings on a board the listing ruled out. processJobs() counts
+// these into "Undated dropped" before its title filter, so a skipped board
+// must report them too, or the pre-check would hide the degraded-scan signal.
+export function undatedInListing(listing, cutoff) {
+  return listing.filter(job => job.url && job.title
+    && classifyPostingDate(job, cutoff) === 'undated').length;
+}
+
 // Apply the same user-owned do-not-apply gate as scan.mjs to reverse-scan
 // results. Absent/empty blacklist is a no-op. Default skips are counted and
 // never silent; --include-blacklisted keeps matches but marks them for audit.
@@ -1389,6 +1408,18 @@ async function main() {
         // per-job detail-page requests via provider.enrichDate) — runs inside
         // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
         await withTimeout((async () => {
+          // Most boards in a public directory hold nothing the title filter
+          // wants; where the provider can list a board cheaply, find that out
+          // before downloading every posting body.
+          if (typeof source.provider.fetchListing === 'function') {
+            const listing = await source.provider.fetchListing(entry, ctx);
+            if (!listingMayMatch(listing, { cutoff, titleFilter, companySlug: entry.name })) {
+              if (!opts.includeUndated) droppedNoDate += undatedInListing(listing, cutoff);
+              recordBoardResult(deadBoards, name, deadBoard, 200);
+              consecutiveResolverFailures = 0;
+              return;
+            }
+          }
           const jobs = await source.provider.fetch(entry, ctx);
           recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;

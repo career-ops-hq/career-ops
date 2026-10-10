@@ -9,10 +9,13 @@
 // WHY THE CHECK IS SCOPED, NOT GLOBAL. _dns-cache.mjs patches `dns.lookup` on
 // the node:dns module object, which is process-wide. Rejecting private ranges
 // there unconditionally would reject every loopback connection anything in the
-// process makes — measured, Node calls dns.lookup even for a numeric host:
+// process makes by name (`localhost`).
 //
-//     fetch('http://127.0.0.1:PORT')  -> dns.lookup calls: 1
-//     fetch('http://localhost:PORT')  -> dns.lookup calls: 2
+// A NUMERIC host does not reach dns.lookup at all (measured on Node 20.15,
+// 22.3 and 26: fetch('http://127.0.0.1:PORT') makes zero lookup calls), so
+// this lookup-time check never sees a literal IP. providers/_http.mjs checks
+// the literal itself before dialling; an earlier version of this comment
+// claimed the opposite and the direct path shipped without that check.
 //
 // In this repo that is already 10+ test files that stand up a local HTTP
 // server and fetch it. An env opt-out would have fixed the suite by disabling

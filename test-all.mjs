@@ -1434,7 +1434,7 @@ try {
   const nonBambooPage = fakePage({ status: 200, finalUrl: URL, bodyText: '', applyControls: [] });
   nonBambooPage.reload = async () => { nonBambooReloadCalled = true; return { status: () => 200 }; };
   const nonBambooInsufficient = await checkUrlLiveness(nonBambooPage, URL);
-  if (nonBambooInsufficient.result === 'expired' && nonBambooInsufficient.code === 'insufficient_content' && !nonBambooReloadCalled) {
+  if (nonBambooInsufficient.result === 'uncertain' && nonBambooInsufficient.code === 'empty_page' && !nonBambooReloadCalled) {
     pass('the reload retry is scoped to BambooHR hosts only');
   } else {
     fail(`reload retry leaked to a non-BambooHR host: ${JSON.stringify(nonBambooInsufficient)}, reloadCalled=${nonBambooReloadCalled}`);
@@ -12596,7 +12596,10 @@ try {
 // PDF was generated, so merge-tracker should flip only matching ❌ cells to ✅.
 console.log('\n🧪 Testing merge-tracker PDF flag sync from data/pdf-index.tsv (#1429)...');
 try {
-  const runPdfSyncFixture = (name, trackerRow, pdfIndex = null, additions = []) => {
+  // A manifest row only means PDF-ready while its file is on disk (#4777), so a
+  // fixture lists the files it expects to exist. The deleted-PDF cases live in
+  // tests/merge-tracker.test.mjs.
+  const runPdfSyncFixture = (name, trackerRow, pdfIndex = null, additions = [], pdfFiles = []) => {
     const tmp = mkdtempSync(join(tmpdir(), `career-ops-merge-pdf-${name}-`));
     mkdirSync(join(tmp, 'data'), { recursive: true });
     const additionsDir = join(tmp, 'additions');
@@ -12607,6 +12610,10 @@ try {
       '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
       trackerRow + '\n');
     if (pdfIndex !== null) writeFileSync(join(tmp, 'data', 'pdf-index.tsv'), pdfIndex);
+    for (const file of pdfFiles) {
+      mkdirSync(dirname(join(tmp, file)), { recursive: true });
+      writeFileSync(join(tmp, file), '%PDF-1.4\n');
+    }
     if (additions.length > 0) {
       mkdirSync(additionsDir, { recursive: true });
       for (const addition of additions) {
@@ -12630,6 +12637,8 @@ try {
     '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](../reports/012-acme-2026-01-04.md) | ok |',
     '# report\tpdf\thtml\tformat\tdate\n' +
       '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
+    [],
+    ['output/cv-acme.pdf'],
   );
   if (matching.result !== null && matching.merged.includes('| ✅ | [12](../reports/012-acme-2026-01-04.md) |')) {
     pass('merge-tracker flips a stale ❌ PDF cell when pdf-index.tsv has the row report number');
@@ -12668,6 +12677,7 @@ try {
       name: '001-umbrella.tsv',
       content: '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](../reports/041-umbrella-2026-01-07.md)\tok\n',
     }],
+    ['output/cv-umbrella.pdf'],
   );
   if (newAddition.result !== null && newAddition.merged.includes('| 1 | 2026-01-07 | Umbrella | Engineer | 4.1/5 | Evaluated | ✅ | [41](../reports/041-umbrella-2026-01-07.md) | ok |')) {
     pass('merge-tracker applies pdf-index.tsv to a newly merged tracker row in the same run');
@@ -12722,6 +12732,7 @@ try {
     reevalRow,
     '# report\tpdf\thtml\tformat\tdate\n1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
     [reevalTsv(2)],
+    ['output/acme-1.pdf', 'output/acme-2.pdf'],
   );
   const keptRow = keptFlag.merged.split('\n').find((l) => l.startsWith('| 3 ')) || '';
   if (keptFlag.result !== null && /\[2\]/.test(keptRow) && keptRow.split('|')[7].trim() === '✅') {

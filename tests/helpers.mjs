@@ -1157,3 +1157,29 @@ export function directoryDenyBinds() {
     }
   }
 }
+
+/**
+ * Point provider requests for a public-looking origin at a local test server.
+ *
+ * providers/_http.mjs refuses a loopback destination, by name (`localhost`,
+ * at lookup time) and as a literal (`127.0.0.1`, before dialling), so a test
+ * can no longer hand it a local URL. Address the request to `publicOrigin`
+ * instead and run it inside this wrapper: the guard sees the public name, and
+ * the transport is redirected to `localOrigin` here, at the fetch boundary.
+ * The local server still receives a real socket, so timeouts and headers are
+ * exercised for real. Restores the original fetch when `fn` settles.
+ *
+ * @template T
+ * @param {string} publicOrigin - e.g. 'http://stalls.example.test'
+ * @param {string} localOrigin  - e.g. `http://127.0.0.1:${port}`
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const url = String(input);
+    return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
+  };
+  try { return await fn(); } finally { globalThis.fetch = realFetch; }
+}

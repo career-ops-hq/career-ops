@@ -316,17 +316,21 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
       if (config.content_filter.by_title_keyword !== undefined) {
         if (!isObject(config.content_filter.by_title_keyword)) {
-          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive keyword');
+          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive (or title_filter_full.positive) keyword');
         } else {
+          // scan-ats-full matches titles against title_filter_full when it is
+          // set and scopes by_title_keyword by that match, so a key that only
+          // exists there is live config for the sweep, not dead config.
           const titlePositive = new Set(
-            (Array.isArray(config.title_filter?.positive) ? config.title_filter.positive : [])
+            [config.title_filter?.positive, config.title_filter_full?.positive]
+              .flatMap(list => (Array.isArray(list) ? list : []))
               .filter(k => typeof k === 'string')
               .map(k => k.trim().toLowerCase())
           );
           for (const [kw, rule] of Object.entries(config.content_filter.by_title_keyword)) {
             const path = `content_filter.by_title_keyword.${kw}`;
             if (!titlePositive.has(kw.trim().toLowerCase())) {
-              add(warnings, path, `"${kw}" does not match any title_filter.positive keyword and will never apply`);
+              add(warnings, path, `"${kw}" does not match any title_filter.positive or title_filter_full.positive keyword and will never apply`);
             }
             if (!isObject(rule)) {
               add(errors, path, 'must be an object with positive/negative keyword lists');

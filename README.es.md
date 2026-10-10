@@ -181,7 +181,7 @@ Reformula tu CV; nunca debe inventarlo. Un control en el código bloquea el PDF 
 | **Banco de historias**   | Acumula historias STAR+Reflexión entre evaluaciones: 5-10 historias maestras que puedes adaptar a las preguntas de comportamiento que te hagan |
 | **Guiones de negociación** | Marcos de negociación salarial, respuesta al descuento geográfico, uso de ofertas competidoras como palanca                            |
 | **Borradores de correo de candidatura** | Correos formales para recruiter, referido o candidatura en frío a partir de un informe o de una descripción pegada, con asunto, lista de adjuntos, puntos de encaje con fuente y un bloque de contacto sacado de tu perfil. Solo borradores: career-ops nunca envía, presenta ni hace clic en nada. |
-| **Escáner de portales**  | 100+ empresas preconfiguradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + consultas propias en Ashby, Greenhouse, Lever, Wellfound |
+| **Escáner de portales**  | 100+ empresas preconfiguradas (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + consultas propias de búsqueda web en Ashby, Greenhouse, Lever, Wellfound |
 | **Descubrimiento de empresas financiadas** | El comando `company:funded`, pensado para revisar antes de actuar, saca a la luz empresas con financiación reciente y diagnósticos de fuente a partir de feeds públicos estructurados, sin tocar tus datos |
 | **Procesamiento en lote** | Evaluación en paralelo con workers de CLI sin interfaz (`claude -p` / `opencode run`)                                                   |
 | **Dashboard TUI**        | Interfaz de terminal para navegar, filtrar y ordenar tu pipeline                                                                         |

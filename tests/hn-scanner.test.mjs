@@ -151,3 +151,36 @@ test('scan-hn --help prints usage and an unknown flag is refused, neither runs t
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
+
+// A portals.yml that exists but does not parse used to be swallowed, and the
+// scan ran on the default "Software Engineer" instead of the user's
+// hn_hiring.keywords (#4921). The fixture thread only carries Software Engineer
+// postings, so the valid file is the control: its keywords are read and match
+// nothing. The broken one must stop before the first fetch, as scan.mjs does.
+test('scan-hn refuses a portals.yml that does not parse instead of scanning with the default keyword', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-scanhn-'));
+  try {
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    const portals = join(dir, 'portals.yml');
+    const keywords = 'hn_hiring:\n  keywords:\n    - Registered Nurse\n';
+
+    const served = writeFetchFixture(dir);
+    writeFileSync(portals, keywords);
+    const valid = runScanHn(dir, served.preload, [], { GEMINI_API_KEY: '' });
+    assert.equal(valid.error, undefined, `scan-hn failed to spawn: ${valid.error?.message}`);
+    assert.equal(valid.status, 0, `expected a valid portals.yml to exit 0, got ${valid.status}\n${valid.stderr}`);
+    assert.match(valid.stdout, /Postings fetched:\s+2/);
+    assert.match(valid.stdout, /New offers:\s+0/, 'hn_hiring.keywords should replace the default');
+
+    const refused = writeFetchFixture(dir, { serveHn: false });
+    writeFileSync(portals, `${keywords}title_filter:\n  positive: ["unclosed\n`);
+    const broken = runScanHn(dir, refused.preload, [], { GEMINI_API_KEY: '' });
+    assert.equal(broken.status, 1, `expected a parse error to exit 1, got ${broken.status}\n${broken.stdout}`);
+    assert.match(broken.stderr, /Error: failed to parse .*portals\.yml: /);
+    assert.doesNotMatch(broken.stdout, /Match:/);
+    assert.equal(existsSync(refused.unexpected), false, 'a run with an unparseable portals.yml reached the network');
+    assert.equal(existsSync(join(dir, 'data', 'pipeline.md')), false, 'a run with an unparseable portals.yml wrote data/pipeline.md');
+  } finally {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});

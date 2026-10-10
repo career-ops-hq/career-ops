@@ -30,8 +30,24 @@ export async function GET(req: Request) {
   let rows: string[];
   try {
     rows = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-history.tsv"), "utf8").split("\n");
-  } catch {
-    return Response.json({ offers: [], count: 0 });
+  } catch (err) {
+    // ENOENT is the only failure that legitimately means "no matches": a user
+    // who has never run a scan has no history, and an empty result is the
+    // truth. Every other failure — unreadable, a directory, bad encoding — is
+    // the file being BROKEN, and answering 200 with `{offers: [], count: 0}`
+    // let that read as "nothing new this week". The home hero then settles both
+    // loops and can claim "You're all caught up" off a file it could not open.
+    //
+    // Same rule the user-layer readers follow: distinguish ENOENT from every
+    // other failure, and let a broken user-layer file surface as something the
+    // user can act on rather than as an empty default.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return Response.json({ offers: [], count: 0 });
+    }
+    return Response.json(
+      { error: `scan history could not be read: ${(err as Error)?.message ?? "unknown error"}`, offers: [], count: 0 },
+      { status: 500 },
+    );
   }
 
   // Roles already evaluated → don't resurface as "new". Keyed on company AND
