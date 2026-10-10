@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5+schema-inline, rep 1, profile ai-engineer.
+# Report: 001-halgate-consulting-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3.1
+ARCHETYPE: AI Solutions Architect
+ARCHETYPE_RAW: AI Solutions Architect
+LEGITIMACY: Proceed with Caution
+DECISION: Research first
+WORK_AUTH: not_needed
+COST_USD: 0.27586840000000007
+TURNS: 19
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key soft_strengths
+EXPECT_FAILURES: none
+---END_SUMMARY---

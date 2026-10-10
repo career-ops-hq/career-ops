@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5+schema-inline, rep 1, profile ai-engineer.
+# Report: 001-vortexa-global-solutions-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 2
+ARCHETYPE: Agentic / Automation
+ARCHETYPE_RAW: Agentic / Automation (unconfirmed)
+LEGITIMACY: Suspicious
+DECISION: Skip
+WORK_AUTH: not_needed
+COST_USD: 0.1947004
+TURNS: 11
+CONTRACT: machine_summary=true jd_archive=true tracker=false
+SCHEMA_ISSUES: missing risk_level; missing confidence; missing next_action; missing discard_reasons; 2 requirement_importance row(s) off-schema (e.g. importance "meaningful (stated)" not in enum)
+EXPECT_FAILURES: none
+---END_SUMMARY---

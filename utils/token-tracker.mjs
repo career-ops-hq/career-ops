@@ -23,7 +23,19 @@ export const RATES = {
   'deepseek/deepseek-reasoner': { input: 0.55 / 1000000, output: 2.19 / 1000000 },
   'deepseek-reasoner': { input: 0.55 / 1000000, output: 2.19 / 1000000 },
 
-  // Anthropic / Claude models
+  // Anthropic / Claude models. First-party list prices; cache reads bill at a
+  // fraction of input (0.1x for most models), so each row carries cachedInput —
+  // the 0.5x generic fallback below would overstate a cache-heavy Claude run.
+  // Longer ids come before their prefixes so substring matching
+  // ("anthropic/claude-opus-5-5") can't land on a shorter sibling.
+  'claude-opus-5-5': { input: 4.00 / 1000000, output: 20.00 / 1000000, cachedInput: 0.20 / 1000000 },
+  'claude-opus-5': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-opus-4-8': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-opus-4-7': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-opus-4-6': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-sonnet-5': { input: 2.00 / 1000000, output: 10.00 / 1000000, cachedInput: 0.20 / 1000000 },
+  'claude-sonnet-4-6': { input: 3.00 / 1000000, output: 15.00 / 1000000, cachedInput: 0.30 / 1000000 },
+  'claude-haiku-4-5': { input: 1.00 / 1000000, output: 5.00 / 1000000, cachedInput: 0.10 / 1000000 },
   'claude-3-5-sonnet': { input: 3.0 / 1000000, output: 15.0 / 1000000 },
   'claude-3-5-haiku': { input: 0.80 / 1000000, output: 4.00 / 1000000 },
   'claude-3-opus': { input: 15.00 / 1000000, output: 75.00 / 1000000 },
@@ -61,7 +73,12 @@ export function estimateCost(model, usage, provider) {
     rate = RATES[model];
     if (!rate) {
       // try matching prefix or substring
-      const key = Object.keys(RATES).find(k => model.includes(k));
+      // OpenRouter spells Claude versions with dots ("anthropic/claude-sonnet-4.6"),
+      // the rate table with hyphens; try that spelling as a second pass so the
+      // dotted Gemini keys keep matching verbatim.
+      const dashed = model.replace(/\./g, '-');
+      const key = Object.keys(RATES).find(k => model.includes(k))
+        || Object.keys(RATES).find(k => k.startsWith('claude-') && dashed.includes(k));
       if (key) {
         rate = RATES[key];
       }
@@ -74,7 +91,8 @@ export function estimateCost(model, usage, provider) {
     } else if (provider === 'gemini') {
       rate = RATES['gemini-3.6-flash'];
     } else if (provider === 'claude' || provider === 'anthropic') {
-      rate = RATES['claude-3-5-sonnet'];
+      // Unknown Claude id: price it as the standard spend_tier model.
+      rate = RATES['claude-sonnet-5'];
     } else {
       return null;
     }

@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5+schema-inline, rep 1, profile ai-engineer.
+# Report: 001-northwind-enterprise-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 4.1
+ARCHETYPE: AI Solutions Architect
+ARCHETYPE_RAW: AI Solutions Architect
+LEGITIMACY: Proceed with Caution
+DECISION: Apply
+WORK_AUTH: not_needed
+COST_USD: 0.24335660000000003
+TURNS: 14
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: missing top_strengths; missing risk_level; missing confidence; missing next_action; missing discard_reasons
+EXPECT_FAILURES: none
+---END_SUMMARY---
