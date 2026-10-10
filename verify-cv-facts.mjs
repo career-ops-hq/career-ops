@@ -45,6 +45,12 @@ const TOOL_PROSE_WORDS = new Set([
   'improving', 'in', 'of', 'on', 'on-time', 'operations', 'production', 'project',
   'recurring', 'resolving', 'submission', 'team', 'the', 'to', 'using', 'with',
 ]);
+// Words that are prose only when they are the whole fragment. "not just using
+// AI, building for it" leaves "building" alone after the split, and it starts
+// the next clause (#4394). It cannot join TOOL_PROSE_WORDS, which drops any
+// fragment holding the word: "using SQL, building Looker models" would then
+// lose Looker unchecked.
+const PROSE_FRAGMENTS = new Set(['building']);
 // A leading determiner marks ordinary reference, not a product list: "using
 // that campaign", "using our playbook". The class is closed, so unlike
 // TOOL_PROSE_WORDS it cannot turn into a list that grows by one word per bug
@@ -392,7 +398,8 @@ function looksToolShaped(rawValue) {
  *
  * Anything left is retained by default, preserving that fail-closed behavior
  * for lowercase names. Only exact words observed as prose false positives are
- * rejected through `TOOL_PROSE_WORDS`; morphological suffixes are deliberately
+ * rejected, through `TOOL_PROSE_WORDS` or, for a word that is prose only when
+ * it stands alone, `PROSE_FRAGMENTS`; morphological suffixes are deliberately
  * not used because real products such as Spring, Unity, and Processing share
  * them.
  */
@@ -409,6 +416,7 @@ function isLikelyTool(value, sourceNormalized) {
   // the only thing between ordinary prose and a tool claim is
   // TOOL_PROSE_WORDS (#4004).
   if (sourceNormalized != null && words.every(word => sourceContainsFact(sourceNormalized, word))) return false;
+  if (PROSE_FRAGMENTS.has(normalized)) return false;
   return !words.some(word => TOOL_PROSE_WORDS.has(word));
 }
 
