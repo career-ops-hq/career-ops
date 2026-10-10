@@ -33,15 +33,26 @@ jobs:
             });
 
             // User-layer paths from DATA_CONTRACT.md and update-system.mjs.
-            // voice-dna.md is omitted on purpose: it ships as a populated
-            // system default, so edits to it are legit.
+            // Every update-system.mjs USER_PATHS entry must be blocked here
+            // unless tests/no-user-data-batch-guard.test.mjs allowlists it with
+            // a reason (#4891). Omitted on purpose: voice-dna.md ships as a
+            // populated system default, so edits to it are legit; .claude/
+            // settings.json and .claude/hooks/ are project harness config that
+            // is not gitignored and may legitimately be committed.
             const USER_PATHS = [
               /^cv\.md$/,
               /^config\/profile\.yml$/,
+              /^config\/plugins\.yml$/,
               /^modes\/_profile\.md$/,
               /^modes\/_custom\.md$/,
+              /^modes\/_brief\.md$/,
               /^portals\.yml$/,
               /^article-digest\.md$/,
+              /^opencode\.json$/,
+              /^plugins\.lock$/,
+              /^plugins\.local\//,
+              /^\.career-ops-web\//,
+              /^documents\//,
               /^interview-prep\//,
               /^data\//,
               /^reports\//,
@@ -52,32 +63,42 @@ jobs:
             ];
             // Tracked scaffolding that legitimately lives under those dirs.
             //
-            // batch/ gets an exact allowlist instead of the filename rule. The
-            // workers write user-layer output into it (tailored CV and
-            // cover-letter JSON, prefetched JD text, per-run state), and a
-            // filename-shaped exemption is exactly what that output can be
-            // named: a worker scratch dir may hold a README.md, and nothing
-            // stops private content being committed as batch/tmp/README.md or
-            // batch/anything/.gitkeep. So under batch/ a path is exempt only by
-            // being on this list, which also means a new tracked file there has
-            // to be added on purpose.
+            // batch/ and documents/ get an exact allowlist instead of the
+            // filename rule. The batch workers write user-layer output into
+            // batch/ (tailored CV and cover-letter JSON, prefetched JD text,
+            // per-run state), and documents/ is where the user drops their own
+            // files for intake (a LinkedIn export, a folder of references). A
+            // filename-shaped exemption is exactly what that content can be
+            // named: a worker scratch dir or an unpacked export may hold a
+            // README.md, and nothing stops private content being committed as
+            // batch/tmp/README.md or documents/private/README.md. So under these
+            // dirs a path is exempt only by being on its list, which also means
+            // a new tracked file there has to be added on purpose.
             //
             // Everywhere else the filename rule stands: data/, reports/, jds/,
             // output/, interview-prep/ and writing-samples/ track real .gitkeep
             // keepers and dir READMEs, and narrowing this globally would fail
             // every PR that touches one.
-            const BATCH_SOURCES = new Set([
-              'batch/README.md',
-              'batch/aggregate-tokens.mjs',
-              'batch/batch-prompt.md',
-              'batch/batch-runner.sh',
-              'batch/logs/.gitkeep',
-              'batch/tracker-additions/.gitkeep',
-            ]);
-            const isScaffold = (f) =>
-              f.startsWith('batch/')
-                ? BATCH_SOURCES.has(f)
+            const EXACT_SCAFFOLD = {
+              'batch/': new Set([
+                'batch/README.md',
+                'batch/aggregate-tokens.mjs',
+                'batch/batch-prompt.md',
+                'batch/batch-runner.sh',
+                'batch/logs/.gitkeep',
+                'batch/tracker-additions/.gitkeep',
+              ]),
+              'documents/': new Set([
+                'documents/.gitkeep',
+                'documents/README.md',
+              ]),
+            };
+            const isScaffold = (f) => {
+              const dir = Object.keys(EXACT_SCAFFOLD).find((d) => f.startsWith(d));
+              return dir
+                ? EXACT_SCAFFOLD[dir].has(f)
                 : /(^|\/)\.gitkeep$/.test(f) || /(^|\/)README\.md$/.test(f);
+            };
 
             const bad = files
               .filter((f) => f.status !== 'removed')

@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { barePrefixDomainKeywords } from './title-keywords.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -212,6 +213,33 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
       validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
       validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
+    }
+  }
+
+  // Consumed only by scan-ats-full.mjs's board gate (#3105). A bare list, not
+  // an object like the filters around it: the gate has one dimension. A
+  // negative domain term would have to mean "this employer is NOT in my
+  // industry because of one posting", which no single posting can establish,
+  // and the threshold is fixed at one by measurement rather than configurable.
+  //
+  // Validated even though its failure direction is the safe one. A malformed
+  // domain_filter leaves the gate OFF, which is exactly today's behaviour — but
+  // the user is then sweeping unguarded while believing the opposite, and the
+  // scanner cannot warn them, because an absent domain_filter is a legitimate
+  // configuration it has to stay silent about. That silence is what makes this
+  // the only place the typo can surface.
+  if (config.domain_filter !== undefined) {
+    if (!Array.isArray(config.domain_filter)) {
+      add(errors, 'domain_filter', 'domain_filter must be a list of keywords');
+    } else {
+      validateKeywordList(config.domain_filter, 'domain_filter', errors);
+      // A bare `word:` or `stem:` is nonblank, so the check above passes it,
+      // but it compiles to a term that never matches: the gate stays on and
+      // drops every complete board. Checked per AND-group term too, since
+      // `solana + word:` can never match either.
+      for (const idx of barePrefixDomainKeywords(config.domain_filter)) {
+        add(errors, `domain_filter[${idx}]`, 'a word:/stem: prefix needs a term after it');
+      }
     }
   }
 

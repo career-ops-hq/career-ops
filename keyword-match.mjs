@@ -183,6 +183,7 @@ export function analyzeCoverage(keywords, cvText) {
  */
 export const KEYWORDS_HEADINGS = [
   'Keywords extracted',             // en, ar, ja — modes/oferta.md, modes/ar/fursah.md, modes/ja/kyujin.md
+  'Extracted Keywords',             // en — batch/batch-prompt.md (batch workers)
   'Udtrukne nøgleord',              // da — modes/da/oferta.md
   'Extrahierte Keywords',           // de — modes/de/angebot.md
   'Palabras clave extraídas',       // es — modes/es/oferta.md

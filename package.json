@@ -4,7 +4,7 @@
   "description": "Open-source AI job search that runs locally in your AI coding CLI: scan job portals, evaluate listings into a structured A-H report with a 1-5 score, tailor your CV, track applications",
   "private": true,
   "engines": {
-    "node": ">=18.17"
+    "node": "^22.13.0 || >=23.4.0"
   },
   "scripts": {
     "doctor": "node doctor.mjs",

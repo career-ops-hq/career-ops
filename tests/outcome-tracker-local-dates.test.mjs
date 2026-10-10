@@ -125,7 +125,7 @@ test('outcome.mjs journals the local day', () => {
 });
 
 test('tracker.mjs dates its status events with the local day', async () => {
-  // node:sqlite needs Node >= 22.5; skip rather than fail on an older runtime,
+  // node:sqlite needs Node >= 22.13 (no flag); skip rather than fail on an older runtime,
   // the way test-all does for the tracker index suites. Probed in-process, so
   // this file contains no process.exit literal — tests/main-guard-convention
   // greps discovered suites for one and does not care that it is inside a

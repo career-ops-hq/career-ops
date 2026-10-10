@@ -18,7 +18,7 @@
 //   - scan-history's requisition_id / language columns seed the decision, and
 //     tracker / pipeline rows inherit them by URL;
 //   - the row writer emits both columns, and a written row seeds the same key,
-//     including an id the writer's formula guard prefixed.
+//     including an id the writer's formula escaping prefixed.
 import { pass, fail } from './helpers.mjs';
 import {
   ANY_REQUISITION,
@@ -31,7 +31,6 @@ import {
   matchesSeenCompanyRole,
   requisitionIdsForDedup,
   resolveDedupIncludeLanguage,
-  sanitizeTsvField,
 } from '../scan.mjs';
 import {
   parseScanHistoryLine,
@@ -312,18 +311,32 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
     'formatScanHistoryRow → collectSeenCompanyRoles: a written row seeds its requisition and language');
 }
 {
-  // The writer prefixes an apostrophe to a cell starting with = + - @
-  // (spreadsheet-formula guard), so a live requisition id must meet its stored
-  // form, whether read from scan-history directly or inherited by a tracker row.
+  // The writer escapes a cell that would run as a spreadsheet formula, and
+  // parseScanHistoryLine undoes the escaping, so every value reads back as
+  // written — including one that already starts with an apostrophe.
+  const values = ['-REQ1', "'-REQ1", "''=x", '=x', '+Acme', '@en', "'abc", 'R1'];
+  const wrong = values.filter((value) => {
+    const line = formatScanHistoryRow({ url: DE_URL, source: 's', title: 't', company: value, requisitionId: value }, '2026-09-28');
+    const row = parseScanHistoryLine(line);
+    return row.company !== value || row.requisition_id !== value;
+  });
+  check(wrong.length === 0, 'formatScanHistoryRow → parseScanHistoryLine: guarded cells read back as written',
+    `differs for ${JSON.stringify(wrong)}`);
+}
+{
+  // A live requisition id meets its copy read back from scan-history, whether
+  // read directly or inherited by a tracker row, and an id that differs only by
+  // a leading apostrophe stays a different requisition.
   const key = companyRoleDedupKey('Acme', 'Senior QA Manager');
-  const line = formatScanHistoryRow({
-    url: DE_URL, source: 'smartrecruiters-api', title: 'Senior QA Manager', company: 'Acme', requisitionId: '-REQ1',
+  const lineFor = (requisitionId) => formatScanHistoryRow({
+    url: DE_URL, source: 'smartrecruiters-api', title: 'Senior QA Manager', company: 'Acme', requisitionId,
   }, '2026-09-28');
   const seed = (sources) => {
     const requisitions = new Map();
     const seen = collectSeenCompanyRoles(sources, {}, undefined, { requisitionsByBase: requisitions });
     return { key, baseKey: key, seen, requisitions, locatedRequisitions: new Map() };
   };
+  const line = lineFor('-REQ1');
   const fromHistory = seed({ scanHistoryText: `${HEADER}\n${line}\n` });
   const fromTracker = seed({
     scanHistoryText: `${HEADER}\n${line.replace('\tadded\t', '\tskipped_expired\t')}\n`,
@@ -332,14 +345,26 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
 | 1 | 2026-09-28 | Acme | Senior QA Manager | 4.0/5 | Applied | ❌ | [001](../reports/001-acme-2026-09-28.md) | applied | ${DE_URL} |
 `,
   });
+  const fromApostrophe = seed({ scanHistoryText: `${HEADER}\n${lineFor("'-REQ1")}\n` });
   check(matchesSeenCompanyRole(fromHistory, requisitionIdsForDedup({ requisitionId: '-REQ1' })) === true,
-    'requisitionIdsForDedup: a formula-guarded id read back from scan-history matches the live id (duplicate)');
+    'requisitionIdsForDedup: a formula-escaped id read back from scan-history matches the live id (duplicate)');
   check(matchesSeenCompanyRole(fromTracker, requisitionIdsForDedup({ requisitionId: '-REQ1' })) === true,
-    'requisitionIdsForDedup: a tracker row inheriting a formula-guarded id matches the live id (duplicate)');
+    'requisitionIdsForDedup: a tracker row inheriting a formula-escaped id matches the live id (duplicate)');
   check(matchesSeenCompanyRole(fromHistory, requisitionIdsForDedup({ requisitionId: '-REQ2' })) === false,
-    'requisitionIdsForDedup: another formula-guarded id stays a distinct requisition');
-  check(same(requisitionIdsForDedup({ requisitionId: "'abc" }), ["'ABC"]),
-    'requisitionIdsForDedup: a genuine leading apostrophe is kept');
-  check(['-REQ1', '=R1', '@x', '+1', "'=x", 'R1'].every((v) => sanitizeTsvField(sanitizeTsvField(v)) === sanitizeTsvField(v)),
-    'sanitizeTsvField is idempotent, so a stored id passed through it again keeps its form');
+    'requisitionIdsForDedup: another formula-escaped id stays a distinct requisition');
+  check(matchesSeenCompanyRole(fromHistory, requisitionIdsForDedup({ requisitionId: "'-REQ1" })) === false
+      && matchesSeenCompanyRole(fromApostrophe, requisitionIdsForDedup({ requisitionId: '-REQ1' })) === false,
+    'requisitionIdsForDedup: -REQ1 and \'-REQ1 stay distinct requisitions through scan-history');
+  check(matchesSeenCompanyRole(fromApostrophe, requisitionIdsForDedup({ requisitionId: "'-REQ1" })) === true,
+    'requisitionIdsForDedup: \'-REQ1 read back from scan-history matches the live \'-REQ1 (duplicate)');
+  check(same(requisitionIdsForDedup({ requisitionId: 'jreq  12757' }), ['JREQ 12757']),
+    'requisitionIdsForDedup: whitespace is flattened the way the scan-history writer flattens it');
+}
+{
+  // A company name starting with a formula character keys the same from
+  // scan-history as from the live posting.
+  const line = formatScanHistoryRow({ url: DE_URL, source: 's', title: 'Senior QA Manager', company: '+Acme' }, '2026-09-28');
+  const seen = collectSeenCompanyRoles({ scanHistoryText: `${HEADER}\n${line}\n` });
+  check(seen.has(companyRoleDedupKey('+Acme', 'Senior QA Manager')),
+    'collectSeenCompanyRoles: a formula-escaped company name read back from scan-history keys like the live one');
 }

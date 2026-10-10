@@ -1584,7 +1584,7 @@ async function generatePDF() {
     // fixtures also ship no cv.md, so this branch is never entered there. If the
     // module is genuinely missing in a real workspace this throws and the render
     // fails, which is the correct direction to fail for a fact gate.
-    const { assertFacts } = await import('./verify-cv-facts.mjs');
+    const { assertFacts, printAdvisoryFacts } = await import('./verify-cv-facts.mjs');
     const factCheck = assertFacts(html, { label: basename(inputPath) });
     // Ahead of the verdict, because it qualifies it: with no config the phrase
     // lists are empty, so a "passed" below covers metrics and facts only.
@@ -1594,6 +1594,7 @@ async function generatePDF() {
     if (factCheck.verdict === 'warn') {
       console.warn(`⚠️  CV fact check warning: ${basename(inputPath)}`);
       for (const phrase of factCheck.warnings) console.warn(`  - advisory phrase: ${phrase}`);
+      printAdvisoryFacts(factCheck.advisoryFacts, console.warn);
     } else {
       console.log('✅ Fact check passed');
     }
