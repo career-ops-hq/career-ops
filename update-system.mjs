@@ -283,6 +283,14 @@ export const SYSTEM_PATHS = [
   // drop it once a release has shipped past that move.
   'lib/context-budget.test.mjs',
   'lib/golden-budget-analysis.mjs',
+  // Centralized Jev System One question sets and decoders for the atomic-core
+  // plan: Block A/D/G enums as data, confidence surfacing, escalation builders.
+  // System layer: shared evaluation behaviour with no candidate data. Its tests
+  // live in tests/jev-atomic-core.test.mjs (covered by the tests/ entry).
+  'lib/jev-atomic-core.mjs',
+  // Deterministic renderer/validator for the report Machine Summary block,
+  // composed from Jev decisions plus typed evaluation slots. System layer.
+  'lib/jev-machine-summary.mjs',
   'img-to-pdf.mjs',
   'archive-posting.mjs',
   'jd-capture.mjs',
