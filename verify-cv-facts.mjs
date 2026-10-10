@@ -45,11 +45,13 @@ const TOOL_PROSE_WORDS = new Set([
   'improving', 'in', 'of', 'on', 'on-time', 'operations', 'production', 'project',
   'recurring', 'resolving', 'submission', 'team', 'the', 'to', 'using', 'with',
 ]);
-// Words that are prose only when they are the whole fragment. "not just using
-// AI, building for it" leaves "building" alone after the split, and it starts
-// the next clause (#4394). It cannot join TOOL_PROSE_WORDS, which drops any
-// fragment holding the word: "using SQL, building Looker models" would then
-// lose Looker unchecked.
+// Words that are prose only when they are the whole fragment, in any case.
+// "not just using AI, building for it" leaves "building" alone after the
+// split, and it starts the next clause (#4394). It cannot join
+// TOOL_PROSE_WORDS, which drops an unshaped fragment when any of its words is
+// listed: "using SQL, building Looker models" would then lose Looker
+// unchecked. isLikelyTool checks this set before the shape and source checks,
+// because a capital letter does not make the bare word a name.
 const PROSE_FRAGMENTS = new Set(['building']);
 // A leading determiner marks ordinary reference, not a product list: "using
 // that campaign", "using our playbook". The class is closed, so unlike
@@ -385,6 +387,9 @@ function looksToolShaped(rawValue) {
 /**
  * Keep likely technology names while dropping ordinary prose fragments.
  *
+ * A fragment that is exactly a `PROSE_FRAGMENTS` word, in any case, is
+ * rejected first, before the shape and source checks below.
+ *
  * A fragment that does not look tool-shaped (see `looksToolShaped`) is kept
  * anyway when it is already an exact substring of the source files: a real
  * lowercase tool name ("kubernetes", "n8n") a user genuinely used and listed
@@ -398,16 +403,18 @@ function looksToolShaped(rawValue) {
  *
  * Anything left is retained by default, preserving that fail-closed behavior
  * for lowercase names. Only exact words observed as prose false positives are
- * rejected, through `TOOL_PROSE_WORDS` or, for a word that is prose only when
- * it stands alone, `PROSE_FRAGMENTS`; morphological suffixes are deliberately
- * not used because real products such as Spring, Unity, and Processing share
- * them.
+ * rejected here, through `TOOL_PROSE_WORDS`; morphological suffixes are
+ * deliberately not used because real products such as Spring, Unity, and
+ * Processing share them.
  */
 function isLikelyTool(value, sourceNormalized) {
   const normalized = normalizeFact(value);
   const words = normalized.split(' ');
   if (!normalized || words.length > 3) return false;
   if (!TOOL_PHRASE_PATTERN.test(value.trim())) return false;
+  // Before the shape and source checks: the whole fragment is the prose word,
+  // so a title-cased "Building" is no more a name than "building" is.
+  if (PROSE_FRAGMENTS.has(normalized)) return false;
   if (looksToolShaped(value)) return true;
   if (sourceNormalized != null && sourceContainsFact(sourceNormalized, normalized)) return true;
   // Every word of the fragment already occurs in the source: this is the
@@ -416,7 +423,6 @@ function isLikelyTool(value, sourceNormalized) {
   // the only thing between ordinary prose and a tool claim is
   // TOOL_PROSE_WORDS (#4004).
   if (sourceNormalized != null && words.every(word => sourceContainsFact(sourceNormalized, word))) return false;
-  if (PROSE_FRAGMENTS.has(normalized)) return false;
   return !words.some(word => TOOL_PROSE_WORDS.has(word));
 }
 

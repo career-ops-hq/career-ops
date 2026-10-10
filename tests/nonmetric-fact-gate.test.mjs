@@ -148,6 +148,18 @@ try {
     fail(`clause prose was extracted as a tool: ${JSON.stringify(commaClause)}`);
   }
 
+  // Case does not make the bare word a name. A title-cased "Building" would
+  // otherwise pass the tool-shape check and block on a prose fragment.
+  for (const word of ['Building', 'BUILDING']) {
+    const cased = factClaims(`Uses agentic workflows daily, not just using AI, ${word} for it.`);
+    if (cased.some(c => c.kind === 'tool' && c.value === 'ai')
+        && !cased.some(c => c.value === 'building')) {
+      pass(`#4394 a bare "${word}" after a clause comma is prose, not a tool claim`);
+    } else {
+      fail(`a bare "${word}" was extracted as a tool: ${JSON.stringify(cased)}`);
+    }
+  }
+
   // Only the "building" fragment is dropped. The list does not end there, so a
   // name after it is still a claim the source has to back.
   const buildingMidList = factClaims('Shipped the app using React and Redux, building with Kubernetes.');
@@ -161,11 +173,13 @@ try {
   // Only the bare word is prose. A fragment that starts with "building" can
   // still name a tool, so it stays a claim the source has to back.
   const buildingWithTool = factClaims('Built dashboards using SQL, building Looker models.');
+  const buildingName = factClaims('Built the tower using Building Information Modeling.');
   if (buildingWithTool.some(c => c.kind === 'tool' && c.value === 'sql')
-      && buildingWithTool.some(c => c.kind === 'tool' && c.value.includes('looker'))) {
-    pass('#4394 a tool inside a "building" fragment is still a claim');
+      && buildingWithTool.some(c => c.kind === 'tool' && c.value.includes('looker'))
+      && buildingName.some(c => c.kind === 'tool' && c.value === 'building information modeling')) {
+    pass('#4394 a tool inside a "building" fragment, or named with it, is still a claim');
   } else {
-    fail(`a tool inside a "building" fragment was dropped: ${JSON.stringify(buildingWithTool)}`);
+    fail(`a tool inside a "building" fragment was dropped: ${JSON.stringify({ buildingWithTool, buildingName })}`);
   }
 
   // The fix is the exact word, not its ending. A lowercase product that ends
@@ -187,21 +201,25 @@ try {
   // that says AI as a word backs the claim, and one that never says it blocks
   // the same sentence. "AI-native" does not back it today, because
   // sourceContainsFact does not read a hyphen as a word boundary. That is a
-  // separate question, and this test does not settle it.
+  // separate question, and this test does not settle it. The title-cased
+  // clause runs through verifyFacts too, which passes a source to
+  // isLikelyTool, so the case rule is pinned on the path rendering uses.
   const aiSource = join(tmp, 'cv-ai.md');
   writeFileSync(aiSource, 'Uses agentic workflows daily. Built internal AI tooling for the sales team.');
-  const aiText = 'Uses agentic workflows daily, not just using AI, building for it.';
-  const aiBacked = verifyFacts(aiText, { sourcePaths: [aiSource], configPath: config });
-  const aiUnbacked = verifyFacts(aiText, { sourcePaths: [source], configPath: config });
-  if (aiBacked.verdict === 'pass'
-      && aiBacked.unsupportedFacts.length === 0
-      && aiUnbacked.verdict === 'block'
-      && aiUnbacked.unsupportedFacts.length === 1
-      && aiUnbacked.unsupportedFacts[0].kind === 'tool'
-      && aiUnbacked.unsupportedFacts[0].value === 'ai') {
-    pass('#4394 "not just using AI" passes when the source says AI as a word and blocks when it does not');
-  } else {
-    fail(`the AI claim was not decided by source evidence: ${JSON.stringify({ aiBacked, aiUnbacked })}`);
+  for (const word of ['building', 'Building']) {
+    const aiText = `Uses agentic workflows daily, not just using AI, ${word} for it.`;
+    const aiBacked = verifyFacts(aiText, { sourcePaths: [aiSource], configPath: config });
+    const aiUnbacked = verifyFacts(aiText, { sourcePaths: [source], configPath: config });
+    if (aiBacked.verdict === 'pass'
+        && aiBacked.unsupportedFacts.length === 0
+        && aiUnbacked.verdict === 'block'
+        && aiUnbacked.unsupportedFacts.length === 1
+        && aiUnbacked.unsupportedFacts[0].kind === 'tool'
+        && aiUnbacked.unsupportedFacts[0].value === 'ai') {
+      pass(`#4394 "not just using AI, ${word} for it" passes when the source says AI as a word and blocks when it does not`);
+    } else {
+      fail(`the AI claim was not decided by source evidence (${word}): ${JSON.stringify({ aiBacked, aiUnbacked })}`);
+    }
   }
 
   const proseTools = factClaims('I worked with the team in London.');
