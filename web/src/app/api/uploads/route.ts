@@ -48,26 +48,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "category must be resume or project" }, { status: 400 });
   }
 
-  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
-  const ALLOWED_EXTENSIONS = new Set([".pdf", ".docx", ".doc", ".md", ".txt", ".zip", ".tar.gz"]);
-
-  const nameLower = file.name.toLowerCase();
-  const ext = nameLower.endsWith(".tar.gz") ? ".tar.gz" : path.extname(nameLower);
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
-    return NextResponse.json({ error: `file type ${ext} not allowed` }, { status: 400 });
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > MAX_SIZE) {
-    return NextResponse.json({ error: "file exceeds 10 MB limit" }, { status: 400 });
-  }
-
   const dir = category === "resume" ? RESUME_DIR() : PROJECT_DIR();
   fs.mkdirSync(dir, { recursive: true });
 
   const id = crypto.randomUUID();
+  const ext = path.extname(file.name);
   const safeBase = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
   const filename = `${id.slice(0, 8)}-${safeBase}`;
+
+  const buffer = Buffer.from(await file.arrayBuffer());
   fs.writeFileSync(path.join(dir, filename), buffer);
 
   const meta: UploadMeta = {
@@ -84,8 +73,7 @@ export async function POST(req: NextRequest) {
   all.push(meta);
   writeMeta(all);
 
-  // Signal that a resume was uploaded — the tailor panel triggers parsing on demand
-  return NextResponse.json({ ...meta, resumeUploaded: category === "resume" }, { status: 201 });
+  return NextResponse.json(meta, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {
@@ -106,49 +94,4 @@ export async function DELETE(req: NextRequest) {
 
   writeMeta(all.filter((u) => u.id !== id));
   return NextResponse.json({ ok: true });
-}
-
-export async function PUT(req: NextRequest) {
-  const formData = await req.formData();
-  const file = formData.get("file") as File | null;
-  const id = formData.get("id") as string | null;
-
-  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  if (!file) return NextResponse.json({ error: "file required" }, { status: 400 });
-
-  const all = readMeta();
-  const entry = all.find((u) => u.id === id);
-  if (!entry) return NextResponse.json({ error: "not found" }, { status: 404 });
-
-  const MAX_SIZE = 10 * 1024 * 1024;
-  const ALLOWED_EXTENSIONS = new Set([".pdf", ".docx", ".doc", ".md", ".txt", ".zip", ".tar.gz"]);
-
-  const nameLower = file.name.toLowerCase();
-  const ext = nameLower.endsWith(".tar.gz") ? ".tar.gz" : path.extname(nameLower);
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
-    return NextResponse.json({ error: `file type ${ext} not allowed` }, { status: 400 });
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > MAX_SIZE) {
-    return NextResponse.json({ error: "file exceeds 10 MB limit" }, { status: 400 });
-  }
-
-  // Delete old file
-  const dir = entry.category === "resume" ? RESUME_DIR() : PROJECT_DIR();
-  try { fs.unlinkSync(path.join(dir, entry.filename)); } catch { /* already gone */ }
-
-  // Write new file with same ID prefix
-  const safeBase = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
-  const filename = `${id.slice(0, 8)}-${safeBase}`;
-  fs.writeFileSync(path.join(dir, filename), buffer);
-
-  // Update metadata
-  entry.filename = filename;
-  entry.originalName = file.name;
-  entry.size = buffer.length;
-  entry.dateUploaded = new Date().toISOString().slice(0, 10);
-
-  writeMeta(all);
-  return NextResponse.json(entry);
 }
