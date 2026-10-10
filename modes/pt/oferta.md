@@ -139,6 +139,7 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (conteúdo completo do bloco F)
 
 ## G) Rascunhos de Respostas para Candidatura
+<!-- career-ops:draft-answers -->
 (apenas se score >= 4.5 -- rascunhos de respostas para o formulário de candidatura)
 
 ---

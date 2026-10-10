@@ -139,6 +139,7 @@ Zapisz pełną ocenę w `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (pełna zawartość bloku F)
 
 ## G) Szkice odpowiedzi do aplikacji
+<!-- career-ops:draft-answers -->
 (tylko jeśli score >= 4.5 -- szkice odpowiedzi do formularza aplikacyjnego)
 
 ---
