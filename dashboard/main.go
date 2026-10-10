@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,7 +42,16 @@ type appModel struct {
 }
 
 func (m *appModel) reloadPipelineData() {
-	apps := data.ParseApplications(m.careerOpsPath)
+	apps, trackerErr := data.ParseApplications(m.careerOpsPath)
+	if trackerErr != nil {
+		// Retain every derived value and surface the failure, the same way the
+		// status-ledger read below does. Rebuilding from a failed read would
+		// empty the pipeline AND drop every rate to 0% through
+		// ComputeProgressMetrics, so the screen would report an empty, failing
+		// search because a file could not be opened.
+		m.pipeline, _ = m.pipeline.Update(screens.PipelineTrackerFailedMsg{Err: trackerErr.Error()})
+		return
+	}
 	metrics := data.ComputeMetrics(apps)
 	ledger, historyErr := data.ReadStatusLedger(m.careerOpsPath)
 	if historyErr == nil {
@@ -191,7 +202,10 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// or the report identity is no longer unique.
 			if msg.App.ReportNumber != "" {
 				savedStatus, matches := "", 0
-				for _, app := range data.ParseApplications(m.careerOpsPath) {
+				// A failed re-read leaves matches at 0, so the displayed status
+				// stays as it was — which is what the comment above promises.
+				saved, _ := data.ParseApplications(m.careerOpsPath)
+				for _, app := range saved {
 					if app.ReportNumber == msg.App.ReportNumber {
 						savedStatus = app.Status
 						matches++
@@ -394,9 +408,16 @@ func main() {
 	careerOpsPath := *pathFlag
 
 	// Load applications
-	apps := data.ParseApplications(careerOpsPath)
-	if apps == nil {
-		fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
+	apps, trackerErr := data.ParseApplications(careerOpsPath)
+	if trackerErr != nil {
+		// Absent is a first run and keeps the original wording. Anything else is
+		// a file that IS there and could not be opened, and saying "could not
+		// find" sent the user looking for a file sitting in front of them.
+		if errors.Is(trackerErr, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", trackerErr)
+		}
 		os.Exit(1)
 	}
 

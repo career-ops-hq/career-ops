@@ -39,7 +39,7 @@ func TestTrackerLockDirMatchesNodeProtocol(t *testing.T) {
 func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
 	tempDir, trackerPath := writeTracker(t, insertedColumnTracker)
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -132,7 +132,7 @@ func TestUpdateApplicationStatusOnlyRewritesStatusColumn(t *testing.T) {
 		t.Fatalf("failed to write tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 parsed application, got %d", len(apps))
 	}
@@ -157,7 +157,7 @@ func TestUpdateApplicationStatusOnlyRewritesStatusColumn(t *testing.T) {
 		t.Errorf("status word was replaced inside the Company cell, file now:\n%s", out)
 	}
 
-	reparsed := ParseApplications(tempDir)
+	reparsed := mustParseApplications(t, tempDir)
 	if reparsed[0].Company != "Applied Materials" {
 		t.Errorf("company = %q, want \"Applied Materials\"", reparsed[0].Company)
 	}
@@ -186,7 +186,7 @@ func TestParseApplicationsUsesTrackerNumberColumn(t *testing.T) {
 		t.Fatalf("failed to write applications tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 2 {
 		t.Fatalf("expected 2 parsed applications, got %d", len(apps))
 	}
@@ -233,7 +233,7 @@ func TestParseApplicationsResolvesTrackerRelativeReportLinks(t *testing.T) {
 		}
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 2 {
 		t.Fatalf("expected 2 parsed applications, got %d", len(apps))
 	}
@@ -286,7 +286,7 @@ const insertedColumnTracker = `# Applications Tracker
 func TestParseApplicationsMapsColumnsByHeader(t *testing.T) {
 	tempDir, _ := writeTracker(t, insertedColumnTracker)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -321,7 +321,7 @@ func TestParseApplicationsReadsLocationColumn(t *testing.T) {
 | 1 | 2026-06-01 | Acme | Engineer | Cardiff, UK | 4.0/5 | Applied | | | |
 `)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -359,7 +359,7 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 		t.Fatalf("write legacy report: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 3 {
 		t.Fatalf("expected 3 applications, got %d", len(apps))
 	}
@@ -379,7 +379,7 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {
 	tempDir, path := writeTracker(t, insertedColumnTracker)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -404,7 +404,7 @@ func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {
 		}
 	}
 
-	reparsed := ParseApplications(tempDir)
+	reparsed := mustParseApplications(t, tempDir)
 	if reparsed[0].Status != "Interview" {
 		t.Errorf("reparsed Status = %q, want \"Interview\"", reparsed[0].Status)
 	}
@@ -450,7 +450,7 @@ func TestParseApplicationsRespectsCareerOpsTracker(t *testing.T) {
 
 	t.Setenv("CAREER_OPS_TRACKER", customTrackerPath)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 parsed application, got %d", len(apps))
 	}
@@ -586,7 +586,7 @@ func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
 		t.Fatalf("write tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 app, got %d", len(apps))
 	}
@@ -634,7 +634,7 @@ func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
 		t.Fatalf("write tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 app, got %d", len(apps))
 	}
@@ -707,7 +707,7 @@ func TestParseApplicationsReadsLinkedURLCells(t *testing.T) {
 		t.Fatalf("write report: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 2 {
 		t.Fatalf("expected 2 applications, got %d", len(apps))
 	}

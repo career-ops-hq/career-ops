@@ -72,7 +72,7 @@ func TestDashboardStatusLifecycleMatchesCLIAndWeb(t *testing.T) {
 					t.Fatalf("ledger row = %q, want %q", lines[i], want)
 				}
 			}
-			apps := ParseApplications(root)
+			apps := mustParseApplications(t, root)
 			if len(apps) != 1 || apps[0].Status != "Rejected" || apps[0].Notes != "original; sent application" {
 				t.Fatalf("unexpected application: %+v", apps)
 			}
@@ -96,7 +96,7 @@ func TestDashboardStatusReportsLifecycleFailure(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "status saved, but") {
 				t.Fatalf("missing partial success warning: %v", err)
 			}
-			apps := ParseApplications(root)
+			apps := mustParseApplications(t, root)
 			if len(apps) != 1 || apps[0].Status != "Applied" {
 				t.Fatalf("saved status must stay visible: %+v", apps)
 			}
@@ -249,7 +249,7 @@ func TestDashboardStatusPreservesFlagLikeNotes(t *testing.T) {
 			if err := UpdateApplicationStatusAndNotes(root, model.CareerApplication{ReportNumber: "7"}, "Interview", note); err != nil {
 				t.Fatal(err)
 			}
-			apps := ParseApplications(root)
+			apps := mustParseApplications(t, root)
 			if len(apps) != 1 || apps[0].Status != "Interview" || apps[0].Notes != "original; "+note {
 				t.Fatalf("note became a CLI flag: %+v", apps)
 			}

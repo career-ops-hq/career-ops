@@ -66,7 +66,7 @@ func TestLocalizedTrackerHeaders(t *testing.T) {
 					}
 					tracker := header + "\n| " + strings.Repeat("--- | ", len(layout.headers)) + "\n" + pipe(layout.cells) + "\n"
 					dir, trackerPath := writeTracker(t, tracker)
-					apps := ParseApplications(dir)
+					apps := mustParseApplications(t, dir)
 					if len(apps) != 1 {
 						t.Fatalf("expected exactly one application, got %d (header must not become a row)", len(apps))
 					}
@@ -94,7 +94,7 @@ func TestLocalizedTrackerHeaders(t *testing.T) {
 					if gotLines[0] != header || !reflect.DeepEqual(splitTrackerRow(gotLines[2]), want) {
 						t.Fatalf("writer changed cells outside Status/Notes:\n%s", updated)
 					}
-					changed := ParseApplications(dir)
+					changed := mustParseApplications(t, dir)
 					if len(changed) != 1 || changed[0].Status != "Interview" || changed[0].Notes != "keep this note; scheduled" {
 						t.Fatalf("writer output did not roundtrip: %+v", changed)
 					}
@@ -110,7 +110,7 @@ func TestTrackerAliasHeaderControls(t *testing.T) {
 		header := "| " + labels + " | Score | Status | Materials | Report | Notes |"
 		row := "| 41 | 2026-01-02 | Firma | Rolle | 4.2/5 | Applied | ✅ | [41](reports/041.md) | Status |"
 		dir, _ := writeTracker(t, header+"\n"+row+"\n")
-		apps := ParseApplications(dir)
+		apps := mustParseApplications(t, dir)
 		if len(apps) != 1 || apps[0].Company != "Firma" || apps[0].Role != "Rolle" || apps[0].Notes != "Status" || !apps[0].HasPDF {
 			t.Errorf("header %q yielded %+v", header, apps)
 		}
@@ -118,7 +118,7 @@ func TestTrackerAliasHeaderControls(t *testing.T) {
 			t.Error("individual aliases in data must not satisfy the full schema")
 		}
 		legacy, _ := writeTracker(t, row+"\n")
-		if got := ParseApplications(legacy); len(got) != 1 || got[0].Company != "Firma" || got[0].Status != "Applied" {
+		if got := mustParseApplications(t, legacy); len(got) != 1 || got[0].Company != "Firma" || got[0].Status != "Applied" {
 			t.Errorf("headerless compatibility lost: %+v", got)
 		}
 	}
@@ -146,7 +146,7 @@ func TestTrackerSeparatorRows(t *testing.T) {
 					}
 				}
 				dir, _ := writeTracker(t, strings.Join(lines, "\n"))
-				apps := ParseApplications(dir)
+				apps := mustParseApplications(t, dir)
 				if len(apps) != 1 || apps[0].Company != "Acme" || apps[0].Notes != "hot --- lead" {
 					t.Fatalf("separator must be skipped while data containing --- survives: %+v", apps)
 				}

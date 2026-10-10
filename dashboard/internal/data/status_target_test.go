@@ -81,7 +81,7 @@ func TestStatusTargetUsesReaderPath(t *testing.T) {
 			}
 			app := model.CareerApplication{Number: 42, ReportNumber: "7", Status: "Applied"}
 			if layout != "missing-override" {
-				apps := ParseApplications(root)
+				apps := mustParseApplications(t, root)
 				if len(apps) != 1 || apps[0].Number != 42 {
 					t.Fatalf("wrong reader target: %+v", apps)
 				}
@@ -160,7 +160,7 @@ func TestStatusTargetStaleStatusNeverMatchesAnotherCell(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			apps := ParseApplications(root)
+			apps := mustParseApplications(t, root)
 			if len(apps) != 1 || apps[0].Status != "Interview" || apps[0].Company != "Applied" || apps[0].Notes != "Applied; follow-up" {
 				t.Fatalf("wrong fields: %+v", apps)
 			}

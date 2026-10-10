@@ -1,7 +1,9 @@
 package data
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -80,18 +82,40 @@ func resolveTrackerPath(careerOpsPath string) string {
 		return filepath.Clean(filepath.Join(getRepoRoot(), envTracker))
 	}
 	dataPath := filepath.Clean(filepath.Join(careerOpsPath, "data", "applications.md"))
+	// Fall back ONLY when data/applications.md is genuinely absent. Any other
+	// stat failure means the canonical tracker IS there and could not be
+	// examined, and falling back then sends the reader to a legacy path that
+	// usually does not exist — so a permission error on the real tracker
+	// surfaced as "could not find applications.md", the same mix-up this change
+	// removes one step later in ParseApplications.
 	if _, err := os.Stat(dataPath); err == nil {
+		return dataPath
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		// Returned as the resolved path so the caller's own read reports the
+		// real error against the real file, rather than this function inventing
+		// a second error channel for a path it only computes.
 		return dataPath
 	}
 	return filepath.Clean(filepath.Join(careerOpsPath, "applications.md"))
 }
 
 // ParseApplications reads applications.md and returns parsed applications.
-func ParseApplications(careerOpsPath string) []model.CareerApplication {
+//
+// The error is returned rather than folded into a nil slice because absent and
+// unreadable are different facts and the callers need to tell them apart. A
+// tracker that is not there yet is a first run; one that cannot be opened is
+// the user's whole pipeline being inaccessible, and reporting that as "no
+// applications" both loses the pipeline and makes ComputeProgressMetrics
+// report the search as failing (every rate falls to 0% and renders red).
+//
+// Callers should branch on errors.Is(err, fs.ErrNotExist). Same rule the rest
+// of the project follows for user-layer reads: ENOENT is the only failure that
+// legitimately means empty.
+func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) {
 	filePath := resolveTrackerPath(careerOpsPath)
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read tracker %s: %w", filePath, err)
 	}
 
 	lines := strings.Split(string(content), "\n")
@@ -238,7 +262,7 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 	// Strategy 5: company name fallback from batch-input.tsv
 	enrichAppURLsByCompany(careerOpsPath, apps)
 
-	return apps
+	return apps, nil
 }
 
 // loadBatchInputURLs reads batch-input.tsv and returns a map of batch ID -> job URL.

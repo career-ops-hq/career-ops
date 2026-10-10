@@ -109,6 +109,17 @@ type PipelineHistoryFailedMsg struct {
 	Err string
 }
 
+// PipelineTrackerFailedMsg reports that the tracker could not be read and the
+// screen is still showing the previous applications.
+//
+// Sibling of PipelineHistoryFailedMsg, for the more consequential of the two
+// files: rebuilding the pipeline from a failed tracker read empties it, and
+// ComputeProgressMetrics then reports every rate as 0% — an empty pipeline and
+// a search that looks like it is failing, because a file could not be opened.
+type PipelineTrackerFailedMsg struct {
+	Err string
+}
+
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
@@ -512,6 +523,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		m.flash = "Could not update status: " + msg.Err
 	case PipelineHistoryFailedMsg:
 		m.flash = "Status history unavailable; progress uses previous data: " + msg.Err
+		return m, nil
+	case PipelineTrackerFailedMsg:
+		m.flash = "Tracker unavailable; showing previous applications: " + msg.Err
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
