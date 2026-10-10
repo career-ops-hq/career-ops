@@ -42,13 +42,18 @@ Flags:
 
 function loadKeywords() {
   const defaultKeywords = ["Software Engineer"];
-  let configObj = {};
-  if (existsSync(PORTALS_PATH)) {
-    try {
-      configObj = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
-    } catch (e) {}
+  if (!existsSync(PORTALS_PATH)) return defaultKeywords;
+  let configObj;
+  try {
+    configObj = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
+  } catch (err) {
+    // Same message and exit as scan.mjs. Swallowing this ran the scan on the
+    // default keyword, so a user who set hn_hiring.keywords got postings they
+    // never asked for in data/pipeline.md and nothing saying why (#4921).
+    console.error(`Error: failed to parse ${PORTALS_PATH}: ${err.message}`);
+    process.exit(1);
   }
-  return configObj.hn_hiring?.keywords || defaultKeywords;
+  return configObj?.hn_hiring?.keywords || defaultKeywords;
 }
 
 // ── AI Extraction Layer ─────────────────────────────────────────
