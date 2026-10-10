@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // GENERADO por github-src/scripts/build.mjs: no editar a mano. Fuente: github-src/scripts/triage.mjs + bin/lib/triage-core.mjs + policy/*.json
-// {"builtAt":"2026-09-24T11:17:32.264Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
+// {"builtAt":"2026-10-02T14:56:44.465Z","core":"bin/lib/triage-core.mjs","policies":{"labels":"8 entradas","trivial":"18 entradas","priority":"7 entradas"}}
 import fs from 'node:fs';
 import path from 'node:path';
 
-const POLICIES = {"labels":{"version":1,"_doc":"Máquina de estados por labels. Los scripts leen de aquí; nada se hardcodea. who_sets/who_clears: action | session | coderabbit | human | collisions | priority.","maintainers":["santifer","Scott-Emberson"],"bots":["coderabbitai","coderabbitai[bot]","github-actions","github-actions[bot]","dependabot","dependabot[bot]","renovate","renovate[bot]","copilot","copilot-pull-request-reviewer"],"states":["triage/new","triage/ci-hold","triage/needs-split","needs-rebase","triage/waiting-author","triage/ready","triage/trivial","triage/re-review"],"statePrecedence":["needs-rebase","triage/ci-hold","triage/needs-split","triage/waiting-author","triage/trivial","triage/re-review","triage/ready","triage/new"],"areas":{"🔴 core-architecture":["AGENTS.md","CLAUDE.md","OPENCODE.md","DATA_CONTRACT.md","modes/_shared.md"],"⚠️ agent-behavior":["modes/*.md","modes/**/*.md",".claude/skills/**",".cursor/skills/**",".opencode/skills/**",".qwen/skills/**",".antigravitycli/skills/**",".grok/skills/**"],"🔧 scripts":["*.mjs","batch/**"],"📄 docs":["docs/**","README*.md","CONTRIBUTING.md","GOVERNANCE.md","CODE_OF_CONDUCT.md","SECURITY.md","SUPPORT.md"],"🌐 i18n":["README.*.md","modes/de/**","modes/fr/**","modes/hi/**","modes/ja/**","modes/ru/**"],"📊 dashboard":["dashboard/**"],"📦 dependencies":["package.json","package-lock.json"],"⚙️ ci":[".github/**"],"area:web":["web/**"]},"labels":{"triage/new":{"color":"BFD4F2","description":"Sin clasificar todavía: la Action decide estado en el siguiente sweep","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/ci-hold":{"color":"E99695","description":"Primerizo con CI pendiente de aprobación: un maintainer la libera","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/needs-split":{"color":"F9D0C4","description":"Demasiado grande o toca demasiadas áreas: pedir troceo","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"needs-rebase":{"color":"fbca04","description":"Conflicts with main after recent merges; author rebase needed","who_sets":"action","who_clears":"action","exclusive_group":"triage","exists":true},"triage/waiting-author":{"color":"FBCA04","description":"La pelota está en el tejado del autor (CI rojo o cambios pedidos)","who_sets":"session","who_clears":"action","exclusive_group":"triage"},"triage/ready":{"color":"0E8A16","description":"CI verde y sin bloqueos: lista para revisión humana","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/trivial":{"color":"C2E0C6","description":"Pasa todos los gates de merge trivial: se fusiona sin lote","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/re-review":{"color":"1D76DB","description":"Tenía OK y cambió después: hay que volver a mirar","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"direction/needs-santiago":{"color":"D93F0B","description":"Decisión de dirección reservada a Santiago: no se fusiona sin su OK","who_sets":"session","who_clears":"session","exclusive_group":"direction","blocks_merge":true},"direction/review":{"color":"5319E7","description":"Política de dirección: revisar encaje antes de avanzar","who_sets":"session","who_clears":"session","exclusive_group":"direction"},"needs-maintainer-decision":{"color":"D93F0B","description":"Architecture/strategy/precedent call reserved for Santiago","who_sets":"human","who_clears":"human","exclusive_group":"direction","exists":true,"synonym_of":"direction/needs-santiago"},"maintainer-commitment":{"color":"D876E3","description":"Hay una promesa nuestra registrada en el ledger para esta PR","who_sets":"session","who_clears":"session"},"blocks-others":{"color":"E4E669","description":"Otras PRs abiertas tocan sus mismos ficheros: fusionarla primero","who_sets":"collisions","who_clears":"collisions"},"p0":{"color":"B60205","description":"Critical / blocking","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true},"p1":{"color":"D93F0B","description":"High priority","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true},"p2":{"color":"FBCA04","description":"Medium priority","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true,"no_label":true,"_doc":"p2 es el estado por defecto: no se etiqueta. classify solo añade p0/p1 y quita p0/p1 cuando dejan de cumplirse."},"quality-check":{"color":"D4C5F9","description":"Automated signal: a maintainer reads this one by hand before anything else happens","who_sets":"coderabbit","who_clears":"human","exists":true,"read_only":true},"agent-generated":{"color":"5319e7","description":"Drafted by a coding agent operated by a maintainer; read, run and signed by a human before review","who_sets":"human","who_clears":"human","exists":true,"read_only":true},"stale":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"plugin-candidate":{"color":"8B5CF6","description":"Good integration, lives outside core — candidate for the optional-integrations/plugin surface","who_sets":"human","who_clears":"human","exists":true,"read_only":true},"adoption/track":{"color":"1D76DB","description":"In the PR adoption ladder: author unresponsive, clock running","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/pinged":{"color":"5DA8E8","description":"Adoption ladder step 1: friendly ping posted","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/warned":{"color":"F9A825","description":"Adoption ladder step 2: adoption notice posted, 2 weeks to respond","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/ready":{"color":"D93F0B","description":"Adoption ladder step 3: eligible for close + adoptable companion issue (maintainer action)","who_sets":"action","who_clears":"human","exists":true,"read_only":true},"🔧 scripts":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"⚠️ agent-behavior":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"📄 docs":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"🔴 core-architecture":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"area:web":{"color":"dd7627","description":"Web/UI surface — owned by the career-ops-ui agent (first-party web)","who_sets":"human","who_clears":"human","exists":true,"read_only":true,"area":true},"📊 dashboard":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"📦 dependencies":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"🌐 i18n":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"⚙️ ci":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true}}},"trivial":{"version":1,"_doc":"Gates de merge trivial. Todos en código (bin/lib/triage-core.mjs evaluateGates). Un test negativo por gate en tests/core.test.mjs.","maxLinesSmall":50,"safeAreas":["📄 docs","🌐 i18n"],"safePathPrefixes":["docs/","tests/","test/"],"safeFilePatterns":["README*.md","*.test.mjs","*.test.js","*.test.ts","*_test.go"],"requiredChecks":["test (ubuntu-latest)","test (macos-latest)","test (windows-latest)"],"forbiddenLabels":["quality-check","agent-generated","needs-rebase","🔴 core-architecture","⚠️ agent-behavior","direction/needs-santiago","direction/review","needs-maintainer-decision"],"forbiddenLabelPrefixes":["direction/"],"coderabbitLogins":["coderabbitai","coderabbitai[bot]"],"minAuthorMerged":1,"codeowners":{"file":".github/CODEOWNERS","owner":"@santifer","extraPatterns":["/plugins-registry/"],"_extraPatternsDoc":"plugins-registry.json ya no existe; hoy es plugins-registry/** y sigue siendo chokepoint de Santiago.","fallbackPatterns":["/README*.md","/CONTRIBUTING.md","/MAINTAINERS.md","/ARCHITECTURE.md","/.github/CODEOWNERS","/.github/copilot-instructions.md","/.github/agents/","/.github/instructions/","/CLAUDE.md","/AGENTS.md","/CODEX.md","/OPENCODE.md","/GEMINI.md","/modes/_shared.md","/DATA_CONTRACT.md","/update-system.mjs","/updater-migration-tests.mjs","/plugins-registry.json","/validate-plugin-registry.mjs","/plugin-install.mjs","/plugin-audit.mjs","/plugins/_engine.mjs","/plugins/_lock.mjs","/plugins/_net.mjs","/plugins/_registry.mjs","/.github/workflows/","/docs/PLUGIN_REVIEW.md","/web/"],"_fallbackDoc":"Copia de los patrones de @santifer en CODEOWNERS para cuando no hay checkout (Action). loadPolicies prefiere el fichero real."},"mergeState":{"requireMergeable":"MERGEABLE","reject":["DIRTY","BLOCKED","BEHIND"],"allowBehind":false,"allowBlocked":true,"_doc":"BLOCKED lo produce la propia protección de rama (falta la aprobación que da act-approve): se permite. BEHIND se permitirá cuando haya merge queue (allowBehind=true)."},"sessionCap":15,"informativeChecks":["CodeRabbit","renovate/artifacts","web typecheck + build","label","welcome","guard"],"_informativeChecksDoc":"Checks que nunca ponen la CI en rojo: informativos por diseño (web-ci.yml) o de servicio.","policyChecks":["direction-gate"],"_policyChecksDoc":"Checks de política, no de CI del autor: ciStatus los ignora (ni rojo ni pendiente, no disparan waiting-author) pero el gate `policy-checks` bloquea el merge trivial si alguno está en rojo."},"priority":{"version":1,"_doc":"p0/p1/p2 calculados en bin/lib/triage-core.mjs computePriority. Cada asignación lleva why en ≤12 palabras.","p0":{"labels":["security","regression"],"codeqlOpenAlerts":true},"p1":{"commitmentDueWithinHours":48,"blocksOthersMinDependents":10,"firstTimerReadyHours":48,"reReview":true,"_blocksOthersDoc":"blocks-others = las `blocksOthersTop` PRs con más dependientes, siempre que tengan ≥ blocksOthersMinDependents. Con 291 abiertas y ficheros como update-system.mjs tocados por 49 PRs, un umbral solo por número marcaba 120: el grafo es denso y lo útil es el top.","blocksOthersTop":15},"firstResponseHours":20,"needsSplit":{"maxLines":1000,"maxAreas":2},"sizeClasses":{"XS":10,"S":50,"M":250,"L":1000}}};
+const POLICIES = {"labels":{"version":1,"_doc":"Máquina de estados por labels. Los scripts leen de aquí; nada se hardcodea. who_sets/who_clears: action | session | coderabbit | human | collisions | priority.","maintainers":["santifer","Scott-Emberson"],"bots":["coderabbitai","coderabbitai[bot]","github-actions","github-actions[bot]","dependabot","dependabot[bot]","renovate","renovate[bot]","copilot","copilot-pull-request-reviewer"],"states":["triage/new","triage/ci-hold","triage/needs-split","needs-rebase","triage/waiting-author","triage/ready","triage/trivial","triage/re-review"],"statePrecedence":["needs-rebase","triage/ci-hold","triage/needs-split","triage/waiting-author","triage/trivial","triage/re-review","triage/ready","triage/new"],"areas":{"🔴 core-architecture":["AGENTS.md","CLAUDE.md","OPENCODE.md","DATA_CONTRACT.md","modes/_shared.md"],"⚠️ agent-behavior":["modes/*.md","modes/**/*.md",".claude/skills/**",".cursor/skills/**",".opencode/skills/**",".qwen/skills/**",".antigravitycli/skills/**",".grok/skills/**"],"🔧 scripts":["*.mjs","batch/**"],"📄 docs":["docs/**","README*.md","CONTRIBUTING.md","GOVERNANCE.md","CODE_OF_CONDUCT.md","SECURITY.md","SUPPORT.md"],"🌐 i18n":["README.*.md","modes/de/**","modes/fr/**","modes/hi/**","modes/ja/**","modes/ru/**"],"📊 dashboard":["dashboard/**"],"📦 dependencies":["package.json","package-lock.json"],"⚙️ ci":[".github/**"],"area:web":["web/**"]},"labels":{"triage/new":{"color":"BFD4F2","description":"Sin clasificar todavía: la Action decide estado en el siguiente sweep","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/ci-hold":{"color":"E99695","description":"Primerizo con CI pendiente de aprobación: un maintainer la libera","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/needs-split":{"color":"F9D0C4","description":"Demasiado grande o toca demasiadas áreas: pedir troceo","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"needs-rebase":{"color":"fbca04","description":"Conflicts with main after recent merges; author rebase needed","who_sets":"action","who_clears":"action","exclusive_group":"triage","exists":true},"triage/waiting-author":{"color":"FBCA04","description":"La pelota está en el tejado del autor (CI rojo o cambios pedidos)","who_sets":"session","who_clears":"action","exclusive_group":"triage"},"triage/ready":{"color":"0E8A16","description":"CI verde y sin bloqueos: lista para revisión humana","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/trivial":{"color":"C2E0C6","description":"Pasa todos los gates de merge trivial: se fusiona sin lote","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"triage/re-review":{"color":"1D76DB","description":"Tenía OK y cambió después: hay que volver a mirar","who_sets":"action","who_clears":"action","exclusive_group":"triage"},"no-split":{"color":"C5DEF5","description":"Maintainer decision: keep as one PR, no split request. Removed if it grows past 1.5x its size.","who_sets":"session","who_clears":"session","_doc":"Cara pública del «no partir» de Santiago (bin/decision.mjs --no-split). La pone y la quita la sesión según su decisión del ledger; la Action no la toca, pero con ella no vuelve a poner triage/needs-split por tamaño (2-oct, #3782)."},"direction/needs-santiago":{"color":"D93F0B","description":"Decisión de dirección reservada a Santiago: no se fusiona sin su OK","who_sets":"session","who_clears":"session","exclusive_group":"direction","blocks_merge":true},"direction/review":{"color":"5319E7","description":"Política de dirección: revisar encaje antes de avanzar","who_sets":"session","who_clears":"session","exclusive_group":"direction"},"needs-maintainer-decision":{"color":"D93F0B","description":"Architecture/strategy/precedent call reserved for Santiago","who_sets":"human","who_clears":"human","exclusive_group":"direction","exists":true,"synonym_of":"direction/needs-santiago"},"maintainer-commitment":{"color":"D876E3","description":"Hay una promesa nuestra registrada en el ledger para esta PR","who_sets":"session","who_clears":"session"},"blocks-others":{"color":"E4E669","description":"Otras PRs abiertas tocan sus mismos ficheros: fusionarla primero","who_sets":"collisions","who_clears":"collisions"},"p0":{"color":"B60205","description":"Critical / blocking","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true},"p1":{"color":"D93F0B","description":"High priority","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true},"p2":{"color":"FBCA04","description":"Medium priority","who_sets":"priority","who_clears":"priority","exclusive_group":"priority","exists":true,"no_label":true,"_doc":"p2 es el estado por defecto: no se etiqueta. classify solo añade p0/p1 y quita p0/p1 cuando dejan de cumplirse."},"quality-check":{"color":"D4C5F9","description":"Automated signal: a maintainer reads this one by hand before anything else happens","who_sets":"coderabbit","who_clears":"human","exists":true,"read_only":true},"agent-generated":{"color":"5319e7","description":"Drafted by a coding agent operated by a maintainer; read, run and signed by a human before review","who_sets":"human","who_clears":"human","exists":true,"read_only":true},"stale":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"plugin-candidate":{"color":"8B5CF6","description":"Good integration, lives outside core — candidate for the optional-integrations/plugin surface","who_sets":"human","who_clears":"human","exists":true,"read_only":true},"adoption/track":{"color":"1D76DB","description":"In the PR adoption ladder: author unresponsive, clock running","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/pinged":{"color":"5DA8E8","description":"Adoption ladder step 1: friendly ping posted","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/warned":{"color":"F9A825","description":"Adoption ladder step 2: adoption notice posted, 2 weeks to respond","who_sets":"action","who_clears":"action","exists":true,"read_only":true},"adoption/ready":{"color":"D93F0B","description":"Adoption ladder step 3: eligible for close + adoptable companion issue (maintainer action)","who_sets":"action","who_clears":"human","exists":true,"read_only":true},"🔧 scripts":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"⚠️ agent-behavior":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"📄 docs":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"🔴 core-architecture":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"area:web":{"color":"dd7627","description":"Web/UI surface — owned by the career-ops-ui agent (first-party web)","who_sets":"human","who_clears":"human","exists":true,"read_only":true,"area":true},"📊 dashboard":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"📦 dependencies":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"🌐 i18n":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true},"⚙️ ci":{"color":"ededed","description":"","who_sets":"action","who_clears":"action","exists":true,"read_only":true,"area":true}}},"trivial":{"version":1,"_doc":"Gates de merge trivial. Todos en código (bin/lib/triage-core.mjs evaluateGates). Un test negativo por gate en tests/core.test.mjs.","maxLinesSmall":50,"safeAreas":["📄 docs","🌐 i18n"],"safePathPrefixes":["docs/","tests/","test/"],"safeFilePatterns":["README*.md","*.test.mjs","*.test.js","*.test.ts","*_test.go"],"requiredChecks":["test (ubuntu-latest)","test (macos-latest)","test (windows-latest)"],"forbiddenLabels":["quality-check","agent-generated","needs-rebase","🔴 core-architecture","⚠️ agent-behavior","direction/needs-santiago","direction/review","needs-maintainer-decision"],"forbiddenLabelPrefixes":["direction/"],"coderabbitLogins":["coderabbitai","coderabbitai[bot]"],"minAuthorMerged":1,"codeowners":{"file":".github/CODEOWNERS","owner":"@santifer","extraPatterns":["/plugins-registry/"],"_extraPatternsDoc":"plugins-registry.json ya no existe; hoy es plugins-registry/** y sigue siendo chokepoint de Santiago.","fallbackPatterns":["/README*.md","/CONTRIBUTING.md","/MAINTAINERS.md","/ARCHITECTURE.md","/.github/CODEOWNERS","/.github/copilot-instructions.md","/.github/agents/","/.github/instructions/","/CLAUDE.md","/AGENTS.md","/CODEX.md","/OPENCODE.md","/GEMINI.md","/modes/_shared.md","/DATA_CONTRACT.md","/update-system.mjs","/updater-migration-tests.mjs","/plugins-registry.json","/validate-plugin-registry.mjs","/plugin-install.mjs","/plugin-audit.mjs","/plugins/_engine.mjs","/plugins/_lock.mjs","/plugins/_net.mjs","/plugins/_registry.mjs","/.github/workflows/","/docs/PLUGIN_REVIEW.md","/web/"],"_fallbackDoc":"Copia de los patrones de @santifer en CODEOWNERS para cuando no hay checkout (Action). loadPolicies prefiere el fichero real."},"mergeState":{"requireMergeable":"MERGEABLE","reject":["DIRTY","BLOCKED","BEHIND"],"allowBehind":false,"allowBlocked":true,"_doc":"BLOCKED lo produce la propia protección de rama (falta la aprobación que da act-approve): se permite. BEHIND se permitirá cuando haya merge queue (allowBehind=true)."},"sessionCap":15,"informativeChecks":["CodeRabbit","renovate/artifacts","web typecheck + build","label","welcome","guard"],"_informativeChecksDoc":"Checks que nunca ponen la CI en rojo: informativos por diseño (web-ci.yml) o de servicio.","policyChecks":["direction-gate"],"_policyChecksDoc":"Checks de política, no de CI del autor: ciStatus los ignora (ni rojo ni pendiente, no disparan waiting-author) pero el gate `policy-checks` bloquea el merge trivial si alguno está en rojo."},"priority":{"version":1,"_doc":"p0/p1/p2 calculados en bin/lib/triage-core.mjs computePriority. Cada asignación lleva why en ≤12 palabras.","p0":{"labels":["security","regression"],"codeqlOpenAlerts":true},"p1":{"commitmentDueWithinHours":48,"blocksOthersMinDependents":10,"firstTimerReadyHours":48,"reReview":true,"_blocksOthersDoc":"blocks-others = las `blocksOthersTop` PRs con más dependientes, siempre que tengan ≥ blocksOthersMinDependents. Con 291 abiertas y ficheros como update-system.mjs tocados por 49 PRs, un umbral solo por número marcaba 120: el grafo es denso y lo útil es el top.","blocksOthersTop":15},"firstResponseHours":20,"needsSplit":{"maxLines":1000,"maxAreas":2,"noSplitGrowth":1.5,"_noSplitDoc":"El «no partir» de Santiago (bin/decision.mjs --no-split) vale mientras la PR no crezca más de noSplitGrowth veces en líneas o en ficheros desde el head en que lo decidió: una lista (rebase, un test) añade un 4-5 % (#3782, #3805) y otra PR entera dentro no cabe."},"sizeClasses":{"XS":10,"S":50,"M":250,"L":1000}}};
 const JEV_CATALOG = {"quality":{"domain":"quality","version":1,"state_default":["title","body(4000)","files","diffHead(120)"],"questions":[{"id":"kind","type":"choice","summary":"Tipo de cambio según lo que toca el diff, no según el prefijo del título.","instructions":"What kind of change is this pull request, judged by the files and diff rather than by the title prefix?","criteria":{"fix":"Corrects a bug or regression in existing behaviour.","feature":"Adds new behaviour, a new mode, command, option or provider on the existing path.","provider":"Adds or changes a job-source provider or scanner.","docs":"Documentation, README, guides, comments only.","i18n":"Translations or language packs.","test":"Tests, fixtures or test harness only.","chore":"Dependencies, CI, tooling, formatting, renames without behaviour change.","refactor":"Restructures code without changing behaviour.","mixed":"Several of the above combined in one pull request."},"state":["title","body(4000)","files","diffHead(120)"],"effect":"note","since":"2026-09-22","source":"CONVENTIONS (triage por tipo) y CONTRIBUTING §What makes a good PR"},{"id":"describes_diff","type":"noul","summary":"El cuerpo explica lo que el diff hace de verdad; si no, se pide información antes de revisar.","instructions":"Does the pull request description accurately explain what the diff changes and why, at the level a reviewer needs?","criteria":{"yes":"The body names the problem, the change and how it was checked, and the files listed match that story.","no":"The body is empty, a template left unfilled, unrelated to the files changed, or claims changes that the diff does not show."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.5,"hit_when":"below","effect":"needs-info","since":"2026-09-22","source":"CONTRIBUTING §What makes a good PR"},{"id":"is_spam","type":"noul","summary":"Solo marca; nunca cierra. Una PR vacía, de prueba o sin relación con el proyecto.","instructions":"Is this pull request spam or noise, meaning it has no plausible intent to improve the project?","criteria":{"yes":"Empty or placeholder changes, link farming, unrelated files, mass-generated boilerplate with no connection to the codebase, test commits opened by mistake.","no":"Any genuine attempt to fix, add or document something, even if low quality, off-scope or poorly written."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.7,"effect":"flag","since":"2026-09-22","source":"CLAUDE.md constitución regla 4 (nunca spam-close sin presentarlo)"},{"id":"is_success_story","type":"noul","summary":"El autor cuenta que consiguió trabajo o entrevistas gracias al proyecto; recibe reconocimiento, nunca cierre automático.","instructions":"Does the author report a personal success obtained with the project (interviews, offers, a hired outcome) as part of this contribution?","criteria":{"yes":"The body or title tells that the author got interviews, offers or a job using the tool, or thanks the project for a personal outcome.","no":"No personal outcome is reported; it is a plain technical change."},"state":["title","body(4000)"],"threshold_review":0.6,"effect":"flag","since":"2026-09-22","source":"product-routing (una success-story legítima recibe reconocimiento)"},{"id":"ai_generated_signal","type":"noul","summary":"Señal de texto o código generado sin revisión humana; solo orienta la profundidad de la revisión.","instructions":"Does this pull request show signs of being generated by an AI agent without human review of the result?","criteria":{"yes":"Generic marketing-style prose, claims that do not match the diff, invented file paths or APIs, boilerplate sections repeated, very large diffs that touch unrelated areas with uniform style, references to non-existent features.","no":"Focused change with specific reasoning, references to real files and issues, human-scale wording, or an explicitly declared agent-generated change reviewed by a person."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.7,"effect":"note","since":"2026-09-22","source":"product-routing (apariencia de texto generado es señal para investigar, no evidencia para cerrar)"},{"id":"scope_creep","type":"noul","summary":"La PR mezcla varias entregas independientes; se pide partirla, no se rechaza.","instructions":"Does this pull request bundle several independent changes that could each be reviewed and merged on their own?","criteria":{"yes":"Multiple unrelated features or fixes, a feature plus large refactors or formatting of untouched files, a new component plus docs plus tooling for other areas in one diff.","no":"One coherent change with the tests, docs and small adjacent adjustments it needs."},"state":["title","body(4000)","files","diffHead(120)"],"threshold_review":0.7,"effect":"needs-split","since":"2026-09-22","source":"product-routing (el tamaño puede requerir partir la entrega, no rechazar su existencia)"}]},"intent":{"domain":"intent","version":1,"state_default":["comment(3000)","title"],"questions":[{"id":"author_comment_intent","type":"choice","summary":"Solo delivered o question quitan waiting-author; el resto se registra.","instructions":"What is the author's intent in this comment on their own pull request?","criteria":{"delivered":"The author says the requested change is done, pushed, rebased or ready for another look.","question":"The author asks the maintainers something they need answered to continue.","pushback":"The author disagrees with the review or the routing and argues for their approach.","will_do_later":"The author acknowledges the request and says they will do it later, without delivering yet.","abandoning":"The author says they will not continue, closes the door, or hands the work over.","unrelated":"Thanks, small talk, bot output or content that does not change the state of the pull request."},"state":["comment(3000)","title"],"effect":"clear-waiting-author","since":"2026-09-22","source":"plan 3.7 (quita waiting-author solo con delivered/question)"},{"id":"maintainer_owes_reply","type":"noul","summary":"El comentario deja una pregunta o entrega esperando a que el mantenedor conteste.","instructions":"After this comment, does the maintainer owe the author a reply before the pull request can move?","criteria":{"yes":"The author asked a direct question, delivered what was asked, or is waiting for a decision only the maintainer can make.","no":"The comment needs no answer, is a bot message, or the ball is still on the author's side."},"state":["comment(3000)","title"],"threshold_review":0.6,"effect":"priority","since":"2026-09-22","source":"plan 3.4 (primera respuesta y prioridad p1)"}]}};
 
 // ---- bin/lib/triage-core.mjs (inlineado) ----
-const { PR_QUERY, jevMarkerToSignals, normLogin, MARKER_BOTS, shape, globToRegex, matchGlob, areasFor, parseCodeowners, ownersFor, codeownerHits, ciStatus, sizeClass, evaluateGates, computePriority, classify, collisions, blocksOthersSet, loadPolicies } = (() => {
+const { PR_QUERY, jevMarkerToSignals, normLogin, MARKER_BOTS, shape, globToRegex, matchGlob, areasFor, parseCodeowners, ownersFor, codeownerHits, touchesWorkflows, checkVerdict, ciStatus, sizeClass, NO_SPLIT_LABEL, noSplitHolds, evaluateGates, computePriority, classify, collisions, blocksOthersSet, loadPolicies } = (() => {
 // Núcleo puro de triage: sin red, sin gh.mjs. Corre igual en la sesión y en la Action del repo.
 // Entrada: snapshot (bin/lib/snapshot.mjs) + políticas (policy/*.json). Salida: estado, labels, prioridad, gates, porqués.
 
@@ -20,19 +20,19 @@ const age = (iso, now) => { const h = hoursSince(iso, now); return h >= 48 ? `${
 /** Consulta GraphQL de una PR. Fuente única: snapshot.mjs y la Action (github-src) la importan de aquí. */
 const PR_QUERY = `query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){ pullRequest(number:$number){
-    number title body author{login} authorAssociation createdAt updatedAt isDraft state
+    number title body author{__typename login} authorAssociation createdAt updatedAt isDraft state
     headRefOid baseRefName headRefName isCrossRepository headRepository{nameWithOwner} mergeable mergeStateStatus maintainerCanModify
     additions deletions changedFiles reviewDecision
     autoMergeRequest{enabledAt mergeMethod}
     mergeQueueEntry{position state}
     labels(first:50){nodes{name}}
     files(first:100){pageInfo{hasNextPage endCursor} nodes{path additions deletions changeType}}
-    commits(last:1){nodes{commit{committedDate statusCheckRollup{state contexts(first:100){pageInfo{hasNextPage} nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}}}}}}
+    commits(last:1){nodes{commit{committedDate statusCheckRollup{state contexts(first:100){pageInfo{hasNextPage} nodes{__typename ... on CheckRun{name status conclusion startedAt completedAt} ... on StatusContext{context state}}}}}}}
     reviews(first:100){pageInfo{hasNextPage} nodes{author{login} state submittedAt body commit{oid}}}
     reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved isOutdated comments(first:1){nodes{author{login} createdAt}}}}
     comments(first:100){pageInfo{hasNextPage endCursor} nodes{author{login} body createdAt}}
     timelineItems(last:100, itemTypes:[PULL_REQUEST_COMMIT, HEAD_REF_FORCE_PUSHED_EVENT, LABELED_EVENT, READY_FOR_REVIEW_EVENT]){nodes{__typename
-      ... on PullRequestCommit{commit{committedDate author{user{login}}}}
+      ... on PullRequestCommit{commit{committedDate authoredDate author{user{login}}}}
       ... on HeadRefForcePushedEvent{createdAt actor{login}}
       ... on LabeledEvent{createdAt label{name}}
       ... on ReadyForReviewEvent{createdAt}}}
@@ -77,8 +77,9 @@ function shape(pr, { authorMergedCount = null, codeqlAlerts = null, maintainers 
   const threads = pr.reviewThreads.nodes.map(t => ({ isResolved: t.isResolved, isOutdated: t.isOutdated, author: norm(t.comments?.nodes?.[0]?.author?.login), createdAt: t.comments?.nodes?.[0]?.createdAt || null }));
   const cr = new Set(['coderabbitai']);
   const rollup = pr.commits.nodes[0]?.commit?.statusCheckRollup || null;
+  // startedAt/completedAt: con dos ejecuciones del mismo check en el head, ciStatus mira cuál corrió después (2-oct, #2628).
   const runs = (rollup?.contexts?.nodes || []).map(c => c.__typename === 'CheckRun'
-    ? { name: c.name, status: c.status, conclusion: c.conclusion }
+    ? { name: c.name, status: c.status, conclusion: c.conclusion, ...(c.startedAt ? { startedAt: c.startedAt } : {}), ...(c.completedAt ? { completedAt: c.completedAt } : {}) }
     : { name: c.context, status: c.state === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED', conclusion: c.state });
   // Marcadores co: y bloques co:jev solo de quien puede escribirlos: el bot de la Action o un maintainer (lo que sale de la cuenta de
   // Santiago). Un comentario de cualquiera con "<!-- co:… -->" ya no cuenta como primera respuesta ni mete señales de Jev.
@@ -86,6 +87,10 @@ function shape(pr, { authorMergedCount = null, codeqlAlerts = null, maintainers 
   const markers = []; const jevMarkers = [];
   for (const b of [...comments.filter(c => trusted(c.author)).map(c => c.body), ...reviews.filter(r => trusted(r.author)).map(r => r.body)]) { for (const m of b.matchAll(MARKER)) markers.push(m[1]); if (parseJev) jevMarkers.push(...parseJev(b)); }
   const maint = [...comments.filter(c => isMaintainer(c.author)).map(c => c.createdAt), ...reviews.filter(r => isMaintainer(r.author)).map(r => r.submittedAt)];
+  // Lo que dicen los maintainers con texto (comentarios y reviews), recortado: de ahí salen las promesas públicas que no llegaron al
+  // ledger como compromiso (29-sep, #2628: «Monday 8 September» incumplido 21 días sin que nada lo recordara).
+  const maintainerSays = [...comments.filter(c => isMaintainer(c.author)).map(c => ({ kind: 'comment', at: c.createdAt, body: c.body.slice(0, 1500) })),
+    ...reviews.filter(r => isMaintainer(r.author) && r.body).map(r => ({ kind: 'review', at: r.submittedAt, body: r.body.slice(0, 1500) }))];
   const tl = pr.timelineItems.nodes;
   const authorActs = [
     ...comments.filter(c => c.author === author).map(c => c.createdAt),
@@ -93,16 +98,28 @@ function shape(pr, { authorMergedCount = null, codeqlAlerts = null, maintainers 
     ...tl.filter(t => t.__typename === 'HeadRefForcePushedEvent').map(t => t.createdAt),
     ...tl.filter(t => t.__typename === 'ReadyForReviewEvent').map(t => t.createdAt),
   ];
+  // Lo último del autor en persona (comentario, respuesta en un hilo, commit suyo, force-push suyo). lastAuthorActivityAt cuenta también
+  // nuestros empujes (act-push, fix-conflict, update-branch); esto no. Un commit o un force-push sin usuario enlazado cuenta como suyo:
+  // mejor una de más que perder una respuesta (relevo del lote 30-1: la de #2628 llevaba un día sin leer). El commit cuenta por su
+  // authoredDate: un rebase (fix-conflict nuestro, «Update branch» con rebase) le pone committedDate nuevo y deja autor y authoredDate.
+  const own = (l) => !norm(l) || norm(l) === author;
+  const authorReplies = [
+    ...comments.filter(c => c.author === author).map(c => ({ at: c.createdAt, kind: 'comment' })),
+    ...reviews.filter(r => r.author === author).map(r => ({ at: r.submittedAt, kind: 'review' })),
+    ...tl.filter(t => t.__typename === 'PullRequestCommit' && own(t.commit?.author?.user?.login)).map(t => ({ at: t.commit?.authoredDate || t.commit?.committedDate, kind: 'commit' })),
+    ...tl.filter(t => t.__typename === 'HeadRefForcePushedEvent' && own(t.actor?.login)).map(t => ({ at: t.createdAt, kind: 'push' })),
+  ].filter(x => x.at).sort((a, b) => a.at.localeCompare(b.at));
   const labeledAt = {};
   for (const t of tl) if (t.__typename === 'LabeledEvent' && t.label?.name) labeledAt[t.label.name] = t.createdAt;
   const lastCommitAt = maxDate(tl.filter(t => t.__typename === 'PullRequestCommit').map(t => t.commit?.committedDate)) || pr.commits.nodes[0]?.commit?.committedDate || null;
   return {
-    number: pr.number, title: pr.title, body: (pr.body || '').replace(EMAIL, '[email]'), author, authorAssociation: pr.authorAssociation,
+    number: pr.number, title: pr.title, body: (pr.body || '').replace(EMAIL, '[email]'), author, authorAssociation: pr.authorAssociation, authorIsBot: pr.author?.__typename === 'Bot',
     createdAt: pr.createdAt, updatedAt: pr.updatedAt, isDraft: pr.isDraft, state: pr.state,
     headSha: pr.headRefOid, baseRef: pr.baseRefName, headRef: pr.headRefName ?? null, isFork: pr.isCrossRepository ?? null, headRepo: pr.headRepository?.nameWithOwner ?? null, mergeable: pr.mergeable, mergeStateStatus: pr.mergeStateStatus, maintainerCanModify: pr.maintainerCanModify,
     autoMerge: pr.autoMergeRequest ? { enabledAt: pr.autoMergeRequest.enabledAt, method: pr.autoMergeRequest.mergeMethod } : null,
     mergeQueue: pr.mergeQueueEntry ? { position: pr.mergeQueueEntry.position, state: pr.mergeQueueEntry.state } : null,
     labels: pr.labels.nodes.map(l => l.name), labeledAt,
+    maintainerSays,
     files: pr.files.nodes.map(f => ({ path: f.path, status: f.changeType, additions: f.additions, deletions: f.deletions })),
     additions: pr.additions, deletions: pr.deletions, changedFiles: pr.changedFiles,
     reviewDecision: pr.reviewDecision,
@@ -114,10 +131,13 @@ function shape(pr, { authorMergedCount = null, codeqlAlerts = null, maintainers 
     },
     reviews: reviews.map(({ body, ...r }) => r),
     unresolvedThreads: threads.filter(t => !t.isResolved && !t.isOutdated).length,
+    // Los mismos hilos vigentes con quién los abrió y cuándo: un hilo de CodeRabbit anterior a nuestra lista no frena re-revisarla (lote 2026-10-01-3).
+    openThreads: threads.filter(t => !t.isResolved && !t.isOutdated).map(t => ({ author: t.author, at: t.createdAt })),
     authorMergedCount: authorMergedCount ?? null,
     codeqlAlerts: codeqlAlerts ?? null,
     lastCommitAt,
     lastAuthorActivityAt: maxDate(authorActs) || pr.createdAt,
+    lastAuthorReply: authorReplies.at(-1) || null,
     lastMaintainerCommentAt: maxDate(maint),
     firstMaintainerResponseAt: minDate(maint),
     markers, jevMarkers,
@@ -184,7 +204,47 @@ function codeownerHits(files, rules, owner, extra = []) {
 }
 
 // ── CI ─────────────────────────────────────────────────────────────────────
-/** Estado de CI en el headSha: green | red | pending | held (espera aprobación) | absent (sin checks) | stale (sin la matriz actual) | unknown. */
+const CI_RED = ['FAILURE', 'TIMED_OUT', 'ERROR'];
+const CI_GREEN = ['SUCCESS', 'SKIPPED', 'NEUTRAL'];
+const upper = (x) => String(x ?? '').toUpperCase();
+/** Cuándo corrió una ejecución: startedAt (GraphQL) o started_at (REST); si no consta, cuándo acabó. null sin fechas. */
+const ranAt = (r) => { const t = Date.parse(r?.startedAt ?? r?.started_at ?? r?.completedAt ?? r?.completed_at ?? ''); return Number.isNaN(t) ? null : t; };
+/** ¿Toca la PR sus workflows? Con eso, un STARTUP_FAILURE puede ser suyo (un YAML roto); sin eso, el run ni arrancó. */
+const touchesWorkflows = (files) => (files || []).some((f) => String(f?.path ?? f?.filename ?? f ?? '').startsWith('.github/workflows/'));
+/**
+ * Veredicto de UN check en el head con todas sus ejecuciones de ese nombre: un head puede tener dos runs del mismo workflow, o un re-run.
+ * 2-oct, #2628: el run 36591016563 de «Tests» salió CANCELLED en los 3 SO y el 36591014638 pasó en los 3 sobre el mismo head; contar el
+ * cancelado como rojo llevó el plan a triage/waiting-author. Un cancelado no juzga el código del autor: si un verde del mismo check corrió
+ * después (o a la vez), el check cuenta verde con `rerun` (GitHub cuenta los dos: rollup FAILURE y merge BLOCKED hasta relanzarlo); si
+ * no, 'cancelled': relanzar, cosa nuestra. STARTUP_FAILURE (el workflow ni arrancó: no corrió nada de la PR) igual, salvo que la PR toque
+ * .github/workflows/, porque entonces el YAML roto puede ser suyo. FAILURE, TIMED_OUT y ERROR son rojo aunque haya un verde después.
+ * Sin fechas no se puede ordenar: el cancelado no se da por tapado. Acepta GraphQL (MAYÚSCULAS) y REST (minúsculas). Pura.
+ * @returns {{verdict:'red'|'pending'|'cancelled'|'green'|'unknown', run:object, rerun?:true, notStarted?:true}}
+ */
+function checkVerdict(runs, { workflowsTouched = false } = {}) {
+  const done = (r) => upper(r.status) === 'COMPLETED' && r.conclusion != null && upper(r.conclusion) !== 'PENDING';
+  const startup = (r) => upper(r.conclusion) === 'STARTUP_FAILURE';
+  const notRun = (r) => upper(r.conclusion) === 'CANCELLED' || (startup(r) && !workflowsTouched);
+  const red = runs.find((r) => done(r) && (CI_RED.includes(upper(r.conclusion)) || (startup(r) && workflowsTouched)));
+  if (red) return { verdict: 'red', run: red };
+  const pending = runs.find((r) => !done(r));
+  if (pending) return { verdict: 'pending', run: pending };
+  const cancelled = runs.filter(notRun), rest = runs.filter((r) => !notRun(r));
+  const odd = rest.find((r) => !CI_GREEN.includes(upper(r.conclusion)));
+  if (odd) return { verdict: 'unknown', run: odd };
+  if (!cancelled.length) return { verdict: 'green', run: rest[0] };
+  const at = cancelled.map(ranAt), lastAt = at.includes(null) ? null : Math.max(...at);
+  const last = lastAt === null ? cancelled.at(-1) : cancelled[at.indexOf(lastAt)];
+  const cover = lastAt === null ? null : rest.find((r) => ranAt(r) !== null && ranAt(r) >= lastAt);
+  if (cover) return { verdict: 'green', run: cover, rerun: true };
+  return { verdict: 'cancelled', run: last, ...(startup(last) ? { notStarted: true } : {}) };
+}
+/**
+ * Estado de CI en el headSha: green | red | pending | cancelled (relanzar: no es del autor) | held (espera aprobación) | absent (sin checks) |
+ * stale (sin la matriz actual) | unknown. Cada check requerido se juzga con todas sus ejecuciones (checkVerdict). `rerun`: los checks
+ * requeridos que hay que relanzar (los cancelados, solos o junto a un verde posterior: con uno en verde el estado es green, pero GitHub cuenta
+ * el cancelado y el gate ci-green no pasa hasta relanzarlo).
+ */
 function ciStatus(snapshot, trivialPolicy) {
   const checks = snapshot.checks;
   if (!checks || checks.state === undefined) return { status: 'unknown', why: 'no pude ver los checks' };
@@ -196,18 +256,22 @@ function ciStatus(snapshot, trivialPolicy) {
   if (held.length) return { status: 'held', why: 'CI espera aprobación de un maintainer' };
   const missing = req.filter(n => !runs.some(r => r.name === n));
   if (missing.length) return { status: 'stale', why: `CI antigua en el head: falta ${missing[0]}` };
-  const reqRuns = runs.filter(r => req.includes(r.name));
-  const red = reqRuns.find(r => r.status === 'COMPLETED' && ['FAILURE', 'TIMED_OUT', 'CANCELLED', 'STARTUP_FAILURE', 'ERROR'].includes(r.conclusion));
+  const workflowsTouched = touchesWorkflows(snapshot.files);
+  const verdicts = req.map((name) => ({ name, ...checkVerdict(runs.filter((r) => r.name === name), { workflowsTouched }) }));
+  const first = (v) => verdicts.find((x) => x.verdict === v);
+  const red = first('red');
   if (red) return { status: 'red', why: `${red.name} en rojo` };
-  const informative = trivialPolicy?.informativeChecks || [];
-  const anyRed = runs.find(r => r.status === 'COMPLETED' && ['FAILURE', 'TIMED_OUT', 'ERROR'].includes(r.conclusion) && !informative.includes(r.name));
-  const pending = reqRuns.find(r => r.status !== 'COMPLETED' || r.conclusion === null || r.conclusion === 'PENDING');
+  const pending = first('pending');
   if (pending) return { status: 'pending', why: `${pending.name} aún corriendo` };
-  if (reqRuns.every(r => ['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(r.conclusion))) {
-    if (anyRed) return { status: 'red', why: `${anyRed.name} en rojo` };
-    return { status: 'green', why: 'matriz completa en verde' };
-  }
-  return { status: 'unknown', why: 'checks en estado no reconocido' };
+  if (first('unknown')) return { status: 'unknown', why: 'checks en estado no reconocido' };
+  const informative = trivialPolicy?.informativeChecks || [];
+  const anyRed = runs.find(r => r.status === 'COMPLETED' && CI_RED.includes(r.conclusion) && !informative.includes(r.name));
+  if (anyRed) return { status: 'red', why: `${anyRed.name} en rojo` };
+  const cancelled = verdicts.filter((x) => x.verdict === 'cancelled');
+  if (cancelled.length) return { status: 'cancelled', why: `${cancelled[0].name} ${cancelled[0].notStarted ? 'no arrancó' : 'cancelado'}: relanzar (no es del autor)`, rerun: cancelled.map((x) => x.name) };
+  const rerun = verdicts.filter((x) => x.rerun).map((x) => x.name);
+  if (rerun.length) return { status: 'green', why: `${rerun[0]} cancelado junto a uno en verde: relanzarlo (GitHub cuenta ambos)`, rerun };
+  return { status: 'green', why: 'matriz completa en verde' };
 }
 
 // ── tamaño / fronteras ─────────────────────────────────────────────────────
@@ -217,6 +281,29 @@ function sizeClass(lines, classes) {
 }
 const lines = (s) => (s.additions || 0) + (s.deletions || 0);
 const has = (s, l) => (s.labels || []).includes(l);
+
+// ── «no partir» ────────────────────────────────────────────────────────────
+const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const dia = (iso) => { const d = new Date(iso || ''); return Number.isNaN(d.getTime()) ? '?' : `${d.getUTCDate()}-${MES[d.getUTCMonth()]}`; };
+/** Label pública del «no partir» (policy/labels.json): la Action no ve el ledger, ve la label. */
+const NO_SPLIT_LABEL = 'no-split';
+/**
+ * ¿Sigue valiendo el «no partir» de Santiago con la PR como está ahora? `dec` es su decisión (kind 'no-split' en el ledger, bin/decision.mjs):
+ * `base` = líneas y ficheros del head en que lo decidió. Vale mientras la PR no crezca más de `growth` veces en líneas ni en ficheros: lo que
+ * pide una lista cabe de sobra (#3782 pasó de 1734 a 1798 líneas con el rebase y el test que le pedimos, ×1,04; #3805 de 1199 a 1263, ×1,05)
+ * y otra PR entera metida dentro no (×1,5 son ≥500 líneas sobre una de 1000). Retirada ('no-split-off'): no vale. Sin base: vale hasta que
+ * la retire. Sin decisión pero con la label `label` puesta (la Action, o una que puso un maintainer a mano): vale, sin límite de tamaño; con
+ * decisión, manda la decisión (si caducó, la label no la salva). Devuelve {holds, why} (el porqué en una línea) o null. Pura.
+ */
+function noSplitHolds(dec, snapshot, { growth = 1.5, label = null } = {}) {
+  if (!dec) return label && has(snapshot, label) ? { holds: true, label: true, why: `no partir: label ${label} (decisión de un maintainer)` } : null;
+  const when = dia(dec.decidedAt || dec.ts), ref = dec.authRef || 'sin firma';
+  if (dec.decision === 'no-split-off') return { holds: false, off: true, why: `«no partir» retirado el ${when} [${ref}]` };
+  const cur = { lines: lines(snapshot), files: (snapshot.files || []).length || snapshot.changedFiles || 0 }, b = dec.base || {};
+  const over = ['lines', 'files'].filter((k) => b[k] > 0 && cur[k] > b[k] * growth).map((k) => `${cur[k]} ${k === 'lines' ? 'líneas' : 'ficheros'} (${b[k]} al decidir)`);
+  if (over.length) return { holds: false, grown: true, why: `«no partir» del ${when} ya no vale: ${over.join(' y ')}, más de ×${String(growth).replace('.', ',')} [${ref}]` };
+  return { holds: true, why: `no partir: decidido el ${when} [${ref}]` };
+}
 
 // ── gates de merge trivial ─────────────────────────────────────────────────
 /**
@@ -238,7 +325,8 @@ function evaluateGates(snapshot, trivialPolicy, { labelsPolicy, sessionCount = n
   else g('scope', 'fail', `${n} líneas y toca código`);
 
   const ci = ciStatus(snapshot, tp);
-  g('ci-green', ci.status === 'green' ? 'pass' : ci.status === 'unknown' ? 'unknown' : 'fail', ci.why);
+  // Verde con un cancelado que relanzar (#2628) no pasa: GitHub cuenta el cancelado y el merge queda BLOCKED hasta relanzarlo.
+  g('ci-green', ci.status === 'green' && !ci.rerun?.length ? 'pass' : ci.status === 'unknown' ? 'unknown' : 'fail', ci.why);
 
   g('no-quality-check', has(snapshot, 'quality-check') ? 'fail' : 'pass', has(snapshot, 'quality-check') ? 'CodeRabbit pidió lectura humana' : 'sin quality-check');
 
@@ -317,9 +405,10 @@ function staleApproval(snapshot, maintainers) {
 }
 
 /**
- * Función pura. `extras`: { sessionCount, commitments, dependents, okGiven } (vienen del ledger/colisiones; opcionales).
+ * Función pura. `extras`: { sessionCount, commitments, dependents, okGiven, noSplit } (vienen del ledger/colisiones; opcionales).
+ * `noSplit`: el «no partir» de Santiago para esta PR (su entrada del ledger, ver noSplitHolds); la Action no lo tiene.
  */
-function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now = Date.now(), sessionCount = null, commitments = [], dependents = 0, blocksOthers = undefined, okGiven = false, rebaseManual = new Set(), rebaseClean = new Set() } = {}) {
+function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now = Date.now(), sessionCount = null, commitments = [], dependents = 0, blocksOthers = undefined, okGiven = false, rebaseManual = new Set(), rebaseClean = new Set(), noSplit = null } = {}) {
   const why = [];
   const files = (snapshot.files || []).map(f => f.path);
   const n = lines(snapshot);
@@ -328,7 +417,12 @@ function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now =
   const ci = ciStatus(snapshot, trivialPolicy);
   const firstTimer = snapshot.authorMergedCount === 0;
   const needsRebase = snapshot.mergeable === 'CONFLICTING' || snapshot.mergeStateStatus === 'DIRTY';
-  const needsSplit = n > priorityPolicy.needsSplit.maxLines || areas.length > priorityPolicy.needsSplit.maxAreas;
+  const tooBig = n > priorityPolicy.needsSplit.maxLines || areas.length > priorityPolicy.needsSplit.maxAreas;
+  // «No partir» de Santiago (2-oct): ni líneas ni áreas piden troceo mientras valga su decisión. No había dónde registrarla y needs-split
+  // volvía por tamaño (#3782, decidido el 1-oct). Si ya no vale (creció o la retiró), needs-split vuelve con su porqué.
+  const nsLabel = labelsPolicy.labels?.[NO_SPLIT_LABEL] ? NO_SPLIT_LABEL : null;
+  const keep = noSplitHolds(noSplit, snapshot, { growth: priorityPolicy.needsSplit.noSplitGrowth, label: nsLabel });
+  const needsSplit = tooBig && !keep?.holds;
   // Primerizo: GitHub no crea check-runs para los workflows retenidos, así que el head aparece sin la matriz (stale) o sin checks (absent): es CI retenida.
   const ciHold = firstTimer && (ci.status === 'held' || ci.status === 'absent' || ci.status === 'stale');
   const responded = !!snapshot.lastMaintainerCommentAt || (snapshot.markers || []).length > 0;
@@ -359,8 +453,11 @@ function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now =
   else if (changesRequested) { state = 'triage/waiting-author'; why.push('cambios pedidos en revisión'); }
   else if (reReview) { state = 'triage/re-review'; why.push('tenía OK y cambió después'); }
   else if (trivialCandidate) { state = 'triage/trivial'; why.push('pasa todos los gates: merge trivial'); }
-  else if (ci.status === 'green') { state = 'triage/ready'; why.push(`CI verde; no trivial: ${gatesRes.failing.filter(f => f !== 'session-cap').map(f => GATE_SHORT[f] || f).slice(0, 3).join(', ') || 'nada'}`); }
-  else { state = 'triage/new'; why.push(ci.status === 'pending' ? 'CI aún corriendo' : ci.status === 'held' ? 'CI retenida' : ci.status === 'absent' ? 'sin CI en el head' : ci.status === 'stale' ? 'CI antigua en el head: relanzar' : 'CI ilegible'); }
+  else if (ci.status === 'green') { state = 'triage/ready'; why.push(`CI verde; no trivial: ${gatesRes.failing.filter(f => f !== 'session-cap').map(f => f === 'ci-green' && ci.rerun?.length ? 'relanzar CI' : GATE_SHORT[f] || f).slice(0, 3).join(', ') || 'nada'}`); }
+  // CI cancelada (2-oct, #2628): ni rojo ni waiting-author; relanzarla es cosa nuestra y el porqué lo dice.
+  else { state = 'triage/new'; why.push(ci.status === 'pending' ? 'CI aún corriendo' : ci.status === 'cancelled' ? ci.why : ci.status === 'held' ? 'CI retenida' : ci.status === 'absent' ? 'sin CI en el head' : ci.status === 'stale' ? 'CI antigua en el head: relanzar' : 'CI ilegible'); }
+  if (ci.rerun?.length && !snapshot.isDraft && !needsRebase && !why.includes(ci.why)) why.push(ci.why);
+  if (tooBig && keep) why.push(keep.why);
 
   const pr = computePriority(snapshot, priorityPolicy, { commitments, dependents, blocksOthers, now, state });
   const current = new Set(snapshot.labels || []);
@@ -372,12 +469,14 @@ function classify(snapshot, { labelsPolicy, trivialPolicy, priorityPolicy, now =
   };
   setExclusive(state);
   setExclusive(pr.priority);
+  // La label pública sigue a su decisión del ledger (solo la sesión la pasa): puesta mientras valga, fuera si caducó o la retiró.
+  if (noSplit && nsLabel) { if (keep?.holds && !current.has(nsLabel)) labelsToAdd.push(nsLabel); else if (!keep?.holds && current.has(nsLabel)) labelsToRemove.push(nsLabel); }
   if (firstResponseMissing) why.push(`sin respuesta nuestra desde hace ${age(snapshot.createdAt, now)}`);
 
   return {
     number: snapshot.number, state, priority: pr.priority, priorityWhy: pr.why, why, labelsToAdd, labelsToRemove,
-    sizeClass: size, lines: n, areas, trivialCandidate, needsSplit, needsRebase, ciHold, firstResponseMissing, authorIsMaintainer, authorIsBot, dependents, blocksOthers: !!(blocksOthers === undefined ? dependents >= priorityPolicy.p1.blocksOthersMinDependents : blocksOthers),
-    ci: ci.status, gates: gatesRes.gates, failingGates: gatesRes.failing, age: age(snapshot.createdAt, now),
+    sizeClass: size, lines: n, areas, trivialCandidate, needsSplit, noSplit: keep, needsRebase, ciHold, firstResponseMissing, authorIsMaintainer, authorIsBot, dependents, blocksOthers: !!(blocksOthers === undefined ? dependents >= priorityPolicy.p1.blocksOthersMinDependents : blocksOthers),
+    ci: ci.status, ciRerun: ci.rerun || [], gates: gatesRes.gates, failingGates: gatesRes.failing, age: age(snapshot.createdAt, now),
   };
 }
 
@@ -443,7 +542,7 @@ function loadPolicies({ root, checkout = process.env.CO_CHECKOUT || path.join(pr
   trivialPolicy.codeownersSource = found ? file : 'policy/trivial.json#codeowners.fallbackPatterns';
   return { labelsPolicy, trivialPolicy, priorityPolicy };
 }
-return { PR_QUERY, jevMarkerToSignals, normLogin, MARKER_BOTS, shape, globToRegex, matchGlob, areasFor, parseCodeowners, ownersFor, codeownerHits, ciStatus, sizeClass, evaluateGates, computePriority, classify, collisions, blocksOthersSet, loadPolicies };
+return { PR_QUERY, jevMarkerToSignals, normLogin, MARKER_BOTS, shape, globToRegex, matchGlob, areasFor, parseCodeowners, ownersFor, codeownerHits, touchesWorkflows, checkVerdict, ciStatus, sizeClass, NO_SPLIT_LABEL, noSplitHolds, evaluateGates, computePriority, classify, collisions, blocksOthersSet, loadPolicies };
 })();
 
 // ---- github-src/scripts/jev-marker.mjs (inlineado) ----
@@ -514,6 +613,8 @@ return { JEV_MARKER_RE, MAX_COMMENT_BYTES_JEV, round2, buildJevMarker, parseJevM
 // (compromisos) y colisiones, que solo tiene la sesión; si la Action la recalculara sin eso, degradaría p1.
 // Toca labels con who_sets/who_clears = "action" en policy/labels.json, más `triage/waiting-author` cuando
 // classify la propone por señal objetiva (CHANGES_REQUESTED de un maintainer o CI en rojo): decisión del lead.
+// Un check cancelado no es CI en rojo (2-oct, #2628): no es del autor, toca relanzarlo (triage/new, o ready si el mismo
+// check pasó después en otro run del head).
 //
 // Env: GITHUB_TOKEN · GITHUB_REPOSITORY · GITHUB_EVENT_NAME · GITHUB_EVENT_PATH
 //      DRY_RUN=true → no escribe en GitHub; solo GITHUB_STEP_SUMMARY
