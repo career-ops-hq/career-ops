@@ -22,9 +22,9 @@ var (
 	pendingRepairs   = map[string]struct{ ledger, followup bool }{}
 )
 
-// Scripts belong to the checkout, even when --path points at a data-only root.
+// CheckoutScriptPath resolves system scripts, even when --path points at a data-only root.
 // The executable fallback also supports launching the built TUI from elsewhere.
-func statusWriterScript() (string, error) {
+func CheckoutScriptPath(name string) (string, error) {
 	roots := []string{getRepoRoot()}
 	if executable, err := os.Executable(); err == nil {
 		if resolved, err := filepath.EvalSymlinks(executable); err == nil {
@@ -36,16 +36,16 @@ func statusWriterScript() (string, error) {
 		if info, err := os.Stat(filepath.Join(root, "path-resolver.mjs")); err != nil || info.IsDir() {
 			continue
 		}
-		script := filepath.Join(root, "set-status.mjs")
+		script := filepath.Join(root, name)
 		if info, err := os.Stat(script); err == nil && !info.IsDir() {
 			return filepath.Abs(script)
 		}
 	}
-	return "", fmt.Errorf("status updates need set-status.mjs in the career-ops checkout")
+	return "", fmt.Errorf("dashboard actions need %s in the career-ops checkout", name)
 }
 
 func runStatusWriter(dataRoot, report, status, note string) error {
-	script, err := statusWriterScript()
+	script, err := CheckoutScriptPath("set-status.mjs")
 	if err != nil {
 		return err
 	}

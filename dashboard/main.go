@@ -283,13 +283,22 @@ func openCmd(target string) tea.Cmd {
 	}
 }
 
-// runGeneratePDF shells out to node generate-pdf.mjs in the career-ops root,
+// runGeneratePDF runs the checkout's generate-pdf.mjs against the selected data root,
 // opens the resulting PDF on success, and reports the outcome back to the
 // pipeline screen as a PipelinePDFGeneratedMsg. Runs in a tea.Cmd goroutine,
 // so the UI stays responsive while Chromium renders.
 func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"generate-pdf.mjs", msg.HTMLPath, msg.PDFPath}
+		script, err := data.CheckoutScriptPath("generate-pdf.mjs")
+		if err != nil {
+			return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+		}
+		pdfAbs := filepath.Join(root, filepath.FromSlash(msg.PDFPath))
+		args := []string{script, filepath.Join(root, filepath.FromSlash(msg.HTMLPath)), pdfAbs}
 		if msg.Format != "" {
 			args = append(args, "--format="+msg.Format)
 		}
@@ -297,12 +306,23 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			args = append(args, "--report="+msg.ReportNumber)
 		}
 		cmd := exec.Command("node", args...)
-		cmd.Dir = msg.CareerOpsPath
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		// Preserve relative overrides before changing the child's working directory.
+		if tracker := resolveEnvPath(os.Getenv("CAREER_OPS_TRACKER")); tracker != "" {
+			cmd.Env = append(cmd.Env, "CAREER_OPS_TRACKER="+tracker)
+		}
+		if index := os.Getenv("CAREER_OPS_PDF_INDEX"); index != "" {
+			absolute, err := filepath.Abs(index)
+			if err != nil {
+				return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+			}
+			cmd.Env = append(cmd.Env, "CAREER_OPS_PDF_INDEX="+absolute)
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeCmdError(err, out)}
 		}
-		pdfAbs := filepath.Join(msg.CareerOpsPath, filepath.FromSlash(msg.PDFPath))
 		if err := openWithDefaultApp(pdfAbs); err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
