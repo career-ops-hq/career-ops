@@ -576,7 +576,7 @@ One sentence after the bolded call is the budget. A reader who wants the reasoni
 
 ## Risk Summary (after Block G)
 
-Close the report body with a `## Risk Summary` block directly after Block G's section — one row per risk signal, fixed order — so the question the candidate actually asks ("is this company safe to join?") is answered on one screen instead of by mentally joining Block A, Block G, and a sidecar file.
+Close the report body with a `## Risk Summary` block directly after the `## Verdict (lead)` block, which follows Block G's section — one row per risk signal, fixed order — so the question the candidate actually asks ("is this company safe to join?") is answered on one screen instead of by mentally joining Block A, Block G, and a sidecar file.
 
 **Aggregation only, zero new judgment.** Each row quotes or links the verdict already produced by its source signal. The summary never re-scores, re-weights, or overrides — if a row looks wrong, the fix belongs in the source signal, not here.
 

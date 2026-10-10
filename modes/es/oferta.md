@@ -323,7 +323,7 @@ Formato del bloque:
 
 ## Risk Summary (después del Bloque G)
 
-Cerrar el report con un bloque `## Risk Summary` después del Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
+Cerrar el report con un bloque `## Risk Summary` después del bloque `## Veredicto (lead)`, que sigue al Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
 
 Tres estados por fila: `✅ {conclusión}` / `⚠️ {hallazgo}` / `— not evaluated`. **`— not evaluated` es estado de primera clase.** Excepción: Interview red flags → `— no interview sessions yet`.
 

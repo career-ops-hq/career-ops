@@ -260,7 +260,7 @@ Blok biçimi:
 
 ## Risk Summary (Blok G'den sonra)
 
-Rapor gövdesini Blok G'nin hemen ardından, Blok H'den önce bir `## Risk Summary` bloğuyla kapatın — her risk sinyali için bir satır, sabit sıra. Böylece adayın gerçekten sorduğu soru ("bu şirkete katılmak güvenli mi?") Blok A, Blok G ve harici bir dosyayı zihinde birleştirmek yerine tek ekranda yanıtlanır.
+Rapor gövdesini, Blok G'yi izleyen `## Karar (lead)` bloğunun hemen ardından, Blok H'den önce bir `## Risk Summary` bloğuyla kapatın — her risk sinyali için bir satır, sabit sıra. Böylece adayın gerçekten sorduğu soru ("bu şirkete katılmak güvenli mi?") Blok A, Blok G ve harici bir dosyayı zihinde birleştirmek yerine tek ekranda yanıtlanır.
 
 **Yalnızca toplama, sıfır yeni yargı.** Her satır, kaynak sinyalin zaten ürettiği kararı alıntılar veya ona bağlanır. Özet asla yeniden puanlamaz, yeniden ağırlıklandırmaz veya kararı geçersiz kılmaz — bir satır yanlış görünüyorsa düzeltme buraya değil, kaynak sinyale aittir.
 
