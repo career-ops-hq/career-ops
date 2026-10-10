@@ -529,6 +529,22 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       }
     }
 
+    // A page still empty when the poll gives up (after the frame wait, if a
+    // same-origin frame is present) has shown nothing: no posting, no closure
+    // notice, no error page. AGENTS.md calls a loading placeholder unconfirmed,
+    // not closed, and a false `expired` is the expensive direction (see the
+    // iCIMS note above). Measured over 218 loads on 17 ATS: 18 were still empty
+    // when the poll ended, 16 of them live postings. Only a body with no text at
+    // all qualifies: a short page ("Page not found", a header and footer) keeps
+    // insufficient_content.
+    if (verdict.code === 'insufficient_content' && !reading.bodyText.trim()) {
+      verdict = {
+        result: 'uncertain',
+        code: 'empty_page',
+        reason: 'page still empty when the poll ended — not trusted as evidence of removal',
+      };
+    }
+
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
     }
