@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.14.0...web-v0.15.0) (2026-10-10)
+
+
+### Features
+
+* add Assessment lifecycle and follow-up status controls ([#4317](https://github.com/career-ops-hq/career-ops/issues/4317)) ([8cb0161](https://github.com/career-ops-hq/career-ops/commit/8cb0161f73d1e6012976bdf2ba79dee6b91f40d1))
+* **web:** ATS keyword coverage on the report view ([#4579](https://github.com/career-ops-hq/career-ops/issues/4579)) ([886b834](https://github.com/career-ops-hq/career-ops/commit/886b834a9989e449587cf1ae9ae2ab39e50cab1e))
+* **web:** recurring skill gaps on the CV page ([#4583](https://github.com/career-ops-hq/career-ops/issues/4583)) ([85fdac2](https://github.com/career-ops-hq/career-ops/commit/85fdac23d93ecb9e2c0246e03ffec5d0a52aeba3))
+
+
+### Bug Fixes
+
+* **web/scheduled:** retry Windows EPERM/EACCES on the lock mkdir instead of crashing ([#4917](https://github.com/career-ops-hq/career-ops/issues/4917)) ([291d53b](https://github.com/career-ops-hq/career-ops/commit/291d53babf306bd8440076447211b8578ecbccef))
+
 ## [0.14.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.13.0...web-v0.14.0) (2026-10-10)
 
 
