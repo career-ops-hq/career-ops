@@ -16,7 +16,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { finishPipelineBatch, mergeProcessedLines } from '../batch-evaluate-gemini.mjs';
-import { lockDirFor } from '../pipeline-lock.mjs';
+import { lockDirFor, withPipelineLock } from '../pipeline-lock.mjs';
 import { appendToPipeline } from '../scan.mjs';
 
 const PENDING = [
@@ -93,7 +93,7 @@ test('CRLF line endings and a missing final newline are preserved', () => {
   assert.equal(mergedBare.text, ['## Pending', PENDING[0], PENDING[1], done(PENDING[2])].join('\n'));
 });
 
-test('a scan appending while the batch finishes loses neither side, and the lock is released', async (t) => {
+test('finishPipelineBatch waits for a held pipeline lock and merges into what the holder wrote', async (t) => {
   const path = workdir(t);
   const start = ['# Pipeline', '', '## Pending', PENDING[0], PENDING[1], ''].join('\n');
   writeFileSync(path, start, 'utf-8');
@@ -104,8 +104,25 @@ test('a scan appending while the batch finishes loses neither side, and the lock
   ]);
 
   const offer = { url: 'https://example.test/job/NEW-SCAN-HIT', company: 'ScanCo', title: 'Staff Engineer', location: 'Remote', source: 'scan' };
-  const scan = appendToPipeline([offer], { pipelinePath: path });
-  await finishPipelineBatch(path, snapshot, results);
+
+  // Both writers start while the lock is held, so both are waiters on a lock
+  // they cannot take; neither may touch the file until it is released.
+  let finishing;
+  let scan;
+  await withPipelineLock(path, async () => {
+    finishing = finishPipelineBatch(path, snapshot, results);
+    scan = appendToPipeline([offer], { pipelinePath: path });
+
+    const state = await Promise.race([
+      finishing.then(() => 'finished'),
+      new Promise((resolve) => setTimeout(() => resolve('pending'), 300)),
+    ]);
+    assert.equal(state, 'pending', 'finishPipelineBatch is still waiting for the lock');
+    assert.equal(readFileSync(path, 'utf-8'), start, 'nothing is written while the lock is held');
+  });
+
+  // The waiters take the lock in either order; the merge holds for both.
+  await finishing;
   await scan;
 
   const lines = readFileSync(path, 'utf-8').split('\n');
