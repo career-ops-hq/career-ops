@@ -14,13 +14,15 @@
  *   5. --file pointing at a nonexistent path fails loudly (exit 1).
  *   6. message_id values are unique across appends.
  *   7. parseFileInput / normalizeCandidate work correctly as direct unit imports.
+ *   8. Interactive (stdin) mode appends one candidate.
+ *   9. Concurrent runs lose no entry and crash no writer (#4920).
  *
  * Provisions a throwaway candidates file via CAREER_OPS_REPLY_CANDIDATES and a
  * temp dir; never touches the repo's real data/reply-candidates.json.
  */
 
-import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'fs';
+import { execFileSync, spawn } from 'child_process';
+import { readFileSync, writeFileSync, mkdtempSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -205,3 +207,48 @@ console.log('8. interactive (stdin) mode — no --file flag');
   check('interactive: CLI reports success', out.includes('Appended a new reply candidate'), out);
 }
 
+
+// ---------------------------------------------------------------------------
+console.log('9. concurrent runs lose no entry and crash no writer (#4920)');
+{
+  // An agent pasting several reply emails as parallel tool calls is the
+  // realistic trigger. The append used to be an unlocked read-modify-write
+  // through a FIXED `<file>.tmp`: overlapping runs read the same array, so the
+  // later rename discarded the earlier entry, and a run could rename its
+  // sibling's temp file out from under it (ENOENT). 20 concurrent runs kept
+  // 16-19 entries.
+  const dir = tmp('paste-reply-concurrent-');
+  const candidates = join(dir, 'reply-candidates.json');
+  const N = 20;
+  for (let i = 0; i < N; i++) {
+    writeFileSync(join(dir, `email-${i}.txt`), `Subject: reply-${i}\n\nBody of reply ${i}.`);
+  }
+  // spawn(), not execFileSync() — a synchronous loop would serialize the runs
+  // and pass even against the unlocked write, proving nothing.
+  const results = await Promise.all(
+    Array.from({ length: N }, (_, i) => new Promise((res) => {
+      const p = spawn(NODE, [CLI, '--file', join(dir, `email-${i}.txt`)], {
+        cwd: ROOT,
+        env: { ...process.env, CAREER_OPS_REPLY_CANDIDATES: candidates },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let err = '';
+      p.stderr.on('data', (chunk) => { err += chunk; });
+      p.on('exit', (code) => res({ i, code, err }));
+    })),
+  );
+  const losers = results.filter((r) => r.code !== 0);
+  check('every concurrent run exited cleanly', losers.length === 0, `${losers.length} non-zero exits`);
+  // Print the cause, not just the count: a lock timeout, a rename ENOENT and a
+  // parse error of a torn file all read as the same `kept=19 of 20` otherwise.
+  for (const l of losers) console.log(`      ↳ reply-${l.i} exited ${l.code}: ${l.err.trim().slice(0, 500)}`);
+
+  const arr = JSON.parse(readFileSync(candidates, 'utf8'));
+  check(`all ${N} concurrently pasted replies survive`, arr.length === N, `kept=${arr.length} of ${N}`);
+  const actual = new Set(arr.map((c) => c.subject));
+  const complete = actual.size === N && Array.from({ length: N }, (_, i) => `reply-${i}`).every((s) => actual.has(s));
+  check('no reply is duplicated or missing', complete, `actual=${[...actual].sort().join(', ')}`);
+
+  const leftovers = readdirSync(dir).filter((f) => f.endsWith('.tmp') || f.endsWith('.lock'));
+  check('no temp file or lock directory is left behind', leftovers.length === 0, leftovers.join(', '));
+}
