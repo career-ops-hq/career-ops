@@ -13,10 +13,8 @@ import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
 import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
-import { GitHubExploreView } from "./github-explore-view";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
-import { ScheduleJobAction } from "./schedule-job-action";
 
 // Same shape as core normalizeTextKey(s, " ") — never [^a-z0-9] (#2666).
 const norm = (s: string) => normalizeTextKey(s, " ");
@@ -108,21 +106,13 @@ export function ExplorerView({
   );
 
   const isAi = mode === "ai";
-  const isGitHub = mode === "github";
-  const isResults = phase === "results";
-  const canDiscover = filters.ats.length > 0;
-  const scanRunning = running && !isAi;
-  // Keep one ResultsList mounted across scanning → revealing → results so
-  // filter/sort/scroll and co-rise survive the 850ms reveal handoff.
-  const showScanList = !isAi && !isGitHub && offers.length > 0 && (scanRunning || isResults);
+  if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
-  if (running && isAi) return <AiHuntView cliName={cli.name} />;
+  const canDiscover = filters.ats.length > 0;
+  const isResults = phase === "results";
 
   return (
-    <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
-      {scanRunning && <DiscoveringState />}
-      {!scanRunning && (
-        <>
+    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8">
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2.5">
@@ -143,10 +133,6 @@ export function ExplorerView({
         )}
       </header>
 
-      {isGitHub ? (
-        <GitHubExploreView />
-      ) : (
-      <>
       {!rootExists && (
         <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           Your career-ops home isn’t set up yet — discovery needs a checkout with a profile to seed from.
@@ -190,7 +176,7 @@ export function ExplorerView({
               {refineOpen && (
                 <div className="space-y-4 border-t border-border p-4">
                   <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
-                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" filters={filters} />
+                  <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Re-cast (free)" />
                 </div>
               )}
             </div>
@@ -198,7 +184,7 @@ export function ExplorerView({
             <div className="mb-6 rounded-2xl border border-border bg-surface/30 p-5">
               <FilterBuilder filters={filters} onChange={setFilters} seededFrom={seed.seededFrom} />
               <div className="mt-5">
-                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" filters={filters} />
+                <DiscoverBar canDiscover={canDiscover} onDiscover={discover} label="Discover (free)" />
               </div>
             </div>
           )}
@@ -215,22 +201,8 @@ export function ExplorerView({
           {isResults && capHit && (
             <CappedBanner companiesScanned={companiesScanned} companiesAvailable={companiesAvailable} onRefine={() => setRefineOpen(true)} />
           )}
-        </>
-      )}
-      </>
-      )}
+          {isResults && <ResultsList offers={enriched} />}
 
-      </>
-      )}
-
-      {showScanList && (
-        <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
-          <ResultsList offers={enriched} />
-        </div>
-      )}
-
-      {!scanRunning && !isAi && !isGitHub && (
-        <>
           {phase === "empty-current" && (
             <EmptyState
               tone="good"
@@ -274,7 +246,7 @@ export function ExplorerView({
   );
 }
 
-function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover: boolean; onDiscover: () => void; label: string; filters: ExploreFilters }) {
+function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean; onDiscover: () => void; label: string }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button
@@ -285,7 +257,6 @@ function DiscoverBar({ canDiscover, onDiscover, label, filters }: { canDiscover:
       >
         <Compass className="size-4" /> {label}
       </button>
-      <ScheduleJobAction filters={filters} />
       <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
         <span className="size-1.5 rounded-full bg-emerald-500" />
         Evaluating a role later costs tokens. Discovering never does.

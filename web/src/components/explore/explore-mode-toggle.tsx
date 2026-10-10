@@ -1,6 +1,6 @@
 "use client";
 
-import { Compass, Sparkles, Globe } from "lucide-react";
+import { Compass, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CostBadge } from "@/components/cost/cost-badge";
 import type { ExploreMode } from "@/lib/explore";
@@ -30,21 +30,6 @@ export function ExploreModeToggle({
       >
         <Compass className="size-4" />
         <span className="font-medium">Scan</span>
-        <span className="hidden sm:inline-flex">
-          <CostBadge kind="free-network" size="xs" />
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange("github")}
-        aria-pressed={mode === "github"}
-        className={cn(
-          "flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-colors sm:flex-none sm:gap-2 sm:px-3 max-sm:min-h-[44px]",
-          mode === "github" ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
-        )}
-      >
-        <Globe className="size-4" />
-        <span className="font-medium">GitHub</span>
         <span className="hidden sm:inline-flex">
           <CostBadge kind="free-network" size="xs" />
         </span>

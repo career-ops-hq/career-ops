@@ -1,40 +1,14 @@
 "use client";
 
-import { useState } from "react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import { CvIngest } from "@/components/cv/cv-ingest";
-import Link from "next/link";
 
 // The first-run takeover: when cv.md is missing, the CV-upload hero IS the home.
 // One input, value-coming framing (not a form), the same product chrome (HeroGlow
 // + dot-bg) so it feels like the app, not a gate. The whole aha (CV → free matches
 // → first score) flows from here.
 export function FirstRunHome() {
-  const [dismissed, setDismissed] = useState(false);
-
-  if (dismissed) {
-    return (
-      <div className="mx-auto max-w-2xl px-6 py-10 md:py-16 space-y-6">
-        <div className="rounded-xl border border-border bg-surface/40 p-6 text-center space-y-4">
-          <h2 className="text-lg font-semibold">Welcome to Career-Ops</h2>
-          <p className="text-sm text-muted">You can set up your CV later from Config. For now, jump straight in:</p>
-          <div className="flex flex-wrap justify-center gap-3">
-            <Link href="/internships" className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity">
-              Internship Tracker
-            </Link>
-            <Link href="/uploads" className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover transition-colors">
-              Upload Resume
-            </Link>
-            <Link href="/config" className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-hover transition-colors">
-              Config
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto max-w-3xl px-6 py-10 md:py-16">
       <section className="dot-bg relative overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
@@ -61,12 +35,6 @@ export function FirstRunHome() {
           <div className="mt-7">
             <CvIngest />
           </div>
-          <button
-            onClick={() => setDismissed(true)}
-            className="mt-4 text-xs text-muted hover:text-foreground transition-colors underline underline-offset-2"
-          >
-            Skip for now — go to dashboard
-          </button>
         </div>
       </section>
     </div>
