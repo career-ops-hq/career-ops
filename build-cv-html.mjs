@@ -899,7 +899,8 @@ function renderMarkdown(payload, template) {
   const proj = [];
   for (const e of list(payload.projects).filter(e => hasRequiredFields(e, 'projects', 'html'))) {
     const url = mdUrl(e.url);
-    const name = url ? `[${mdLine(e.name)}](${url})` : mdLine(e.name);
+    // Escape the label's own delimiters so a name cannot close the link early.
+    const name = url ? `[${mdLine(e.name).replace(/[\\[\]]/g, '\\$&')}](${url})` : mdLine(e.name);
     proj.push(`### ${mdJoin([name, e.badge], ' · ')}`, '');
     const desc = e.description || list(e.bullets).filter(Boolean).join(' ');
     if (mdLine(desc)) proj.push(mdLine(desc), '');
@@ -933,6 +934,8 @@ function renderMarkdown(payload, template) {
   for (const key of templateSectionOrder(template)) {
     if (bodies.has(key)) out.push(...bodies.get(key));
   }
+  // The GDPR/RODO consent footer, where the template carries one (as the HTML does).
+  if (template.includes('{{CONSENT}}') && mdLine(payload.consent)) out.push('---', '', mdLine(payload.consent), '');
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 

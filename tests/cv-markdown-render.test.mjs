@@ -102,3 +102,20 @@ test('--markdown refuses to overwrite the input file', () => {
   assert.match(r.stderr, /Output path is the input file/);
   assert.equal(readFileSync(inPath, 'utf8'), original);
 });
+
+test('--markdown escapes link-label delimiters in project names', () => {
+  const { r, outPath } = run({
+    ...payload,
+    projects: [{ name: 'A](https://example.invalid) [B', url: 'https://example.com', description: 'Does things.' }],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(outPath, 'utf8'), /### \[A\\\]\(https:\/\/example\.invalid\) \\\[B\]\(https:\/\/example\.com\)\n/);
+});
+
+test('--markdown ends with the consent footer when the payload sets one', () => {
+  const { r, outPath } = run({ ...payload, consent: 'I consent to the processing of my data.' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(outPath, 'utf8'), /\n---\n\nI consent to the processing of my data\.\n$/);
+  const plain = run(payload);
+  assert.doesNotMatch(readFileSync(plain.outPath, 'utf8'), /^---$/m);
+});
