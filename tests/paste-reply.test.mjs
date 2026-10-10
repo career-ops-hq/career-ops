@@ -234,6 +234,10 @@ console.log('9. concurrent runs lose no entry and crash no writer (#4920)');
       });
       let err = '';
       p.stderr.on('data', (chunk) => { err += chunk; });
+      // A child that cannot START emits 'error', not 'exit'. Unhandled, that
+      // throws out of the test process before any run is reported; routed
+      // here it is one more failed run, with its cause.
+      p.on('error', (e) => res({ i, code: -1, err: `spawn failed: ${e.message}` }));
       p.on('exit', (code) => res({ i, code, err }));
     })),
   );
