@@ -344,12 +344,65 @@ const twoPassManifestChecks = [
     pattern: /CAREER_OPS_UPDATE_REEXEC/,
   },
   {
-    name: 'apply resolves the re-exec checkout closure from FETCH_HEAD (#1245)',
-    pattern: /resolveReexecCheckout\('FETCH_HEAD',\s*'update-system\.mjs'\)/,
+    // #3052's own mechanism: bare `main` lets git auto-follow a tag into
+    // FETCH_HEAD. Naming the full ref (refs/heads/main, or refs/tags/<release>
+    // on the default channel) and disabling tag-following is what makes the
+    // fetch produce the requested ref and nothing else.
+    name: 'apply fetches the requested ref by explicit refspec with tag-following off (#3052)',
+    pattern: /const targetRefspec = refspecForTarget\(targetRef\);[\s\S]{0,2000}?git\('fetch',\s*'--no-tags',\s*CANONICAL_REPO,\s*targetRefspec\)/,
   },
   {
-    name: 'apply checks out the resolved re-exec files from FETCH_HEAD (#1245)',
-    pattern: /git\('checkout',\s*'FETCH_HEAD',\s*'--',\s*\.\.\.reexecFiles\)/,
+    // The authoritative SHA must be read BEFORE the fetch: read after, a push
+    // landing in between makes the legitimate new tip look like a stale target.
+    name: 'apply reads the authoritative SHA before fetching (#3052)',
+    pattern: /const authoritativeCommit = inheritedTarget \? '' : await upstreamRefCommit\(targetRefspec\);[\s\S]{0,900}?git\('fetch',\s*'--no-tags'/,
+  },
+  {
+    // #3052: FETCH_HEAD is a pseudo-ref, re-resolved on every read. apply() read
+    // it a dozen times, so nothing tied those reads to one tree. Resolve once.
+    // `const`, and no try/catch around it: a child that cannot resolve its
+    // parent's SHA must abort, not silently re-pin its own FETCH_HEAD while
+    // running bootstrap files the parent checked out from the parent's target.
+    name: 'apply pins the fetched target to an immutable SHA, with no fallback (#3052)',
+    pattern: /const targetCommit = inheritedTarget\s*\n?\s*\? pinInheritedTarget\(inheritedTarget\)\s*\n?\s*: pinRefToCommit\('FETCH_HEAD'\);/,
+  },
+  {
+    // Verifying the version direction is not verifying the target's identity:
+    // a rogue tree shipping a high VERSION passes the downgrade guard. apply()
+    // must consume the authoritative SHA check() has always resolved.
+    name: 'apply cross-checks the pinned target against the requested upstream ref (#3052)',
+    pattern: /const identity = targetIdentityRefusal\(targetCommit,\s*authoritativeCommit,\s*targetRefspec\);\s*\n\s*if \(identity\) throw new Error\(/,
+  },
+  {
+    // #3052: compareVersions() was only ever called from check(), which decides
+    // whether to NOTIFY. apply() installed whatever the fetch produced.
+    //
+    // The call SHAPE is pinned, not just the call: `versionAtRef('HEAD')` would
+    // compare the installed tree with itself, always return null, and otherwise
+    // survive every test in this repo. The guard is only a guard when it reads
+    // the same pinned commit the checkout will install from.
+    name: 'apply refuses a target older than the installed version (#3052)',
+    pattern: /const targetVersion = versionAtRef\(targetCommit\);\s*\n\s*const refusal = downgradeRefusal\(local, targetVersion\);\s*\n\s*if \(refusal\) \{\s*\n\s*throw new Error\(/,
+  },
+  {
+    // A guard whose refusal is unreachable is not a guard. Pin the throw.
+    name: 'a refused target aborts apply instead of being logged (#3052)',
+    pattern: /if \(refusal\) \{\s*\n\s*throw new Error\(refusalMessage\(targetCommit, refusal, isReexec\)\);\s*\n\s*\}/,
+  },
+  {
+    // #3052's reported symptom is the banner: `v1.26.0 -> v1.26.0`. Re-reading
+    // VERSION off disk reports the target only when the checkout reached
+    // VERSION; a locally-edited VERSION is preserved and keeps the old value.
+    name: 'the completion banner reports the verified target version (#3052)',
+    pattern: /const remote = targetVersion;/,
+  },
+  {
+    name: 'apply resolves the re-exec checkout closure from the pinned target (#1245, #3052)',
+    pattern: /resolveReexecCheckout\(targetCommit,\s*'update-system\.mjs'\)/,
+  },
+  {
+    name: 'apply checks out the resolved re-exec files from the pinned target (#1245, #3052)',
+    pattern: /git\('checkout',\s*targetCommit,\s*'--',\s*\.\.\.reexecFiles\)/,
   },
   {
     name: 're-exec fallback still covers the skill-entrypoints import (#1245)',
@@ -364,8 +417,8 @@ const twoPassManifestChecks = [
     pattern: /CAREER_OPS_UPDATE_BACKUP_BRANCH/,
   },
   {
-    name: 'apply reads the target updater manifest from FETCH_HEAD',
-    pattern: /git\('show',\s*'FETCH_HEAD:update-system\.mjs'\)/,
+    name: 'apply reads the target updater manifest from the pinned target (#3052)',
+    pattern: /git\('show',\s*`\$\{targetCommit\}:update-system\.mjs`\)/,
   },
   {
     name: 'apply extracts SYSTEM_PATHS from the target updater',
@@ -399,7 +452,15 @@ const twoPassManifestChecks = [
     // against the factory's own exports; this only has to pin that apply() feeds
     // it `ls-files -z` and `ls-tree -z` rather than something of its own.
     name: 'the guard is handed probes built by manifestProbes from real git output',
-    pattern: /rejectUserLayerPaths\([\s\S]{0,300}?manifestProbes\(\{\s*trackedOutput:\s*git\('ls-files',\s*'-z'\),\s*upstreamOutput:\s*git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*'FETCH_HEAD'\),\s*\}\),/,
+    pattern: /rejectUserLayerPaths\([\s\S]{0,300}?manifestProbes\(\{\s*trackedOutput:\s*git\('ls-files',\s*'-z'\),\s*upstreamOutput:\s*git\('ls-tree',\s*'-r',\s*'--name-only',\s*'-z',\s*targetCommit\),\s*\}\),/,
+  },
+  {
+    name: 'configured template variants are listed from the pinned target',
+    pattern: /configuredVariantRemoteFiles = git\('ls-tree',\s*'-r',\s*'--name-only',\s*targetCommit,\s*'--',\s*'templates'\)/,
+  },
+  {
+    name: 'configured template variant contents are read from the pinned target',
+    pattern: /readRemoteContent:\s*\(file\) => gitShowRaw\(\x60\$\{targetCommit\}:\$\{file\}\x60\)/,
   },
   {
     // A refused entry was never checked out, so verifying it would report a gap
@@ -408,7 +469,7 @@ const twoPassManifestChecks = [
     // permanently dead updater, which is the opposite of refusing loudly without
     // aborting. Subtracting the refused set is what keeps that contract.
     name: 'the completeness check skips entries the guard refused',
-    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths\.filter\(\(path\) => !refusedSet\.has\(path\)\),\s*\)/,
+    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths\.filter\(\(path\) => !refusedSet\.has\(path\)\),\s*targetCommit,?\s*\)/,
   },
   {
     name: 'apply checks out the merged manifest instead of only the local manifest',
@@ -451,13 +512,13 @@ const twoPassManifestChecks = [
     // The trailing spread is the #2337 preserve-exclusions; the property this
     // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('checkout',\s*'FETCH_HEAD',\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
+    pattern: /gitQuiet\('checkout',\s*targetCommit,\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
   },
   {
     // #2337: a system file this install edited must be listed and backed up
     // before the checkout, not overwritten in silence.
     name: 'locally edited system files are detected before checkout (#2337)',
-    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, 'FETCH_HEAD'\)/,
+    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, targetCommit\)/,
   },
   {
     name: 'the local copy is saved as .bak before any overwrite (#2337)',
@@ -482,20 +543,20 @@ const twoPassManifestChecks = [
   {
     // existsSync on a pre-existing directory (docs/) would call it materialized
     // even when the target added files under it — the verification must recurse
-    // into directory entries against FETCH_HEAD (#1998 CodeRabbit review).
+    // into directory entries against the target tree (#1998 CodeRabbit review).
     name: 'manifest verification recurses into directory entries via ls-tree (#1998)',
-    pattern: /ls-tree', '-r', '--name-only', 'FETCH_HEAD'[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
+    pattern: /ls-tree', '-r', '--name-only', targetRef[\s\S]{0,400}?treeFiles\.some\(f => !existsSync/,
   },
   {
     // A checkout failure is an expected skip only when `probeAbsentUpstream`
     // returns true (a SUCCESSFUL empty `ls-tree` — the path is truly gone from
-    // FETCH_HEAD), or — for a directory whose upstream content could not be
+    // the pinned target), or — for a directory whose upstream content could not be
     // enumerated (#3824) — when the exclusions cancelled the pathspec out. A
     // thrown probe, a timeout or a permission error must rethrow, not report
     // success (#1998). The catch must NOT set `absentUpstream` any other way:
     // an inline `catch { absentUpstream = true }` is exactly the regression.
     name: 'the checkout catch derives absentUpstream only from probeAbsentUpstream (#1998, #3824)',
-    pattern: /const absentUpstream = probeAbsentUpstream\(spec\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) throw err;/,
+    pattern: /const absentUpstream = probeAbsentUpstream\(spec, targetCommit\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) throw err;/,
   },
   {
     name: 'the checkout catch never assigns absentUpstream = true directly (#1998 regression)',
