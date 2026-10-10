@@ -136,6 +136,14 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
+    source: 'web/src/app/api/company-history/route.ts',
+    script: 'company-history.mjs',
+    // The fixture tracker's own company, so the probe exercises a real lookup
+    // rather than the not-found fallback.
+    args: ['--company', 'Northwind Robotics'],
+    probe: 'run',
+  },
+  {
     source: 'web/src/lib/core/pipeline.ts',
     script: null,
     args: [],
