@@ -1467,15 +1467,25 @@ const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
  * Every other skipped status describes the posting: a dead URL stays dead
  * until the configured recheck window releases it (see
  * RECHECKABLE_SCAN_HISTORY_STATUSES), a blocked host stays blocked, so pinning
- * saves a later scan the work. These
- * two describe the user's CONFIG instead — `location_filter` and
- * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
- * dropped under the old threshold never resurfaces under the new one, which is
- * the opposite of what recording the drop is for.
+ * saves a later scan the work. These three describe something else.
  *
- * Pinning would also buy nothing: both cuts run on data the provider already
- * returned, before any liveness verification, so a re-scan of one of these URLs
- * costs no extra request.
+ * `skipped_location` and `skipped_age` describe the user's CONFIG —
+ * `location_filter` and `max_posting_age_days` are thresholds they edit.
+ * Pinning would mean a role dropped under the old threshold never resurfaces
+ * under the new one, which is the opposite of what recording the drop is for.
+ * For those two, not pinning is also free: both cuts run on data the provider
+ * already returned, before any liveness verification, so a re-scan of one of
+ * these URLs costs no extra request.
+ *
+ * `skipped_no_apply_control` describes the CHECK: the browser classifier did
+ * not see an Apply control, which is not proof the posting is closed. On
+ * boards whose button it does not recognise, pinning would drop a live posting
+ * once and never offer it again (#4832). Unlike the other two, this verdict
+ * comes from a browser load, so every `--verify` scan re-opens the posting for
+ * as long as the provider lists it. That is the accepted price: a slower
+ * `--verify` beats a posting lost for good, and it shrinks as the classifier
+ * learns each board, since a posting that reads `active` gets an `added` row
+ * and stops coming back.
  *
  * `collectSeenCompanyRoles` needs no companion change — it already seeds from
  * `added` rows alone.
@@ -1483,12 +1493,6 @@ const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
 const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
   'skipped_location',
   'skipped_age',
-  // The browser check could not see an Apply control. That says something
-  // about the check, not the posting: on boards whose button it does not
-  // recognise, a live posting would otherwise be dropped once and never
-  // offered again (#4832). Unlike the other two statuses, which are decided
-  // from data already in hand, this one costs a browser load every time the
-  // URL is checked again, since nothing is remembered to skip it.
   'skipped_no_apply_control',
 ]);
 
@@ -3547,12 +3551,14 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
     ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get() })
     : checkUrlLiveness(page, url);
 
-  // Three permanent buckets + one transient passthrough:
+  // Two permanent buckets, one observational, one transient passthrough:
   //   verified  → active pages and transient nav errors (retry next scan)
   //   expired   → classifier-confirmed dead postings (HTTP 4xx, redirect markers,
   //               body patterns, listing pages, insufficient content)
   //   dropped   → page loaded but classifier saw no Apply control. --verify is an
-  //               opt-in stricter filter; keeping these defeats the purpose.
+  //               opt-in stricter filter; keeping these defeats the purpose. Not
+  //               proof the posting is closed, so the row never pins the URL and
+  //               the next --verify scan loads the page again (#4832).
   //   invalid   → up-front URL guard rejections (malformed / non-http / private)
   const verified = [];
   const expired = [];
@@ -3606,9 +3612,11 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         invalid.push({ ...offer, code, reason });
         console.log(`  ⛔ invalid   ${offer.company} | ${offer.title} (${reason})`);
       } else if (result === 'uncertain' && code === 'no_apply_control') {
-        // Page loaded but classifier could not find an Apply control. Treat like
-        // expired for routing — drop from pipeline AND record in scan-history so
-        // we don't burn a verify cycle on the same URL next scan.
+        // Page loaded but classifier could not find an Apply control. Drop from
+        // pipeline and record in scan-history for visibility only: the row does
+        // not pin the URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so the next
+        // --verify scan checks it again rather than losing a live posting whose
+        // button the classifier does not recognise (#4832).
         dropped.push({ ...offer, reason });
         console.log(`  ⚠️ no-apply  ${offer.company} | ${offer.title} (${reason})`);
       } else {
