@@ -315,13 +315,18 @@ test("Claude system init becomes the ready status", () => {
   assert.deepEqual(event, { status: "Agent ready" });
 });
 
-test("Claude result usage becomes tokens + cost", () => {
+test("Claude result usage counts cache reads with every reported token category", () => {
   const event = parseClaudeEvent(JSON.stringify({
     type: "result",
-    usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 5 },
+    usage: {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_creation_input_tokens: 5,
+      cache_read_input_tokens: 500,
+    },
     total_cost_usd: 0.012,
   }));
-  assert.deepEqual(event, { tokens: 125, costUsd: 0.012 });
+  assert.deepEqual(event, { tokens: 625, costUsd: 0.012 });
 });
 
 test("Claude result without usage is ignored, not zeroed", () => {

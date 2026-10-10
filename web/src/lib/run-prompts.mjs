@@ -51,7 +51,56 @@ const SAFE_COMPANY_NAME = /^[\p{L}\p{N} .,&'()+/-]+$/u;
 /** ISO calendar date, the only form the dashboard's POSTED column parses. */
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 
-export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
+/** The CV template every run falls back to, relative to the career-ops root. */
+export const BASE_CV_TEMPLATE = "templates/cv-template.html";
+
+/**
+ * The two shapes cv-templates.mjs can produce, and nothing wider.
+ *
+ * FILENAME: its parseFilename() only ever matches
+ * `cv-template(.<name>)?.(html|tex)` with `<name>` in `[a-z0-9-]`, so the filename
+ * half can be spelled out exactly. (html only here: resolveCvTemplate asks for the
+ * html format.)
+ *
+ * PACK DIRECTORY: one level, optional (#3202). Unlike the filename, this comes
+ * straight from readdirSync — the resolver constrains it not at all, so
+ * `templates/My Pack/cv-template.ats.html` is a path it genuinely returns and the
+ * previous pattern, which allowed no space, silently fell back to the base
+ * template for exactly the users who had built a pack.
+ *
+ * The obvious widening — `[^/]+` for the directory — is the wrong trade. This path
+ * is interpolated into an agent's numbered instructions, so `;`, `$`, quotes,
+ * backticks and control characters would ride in with it; the allowlist keeps the
+ * characters real directory names actually need. A pack whose name falls
+ * outside it still renders, from the base template, which is the same outcome as
+ * before and not a new failure.
+ *
+ * `+` earns its place on the same evidence as the space: `Design+Dev`, `C++`,
+ * `ATS+Exec` are how people write a pack that covers two things, and `+` names no
+ * shell or prompt construct. It is confined to the DIRECTORY half. parseFilename
+ * cannot produce it in a filename (`[a-z0-9-]`), so `cv-template.a+b.html` is
+ * still a path the resolver never returns.
+ *
+ * `(?![\s\S])` rather than `$`: JS's `$` also matches BEFORE a final newline, so
+ * `templates/cv-template.html\n` would pass and break the step it is written into.
+ */
+const CV_TEMPLATE_RE =
+  /^templates\/(?:[A-Za-z0-9][A-Za-z0-9._ +-]*\/)?cv-template(?:\.[a-z0-9-]+)?\.html(?![\s\S])/;
+
+/**
+ * The template path is interpolated into an agent's instructions, so it is a
+ * trust boundary even though config/profile.yml is the user's own file: a path
+ * that never went through the resolver has no business reaching a worker. An
+ * unrecognized value falls back to the base template rather than throwing,
+ * because a CV the user can still send beats a run that dies on their config.
+ */
+function safeCvTemplate(value) {
+  return typeof value === "string" && !value.includes("..") && CV_TEMPLATE_RE.test(value)
+    ? value
+    : BASE_CV_TEMPLATE;
+}
+
+export function buildPrompt({ kind, input, memory, today, postedAt, lang, cvTemplate }) {
   // AGENTS.md's "Output Language vs Market Modes" composition rule. The CLI
   // picks this up by reading AGENTS.md interactively; a one-shot headless
   // prompt has no such chance, so the rule has to be stated in the prompt or a
@@ -61,11 +110,34 @@ export function buildPrompt({ kind, input, memory, today, postedAt, lang }) {
   // readLanguageConfig() touches the filesystem, so callers that cannot supply
   // it (tests, future callers) keep working instead of this module reaching for
   // fs itself and losing its "plain module, testable as a value" property.
-  const resolvedLang = lang ?? { output: "en", modesDir: "modes", evalModeFile: "modes/oferta.md" };
-  const marketNote =
-    resolvedLang.modesDir !== "modes"
-      ? ` Also read ${resolvedLang.modesDir}/_shared.md for this market's vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.`
-      : "";
+  const resolvedLang = lang ?? { output: "en", modesDir: "modes", modesDirs: ["modes"], evalModeFile: "modes/oferta.md" };
+  // language.modes_dir may declare MULTIPLE simultaneous candidate markets
+  // (#3793 — e.g. an immigrant candidate applying in both Canada and China at
+  // once). `modesDirs` carries every declared market (primary first);
+  // `modesDir` alone (older callers, e.g. tests that only set that field)
+  // means exactly one declared market.
+  const allDeclaredMarkets = resolvedLang.modesDirs ?? [resolvedLang.modesDir];
+  // `modes` is a real declared candidate (for markets with no localized
+  // directory), so [modes, modes/zh] is still multi-market. It is omitted only
+  // from the extra `_shared.md` pointers: the default baseline is already the
+  // core context, while localized directories need an explicit include.
+  const declaredMarkets = allDeclaredMarkets.filter(Boolean);
+  const isMultiMarket = declaredMarkets.length > 1;
+  const sharedMarketDirs = declaredMarkets.filter((dir) => dir !== "modes");
+  const sharedMarketNote = sharedMarketDirs.length
+    ? ` Also read ${sharedMarketDirs.map((dir) => `${dir}/_shared.md`).join(" and ")} for ${
+        isMultiMarket ? "these markets'" : "this market's"
+      } vocabulary, benefits and legal concepts, and keep those terms (explained in the output language) where relevant.`
+    : "";
+  // Market selection affects evaluation persistence. Research is read-only and
+  // may use the shared context without receiving evaluation-only stop rules.
+  const marketSelectionNote = kind === "evaluate" && isMultiMarket
+    ? ` These are multiple DECLARED candidate markets — per posting, judge which one actually applies from the JD's own MARKET signals (hiring-entity jurisdiction, currency, benefits/legal vocabulary), reusing the same judgment Block G posting-legitimacy checks already use. Never infer the market from the JD's language alone (a French-language Quebec/federal-Canada posting needs Canada's concepts, not modes/fr's France/Belgium/Switzerland/Luxembourg ones).`
+    : "";
+  const unattendedAmbiguityStep = kind === "evaluate" && isMultiMarket
+    ? ` If those signals remain genuinely ambiguous, this is an unattended run and nobody can answer a question: do not stop or ask the candidate. Continue with the first/primary market (${resolvedLang.modesDir}) and state both the ambiguity and that primary-market fallback explicitly in the report header or Block G before persisting.\n\n`
+    : "";
+  const marketNote = sharedMarketNote + marketSelectionNote;
   const languageDirective = `\n\nWrite all human-facing output in "${resolvedLang.output}" regardless of the language of these instructions or the job description.${marketNote}\n`;
   const mem = (memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "") + languageDirective;
   if (kind === "research") {
@@ -85,10 +157,10 @@ Target: ${input}`;
     // cv.md or data/applications.md. The agent now emits the CV inline and the
     // backend (a plain Node process, no CLI sandbox) writes and renders it, so
     // pdf mode runs with no write tool at all.
-    return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check, template resolution) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
+    return `You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. Use that template even though modes/pdf.md resolves one via cv-templates.mjs: web runs always use the base template. ${CV_ENVELOPE_INSTRUCTION}
+3. Fill ${safeCvTemplate(cvTemplate)}'s {{...}} placeholders with the tailored content. Use that exact file: the platform already resolved it from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. ${CV_ENVELOPE_INSTRUCTION}
 4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
 After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
@@ -179,7 +251,7 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 
    **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
 
-2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
+${mem}${unattendedAmbiguityStep}2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
    c. Write batch/tracker-additions/{num}-{company-slug}.tsv as TWO lines (real \\t tabs): a HEADER row of the 10 column labels, then ONE data row of 10 TAB-separated columns under it. merge-tracker reads the header and resolves every field by NAME, so no value can land in the wrong column. Copy both lines exactly as shown. ALWAYS write all 10 fields on the data row — leave the last one EMPTY if there is no posting URL, never "N/A" or "-":
@@ -187,11 +259,10 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
       {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}${postedSegment}\t{posting URL, or empty}
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
 Posting URL: ${input}`;
 }
-

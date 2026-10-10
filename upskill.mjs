@@ -931,7 +931,15 @@ const USAGE = `Usage:
 
 if (isMain) {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // requireOperand: neither value flag caught a MISSING operand on its own, so
+  // this is the shared guard's case, not an own-validator exemption.
+  // `--min-reports --summary` read '--summary' as the count, parseInt gave NaN
+  // and the aggregate branch silently fell back to 5 — a gap map for a threshold
+  // nobody asked for, at exit 0. `--url-text --help` printed usage and exited 0
+  // before the "provide a valid URL" check below could run (#2961). The
+  // non-numeric fallback (`--min-reports abc` → 5) is separate behaviour and is
+  // deliberately left alone here.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (args.includes('--self-test')) runSelfTest();
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======

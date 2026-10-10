@@ -8,7 +8,7 @@ import { ATS_LABEL, ATS_SOURCES, type AtsSource } from "@/lib/explore";
 import { useExplore, type SourceState } from "./explore-provider";
 
 const STYLE = `
-.co-disc{position:relative;z-index:1;display:flex;min-height:78vh;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:1.6rem;padding:2rem}
+.co-disc{position:relative;z-index:1;display:flex;min-height:0;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center;gap:1rem;padding:1.5rem 1rem 0.5rem}
 .co-disc__counter{font-variant-numeric:tabular-nums;line-height:1;font-size:clamp(4rem,13vw,8rem)}
 .co-src{display:flex;flex-wrap:wrap;justify-content:center;gap:.6rem}
 .co-src__chip{display:flex;align-items:center;gap:.5rem;border-radius:.8rem;border:1px solid var(--border,hsl(0 0% 50% / .2));padding:.5rem .8rem;min-width:9.5rem;background:color-mix(in srgb, var(--bg) 70%, transparent);transition:opacity .3s,border-color .3s}
@@ -101,14 +101,6 @@ export function DiscoveringState() {
           <Loader2 className="size-3.5 animate-spin" />
           {status || "Casting the net across the ATS network…"}
         </p>
-
-        {phase !== "revealing" && (
-          <div className="co-disc__skel" aria-hidden>
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="co-disc__skelcard" />
-            ))}
-          </div>
-        )}
       </div>
     </>
   );

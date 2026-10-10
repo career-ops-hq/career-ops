@@ -3,7 +3,13 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
+import { readTrackerFile } from "@/lib/core/tracker-files.mjs";
+import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { parseApplications } from "@/lib/tracker-table.mjs";
+import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
+// Pipeline rows are parsed in a plain .mjs for the same reason as
+// tracker-table.mjs: so `node --test` can exercise the real parser.
+import { parseInbox, splitLines } from "@/lib/pipeline-table.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
@@ -12,6 +18,10 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // don't drift into two different definitions of "which report does this
 // index row belong to" (#2599, #2008 review).
 import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
+// The managed-block markers and the profile read live together in one plain
+// module, so rememberFact() (the block's only WRITER) and readMemory() (its
+// reader) cannot drift apart, and so the read rule is testable from web/tests.
+import { NOTES_START, NOTES_END, profilePath as profileMemoryPath, readProfileMemory } from "@/lib/profile-memory.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -25,7 +35,14 @@ export function careerOpsRoot(): string {
   // the core checkout — the same directory `path-resolver.mjs` calls `__dirname`.
   // resolveDataRoot() needs it explicitly because relative env values and marker
   // contents resolve against it; see data-root.mjs for why that base matters.
-  const coreRoot = path.resolve(process.cwd(), "..");
+  //
+  // Via resolveCodeRoot(), NOT a hardcoded `..`, so this agrees with rootScript()
+  // just below — which already resolves the checkout that way. With
+  // CAREER_OPS_CODE_ROOT set and a RELATIVE data root, the two were computing
+  // from different bases: the script came from the configured checkout and the
+  // data root from the process's parent. Identical when the variable is unset,
+  // which is every default install.
+  const coreRoot = resolveCodeRoot(process.cwd(), process.env);
   return resolveDataRoot(
     coreRoot,
     (p) => {
@@ -46,11 +63,18 @@ export function careerOpsRoot(): string {
  * is assembled here from the bare name so the literal never appears as a direct
  * `execFile`/`spawn` argument — Next's bundler statically traces such literals
  * as module imports and fails the production build otherwise.
+ *
+ * Scripts live in the engine checkout — never in the data root. Under the #524
+ * split layout (CAREER_OPS_ROOT pointing at a data-only directory) the data
+ * root has no `.mjs` files, so resolving here made every script-driven endpoint
+ * (Explore discovery, doctor, portals verify, followups, run) report the
+ * checkout as missing. CAREER_OPS_CODE_ROOT selects the checkout explicitly.
  */
 export function rootScript(nameNoExt: string): string {
-  // The core checkout is selected at runtime and must not be bundled into the
-  // web server output when Turbopack sees this dynamic script path.
-  return path.join(/* turbopackIgnore: true */ careerOpsRoot(), `${nameNoExt}.mjs`);
+  // resolveRootScript() already returns the absolute `<checkout>/<name>.mjs`, and
+  // its path.join carries the Turbopack ignore: the core checkout is selected at
+  // runtime and must not be bundled into the web server output.
+  return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), nameNoExt);
 }
 
 // Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
@@ -74,51 +98,12 @@ function read(rel: string): string | null {
 
 export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
 
-/** A pipeline-row segment like `posted: 2026-07-14`, `trust: 62 stale` or
- *  `note: …` — the core appends these LABELED segments after whatever
- *  positional shape a row has (3/4/5 columns), so a naive positional reader
- *  would misread them as location/compensation on short rows. Any
- *  `word:`-prefixed segment is treated as labeled (forward-compatible with
- *  labels the core hasn't invented yet). */
-const LABELED_SEGMENT = /^([a-z][a-z_-]*):\s*(.*)$/i;
-
-/** Parse data/pipeline.md — `- [ ] URL | Company | Role [| Location [| Compensation]] [| label: …]*`.
- *  Positional split for the first columns (the optional 4th `location` #1015
- *  and 5th `compensation` #1017 must NOT bleed into `role`); labeled segments
- *  (posted:/trust:/note:/…) are filtered out of positional assignment wherever
- *  they appear and surfaced when useful (posted: → postedAt). Unknown labels
- *  and further trailing columns are ignored gracefully. */
+/** Parse data/pipeline.md. The row grammar and its labeled-segment handling
+ *  live in pipeline-table.mjs — see there for the column rules (#1015, #1017). */
 export function readInbox(): InboxJob[] {
   const md = read("data/pipeline.md");
   if (!md) return [];
-  const jobs: InboxJob[] = [];
-  for (const line of md.split("\n")) {
-    const m = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
-    if (!m) continue;
-    const all = m[2].split("|").map((s) => s.trim());
-    const labels = new Map<string, string>();
-    const parts: string[] = [];
-    for (const [i, seg] of all.entries()) {
-      // the URL cell can contain a colon-y value but is always position 0
-      const lm = i >= 3 ? seg.match(LABELED_SEGMENT) : null;
-      if (lm) labels.set(lm[1].toLowerCase(), lm[2].trim());
-      else parts.push(seg);
-    }
-    if (parts.length < 3 || !parts[0]) continue; // need at least url | company | role
-    const posted = labels.get("posted");
-    jobs.push({
-      done: m[1].toLowerCase() === "x",
-      url: parts[0],
-      company: parts[1],
-      role: parts[2],
-      location: parts[3] || undefined, // optional 4th column (#1015)
-      compensation: parts[4] || undefined, // optional 5th column (#1017); 6th+ ignored
-      // the row's own posting date (scan.mjs `posted:` label) — a more direct
-      // freshness signal than the scan-history join, which stays as fallback
-      postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
-    });
-  }
-  return jobs;
+  return parseInbox(md);
 }
 
 /**
@@ -133,7 +118,7 @@ export function readScanDates(): Map<string, string> {
   const tsv = read("data/scan-history.tsv");
   const dates = new Map<string, string>();
   if (!tsv) return dates;
-  const lines = tsv.split("\n");
+  const lines = splitLines(tsv);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line || (i === 0 && line.startsWith("url\t"))) continue; // skip header
@@ -154,10 +139,16 @@ export type Application = {
   /** Intermediary channel (#1596): agency/recruiter firm, "—" for direct, "" when the tracker has no Via column. */
   via: string;
   role: string;
+  /** Tracker's `Location` column — recognized by the alias table; "" when the tracker has no such column. */
+  location: string;
   score: string;
   status: string;
   pdf: string;
   report: string;
+  /** Tracker's `Apply Link` column — usually a markdown link to the original ad; "" when the column is absent. */
+  applyLink: string;
+  /** Tracker's `Follow-up` column — a date or "—"; "" when the column is absent. */
+  followUp: string;
   notes: string;
 };
 
@@ -166,12 +157,42 @@ export type Application = {
  * The header-aware parsing lives in tracker-table.mjs, which resolves headers
  * through the SAME alias table the Node tooling uses (tracker-aliases.json,
  * exported by tracker-parse.mjs as HEADER_ALIASES) — one shared source, no
- * web-side mirror to drift (#954, PR #1598 review).
+ * web-side mirror to drift (#954, PR #1598 review). A data-only root falls back
+ * to the running system checkout for that system-layer alias table.
  */
 export function readApplications(): Application[] {
-  const md = read("data/applications.md");
+  const md = readTrackerFile(careerOpsRoot());
   if (!md) return [];
-  return parseApplications(md, careerOpsRoot());
+  // parseApplications derives each row from WEB_FIELD (tracker-table.mjs), so
+  // its keys are exactly this type's field names by construction — adding a
+  // tracker column is the two edits described there (WEB_FIELD + Application),
+  // never a hand-written return-shape list that the two could drift from. The
+  // third argument is the running system checkout, so a data-only root (no
+  // tracker-aliases.json of its own) still resolves headers correctly.
+  return parseApplications(md, careerOpsRoot(), path.resolve(process.cwd(), "..")) as Application[];
+}
+
+export type StatusLogRow = {
+  num: number;
+  date: string;
+  from: string;
+  to: string;
+  source: string;
+  note: string;
+};
+
+/** Append-only transitions beside the active tracker. A missing log is
+ *  normal (no status change recorded yet) and yields []. Any other read failure
+ *  is rethrown: an unreadable log must not pass for an empty one, which would
+ *  silently drop recorded interview paths from the Sankey (web/AGENTS.md: a
+ *  missing file is not a malformed file). */
+export function readStatusLog(): StatusLogRow[] {
+  return parseStatusLog(readApplicationStatusLog() ?? "");
+}
+
+/** Ledger sibling of the same tracker readApplications consumes. */
+export function readApplicationStatusLog(): string | null {
+  return readTrackerFile(careerOpsRoot(), "status-log.tsv");
 }
 
 /** Resolve the report-number cell in data/pdf-index.tsv for a given report id.
@@ -263,7 +284,7 @@ export type LifecyclePhase = "first-run" | "in-between" | "established";
  *   - established → all 4 prereqs present.
  * onboardingNeeded mirrors doctor.mjs: true if ANY prereq is missing → show banner.
  */
-export function doctorState(): {
+export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "inbox">): {
   phase: LifecyclePhase;
   onboardingNeeded: boolean;
   missing: string[];
@@ -285,7 +306,10 @@ export function doctorState(): {
   ];
   const missing = prereqs.filter(([rel]) => !has(rel)).map(([, label]) => label);
   const hasCv = has("cv.md");
-  const hasData = readApplications().length > 0 || readInbox().some((j) => !j.done);
+  // Home already reads these files. Reuse that snapshot so its setup check
+  // neither parses the tracker twice nor disagrees with the rendered queue.
+  const hasData = (snapshot?.applications ?? readApplications()).length > 0 ||
+    (snapshot?.inbox ?? readInbox()).some((j) => !j.done);
   const onboardingNeeded = missing.length > 0;
   const phase: LifecyclePhase = !hasCv && !hasData ? "first-run" : onboardingNeeded ? "in-between" : "established";
   return { phase, onboardingNeeded, missing, hasCv, hasData };
@@ -398,29 +422,13 @@ export function findApplication(n: string): Application | null {
  *  web assistant learns go HERE (single source of truth) inside a managed marker
  *  block — so the CLI sees them too. No web-only memory store (that would drift). */
 export function profilePath(): string {
-  return path.join(careerOpsRoot(), "modes", "_profile.md");
+  return profileMemoryPath(careerOpsRoot());
 }
 
-const NOTES_START = "<!-- co-web-notes:start -->";
-const NOTES_END = "<!-- co-web-notes:end -->";
-
-/** Read back ONLY the web-assistant managed notes from modes/_profile.md (small,
- *  focused — the agent reads the rest of the canonical files itself). Falls back
- *  to the legacy web-only memory file for back-compat. */
+/** Read modes/_profile.md back for injection into a prompt. profile-memory.mjs
+ *  owns the rule and is where it is tested. */
 export function readMemory(): string {
-  try {
-    const md = fs.readFileSync(profilePath(), "utf8");
-    const i = md.indexOf(NOTES_START);
-    const j = md.indexOf(NOTES_END);
-    if (i !== -1 && j !== -1 && j > i) return md.slice(i + NOTES_START.length, j).trim();
-  } catch {
-    /* no _profile.md yet */
-  }
-  try {
-    return fs.readFileSync(path.join(careerOpsRoot(), ".career-ops-web", "memory.md"), "utf8").trim();
-  } catch {
-    return "";
-  }
+  return readProfileMemory(careerOpsRoot());
 }
 
 /** Append a durable fact to the canonical modes/_profile.md (creating the file +
@@ -466,9 +474,22 @@ export function rememberFact(fact: string): "ok" | "deduped" | "error" {
 export type LanguageConfig = {
   /** language.output — prose language for user-facing text. Default "en". */
   output: string;
-  /** language.modes_dir, normalized without a trailing slash. Default "modes". */
+  /**
+   * language.modes_dir's PRIMARY declared market, normalized without a
+   * trailing slash. Default "modes". When modes_dir is an array (#3793 —
+   * multiple simultaneous target markets), this is `modesDirs[0]`: the
+   * evaluation-mode file can only come from one market at a time.
+   */
   modesDir: string;
-  /** The market's evaluation-mode file, repo-root-relative. Default "modes/oferta.md". */
+  /**
+   * Every market declared in language.modes_dir, primary first. A plain
+   * string config normalizes to a single-element array; the default (no
+   * modes_dir configured) is `["modes"]`. Prefer this over `modesDir` when a
+   * caller needs to know about ALL declared candidate markets, not just the
+   * primary one (#3793).
+   */
+  modesDirs: string[];
+  /** The primary market's evaluation-mode file, repo-root-relative. Default "modes/oferta.md". */
   evalModeFile: string;
 };
 
@@ -532,7 +553,7 @@ function resolveEvalModeFile(root: string, modesDir: string): string {
  */
 export function readLanguageConfig(): LanguageConfig {
   const root = careerOpsRoot();
-  let modesDir = "modes";
+  let modesDirs = ["modes"];
   let output = "en";
   try {
     const parsed = yaml.load(fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8"));
@@ -541,14 +562,36 @@ export function readLanguageConfig(): LanguageConfig {
       if (language && typeof language === "object" && !Array.isArray(language)) {
         const l = language as Record<string, unknown>;
         if (typeof l.output === "string" && l.output.trim()) output = l.output.trim();
-        if (typeof l.modes_dir === "string" && l.modes_dir.trim()) {
-          const candidate = l.modes_dir.trim().replace(/\/+$/, "");
-          if (MODES_DIR_RE.test(candidate)) modesDir = candidate;
+        // modes_dir may be a single declared market (string, the historical
+        // shape) or a list of simultaneously declared candidate markets
+        // (#3793). Either shape normalizes to a string array here; an empty
+        // or fully-invalid list falls back to the ["modes"] default.
+        const rawModesDir = l.modes_dir;
+        const rawCandidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
+        const resolveDeclaredDir = (value: unknown): string | null => {
+          if (typeof value !== "string" || !value.trim()) return null;
+          const candidate = value.trim().replace(/\/+$/, "");
+          if (!MODES_DIR_RE.test(candidate)) return null;
+          return fs.existsSync(path.join(root, candidate)) ? candidate : null;
+        };
+        // The first declared entry is primary. Do not filter it away and
+        // silently promote a later market into the evaluation slot. This
+        // mirrors gemini-eval.mjs: invalid primary -> default modes, while
+        // valid secondary markets remain available as shared context.
+        const primary = resolveDeclaredDir(rawCandidates[0]);
+        const extras = rawCandidates.slice(1).map(resolveDeclaredDir).filter(
+          (value): value is string => value !== null,
+        );
+        if (primary) {
+          modesDirs = [primary, ...extras];
+        } else if (extras.length) {
+          modesDirs = ["modes", ...extras.filter((dir) => dir !== "modes")];
         }
       }
     }
   } catch {
     /* no profile yet, or malformed — defaults are correct */
   }
-  return { output, modesDir, evalModeFile: resolveEvalModeFile(root, modesDir) };
+  const modesDir = modesDirs[0];
+  return { output, modesDir, modesDirs, evalModeFile: resolveEvalModeFile(root, modesDir) };
 }

@@ -1,120 +1,200 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
+<p align="center">Açık kaynaklı yapay zekâ iş arama ajanı.</p>
+
 <p align="center">
-  <em>Aylarca zor yoldan iş başvurusu yaptım. Bu yüzden keşke olsun dediğim sistemi kendim inşa ettim.</em><br>
-  Şirketler adayları elemek için yapay zekâ kullanıyor. <strong>Ben de adaylara şirket <em>seçmek</em> için yapay zekâ verdim.</strong><br>
-  Değerlendirir, sıralar ve taslak yazar. <strong>Asla göndermez: gönderen sensin.</strong> Açık kaynak, yerel, senin.
+  <a href="README.md">English</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.pt-BR.md">Português (Brasil)</a> |
+  <a href="README.ko-KR.md">한국어</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.cn.md">简体中文</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.ua.md">Українська</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ta.md">தமிழ்</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.hi.md">हिन्दी</a> |
+  <a href="README.tr.md">Türkçe</a>
+</p>
+
+<!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
+
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>santifer</strong></a></p>
+
+<p align="center">
+<strong>Aylarca sessizliğe CV&nbsp;gönderdim.</strong><br>
+Ben de ihtiyacım olan filtreyi kendim&nbsp;yaptım.
 </p>
 
 <p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="career-ops hattı: puanlanmış ilanlar, 219'u başvurma olarak işaretli, sonra bir tam değerlendirme" width="800"></a>
+<strong>740&nbsp;ilan&nbsp;değerlendirildi. 68&nbsp;başvuru. 12&nbsp;mülakat.&nbsp;1&nbsp;teklif.</strong><br>
+İlk kullanıcısı bendim. İşi&nbsp;aldım. Sonra&nbsp;açık&nbsp;kaynak&nbsp;yaptım.
 </p>
-
-<p align="center"><sub>Arayışın ortasından bir kare: hat, sonra bir ilan açılıp baştan sona değerlendiriliyor.</sub></p>
-
-<p align="center"><strong>740 ilandan 68'i başvurmaya değerdi. 12 mülakat. 1 teklif.</strong></p>
-<p align="center"><sub>Tek bir arayış, yazarınki, 2026. Önemli olan sayı eleme, toplam değil. Tüm rakamlar <a href="https://santifer.io/career-ops-system">vaka çalışmasında</a>.</sub></p>
-
-<p align="center"><sub>Asla göndermez, asla e-posta atmaz, asla eve rapor vermez: <a href="#career-opsun-yapmadıkları">yapmadıkları</a> · zaten kullandığın AI CLI içinde çalışır, <a href="docs/RUNNING_ON_A_BUDGET.md">ücretsiz ve yerel modeller dahil</a>.</sub></p>
-
-<details>
-<summary>17 dilde oku</summary>
-<div align="center">
-
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
-
-</div>
-</details>
-
-<hr>
 
 <p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="career-ops ile işe alınanlar: doğrulanmış sayı"></a>
+Bir ilan yapıştır. Kendi makinende, ilanın hâlâ&nbsp;açık olup olmadığını ve sana uyup&nbsp;uymadığını&nbsp;söyler.<br>
+CV'ni uyarlar ve cevaplarının taslağını&nbsp;yazar. <strong>Gönder'e&nbsp;sen&nbsp;basarsın.</strong>
 </p>
-
-<p align="center"><sub>Seninkini buldun mu? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Paylaş →</a> · kartın, arayışın ortasındaki birine çıkış yolunun var olduğunu gösterir.</sub></p>
 
 <p align="center">
-  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="En yeni üç işe alım hikâyesi" width="800"></a>
+  <img src="docs/demo.gif" alt="Yazarın career-ops panosundaki kendi arayışı: puanlanmış ilanlar, “başvurma” olarak işaretlenenlerin kırmızı sayacı, ardından tam bir değerlendirme raporu" width="800">
 </p>
 
-<p align="center"><sub>Her sayı <a href="HIRED.md">denetleyebileceğin →</a> herkese açık bir hikâye · her biri şu an bulunduğun yerden başladı.</sub></p>
+<p align="center"><sub>Kendi arayışım, daha yarısındayken, İspanyolca&nbsp;arayüzle.</sub></p>
 
-<p align="center"><sub>BASINDA</sub></p>
+<p align="center">
+  Şirketler adayları elemek için yapay zekâ kullanıyor.<br>
+  <strong>Ben de adaylara şirket&nbsp;<em>seçmek</em>&nbsp;için yapay&nbsp;zekâ&nbsp;verdim.</strong>
+</p>
+
+<p align="center">
+  Altı ay sonra <strong>o işten ayrıldım.</strong><br>
+  Şimdi career-ops'u geliştiriyoruz, sen&nbsp;de&nbsp;kendi&nbsp;işini&nbsp;bulabilesin&nbsp;diye.
+</p>
+
+<p align="center"><a href="#sıra-sende">Tek bir ilanla&nbsp;dene&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Hikâyenin tamamını&nbsp;oku&nbsp;→</a></p>
+
+<br>
+
+<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+
+<p align="center">Benden sonra gelenler, nasıl işe alındıklarını yazdı.</p>
+
+<p align="center">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="Açıp okuyabileceğin işe alım hikâyeleri" width="800"></a>
+</p>
+
+<p align="center"><sub>Her kart, açabileceğin herkese açık bir issue. Sen de işi aldın mı? <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">Kartını bırak →</a></sub></p>
+
+<p align="center">⭐ <strong>career-ops sana yardımcı olduysa, bir yıldız sıradaki kişinin onu bulmasına&nbsp;yardım&nbsp;eder.</strong></p>
+
+<br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
-  &nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
 </p>
 
-<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) tarafından oluşturuldu ve sürdürülüyor</sub></p>
+<p align="center">
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
+</p>
 
-## Bu Nedir
+## Sıra sende
 
-career-ops ([career-ops.org](https://career-ops.org), **careerops** olarak da bilinir), herhangi bir yapay zekâ kodlama CLI'ının içinde yerel olarak çalışan açık kaynaklı bir yapay zekâ iş arama aracıdır: ilanları değerlendirir, CV'ni uyarlar ve her başvuruyu takip eder; son söz her zaman sende. Başvuruları bir tabloda elle takip etmek yerine, şunları yapan yapay zekâ destekli bir hat elde edersin:
+Bu akşam başvurmak üzere olduğun bir ilanı yapıştır. <em>Başvurma</em> diye dönerse, akşamını geri kazandın demektir. Bir planla dönerse, sonraki adımı biliyorsun.
 
-- **İlanları değerlendirir** ve yapılandırılmış bir rapora dönüştürür: A'dan H'ye bloklar ve 1-5 arası genel puan. Bu puan aritmetik bir formülle değil, beş boyut üzerinden bütüncül bir yargıyla belirlenir. B bloğundaki gereksinim başına önem sütunu ile G bloğundaki ilan meşruiyeti değerlendirmesi, puanı asla etkilemeyen ayrı ve puan-nötr sinyallerdir; H bloğu yalnızca 4,5 ve üzerinde yazılır
-- **Özel PDF'ler üretir**: her iş tanımına göre uyarlanmış, ATS için optimize edilmiş CV'ler
-- **Portalları otomatik tarar** (Greenhouse, Ashby, Lever, şirket sayfaları)
-- **Toplu işler**: alt ajanlarla 10+ ilanı paralel değerlendirir
-- **Her şeyi takip eder**: bütünlük kontrolleriyle tek bir doğruluk kaynağında
-- **Şirketleri araştırır ve iletişime geçilecek doğru kişiyi bulur**: başvuru seni kuyruğa sokar; araştırma sana bir sohbet kazandırır
+```bash
+npx @santifer/career-ops init
+```
 
-> **Önemli: Bu, rastgele başvuru yağdıran bir araç DEĞİLDİR.** career-ops bir filtredir: yüzlerce ilan arasından zamanına değecek birkaçını bulmana yardımcı olur. Sistem 4,0/5'in altında puan alan hiçbir şeye başvurmamanı kesinlikle önerir. Senin zamanın değerli, işe alım uzmanınınki de. Göndermeden önce her zaman gözden geçir.
+<p align="center"><sub>Açık kaynak. Yerel. Zaten kullandığın yapay zekâ CLI'ının içinde. <a href="docs/RUNNING_ON_A_BUDGET.md">Ücretsiz ve yerel modeller dahil.</a></sub></p>
 
-career-ops ajan tabanlıdır: seçtiğin yapay zekâ kodlama CLI'ı Playwright ile kariyer sayfalarında gezinir, CV'ni iş tanımıyla karşılaştırarak (anahtar kelime eşleştirmesi değil, akıl yürüterek) uyumu değerlendirir ve özgeçmişini her ilana göre uyarlar.
 
-> **Uyarı: İlk değerlendirmeler pek iyi olmayacak.** Sistem seni henüz tanımıyor. Ona bağlam ver: CV'n, kariyer hikâyen, kanıtlanmış başarıların, tercihlerin, iyi olduğun şeyler, kaçınmak istediklerin. Ne kadar beslersen o kadar iyi olur. Bunu yeni bir işe alım uzmanını işe alıştırmak gibi düşün: ilk hafta seni tanıması gerekir, sonra vazgeçilmez hale gelir.
+## Tek başına aramak zorunda değilsin
 
-740 iş ilanını değerlendirip 68'ine başvuran ve Head of Applied AI pozisyonunu alan biri tarafından yapıldı. [Vaka çalışmasının tamamını oku](https://santifer.io/career-ops-system).
+Gönder'e bastıktan sonraki sessizlik seninle ilgili değil. Aynı şeyi gören yeterince insan, pratiği altı satırda yazıya döktü:
+
+> Daha azına, daha iyi başvur. Hacim değil sinyal. Anahtar kelime değil kanıt. Kararı insan verir. Önce yerel. Masanın iki tarafında da saygınlık.
+
+<p align="center"><a href="https://career-ops.org/manifesto?utm_source=readme"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2FSIGNATURES.md&search=n%3A(%5Cd%2B)%5Cs*%24&replace=%241%20signatories&label=THE%20CAREEROPS%20MANIFESTO&color=DD7627&style=for-the-badge&labelColor=2b3137" alt="CareerOps manifestosu: canlı imzacı sayısı"></a></p>
+
+<p align="center">İçlerinden birkaçı, kendi sözleriyle.</p>
+
+<p align="center">
+  <a href="https://career-ops.org/manifesto?utm_source=readme"><img src="docs/manifesto-wall.svg" alt="CareerOps manifestosuna atılmış üç imza, kendi sözleriyle" width="800"></a>
+</p>
+
+<p align="center"><sub>Her imza, denetleyebileceğin bir commit. <a href="https://career-ops.org/manifesto?utm_source=readme">Hepsini oku ya da seninkini ekle →</a></sub></p>
+
+<br>
+
+İşe alım kendi kendine düzelmeyecek. Onu yaşayanlar düzeltebilir ve onlar zaten odadalar: notları karşılaştırıyor, birbirlerinin kurulumlarını onarıyorlar. [Düzeltme burada yazılıyor](CONTRIBUTING.md). Bir kulüp değil, bir oda. **Birlikte inşa edelim.**
+
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops sunucusunun canlı üye sayısı"></a></p>
+
+## Sponsorlar
+
+career-ops adaylar için sonsuza dek ücretsiz. Bu şirketler projeye sponsor oluyor:
+
+<p align="center">
+  <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
+</p>
+
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
+
+> Sponsorluk, açıkça etiketlenmiş görünürlük satın alır, asla etki değil: hiçbir para yol haritasını değiştirmez ya da ürünün içine bir şey yerleştirmez. Sponsorlar değerlendirmelerde, sıralamalarda ya da önerilerde asla yer almaz.
+
+## career-ops senin için ne yapar
+
+Bir ilan yapıştır. O akşama değip değmeyeceğini söyler.
+
+- **Hâlâ açık mı?** Tek kelime yazmadan önce ilanın hâlâ yayında olduğunu kontrol eder.
+- **Sana göre değil mi?** Rolü gerçek CV'ne göre puanlar ve zayıf eşleşmeyi atlamanı söyler. Kararı geçersiz kılabilirsin.
+- **Değer mi?** CV'yi, ön yazıyı ve cevapları taslak olarak hazırlar. Sen okursun. Sen gönderirsin.
+- **Kiminle konuşmalıyım?** Kişiyi bulur ve notu taslak olarak yazar. Asla göndermez.
+- **Bunların hepsi nereye gidiyor?** Her başvuru senin makinende kalır. Bize hiçbir şey yüklenmez.
+- **Ne öğrenmeliyim?** Bir dizi ret sonrasında eksiği adıyla söyler.
+
+İlk çalıştırmalar kabadır. Seni henüz tanımıyor. Onunla konuş: CV'n, ne istediğin, neyi reddettiğin. Bunu bir işe alım uzmanının ilk haftası gibi düşün.
+
+İlk açılışta bunların hepsini sohbette sorar. Elle yapılandırılacak bir şey yok.
 
 ## career-ops'un yapmadıkları
 
-- **Başvuru göndermek.** Cevapları hazırlar; formu sen açar, Gönder'e sen basarsın. Betik asla POST yapmaz (`prepare-application.mjs`).
+- **Başvuruyu otomatik göndermek.** Her alan için cevabı taslak olarak hazırlar; sen kontrol eder ve Gönder'e tıklarsın. Betik asla POST yapmaz (`prepare-application.mjs`).
 - **E-posta göndermek.** Yalnızca taslak. Bu kod tabanının hiçbir yerinde posta gönderimi yok.
 - **Eve rapor vermek.** Telemetri yok, bize ait bir arka uç yok. CV'n senin makinenden seçtiğin yapay zekâ sağlayıcısına gider, başka hiçbir yere gitmez. Tek kamuya açık kayıt bu depo: `HIRED.md` ve issue'ları.
 - **Seni 4,0/5 altına başvurmaya itmek.** Başvurma der. Yok sayabilirsin, o da bunu söyler.
 
-CV'ni yeniden ifade eder; asla uydurmamalıdır. Bugün bu kural prompt'larda yaşıyor, henüz kodda zorlayıcı bir denetimde değil. Göndermeden önce her CV'yi oku. Ayrıntılar [SSS](#sss) bölümünde.
-
-## CareerOps Manifestosu
-
-career-ops, [CareerOps Manifestosu](https://career-ops.org/manifesto?utm_source=readme)'nun ilk referans uygulamasıdır. oku. inandığın şeyi söylüyorsa imzala. imzan bir commit olur.
+CV'ni yeniden ifade eder; asla uydurmamalıdır. Koddaki bir denetim, CV'nde de article digest'inde de bulunmayan sayı veya bilgi içeren bir PDF'i durdurur, ama henüz her ifade değişikliğini değerlendiremez. Göndermeden önce her CV'yi oku. Ayrıntılar [SSS](#sss) bölümünde.
 
 ## Özellikler
 
 | Özellik                  | Açıklama                                                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **Otomatik Hat**         | Bir URL yapıştır; tam değerlendirme + PDF + takipçi kaydı al                                                                             |
-| **A-H Değerlendirmesi**  | Rol özeti, CV uyumu (her gereksinimin bu ilan için ne kadar önemli olduğu ve bu ağırlığın iş tanımının kendi ifadesinden mi, yapısından mı yoksa bir tahminden mi geldiği gereksinim başına etiketlenir; bir tahmin asla en üst banda çıkamaz), seviye stratejisi, maaş araştırması, kişiselleştirme, mülakat hazırlığı (STAR+R), ayrıca dolandırıcılık ve hayalet ilanları işaretleyen G bloğu meşruiyet kontrolü ve vize sponsorluğu olmadığını açıkça belirten bir iş tanımını kesin engel olarak işaretleyen çalışma izni sinyali |
-| **Mülakat Hikâye Bankası** | Değerlendirmeler boyunca STAR+Refleksiyon hikâyeleri biriktirir: her davranışsal soruya cevap veren 5-10 ana hikâye                    |
-| **Pazarlık Senaryoları** | Maaş pazarlığı çerçeveleri, coğrafi indirime karşı duruş, rakip tekliflerden kaldıraç                                                    |
-| **ATS PDF Üretimi**      | Space Grotesk + DM Sans tasarımıyla anahtar kelime enjekte edilmiş CV'ler                                                                |
+| **A-H Değerlendirmesi**  | Rol özeti, CV uyumu (her gereksinimin bu ilan için ne kadar önemli olduğu ve bu ağırlığın iş tanımının kendi ifadesinden mi, yapısından mı yoksa bir tahminden mi geldiği gereksinim başına etiketlenir; bir tahmin asla en üst banda çıkamaz), seviye stratejisi, maaş araştırması, kişiselleştirme, mülakat hazırlığı (STAR+R), ayrıca G bloğu meşruiyet kontrolü (hâlâ açık mı, yeniden yayınlanmış mı: gözlemler, hüküm değil) ve vize sponsorluğu olmadığını açıkça belirten bir iş tanımını kesin engel olarak işaretleyen çalışma izni sinyali |
+| **Human-in-the-Loop**    | Yapay zekâ değerlendirir ve önerir, sen karar verir ve harekete geçersin. Sistem asla başvuru göndermez: son söz her zaman sende <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
+| **ATS PDF Üretimi**      | Space Grotesk + DM Sans tasarımıyla, kendi deneyiminden yola çıkarak her iş tanımına uyarlanmış, ATS'nin okuyabildiği CV'ler                                                                |
 | **Ön Yazı Üretici**      | Araştırmaya dayalı ön yazılar: anahtar kelime yansıtma, dört etkileşimli açı sorusu (neden/sorunlar/yaklaşım/ton), sohbette taslak onayı ve CV'lerle aynı HTML + Playwright hattı üzerinden A4 PDF. Her değerlendirmede otomatik taslak yazar; istediğinde `/career-ops cover` ile tamamla ve üret |
+| **CV'nin Ötesi**         | Şirket araştırması ([`deep`](modes/deep.md)) yapay zekâ stratejisini, son hamleleri, mühendislik kültürünü ve profilinin alması gereken açıyı ortaya çıkarır. Kişi keşfi ([`contacto`](modes/contacto.md)) ulaşmaya değer işe alım yöneticisini, işe alım uzmanını veya ekip arkadaşını belirler ve her kişi tipine göre ayarlanmış ≤300 karakterlik bir LinkedIn mesajı taslağı yazar. Resmî başvuru e-postası taslakları ([`email`](modes/email.md)) değerlendirilmiş bir raporu veya yapıştırılan iş tanımını hiçbir şey göndermeden, iletmeden veya tıklamadan konu satırına, gövdeye ve ek listesine dönüştürür. Başvuru seni kuyruğa sokar; araştırma sana bir sohbet kazandırır. |
+| **Örüntü Analizi**       | Ret örüntüleri ve ATS kanalı başına ilerleme oranları (`analyze-patterns.mjs`), tüm arayışın huni istatistikleri (`stats.mjs`), hayalet ilana işaret edebilecek yeniden yayınların tespiti (`detect-reposts.mjs`) |
+
+<details>
+<summary><b>Yaptığı diğer her şey</b></summary>
+
+| Özellik                  | Açıklama                                                                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Otomatik Hat**         | Bir URL yapıştır; tam değerlendirme + PDF + takipçi kaydı al                                                                             |
+| **Mülakat Hikâye Bankası** | Değerlendirmeler boyunca STAR+Refleksiyon hikâyeleri biriktirir: karşına çıkan davranışsal sorulara uyarlayabileceğin 5-10 ana hikâye                    |
+| **Pazarlık Senaryoları** | Maaş pazarlığı çerçeveleri, coğrafi indirime karşı duruş, rakip tekliflerden kaldıraç                                                    |
 | **Başvuru E-postası Taslakları** | Bir rapordan veya yapıştırılan iş tanımından işe alım uzmanına, referansla ya da soğuk başvuru için resmî e-postalar: konu satırı, ek listesi, kaynaklı uyum noktaları ve profilden gelen iletişim bloğu ile. Yalnızca taslak: career-ops asla göndermez, iletmez veya hiçbir şeye tıklamaz. |
 | **Portal Tarayıcı**      | 100+ önceden yapılandırılmış şirket (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + Ashby, Greenhouse, Lever, Wellfound üzerinde özel sorgular |
 | **Yatırım Almış Şirket Keşfi** | Önce incele yaklaşımlı `company:funded` komutu, yapılandırılmış açık akışlardan yakın zamanda yatırım almış şirketleri ve kaynak tanılamalarını verilerini düzenlemeden ortaya çıkarır |
 | **Toplu İşleme**         | Başsız CLI işçileriyle paralel değerlendirme (`claude -p` / `opencode run`)                                                              |
 | **Dashboard TUI**        | Hattını gezmek, filtrelemek ve sıralamak için terminal arayüzü                                                                           |
-| **Human-in-the-Loop**    | Yapay zekâ değerlendirir ve önerir, sen karar verir ve harekete geçersin. Sistem asla başvuru göndermez: son söz her zaman sende <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **Hat Bütünlüğü**        | Otomatik birleştirme, tekilleştirme, durum normalleştirme, sağlık kontrolleri                                                            |
 | **Mülakat Paketi**       | Zaman bloklu hazırlık planları, geri bildirimli pratik oturumları, mülakat sonrası değerlendirmeler ([`interview/`](modes/interview/README.md)) ve şirket kırmızı bayrak dedektörü ([`interview-redflag`](modes/interview-redflag.md)) |
 | **Teklif Aşaması**       | Sözleşme okuma yoldaşı: madde madde geçiş artı avukata soru listesi ([`offer-prep`](modes/offer-prep.md)) ve istenen/ilan edilen/gerçek maaş farkı analizörü (`salary-gap.mjs`) |
 | **Takip ve Yanıtlar**    | Takip ritmi hesaplayıcı ve önceden ekilmiş hatırlatıcılar (`followup-cadence.mjs`, `followup-seed.mjs`); işveren yanıtlarının takipçi güncellemelerine sınıflandırılması ([`reply-watch`](modes/reply-watch.md)) |
-| **Örüntü Analizi**       | Ret örüntüleri ve ATS kanalı başına ilerleme oranları (`analyze-patterns.mjs`), tüm arayışın huni istatistikleri (`stats.mjs`), yeniden yayın ve hayalet ilan tespiti (`detect-reposts.mjs`) |
 | **Eklenti Sistemi**      | İsteğe bağlı entegrasyonlar (Gmail, Notion, Apify + topluluk kaydı), varsayılan olarak kapalı; bkz. [docs/PLUGINS.md](docs/PLUGINS.md)   |
-| **CV'nin Ötesi**         | Şirket araştırması ([`deep`](modes/deep.md)) yapay zekâ stratejisini, son hamleleri, mühendislik kültürünü ve profilinin alması gereken açıyı ortaya çıkarır. Kişi keşfi ([`contacto`](modes/contacto.md)) ulaşmaya değer işe alım yöneticisini, işe alım uzmanını veya ekip arkadaşını belirler ve her kişi tipine göre ayarlanmış ≤300 karakterlik bir LinkedIn mesajı taslağı yazar. Resmî başvuru e-postası taslakları ([`email`](modes/email.md)) değerlendirilmiş bir raporu veya yapıştırılan iş tanımını hiçbir şey göndermeden, iletmeden veya tıklamadan konu satırına, gövdeye ve ek listesine dönüştürür. Başvuru seni kuyruğa sokar; araştırma sana bir sohbet kazandırır. |
+
+</details>
 
 ## Hızlı Başlangıç
 
-**En hızlı yol: tek komut:**
+**En hızlı yol, tek komutla:**
 
 ```bash
 npx @santifer/career-ops init
@@ -140,6 +220,10 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
 # 2. Check setup
 npm run doctor                     # Validates all prerequisites
@@ -187,6 +271,79 @@ Bu, `career-ops` ikilisini global olarak kurar; böylece `npx` yerine doğrudan 
 > **Sistem, bizzat yapay zekâ kodlama CLI'ın tarafından özelleştirilmek üzere tasarlandı.** Modlar, arketipler, puanlama ağırlıkları, pazarlık senaryoları: değiştirmesini istemen yeterli. Kullandığı dosyaların aynısını okur, bu yüzden neyi düzenleyeceğini tam olarak bilir.
 
 Tam kurulum kılavuzu için [docs/SETUP.md](docs/SETUP.md), career-ops'u özel veya yerel modellerle ucuza çalıştırmak için [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) (Antigravity CLI'ın ücretsiz katmanında sıfır maliyetle çalıştırmak için [docs/FREE_TIER.md](docs/FREE_TIER.md)), tekrarlayan taramaları zamanlamak ve token harcamayan bir eleme-kısa liste tarifi için [docs/AUTOMATION.md](docs/AUTOMATION.md), ATS otomatik doldurma akışının ayrıntıları için [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md), LinkedIn bağlantı dışa aktarımını hunindeki şirketlerle çapraz kontrol etmek için [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) ve yaygın kurulum sorularının cevapları için [docs/FAQ.md](docs/FAQ.md) sayfasına bak; buna [hikâye kaynağının uydurma sayıları nasıl engellediği](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank) de dahil. Tasarım ilkeleri [ARCHITECTURE.md](ARCHITECTURE.md) içinde; çalışma zamanı akışları [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) içinde.
+
+## Kullanım
+
+career-ops ortak bir komut yönlendiricisi kullanır. Eğik çizgi komutlarını kaydeden CLI'larda şöyle görünür:
+
+```
+/career-ops           → Tüm kullanılabilir komutları göster
+/career-ops {JD}      → OTOMATİK HAT: değerlendirme + rapor + PDF + takipçi (metin veya URL yapıştır)
+/career-ops pipeline  → Gelen kutusundaki bekleyen URL'leri işle (data/pipeline.md)
+/career-ops oferta    → Yalnızca değerlendirme, A'dan H'ye bloklar (otomatik PDF yok)
+/career-ops ofertas   → Birden çok ilanı karşılaştır ve sırala
+/career-ops contacto  → LinkedIn hamlesi: kişileri bul + mesaj taslağı yaz
+/career-ops deep      → Şirket hakkında derin araştırma prompt'u
+/career-ops interview-prep → Şirkete özel mülakat hazırlık belgesi üret
+/career-ops interview    → Etkileşimli profil/CV tanışma mülakatı
+/career-ops master-profile → Master Career Profile'ını içe aktar, gözden geçir ve doğrula
+/career-ops eu-swe    → CV/başvuru/mülakat öncesinde bir Avrupa SWE başvurusunu kalibre et
+/career-ops interview/plan → Yaklaşan bir mülakat için zaman bloklu hazırlık planı
+/career-ops interview/practice → Pratik mülakat, geri bildirimle her seferinde bir soru
+/career-ops interview/debrief → Mülakat sonrası değerlendirme: açıkları kapat, sonraki turu öngör
+/career-ops interview-redflag → Bir şirkete katılmadan önce işverenin uyarı işaretlerini analiz et
+/career-ops pdf       → Yalnızca PDF, ATS için optimize edilmiş CV
+/career-ops text      → Uyarlanmış markdown CV (cv.md'yi yansıtır, PDF yok)
+/career-ops latex     → CV'yi LaTeX/Overleaf .tex olarak dışa aktar
+/career-ops latex-tex → Kendi resume.tex dosyanı yerinde uyarla (isteğe bağlı; cv.md varsayılan kalır)
+/career-ops cover     → Ön yazı: tek başına yapıştırılan iş tanımı veya /career-ops cover {slug}
+/career-ops email     → Resmî başvuru e-postası taslağı (yalnızca taslak; asla göndermez, iletmez veya tıklamaz)
+/career-ops add       → CV'ne proje/makale/rol ekle (getir + önizle + onayla)
+/career-ops expand    → Profil bağlantılarından eksik yetkinlikleri otomatik keşfet ve ekle
+/career-ops training  → Kurs/sertifikayı North Star'a göre değerlendir
+/career-ops project   → Portföy projesi fikrini değerlendir
+/career-ops tracker   → Başvuru durumu özeti
+/career-ops agent-inbox → Sonraki oturum için istekleri kuyruğa al/boşalt (data/agent-inbox.md)
+/career-ops apply     → Canlı başvuru asistanı (formu okur + cevapları üretir)
+/career-ops scan      → Portalları tara ve yeni ilanları keşfet
+/career-ops discover  → Bir şirket listesini taranabilir ATS panolarına çevir + portals.yml'e ekle (token harcamaz)
+/career-ops batch     → Paralel işçilerle toplu işleme
+/career-ops patterns  → Ret örüntülerini analiz et ve hedeflemeyi iyileştir
+/career-ops offer-prep → Alınan teklifi/sözleşmeyi adayla birlikte oku: madde madde geçiş + avukata sorular (hukuki tavsiye değildir)
+/career-ops titles    → Aramayı genişletmek için CV'nden komşu iş unvanları öner
+/career-ops upskill   → Değerlendirilmiş raporlarından toplu beceri açığı analizi
+/career-ops followup  → Takip ritmi takipçisi: gecikenleri işaretle, taslaklar üret
+/career-ops reply-watch → İşveren yanıtlarını sınıflandır ve takipçi güncellemeleri öner
+/career-ops outcome   → Başvuru sonucunu kaydet ve çıktıları arşivle
+/career-ops calibrate → Danışma raporu: değerlendirme puanların gerçek sonuçlarını öngörüyor mu? /outcome verilerini okur; puanlamayı asla değiştirmez
+/career-ops update    → career-ops sistem dosyalarını diff önizlemesi + uyumluluk kontrolüyle güncelle
+```
+
+Ya da sadece bir iş URL'si veya tanımı yapıştır: career-ops bunu otomatik algılar ve tam hattı çalıştırır.
+
+Codex'te eğik çizgi komutları garanti değildir. Bunun yerine aynı mod adlarını bir prompt'ta kullan veya `codex exec` ile çağır.
+
+## Nasıl Çalışır
+
+```
+You paste a job URL or description
+        │
+        ▼
+┌──────────────────┐
+│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
+│  Detection       │
+└────────┬─────────┘
+         │
+┌────────▼─────────┐
+│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
+│  (reads cv.md)   │
+└────────┬─────────┘
+         │
+    ┌────┼────┐
+    ▼    ▼    ▼
+ Report  PDF  Tracker
+  .md   .pdf  entry
+```
 
 ## Antigravity CLI Entegrasyonu
 
@@ -263,6 +420,35 @@ grok
 
 Başsız toplu işçiler için `grok -p "prompt"` kullan (araç yürütmelerini otomatik onaylamak için `--yolo` ekle).
 
+## Pi Entegrasyonu
+
+career-ops, [Pi](https://github.com/earendil-works/pi)'yi yerel olarak destekler ve bakımını yapman gereken bir sarmalayıcı dosya yoktur: Pi, depo kökündeki `AGENTS.md` dosyasını proje bağlamı olarak okur ve `.agents/skills/career-ops/SKILL.md` içindeki ortak beceriyi kendi başına keşfeder. Yönlendirici bundan sonra `/skill:career-ops` olarak kullanılabilir.
+
+### Yerel Pi
+
+```bash
+# 1. Run in the career-ops directory
+cd career-ops
+pi
+
+# 2. Use the shared skill with subcommands:
+/skill:career-ops "Senior AI Engineer at Anthropic..."
+/skill:career-ops pipeline
+/skill:career-ops scan
+/skill:career-ops pdf
+/skill:career-ops tracker
+```
+
+### Tek seferlik Pi (`pi -p`)
+
+```bash
+pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p "Run career-ops scan mode and summarize new matches."
+pi -p "Run career-ops tracker mode and summarize the current statuses."
+```
+
+Bir Pi sürümü proje kaynaklarını bir güven kararına bağlıyorsa, depo içinde bir kez `/trust` çalıştır ve proje becerisinin yüklenmesi için `pi`'yi yeniden başlat (`/trust` sonraki Pi süreçlerine uygulanır) ya da tek bir çalıştırmaya güvenen ve yeniden başlatma gerektirmeyen `-a` ile başlat.
+
 ### Bağımsız Gemini API Betiği (CLI kurulumu gerekmez)
 
 ```bash
@@ -282,82 +468,9 @@ npm run gemini:eval -- "JD text here"
 
 > **Ücretsiz katman:** İki seçenek de faturalandırma olmadan çalışır. Yerel CLI Google OAuth kullanır; API betiği `gemini-3.6-flash` kullanır (hız limitleri modele ve katmana bağlıdır; güncel kotalar için Google AI belgelerine bak).
 
-## Kullanım
-
-career-ops ortak bir komut yönlendiricisi kullanır. Eğik çizgi komutlarını kaydeden CLI'larda şöyle görünür:
-
-```
-/career-ops           → Tüm kullanılabilir komutları göster
-/career-ops {JD}      → OTOMATİK HAT: değerlendirme + rapor + PDF + takipçi (metin veya URL yapıştır)
-/career-ops pipeline  → Gelen kutusundaki bekleyen URL'leri işle (data/pipeline.md)
-/career-ops oferta    → Yalnızca değerlendirme, A'dan G'ye bloklar (otomatik PDF yok)
-/career-ops ofertas   → Birden çok ilanı karşılaştır ve sırala
-/career-ops contacto  → LinkedIn hamlesi: kişileri bul + mesaj taslağı yaz
-/career-ops deep      → Şirket hakkında derin araştırma prompt'u
-/career-ops interview-prep → Şirkete özel mülakat hazırlık belgesi üret
-/career-ops interview    → Etkileşimli profil/CV tanışma mülakatı
-/career-ops eu-swe    → CV/başvuru/mülakat öncesinde bir Avrupa SWE başvurusunu kalibre et
-/career-ops eu-fintech → 21 AB fintech portalını Product Manager rolleri için tara (token harcamaz)
-/career-ops interview/plan → Yaklaşan bir mülakat için zaman bloklu hazırlık planı
-/career-ops interview/practice → Pratik mülakat, geri bildirimle her seferinde bir soru
-/career-ops interview/debrief → Mülakat sonrası değerlendirme: açıkları kapat, sonraki turu öngör
-/career-ops interview-redflag → Bir şirkete katılmadan önce işverenin uyarı işaretlerini analiz et
-/career-ops pdf       → Yalnızca PDF, ATS için optimize edilmiş CV
-/career-ops text      → Uyarlanmış markdown CV (cv.md'yi yansıtır, PDF yok)
-/career-ops latex     → CV'yi LaTeX/Overleaf .tex olarak dışa aktar
-/career-ops latex-tex → Kendi resume.tex dosyanı yerinde uyarla (isteğe bağlı; cv.md varsayılan kalır)
-/career-ops cover     → Ön yazı: tek başına yapıştırılan iş tanımı veya /career-ops cover {slug}
-/career-ops email     → Resmî başvuru e-postası taslağı (yalnızca taslak; asla göndermez, iletmez veya tıklamaz)
-/career-ops add       → CV'ne proje/makale/rol ekle (getir + önizle + onayla)
-/career-ops expand    → Profil bağlantılarından eksik yetkinlikleri otomatik keşfet ve ekle
-/career-ops training  → Kurs/sertifikayı North Star'a göre değerlendir
-/career-ops project   → Portföy projesi fikrini değerlendir
-/career-ops tracker   → Başvuru durumu özeti
-/career-ops agent-inbox → Sonraki oturum için istekleri kuyruğa al/boşalt (data/agent-inbox.md)
-/career-ops apply     → Canlı başvuru asistanı (formu okur + cevapları üretir)
-/career-ops scan      → Portalları tara ve yeni ilanları keşfet
-/career-ops discover  → Bir şirket listesini taranabilir ATS panolarına çevir + portals.yml'e ekle (token harcamaz)
-/career-ops batch     → Paralel işçilerle toplu işleme
-/career-ops patterns  → Ret örüntülerini analiz et ve hedeflemeyi iyileştir
-/career-ops offer-prep → Alınan teklifi/sözleşmeyi adayla birlikte oku: madde madde geçiş + avukata sorular (hukuki tavsiye değildir)
-/career-ops titles    → Aramayı genişletmek için CV'nden komşu iş unvanları öner
-/career-ops upskill   → Değerlendirilmiş raporlarından toplu beceri açığı analizi
-/career-ops followup  → Takip ritmi takipçisi: gecikenleri işaretle, taslaklar üret
-/career-ops reply-watch → İşveren yanıtlarını sınıflandır ve takipçi güncellemeleri öner
-/career-ops outcome   → Başvuru sonucunu kaydet ve çıktıları arşivle
-/career-ops calibrate → Danışma raporu: değerlendirme puanların gerçek sonuçlarını öngörüyor mu? /outcome verilerini okur; puanlamayı asla değiştirmez
-/career-ops update    → career-ops sistem dosyalarını diff önizlemesi + uyumluluk kontrolüyle güncelle
-```
-
-Ya da sadece bir iş URL'si veya tanımı yapıştır: career-ops bunu otomatik algılar ve tam hattı çalıştırır.
-
-Codex'te eğik çizgi komutları garanti değildir. Bunun yerine aynı mod adlarını bir prompt'ta kullan veya `codex exec` ile çağır.
-
-## Nasıl Çalışır
-
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
-
 ## Önceden Yapılandırılmış Portallar
 
-Tarayıcı, taramaya hazır **100+ şirket** ve başlıca iş panolarında **45+ arama sorgusu** ile gelir. `templates/portals.example.yml` dosyasını `portals.yml` olarak kopyala ve kendininkileri ekle:
+Tarayıcı, taramaya hazır **100+ şirket** ve başlıca iş panolarında **35+ arama sorgusu** ile gelir. `templates/portals.example.yml` dosyasını `portals.yml` olarak kopyala ve kendininkileri ekle:
 
 **Yapay Zekâ Laboratuvarları:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
 **Sesli Yapay Zekâ:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
@@ -389,7 +502,7 @@ npm run build:dashboard   # optional: build the standalone binary
 
 Özellikler: 6 filtre sekmesi, 4 sıralama modu, gruplu/düz görünüm, tembel yüklenen önizlemeler, satır içi durum değişiklikleri.
 
-Ayrıca **deneysel bir web arayüzü** de var (alfa, isteğe bağlı: sen başlatmadıkça hiçbir şey çalışmaz): bkz. [`web/README.md`](web/README.md).
+Ayrıca **deneysel bir web arayüzü** de var (alfa ve isteğe bağlı: sen başlatmadıkça hiçbir şey çalışmaz): bkz. [`web/README.md`](web/README.md).
 
 ## Proje Yapısı
 
@@ -446,6 +559,10 @@ Kişisel verilerini koddan ayırmak için (dal değiştirmeyi, güncelleme çekm
 
 - **Takipçiyi Geçersiz Kılma:** Başvuru takipçisi dosya yolunu doğrudan geçersiz kılmak için `CAREER_OPS_TRACKER` da ayarlayabilirsin.
 - **Yazmalar:** Tüm yazma işlemleri (birleştirmeler gibi) kanonik olarak `{DATA_ROOT}/data/applications.md` hedefine gider.
+- **Tarayıcı yapılandırması:** `portals.yml`, `{DATA_ROOT}/portals.yml` konumunda okunur ve doğrulanır; böylece `node validate-portals.mjs`, `scan.mjs` betiğinin okuduğu dosyanın aynısını denetler.
+- **Üretilen belgeler:** Uyarlanmış CV'ler ve ön yazılar `{DATA_ROOT}/output/` altına yazılır; bunları bir rapora bağlayan PDF manifest dosyası `{DATA_ROOT}/data/pdf-index.tsv` konumundadır. `CAREER_OPS_TRACKER` ayarlanmadığı sürece, bu yazmaları sınırlayan takipçi çalışma alanı depo kopyası değil, veri köküdür.
+- **Takipçi geçersiz kılındığında PDF'ler:** `generate-pdf.mjs`, çalışma alanını belirlemeden önce `CAREER_OPS_TRACKER` değerini çözümler; bu yüzden geçersiz kılma ayarlıyken çalışma alanı o takipçiyi içeren klasördür (takipçi bir `data/` klasöründeyse onun bir üstündeki klasör). Bu durumda CV'nin HTML'i ve tüm PDF'ler bu çalışma alanının içinde olmalıdır; manifest dosyası da çalışma alanının `data/pdf-index.tsv` dosyasına taşınır. Ön yazılar yine `{DATA_ROOT}/output/` hedefini kullanır; bu yüzden o klasör takipçinin çalışma alanının dışında kalırsa reddedilir.
+- **Kod katmanı yerinde kalır:** `node_modules/`, `providers/`, `modes/` ve betiklerin kendisi her zaman depoya göre çözümlenir, asla veri köküne göre değil.
 
 Go dashboard TUI, Node.js betikleri ve yapay zekâ ajan modlarının tümü bu çözümleme hiyerarşisine otomatik olarak uyar.
 
@@ -465,6 +582,34 @@ Go dashboard TUI, Node.js betikleri ve yapay zekâ ajan modlarının tümü bu �
 - **Dashboard**: Go + Bubble Tea + Lipgloss (Catppuccin Mocha teması)
 - **Veri**: Markdown tabloları + YAML yapılandırması + TSV toplu dosyaları
 
+<p align="center">
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center">
+  <sub>Agent skill standardını destekleyen her CLI'da da çalışır. Bkz. <a href="docs/SUPPORTED_CLIS.md">desteklenen CLI'lar</a>.</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
+
 ## Ayrıca Açık Kaynak
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)**: Yapay zekâ sohbet botu, LLMOps panosu ve vaka çalışmalarıyla portföy sitesi (santifer.io). İş arayışının yanında sergileyecek bir portföye ihtiyacın varsa, çatalla ve kendine ait yap.
@@ -472,10 +617,10 @@ Go dashboard TUI, Node.js betikleri ve yapay zekâ ajan modlarının tümü bu �
 ## SSS
 
 **career-ops nedir?**
-career-ops, yapay zekâ kodlama CLI'ında (Claude Code, Codex, OpenCode ve diğerleri) yerel olarak çalışan ve her kararı sana bırakan açık kaynaklı bir yapay zekâ iş arama aracıdır. İş ilanlarını CV'ne göre değerlendirir, ATS'ye uyarlanmış PDF'ler üretir, iletişime geçilecek doğru kişiyi bulur ve her şeyi tek yerde takip eder: son söz her zaman sende. CareerOps Manifestosu'nun ilk referans uygulamasıdır. Daha fazlası [career-ops.org](https://career-ops.org) adresinde.
+career-ops ([career-ops.org](https://career-ops.org), **careerops** olarak da bilinir), yapay zekâ kodlama CLI'ında (Claude Code, Codex, OpenCode ve diğerleri) yerel olarak çalışan ve her kararı sana bırakan açık kaynaklı bir yapay zekâ iş arama aracıdır. İş ilanlarını CV'ne göre değerlendirir, ATS'ye uyarlanmış PDF'ler üretir, iletişime geçilecek doğru kişiyi bulur ve her şeyi tek yerde takip eder: son söz her zaman sende. [CareerOps Manifestosu](https://career-ops.org/manifesto)'nun ilk referans uygulamasıdır.
 
 **Uyarlanmış CV bir şeyler uydurabilir mi?**
-Uydurmamalı, prompt'lar da böyle diyor: yeniden ifade et, asla uydurma. Bu kural henüz kodda bir denetimle zorlanmıyor. İki açık issue bunu takip ediyor: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (iş unvanları cv.md ile eşleşmeli) ve [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (uyuşmazlıkta engelleyen sadakat denetimi). Bunlar birleştirilene kadar, göndermeden önce her CV'yi oku. [Yasal uyarı](LEGAL_DISCLAIMER.md) aynı şeyi daha uzun söylüyor.
+Uydurmamalı, prompt'lar da böyle diyor: yeniden ifade et, asla uydurma. `--skip-fact-check` vermediğin sürece `generate-pdf`, kaynaklarında bulunmayan sayı veya bilgi içeren bir CV'yi engeller. İş unvanlarını henüz kontrol etmiyor, ifade değişikliklerini de değerlendirmiyor. İki açık issue bunu takip ediyor: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (iş unvanları cv.md ile eşleşmeli) ve [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (uyuşmazlıkta engelleyen sadakat denetimi). Bunlar birleştirilene kadar, göndermeden önce her CV'yi oku. [Yasal uyarı](LEGAL_DISCLAIMER.md) aynı şeyi daha uzun söylüyor.
 
 **career-ops'u ücretsiz veya daha ucuz / yerel bir modelde çalıştırabilir miyim?**
 Evet. career-ops CLI'dan bağımsızdır ve ücretsiz ve yerel modellerde çalışır (OpenRouter ücretsiz modelleri, Ollama veya herhangi bir OpenAI uyumlu uç nokta), bu yüzden ücretli bir aboneliğe bağlı değilsin. Tam kurulum için bkz. [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md).
@@ -490,16 +635,16 @@ career-ops, açık Agent Skill Standard üzerinden başlıca tüm yapay zekâ ko
 career-ops Windows'ta çalışır. Platforma özel kurulum ve bilinen pürüzler (Git Bash keşfi, satır sonları, Görev Zamanlayıcı) [docs/WINDOWS.md](docs/WINDOWS.md) içinde. Kurulum sırasında beceriler sembolik bağ hatasıyla yüklenmezse çözüm [docs/FAQ.md](docs/FAQ.md) içinde. Tam adımlar [docs/SETUP.md](docs/SETUP.md) içinde.
 
 **career-ops benim yerime otomatik başvuru yapar mı?**
-Hayır. career-ops bir filtredir, rastgele başvuru yağdıran bir otomatik başvurucu değil. Yapay zekâ değerlendirir, sıralar ve taslak yazar; sen gözden geçirir ve karar verirsin. Asla göndermez, iletmez veya hiçbir şeye tıklamaz: son söz her zaman sende. Bu insan-döngüde tasarımı meselenin özüdür.
+Hayır. career-ops bir filtredir, rastgele başvuru yağdıran bir otomatik başvurucu değil. Yapay zekâ değerlendirir, sıralar ve taslak yazar; sen gözden geçirir ve karar verirsin. Taslakları hazırlar ve alanları doldurur; asla göndermez. Gönder'e sen basarsın. Bu insan-döngüde tasarımı meselenin özüdür.
 
 **career-ops ücretsiz ve açık kaynak mı?**
-Evet. career-ops ücretsiz ve açık kaynaktır ve aday için her zaman öyle kalacaktır: [CareerOps Manifestosu](https://career-ops.org/manifesto)'nun ilk referans uygulamasıdır. Oku ve inandığın şeyi söylüyorsa imzala.
+Evet. career-ops ücretsiz ve açık kaynaktır ve aday için her zaman öyle kalacaktır. [CareerOps Manifestosu](https://career-ops.org/manifesto)'nun ilk referans uygulamasıdır. Oku ve inandığın şeyi söylüyorsa imzala.
 
 ## Yazar Hakkında
 
-Ben [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer): Head of Applied AI, eski kurucu (hâlâ adımla çalışan bir işletme kurdum ve sattım). career-ops'u kendi iş arayışımı yönetmek için yaptım. İşe yaradı: şu anki pozisyonumu onunla aldım.
+Ben [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer), eski bir kurucuyum: hâlâ adımla çalışan bir işletme kurdum ve sattım. career-ops'u kendi iş arayışımı yönetmek için yaptım ve işe yaradı: bana bir Head of Applied AI pozisyonu kazandırdı. Altı ay sonra, tam zamanlı olarak career-ops'u geliştirmeye odaklanmak için o pozisyondan ayrıldım.
 
-Bu deponun haftada yaklaşık 4 saatle nasıl sürdürüldüğünü merak ediyor musun? [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) yazısını oku.
+Bu büyüklükte bir deponun, bir yapay zekâ ajanı filosu ve her birleştirmeye karar veren bir insanla nasıl sürdürüldüğünü merak ediyor musun? [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet) yazısını oku.
 
 Portföyüm ve diğer açık kaynak projelerim → [santifer.io](https://santifer.io)
 
@@ -535,7 +680,7 @@ markası [Ticari Marka Politikası](TRADEMARK.md) ile yönetilir: topluluk
 kullanımı için izin verici, ticari ürün adlandırması ve onayı için
 saklıdır.
 
-## Tanınırlık
+## Yıldız geçmişi
 
 <p align="center">
   <a href="https://warpchart.dev/hq">
@@ -546,36 +691,7 @@ saklıdır.
   </a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
-</p>
-
-<p align="center">
-  <sub>Agent-skill standardına uyan her CLI'da da çalışır. Bkz. <a href="docs/SUPPORTED_CLIS.md">Desteklenen CLI'lar</a>.</sub><br>
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
-  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
-  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
-  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
-  <br>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
-</p>
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>) tarafından oluşturuldu ve sürdürülüyor</sub></p>
 
 ## Bize Ulaşın
 

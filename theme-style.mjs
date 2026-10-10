@@ -7,11 +7,15 @@
  * Users declare a `style:` block in config/profile.yml:
  *
  *   style:
- *     accent_color:    "#2563eb"
- *     secondary_color: "#111827"
- *     font_family:     "Outfit, Inter, sans-serif"
- *     font_size:       "10pt"
- *     margin:          "0.5in"
+ *     accent_color:     "#2563eb"
+ *     secondary_color:  "#111827"
+ *     tag_color:        "#0e7490"   # competency-tag text
+ *     tag_bg:           "#ecfeff"   # competency-tag and project-tech fill
+ *     tag_border:       "#a5f3fc"   # competency-tag border
+ *     font_family:      "Outfit, Inter, sans-serif"
+ *     font_size:        "10pt"
+ *     margin:           "0.5in"
+ *     job_break_inside: "avoid"
  *
  * These are injected as CSS custom properties into the rendered HTML before it
  * hits the PDF pipeline. The templates read them via `var(--x, <default>)`, so a
@@ -32,11 +36,37 @@ import * as yaml from 'js-yaml';
 // Recognized style tokens → the CSS custom property each maps to. Anything not
 // listed here is ignored, so a typo or an unrelated `style:` key is inert.
 export const STYLE_VAR_MAP = {
-  accent_color:    '--accent-color',
-  secondary_color: '--secondary-color',
-  font_family:     '--font-family',
-  font_size:       '--font-size',
-  margin:          '--page-margin',
+  accent_color:     '--accent-color',
+  secondary_color:  '--secondary-color',
+  tag_color:        '--tag-color',
+  tag_bg:           '--tag-bg',
+  tag_border:       '--tag-border',
+  font_family:      '--font-family',
+  font_size:        '--font-size',
+  margin:           '--page-margin',
+  // #3242: whether a Work Experience entry may split across a page break.
+  // Each template keeps its OWN current behavior as the default (its :root
+  // token default, or the .job var() fallback where it declares none), so
+  // this is purely additive — no shipped template's default pagination
+  // changes for anyone who doesn't set this. A break-inside keyword, normally
+  // "avoid" or "auto", same contract as the other tokens. Trade-off worth
+  // knowing: "avoid" cannot help an entry taller than a full page — it still
+  // splits, just after leaving a bottom gap on the page before it.
+  job_break_inside: '--job-break-inside',
+  // Whether a Projects entry may split across a page break. Same opt-in shape
+  // as job_break_inside above, and every shipped template keeps its current
+  // behavior (auto — a project may split) as the default, so this changes
+  // nobody's layout unless they set it.
+  //
+  // What "avoid" buys: `.project-tech { break-before: avoid }` keeps a tech
+  // line attached to its description, and when the break would land there
+  // Chromium satisfies that by moving the description's LAST LINE over too.
+  // A description ending in one short word therefore opens the next page as a
+  // lone word above the tech line, with the project title left behind. Keeping
+  // the whole entry together removes that, at the cost of a bottom gap on the
+  // page before it — and on a CV already near its page budget, that gap can
+  // cost a page. That trade is why this is opt-in rather than a new default.
+  project_break_inside: '--project-break-inside',
 };
 
 /**

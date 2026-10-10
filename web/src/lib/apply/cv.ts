@@ -49,6 +49,28 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
 }
 
 /**
+ * The tailored CV for one apply session, resolved once for both halves of it.
+ *
+ * /api/apply/fill uploads this PDF and /api/apply/prefill drafts the answers
+ * typed into the same form, so the two must agree on which document this
+ * application is. They disagreed while prefill resolved nothing at all and sent
+ * the planner to master cv.md: bullets are reselected per offer, role framing is
+ * rewritten toward the employer's domain, and engagements are regrouped, so the
+ * reviewer read a resume and a set of answers describing different careers.
+ *
+ * Both routes call this. Two copies of the same three-way expression, one per
+ * route, is how they drift apart again.
+ */
+export async function resolveSessionCv(opts: { company?: string; application?: string; title?: string }): Promise<string | null> {
+  const direct = await resolveTailoredCv(opts.company, opts.application);
+  if (direct) return direct;
+  // An application number that resolved nothing means THIS role has no tailored
+  // CV. Guessing a company off the page title would attach a sibling role's.
+  if (opts.application) return null;
+  return resolveTailoredCv(companyFromTitle(opts.title));
+}
+
+/**
  * Best-effort company name from an application form/page title. ATS titles look
  * like "Role - Region @ Company" (Ashby) or "Company — Role" / "Role at Company".
  * Used as a fallback when the apply flow was started by pasting a URL (no offer
