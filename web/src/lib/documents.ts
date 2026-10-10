@@ -32,7 +32,7 @@ export function discoverDocuments(opts: DiscoverOptions): DiscoveredDocument[] {
     kind: DocumentKind;
   }[] = [];
 
-  if (manifestPath && fs.existsSync(manifestPath)) {
+  if (manifestPath) {
     try {
       const text = fs.readFileSync(manifestPath, "utf8");
       for (const line of text.split(/\r?\n/)) {
@@ -59,8 +59,10 @@ export function discoverDocuments(opts: DiscoverOptions): DiscoveredDocument[] {
           }
         }
       }
-    } catch {
-      // Ignore read errors, proceed with filesystem discovery
+    } catch (err: any) {
+      if (err.code !== "ENOENT") {
+        throw new Error("Failed to read manifest");
+      }
     }
   }
 
@@ -169,12 +171,17 @@ export async function handleDocumentsRequest(
 
   const outputDir = path.join(root, "output");
 
-  const documents = discoverDocuments({
-    outputDir,
-    manifestPath,
-    workspaceRoot: root,
-    isRegularContainedFile
-  });
+  let documents: DiscoveredDocument[];
+  try {
+    documents = discoverDocuments({
+      outputDir,
+      manifestPath,
+      workspaceRoot: root,
+      isRegularContainedFile
+    });
+  } catch (err) {
+    return new Response("failed to discover documents", { status: 500 });
+  }
 
   if (id) {
     const filename = decodeId(id);
@@ -204,11 +211,13 @@ export async function handleDocumentsRequest(
       }
 
       const buf = fs.readFileSync(fd);
+      const asciiFilename = doc.filename.replace(/[^\x20-\x7E]/g, "?").replace(/(["\\])/g, "\\$1");
+      const encodedFilename = encodeURIComponent(doc.filename);
       return new Response(new Uint8Array(buf), {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${doc.filename}"`,
+          "Content-Disposition": `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
           "Cache-Control": "no-store"
         }
       });

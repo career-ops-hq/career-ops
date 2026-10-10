@@ -9,10 +9,10 @@ import { ExternalLink, FileText, File, Calendar, Loader2 } from "lucide-react";
 type DocumentItem = {
   id: string;
   filename: string;
-  kind: "cv" | "cover";
+  kind: "cv" | "cover" | "unknown";
   date: string | null;
   reportId: string | null;
-  format: string;
+  format: string | null;
   mtimeMs: number;
 };
 
@@ -114,7 +114,7 @@ export default function DocumentsPage() {
               
               <div className="mt-4 flex flex-wrap gap-2">
                 <Badge tone="info" className="capitalize">
-                  {doc.kind === "cv" ? "CV" : "Cover Letter"}
+                  {doc.kind === "cv" ? "CV" : doc.kind === "cover" ? "Cover Letter" : "Document"}
                 </Badge>
                 {doc.date && (
                   <Badge tone="muted" className="flex items-center gap-1 font-normal">
