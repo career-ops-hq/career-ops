@@ -30,13 +30,13 @@ const payload = {
   skills: [{ category: 'Tools', items: ['Node.js', 'SQL'] }],
 };
 
-function run(input) {
+function run(input, extra = []) {
   const dir = mkdtempSync(join(tmpdir(), 'cv-md-'));
   const inPath = join(dir, 'in.json');
   const outPath = join(dir, 'nested', 'out.md');
   writeFileSync(inPath, JSON.stringify(input));
-  const r = spawnSync(process.execPath, ['build-cv-html.mjs', inPath, '--markdown', outPath], { cwd: ROOT, encoding: 'utf8' });
-  return { r, outPath };
+  const r = spawnSync(process.execPath, ['build-cv-html.mjs', inPath, '--markdown', outPath, ...extra], { cwd: ROOT, encoding: 'utf8' });
+  return { r, outPath, dir };
 }
 
 test('--markdown renders the payload with resolved titles in builder order', () => {
@@ -68,4 +68,37 @@ test('--markdown without an output path fails with usage', () => {
   const r = spawnSync(process.execPath, ['build-cv-html.mjs', inPath, '--markdown'], { cwd: ROOT, encoding: 'utf8' });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /--markdown <output\.md>/);
+});
+
+test('--markdown follows the section order of the given template', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cv-md-tpl-'));
+  const tpl = join(dir, 'custom.html');
+  // Skills first, Interests absent: the markdown mirrors both.
+  writeFileSync(tpl, '{{SECTION_SKILLS}} {{SECTION_SUMMARY}} {{SECTION_EXPERIENCE}} {{SECTION_EDUCATION}}');
+  const { r, outPath } = run(payload, [tpl]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(readFileSync(outPath, 'utf8').match(/^## .+$/gm), [
+    '## Skills', '## Professional Summary', '## Experiencia', '## Education',
+  ]);
+});
+
+test('--markdown percent-encodes Markdown delimiters in project URLs', () => {
+  const { r, outPath } = run({
+    ...payload,
+    projects: [{ name: 'Proj', url: 'https://example.com/a_(b))c d', description: 'Does things.' }],
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(outPath, 'utf8'), /### \[Proj\]\(https:\/\/example\.com\/a_%28b%29%29c%20d\)\n/);
+});
+
+test('--markdown refuses to overwrite the input file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cv-md-'));
+  const inPath = join(dir, 'in.json');
+  const original = JSON.stringify(payload);
+  writeFileSync(inPath, original);
+  const alias = join(dir, '.', 'in.json');
+  const r = spawnSync(process.execPath, ['build-cv-html.mjs', inPath, '--markdown', alias], { cwd: ROOT, encoding: 'utf8' });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /Output path is the input file/);
+  assert.equal(readFileSync(inPath, 'utf8'), original);
 });

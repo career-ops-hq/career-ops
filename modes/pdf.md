@@ -307,8 +307,10 @@ or unsupported photo fails with an actionable error before any output is written
 To read a built CV as prose without a browser (headless runs, or diffing against `cv.md`), render the same payload to markdown. It is zero-token, re-runs no tailoring, and uses the same resolved section titles and entry filtering as the HTML:
 
 ```bash
-node build-cv-html.mjs /tmp/cv-{candidate}-{company}.json --markdown {output.md}
+node build-cv-html.mjs /tmp/cv-{candidate}-{company}.json --markdown {output.md} {template}
 ```
+
+Pass the same `{template}` the HTML build used (omit it for the default template) so the markdown follows that template's section order.
 
 ## Canva CV Generation (optional)
 
