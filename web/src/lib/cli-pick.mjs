@@ -20,3 +20,37 @@ export function pickSoleInstalled(clis) {
 export function pickDefaultInstalled(clis) {
   return (clis || []).find((c) => c && c.installed)?.id || null;
 }
+
+/**
+ * `id` when it is still an installed CLI, otherwise null.
+ *
+ * A saved id outlives the CLI it names: swap one install for another and the
+ * old id stays in localStorage, and every run against it 404s (#4012).
+ */
+export function keepIfInstalled(id, clis) {
+  if (!id) return null;
+  return (clis || []).some((c) => c && c.id === id && c.installed) ? id : null;
+}
+
+/**
+ * The CLI a server route should run for a requested `id`, by the same rule the
+ * client's resolveCliId() applies before a Run: `id` itself while it is
+ * installed, otherwise the sole installed CLI. `substitutedFrom` names the
+ * requested id whenever the answer is a different CLI, so the caller can say so
+ * instead of silently running another runtime. `id` is null when there is no
+ * unambiguous answer (nothing installed, or two or more to choose between).
+ *
+ * Every AI route but Run sends the saved id unchecked, so without this a stale
+ * one 404s on each of them with no way back (#4607).
+ */
+export function pickUsableCli(id, clis) {
+  const kept = keepIfInstalled(id, clis);
+  if (kept) return { id: kept, substitutedFrom: null };
+  const sole = pickSoleInstalled(clis);
+  return sole ? { id: sole, substitutedFrom: id || null } : { id: null, substitutedFrom: null };
+}
+
+/** Installed CLI ids, for an error that tells the user what they can pick. */
+export function installedCliIds(clis) {
+  return (clis || []).filter((c) => c && c.installed && typeof c.id === "string").map((c) => c.id);
+}

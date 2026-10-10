@@ -4,6 +4,11 @@
 
 candidate:
   full_name: "Jane Smith"
+  # Optional. Professional headline shown directly under the name on the CV
+  # (modes/pdf.md's candidate.title). Tailor it to the JD's own title wording
+  # when your real level supports it — never inflate. Omit or leave blank for
+  # no title element.
+  # title: "Senior Backend Engineer"
   email: "jane@example.com"
   # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
   # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
@@ -90,6 +95,24 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+# Optional. Only read by the Singapore market mode (modes/sg/): your work
+# status there. One of: citizen | pr | pass-holder | foreign. Omit → the mode
+# treats you as foreign (Employment Pass sponsorship required) and says so.
+# sg:
+#   work_status: "foreign"
+
+# Optional. If you have a documented disability, some jurisdictions run
+# affirmative/quota hiring for it (e.g. Brazil's Lei de Cotas, Lei 8.213/91 --
+# employers with 100+ staff must reserve 2-5% of roles for PcD candidates).
+# Setting this does NOT disclose anything automatically -- it only lets
+# evaluation mode (modes/oferta.md -> Block A "PcD-quota check") notice when
+# a JD is already advertising a quota-designated opening and treat that as a
+# positive opportunity signal. Actual disclosure on an application form is
+# ALWAYS a separate, per-application, candidate-confirmed decision (see
+# modes/apply.md -- self-identification questions are never auto-answered).
+# disability:
+#   br_pcd_quota_eligible: true
+
 language:
   # Human-facing output language for reports, tracker notes, PDFs, cover
   # letters, outreach, and form answers. Use an ISO language code such as
@@ -98,6 +121,16 @@ language:
   # vocabulary/rules, while output selects the prose language.
   output: en
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+  # modes_dir can also be a LIST of declared candidate markets, for a
+  # candidate genuinely running parallel campaigns in more than one market at
+  # once (e.g. applying in both DACH and China simultaneously) — not for
+  # switching sequentially. The FIRST entry is primary (drives the
+  # evaluation-mode file); every declared market's _shared.md is loaded into
+  # context, and which one applies to a given JD is judged from the JD's own
+  # market signals (hiring-entity jurisdiction, currency, benefits/legal
+  # vocabulary), never from the JD's language alone. See AGENTS.md "Output
+  # Language vs Market Modes" for the full contract.
+  # modes_dir: [modes/de, modes/zh]
 
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
@@ -116,16 +149,28 @@ language:
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
+# (Optional) Paper size for every generated PDF: "letter" or "a4".
+# One setting for the CV, the cover letter and the HTML body width, so they
+# cannot disagree. Absent means letter. An explicit --format flag or a payload
+# page_format still wins for a single render.
+# page_format: letter
+
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
 # Each token is injected as a CSS custom property that overrides the template
 # default — omit the block (or any key) to keep the built-in look unchanged.
-# Only these five keys are recognized; anything else is ignored.
+# Only these seven keys are recognized; anything else is ignored.
 # style:
-#   accent_color:    "#2563eb"           # section headings, competency tags, project badges
-#   secondary_color: "#111827"           # company/institution names, header gradient's 2nd stop
-#   font_family:     "Outfit, Inter, sans-serif"
-#   font_size:       "10pt"              # base body text size
-#   margin:          "0.5in"             # page margin (@page)
+#   accent_color:     "#2563eb"           # section headings, competency tags, project badges
+#   secondary_color:  "#111827"           # company/institution names, header gradient's 2nd stop
+#   font_family:      "Outfit, Inter, sans-serif"
+#   font_size:        "10pt"              # base body text size
+#   margin:           "0.5in"             # page margin (@page)
+#   job_break_inside: "avoid"             # keep each role whole (one taller than a page still splits);
+#                                         # "auto" lets roles split. Unset: the template's own default
+#   project_break_inside: "avoid"         # keep each project whole — removes the one-word widow a
+#                                         # description can leave above its tech line, at the cost of a
+#                                         # bottom gap (and a page, on a CV already near its budget).
+#                                         # "auto" lets projects split. Unset: the template's own default
 
 cv:
   output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)
@@ -267,6 +312,10 @@ cover_letter:
 #                   silently, so nothing breaks. `doctor` reports the active mode.
 # scan:
 #   extractor: mcp   # mcp (default) | cli
+#   timeout_seconds: 230   # web Explore scan budget (seconds) before the run is
+#                          # stopped; default 230. A broad ATS sweep probes every
+#                          # company in a source — raise this to let a large scan
+#                          # finish (bounded by the API route's 300s cap if deployed).
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #

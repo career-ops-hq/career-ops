@@ -19,7 +19,7 @@
  * Phase 2 of #918 (DB becomes source of truth, markdown becomes a rendered
  * view) is a separate, explicit per-user opt-in — not implemented here.
  *
- * Zero new dependencies — uses node:sqlite (built into Node >= 22.5).
+ * Zero new dependencies — uses node:sqlite (built into Node; unflagged from 22.13).
  *
  * Usage:
  *   node tracker.mjs sync [--check]             # (re)build applications.db from applications.md
@@ -39,7 +39,9 @@ import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs'
 import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
+import { format } from 'util';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import * as yaml from 'js-yaml';
 import {
   resolveColumns, detectColumns, isHeaderRow, isSeparatorRow, LEGACY_COLMAP,
@@ -49,50 +51,45 @@ import {
 } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = getCareerOpsRoot();
-const MD_PATH = resolveTrackerPath(CAREER_OPS);
-
 /**
- * Where the derived SQLite index lives, resolved at call time.
+ * Where the derived SQLite index lives for a given tracker.
  *
- * This used to be a module-scope `const`, which is the right shape for a CLI —
- * one process, one invocation, env fixed before node starts — and the wrong one
- * the moment the module is IMPORTED rather than executed. The first importer in
- * a process froze the path for every later one, so a subsequent
- * `process.env.CAREER_OPS_TRACKER_DB = ...` was silently ignored: no error, no
- * warning, and an assignment that reads as though it took effect.
+ * Resolved per call, never at module scope. A module-scope path is the right
+ * shape for a CLI — one process, one invocation, env fixed before node starts —
+ * and the wrong one the moment the module is IMPORTED: the first importer in a
+ * process froze the path for every later one, so a subsequent
+ * `process.env.CAREER_OPS_TRACKER_DB = ...` was silently ignored (#3506). The
+ * tracker path went the same way for the same reason (#4758): runTracker() now
+ * takes both from its caller, and only the CLI branch reads the environment.
  *
- * That is how the test suite came to create an applications.db outside its own
- * fixtures (#3506). tests/tracker-busy-timeout.test.mjs pins the variable before
- * importing this module, but test-all.mjs imports tracker.mjs earlier in the same
- * process for removeRowByNum, so module scope had already run and openDb() built
- * its schema at the unpinned path. The test passed either way — busy_timeout
- * reads back 5000 whichever file was opened — so nothing flagged it.
- *
- * Resolving per call costs nothing here (openDb is called once per command) and
- * makes the documented override mean the same thing to an importer as it does on
- * the command line.
- *
- * MD_PATH stays import-time on purpose: it is the source of truth, every writer
- * reaches it through openTrackerTransaction(MD_PATH), and a tracker path that
- * could change underneath an open transaction is a different and worse problem
- * than the one this solves.
- *
+ * @param {string} mdPath - The markdown tracker (the source of truth).
+ * @param {string} [override] - Explicit index path (CAREER_OPS_TRACKER_DB on the CLI).
  * @returns {string} Absolute or relative path to the derived index.
  */
-function dbPath() {
-  const path = process.env.CAREER_OPS_TRACKER_DB
-    || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
-  // SQLite must never open the source of truth itself (an explicit
-  // CAREER_OPS_TRACKER_DB could point both names at the same file). Checked here
-  // rather than at import: a module that exits the process as a side effect of
-  // being imported takes its importer down with it, and the check is only
-  // meaningful at the moment the path is actually used.
-  if (resolve(MD_PATH) === resolve(path)) {
-    console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
-    process.exit(1);
+function resolveDbPath(mdPath, override) {
+  return override || (mdPath.endsWith('.md') ? mdPath.slice(0, -3) + '.db' : mdPath + '.db');
+}
+
+/**
+ * The index path an importer gets from openDb() with no explicit path: the
+ * documented env override, else the db beside the resolved tracker. Read at
+ * call time, so an override set after import still holds (#3506).
+ */
+function defaultDbPath() {
+  return resolveDbPath(resolveTrackerPath(getCareerOpsRoot()), process.env.CAREER_OPS_TRACKER_DB);
+}
+
+/**
+ * How a command stops with a non-zero status. Commands used to call
+ * process.exit(), which an importer cannot survive and which skips every
+ * `finally` (a held tracker lock included); runTracker() turns this into its
+ * return value instead.
+ */
+class TrackerExit extends Error {
+  constructor(code) {
+    super(`tracker.mjs exited with ${code}`);
+    this.exitCode = code;
   }
-  return path;
 }
 
 // templates/states.yml ships with the code, so it is resolved from this module's
@@ -125,7 +122,7 @@ const SCHEMA_VERSION = '2';
 
 // ── node:sqlite loading ─────────────────────────────────────────────
 
-async function loadSqlite() {
+async function loadSqlite(ctx) {
   // node:sqlite is stable in behavior but still flagged experimental in some
   // Node lines — silence only that one warning, leave everything else alone.
   const origEmit = process.emitWarning;
@@ -138,73 +135,82 @@ async function loadSqlite() {
     const { DatabaseSync } = await import('node:sqlite');
     return DatabaseSync;
   } catch {
-    console.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.5 (you are on ' + process.version + ').');
-    console.error('The markdown tracker keeps working without it — the index is optional.');
-    process.exit(1);
+    ctx.error('Error: node:sqlite is not available. tracker.mjs needs Node >= 22.13 (you are on ' + process.version + ').');
+    ctx.error('The markdown tracker keeps working without it — the index is optional.');
+    throw new TrackerExit(1);
   } finally {
     process.emitWarning = origEmit; // the warning fires at import time — safe to restore here
   }
 }
 
-export function openDb(DatabaseSync) {
-  const path = dbPath();
+export function openDb(DatabaseSync, path = defaultDbPath()) {
   mkdirSync(dirname(path) || '.', { recursive: true });
   const db = new DatabaseSync(path);
-  // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
-  // contention. The index is read by concurrent callers — a CLI query, a
-  // `set-status` write and the Go TUI dashboard can all hit the same db at
-  // once — and the default busy_timeout of 0 makes any overlap fail instantly.
-  db.exec('PRAGMA busy_timeout = 5000');
-  db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS applications (
-      id      INTEGER PRIMARY KEY,
-      pos     INTEGER NOT NULL,
-      date    TEXT NOT NULL,
-      company TEXT NOT NULL,
-      role    TEXT NOT NULL,
-      score   TEXT NOT NULL DEFAULT '—',
-      status  TEXT NOT NULL,
-      pdf     TEXT NOT NULL DEFAULT '❌',
-      report  TEXT NOT NULL DEFAULT '—',
-      notes   TEXT NOT NULL DEFAULT '',
-      -- Cells of columns the schema has no field for, keyed by their index in
-      -- the source row's split by pipe. JSON object, '{}' when the layout is
-      -- the canonical nine columns.
-      extras  TEXT NOT NULL DEFAULT '{}'
-    );
-    CREATE TABLE IF NOT EXISTS status_events (
-      id     INTEGER PRIMARY KEY AUTOINCREMENT,
-      app_id INTEGER NOT NULL REFERENCES applications(id),
-      status TEXT NOT NULL,
-      date   TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS meta (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
-    CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
-    CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
-  `);
-  // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
-  // a column added after the fact has to be migrated in explicitly. Cheap and
-  // idempotent; the rows are refilled by the next sync either way.
-  const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
-  if (!columns.includes('extras')) {
-    db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+  // A schema step can throw against a db some other version or tool left
+  // behind (an `applications` table without `status` fails the index below).
+  // The caller never receives the handle then, so close it here: in-process,
+  // an open handle outlives the failure, and on Windows it also keeps the
+  // file from being deleted.
+  try {
+    // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
+    // contention. The index is read by concurrent callers — a CLI query, a
+    // `set-status` write and the Go TUI dashboard can all hit the same db at
+    // once — and the default busy_timeout of 0 makes any overlap fail instantly.
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS applications (
+        id      INTEGER PRIMARY KEY,
+        pos     INTEGER NOT NULL,
+        date    TEXT NOT NULL,
+        company TEXT NOT NULL,
+        role    TEXT NOT NULL,
+        score   TEXT NOT NULL DEFAULT '—',
+        status  TEXT NOT NULL,
+        pdf     TEXT NOT NULL DEFAULT '❌',
+        report  TEXT NOT NULL DEFAULT '—',
+        notes   TEXT NOT NULL DEFAULT '',
+        -- Cells of columns the schema has no field for, keyed by their index in
+        -- the source row's split by pipe. JSON object, '{}' when the layout is
+        -- the canonical nine columns.
+        extras  TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE TABLE IF NOT EXISTS status_events (
+        id     INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_id INTEGER NOT NULL REFERENCES applications(id),
+        status TEXT NOT NULL,
+        date   TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_apps_status ON applications(status);
+      CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
+      CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
+    `);
+    // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
+    // a column added after the fact has to be migrated in explicitly. Cheap and
+    // idempotent; the rows are refilled by the next sync either way.
+    const columns = db.prepare('PRAGMA table_info(applications)').all().map(c => c.name);
+    if (!columns.includes('extras')) {
+      db.exec("ALTER TABLE applications ADD COLUMN extras TEXT NOT NULL DEFAULT '{}'");
+    }
+  } catch (err) {
+    db.close();
+    throw err;
   }
   return db;
 }
 
 // ── Canonical states (templates/states.yml is the source of truth) ──
 
-function loadStates() {
+function loadStates(ctx) {
   if (!existsSync(STATES_PATH)) {
     // No longer "run from the career-ops root" advice: the path is anchored to
     // the module, so a miss here is a broken install, not a wrong cwd.
-    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
-    process.exit(1);
+    ctx.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
+    throw new TrackerExit(1);
   }
   const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
   const byKey = new Map(); // lowercased label/alias → canonical label
@@ -469,9 +475,9 @@ export function removeRowByNum(content, num) {
 // never modified — normalization lives only in the derived index, and the
 // diagnostics tell the user what to fix at the source (normalize-statuses.mjs,
 // dedup-tracker.mjs).
-function parseTracker(states) {
+function parseTracker(states, ctx) {
   const diag = { mojibake: 0, scoreInStatus: 0, unknownStatus: 0, badId: 0, badDate: 0, strayPipes: 0 };
-  const { rows, layout } = parseMarkdownRows(readFileSync(MD_PATH, 'utf-8'), diag);
+  const { rows, layout } = parseMarkdownRows(readFileSync(ctx.mdPath, 'utf-8'), diag);
 
   const usedIds = new Set();
   let maxId = 0;
@@ -524,32 +530,36 @@ function parseTracker(states) {
   return { apps, diag, layout };
 }
 
-function mdHash() {
-  return createHash('sha256').update(readFileSync(MD_PATH)).digest('hex');
+function mdHash(ctx) {
+  return createHash('sha256').update(readFileSync(ctx.mdPath)).digest('hex');
 }
 
 // ── Sync (markdown → derived index) ─────────────────────────────────
 
-function reportDiagnostics(diag) {
+function reportDiagnostics(diag, ctx) {
   const total = Object.values(diag).reduce((a, b) => a + b, 0);
   if (total === 0) {
-    console.error('No corruption detected — index matches the markdown cleanly.');
+    ctx.error('No corruption detected — index matches the markdown cleanly.');
     return 0;
   }
-  console.error(`Corruption detected in ${MD_PATH} (normalized in the index only — the markdown is untouched):`);
-  if (diag.mojibake) console.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
-  if (diag.scoreInStatus) console.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
-  if (diag.unknownStatus) console.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
-  if (diag.badId) console.error(`  ${diag.badId} missing/malformed/duplicate id(s), reassigned in the index`);
-  if (diag.badDate) console.error(`  ${diag.badDate} malformed date(s), kept as-is`);
-  if (diag.strayPipes) console.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
-  console.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
+  ctx.error(`Corruption detected in ${ctx.mdPath} (normalized in the index only — the markdown is untouched):`);
+  if (diag.mojibake) ctx.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
+  if (diag.scoreInStatus) ctx.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
+  if (diag.unknownStatus) ctx.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
+  if (diag.badId) ctx.error(`  ${diag.badId} missing/malformed/duplicate id(s), reassigned in the index`);
+  if (diag.badDate) ctx.error(`  ${diag.badDate} malformed date(s), kept as-is`);
+  if (diag.strayPipes) ctx.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
+  ctx.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
   return total;
 }
 
-function syncIndex(db, states) {
-  const { apps, diag, layout } = parseTracker(states);
-  const today = new Date().toISOString().slice(0, 10);
+function syncIndex(db, states, ctx) {
+  const { apps, diag, layout } = parseTracker(states, ctx);
+  // LOCAL calendar day (#3070). This dates a row in the status_events table,
+  // and that table is the one part of the index a resync does NOT rebuild
+  // identically — the comment below says events "persist across rebuilds, keyed
+  // by id", so a wrong day is written once and then sticks.
+  const today = localToday();
 
   db.exec('BEGIN');
   db.exec('PRAGMA defer_foreign_keys = ON'); // full rebuild — FKs settle at commit
@@ -571,7 +581,7 @@ function syncIndex(db, states) {
     }
 
     const setMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-    setMeta.run('md_sha256', mdHash());
+    setMeta.run('md_sha256', mdHash(ctx));
     setMeta.run('schema_version', SCHEMA_VERSION);
     // The source layout, so export rebuilds this FILE rather than the default
     // skeleton: the header and separator it read, the lines around the table,
@@ -595,34 +605,34 @@ function syncIndex(db, states) {
   return { apps, diag };
 }
 
-async function sync(args) {
-  if (!existsSync(MD_PATH)) {
-    console.error(`Error: ${MD_PATH} not found — nothing to index.`);
-    process.exit(1);
+async function sync(args, ctx) {
+  if (!existsSync(ctx.mdPath)) {
+    ctx.error(`Error: ${ctx.mdPath} not found — nothing to index.`);
+    throw new TrackerExit(1);
   }
-  const states = loadStates();
+  const states = loadStates(ctx);
 
   if (args.includes('--check')) {
-    const { apps, diag } = parseTracker(states);
-    console.error(`Parsed ${apps.length} data rows from ${MD_PATH}`);
-    const issues = reportDiagnostics(diag);
-    console.error('(--check — no index written)');
-    process.exit(issues > 0 ? 1 : 0);
+    const { apps, diag } = parseTracker(states, ctx);
+    ctx.error(`Parsed ${apps.length} data rows from ${ctx.mdPath}`);
+    const issues = reportDiagnostics(diag, ctx);
+    ctx.error('(--check — no index written)');
+    return issues > 0 ? 1 : 0;
   }
 
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  const { apps, diag } = syncIndex(db, states);
-  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${dbPath()}`);
-  reportDiagnostics(diag);
+  const DatabaseSync = await loadSqlite(ctx);
+  const db = ctx.openDb(DatabaseSync);
+  const { apps, diag } = syncIndex(db, states, ctx);
+  ctx.error(`Indexed ${apps.length} applications from ${ctx.mdPath} into ${ctx.dbPath()}`);
+  reportDiagnostics(diag, ctx);
 }
 
 // query/history must never serve stale reads: if the markdown changed since
 // the last sync (or was never synced), rebuild the index first.
-function ensureFresh(db, states) {
-  if (!existsSync(MD_PATH)) {
-    console.error(`Error: ${MD_PATH} not found — the index has no source of truth to read from.`);
-    process.exit(1);
+function ensureFresh(db, states, ctx) {
+  if (!existsSync(ctx.mdPath)) {
+    ctx.error(`Error: ${ctx.mdPath} not found — the index has no source of truth to read from.`);
+    throw new TrackerExit(1);
   }
   const synced = db.prepare('SELECT value FROM meta WHERE key = ?').get('md_sha256');
   // The schema version is part of freshness, not just the content hash: a db
@@ -630,9 +640,9 @@ function ensureFresh(db, states) {
   // the columns an export needs, which is exactly the silent drop #3703 is
   // about. A version mismatch forces the rebuild that fills them in.
   const version = db.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version');
-  if (synced && synced.value === mdHash() && version?.value === SCHEMA_VERSION) return;
-  console.error(`(index stale — resyncing from ${MD_PATH})`);
-  syncIndex(db, states);
+  if (synced && synced.value === mdHash(ctx) && version?.value === SCHEMA_VERSION) return;
+  ctx.error(`(index stale — resyncing from ${ctx.mdPath})`);
+  syncIndex(db, states, ctx);
 }
 
 // ── Query helpers ───────────────────────────────────────────────────
@@ -651,18 +661,18 @@ function rowToMarkdown(r) {
   return `| ${r.id} | ${cleanCell(r.date)} | ${cleanCell(r.company)} | ${cleanCell(r.role)} | ${cleanCell(r.score)} | ${cleanCell(r.status)} | ${cleanCell(r.pdf)} | ${cleanCell(r.report)} | ${cleanCell(r.notes)} |`;
 }
 
-async function query(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  const states = loadStates();
-  ensureFresh(db, states);
+async function query(args, ctx) {
+  const DatabaseSync = await loadSqlite(ctx);
+  const db = ctx.openDb(DatabaseSync);
+  const states = loadStates(ctx);
+  ensureFresh(db, states, ctx);
 
   const where = [];
   const params = [];
   const status = flagValue(args, '--status');
   if (status) {
     const canonical = normalizeStatus(status, states);
-    if (!canonical) { console.error(`Error: unknown status "${status}". Canonical: ${states.labels.join(', ')}`); process.exit(1); }
+    if (!canonical) { ctx.error(`Error: unknown status "${status}". Canonical: ${states.labels.join(', ')}`); throw new TrackerExit(1); }
     where.push('status = ?'); params.push(canonical);
   }
   const company = flagValue(args, '--company');
@@ -671,13 +681,13 @@ async function query(args) {
   if (role) { where.push('role LIKE ?'); params.push(`%${role}%`); }
   const since = flagValue(args, '--since');
   if (since) {
-    if (!DATE_RE.test(since)) { console.error('Error: --since must be YYYY-MM-DD'); process.exit(1); }
+    if (!DATE_RE.test(since)) { ctx.error('Error: --since must be YYYY-MM-DD'); throw new TrackerExit(1); }
     where.push('date >= ?'); params.push(since);
   }
   const idRaw = flagValue(args, '--id');
   if (args.some(arg => arg === '--id' || arg.startsWith('--id='))) {
     const id = parseApplicationId(idRaw);
-    if (id === null) { console.error('Error: --id must be a positive integer'); process.exit(1); }
+    if (id === null) { ctx.error('Error: --id must be a positive integer'); throw new TrackerExit(1); }
     where.push('id = ?'); params.push(id);
   }
 
@@ -688,26 +698,26 @@ async function query(args) {
 
   const rows = db.prepare(sql).all(...params);
   if (args.includes('--json')) {
-    console.log(JSON.stringify(rows, null, 2));
+    ctx.log(JSON.stringify(rows, null, 2));
   } else {
-    console.log(HEADER);
-    console.log(SEPARATOR);
-    for (const r of rows) console.log(rowToMarkdown(r));
-    console.error(`\n${rows.length} row(s)`); // stderr so stdout stays pipeable
+    ctx.log(HEADER);
+    ctx.log(SEPARATOR);
+    for (const r of rows) ctx.log(rowToMarkdown(r));
+    ctx.error(`\n${rows.length} row(s)`); // stderr so stdout stays pipeable
   }
 }
 
-async function history(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  ensureFresh(db, loadStates());
+async function history(args, ctx) {
+  const DatabaseSync = await loadSqlite(ctx);
+  const db = ctx.openDb(DatabaseSync);
+  ensureFresh(db, loadStates(ctx), ctx);
   const id = parseApplicationId(flagValue(args, '--id'));
-  if (id === null) { console.error('Error: history requires --id N (a positive integer)'); process.exit(1); }
+  if (id === null) { ctx.error('Error: history requires --id N (a positive integer)'); throw new TrackerExit(1); }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-  if (!app) { console.error(`Error: no application with id ${id}`); process.exit(1); }
-  console.log(`#${app.id} ${app.company} — ${app.role}`);
+  if (!app) { ctx.error(`Error: no application with id ${id}`); throw new TrackerExit(1); }
+  ctx.log(`#${app.id} ${app.company} — ${app.role}`);
   for (const e of db.prepare('SELECT status, date FROM status_events WHERE app_id = ? ORDER BY id').all(id)) {
-    console.log(`  ${e.date}  ${e.status}`);
+    ctx.log(`  ${e.date}  ${e.status}`);
   }
 }
 
@@ -828,15 +838,15 @@ function renderTable(rows, layout) {
   return { header, separator, body, dropped };
 }
 
-async function exportMd(args) {
+async function exportMd(args, ctx) {
   const outPath = flagValue(args, '--out');
   const force = args.includes('--force');
   if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
-    console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
-    process.exit(1);
+    ctx.error(`Error: --out ${outPath} is a directory — pass a file path.`);
+    throw new TrackerExit(1);
   }
 
-  const trackerPath = canonicalizeTrackerPath(MD_PATH);
+  const trackerPath = canonicalizeTrackerPath(ctx.mdPath);
   const writesTracker = outPath
     ? canonicalizeTrackerPath(outPath) === trackerPath
     : false;
@@ -845,9 +855,9 @@ async function exportMd(args) {
     : null;
 
   try {
-    const DatabaseSync = await loadSqlite();
-    const db = openDb(DatabaseSync);
-    ensureFresh(db, loadStates());
+    const DatabaseSync = await loadSqlite(ctx);
+    const db = ctx.openDb(DatabaseSync);
+    ensureFresh(db, loadStates(ctx), ctx);
     const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
     const meta = db.prepare('SELECT key, value FROM meta').all()
       .reduce((acc, m) => Object.assign(acc, { [m.key]: m.value }), {});
@@ -872,13 +882,13 @@ async function exportMd(args) {
     // leaves `losses` empty for every file career-ops itself produces: it is
     // what turns data loss into a decision the user makes.
     if (losses.length) {
-      console.error(`Warning: ${losses.length} item(s) in ${MD_PATH} cannot be reproduced by export and will be dropped:`);
-      for (const d of losses) console.error(`  ${d}`);
-      console.error('Cells outside the declared header, and content between the first and last table row, have nowhere to go in a single rebuilt table.');
+      ctx.error(`Warning: ${losses.length} item(s) in ${ctx.mdPath} cannot be reproduced by export and will be dropped:`);
+      for (const d of losses) ctx.error(`  ${d}`);
+      ctx.error('Cells outside the declared header, and content between the first and last table row, have nowhere to go in a single rebuilt table.');
     }
 
     if (!outPath) {
-      process.stdout.write(out);
+      ctx.stdout.write(out);
       return;
     }
     mkdirSync(dirname(outPath) || '.', { recursive: true });
@@ -887,21 +897,20 @@ async function exportMd(args) {
     // the failure mode of #3703 — the .bak below makes it recoverable, but only
     // for a user who was told there was something to recover.
     if (losses.length && existsSync(writeTarget) && !force) {
-      console.error(`Refusing to overwrite ${outPath} — that would drop the item(s) listed above.`);
-      console.error('Re-run with --force if you have read the list and want the export anyway.');
-      // exitCode + return, never process.exit(): exiting here would skip the
-      // finally below and leave the tracker lock dir held until it goes stale.
-      process.exitCode = 1;
-      return;
+      ctx.error(`Refusing to overwrite ${outPath} — that would drop the item(s) listed above.`);
+      ctx.error('Re-run with --force if you have read the list and want the export anyway.');
+      // A return, never an exit: exiting here would skip the finally below and
+      // leave the tracker lock dir held until it goes stale.
+      return 1;
     }
     // Never silently clobber — whatever was there is backed up first.
     if (existsSync(writeTarget)) {
       copyFileSync(writeTarget, writeTarget + '.bak');
-      console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+      ctx.error(`Existing ${outPath} backed up to ${outPath}.bak`);
     }
     if (trackerTransaction) trackerTransaction.replace(out);
     else writeFileAtomic(outPath, out);
-    console.error(`Exported ${body.length} applications to ${outPath}`);
+    ctx.error(`Exported ${body.length} applications to ${outPath}`);
   } finally {
     trackerTransaction?.close();
   }
@@ -913,36 +922,35 @@ async function exportMd(args) {
 // the derived index. The markdown stays the source of truth: callers (incl. the
 // web) orchestrate this script rather than editing applications.md directly.
 // The read and atomic replacement share merge-tracker's cross-process lock.
-async function deleteApp(args) {
+async function deleteApp(args, ctx) {
   const num = flagValue(args, '--num');
   if (!num) {
-    console.error('Usage: node tracker.mjs delete --num <N> [--dry-run]   (remove one application row by its number)');
-    process.exit(1);
+    ctx.error('Usage: node tracker.mjs delete --num <N> [--dry-run]   (remove one application row by its number)');
+    throw new TrackerExit(1);
   }
-  if (!existsSync(MD_PATH)) {
-    console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
-    process.exit(1);
+  if (!existsSync(ctx.mdPath)) {
+    ctx.error(`Error: ${ctx.mdPath} not found — nothing to delete.`);
+    throw new TrackerExit(1);
   }
   if (args.includes('--dry-run')) {
-    const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    const { removed, removedCount, report } = removeRowByNum(readFileSync(ctx.mdPath, 'utf-8'), num);
     if (!removed) {
-      console.error(`No application numbered ${num} in ${MD_PATH}.`);
-      process.exit(1);
+      ctx.error(`No application numbered ${num} in ${ctx.mdPath}.`);
+      throw new TrackerExit(1);
     }
-    console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
-    if (report) console.error(`(report file would be orphaned: ${report})`);
+    ctx.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${ctx.mdPath}.`);
+    if (report) ctx.error(`(report file would be orphaned: ${report})`);
     return;
   }
 
-  const trackerTransaction = await openTrackerTransaction(MD_PATH);
+  const trackerTransaction = await openTrackerTransaction(ctx.mdPath);
 
   let removal;
   try {
     removal = removeRowByNum(trackerTransaction.read(), num);
     if (!removal.removed) {
-      console.error(`No application numbered ${num} in ${MD_PATH}.`);
-      process.exitCode = 1;
-      return;
+      ctx.error(`No application numbered ${num} in ${ctx.mdPath}.`);
+      return 1;
     }
     trackerTransaction.replace(removal.newContent);
   } finally {
@@ -952,33 +960,97 @@ async function deleteApp(args) {
   const { removedCount, report } = removal;
   // Rebuild the derived SQLite index from the now-updated markdown.
   try {
-    const states = loadStates();
-    const DatabaseSync = await loadSqlite();
-    const db = openDb(DatabaseSync);
-    syncIndex(db, states);
+    const states = loadStates(ctx);
+    const DatabaseSync = await loadSqlite(ctx);
+    const db = ctx.openDb(DatabaseSync);
+    syncIndex(db, states, ctx);
   } catch (e) {
-    console.error(`(row removed; index resync skipped: ${e.message})`);
+    // A command that has already said why it stops (no node:sqlite, no
+    // states.yml, a db path equal to the tracker) still stops with status 1,
+    // as it did when it called process.exit() from in here.
+    if (e instanceof TrackerExit) throw e;
+    ctx.error(`(row removed; index resync skipped: ${e.message})`);
   }
-  console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
-  if (report) console.error(`Note: report file may now be orphaned — ${report}`);
+  ctx.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${ctx.mdPath} and reindexed.`);
+  if (report) ctx.error(`Note: report file may now be orphaned — ${report}`);
 }
 
 const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };
 
-async function main() {
-  const [command, ...args] = process.argv.slice(2);
+/**
+ * Run one tracker.mjs command against the paths given, in-process.
+ *
+ * The CLI branch below is the only caller that reads the environment; it
+ * resolves the tracker and index paths and calls this. Anything else — a test,
+ * another script — passes its own, so two calls in one process can target two
+ * trackers (#4758; see resolveDbPath for why that was not possible before).
+ *
+ * @param {string} command - sync | query | history | export | delete.
+ * @param {string[]} [args] - The command's flags, as on the command line.
+ * @param {object} options
+ * @param {string} options.mdPath - The markdown tracker (source of truth).
+ * @param {string} [options.dbPath] - Derived index; defaults to the .db beside mdPath.
+ * @param {{write: Function}} [options.stdout=process.stdout] - Command output.
+ * @param {{write: Function}} [options.stderr=process.stderr] - Diagnostics.
+ * @returns {Promise<number>} The exit status the CLI exits with.
+ */
+export async function runTracker(command, args = [], options = {}) {
+  const { mdPath, stdout = process.stdout, stderr = process.stderr } = options;
+  if (!mdPath) throw new TypeError('runTracker: options.mdPath is required');
+  const line = (stream) => (...parts) => { stream.write(`${format(...parts)}\n`); };
+  const opened = [];
+  const ctx = {
+    mdPath,
+    stdout,
+    log: line(stdout),
+    error: line(stderr),
+    // Every index a command opens is closed when runTracker returns. A CLI
+    // could leave that to process exit; an in-process caller cannot, and on
+    // Windows an open handle also keeps the file from being deleted.
+    openDb(DatabaseSync) {
+      const db = openDb(DatabaseSync, ctx.dbPath());
+      opened.push(db);
+      return db;
+    },
+    dbPath() {
+      const path = resolveDbPath(mdPath, options.dbPath);
+      // SQLite must never open the source of truth itself (an explicit
+      // CAREER_OPS_TRACKER_DB could point both names at the same file). Checked
+      // where the path is used rather than up front, so a command that never
+      // opens the index is not refused over it.
+      if (resolve(mdPath) === resolve(path)) {
+        ctx.error(`Error: DB path must differ from the markdown path (${mdPath}).`);
+        throw new TrackerExit(1);
+      }
+      return path;
+    },
+  };
   const fn = COMMANDS[command];
   if (!fn) {
-    console.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
-    console.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
-    process.exit(command ? 1 : 0);
+    ctx.log('Usage: node tracker.mjs <sync|query|history|export|delete> [flags]');
+    ctx.log('See the header comment of this file for examples, or docs/SCRIPTS.md.');
+    return command ? 1 : 0;
   }
-  await fn(args);
+  try {
+    return (await fn(args, ctx)) ?? 0;
+  } catch (err) {
+    if (err instanceof TrackerExit) return err.exitCode;
+    throw err;
+  } finally {
+    for (const db of opened) db.close();
+  }
 }
 
 if (isMainModule(import.meta.url)) {
-  main().catch(err => {
-    console.error('Fatal:', err.message);
-    process.exit(1);
-  });
+  const [command, ...args] = process.argv.slice(2);
+  runTracker(command, args, {
+    mdPath: resolveTrackerPath(getCareerOpsRoot()),
+    dbPath: process.env.CAREER_OPS_TRACKER_DB,
+  }).then(
+    (code) => { process.exitCode = code; },
+    (err) => {
+      console.error('Fatal:', err.message);
+      process.exitCode = 1;
+    },
+  );
 }

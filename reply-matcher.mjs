@@ -74,8 +74,17 @@ export function checkCompanyMatch(text, company) {
   // Length is counted in CODE POINTS — `String.length` counts UTF-16 units, so a
   // three-character supplementary-plane name reported 4 and slipped past the
   // threshold into the substring path its BMP equivalent was refused.
-  const alphanumeric = company.replace(/[^\p{L}\p{N}]/gu, '');
-  const isShortName = Array.from(alphanumeric).length <= SHORT_NAME_MAX;
+  //
+  // \p{M} counts, for the same reason it counts in matchesOnWordBoundary's
+  // lookarounds: a combining mark is word material. This gate exists to measure
+  // how much distinctive material a needle carries, and stripping marks measures
+  // it in a unit whose size depends on the script. Devanagari and Bengali write
+  // most vowels as marks, so `विप्रो` (Wipro, 6 code points) counted 3 and
+  // `টাটা` (Tata, 4) counted 2 — both were handed the rule written for two- and
+  // three-letter Latin acronyms, while their own transliterations, `Wipro` and
+  // `Tata`, were long enough to skip it. See the fourth-predicate note below.
+  const wordMaterial = company.replace(/[^\p{L}\p{M}\p{N}]/gu, '');
+  const isShortName = Array.from(wordMaterial).length <= SHORT_NAME_MAX;
   if (isShortName && !NO_WORD_SEPARATOR_RE.test(company)) {
     return matchesOnWordBoundary(text, company);
   }
@@ -238,9 +247,11 @@ export function checkRoleMatch(text, role) {
     // the result, because the mark still sitting in the text makes that position
     // mid-grapheme. The word stops matching itself.
     //
-    // Three predicates define "word material" here (this strip, LATIN_WORD_RE,
-    // and matchesOnWordBoundary's lookarounds) and they have to move as a unit.
-    // Updating two of the three is what produced that bug (CodeRabbit, #3535).
+    // FOUR predicates define "word material" in this file (this strip,
+    // LATIN_WORD_RE, matchesOnWordBoundary's lookarounds, and the length gate in
+    // checkCompanyMatch) and they have to move as a unit. Updating two of them is
+    // what produced that bug (CodeRabbit, #3535); the length gate was the one
+    // left behind, and it is counted with \p{M} now.
     const stripped = part.replace(/^[^\p{L}\p{M}\p{N}]+|[^\p{L}\p{M}\p{N}]+$/gu, '');
     const bare = stripped.toLowerCase();
 
@@ -388,6 +399,72 @@ export function getAppDomains(app, followups) {
   return Array.from(domains);
 }
 
+// A company-wide rejection is only safe when the application definitely
+// existed by the time the email arrived. Exact dates collapse to one instant;
+// the tracker's `~YYYY-MM` backfill form is a range, and is eligible only when
+// the WHOLE month is on/before the email date. Unknown shapes fail closed.
+function comparableDateRange(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  const approximate = value.match(/^~(\d{4})-(\d{2})$/);
+  if (approximate) {
+    const year = Number(approximate[1]);
+    const month = Number(approximate[2]);
+    if (month < 1 || month > 12) return null;
+    return {
+      earliest: Date.UTC(year, month - 1, 1),
+      latest: Date.UTC(year, month, 1) - 1,
+    };
+  }
+  const calendarDate = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/i);
+  let calendarInstant = null;
+  if (calendarDate) {
+    const year = Number(calendarDate[1]);
+    const month = Number(calendarDate[2]);
+    const day = Number(calendarDate[3]);
+    calendarInstant = Date.UTC(year, month - 1, day);
+    const date = new Date(calendarInstant);
+    if (
+      date.getUTCFullYear() !== year
+      || date.getUTCMonth() !== month - 1
+      || date.getUTCDate() !== day
+    ) return null;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return { earliest: calendarInstant, latest: calendarInstant };
+  }
+  // ISO date-times without an explicit zone parse in the host's local time,
+  // which would make eligibility vary across machines. Fail closed instead.
+  if (
+    /^\d{4}-\d{2}-\d{2}T/i.test(value)
+    && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)
+  ) return null;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return null;
+  return { earliest: parsed, latest: parsed };
+}
+
+function candidateReceivedAt(cand) {
+  return comparableDateRange(
+    cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date,
+  );
+}
+
+function canonicalStatus(raw) {
+  return String(raw ?? '').replace(/\*\*/g, '').trim().toLowerCase();
+}
+
+function companyKey(raw) {
+  return normalizeStr(normalizeChinese(String(raw ?? ''))).replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
+}
+
+function companyWideEligible(app, emailRange) {
+  if (!emailRange || !['applied', 'evaluated'].includes(canonicalStatus(app?.status))) return false;
+  const appliedRange = comparableDateRange(app?.date);
+  if (!appliedRange) return false;
+  return appliedRange.latest <= emailRange.earliest;
+}
+
 export function matchCandidates(candidates, apps, followups = []) {
   const results = [];
   
@@ -397,6 +474,7 @@ export function matchCandidates(candidates, apps, followups = []) {
     
     let bestMatches = [];
     let highestScore = -1;
+    let anyRoleMatch = false;
     
     for (const app of apps) {
       let score = 0;
@@ -431,6 +509,7 @@ export function matchCandidates(candidates, apps, followups = []) {
       // attribute itself to this application (#2671).
       const isRoleExactMatch = checkRoleMatchExact(textContext, app.role);
       const isRolePartialMatch = !isRoleExactMatch && checkRoleMatch(textContext, app.role);
+      if (isRoleExactMatch || isRolePartialMatch) anyRoleMatch = true;
       const isRoleMatch = isRoleExactMatch || (isRolePartialMatch && (isCompanyMatch || hasDomainMatch));
       if (isRoleMatch) {
         score += 1.5;
@@ -483,15 +562,37 @@ export function matchCandidates(candidates, apps, followups = []) {
       delete match.score;
       results.push(match);
     } else if (bestMatches.length > 1) {
-      // Ambiguous matches
-      results.push({
-        message_id: cand.message_id,
-        company_hint: cand.from,
-        role_hint: '',
-        application_num: null, // ambiguous
-        confidence: 'low',
-        signals: ['ambiguous-match'],
-      });
+      const tiedApps = bestMatches
+        .map(match => apps.find(app => app.num === match.application_num))
+        .filter(Boolean);
+      const tiedCompanies = new Set(tiedApps.map(app => companyKey(app.company)).filter(Boolean));
+      const emailRange = candidateReceivedAt(cand);
+      const isRejection = classifyReply(cand).type === 'Rejected';
+      const eligible = tiedApps.filter(app => companyWideEligible(app, emailRange));
+
+      if (isRejection && !anyRoleMatch && tiedCompanies.size === 1 && eligible.length > 0) {
+        results.push({
+          message_id: cand.message_id,
+          company_hint: eligible[0].company,
+          role_hint: '',
+          application_num: null,
+          application_nums: eligible.map(app => app.num),
+          confidence: 'medium',
+          signals: ['company-wide-rejection'],
+        });
+      } else {
+        // Ambiguous matches remain fail-closed when the message is not a
+        // rejection, names any tracked role, spans companies, lacks a reliable
+        // received date, or leaves no safely eligible application.
+        results.push({
+          message_id: cand.message_id,
+          company_hint: cand.from,
+          role_hint: '',
+          application_num: null, // ambiguous
+          confidence: 'low',
+          signals: ['ambiguous-match'],
+        });
+      }
     } else {
       // No matches
       results.push({

@@ -26,13 +26,14 @@
  * permanent. A flywheel that nags stops being a celebration.
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, writeFileAtomic } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const REPO_URL = 'https://github.com/career-ops-hq/career-ops';
 const TEMPLATE = 'i-got-hired.yml';
@@ -53,14 +54,69 @@ user reviews on GitHub and submits from their own account. --status lists
 hires recorded in the tracker that were never offered a share. --mark records
 the user's answer so the question is never repeated against their wishes.`;
 
+/**
+ * Raised when the anti-nag memory exists and cannot be trusted.
+ *
+ * Deliberately not a silent fallback: the file records which hires the user
+ * declined to share, and an empty memory is indistinguishable from "nobody has
+ * ever been asked". Failing loudly asks the user to fix one file; failing
+ * quietly asks them about a hire they already said no to.
+ */
+class StateError extends Error {
+  constructor(message) { super(message); this.name = 'StateError'; }
+}
+
 /** State file: the entire anti-nag memory. User layer, gitignored with data/. */
 function statePath(root) { return join(root, 'data', '.hired-share-state.json'); }
 function loadState(root) {
   const p = statePath(root);
+  // Absent is a first run — an empty memory is the correct answer.
   if (!existsSync(p)) return { byReport: {} };
-  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return { byReport: {} }; }
+  let raw;
+  try {
+    raw = readFileSync(p, 'utf8');
+  } catch (err) {
+    throw new StateError(`cannot read ${p} (${err.message})`);
+  }
+  // Unreadable is NOT a first run, and returning an empty memory for it is how
+  // a "never" answer disappears. AGENTS.md's cadence rule is absolute — "If
+  // they say no: --mark never, and honor it — that hire is never brought up
+  // again" — and this file is the only thing that remembers. An empty object
+  // here means every declined hire becomes askable, and the next saveState
+  // persists that, so one unreadable byte erases the record permanently.
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new StateError(`${p} does not contain a JSON object`);
+    }
+    // ABSENT is fine — a file written before this key existed, or one that has
+    // only ever recorded nothing, is an empty memory and `{}` is the right
+    // answer. PRESENT BUT NOT AN OBJECT is the same reset one level down: a
+    // string or an array here was silently replaced with `{}` and then written
+    // back by saveState, dropping every declined hire exactly as a corrupt file
+    // used to. Refuse it for the same reason the top level is refused.
+    if (parsed.byReport === undefined || parsed.byReport === null) parsed.byReport = {};
+    else if (typeof parsed.byReport !== 'object' || Array.isArray(parsed.byReport)) {
+      throw new StateError(`${p} has a "byReport" that is not an object — fix or delete it.`);
+    }
+    return parsed;
+  } catch (err) {
+    if (err instanceof StateError) throw err;
+    throw new StateError(`${p} is not valid JSON (${String(err.message).split('\n')[0]})`);
+  }
 }
-function saveState(root, s) { writeFileSync(statePath(root), JSON.stringify(s, null, 2) + '\n'); }
+// Atomic, via the same helper every tracker writer uses. A plain writeFileSync
+// truncates before it writes, so an interrupt — Ctrl-C, a full disk, a crash —
+// leaves a half-written file. That file then fails to parse, which is exactly
+// the condition the guard above now refuses to paper over: the non-atomic write
+// is what MANUFACTURES the corruption the silent reset used to hide.
+function saveState(root, s) {
+  // A root on the legacy layout (applications.md at the top, no data/) still
+  // resolves its hires, so data/ may not exist yet when the answer is recorded.
+  const p = statePath(root);
+  mkdirSync(dirname(p), { recursive: true });
+  writeFileAtomic(p, JSON.stringify(s, null, 2) + '\n');
+}
 
 /** All tracker rows whose canonical state is Hired, as {report, role, company, location, date}. */
 export function hiredRows(trackerText) {
@@ -138,7 +194,10 @@ async function main() {
   const bad = validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (bad) { process.exitCode = 1; return; }
 
-  const root = flagValue(args, '--root') || resolveWorkspaceRoot(resolveTrackerPath(process.cwd()));
+  // Default to the configured data root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR /
+  // .career-ops-data marker), not process.cwd(): with the user layer outside the
+  // checkout, the cwd-derived root found no tracker and reported no hires.
+  const root = flagValue(args, '--root') || resolveWorkspaceRoot(resolveTrackerPath(getCareerOpsRoot()));
   const trackerPath = resolveTrackerPath(root);
   const tracker = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf8') : '';
   const hires = hiredRows(tracker);

@@ -1,0 +1,47 @@
+# Career-Ops: Canonical Discard Reasons
+# Source of truth for the Machine Summary `discard_reasons` vocabulary (#2785).
+# Writers: batch/batch-prompt.md (and modes/oferta.md, which defers to it).
+# Readers: analyze-patterns.mjs, dashboard discard picker
+# (dashboard/internal/ui/screens/pipeline.go `canonicalDiscardReasons`).
+#
+# Rule: each `discard_reasons` item is one of these ids. When none fits,
+# write a short free-text reason instead. analyze-patterns.mjs counts
+# canonical ids in `predictedDiscardReasonStats` and reports every other
+# label under `predictedDiscardReasonOther` with its raw spelling, never
+# rolled into the stats. If `other` keeps growing around one idea, that
+# idea is the next member of this list.
+#
+# Matching is by spelling only: case, surrounding whitespace, and
+# space/hyphen versus underscore. No synonyms are guessed.
+#
+# Adding an id is additive. Renaming or removing one is not: reports
+# already written carry the old id, and the dashboard list must match.
+
+reasons:
+  - id: salary_too_low
+    label: Salary too low
+    when: Advertised or likely compensation is below the candidate's floor.
+
+  - id: hybrid_required
+    label: Hybrid or on-site required
+    when: The role requires office presence the candidate does not accept.
+
+  - id: tech_stack_mismatch
+    label: Tech stack mismatch
+    when: The core stack is one the candidate does not work in.
+
+  - id: seniority_mismatch
+    label: Seniority mismatch
+    when: The level is clearly above or below the candidate's.
+
+  - id: geo_restriction
+    label: Geographic restriction
+    when: Location, residency, time-zone, or work-authorization limits exclude the candidate.
+
+  - id: size_mismatch
+    label: Company size mismatch
+    when: Company or team size is outside what the candidate targets.
+
+  - id: company_culture
+    label: Company culture
+    when: Culture, values, or working-model signals conflict with the candidate's stated preferences.
