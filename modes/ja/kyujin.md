@@ -224,9 +224,9 @@ I am happy to discuss further at your convenience.
 
 ---
 
-## Verdict (lead)
+## 判定 (lead)
 
-ブロック G の直後、`## Risk Summary` の前に `## Verdict (lead)` ブロックを書く。読者がレポートを開いた唯一の問い、すなわち「応募すべきか」に答えるブロックである。
+ブロック G の直後、`## Risk Summary` の前に `## 判定 (lead)` ブロックを書く。読者がレポートを開いた唯一の問い、すなわち「応募すべきか」に答えるブロックである。
 
 **派生であり、判断を新たに生まない。** 唯一の情報源は `## Machine Summary` の `final_decision`。本ブロックは同じ判断を人間の一文で言い直すだけで、別の判断を持ち込まない。文とフィールドが食い違う場合はフィールドが正しく、本ブロックが欠陥である。太字の判断はそのフィールドの値、すなわち Apply、Consider、Research first、Skip のいずれか。
 
@@ -237,7 +237,7 @@ I am happy to discuss further at your convenience.
 ブロック形式:
 
 ```markdown
-## Verdict (lead)
+## 判定 (lead)
 
 **Apply.** 職務の中核軸で強く一致し、ハードストップなし。ブロック G は High Confidence。
 ```
@@ -246,7 +246,7 @@ I am happy to discuss further at your convenience.
 
 ## Risk Summary (ブロック G の後)
 
-レポート本文は、ブロック G に続く `## Verdict (lead)` ブロックの直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
+レポート本文は、ブロック G に続く `## 判定 (lead)` ブロックの直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
 
 **集約のみで、新たな judgment は行いません。** 各行は、元のシグナルがすでに出した判定を引用またはリンクします。サマリーが再採点・再重み付け・上書きを行うことは決してありません。ある行が誤って見える場合、修正すべきは元のシグナル側であり、ここではありません。
 
@@ -323,8 +323,8 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 ## G) Posting Legitimacy
 (full content of block G)
 
-## Verdict (lead)
-(応募可否の判断を一文で — `final_decision` の言い直し、上記 Verdict セクションを参照)
+## 判定 (lead)
+(応募可否の判断を一文で — `final_decision` の言い直し、上記の判定セクションを参照)
 
 ## Risk Summary
 (リスクシグナルごとに1行、順序は固定 — 上記の Risk Summary セクションを参照)
