@@ -26,9 +26,10 @@ file contains **one object**, not an array or JSONL stream:
 ```
 
 This is the core reader contract proposed in #3333. The directory and row
-format await maintainer agreement; this draft does not authorize a plugin
-registry release. A maintained Gmail successor can produce these files after
-that agreement. The bundled Gmail seed and v1 hook taxonomy stay unchanged.
+format are accepted as a v1 draft and may change until a real producer writes
+to the directory; this draft does not authorize a plugin registry release. A
+maintained Gmail successor can produce these files against this v1 draft. The
+bundled Gmail seed and v1 hook taxonomy stay unchanged.
 
 ## Producer contract
 
