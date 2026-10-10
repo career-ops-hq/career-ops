@@ -237,6 +237,83 @@ test("lock creation cleans directories when owner metadata writes fail", async (
   }
 });
 
+// Windows answers mkdir on a directory another process is removing at that
+// instant (pending delete) with EPERM/EACCES rather than EEXIST. Seen on
+// windows-latest as `EPERM: operation not permitted, mkdir '…resource.recovery.lock'`
+// out of the real-contender race test below. `platform` is passed explicitly so
+// both halves are exercised on every runner.
+function injectMkdirFailures(target, code, failures = Number.POSITIVE_INFINITY) {
+  const originalMkdir = fs.mkdirSync;
+  const state = { attempts: 0, restore: () => { fs.mkdirSync = originalMkdir; } };
+  fs.mkdirSync = (dir, ...args) => {
+    if (String(dir) === target) {
+      state.attempts += 1;
+      if (state.attempts <= failures) {
+        const error = new Error(`${code}: operation not permitted, mkdir '${dir}'`);
+        error.code = code;
+        throw error;
+      }
+    }
+    return originalMkdir(dir, ...args);
+  };
+  return state;
+}
+
+for (const [label, suffix] of [["recovery guard", ".recovery.lock"], ["resource lock", ".lock"]]) {
+  for (const code of ["EPERM", "EACCES"]) {
+    test(`${label} mkdir retries a Windows ${code} as contention instead of crashing`, async () => {
+      const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-mkdir-retry-"));
+      const resource = path.join(temp, "resource");
+      const injected = injectMkdirFailures(`${resource}${suffix}`, code, 3);
+      try {
+        let entered = false;
+        await withResourceLock(resource, async () => { entered = true; }, { platform: "win32", retryMs: 1 });
+        assert.equal(entered, true);
+        assert.equal(injected.attempts, 4);
+        assert.equal(fs.existsSync(`${resource}.lock`), false);
+        assert.equal(fs.existsSync(`${resource}.recovery.lock`), false);
+      } finally {
+        injected.restore();
+        fs.rmSync(temp, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test(`${label} mkdir still throws a persistent Windows EPERM once the deadline passes`, async () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-mkdir-deadline-"));
+    const resource = path.join(temp, "resource");
+    const injected = injectMkdirFailures(`${resource}${suffix}`, "EPERM");
+    try {
+      await assert.rejects(
+        withResourceLock(resource, async () => {}, { platform: "win32", retryMs: 1, timeoutMs: 40 }),
+        (error) => error.code === "EPERM",
+      );
+      assert.ok(injected.attempts > 1, "the guard gave up without retrying");
+      assert.equal(fs.existsSync(`${resource}.lock`), false);
+      assert.equal(fs.existsSync(`${resource}.recovery.lock`), false);
+    } finally {
+      injected.restore();
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  test(`${label} mkdir EPERM stays an immediate failure off Windows`, async () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-mkdir-posix-"));
+    const resource = path.join(temp, "resource");
+    const injected = injectMkdirFailures(`${resource}${suffix}`, "EPERM");
+    try {
+      await assert.rejects(
+        withResourceLock(resource, async () => {}, { platform: "linux", retryMs: 1 }),
+        (error) => error.code === "EPERM",
+      );
+      assert.equal(injected.attempts, 1);
+    } finally {
+      injected.restore();
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+}
+
 test("roles-found parsing matches both scanner output formats", () => {
   assert.equal(extractRolesFound("full", JSON.stringify({ postingsKept: 7 })), 7);
   assert.equal(extractRolesFound("portals", "New offers added:      3\n"), 3);
