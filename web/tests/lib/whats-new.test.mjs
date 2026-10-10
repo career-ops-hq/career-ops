@@ -43,6 +43,53 @@ test("duplicate URLs count once even when walking the full history", () => {
   assert.equal(result.offers[0].title, "New title");
 });
 
+test("a confirmed-dead row retires its URL instead of just skipping itself", () => {
+  // scan-history is append-only, so confirming a posting dead adds a row — it
+  // cannot edit the `added` row that first surfaced it. The walk is
+  // newest-first, and a dead row that only rejects ITSELF leaves the older
+  // `added` row free to resurface the posting the newer row just proved dead
+  // (#3891). Note the caller's toOffer here ignores status entirely: retiring
+  // the URL is collectWhatsNew's job, not the route predicate's.
+  const rows = [
+    header,
+    "https://example.com/1\t2026-08-09\ttest\tStaff Engineer\tAcme\tadded\tRemote",
+    "https://example.com/1\t2026-08-10\ttest\tStaff Engineer\tAcme\tskipped_expired\tRemote",
+  ];
+  const result = collectWhatsNew(rows, { cutoff: Date.parse("2026-08-03"), toOffer });
+
+  assert.equal(result.count, 0);
+  assert.deepEqual(result.offers, []);
+});
+
+test("a re-listing after a dead row surfaces again", () => {
+  // The guard on the test above: retiring must respect the newest-first walk.
+  // A posting re-listed at the same URL is live again, and the fresher `added`
+  // row has to win over the older death certificate.
+  const rows = [
+    header,
+    "https://example.com/1\t2026-08-08\ttest\tStaff Engineer\tAcme\tadded\tRemote",
+    "https://example.com/1\t2026-08-09\ttest\tStaff Engineer\tAcme\tskipped_expired\tRemote",
+    "https://example.com/1\t2026-08-10\ttest\tStaff Engineer\tAcme\tadded\tRemote",
+  ];
+  const result = collectWhatsNew(rows, { cutoff: Date.parse("2026-08-03"), toOffer });
+
+  assert.equal(result.count, 1);
+});
+
+test("an ordinary skipped row does not retire its URL", () => {
+  // Only `expired` is a death certificate. skipped_dup / skipped_title mean
+  // "this row is not itself a fresh match" — retiring on those would hide live
+  // postings, which is the failure this whole area exists to avoid.
+  const rows = [
+    header,
+    "https://example.com/1\t2026-08-09\ttest\tStaff Engineer\tAcme\tadded\tRemote",
+    "https://example.com/1\t2026-08-10\ttest\tStaff Engineer\tAcme\tskipped_dup\tRemote",
+  ];
+  const result = collectWhatsNew(rows, { cutoff: Date.parse("2026-08-03"), toOffer });
+
+  assert.equal(result.count, 1);
+});
+
 test("legacy append-order fallback also reports the complete count", () => {
   const rows = [
     header,

@@ -18,7 +18,7 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { dirname, resolve, join, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { parseArgs } from "util";
-import { assertFacts } from "./verify-cv-facts.mjs";
+import { assertFacts, printAdvisoryFacts } from "./verify-cv-facts.mjs";
 import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { getCareerOpsRoot } from "./path-resolver.mjs";
@@ -464,6 +464,7 @@ Usage:
       for (const phrase of factCheck.warnings) {
         console.error(`  - advisory phrase: ${phrase}`);
       }
+      printAdvisoryFacts(factCheck.advisoryFacts, console.error);
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.

@@ -21,12 +21,14 @@
  * Run: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, realpathSync, statSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, copyFileSync, realpathSync, statSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { withPipelineLock, LockTimeoutError } from './pipeline-lock.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 
@@ -167,8 +169,6 @@ function resolvePdf(reportFile) {
 }
 
 // ---- parse pipeline.md ----
-const lines = readFileSync(PIPELINE_FILE, 'utf-8').split(/\r?\n/);
-
 const PENDING_RE = /^##\s+(Pendientes|Pending)\s*$/i;
 const PROCESSED_RE = /^##\s+(Procesadas|Processed)\s*$/i;
 const SECTION_RE = /^##\s+/;
@@ -180,137 +180,159 @@ function lineUrl(body) {
   return (i >= 0 ? body.slice(0, i) : body).trim();
 }
 
-let pendStart = -1, procStart = -1;
-for (let i = 0; i < lines.length; i++) {
-  if (pendStart < 0 && PENDING_RE.test(lines[i])) pendStart = i;
-  else if (procStart < 0 && PROCESSED_RE.test(lines[i])) procStart = i;
-}
+// The whole read → compute → write runs under the pipeline lock (#4895).
+// scan.mjs and every other pipeline writer append under withPipelineLock; a
+// bare read here followed by a bare write later silently dropped any offers
+// appended in between — and the .pre-reconcile.bak, copied before they
+// landed, did not have them either.
+function reconcile() {
+  const lines = readFileSync(PIPELINE_FILE, 'utf-8').split(/\r?\n/);
 
-if (pendStart < 0) {
-  console.log('No "Pendientes" section in pipeline.md — nothing to reconcile.');
-  process.exit(0);
-}
-
-function sectionEnd(start) {
-  for (let i = start + 1; i < lines.length; i++) {
-    if (SECTION_RE.test(lines[i])) return i;
+  let pendStart = -1, procStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (pendStart < 0 && PENDING_RE.test(lines[i])) pendStart = i;
+    else if (procStart < 0 && PROCESSED_RE.test(lines[i])) procStart = i;
   }
-  return lines.length;
-}
-const pendEnd = sectionEnd(pendStart);
-const procEnd = procStart >= 0 ? sectionEnd(procStart) : -1;
 
-// URLs already in Procesadas — guards against a double copy on re-runs.
-const procUrls = new Set();
-if (procStart >= 0) {
-  for (let i = procStart + 1; i < procEnd; i++) {
-    const m = lines[i].match(/^- \[x\]\s+(.+)$/i);
-    if (!m) continue;
-    // "[num](path) | url | company | role | score | PDF x" — url is field 2
-    const parts = m[1].split('|').map(s => s.trim());
-    if (parts[1]) procUrls.add(parts[1]);
+  if (pendStart < 0) {
+    console.log('No "Pendientes" section in pipeline.md — nothing to reconcile.');
+    return;
   }
-}
 
-// ---- walk Pendientes, decide keep vs. move ----
-const removeIdx = new Set();
-const movedProcLines = [];
-const moved = [];
-const skippedNoReport = [];
+  function sectionEnd(start) {
+    for (let i = start + 1; i < lines.length; i++) {
+      if (SECTION_RE.test(lines[i])) return i;
+    }
+    return lines.length;
+  }
+  const pendEnd = sectionEnd(pendStart);
+  const procEnd = procStart >= 0 ? sectionEnd(procStart) : -1;
 
-for (let i = pendStart + 1; i < pendEnd; i++) {
-  if (!PENDING_ITEM_RE.test(lines[i])) continue; // blank lines, "- [!]" errors → keep
-  const body = lines[i].replace(PENDING_ITEM_RE, '');
-  const url = lineUrl(body);
-  const done = DONE.get(url);
-  if (!done) continue; // not processed → keep in Pendientes
+  // URLs already in Procesadas — guards against a double copy on re-runs.
+  const procUrls = new Set();
+  if (procStart >= 0) {
+    for (let i = procStart + 1; i < procEnd; i++) {
+      const m = lines[i].match(/^- \[x\]\s+(.+)$/i);
+      if (!m) continue;
+      // "[num](path) | url | company | role | score | PDF x" — url is field 2
+      const parts = m[1].split('|').map(s => s.trim());
+      if (parts[1]) procUrls.add(parts[1]);
+    }
+  }
 
-  if (procUrls.has(url)) {
-    // Already recorded in Procesadas — just drop the stale Pendientes copy.
+  // ---- walk Pendientes, decide keep vs. move ----
+  const removeIdx = new Set();
+  const movedProcLines = [];
+  const moved = [];
+  const skippedNoReport = [];
+
+  for (let i = pendStart + 1; i < pendEnd; i++) {
+    if (!PENDING_ITEM_RE.test(lines[i])) continue; // blank lines, "- [!]" errors → keep
+    const body = lines[i].replace(PENDING_ITEM_RE, '');
+    const url = lineUrl(body);
+    const done = DONE.get(url);
+    if (!done) continue; // not processed → keep in Pendientes
+
+    if (procUrls.has(url)) {
+      // Already recorded in Procesadas — just drop the stale Pendientes copy.
+      removeIdx.add(i);
+      moved.push({ url, role: '(already in Procesadas)', dup: true });
+      continue;
+    }
+
+    const reportFile = findReportFile(done.reportNum);
+    if (!reportFile) {
+      // No report on disk — leave it in Pendientes rather than write a dead link.
+      skippedNoReport.push({ url, reportNum: done.reportNum || '?' });
+      continue;
+    }
+
+    const parts = body.split('|').map(s => s.trim());
+    const company = parts[1] || '';
+    const role = parts[2] || '';
+    const score = resolveScore(done.score, reportFile);
+    const pdf = resolvePdf(reportFile);
+    const num = parseInt(done.reportNum, 10);
+
+    const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS);
+    movedProcLines.push(`- [x] ${reportLink} | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
+    moved.push({ url, company, role, num, score });
+    procUrls.add(url);
     removeIdx.add(i);
-    moved.push({ url, role: '(already in Procesadas)', dup: true });
-    continue;
   }
 
-  const reportFile = findReportFile(done.reportNum);
-  if (!reportFile) {
-    // No report on disk — leave it in Pendientes rather than write a dead link.
-    skippedNoReport.push({ url, reportNum: done.reportNum || '?' });
-    continue;
+  // ---- report & exit early if nothing changed ----
+  console.log('=== Reconcile pipeline.md ===');
+  for (const s of skippedNoReport) {
+    console.warn(`⚠️  ${s.url} — batch reports report #${s.reportNum} but no reports/${s.reportNum}-*.md found; left in Pendientes.`);
   }
 
-  const parts = body.split('|').map(s => s.trim());
-  const company = parts[1] || '';
-  const role = parts[2] || '';
-  const score = resolveScore(done.score, reportFile);
-  const pdf = resolvePdf(reportFile);
-  const num = parseInt(done.reportNum, 10);
-
-  const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS);
-  movedProcLines.push(`- [x] ${reportLink} | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
-  moved.push({ url, company, role, num, score });
-  procUrls.add(url);
-  removeIdx.add(i);
-}
-
-// ---- report & exit early if nothing changed ----
-console.log('=== Reconcile pipeline.md ===');
-for (const s of skippedNoReport) {
-  console.warn(`⚠️  ${s.url} — batch reports report #${s.reportNum} but no reports/${s.reportNum}-*.md found; left in Pendientes.`);
-}
-
-if (removeIdx.size === 0) {
-  console.log('✅ pipeline.md already in sync — nothing to reconcile.');
-  process.exit(0);
-}
-
-// ---- rebuild the file ----
-const out = [];
-let skipBlankAfterProc = false;
-for (let i = 0; i < lines.length; i++) {
-  if (removeIdx.has(i)) continue;
-  if (skipBlankAfterProc) {
-    skipBlankAfterProc = false;
-    if (lines[i].trim() === '') continue; // drop the original blank after "## Procesadas"
+  if (removeIdx.size === 0) {
+    console.log('✅ pipeline.md already in sync — nothing to reconcile.');
+    return;
   }
-  out.push(lines[i]);
-  if (i === procStart && movedProcLines.length > 0) {
-    out.push('', ...movedProcLines);
-    skipBlankAfterProc = true;
+
+  // ---- rebuild the file ----
+  const out = [];
+  let skipBlankAfterProc = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (removeIdx.has(i)) continue;
+    if (skipBlankAfterProc) {
+      skipBlankAfterProc = false;
+      if (lines[i].trim() === '') continue; // drop the original blank after "## Procesadas"
+    }
+    out.push(lines[i]);
+    if (i === procStart && movedProcLines.length > 0) {
+      out.push('', ...movedProcLines);
+      skipBlankAfterProc = true;
+    }
   }
-}
-// No Procesadas section yet — create one at the end of the file, matching the
-// language the pending section header already uses.
-if (procStart < 0 && movedProcLines.length > 0) {
-  const processedHeader = /Pending/i.test(lines[pendStart]) ? '## Processed' : '## Procesadas';
-  if (out.length && out[out.length - 1].trim() !== '') out.push('');
-  out.push(processedHeader, '', ...movedProcLines);
-}
-
-const newContent = out.join('\n');
-
-const newCount = (() => {
-  let n = 0, inPend = false;
-  for (const l of out) {
-    if (PENDING_RE.test(l)) { inPend = true; continue; }
-    if (SECTION_RE.test(l)) { inPend = false; continue; }
-    if (inPend && PENDING_ITEM_RE.test(l)) n++;
+  // No Procesadas section yet — create one at the end of the file, matching the
+  // language the pending section header already uses.
+  if (procStart < 0 && movedProcLines.length > 0) {
+    const processedHeader = /Pending/i.test(lines[pendStart]) ? '## Processed' : '## Procesadas';
+    if (out.length && out[out.length - 1].trim() !== '') out.push('');
+    out.push(processedHeader, '', ...movedProcLines);
   }
-  return n;
-})();
 
-const realMoves = moved.filter(m => !m.dup);
-console.log(`🔄 ${realMoves.length} processed entr${realMoves.length === 1 ? 'y' : 'ies'} moved Pendientes → Procesadas:`);
-for (const m of realMoves) console.log(`   + #${m.num} ${m.company} — ${m.role} (${m.score})`);
-const dups = moved.filter(m => m.dup);
-if (dups.length) console.log(`🧹 ${dups.length} stale Pendientes entr${dups.length === 1 ? 'y' : 'ies'} dropped (already in Procesadas).`);
-console.log(`📋 Pendientes now: ${newCount} entr${newCount === 1 ? 'y' : 'ies'}`);
+  const newContent = out.join('\n');
 
+  const newCount = (() => {
+    let n = 0, inPend = false;
+    for (const l of out) {
+      if (PENDING_RE.test(l)) { inPend = true; continue; }
+      if (SECTION_RE.test(l)) { inPend = false; continue; }
+      if (inPend && PENDING_ITEM_RE.test(l)) n++;
+    }
+    return n;
+  })();
+
+  const realMoves = moved.filter(m => !m.dup);
+  console.log(`🔄 ${realMoves.length} processed entr${realMoves.length === 1 ? 'y' : 'ies'} moved Pendientes → Procesadas:`);
+  for (const m of realMoves) console.log(`   + #${m.num} ${m.company} — ${m.role} (${m.score})`);
+  const dups = moved.filter(m => m.dup);
+  if (dups.length) console.log(`🧹 ${dups.length} stale Pendientes entr${dups.length === 1 ? 'y' : 'ies'} dropped (already in Procesadas).`);
+  console.log(`📋 Pendientes now: ${newCount} entr${newCount === 1 ? 'y' : 'ies'}`);
+
+  if (DRY_RUN) {
+    console.log('(dry-run — no changes written)');
+    return;
+  }
+
+  copyFileSync(PIPELINE_FILE, `${PIPELINE_FILE}.pre-reconcile.bak`);
+  writeFileAtomic(PIPELINE_FILE, newContent);
+  console.log(`✅ pipeline.md updated (backup: ${PIPELINE_FILE}.pre-reconcile.bak)`);
+}
+
+// A dry run writes nothing, so it neither waits on nor blocks a writer.
 if (DRY_RUN) {
-  console.log('(dry-run — no changes written)');
-  process.exit(0);
+  reconcile();
+} else {
+  try {
+    await withPipelineLock(PIPELINE_FILE, reconcile);
+  } catch (err) {
+    if (!(err instanceof LockTimeoutError)) throw err;
+    console.error(`❌ ${err.message} — another process is writing pipeline.md; nothing was changed. Re-run once it finishes.`);
+    process.exit(1);
+  }
 }
-
-copyFileSync(PIPELINE_FILE, `${PIPELINE_FILE}.pre-reconcile.bak`);
-writeFileSync(PIPELINE_FILE, newContent);
-console.log(`✅ pipeline.md updated (backup: ${PIPELINE_FILE}.pre-reconcile.bak)`);
