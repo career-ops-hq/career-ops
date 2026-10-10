@@ -83,7 +83,7 @@ Adapta tu CV y redacta tus&nbsp;respuestas. <strong>Tú&nbsp;pulsas&nbsp;Enviar.
 </p>
 
 <p align="center">
-  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
+  <a href="https://vercel.com/open-source-program"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/vercel-oss-badge-dark.svg"><source media="(prefers-color-scheme: light)" srcset="docs/vercel-oss-badge-light.svg"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></picture></a>
 </p>
 
 <p align="center">
