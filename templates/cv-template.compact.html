@@ -35,6 +35,12 @@ version: 1.0.0
     --rail-width: 96px;
     /* #3242: unchanged default — see templates/cv-template.html. */
     --job-break-inside: auto;
+    /* Whether a Projects entry may split across a page break. Unchanged
+       default — a project may still split, keeping the CV compact. Override via
+       config/profile.yml `style.project_break_inside: avoid` for "a project is
+       one unit, never split", which removes the one-word widow a description
+       can leave above its tech line, at the cost of a bottom gap. */
+    --project-break-inside: auto;
   }
   @page { margin: var(--page-margin); }
 
@@ -112,7 +118,20 @@ version: 1.0.0
 
   .contact-row a { color: #4a5260; text-decoration: none; }
 
-  .separator { margin: 0 4px; color: #b0b7c2; }
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    /* Replaces the markup whitespace that sat before the old separator element;
+       without it every item after the first shifts left.
+       NO-BREAK space (U+00A0), not a plain one: a plain space here is a break
+       opportunity and Chromium takes it, leaving the bar alone at the start of
+       the next line -- the artifact this rule exists to prevent. Measured: with
+       a plain space, tests/cv-visual/contact-row-wrap.spec.mjs fails on
+       compact, executive, jake and modern in LTR. */
+    content: "\00a0|";
+    margin-inline: 4px;
+    color: #b0b7c2;
+  }
 
   /* === SECTIONS ===
      Each section is a two-part flex row: a fixed label rail on the left and the
@@ -295,6 +314,22 @@ version: 1.0.0
 
   .skill-category { font-weight: 700; color: var(--accent-color); }
 
+  /* === GDPR / RODO CONSENT (footer) === */
+  /* Opt-in footer slot filled from payload.consent. Empty by default — the
+     :empty rule hides the div (and its border-top) when no consent text is
+     set, so existing CVs render byte-identical to a pre-consent layout.
+     Mirrors the {{PHOTO}} opt-in slot pattern (#264). */
+  .cv-consent {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    font-size: 8.5px;
+    line-height: 1.4;
+    color: #777;
+    text-align: left;
+  }
+  .cv-consent:empty { display: none; }
+
   /* === PAGE BREAK CONTROL === */
   .header,
   .edu-item,
@@ -311,7 +346,16 @@ version: 1.0.0
     break-inside: var(--job-break-inside, auto);
   }
 
-  .section-title,
+  /* Opt-in — see the --project-break-inside default above. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
+  }
+
+  /* The label is beside its content in a flex row, not above it. Applying
+     break-after: avoid to it also binds the following section in Chromium:
+     a body that fits one full page can then move wholesale past the header.
+     Keep the rail labels free to fragment at section boundaries. */
   .job-company,
   .job-role,
   .job-location,
@@ -373,13 +417,9 @@ version: 1.0.0
     {{TITLE_BLOCK}}
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>
@@ -443,6 +483,9 @@ version: 1.0.0
   </div>
 
   <!-- END -->
+
+  <!-- GDPR / RODO consent -->
+  <div class="cv-consent">{{CONSENT}}</div>
 
 </div>
 </body>

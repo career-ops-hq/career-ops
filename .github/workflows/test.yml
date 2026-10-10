@@ -41,10 +41,14 @@ jobs:
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
           persist-credentials: false
-      - name: Set up Node 18 for syntax compatibility
+      # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
+      # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
+      # Renovate is told to leave node-version in this file alone (renovate.json);
+      # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
+      - name: Set up the Node floor (22.13) for syntax compatibility
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '22.13'
       - run: npm run lint
       - name: Set up Node 24 for the test suite
         uses: actions/setup-node@v7
@@ -67,14 +71,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-      - name: Install deterministic CJK and PDF extraction dependencies
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk poppler-utils
-      - run: npm install --ignore-scripts
-      - run: npx playwright install chromium --with-deps
-      - run: npm run test:cv-visual
+      - name: Build the canonical CV rendering environment
+        run: docker build --platform linux/amd64 --tag career-ops-cv-visual tests/cv-visual
+      - name: Check every CV template and PDF page
+        run: |
+          docker run --rm --init --ipc=host --platform linux/amd64 \
+            --volume "$PWD:/work" --volume /work/node_modules \
+            career-ops-cv-visual \
+            sh -c 'npm install --ignore-scripts --package-lock=false && npm run test:cv-visual'
       - name: Upload CV visual diffs and rendered previews
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -13,6 +13,11 @@ version: 1.0.0
      Keep each surface's existing font and color as its fallback: this template
      has different defaults from the standard CV, including within its own
      typography and palette. With no profile override those defaults stay put. */
+  :root {
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
+  }
 
   /* ATS-safe typography (#font-extraction fix):
      The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
@@ -115,8 +120,12 @@ version: 1.0.0
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -182,11 +191,11 @@ version: 1.0.0
     font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -267,7 +276,7 @@ version: 1.0.0
     font-size: 9px;
     font-weight: 500;
     color: hsl(187, 74%, 32%);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
@@ -456,6 +465,15 @@ version: 1.0.0
   .job {
     page-break-inside: var(--job-break-inside, auto);
     break-inside: var(--job-break-inside, auto);
+  }
+
+  /* Opt-in — unchanged default (a project may split across a page break).
+     Override via config/profile.yml style.project_break_inside: avoid. This
+     template's :root token block does not declare --project-break-inside, so
+     the fallback below is the only default. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
   }
 
   /* Keep a heading attached to the content that follows it, so headings are not
@@ -744,13 +762,9 @@ version: 1.0.0
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>

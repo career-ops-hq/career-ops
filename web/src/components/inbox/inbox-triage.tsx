@@ -12,6 +12,7 @@ import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
+import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
@@ -209,12 +210,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   };
 
   const estimate = useMemo(() => {
-    const samples = jobs.filter((j) => j.kind === "evaluate" && j.status === "done" && j.cost?.tokens).map((j) => j.cost!);
-    if (!samples.length || shortlist.length === 0) return {};
-    const avgT = samples.reduce((a, c) => a + c.tokens, 0) / samples.length;
-    const usds = samples.filter((s) => s.usd != null).map((s) => s.usd!);
-    const avgUsd = usds.length ? usds.reduce((a, c) => a + c, 0) / usds.length : undefined;
-    return { tokens: Math.round(avgT * shortlist.length), usd: avgUsd != null ? +(avgUsd * shortlist.length).toFixed(2) : undefined };
+    if (shortlist.length === 0) return {};
+    return estimateRunCost(jobs, "evaluate", shortlist.length);
   }, [jobs, shortlist.length]);
 
   const scoreShortlist = () => {

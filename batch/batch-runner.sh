@@ -441,8 +441,8 @@ read_spend_tier() {
 spend_tier_to_model() {
   case "$1" in
     economy) echo "claude-haiku-4-5" ;;
-    premium) echo "claude-opus-5" ;;
-    standard|*) echo "claude-sonnet-5" ;;
+    premium) echo "claude-opus-5-5" ;;
+    standard|*) echo "claude-sonnet-5-5" ;;
   esac
 }
 
@@ -724,7 +724,10 @@ rate_limit_delay() {
   fi
   base=30
   (( base <= RATE_LIMIT_SLEEP )) || base=$RATE_LIMIT_SLEEP
-  hint=$(LC_ALL=C awk -v cap="$RATE_LIMIT_SLEEP" '
+  # A log that exists and is empty has no header to find, and awk would print
+  # nothing for it: skip the two processes. A missing log still reaches awk.
+  hint=""
+  [[ -e "$log_file" && ! -s "$log_file" ]] || hint=$(LC_ALL=C awk -v cap="$RATE_LIMIT_SLEEP" '
     tolower($0) ~ /^[[:space:]]*retry-after:[[:space:]]*[0-9]+[[:space:]]*$/ {
       value=$0
       sub(/^[^:]*:[[:space:]]*/, "", value)

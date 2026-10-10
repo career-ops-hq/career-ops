@@ -55,6 +55,22 @@
 # scan_history:
 #   dedup_include_location: true
 
+# -- Language-aware duplicate roles (optional, opt-in) --
+# An employer can publish one requisition in more than one language (for
+# example German and English), with the same title and location in each. By
+# default those are ONE role and the scan keeps whichever version the ATS
+# returned first.
+#
+# Set dedup_include_language: true to keep them apart when the ATS reports each
+# posting's language. Turn it on when you only apply to postings written in some
+# languages and discard the rest (for example, skip every JD written in German):
+# otherwise the version the scan kept may be the one you throw away.
+# Regional variants count as one language (en-GB equals en), and a posting whose
+# language the ATS doesn't report is compared as before.
+#
+# scan_history:
+#   dedup_include_language: true
+
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
 # scanner for Interamt.de, a portal for German federal, state, and municipal
@@ -368,6 +384,7 @@ title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
   # 2-3 letter keyword ("AI", "ML", "VP"), which is matched on word boundaries
   # so it does not fire inside another word ("AI" will not match "Maintenance").
+  # A CJK character counts as a boundary, so "AI" does match "AI工程师".
   # Either way an entry expresses the exact spelling you write, and nothing
   # else: real titles vary in separator and word order, and every variant your
   # list does not literally contain is dropped in silence.
@@ -622,6 +639,112 @@ title_filter:
 #       - "Program Administrator"
 #       - "Registrar"
 #       - "Student Services"
+
+# -- Domain filter (reverse sweep only, opt-in) --
+# Read ONLY by `scan-ats-full.mjs` (npm run scan:full), the reverse sweep that
+# walks every public ATS board instead of your tracked_companies. Commented out
+# on purpose: absent, the sweep behaves exactly as it always has.
+#
+# Why it exists: `title_filter` runs on the wrong axis out there. It asks the
+# title to answer both "is this the right role" and "is this employer in my
+# industry", and a title cannot answer the second one — "Senior Backend
+# Engineer" is identical at a Solana infrastructure company and at a supermarket
+# chain. scan.mjs never has that problem, because tracked_companies settles the
+# employer before any title is read.
+#
+# So this gates the BOARD before any title is tested: if no posting anywhere on
+# a board matches one of these keywords, the company is not in your industry and
+# the whole board is skipped. One matching posting is enough — that threshold is
+# measured, not cautious: raising it to two kept twelve boards and lost every
+# genuine one, because a repeated false-positive substring is a property of big
+# boards while a real find is one opening at a small company.
+#
+# The payoff is that broad keywords become usable again. Once a board is
+# established as in-domain, "Backend Engineer" on it is a real lead.
+#
+# Write the INDUSTRY half of your filter here, not the role half — the terms
+# that identify what a company does.
+#
+# An entry is matched as a WHOLE WORD by default, which is the opposite of
+# title_filter's plain-substring default, and measured: a plain substring
+# admitted 32 boards on one sweep of which 28 were junk, 25 of them because
+# `defi` sits at the start of "Deficiência", "Defiance", "Software Defined" and
+# "Product Definition". One such match admits that board's entire catalogue,
+# which is why the strict end is the free one here.
+#
+# The cost of that default is real: `blockchain` will not match "Blockchains",
+# `smart contract` will not match "Smart Contracts", and `crypto` will not match
+# "Cryptocurrency". Prefix an entry with `stem:` when a longer form matters, the
+# same prefix title_filter uses — `stem:smart contract` matches "Smart
+# Contracts" and carries no junk risk, since no unrelated word begins with it.
+# `word:` is accepted too and is simply explicit about the default.
+#
+# Known limit: an aggregator board is not one employer. A job aggregator that
+# carries some in-domain roles passes the gate and brings its unrelated
+# postings with it. No threshold fixes that; the gate degrades to the old
+# behaviour there.
+#
+# Skipped boards are counted in the run summary and named by --verbose, so a
+# domain term you forgot shows up as boards declined rather than as silence.
+#
+# The list below is [CUSTOMIZE] and deliberately from ONE vertical (crypto), the
+# same one the numbers above were measured on. Replace it with the industry
+# terms of your own search — and note the gate is worth most to a narrow
+# vertical: a domain list of "AI" and "machine learning" admits most boards in
+# 2026, which is no worse than today but buys less.
+#
+# domain_filter:
+#   # Plain entries: whole-word, no longer form to keep.
+#   - "solana"
+#   - "solidity"
+#   - "web3"
+#   - "defi"
+#   - "onchain"
+#   - "ethereum"
+#   - "evm"
+#   # stem: where the plural or compound is the common spelling.
+#   - "stem:blockchain"       # Blockchain, Blockchains
+#   - "stem:smart contract"   # Smart Contract, Smart Contracts
+#   - "stem:digital asset"    # Digital Asset, Digital Assets
+#   # `stem:crypto` would reach "Cryptocurrency" and also "Cryptography" —
+#   # a board of security roles. Whole-word here, and the one below covers
+#   # the form actually wanted.
+#   - "crypto"
+#   - "cryptocurrency"
+
+# -- Declared-field whitelists (optional, scan.mjs) --
+# title_filter judges a posting by its TITLE. Some boards publish a better
+# discriminator as a field of its own — an occupation code, a department —
+# which no title list can stand in for: one title spans several occupations,
+# and one occupation is advertised under countless titles.
+#
+# field_filters holds one whitelist per field, in the same keyword language as
+# title_filter (plain substring, `word:`, `stem:`). A target opts in with
+# `filter_on`; a target without it gates on title exactly as before.
+#
+#   filter_on: noc             # judge this target by `noc` instead of title
+#   filter_on: [title, noc]    # both must match (AND)
+#
+# The provider has to emit the field: e.g. a local_parser script adding
+# "noc": "22221" to each job object it prints. A posting without the field
+# PASSES rather than being dropped, and is counted as "Passed, field absent" in
+# the scan summary; a target that never supplies the field at all gets an
+# end-of-run warning that its whitelist is effectively off. `title` cannot be
+# a key here — title keywords belong in title_filter above.
+#
+# field_filters:
+#   noc:
+#     positive: ["stem:22", "stem:13"]   # occupation codes starting 22 or 13
+#
+# and, as an entry under the tracked_companies: key further down:
+#   - name: Example Occupation-Coded Board
+#     careers_url: https://example.com/jobs
+#     scan_method: local_parser
+#     filter_on: noc
+#     parser:
+#       command: node
+#       script: local/example-board-jobs.js
+#       format: jobs-json-v1
 
 # -- Search queries --
 # Each query triggers a WebSearch. Use site: to filter by portal.
@@ -1066,6 +1189,8 @@ search_queries:
 #   peoplesoft      /psc/<site>/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL  (PeopleSoft Fluid Candidate
 #                   Gateway — the URL PATH is the signature, not the host: every tenant runs on its own
 #                   branded institution domain, e.g. recruit.uwo.ca, careers.torontomu.ca, hr.mcmaster.ca, wsib.ca)
+#   pageup          careers.pageuppeople.com/<tenant>/<site>/<lang>/  (PageUp vendor-hosted careers site; numeric <tenant>.
+#                   A tenant's branded domain, e.g. jobs.hku.hk, is NOT detected — use the vendor-host URL)
 #   ultipro         {host}/<tenant>/JobBoard/<boardId>/  (UKG Pro / UltiPro Recruiting; host is one of several
 #                   recruiting.ultipro.(ca|com) / recruiting2/3.ultipro.com variants, matched by pattern —
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
@@ -1324,6 +1449,16 @@ search_queries:
 #   careers_url: https://recruit.uwo.ca/psc/hrprdwebER/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
 #   enabled: true
 #
+# - name: Example PageUp Co
+#   # PageUp vendor-hosted careers site. Auto-detects any path under
+#   # careers.pageuppeople.com/<tenant>/<site>/<lang>/ — the listing, or a posting
+#   # link copied from the site. If the employer fronts it on its own domain, the
+#   # numeric tenant id is in that page's asset URLs (…pageuppeople.com/<tenant>/…).
+#   # Listings carry no location and no posting date.
+#   careers_url: https://careers.pageuppeople.com/123/cw/en/listing/
+#   max_pages: 20          # optional cap on listing pages of 100 (default 20, max 200)
+#   enabled: true
+#
 # - name: Example SuccessFactors Co
 #   # SAP SuccessFactors Recruiting Marketing (RMK, ex-jobs2web) branded board —
 #   # what many large industrials run at their own domain (jobs.<company>.com).
@@ -1367,7 +1502,7 @@ search_queries:
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
 #   enabled: true                         # ~445 English postings (zero-token XML)
 #
-# - name: Deutsche Bahn                   # single-company; db.jobs Avature front
+# - name: Deutsche Bahn                   # single-company; db.jobs search front
 #   careers_url: https://db.jobs          # auto-detects; SSR search, paginated over HTTP
 #   provider: deutschebahn                # optional — db.jobs host also auto-detects
 #   enabled: true
@@ -1501,8 +1636,7 @@ search_queries:
 #     workplace_types: [remote, hybrid]  # optional: remote / hybrid / on-site
 #     # job_types: [vacancy_type_effective]  # optional: platform job-type ids
 #     # state: São Paulo  # optional state filter
-#     # country: Brasil   # optional country filter
-#   max_pages: 5          # optional page cap per keyword (100 jobs/page, default 5, max 200)
+#   max_pages: 5          # optional page cap per keyword (100 jobs/page, default 5, max 100)
 #   enabled: true
 #
 # - name: Arbeitsagentur — AI Roles      # German federal jobs API
@@ -1676,6 +1810,35 @@ search_queries:
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
 #   provider: pythonorg
 #   careers_url: https://www.python.org/jobs/
+#   enabled: true
+#
+# Startup Jobs: global startup/scale-up jobs (public RSS feed). Each query
+# returns only the ~50 most recent postings, so cover a search with several
+# narrow entries rather than one broad one: one per role slug, plus a
+# `workplace: remote` variant (for a broad slug the unscoped entry fills up
+# within hours, while the remote one stays under the cap longer).
+#   role: slug = last segment of a https://startup.jobs/roles/<slug> page;
+#     full list: bare /roles/<slug> entries in
+#     https://cdn.startup.jobs/sitemaps/startupjobs/roles.xml.gz
+#   workplace: optional; "remote" is the only accepted value, anything else → HTTP 404
+#
+# - name: Startup Jobs — Platform Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#   enabled: true
+#
+# - name: Startup Jobs — Platform Engineer (remote)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#     workplace: remote
+#   enabled: true
+#
+# - name: Startup Jobs — Site Reliability Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: site-reliability-engineer
 #   enabled: true
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
@@ -2810,6 +2973,26 @@ tracked_companies:
     careers_url: https://www.applitrack.com/camas/onlineapp/default.aspx?all=1
     default_location: "Camas, WA"
     notes: "Frontline AppliTrack. 25 postings when checked."
+    enabled: false
+
+  # -- PageUp-hosted boards (universities, public sector) --
+  # Examples of the pageup provider. Disabled: single employers — copy the
+  # pattern for your own. Verified 2026-10-02 (postings when checked).
+  # University titles follow the employer's rank names ("IT Officer",
+  # "Assistant IT Director"), so widen title_filter before expecting matches.
+  - name: The University of Hong Kong
+    careers_url: https://careers.pageuppeople.com/932/cw/en/listing/
+    notes: "PageUp. All staff categories on one board (academic, research, administrative, IT). 363 postings when checked."
+    enabled: false
+
+  - name: Bank of China (Hong Kong)
+    careers_url: https://careers.pageuppeople.com/798/cw/en/listing/
+    notes: "PageUp. 258 postings when checked."
+    enabled: false
+
+  - name: Oklahoma State University
+    careers_url: https://careers.pageuppeople.com/1216/cw/en-us/listing/
+    notes: "PageUp. US tenants use the en-us locale segment. 367 postings when checked."
     enabled: false
 
 # ── Job Boards ────────────────────────────────────────────────────────

@@ -4,15 +4,42 @@
 import { execFileSync } from 'child_process';
 import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, dirname } from 'path';
+import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// The suite must never follow a developer's own tracker override into their
+// real data. CAREER_OPS_TRACKER outranks the CAREER_OPS_ROOT that fixtures pin,
+// so with it set in the shell a test that runs normalize-statuses.mjs against
+// its fixture root rewrote the developer's tracker instead (and left a .bak
+// beside it), and a dozen checks failed on rows that were not theirs.
+//
+// Blanked here because test-all.mjs imports this module before it runs
+// anything, so the runner and each child it spawns start without the override;
+// a suite that imports these helpers is covered when run on its own as well.
+// Blanked rather than deleted: every reader trims the value and treats an empty
+// one as unset, which is also how the Go tests neutralise it
+// (`t.Setenv("CAREER_OPS_TRACKER", "")`), and a variable that is set is not
+// overwritten by a later .env load (#4707 did the same for one test and
+// CAREER_OPS_PIPELINE). A test that needs the override sets its own.
+process.env.CAREER_OPS_TRACKER = '';
+
+/**
+ * A merge-tracker fixture must not consult the install's batch history.
+ * Keep the default state path beside the fixture additions directory; tests
+ * that exercise explicit batch-state behavior should pass their own path.
+ * @param {string} additionsDir - Fixture additions directory.
+ * @returns {string} Fixture-local batch-state path.
+ */
+export function isolatedBatchStatePath(additionsDir) {
+  return join(dirname(additionsDir), 'batch-state.tsv');
+}
 
 // Windows keeps a handle open on a just-exited child's files for a short
 // window (antivirus widens it), so a cleanup rmSync can fail with EPERM even
@@ -200,6 +227,11 @@ export function run(cmd, args = [], opts = {}) {
   // executable is still allowlisted and the arguments are still an argv vector.
   lastFailure = null;
   const exe = resolveAllowedExecutable(cmd);
+  const env = opts.env ?? process.env;
+  const isolatedOpts = args.includes('merge-tracker.mjs') && env.CAREER_OPS_ADDITIONS
+    ? { ...opts, env: { ...env, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.CAREER_OPS_ADDITIONS) } }
+    : opts;
+  opts = isolatedOpts;
   try {
     return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
@@ -337,7 +369,7 @@ export function runAcrossLocalDay(cmd, args = [], opts = {}) {
  * later a case was added, the more certain it is to be truncated away, which
  * is exactly backwards for something read only when a run goes red.
  *
- * That is not hypothetical: `agent-inbox-tests.mjs` grew past this cap, and a
+ * That is not hypothetical: `tests/agent-inbox.test.mjs` grew past this cap, and a
  * windows-latest failure of its §7 cut off mid-word one assertion short of §8's
  * verdict — the assertion added specifically to attribute that failure (#3035).
  *
@@ -392,40 +424,41 @@ export function formatRunFailure(maxChars = 2000) {
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
 /**
- * Recursively collect files under `dir` whose basename matches `match`.
+ * Every TRACKED file under `dir` whose basename matches `match`.
  *
- * Deterministic by construction: entries are sorted lexicographically at every
- * level, so the result is identical on every run and every OS — the same
- * property test-all.mjs's own `tests/` discovery relies on (#1440).
+ * Enumerated through lib/mjs-files.mjs (#3890), not a private walk. This used
+ * to recurse the working tree with a skip-list its one caller passed in
+ * (`node_modules`, `.next`, `.git`, `out`, `dist`, `coverage`) — the same
+ * hand-maintained shape #3419 removed from the syntax gate, and the same silent
+ * narrowing: a suite added under a directory somebody forgot to un-skip never
+ * enters the guard, and the run is exactly as green as one that read it. Git
+ * already knows which of those trees is repository content, so the skip-list
+ * parameter is gone rather than reproduced here.
+ *
+ * That also retires the `isNestedCheckout` guard this walk used to need, and
+ * retires it rather than losing it: a name-matching skip-list never fired on a
+ * linked worktree, which marks itself with a `.git` FILE, so the walk descended
+ * into a whole second checkout of this repository (#3499, #3762). Nothing in
+ * that second checkout is tracked HERE, so the index cannot name it — the
+ * hazard is gone by construction instead of by a rule each walker remembers.
+ *
+ * Deterministic by construction (sorted), which is the property test-all.mjs's
+ * own `tests/` discovery relies on (#1440).
  *
  * A missing `dir` yields `[]` rather than throwing, so the caller reports its
- * own contract failure (e.g. "discovery is empty") instead of the run dying
- * mid-traversal with an ENOENT that says nothing about what was expected.
+ * own contract failure (e.g. "discovery is empty") instead of the run dying on
+ * an ENOENT that says nothing about what was expected. A `dir` that EXISTS but
+ * that git can see nothing in is a different thing entirely — that is a scan
+ * that could not look, and trackedFiles throws rather than let it read as a
+ * clean sweep.
  *
- * @param {string} dir - Absolute directory to walk.
- * @param {RegExp} match - Tested against each entry's basename.
- * @param {Set<string>} [skipDirs] - Directory names never descended into.
- * @returns {string[]} Absolute paths, parents before children.
+ * @param {string} dir - Absolute directory inside a git working tree.
+ * @param {RegExp} match - Tested against each tracked file's basename.
+ * @returns {string[]} Absolute paths, lexicographically sorted.
  */
-export function walkFiles(dir, match, skipDirs = new Set()) {
+export function walkFiles(dir, match) {
   if (!existsSync(dir)) return [];
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true })
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
-      // which matches by NAME — never fires on one, and the walk descends into a
-      // whole second checkout of this repository (#3499, #3762). The caller's
-      // own set stays authoritative for everything else.
-      if (isNestedCheckout(full)) continue;
-      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
-    } else if (match.test(entry.name)) {
-      out.push(full);
-    }
-  }
-  return out;
+  return trackedFiles(dir, (rel) => match.test(basename(rel)));
 }
 
 /**
@@ -874,8 +907,8 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that drive git
- * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`). Only
+ * Build a throwaway git repository for the two updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`). Only
  * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
  * and then asks about index membership, which is a different question.
  *
@@ -909,11 +942,16 @@ export async function captureConsoleErrors(fn) {
  * pins nothing. They are different fixtures that share a name, not copies of
  * this one.
  *
- * `gitIn` is injected rather than imported so this module keeps depending on
- * nothing but Node builtins — 57 of the 62 suites import it, and none of them
- * should pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
+ * The pins above are the FILE layer. They do not hold against the runtime layer:
+ * an ambient GIT_CONFIG_COUNT pair is applied after every config file, so a
+ * `core.excludesFile` injected that way overrode the one pinned here, the seed
+ * file was never staged, and the base commit died before the first assertion
+ * (#3801). So the fixture runs git through `hermeticGitRunner` rather than
+ * through the updater's own `gitIn`, which inherits the environment as a real
+ * install must. That also keeps this module on Node builtins alone: most suites
+ * import it, and none of them should pull in update-system.mjs as a side effect
+ * of asking for `pass`/`fail`.
  *
- * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
  * @param {object} [options]
  * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
  *   temp dir names the suite that made it.
@@ -923,9 +961,9 @@ export async function captureConsoleErrors(fn) {
  *   fixture. `isTracked` never reads it.
  * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
  */
-export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  const g = (...args) => gitIn(dir, ...args);
+  const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
@@ -982,6 +1020,45 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG_PARAMETERS;
   delete env.GIT_CONFIG;
   return env;
+}
+
+const REPO_LOCATION_ENV = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_GRAFT_FILE', 'GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+];
+
+/**
+ * A git runner bound to one fixture repository and to `hermeticGitEnv`.
+ *
+ * Same shape as the updater's `gitIn(dir, ...args)` with the directory already
+ * applied: trimmed stdout, a throw on a non-zero exit. It can stand in for it
+ * wherever a function under test takes its runner as `{ git }`. The difference
+ * is the environment. `gitIn` passes none, so it inherits the contributor's,
+ * and a fixture built with it is only as isolated as their shell (#3801).
+ *
+ * The environment is built once, here, and held for the life of the runner: a
+ * fixture hands its `g` back to the suite, which keeps calling it long after
+ * the fixture was built, so sealing only the setup calls would leave the rest
+ * exposed. The config path does not have to exist; a missing global file is
+ * simply an empty one.
+ *
+ * Config is not the only way in. A runner is bound to ONE directory, so every
+ * variable that tells git where a repository is has to go as well: with an
+ * ambient GIT_DIR, `cwd` stops deciding which repository a command touches.
+ * Measured before this was closed: the fixture's `git config user.name Test`
+ * rewrote the user.name of the repository GIT_DIR pointed at. A git hook is
+ * the ordinary way to inherit one. The list is git's own, the rest of
+ * `git rev-parse --local-env-vars` after the three hermeticGitEnv handles.
+ *
+ * @param {string} dir - The fixture repository.
+ * @returns {(...args: string[]) => string}
+ */
+export function hermeticGitRunner(dir) {
+  const env = hermeticGitEnv(join(dir, '.git', 'co-hermetic-gitconfig'));
+  for (const name of REPO_LOCATION_ENV) delete env[name];
+  return (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf-8', env }).trim();
 }
 
 /**

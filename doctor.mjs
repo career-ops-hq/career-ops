@@ -8,7 +8,7 @@
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
@@ -20,6 +20,8 @@ import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
+import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -88,30 +90,7 @@ const yellow = (s) => isTTY ? `\x1b[33m${s}\x1b[0m` : s;
 const dim = (s) => isTTY ? `\x1b[2m${s}\x1b[0m` : s;
 
 function checkNodeVersion() {
-  const versionStr = process.versions.node;
-  const [major, minor] = versionStr.split('.').map(Number);
-  const hasSqlite = major > 22 || (major === 22 && minor >= 5);
-
-  if (hasSqlite) {
-    return { pass: true, label: `Node.js >= 22.5 (v${versionStr})` };
-  }
-
-  if (major >= 18) {
-    return {
-      warn: true,
-      label: `Node.js v${versionStr} detected. Node >= 22.5.0 is highly recommended because tracker.mjs (SQLite database indexing) requires node:sqlite.`,
-      fix: [
-        'Upgrade Node.js to v22.5.0 or later to enable full tracker database support.',
-        'The markdown tracker keeps working without it — the index is optional.',
-      ],
-    };
-  }
-
-  return {
-    pass: false,
-    label: `Node.js >= 18 (found v${versionStr})`,
-    fix: 'Install Node.js 22.5.0 or later from https://nodejs.org',
-  };
+  return nodeFloor(process.versions.node);
 }
 
 // El check mas frecuente de la comunidad, medido: 8 personas en 4 semanas
@@ -160,13 +139,48 @@ function checkBillingSource() {
   };
 }
 
+// Whether each package.json dependency resolves from the code checkout the way
+// Node will at run time — not whether a node_modules directory exists. That
+// was wrong both ways: a git worktree with no node_modules of its own resolves
+// through the main checkout's (Node walks up parent directories), and a
+// node_modules installed before a dependency was added (undici, #4445) still
+// exists while the import fails. Every script loads its dependencies with ESM
+// `import`, whose bare-specifier lookup is node_modules in the code root and
+// each ancestor directory — and nothing else: unlike require(), it ignores
+// NODE_PATH and the global folders, so a package found only there would pass
+// here and still fail to import. A package counts as installed when one of
+// those node_modules holds it. Checking for its package.json, rather than
+// resolving the package, never consults an `exports` map that refuses the
+// lookup and never loads the package — doctor runs on every session's first
+// message.
+function findMissingDependencies(root) {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+  const lookupDirs = [];
+  for (let dir = resolve(root); ; dir = dirname(dir)) {
+    lookupDirs.push(join(dir, 'node_modules'));
+    if (dirname(dir) === dir) break;
+  }
+  return Object.keys(manifest.dependencies || {}).filter((name) =>
+    !lookupDirs.some((dir) => existsSync(join(dir, name, 'package.json'))));
+}
+
 function checkDependencies() {
-  if (existsSync(join(codeRoot, 'node_modules'))) {
+  let missing;
+  try {
+    missing = findMissingDependencies(codeRoot);
+  } catch (err) {
+    return {
+      pass: false,
+      label: `Dependencies could not be checked: package.json unreadable (${err.message})`,
+      fix: 'Run doctor from a career-ops checkout, or pass --target <checkout>',
+    };
+  }
+  if (missing.length === 0) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
     pass: false,
-    label: 'Dependencies not installed',
+    label: `Dependencies missing: ${missing.join(', ')}`,
     fix: 'Run: npm install',
   };
 }
@@ -780,6 +794,41 @@ function checkPlugins(root) {
 // WARN, never FAIL, like the plugin check below it: an unknown key is a typo,
 // not a broken install, and refusing to run would be a worse answer than naming
 // it.
+// cv.md exists but in a shape the CV checks cannot read (#4879). The prereq
+// check only proves the file is there; cv-title-check.mjs and
+// verify-cv-structure.mjs locate jobs through lib/cv-markdown.mjs, and a cv.md
+// whose Experience section they cannot find makes both run against nothing.
+// They do say so per run, but only once a tailored CV is already being built;
+// this says it at setup time. A warning, never a failure: cv.md is the user's
+// file and career-ops still works with it.
+function checkCvShape(root) {
+  const cvPath = join(root, 'cv.md');
+  if (!existsSync(cvPath)) return null;   // the prereq check owns "absent"
+  let text;
+  try {
+    text = readFileSync(cvPath, 'utf-8');
+  } catch (err) {
+    return { warn: true, label: `cv.md could not be read (${err.message})` };
+  }
+  const sections = findExperienceSections(text);
+  // Same entry rule verify-cv-structure.mjs parses with, so a stray
+  // "### Notes" under Experience is not counted as a job.
+  const entries = sections.flat().filter((line) => parseCompanyHeading(line) !== null).length;
+  if (entries > 0) {
+    return { pass: true, label: `cv.md: Experience section recognized (${entries} entr${entries === 1 ? 'y' : 'ies'})` };
+  }
+  return {
+    warn: true,
+    label: sections.length === 0
+      ? 'cv.md: no Experience section the CV checks recognize — title and structure checks will not run'
+      : 'cv.md: Experience section has no "### Company — Location" entries — title and structure checks will not run',
+    fix: [
+      `Name the section ${EXPERIENCE_HEADING_NAMES.map((n) => `"## ${n}"`).join(', ')}`,
+      'Start each job with "### Company — Location", then a bold **Title** line, then a dates line (see examples/cv-example.md)',
+    ],
+  };
+}
+
 function checkProfileShape(root) {
   const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
@@ -821,6 +870,7 @@ async function main() {
     checkFonts(),
     checkPersonalization(projectRoot),
     checkProfileShape(projectRoot),
+    checkCvShape(projectRoot),
     checkAutoDir('data'),
     checkPipelineFile(),
     checkAutoDir('output'),
@@ -994,11 +1044,13 @@ function onboardingState(root) {
   // split-checkout data root is in play and no --target was given.
   const bakCheck = checkTrackedBakFiles(codeRoot);
   const skillCheck = checkSkillEntrypoints(codeRoot);
+  const cvShape = checkCvShape(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
     ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
+    ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 

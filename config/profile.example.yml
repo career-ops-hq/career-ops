@@ -95,6 +95,12 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+# Optional. Only read by the Singapore market mode (modes/sg/): your work
+# status there. One of: citizen | pr | pass-holder | foreign. Omit → the mode
+# treats you as foreign (Employment Pass sponsorship required) and says so.
+# sg:
+#   work_status: "foreign"
+
 # Optional. If you have a documented disability, some jurisdictions run
 # affirmative/quota hiring for it (e.g. Brazil's Lei de Cotas, Lei 8.213/91 --
 # employers with 100+ staff must reserve 2-5% of roles for PcD candidates).
@@ -152,7 +158,7 @@ spend_tier: standard
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
 # Each token is injected as a CSS custom property that overrides the template
 # default — omit the block (or any key) to keep the built-in look unchanged.
-# Only these six keys are recognized; anything else is ignored.
+# Only these seven keys are recognized; anything else is ignored.
 # style:
 #   accent_color:     "#2563eb"           # section headings, competency tags, project badges
 #   secondary_color:  "#111827"           # company/institution names, header gradient's 2nd stop
@@ -161,6 +167,10 @@ spend_tier: standard
 #   margin:           "0.5in"             # page margin (@page)
 #   job_break_inside: "avoid"             # keep each role whole (one taller than a page still splits);
 #                                         # "auto" lets roles split. Unset: the template's own default
+#   project_break_inside: "avoid"         # keep each project whole — removes the one-word widow a
+#                                         # description can leave above its tech line, at the cost of a
+#                                         # bottom gap (and a page, on a CV already near its budget).
+#                                         # "auto" lets projects split. Unset: the template's own default
 
 cv:
   output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)

@@ -52,14 +52,19 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cv-template-")));
   fs.copyFileSync(path.join(CORE, "cv-templates.mjs"), path.join(root, "cv-templates.mjs"));
   // cv-templates.mjs imports ./lib/is-main-module.mjs, ./path-resolver.mjs (its
-  // default profile path follows the data root) and ./providers/_html-entities.mjs
-  // (it decodes entities in a template meta block) relative to itself. A missing
+  // default profile path follows the data root), ./providers/_html-entities.mjs
+  // (it decodes entities in a template meta block) and ./lib/template-manifest.mjs
+  // (the manifest block and the section vocabulary) relative to itself. A missing
   // one throws at module load and every case below falls back to the base
   // template, which is the same silent pass the js-yaml link below prevents.
   fs.mkdirSync(path.join(root, "lib"), { recursive: true });
   fs.copyFileSync(
     path.join(CORE, "lib", "is-main-module.mjs"),
     path.join(root, "lib", "is-main-module.mjs"),
+  );
+  fs.copyFileSync(
+    path.join(CORE, "lib", "template-manifest.mjs"),
+    path.join(root, "lib", "template-manifest.mjs"),
   );
   fs.copyFileSync(path.join(CORE, "path-resolver.mjs"), path.join(root, "path-resolver.mjs"));
   fs.mkdirSync(path.join(root, "providers"), { recursive: true });

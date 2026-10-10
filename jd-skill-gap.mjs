@@ -31,6 +31,7 @@ import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -369,39 +370,50 @@ function skillMentionedInText(skill, text) {
 // section at all or matches a literal "Z" character later in the text.
 // Scanning line-by-line for the next heading avoids the anchor entirely.
 
-const SKILLS_HEADING_RE = /^#{1,6}\s*Skills\s*$/i;
 const ANY_HEADING_RE = /^#{1,6}\s/;
 
+// Which headings open a named skills section (#4879). The heading is read
+// through lib/cv-markdown.mjs first, so `## **[Skills]{.smallcaps}**` counts.
+// "Skills" anywhere in the heading counts at any level ("Technical Skills",
+// "Skills & Tools"). "Tools" / "Technologies" / "Tech Stack" only count on a
+// level-1 or level-2 heading: at level 3 they would also match an employer
+// such as "### Acme Technologies — Remote" and promote that job's prose into
+// named skills.
+const SKILLS_WORD_RE = /\bskills\b/i;
+const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b/i;
+
+function isSkillsHeading(line) {
+  // `\s*` rather than `\s+` keeps the historical `#Skills` (no space) form.
+  const m = String(line).match(/^(#{1,6})(?!#)\s*(.+?)\s*$/);
+  if (!m) return false;
+  const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, ''));
+  return SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text));
+}
+
 /**
- * Split cv.md into its named "Skills" section (if any) and the remaining
- * prose, without relying on a Python-style end-of-string regex anchor.
+ * Split cv.md into its named skills sections (if any) and the remaining
+ * prose, without relying on a Python-style end-of-string regex anchor. Every
+ * skills heading contributes its section, up to the next heading of any
+ * level, so a CV with both "## Core Skills" and "## Technical Platforms &
+ * Tools" counts both.
  * @param {string} cvText
  * @returns {{namedSkillsText: string, proseText: string}}
  */
 function splitSkillsSection(cvText) {
-  const lines = cvText.split('\n');
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (SKILLS_HEADING_RE.test(lines[i])) {
-      start = i + 1;
-      break;
+  const named = [];
+  const prose = [];
+  let inSkills = false;
+  for (const line of cvText.split('\n')) {
+    const skillsHeading = isSkillsHeading(line);
+    if (skillsHeading || ANY_HEADING_RE.test(line)) {
+      inSkills = skillsHeading;
+      // A skills heading itself belongs to neither side.
+      if (!skillsHeading) prose.push(line);
+      continue;
     }
+    (inSkills ? named : prose).push(line);
   }
-  if (start === -1) {
-    return { namedSkillsText: '', proseText: cvText };
-  }
-
-  let end = lines.length;
-  for (let i = start; i < lines.length; i++) {
-    if (ANY_HEADING_RE.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-
-  const namedSkillsText = lines.slice(start, end).join('\n');
-  const proseText = lines.slice(0, start - 1).concat(lines.slice(end)).join('\n');
-  return { namedSkillsText, proseText };
+  return { namedSkillsText: named.join('\n'), proseText: prose.join('\n') };
 }
 
 // ── Classification ───────────────────────────────────────────────────
@@ -430,21 +442,25 @@ function classifySkillGaps(jdSkills, cvText) {
 
   for (const skill of jdSkills) {
     const canon = canonicalize(skill);
-    // "Known" = skill-extract recognizes this token (canonicalize rewrote it,
-    // or SKILL_PATTERN matches it). For known skills the canonical-set lookup
-    // is authoritative and alias-safe. Unknown/free tokens canonicalize to
-    // themselves and fall through to the word-boundary heuristic below, which
-    // is byte-for-byte the prior behavior — jd-skill-gap keeps its own
-    // heuristics for free tokens (#1896 answer 2).
-    const known = canon !== skill || extractSkills(skill).size > 0;
+    // "Known" = skill-extract reads this token as its own canonical skill. For
+    // known skills the canonical-set lookup is authoritative and alias-safe.
+    // Unknown/free tokens canonicalize to themselves and fall through to the
+    // word-boundary heuristic below, which is byte-for-byte the prior behavior
+    // — jd-skill-gap keeps its own heuristics for free tokens (#1896 answer 2).
+    // A known skill must not reach that heuristic: it matches the JD's spelling
+    // anywhere, including the prose skill-extract declines to count ("go the
+    // extra mile", "a safe environment", "Fine-tuning the funnel"). Containing
+    // a skill is not being one: "React.js" extracts as React, never as itself,
+    // so it stays a free token and the heuristic still finds it in a CV.
+    const known = extractSkills(skill).has(canon);
 
     if (known && namedCanon.has(canon)) {
       existing.push(skill);
     } else if (known && proseCanon.has(canon)) {
       supportedByResume.push(skill);
-    } else if (skillMentionedInText(skill, namedSkillsText)) {
+    } else if (!known && skillMentionedInText(skill, namedSkillsText)) {
       existing.push(skill);
-    } else if (skillMentionedInText(skill, proseText)) {
+    } else if (!known && skillMentionedInText(skill, proseText)) {
       supportedByResume.push(skill);
     } else {
       gap.push(skill);
@@ -541,6 +557,31 @@ Python, Docker, Zookeeper
   eq('an h5 Skills heading is recognized as the named section', deepCvResult.existing.includes('Python'), true);
   eq('the named section stops at the h6 heading (Kubernetes stays prose)', deepCvResult.existing.includes('Kubernetes'), false);
   eq('prose under the h6 still classifies as supportedByResume', deepCvResult.supportedByResume.includes('Kubernetes'), true);
+
+  // Pandoc-flavored and differently named skills headings (#4879). The
+  // issue's repro: skills under "## **[Technical Platforms & Tools]{.smallcaps}**"
+  // were reported as resume prose, so the existing bucket was always empty.
+  const pandocSkillsCv = [
+    '# Jane Example', '',
+    '## **[Technical Platforms & Tools]{.smallcaps}**', '',
+    '- Cloud: AWS, Kubernetes, Terraform', '',
+    '## **[Professional Experience]{.smallcaps}**', '',
+    '### **Acme Technologies** --- New York, NY', '',
+    'Migrated the PostgreSQL fleet.',
+  ].join('\n');
+  const pandocSkillsResult = classifySkillGaps(['AWS', 'Kubernetes', 'Terraform', 'PostgreSQL'], pandocSkillsCv);
+  eq('a bold + span "Technical Platforms & Tools" heading is a named skills section',
+    pandocSkillsResult.existing.sort(), ['AWS', 'Kubernetes', 'Terraform']);
+  eq('a level-3 employer named "... Technologies" is not a skills section',
+    pandocSkillsResult.supportedByResume, ['PostgreSQL']);
+  for (const heading of ['## Technical Skills', '## **[Skills]{.smallcaps}**', '### Core Skills', '## Technologies', '# Tech Stack', '## Skills {#skills}']) {
+    eq(`"${heading}" opens a named skills section`,
+      classifySkillGaps(['Python'], `${heading}\nPython\n`).existing, ['Python']);
+  }
+  const twoSectionsCv = '## Skills\nPython\n\n## Experience\nUsed Docker daily.\n\n## Tools\nTerraform\n';
+  const twoSectionsResult = classifySkillGaps(['Python', 'Terraform', 'Docker'], twoSectionsCv);
+  eq('every skills section counts, not just the first', twoSectionsResult.existing.sort(), ['Python', 'Terraform']);
+  eq('prose between two skills sections stays prose', twoSectionsResult.supportedByResume, ['Docker']);
 
   // Regression: requirement headings that are full sentences or bare
   // uppercase rather than the noun forms ("Requirements", "Qualifications").
@@ -758,6 +799,42 @@ Maintained the internal Fabrikam-SDK build.
   eq('unknown token present in CV still matches (word-boundary fallback preserved)', freeResult.existing.includes('Fabrikam-SDK'), true);
   eq('unknown token absent from CV is still a real gap', freeResult.gap.includes('Contoso-Cloud'), true);
 
+  // Regression: a known skill is decided by the canonical sets alone. Falling
+  // through to the word-boundary search matched the JD's spelling in prose that
+  // skill-extract declines to count, so a marketing CV "fine-tuning the funnel"
+  // read as support for an ML requirement, and Go and SAFe had the same hole.
+  const everydayCv = `
+# Skills
+HubSpot, Google Ads
+
+# Experience
+Fine-tuning the funnel to lift ROAS. Willing to go the extra mile; a safe pair of hands.
+`;
+  const everydayResult = classifySkillGaps(['Fine-tuning', 'Go', 'SAFe'], everydayCv);
+  eq('CV prose "Fine-tuning the funnel" leaves JD "Fine-tuning" a gap', everydayResult.gap.includes('Fine-tuning'), true);
+  eq('CV prose "go the extra mile" leaves JD "Go" a gap', everydayResult.gap.includes('Go'), true);
+  eq('CV prose "a safe pair of hands" leaves JD "SAFe" a gap', everydayResult.gap.includes('SAFe'), true);
+
+  const mlCv = `
+# Skills
+PyTorch, Fine-tuning, RAG
+
+# Experience
+Shipped a support assistant on Llama 3.
+`;
+  eq('a Skills entry "Fine-tuning" still satisfies JD "Fine-tuning"', classifySkillGaps(['Fine-tuning'], mlCv).existing, ['Fine-tuning']);
+
+  // The edge of "known": a token that only contains a skill is not that skill.
+  // "React.js" extracts as React, so the canonical sets never hold "React.js";
+  // counting it as known left a CV that lists it with a false gap.
+  const reactJdSkills = extractJdSkills('## Requirements\n- React.js and TypeScript\n');
+  eq('the JD tokenizer yields "React.js" as one token', reactJdSkills, ['React.js', 'TypeScript']);
+  eq(
+    'JD "React.js" is satisfied by a Skills entry "React.js"',
+    classifySkillGaps(reactJdSkills, '# Skills\nReact.js, TypeScript\n').existing,
+    ['React.js', 'TypeScript']
+  );
+
   // Regression (#2278): a JD the extractor cannot read returns zero skills, and
   // the three buckets then print exactly like "checked, no gaps found".
   // modes/pdf.md Step 4 uses this output as a gate, so the two cases have to be
@@ -905,6 +982,14 @@ if (selfTestMode) {
     console.log(`  ✅ Already in Skills section:   ${result.existing.join(', ') || '(none)'}`);
     console.log(`  📝 Mentioned in resume prose:   ${result.supportedByResume.join(', ') || '(none)'}`);
     console.log(`  ⚠️  Real gaps (not found anywhere): ${result.gap.join(', ') || '(none)'}`);
+    // Without a recognized skills heading every match lands in "prose", which
+    // reads like a CV that lists no skills rather than a heading this script
+    // did not recognize (#4879).
+    if (!splitSkillsSection(cvText).namedSkillsText.trim()) {
+      console.log('');
+      console.log('  ℹ️  No skills section recognized in cv.md (a heading containing "Skills", or a top-level');
+      console.log('     "Tools" / "Technologies" / "Tech Stack" heading), so nothing can be "already in Skills section".');
+    }
 
     // An empty three-bucket summary is indistinguishable from a clean bill of
     // health, and modes/pdf.md Step 4 treats this output as a gate. Say out loud

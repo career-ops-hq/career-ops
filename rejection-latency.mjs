@@ -56,17 +56,16 @@ import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
   ? join(DATA_ROOT, 'data/active-interviews.md')
   : join(DATA_ROOT, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
+export const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
@@ -132,14 +131,6 @@ const cliCourtesyDays = argValue('--courtesy-days');
 const cliToday = argValue('--today');
 
 // --- Date helpers (same conventions as detect-reposts.mjs) ---
-export function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 // Extract a YYYY-MM-DD date from a free-form Date/Time cell
 // (e.g. "2026-06-01 14:00 EST" → 2026-06-01). Returns null when the cell
 // contains no valid date.

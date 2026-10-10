@@ -123,7 +123,7 @@ Sometimes a real interview surfaces a story the candidate hadn't prepared. If th
 
 > "You mentioned [X] in your answer — that sounds like it could become a proper STAR+R story. Want to build it out now while it's fresh?"
 
-If yes, build it out as a STAR+R story (Situation, Task, Action, Result, Reflection) and append it to `interview-prep/story-bank.md`.
+If yes, build it out as a STAR+R story (Situation, Task, Action, Result, Reflection) and append it to `interview-prep/story-bank.md` as a `### ` block in the exact format of `templates/story-bank.template.md` (create the file from that template if it is missing). Keep the labels in English, always include `**A (Action):**`, and add no `**Provenance:**` line.
 
 ---
 

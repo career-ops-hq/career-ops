@@ -116,6 +116,30 @@ func TestRenderAppLineIncludesDateColumn(t *testing.T) {
 	if !strings.Contains(line, "#42") {
 		t.Fatalf("expected rendered line to include tracker number marker, got %q", line)
 	}
+
+	// With ledger history the DATE column shows the latest status change,
+	// not the tracker's evaluation date.
+	line = pm.renderAppLine(model.CareerApplication{
+		Number:     42,
+		Date:       "2026-04-13",
+		StatusDate: "2026-05-20",
+		Company:    "Anthropic",
+		Role:       "Forward Deployed Engineer",
+		Status:     "Interview",
+		Score:      4.5,
+		HasScore:   true,
+	}, false)
+	if !strings.Contains(line, "2026-05-20") || strings.Contains(line, "2026-04-13") {
+		t.Fatalf("expected DATE column to show the status-change date over the tracker date, got %q", line)
+	}
+}
+
+func TestColumnHeaderReadsDate(t *testing.T) {
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), nil, model.PipelineMetrics{}, "..", 120, 40)
+	header := pm.renderColumnHeader()
+	if !strings.Contains(header, "DATE") || strings.Contains(header, "APPLIED") {
+		t.Fatalf("expected the date column header to read DATE, not APPLIED, got %q", header)
+	}
 }
 
 func TestSearchFiltersByCompanyRoleAndNotes(t *testing.T) {

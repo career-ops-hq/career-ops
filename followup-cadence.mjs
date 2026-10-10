@@ -440,10 +440,11 @@ export function addDays(date, days) {
 // below is what the CLI path uses.
 function parseTrackerContent(content) {
   const lines = String(content ?? '').split('\n');
-  const colmap = resolveColumns(lines);
+  const parseOptions = { allowTabs: true, allowIndentation: true };
+  const colmap = resolveColumns(lines, parseOptions);
   const entries = [];
   for (const line of lines) {
-    const row = parseTrackerRow(line, colmap);
+    const row = parseTrackerRow(line, colmap, parseOptions);
     if (row) entries.push(row);
   }
   return entries;

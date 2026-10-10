@@ -14,6 +14,7 @@ import { useExplore } from "@/components/explore/explore-provider";
 import { WorkerCard } from "@/components/jobs/worker-card";
 import { Button } from "@/components/ui/button";
 import { dispatch, type ActionCtx, type DoneInfo } from "@/app/actions/registry";
+import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { scoreNum } from "@/lib/format";
 import { pendingActOpenerStart } from "@/lib/act-envelope.mjs";
 import { cleanMessages } from "@/lib/assistant-history.mjs";
@@ -435,6 +436,7 @@ export function AssistantConsole() {
         const m = jobsRef.current.filter((j) => j.input === url).sort((a, b) => b.startedAt - a.startedAt);
         return m[0];
       },
+      estimateCost: (kind, count) => estimateRunCost(jobsRef.current, kind, count),
       rememberFact: (fact) => {
         fetch("/api/memory", {
           method: "POST",
