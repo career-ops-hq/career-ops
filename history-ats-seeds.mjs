@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import path from 'path';
 import { atsVendorOf } from './ats-vendor.mjs';
-import { detectColumns, extractTrackerReportNumbers, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
+import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { detectColumns, extractCellUrl, extractTrackerReportNumbers, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
@@ -104,7 +105,11 @@ export function parseTrackerAtsSeeds(text, { reportsRoot } = {}) {
     // links to the evaluation report that owns the posting's **URL:** field.
     // Custom trackers may carry URL directly; prefer it but never scrape an
     // arbitrary Notes URL, which may be unrelated evidence.
-    const directUrl = columns.url == null ? null : cells[columns.url];
+    // The URL cell may be a markdown link (#3516): read its HREF through the
+    // shared extractor rather than relying on WEB_URL_RE happening to stop
+    // at the link's closing paren — the same contract every tracker reader
+    // follows, and one regex edit away from breaking if left implicit.
+    const directUrl = columns.url == null ? null : extractCellUrl(cells[columns.url]);
     const reportNumbers = linkedReportNumbers(
       columns.report == null ? '' : cells[columns.report],
       columns.notes == null ? '' : cells[columns.notes],
@@ -121,9 +126,9 @@ export function parseScanHistoryAtsSeeds(text) {
   const seeds = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    const cells = line.split('\t');
-    if (String(cells[0]).trim().toLowerCase() === 'url') continue;
-    const seed = seedOf(cells[4], cells[0], 'scan-history');
+    const row = parseScanHistoryLine(line);
+    if (row.url.trim().toLowerCase() === 'url') continue;
+    const seed = seedOf(row.company, row.url, 'scan-history');
     if (seed) seeds.push(seed);
   }
   return seeds;

@@ -52,7 +52,9 @@ test('--backfill-urls adds a trailing URL column and fills a canonical legacy tr
   const after = readFileSync(env.tracker, 'utf8');
   assert.match(output, /added the URL column/);
   assert.equal(tableLine(after, '| # |'), `${LEGACY_HEADER} URL |`);
-  assert.match(tableLine(after, '| 1 |'), /\| keep \| https:\/\/example\.com\/jobs\/one \|$/);
+  // merge-tracker writes the URL cell as a labelled markdown link (#3516); the
+  // href inside it is the dedup key and is the backfilled value, unchanged.
+  assert.match(tableLine(after, '| 1 |'), /\| keep \| \[example\.com\]\(https:\/\/example\.com\/jobs\/one\) \|$/);
 });
 
 test('migration preserves wider custom-column values and appends URL last', t => {
@@ -71,7 +73,7 @@ test('migration preserves wider custom-column values and appends URL last', t =>
   const row = tableLine(after, '| 7 |');
   assert.equal(tableLine(after, '| # |'), `${header} URL |`);
   assert.match(row, /\| user-owned exact value \| Designer \| Toronto \|/);
-  assert.match(row, /\| do not alter \| 2026-09-20 \| https:\/\/jobs\.example\.org\/acme\/7 \|$/);
+  assert.match(row, /\| do not alter \| 2026-09-20 \| \[jobs\.example\.org\]\(https:\/\/jobs\.example\.org\/acme\/7\) \|$/);
   assert.equal(row.split('|').length, tableLine(after, '| # |').split('|').length);
 });
 

@@ -59,6 +59,7 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { unescapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
@@ -104,15 +105,6 @@ const vcfPathArg = (() => {
 const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
 
 // --- Phonebook parsing (TSV) ---
-export function escapeFormulaCell(value) {
-  const cell = String(value ?? '');
-  return /^'*[=+\-@]/.test(cell) ? `'${cell}` : cell;
-}
-
-export function unescapeFormulaCell(value) {
-  const cell = String(value ?? '');
-  return cell.replace(/^'(?='*[=+\-@])/, '');
-}
 
 // line: {name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#|-}\t{notes}
 // Cells are split BEFORE trimming the line (only the trailing \r is stripped):

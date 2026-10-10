@@ -1,0 +1,115 @@
+{
+  "_comment": "One table, two readers. Node (tracker-parse.mjs extractCellUrl, asserted in tracker-columns-tests.mjs) and Go (dashboard/internal/data extractCellURL, asserted in career_test.go) must each map every cell to this href. Generated from the Node reader; a change to either reader that breaks parity fails CI. #3516 / #3854.",
+  "cases": [
+    {
+      "name": "bare URL (pre-#3516 row)",
+      "cell": "https://jobs.ashbyhq.com/temporal/8a65908d",
+      "href": "https://jobs.ashbyhq.com/temporal/8a65908d"
+    },
+    {
+      "name": "linked, ATS label",
+      "cell": "[ashby](https://jobs.ashbyhq.com/temporal/8a65908d)",
+      "href": "https://jobs.ashbyhq.com/temporal/8a65908d"
+    },
+    {
+      "name": "linked, host label",
+      "cell": "[careers.snowflake.com](https://careers.snowflake.com/us/en/job/4735b223)",
+      "href": "https://careers.snowflake.com/us/en/job/4735b223"
+    },
+    {
+      "name": "query string survives",
+      "cell": "[greenhouse](https://boards.greenhouse.io/acme/jobs/9?gh_jid=123)",
+      "href": "https://boards.greenhouse.io/acme/jobs/9?gh_jid=123"
+    },
+    {
+      "name": "balanced parens survive whole",
+      "cell": "[example.com](https://example.com/jobs/eng(remote))",
+      "href": "https://example.com/jobs/eng(remote)"
+    },
+    {
+      "name": "square brackets allowed in the destination",
+      "cell": "[example.com](https://example.com/[team]/eng(remote))",
+      "href": "https://example.com/[team]/eng(remote)"
+    },
+    {
+      "name": "angle-bracketed destination",
+      "cell": "[example.com](<https://example.com/jobs/1>)",
+      "href": "https://example.com/jobs/1"
+    },
+    {
+      "name": "encoded space, as the writer emits it",
+      "cell": "[example.com](https://example.com/jobs/a%20b)",
+      "href": "https://example.com/jobs/a%20b"
+    },
+    {
+      "name": "empty cell",
+      "cell": "",
+      "href": ""
+    },
+    {
+      "name": "em-dash placeholder passes through",
+      "cell": "—",
+      "href": "—"
+    },
+    {
+      "name": "N/A placeholder passes through",
+      "cell": "N/A",
+      "href": "N/A"
+    },
+    {
+      "name": "non-http link is not a posting URL",
+      "cell": "[jd](local:jds/acme.md)",
+      "href": "[jd](local:jds/acme.md)"
+    },
+    {
+      "name": "adjacent links: first wins",
+      "cell": "[a](https://x.com/1)[b](https://y.com/2)",
+      "href": "https://x.com/1"
+    },
+    {
+      "name": "adjacent links, first angle-bracketed",
+      "cell": "[x](<https://x.com/1>)[y](https://y.com)",
+      "href": "https://x.com/1"
+    },
+    {
+      "name": "first http link wins past a non-http one",
+      "cell": "[x](local:jds/a.md)[y](https://y.com/2)",
+      "href": "https://y.com/2"
+    },
+    {
+      "name": "angle-bracketed destination with a space",
+      "cell": "[x.com](<https://x.com/a b>)",
+      "href": "https://x.com/a b"
+    },
+    {
+      "name": "unmatched close paren ends the link",
+      "cell": "[x.com](https://x.com/a)b)",
+      "href": "https://x.com/a"
+    },
+    {
+      "name": "unmatched open paren: no link at all",
+      "cell": "[x.com](https://x.com/a(b)",
+      "href": "[x.com](https://x.com/a(b)"
+    },
+    {
+      "name": "escaped paren in the destination is undone",
+      "cell": "[x.com](https://x.com/a\\)b)",
+      "href": "https://x.com/a)b"
+    },
+    {
+      "name": "escaped bracket in the label",
+      "cell": "[a\\]b](https://x.com/1)",
+      "href": "https://x.com/1"
+    },
+    {
+      "name": "link title is not part of the href",
+      "cell": "[x](https://x.com/1 \"title\")",
+      "href": "https://x.com/1"
+    },
+    {
+      "name": "scheme match is case-insensitive",
+      "cell": "[x](HTTPS://X.COM/1)",
+      "href": "HTTPS://X.COM/1"
+    }
+  ]
+}

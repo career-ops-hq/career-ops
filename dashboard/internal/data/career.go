@@ -1,7 +1,6 @@
 package data
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/santifer/career-ops/dashboard/internal/model"
 )
@@ -26,9 +26,12 @@ var (
 	reArchetypeColon = regexp.MustCompile(`(?i)\*\*(?:Arquetipo|Archetype):\*\*\s*(.+)`)
 	reArchetypeYAML  = regexp.MustCompile(`(?m)^archetype:\s*"?([^"\n]+)"?\s*$`)
 	reReportURL      = regexp.MustCompile(`(?m)^\*\*URL:\*\*\s*(https?://\S+)`)
-	reBatchID        = regexp.MustCompile(`(?m)^\*\*Batch ID:\*\*\s*(\d+)`)
-	reDiscardReasons = regexp.MustCompile(`(?s)discard_reasons:\s*\n((?:\s*-\s*.+?\n)+)`)
-	reDiscardItem    = regexp.MustCompile(`\s*-\s*([^\n]+)`)
+	// Backslash escapes a markdown link destination may carry; mirrors the
+	// unescape in tracker-parse.mjs markdownLinkDestination().
+	reMarkdownDestEscape = regexp.MustCompile(`\\([\\()<> ])`)
+	reBatchID            = regexp.MustCompile(`(?m)^\*\*Batch ID:\*\*\s*(\d+)`)
+	reDiscardReasons     = regexp.MustCompile(`(?s)discard_reasons:\s*\n((?:\s*-\s*.+?\n)+)`)
+	reDiscardItem        = regexp.MustCompile(`\s*-\s*([^\n]+)`)
 )
 
 // resolveReportPath converts a report link from the tracker into a path
@@ -142,9 +145,10 @@ func ParseApplications(careerOpsPath string) []model.CareerApplication {
 			Date:                 at("date"),
 			Company:              at("company"),
 			Role:                 at("role"),
-			JobURL:               at("url"),
+			JobURL:               extractCellURL(at("url")),
 			Status:               at("status"),
 			HasPDF:               strings.Contains(at("pdf"), "\u2705"),
+			Location:             CanonicalizeLocation(at("location")),
 		}
 
 		// Parse score from the Score column.
@@ -640,6 +644,141 @@ func splitTrackerRow(line string) []string {
 	return fields
 }
 
+// extractCellURL returns the posting URL a tracker URL cell points at, in
+// either written form: the href of the first http(s) markdown link, or the cell
+// verbatim when it holds none (a bare URL on an older tracker, or a "—"/"N/A"
+// placeholder the callers already treat as absent).
+//
+// This is a PORT of extractCellUrl / parseMarkdownLinks / markdownLinkDestination
+// in tracker-parse.mjs, not an approximation of it. It used to be two regexes,
+// and they disagreed with Node at the edges: a hand-edited cell holding two
+// adjacent links read as one malformed URL spanning both. The JobURL tier and
+// merge-tracker's dedup key must agree on a row's URL, so the boundary rules —
+// first link wins, balanced parentheses kept, `[`/`]` allowed in the
+// destination, the same escapes undone — are the same code, not a lookalike.
+//
+// This reader is tier 0 of the JobURL enrichment chain since #3452, and a
+// markdown-wrapped cell it could not read would not error — it would look like
+// a row with no URL and silently fall through to the report/scan-history tiers,
+// which resolve a DIFFERENT posting often enough to matter.
+func extractCellURL(cellValue string) string {
+	value := strings.TrimSpace(cellValue)
+	if value == "" {
+		return ""
+	}
+	for _, link := range parseMarkdownLinks(value) {
+		target := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(link.target), "<"), ">")
+		lower := strings.ToLower(target)
+		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+			return target
+		}
+	}
+	return value
+}
+
+type markdownLink struct {
+	label  string
+	target string
+}
+
+// parseMarkdownLinks returns every markdown link in value, in order. Mirrors
+// parseMarkdownLinks in tracker-parse.mjs: the label ends at the first
+// unescaped `]`, it must be followed directly by `(`, and the destination runs
+// to the `)` that balances it, so `(remote)` inside a href survives whole.
+// Works on runes; every delimiter involved is ASCII.
+func parseMarkdownLinks(value string) []markdownLink {
+	r := []rune(value)
+	var links []markdownLink
+	cursor := 0
+	for cursor < len(r) {
+		labelStart := -1
+		for i := cursor; i < len(r); i++ {
+			if r[i] == '[' {
+				labelStart = i
+				break
+			}
+		}
+		if labelStart == -1 {
+			break
+		}
+		labelEnd := -1
+		for i := labelStart + 1; i < len(r); i++ {
+			if r[i] == '\\' {
+				i++
+			} else if r[i] == ']' {
+				labelEnd = i
+				break
+			}
+		}
+		if labelEnd == -1 || labelEnd+1 >= len(r) || r[labelEnd+1] != '(' {
+			cursor = labelStart + 1
+			continue
+		}
+		depth, linkEnd := 1, -1
+		for i := labelEnd + 2; i < len(r); i++ {
+			if r[i] == '\\' {
+				i++
+			} else if r[i] == '(' {
+				depth++
+			} else if r[i] == ')' {
+				depth--
+				if depth == 0 {
+					linkEnd = i
+					break
+				}
+			}
+		}
+		if linkEnd == -1 {
+			cursor = labelStart + 1
+			continue
+		}
+		if target, ok := markdownLinkDestination(string(r[labelEnd+2 : linkEnd])); ok {
+			links = append(links, markdownLink{label: string(r[labelStart+1 : labelEnd]), target: target})
+		}
+		cursor = linkEnd + 1
+	}
+	return links
+}
+
+// markdownLinkDestination extracts the destination from the text between `](`
+// and its balancing `)`: an angle-bracketed `<...>` form, or the run up to the
+// first whitespace outside parentheses. Mirrors markdownLinkDestination in
+// tracker-parse.mjs, including undoing the same escapes.
+func markdownLinkDestination(raw string) (string, bool) {
+	r := []rune(strings.TrimLeftFunc(raw, unicode.IsSpace))
+	if len(r) > 0 && r[0] == '<' {
+		for i := 1; i < len(r); i++ {
+			if r[i] == '\\' {
+				i++
+			} else if r[i] == '>' {
+				return reMarkdownDestEscape.ReplaceAllString(string(r[1:i]), "$1"), true
+			}
+		}
+		return "", false
+	}
+	depth, end := 0, len(r)
+	for i := 0; i < len(r); i++ {
+		switch {
+		case r[i] == '\\':
+			i++
+		case r[i] == '(':
+			depth++
+		case r[i] == ')' && depth > 0:
+			depth--
+		case unicode.IsSpace(r[i]) && depth == 0:
+			end = i
+		}
+		if end != len(r) {
+			break
+		}
+	}
+	destination := strings.TrimSpace(string(r[:end]))
+	if destination == "" {
+		return "", false
+	}
+	return reMarkdownDestEscape.ReplaceAllString(destination, "$1"), true
+}
+
 // trackerHeaderAliases maps a lowercased header cell to a canonical field name.
 // Mirrors tracker-aliases.json, which Node and web load directly. Keep the full
 // table in sync; TestTrackerHeaderAliasesMatchSharedJSON guards exact parity.
@@ -713,251 +852,30 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
 }
 
-// UpdateApplicationStatusAndNotes atomically updates both the Status cell and
-// the Notes cell for an application row. It is used by the discard reason
-// picker (Issue 1380) to commit `DISCARD: <reason>` alongside the new status
-// in a single file write, preventing a second partial update from leaving the
-// tracker in a half-written state.
-//
-// notesAppend is appended (with a space separator if notes are non-empty) to
-// whatever the Notes cell already contains. Pass an empty string to leave
-// notes unchanged.
-func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerApplication, newStatus, notesAppend string) (returnErr error) {
+// UpdateApplicationStatusAndNotes delegates to the canonical writer so status,
+// notes, the transition ledger and Applied follow-up seeding share one path.
+// Notes use the CLI's idempotent "; " separator; empty notes are unchanged.
+// Only the child takes the tracker lock: holding it here would deadlock.
+func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerApplication, newStatus, notesAppend string) error {
 	if strings.ContainsAny(notesAppend, "|\r\n\t") {
 		return fmt.Errorf("notes cannot contain table delimiters or line breaks")
 	}
 	if !isCanonicalStatusName(newStatus) {
 		return fmt.Errorf("unrecognized status: %q", newStatus)
 	}
-	filePath := resolveTrackerPath(careerOpsPath)
-	filePath, err := canonicalPath(filePath)
-	if err != nil {
-		return fmt.Errorf("resolve tracker path: %w", err)
-	}
-
-	lock, err := acquireTrackerLock(filePath, defaultTrackerLockOptions())
-	if err != nil {
-		return fmt.Errorf("acquire tracker lock: %w", err)
-	}
-	defer func() {
-		if err := lock.release(); err != nil {
-			releaseErr := fmt.Errorf("release tracker lock: %w", err)
-			if returnErr == nil {
-				returnErr = releaseErr
-			} else {
-				returnErr = errors.Join(returnErr, releaseErr)
-			}
-		}
-	}()
-
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-
-	lines := strings.Split(string(content), "\n")
-	cols := resolveTrackerColumns(lines)
-	statusIdx, statusOk := cols["status"]
-	if !statusOk {
-		return fmt.Errorf("status column not found in tracker")
-	}
-	notesIdx, notesOk := cols["notes"]
-	if notesAppend != "" && !notesOk {
-		return fmt.Errorf("notes column not found in tracker, cannot append notes")
-	}
-
-	reportIdx, reportOk := cols["report"]
-	if !reportOk || app.ReportNumber == "" {
+	if app.ReportNumber == "" {
 		return fmt.Errorf("application has no report identity; use set-status.mjs --row to select a tracker row")
 	}
-
-	// Resolve exactly one target under the lock before changing any cells.
-	// A reference in Notes is not an application's Report identity.
-	target := -1
-	for i, line := range lines {
-		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
-			continue
-		}
-		cells := splitTrackerRow(line)
-		if reportIdx < 0 || reportIdx >= len(cells) {
-			continue
-		}
-		matches := reReportLink.FindAllStringSubmatch(cells[reportIdx], -1)
-		hasTarget := false
-		for _, match := range matches {
-			if match[1] == app.ReportNumber {
-				hasTarget = true
-				break
-			}
-		}
-		if !hasTarget {
-			continue
-		}
-		if len(matches) != 1 || matches[0][0] != strings.TrimSpace(cells[reportIdx]) {
-			return fmt.Errorf("malformed report cell for report %s: expected exactly one report link", app.ReportNumber)
-		}
-		if target >= 0 {
-			return fmt.Errorf("ambiguous application: report %s occurs in multiple rows", app.ReportNumber)
-		}
-		target = i
-	}
-
-	if target < 0 {
-		return fmt.Errorf("application not found: report %s", app.ReportNumber)
-	}
-	updated, ok := replaceStatusInLine(lines[target], newStatus, statusIdx)
-	if !ok {
-		return fmt.Errorf("failed to replace status: mapped status cell is missing or unrecognized")
-	}
-	if notesAppend != "" {
-		updated, ok = appendNotesInLine(updated, notesAppend, notesIdx)
-		if !ok {
-			return fmt.Errorf("failed to append notes: notes column index %d out of bounds", notesIdx)
-		}
-	}
-	lines[target] = updated
-
-	return writeFileAtomic(filePath, []byte(strings.Join(lines, "\n")))
+	return runStatusWriter(careerOpsPath, app.ReportNumber, newStatus, notesAppend)
 }
 
-// appendNotesInLine appends text to the Notes cell of a tracker row without
-// disturbing any other cell. notesField is the 0-based column index returned
-// by resolveTrackerColumns.
-func appendNotesInLine(line, text string, notesField int) (string, bool) {
-	if notesField < 0 {
-		return line, false
-	}
-	if strings.Contains(line, "\t") {
-		prefix, body, found := strings.Cut(line, "|")
-		if !found {
-			return line, false
-		}
-		cells := strings.Split(body, "\t")
-		if notesField < len(cells) {
-			cell := cells[notesField]
-			suffix := ""
-			// The final tab-separated field may include the table's closing
-			// pipe. Keep it outside the Notes value when appending text.
-			if notesField == len(cells)-1 {
-				trimmed := strings.TrimRight(cell, " \r")
-				if strings.HasSuffix(trimmed, "|") {
-					end := len(trimmed) - 1
-					suffix = cell[end:]
-					cell = cell[:end]
-				}
-			}
-			value := strings.TrimSpace(strings.TrimSpace(cell) + " " + text)
-			cells[notesField] = spliceCellValue(cell, value) + suffix
-			return prefix + "|" + strings.Join(cells, "\t"), true
-		}
-		return line, false
-	}
-
-	segments := strings.Split(line, "|")
-	end := len(segments)
-	// Exclude exactly one closing delimiter, retaining an explicit empty
-	// final cell (||). Trimming all outer pipes loses that distinction.
-	if strings.TrimSpace(segments[end-1]) == "" {
-		end--
-	}
-	if notesField+1 < end {
-		old := strings.TrimSpace(segments[notesField+1])
-		if old == "" {
-			segments[notesField+1] = " " + text + " "
-		} else {
-			segments[notesField+1] = " " + old + " " + text + " "
-		}
-		return strings.Join(segments, "|"), true
-	}
-	return line, false
-}
-
-// replaceStatusInLine rewrites only the Status cell of a tracker row, leaving
-// every other cell untouched. The previous implementation used
-// strings.Replace(line, oldStatus, …, 1), which replaces the first occurrence of
-// the status text anywhere in the row — so a status word appearing as a
-// substring of an earlier cell (e.g. Company "Applied Materials") was rewritten
-// instead of the Status cell, corrupting that cell while the status appeared to
-// stay unchanged (#1180). The mapped column must contain a recognized status;
-// another cell containing a status word is never a fallback target.
-//
-// statusField is the Status column index in splitTrackerRow field space (5 in
-// the legacy layout), resolved from the table header so a customized layout
-// (e.g. an inserted Location column) targets the right cell.
-func replaceStatusInLine(line, newStatus string, statusField int) (string, bool) {
-	// Mixed "| " + tab-separated format (mirrors ParseApplications). The body is
-	// tab-split, so cell index equals the field index.
-	if strings.Contains(line, "\t") {
-		prefix, body, found := strings.Cut(line, "|")
-		if !found {
-			return line, false
-		}
-		// A reordered Status field can be last; the closing table pipe is
-		// formatting, not part of the status value.
-		suffix := ""
-		if trimmed := strings.TrimRight(body, " \r"); strings.HasSuffix(trimmed, "|") {
-			end := len(trimmed) - 1
-			suffix, body = body[end:], body[:end]
-		}
-		cells := strings.Split(body, "\t")
-		if idx := statusCellIndex(cells, statusField); idx >= 0 {
-			cells[idx] = spliceCellValue(cells[idx], newStatus)
-			return prefix + "|" + strings.Join(cells, "\t") + suffix, true
-		}
-		return line, false
-	}
-
-	// Pure pipe format. strings.Split keeps the segments between pipes; content
-	// cell N is segment N+1 (segment 0 is the empty text before the leading
-	// pipe), so the Status field maps to segment statusField+1.
-	segments := strings.Split(line, "|")
-	if idx := statusCellIndex(segments, statusField+1); idx >= 0 {
-		segments[idx] = spliceCellValue(segments[idx], newStatus)
-		return strings.Join(segments, "|"), true
-	}
-	return line, false
-}
-
-// statusCellIndex validates only the mapped Status column. A stale UI snapshot
-// may overwrite a recognized disk status, as before, but cannot redirect the
-// write to a lookalike in Company or Notes. Invalid cells fail without a write.
-func statusCellIndex(cells []string, canonicalIdx int) int {
-	if canonicalIdx >= 0 && canonicalIdx < len(cells) && isCanonicalStatusValue(cells[canonicalIdx]) {
-		return canonicalIdx
-	}
-	return -1
-}
-
-// isCanonicalStatusValue reports whether a cell's content reads as one of the
-// known tracker statuses (in any accepted spelling/language), i.e. whether it
-// is safe to treat the cell as the Status column.
-func isCanonicalStatusValue(cell string) bool {
-	return isCanonicalStatusName(NormalizeStatus(cell))
-}
-
-// New writes accept canonical names only. Historical disk cells still use
-// NormalizeStatus above; its permissive aliases must not authorize new values.
+// Reject malformed UI input cheaply; the writer validates against states.yml.
 func isCanonicalStatusName(status string) bool {
 	switch strings.ToLower(status) {
 	case "evaluated", "applied", "responded", "interview", "offer", "hired", "rejected", "discarded", "skip":
 		return true
 	}
 	return false
-}
-
-// spliceCellValue swaps a cell's inner value while preserving its surrounding
-// whitespace, so "| Applied |" becomes "| Interview |" rather than "|Interview|".
-func spliceCellValue(cell, newVal string) string {
-	trimmed := strings.TrimSpace(cell)
-	if trimmed == "" {
-		if len(cell) >= 2 {
-			half := len(cell) / 2
-			return cell[:half] + newVal + cell[half:]
-		}
-		return " " + newVal + " "
-	}
-	start := strings.Index(cell, trimmed)
-	return cell[:start] + newVal + cell[start+len(trimmed):]
 }
 
 // cleanTableCell removes trailing pipes and whitespace from a table cell value.
