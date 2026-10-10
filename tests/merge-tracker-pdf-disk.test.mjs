@@ -1,5 +1,6 @@
 // tests/merge-tracker-pdf-disk.test.mjs — merge-tracker's own PDF sync must not
-// set the flag from a manifest row whose PDF is missing or is a cover letter (#4777).
+// set the flag from a manifest row whose PDF is missing, is a cover letter, or
+// sits outside output/ (#4777).
 
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { join } from 'path';
@@ -19,10 +20,11 @@ const TRACKER_HEADER = [
 
 const seed = '| 1 | 2026-01-01 | Acme | Eng | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | |\n';
 
-// A manifest row whose PDF is gone, or that is a cover letter, must not set the flag (#4777)
-for (const [label, manifestRow, writeFile] of [
-  ['missing PDF', '1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\tcv', false],
-  ['cover-letter row', '1\toutput/1-cover.pdf\toutput/1.html\ta4\t2026-01-01\tcover', true],
+// A manifest row whose PDF is gone, is a cover letter, or escapes output/ must not set the flag (#4777)
+for (const [label, manifestRow, fileOnDisk] of [
+  ['missing PDF', '1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\tcv', null],
+  ['cover-letter row', '1\toutput/1-cover.pdf\toutput/1.html\ta4\t2026-01-01\tcover', 'output/1-cover.pdf'],
+  ['path outside output/', '1\toutput/../outside.pdf\toutput/1.html\ta4\t2026-01-01\tcv', 'outside.pdf'],
 ]) {
   const workGone = mkdtempSync(join(tmpdir(), 'cops-merge-pdf-sync-gone-'));
   try {
@@ -32,10 +34,8 @@ for (const [label, manifestRow, writeFile] of [
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, TRACKER_HEADER + seed);
     writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\tkind\n' + manifestRow + '\n');
-    if (writeFile) {
-      mkdirSync(join(workGone, 'output'), { recursive: true });
-      writeFileSync(join(workGone, 'output', '1-cover.pdf'), 'pdf-content');
-    }
+    mkdirSync(join(workGone, 'output'), { recursive: true });
+    if (fileOnDisk) writeFileSync(join(workGone, fileOnDisk), 'pdf-content');
     execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
