@@ -323,115 +323,124 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
 }
 
 /**
- * The `(draft)` authoring marker, and the discriminator that replaced
- * `/^##\s+H\)\s*Draft Application Answers\s*$/m`.
+ * The locale-invariant discriminator for the evaluation's draft-answers block.
  *
- * NEITHER the letter NOR the name identifies this block. Both move with the
- * locale: of the 19 evaluation modes, 3 write the English name under `H)`
- * (canonical, `ar`, `ja`), 5 write a translated name under `H)`
- * (`es ru tr zh zh-TW`), and 11 write a translated name under `G)`
- * (`da de fr hi id it ko nl pl pt ua`). Matching one exact heading found the
- * block in 3 of 19, so in sixteen languages `modes/apply.md` silently
- * regenerated every answer the evaluation had already drafted and paid for.
+ * REPLACES a `/^## H\) Draft Application Answers$/` heading match, which found
+ * the block in 5 of the 19 evaluation modes and returned `null` — documented as
+ * "the report has no block" — for the other 14. Neither half of that heading is
+ * stable: the LETTER has been both `G)` (12 modes, pending the #3669 re-sync)
+ * and `H)` (7 modes), and the NAME is user-facing prose that every localized
+ * mode translates. The marker is the one part of the block no mode translates or
+ * renumbers, so this reader works before and after that re-sync. Specified in
+ * `modes/oferta.md` under "Draft-answers marker (required)".
  *
- * A trailing parenthetical marker is the signal instead, which is the
- * convention `web/src/lib/report-sections.mjs` already established for the
- * verdict callout: `(lead)` / `(verdict)` are stripped for display precisely
- * because they are deliberate authoring signals that read the same in every
- * language. `(draft)` is the same shape for the same reason; the evaluation
- * modes write it on this block (#4272).
- *
- * The English name is still accepted on its own, under any letter, for the
- * reports users already have on disk: those were written before any mode
- * emitted the marker, and they are the corpus `apply` reads from today.
- * A translated heading in an OLD report stays unreadable: no discriminator
- * can recover it without guessing, and guessing here re-submits a mispaired
- * answer to an employer. New evaluations in every language carry the marker.
+ * Placement is load-bearing, not cosmetic: a marker counts only when its
+ * preceding non-blank line is an `##` heading. Reports carry the posting's full
+ * text in `## Job Description (archived verbatim)`, which is untrusted external
+ * content (AGENTS.md); without the adjacency rule, a JD containing this literal
+ * would hand the posting's own words back as the candidate's draft answers, and
+ * `modes/apply.md` adapts whatever comes back into a real submission.
  */
-const DRAFT_ANSWERS_MARKER_RE = /\(draft\)\s*$/i;
-const DRAFT_ANSWERS_NAME_RE = /^draft application answers$/i;
-// Same grammar as report-sections.mjs' HEADING_PREFIX: a bare letter needs a
-// real delimiter, or ordinary prose loses its first word.
-const HEADING_PREFIX_RE = /^\s*(?:Block\s+([A-Z])(?:[).:]\s*|\s+(?:[—–-]+\s*)?)|([A-Z])[).:]\s*)/i;
-// The draft-answers block's own marker. Deliberately tighter than
-// HEADING_PREFIX_RE, which also accepts `H:` and `Block H`: every mode that
-// defines this block writes `## H)`, so the wider grammar would only let an
-// unrelated `H:` section be read as draft answers (#4400 review).
-const DRAFT_ANSWERS_LETTER_RE = /^H\)\s*(.*)$/i;
+const DRAFT_ANSWERS_MARKER = /^<!--[ \t]*career-ops:draft-answers[ \t]*-->[ \t]*$/m;
 
 /**
- * Locate the draft-answers heading: the first `## ` heading carrying the
- * `(draft)` marker, or failing that the first one whose name, with the author
- * letter and any marker stripped, is the canonical English one.
- * @param {string} report Report markdown, newlines already normalized.
- * @returns {{index:number, 0:string} | null} A match-like object, or null.
+ * Legacy path for reports written before the marker existed. It is unambiguous,
+ * so it costs nothing to keep, but it recovers English reports only — which is
+ * why it is the fallback and not the discriminator. Non-English reports already
+ * on disk stay unreadable: recognizing them would mean guessing at a translated
+ * heading, and picking the wrong BLOCK carries the same mispairing risk the body
+ * parser below refuses to take, one level up.
  */
-function findDraftAnswersHeading(report) {
-  /** @type {RegExpMatchArray[]} */
-  // Horizontal whitespace only. `\s+` also matches the newline, so a bare `##`
-  // line consumed it and captured the NEXT line as the heading text. With the
-  // letter rule below, `##` followed by `H) Internal Notes` then read that
-  // section's bold text as draft answers (#4400 review).
-  const headings = [...report.matchAll(/^##[ \t]+(.+?)\s*$/gm)];
-  const marked = headings.find(h => DRAFT_ANSWERS_MARKER_RE.test(h[1]));
-  if (marked) return marked;
-  const named = headings.find(h => DRAFT_ANSWERS_NAME_RE.test(
-    h[1].replace(DRAFT_ANSWERS_MARKER_RE, '').replace(HEADING_PREFIX_RE, '').trim(),
-  ));
-  if (named) return named;
-  // Last resort, and the only path that reads a TRANSLATED heading (#4400).
-  // Neither rule above fires on one today: no mode emits the `(draft)` marker
-  // (`git grep '(draft)' -- 'modes/*'` is empty), and the name rule is the
-  // English words, which five shipped modes translate — modes/es, modes/ru,
-  // modes/tr, modes/zh and modes/zh-TW. For those the block silently returned
-  // null, which is indistinguishable from a report that has no Block H.
-  //
-  // The letter is the structural part every mode keeps: `modes/oferta.md`
-  // defines `H)` as the draft-answers block and each translation renders the
-  // title only. It is deliberately LAST so the marker and the English name stay
-  // authoritative where they apply, and it requires a non-empty title so a bare
-  // `## H)` does not qualify.
-  return headings.find(h => Boolean(DRAFT_ANSWERS_LETTER_RE.exec(h[1])?.[1]?.trim())) ?? null;
+const CANONICAL_DRAFT_HEADING = /^##\s+H\)\s*Draft Application Answers\s*$/m;
+
+/**
+ * The report's JD archive, which is where untrusted text lives.
+ *
+ * Kept identical to `JD_HEADING_RE` in `check-jd-archive.mjs` (the canonical
+ * heading is `## Job Description (archived verbatim)`; the suffix is optional).
+ * Deliberately NOT imported from there: that module resolves the data root, the
+ * tracker path and the states file at import time, which is far too much to drag
+ * into a parser the apply flow calls. If one moves, move both.
+ */
+const JD_ARCHIVE_HEADING = /^##\s+Job Description\b.*$/im;
+
+/**
+ * A lettered report-section heading (`## G)`, `## H)`, ...). Every one of the 19
+ * evaluation modes numbers the draft-answers block this way, in every locale —
+ * the letters are not translated, only the names are — so requiring one costs
+ * nothing and is the same "is this a real report section?" test that
+ * `check-jd-archive.mjs`'s NEXT_REPORT_SECTION_RE already applies.
+ */
+const LETTERED_BLOCK_HEADING = /^##[ \t]+[A-Z]\)/;
+
+/**
+ * Offset where the draft-answers body starts, or `null` when the report has no
+ * such block.
+ *
+ * TWO barriers, because a report embeds the posting verbatim and that text is
+ * untrusted (AGENTS.md). Whatever comes back from here is adapted by
+ * `modes/apply.md` into a real submission, so a JD that can steer this function
+ * can put its own words in the candidate's mouth.
+ *
+ *   1. The search stops at the JD archive heading. Everything from there on is
+ *      the employer's text, not the evaluation's.
+ *   2. The marker must sit under a LETTERED block heading. Adjacency to any
+ *      `##` line is not enough: a pasted JD routinely carries its own markdown
+ *      sub-headings (`## Responsibilities`, `## About the role`) — the same
+ *      collision `check-jd-archive.mjs` documents from PR #2791 — and one of
+ *      those directly above a planted marker would otherwise clear the guard.
+ *
+ * The first qualifying marker wins, so even inside the searched region the real
+ * block outranks anything later. The English fallback is bounded the same way; a
+ * JD quoting the canonical heading verbatim must not trigger it either.
+ */
+function findDraftAnswersBody(report) {
+  const jdArchive = JD_ARCHIVE_HEADING.exec(report);
+  const searchable = jdArchive ? report.slice(0, jdArchive.index) : report;
+
+  const marker = new RegExp(DRAFT_ANSWERS_MARKER.source, 'gm');
+  for (let hit = marker.exec(searchable); hit; hit = marker.exec(searchable)) {
+    const preceding = searchable.slice(0, hit.index).split('\n');
+    preceding.pop(); // the empty partial line the marker itself starts on
+    let i = preceding.length - 1;
+    while (i >= 0 && preceding[i].trim() === '') i -= 1;
+    if (i >= 0 && LETTERED_BLOCK_HEADING.test(preceding[i])) return hit.index + hit[0].length;
+  }
+  const heading = CANONICAL_DRAFT_HEADING.exec(searchable);
+  return heading ? heading.index + heading[0].length : null;
 }
 
 /**
- * Read the evaluation mode's `## H) Draft Application Answers (draft)` block.
+ * Read the evaluation mode's draft application answers block.
  *
  * A DIFFERENT producer and a different format from the section above.
  * `parseApplicationAnswersSection` reads a format this module also writes, so
- * the two halves are pinned to each other. Nothing writes Block H from code:
- * `modes/oferta.md:622` specifies its heading and nothing about its body, so
- * the bold-question-then-paragraph shape below is a CONVENTION the evaluation
- * happens to emit, not a contract. This reads the convention and degrades to an
- * empty list when it does not hold, rather than guessing: a mispaired
- * question/answer here would be re-submitted to an employer later.
+ * the two halves are pinned to each other. Nothing writes this block from code:
+ * `modes/oferta.md` specifies its heading and its marker and nothing about its
+ * body, so the bold-question-then-paragraph shape below is a CONVENTION the
+ * evaluation happens to emit, not a contract. This reads the convention and
+ * degrades to an empty list when it does not hold, rather than guessing: a
+ * mispaired question/answer here would be re-submitted to an employer later.
  *
- * Worth reading despite that, because `modes/apply.md` already treats Block H
+ * Worth reading despite that, because `modes/apply.md` already treats the block
  * as a legitimate base for a real application ("If there is a Section H or
  * `## Application Answers` -> load previous answers as a base"), and until now
- * nothing in the tree could load it. An evaluated report is the one case where
- * answers exist before any form has been seen.
+ * nothing in the tree could load it outside English. An evaluated report is the
+ * one case where answers exist before any form has been seen.
  *
- * Returns the primary key spelling (`question`/`answer`) and omits the keys
- * Block H cannot carry, so the result is a partial snapshot that
+ * Returns the primary key spelling (`question`/`answer`) and omits the keys the
+ * block cannot carry, so the result is a partial snapshot that
  * `normalizeApplicationAnswersSnapshot` accepts as-is.
  *
  * @param {string} reportText Full report markdown.
- * The heading's title may be in any language; only the `## H)` marker is
- * required. A heading with a marker and no title is not Block H.
- *
- * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
+ * @returns {{freeText: object[]} | null} `null` when the report has no draft block.
  */
 export function parseDraftAnswersBlockH(reportText) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = findDraftAnswersHeading(report);
-  if (!heading) return null;
+  const afterHeading = findDraftAnswersBody(report);
+  if (afterHeading === null) return null;
 
-  const afterHeading = heading.index + heading[0].length;
-  // Same grammar as the opener above. That one accepts `##` plus a tab, so a
-  // terminator matching only `## ` let a later `##\tI) ...` section stay inside
-  // Block H and its bold text come back as draft answers (#4400 review).
-  const nextHeading = /^##[ \t]+.+$/m.exec(report.slice(afterHeading));
+  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,
@@ -507,10 +516,11 @@ function usage() {
     '--read prints the parsed ## Application Answers snapshot as JSON (null when the section is absent).',
     '--strict makes --read refuse a partially unreadable section, naming every line it could not parse,',
     'instead of skipping it. Recovery callers (modes/apply.md) want the refusal; the default stays total.',
-    '--read-draft prints the evaluation mode\'s ## H) Draft Application Answers block instead, as a partial',
-    'snapshot ({"freeText": [...]}), or null when the report has no Block H. Best-effort by construction:',
-    'modes/oferta.md fixes the heading and not the body, so an empty freeText means "drafted, unreadable",',
-    'which is why --strict does not apply to it.',
+    '--read-draft prints the evaluation mode\'s draft-answers block instead, as a partial snapshot',
+    '({"freeText": [...]}), or null when the report has no such block. The block is located by the',
+    'locale-invariant <!-- career-ops:draft-answers --> marker, never by its heading: localized modes',
+    'translate the name and number it G) or H). Best-effort by construction: modes/oferta.md fixes the',
+    'marker and not the body, so an empty freeText means "drafted, unreadable", and --strict does not apply.',
   ].join('\n');
 }
 

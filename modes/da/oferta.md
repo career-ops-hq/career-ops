@@ -139,6 +139,7 @@ Gem den fulde evaluering i `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (fuldt indhold af blok F)
 
 ## G) Udkast til svar til ansøgningen
+<!-- career-ops:draft-answers -->
 (kun ved score >= 4.5 -- udkast til svar til ansøgningsformularen)
 
 ---

@@ -390,14 +390,9 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 ## F) Plan de entrevistas
 (contenido completo del bloque F)
 
-## G) Legitimidad de la publicación
-(contenido completo del bloque G)
-
-## Risk Summary
-(una fila por señal de riesgo, orden fijo — ver la sección Risk Summary arriba)
-
-## H) Borradores de respuestas para la candidatura
-(solo si score >= 4.5 — borradores de respuestas para el formulario)
+## G) Borradores de respuestas para la candidatura
+<!-- career-ops:draft-answers -->
+(solo si score >= 4.5 -- borradores de respuestas para el formulario de candidatura)
 
 ---
 
