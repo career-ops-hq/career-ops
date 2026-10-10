@@ -2951,6 +2951,159 @@ tracked_companies:
     notes: "African-founded talent marketplace. Verified 2026-08-17: 19 postings, but mostly North America and the UK with a single Kenya role — enable it for the company, not for African coverage."
     enabled: false
 
+  # -- Latin America (employers on already-supported ATS) --
+  #
+  # The scanner reads LatAm job boards (Get on Board, OCC, Gupy, HiringRoom),
+  # but no LatAm employer was tracked here. These companies publish through
+  # Greenhouse, Lever, Ashby and Workable, whose public zero-auth APIs the
+  # scanner already reads.
+  #
+  # Every entry below was verified live on 2026-10-08: the API answered 200 and
+  # the posting locations were counted per country. The note on each says where
+  # it actually hires, so a candidate in Colombia does not enable a board that
+  # only posts in Brazil. Left `enabled: false` like every other example.
+
+  - name: Nubank
+    careers_url: https://jobs.ashbyhq.com/nubank
+    api: https://api.ashbyhq.com/posting-api/job-board/nubank
+    notes: "Digital bank. Verified 2026-10-08: 103 postings — Brazil 35, Mexico 20, Colombia 8, Argentina 3."
+    enabled: false
+
+  - name: Clara
+    careers_url: https://job-boards.greenhouse.io/clara
+    api: https://boards-api.greenhouse.io/v1/boards/clara/jobs
+    notes: "Corporate cards and spend management. Verified 2026-10-08: 145 postings — Brazil 70, Mexico 68, Colombia 34 (many list several countries)."
+    enabled: false
+
+  - name: dLocal
+    careers_url: https://jobs.lever.co/dlocal
+    api: https://api.lever.co/v0/postings/dlocal?mode=json
+    notes: "Cross-border payments. Verified 2026-10-08: 54 postings — Uruguay 25, Brazil 23, Argentina 19, a few in the UK."
+    enabled: false
+
+  - name: EBANX
+    careers_url: https://job-boards.greenhouse.io/ebanx
+    api: https://boards-api.greenhouse.io/v1/boards/ebanx/jobs
+    notes: "Payments. Verified 2026-10-08: 38 postings, mostly Brazil (15), some Argentina and UK."
+    enabled: false
+
+  - name: Yuno
+    careers_url: https://jobs.lever.co/yuno
+    api: https://api.lever.co/v0/postings/yuno?mode=json
+    notes: "Payments orchestration. Verified 2026-10-08: 36 postings, all remote, spread across Colombia 10, Mexico 9, UK 9, Brazil 8, Argentina 8, Chile 6."
+    enabled: false
+
+  - name: Addi
+    careers_url: https://jobs.ashbyhq.com/addi
+    api: https://api.ashbyhq.com/posting-api/job-board/addi
+    notes: "Buy-now-pay-later. Verified 2026-10-08: 32 postings, 24 in Colombia."
+    enabled: false
+
+  - name: Platzi
+    careers_url: https://apply.workable.com/platzi
+    notes: "Online tech education. Verified 2026-10-08: 13 postings, posted in Mexico and Colombia."
+    enabled: false
+
+  - name: Deuna
+    careers_url: https://jobs.lever.co/deuna
+    api: https://api.lever.co/v0/postings/deuna?mode=json
+    notes: "Payments. Verified 2026-10-08: 18 postings — Mexico 11, US 10, Colombia 8 (most remote)."
+    enabled: false
+
+  - name: Cobre
+    careers_url: https://job-boards.greenhouse.io/cobre
+    api: https://boards-api.greenhouse.io/v1/boards/cobre/jobs
+    notes: "B2B payments. Verified 2026-10-08: 17 postings — Colombia 8, Mexico 4."
+    enabled: false
+
+  - name: Simetrik
+    careers_url: https://jobs.ashbyhq.com/simetrik
+    api: https://api.ashbyhq.com/posting-api/job-board/simetrik
+    notes: "Financial reconciliation. Verified 2026-10-08: 9 postings, remote, across Colombia, Mexico, Brazil, Argentina and the US."
+    enabled: false
+
+  # -- Cybersecurity (vendors, offensive security, bug bounty) --
+  #
+  # No security employer was tracked here, though a SOC analyst, pentester or
+  # AppSec engineer reads the same Greenhouse / Lever / Ashby boards as
+  # everyone else. Verified live on 2026-10-08; "security roles" counts titles
+  # matching security, cyber, SOC, AppSec, pentest, red team, threat,
+  # detection, incident or vulnerability. Most of these hire in the US and UK
+  # only — the notes say so, and they name the few that also post in Latin
+  # America. Left `enabled: false`.
+
+  - name: Huntress
+    careers_url: https://job-boards.greenhouse.io/huntress
+    api: https://boards-api.greenhouse.io/v1/boards/huntress/jobs
+    notes: "Managed EDR / SOC for SMBs. Verified 2026-10-08: 36 postings, 15 security roles (incl. SOC analysts); US 27, UK 2."
+    enabled: false
+
+  - name: Sophos
+    careers_url: https://jobs.lever.co/sophos
+    api: https://api.lever.co/v0/postings/sophos?mode=json
+    notes: "Endpoint and MDR vendor. Verified 2026-10-08: 86 postings, 26 security roles; mostly remote, UK 15, US 12, one in Brazil."
+    enabled: false
+
+  - name: Wiz
+    careers_url: https://job-boards.greenhouse.io/wizinc
+    api: https://boards-api.greenhouse.io/v1/boards/wizinc/jobs
+    notes: "Cloud security. Verified 2026-10-08: 131 postings, 20 security roles; US 38, UK 9, Brazil 7, Mexico 4."
+    enabled: false
+
+  - name: Abnormal Security
+    careers_url: https://job-boards.greenhouse.io/abnormalsecurity
+    api: https://boards-api.greenhouse.io/v1/boards/abnormalsecurity/jobs
+    notes: "Email security. Verified 2026-10-08: 82 postings, 13 security roles; US 52, UK 6."
+    enabled: false
+
+  - name: 1Password
+    careers_url: https://jobs.ashbyhq.com/1password
+    api: https://api.ashbyhq.com/posting-api/job-board/1password
+    notes: "Identity and password management. Verified 2026-10-08: 69 postings, 7 security roles; remote US 54, UK 9."
+    enabled: false
+
+  - name: Chainguard
+    careers_url: https://job-boards.greenhouse.io/chainguard
+    api: https://boards-api.greenhouse.io/v1/boards/chainguard/jobs
+    notes: "Software supply-chain security. Verified 2026-10-08: 80 postings, 5 security roles; all remote, US 41, UK 9."
+    enabled: false
+
+  - name: Semgrep
+    careers_url: https://jobs.ashbyhq.com/semgrep
+    api: https://api.ashbyhq.com/posting-api/job-board/semgrep
+    notes: "Static analysis / AppSec. Verified 2026-10-08: 12 postings, remote US."
+    enabled: false
+
+  - name: Bishop Fox
+    careers_url: https://job-boards.greenhouse.io/bishopfox
+    api: https://boards-api.greenhouse.io/v1/boards/bishopfox/jobs
+    notes: "Offensive security consultancy. Verified 2026-10-08: 7 postings, 3 security roles; remote US and one in Mexico."
+    enabled: false
+
+  - name: Praetorian
+    careers_url: https://job-boards.greenhouse.io/praetorian
+    api: https://boards-api.greenhouse.io/v1/boards/praetorian/jobs
+    notes: "Offensive security consultancy. Verified 2026-10-08: 4 postings, remote US."
+    enabled: false
+
+  - name: Coalfire
+    careers_url: https://jobs.lever.co/coalfire
+    api: https://api.lever.co/v0/postings/coalfire?mode=json
+    notes: "Pentest and compliance (FedRAMP, PCI). Verified 2026-10-08: 14 postings, 5 security roles; remote US."
+    enabled: false
+
+  - name: Bugcrowd
+    careers_url: https://job-boards.greenhouse.io/bugcrowd
+    api: https://boards-api.greenhouse.io/v1/boards/bugcrowd/jobs
+    notes: "Bug bounty platform. Verified 2026-10-08: 7 postings; remote, US 3, UK 1, Brazil 1."
+    enabled: false
+
+  - name: HackerOne
+    careers_url: https://jobs.ashbyhq.com/hackerone
+    api: https://api.ashbyhq.com/posting-api/job-board/hackerone
+    notes: "Bug bounty platform. Verified 2026-10-08: 8 postings, US-based remote."
+    enabled: false
+
   # -- US K-12 school districts & community colleges (single-employer boards) --
   # Examples of the applitrack / neogov / redrover / schoolspring providers.
   # Disabled: these are one region's boards — copy the pattern for your own
