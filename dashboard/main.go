@@ -336,17 +336,26 @@ func (m appModel) View() string {
 	}
 }
 
+// getRepoRoot defers to internal/data, which already walks up from cwd looking
+// for path-resolver.mjs and is the function a relative CAREER_OPS_TRACKER
+// resolves through.
+//
+// This used to be a second, shorter search — cwd and cwd's PARENT, then a
+// silent fallback to cwd — so from anywhere deeper the data root and the
+// tracker could anchor to different directories. One walker, one answer.
 func getRepoRoot() string {
-	cwd, err := os.Getwd()
+	root, err := data.FindRepoRoot()
 	if err != nil {
+		// The checkout could not be examined, which is not the same as not
+		// being there. Say so: everything below resolves against this.
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if root != "" {
+		return root
+	}
+	cwd, wdErr := os.Getwd()
+	if wdErr != nil {
 		return "."
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "path-resolver.mjs")); err == nil {
-		return cwd
-	}
-	parent := filepath.Dir(cwd)
-	if _, err := os.Stat(filepath.Join(parent, "path-resolver.mjs")); err == nil {
-		return parent
 	}
 	return cwd
 }
@@ -359,7 +368,31 @@ func resolveEnvPath(envVal string) string {
 	if filepath.IsAbs(trimmed) {
 		return filepath.Clean(trimmed)
 	}
-	return filepath.Clean(filepath.Join(getRepoRoot(), trimmed))
+	root, err := data.FindRepoRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if root == "" {
+		// Anchoring to cwd here is a guess, and what is being guessed at is
+		// which tracker to read. Getting it wrong is invisible: the dashboard
+		// shows one file while every .mjs writer uses another, and neither side
+		// reports anything. The guess is still made — exiting would be worse
+		// for a user whose layout we cannot see — but it is said out loud, with
+		// the absolute path the reader can check.
+		cwd, wdErr := os.Getwd()
+		if wdErr != nil {
+			return filepath.Clean(trimmed)
+		}
+		resolved := filepath.Clean(filepath.Join(cwd, trimmed))
+		fmt.Fprintf(os.Stderr,
+			"Warning: no career-ops checkout found above the working directory or the executable, "+
+				"so the relative path %q was resolved against the working directory: %s\n"+
+				"         The .mjs scripts resolve it against the repository root, so they may be using a "+
+				"different tracker. Pass an absolute path or --path to be sure.\n",
+			trimmed, resolved)
+		return resolved
+	}
+	return filepath.Clean(filepath.Join(root, trimmed))
 }
 
 func main() {
