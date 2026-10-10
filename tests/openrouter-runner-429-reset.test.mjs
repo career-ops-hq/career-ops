@@ -39,8 +39,8 @@ function scriptedFetch(models, script) {
     }
     const { model } = JSON.parse(init.body);
     const status = queues[model]?.shift() ?? 200;
-    if (status === 429) {
-      return { ok: false, status, text: async () => 'rate limited' };
+    if (status !== 200) {
+      return { ok: false, status, text: async () => (status === 429 ? 'rate limited' : 'server error') };
     }
     return {
       ok: true,
@@ -122,6 +122,26 @@ test('three consecutive 429s still blacklist the model and persist it', async ()
     await callOnce(runner);
     assert.equal(runner.blacklistedModels.has(MODEL_A), true);
     assert.deepEqual(JSON.parse(readFileSync(file, 'utf-8')), [MODEL_A]);
+  });
+});
+
+test('429, 500, 429, 429 does not blacklist the model', async () => {
+  // The 500 breaks the run, so the last two 429s are only two in a row.
+  await withRunner('other-failure', [MODEL_A], { [MODEL_A]: [429, 500, 429, 429] }, async (runner, file) => {
+    for (let i = 0; i < 4; i++) assert.notEqual(await callOnce(runner), null);
+
+    assert.equal(runner.blacklistedModels.has(MODEL_A), false, 'a 500 between 429s did not reset the count');
+    assert.equal(existsSync(file), false, 'the blacklist file was written');
+  });
+});
+
+test('a 500 after two 429s resets the count to the next 429', async () => {
+  await withRunner('reset-by-500', [MODEL_A], { [MODEL_A]: [429, 429, 500, 429] }, async (runner, file) => {
+    for (let i = 0; i < 4; i++) assert.notEqual(await callOnce(runner), null);
+
+    assert.equal(runner.rateLimitCounts[MODEL_A], 1);
+    assert.equal(runner.blacklistedModels.has(MODEL_A), false);
+    assert.equal(existsSync(file), false);
   });
 });
 

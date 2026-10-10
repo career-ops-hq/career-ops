@@ -112,6 +112,7 @@ if (blacklistedModels.size > 0) {
   console.log(`[blacklist] Loaded ${blacklistedModels.size} pre-blacklisted model(s) from disk.`);
 }
 // 429 failure count per model — auto-blacklist after 3 consecutive 429s
+// (a success or any other failure resets the count)
 const rateLimitCounts = {};
 
 // ---------------------------------------------------------------------------
@@ -364,6 +365,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
           await new Promise(r => setTimeout(r, 800));
         }
       } else {
+        delete rateLimitCounts[model];
         console.log(`FAILED (${msg})`);
         await new Promise(r => setTimeout(r, 800));
       }
