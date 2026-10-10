@@ -33,7 +33,7 @@ const SUPPORTED_CLIS = [
 const USAGE = `career-ops — set up an AI job search workspace.
 
 Usage:
-  npx career-ops init [folder]    Create a new workspace (default: ./career-ops)
+  npx @santifer/career-ops init [folder]    Create a new workspace (default: ./career-ops)
 
 After setup, open your AI coding tool inside the folder and paste a job offer.
 Docs: https://github.com/career-ops-hq/career-ops`;
