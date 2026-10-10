@@ -61,8 +61,12 @@ import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import {
+  boldLineText, findExperienceSections, headingText, toPlainText, EXPERIENCE_HEADING_NAMES,
+} from './lib/cv-markdown.mjs';
 
-const CV_PATH = 'cv.md';
+const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 
 // ── cv.md experience parsing ────────────────────────────────────────
 //
@@ -75,63 +79,57 @@ const CV_PATH = 'cv.md';
 //
 //   - bullet
 //
-// Company/location are split on the first " -- " (or " – ", an em-dash
-// variant some editors auto-substitute); location is optional. The title is
-// the next bolded line; dates are the next non-empty line after that. Any
+// Company/location are split on the first " -- " (or " – " / " — ", the
+// dashes some editors and Pandoc substitute); location is optional. The title
+// is the next bolded line; dates are the next non-empty line after that. Any
 // entry missing a bolded title or a dates line is skipped rather than
 // guessed at — a checker that invents a comparison side is worse than one
 // that reports nothing for that entry.
-const HEADING_RE = /^###\s+(.+?)\s*$/;
-const BOLD_LINE_RE = /^\*\*(.+?)\*\*\s*$/;
+//
+// Lines go through lib/cv-markdown.mjs first, so the same entry written as
+// Pandoc Markdown (`### **Acme** --- City`, `**Title**\`, `**2020 -- 2024**`,
+// `## **[Professional Experience]{.smallcaps}**`) parses identically (#4879).
 
 export function parseCvExperience(cvText) {
-  const lines = String(cvText ?? '').replace(/\r\n/g, '\n').split('\n');
   const entries = [];
 
-  // Only scan inside a "## Work Experience" (or "## Experience") section, so
-  // an unrelated "### " heading elsewhere in the CV (e.g. under Projects)
-  // never gets misread as a job.
-  let inExperience = false;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const h2 = line.match(/^##\s+(.+?)\s*$/);
-    if (h2) {
-      inExperience = /^(work\s+)?experience$/i.test(h2[1].trim());
-      continue;
-    }
-    if (!inExperience) continue;
+  // Only scan inside a recognized Experience section (lib/cv-markdown.mjs's
+  // EXPERIENCE_HEADING_NAMES), so an unrelated "### " heading elsewhere in
+  // the CV (e.g. under Projects) never gets misread as a job.
+  for (const lines of findExperienceSections(cvText)) {
+    for (let i = 0; i < lines.length; i++) {
+      const heading = headingText(lines[i], 3);
+      if (heading === null) continue;
 
-    const heading = line.match(HEADING_RE);
-    if (!heading) continue;
+      const [companyPart] = heading.split(/\s+[-–—]{1,2}\s+/);
+      const company = companyPart.trim();
+      if (!company) continue;
 
-    const [companyPart] = heading[1].split(/\s+[-–—]{1,2}\s+/);
-    const company = companyPart.trim();
-    if (!company) continue;
-
-    // Walk forward for the bolded title line, then the dates line, skipping
-    // blank lines. Stop at the next heading (### or ##) so a malformed entry
-    // never eats the following one.
-    let title = null;
-    let dates = null;
-    for (let j = i + 1; j < lines.length; j++) {
-      const next = lines[j];
-      if (/^#{2,3}\s+/.test(next)) break;
-      if (next.trim() === '') continue;
-      if (title === null) {
-        const bold = next.match(BOLD_LINE_RE);
-        if (bold) {
-          title = bold[1].trim();
-          continue;
+      // Walk forward for the bolded title line, then the dates line, skipping
+      // blank lines. Stop at the next heading so a malformed entry never eats
+      // the following one.
+      let title = null;
+      let dates = null;
+      for (let j = i + 1; j < lines.length; j++) {
+        const next = lines[j];
+        if (/^#{2,3}\s+/.test(next)) break;
+        if (next.trim() === '') continue;
+        if (title === null) {
+          const bold = boldLineText(next);
+          if (bold) {
+            title = bold;
+            continue;
+          }
+          break; // first non-blank line after the heading must be the title
         }
-        break; // first non-blank line after the heading must be the title
+        if (dates === null) {
+          dates = toPlainText(next);
+        }
+        break;
       }
-      if (dates === null) {
-        dates = next.trim();
-      }
-      break;
-    }
 
-    if (title && dates) entries.push({ company, title, dates });
+      if (title && dates) entries.push({ company, title, dates });
+    }
   }
 
   return entries;
@@ -188,7 +186,9 @@ export function parseTailoredExperience(payload) {
 
 // ── Normalization / matching ────────────────────────────────────────
 
-// Case/whitespace/dash normalization only — no fuzzy similarity. A date
+// Case/whitespace/dash normalization only — no fuzzy similarity. Any run of
+// hyphens, en dashes and em dashes is one separator, so Pandoc's
+// "09/2021 -- Present" pairs with a payload's "09/2021 - Present". A date
 // phrasing that differs in more than punctuation/spacing (e.g. "2020-2024"
 // on the cv.md side vs "June 2020 - Present" on the tailored side) will not
 // match, and the pair is reported as unmatched rather than forced together.
@@ -196,7 +196,7 @@ export function normalizeDates(s) {
   return String(s ?? '')
     .toLowerCase()
     .replace(/[–—]/g, '-')
-    .replace(/\s*-\s*/g, '-')
+    .replace(/\s*-+\s*/g, '-')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -285,6 +285,42 @@ export function checkTitles(cvEntries, tailoredEntries) {
   }
 
   return { matched, mismatches, ambiguous, unmatchedTailored, unmatchedCv };
+}
+
+/**
+ * Say out loud when a run compared nothing it was given (#4879).
+ *
+ * "No mismatches" is only a clean result when something was compared. A
+ * cv.md the parser cannot read yields zero entries, every tailored entry
+ * lands in unmatchedTailored, and the summary used to print ✅ anyway — a
+ * planted title inflation went out under a green check. Mirrors
+ * verify-cv-structure.mjs's UNVERIFIED and jd-skill-gap.mjs's LOW CONFIDENCE:
+ * still warn-only (exit 0), but impossible to read as a pass.
+ *
+ * @param {Array} cvEntries parsed cv.md entries
+ * @param {Array} tailoredEntries parsed payload entries
+ * @param {ReturnType<typeof checkTitles>} result
+ * @returns {{reason: string, message: string}|null} null when the run was conclusive
+ */
+export function diagnoseUnverified(cvEntries, tailoredEntries, result) {
+  if (tailoredEntries.length === 0) return null;
+  if (result.matched.length + result.mismatches.length + result.ambiguous.length > 0) return null;
+  if (cvEntries.length === 0) {
+    return {
+      reason: 'cv-unparsed',
+      message:
+        'cv.md entries could not be parsed — title check did not run. ' +
+        `Expected a "## ${EXPERIENCE_HEADING_NAMES.join('" / "## ')}" section whose entries are ` +
+        '"### Company — Location", then a bold **Title** line, then a dates line (see examples/cv-example.md).',
+    };
+  }
+  return {
+    reason: 'no-pairs',
+    message:
+      `cv.md has ${cvEntries.length} parsed entr${cvEntries.length === 1 ? 'y' : 'ies'}, but no tailored entry ` +
+      'matched one by {company, dates} — title check did not run. Compare the company names and date ' +
+      'phrasing in the payload against cv.md.',
+  };
 }
 
 // ── Self-test ────────────────────────────────────────────────────────
@@ -457,6 +493,81 @@ function runSelfTest() {
   eq('an ambiguous tailored-CV-side key is not silently reported as a mismatch either', dupTailoredResult.mismatches.length, 0);
   eq('the ambiguous group carries both tailored titles', dupTailoredResult.ambiguous[0]?.tailoredTitles.sort(), ['Engineering Lead', 'Senior Software Engineer']);
 
+  // Pandoc-flavored cv.md (#4879): the same content as a plain cv.md, in the
+  // shape a .docx → Markdown conversion produces. Must parse to the same
+  // entries, so a planted title inflation is caught here exactly as it is on
+  // the plain file.
+  const pandocCv = [
+    '# Jane Example',
+    '',
+    '## **[Technical Platforms & Tools]{.smallcaps}**',
+    '',
+    '- Cloud: AWS, Kubernetes, Terraform',
+    '',
+    '## **[Professional Experience]{.smallcaps}**',
+    '',
+    '### **Acme Health, Inc.** --- New York, NY (Remote)',
+    '',
+    '**Senior Director, Platform Engineering**\\',
+    '**09/2021 -- Present**',
+    '',
+    '- Owned the cloud platform.',
+    '',
+    '### **Globex Corp.** --- Stamford, CT',
+    '',
+    '**Principal Infrastructure Engineer**\\',
+    '**03/2015 -- 08/2021**',
+    '',
+    '- Built the data platform.',
+  ].join('\n');
+  const pandocEntries = parseCvExperience(pandocCv);
+  eq('Pandoc cv.md: parses both experience entries', pandocEntries, [
+    { company: 'Acme Health, Inc.', title: 'Senior Director, Platform Engineering', dates: '09/2021 – Present' },
+    { company: 'Globex Corp.', title: 'Principal Infrastructure Engineer', dates: '03/2015 – 08/2021' },
+  ]);
+  const inflatedPayload = { experience: [
+    { company: 'Acme Health, Inc.', role: 'VP, Platform Engineering', dates: '09/2021 - Present' },
+    { company: 'Globex Corp.', role: 'Principal Infrastructure Engineer', dates: '03/2015 - 08/2021' },
+  ] };
+  const pandocResult = checkTitles(pandocEntries, parseTailoredExperience(inflatedPayload));
+  eq('Pandoc cv.md: the planted title inflation is caught', pandocResult.mismatches.map(m => m.tailoredTitle), ['VP, Platform Engineering']);
+  eq('Pandoc cv.md: the unchanged title still matches', pandocResult.matched.length, 1);
+  eq('Pandoc cv.md: a conclusive run is not flagged unverified',
+    diagnoseUnverified(pandocEntries, parseTailoredExperience(inflatedPayload), pandocResult), null);
+
+  // One Pandoc feature at a time, each on an otherwise-plain entry — the
+  // issue's table, row by row.
+  const oneEntry = (h2, h3, title, dates) => parseCvExperience(`${h2}\n\n${h3}\n\n${title}\n${dates}\n`);
+  const plainEntry = [{ company: 'Co', title: 'Engineer', dates: '2020-2024' }];
+  for (const heading of ['Experience', 'Work Experience', 'Professional Experience', 'Employment History', 'Work History']) {
+    eq(`"## ${heading}" is a recognized Experience section`, oneEntry(`## ${heading}`, '### Co -- City', '**Engineer**', '2020-2024'), plainEntry);
+  }
+  eq('a bold + span h2 is recognized', oneEntry('## **[Experience]{.smallcaps}**', '### Co -- City', '**Engineer**', '2020-2024'), plainEntry);
+  eq('a Pandoc {#id} attribute on the h2 is ignored', oneEntry('## Experience {#experience}', '### Co -- City', '**Engineer**', '2020-2024'), plainEntry);
+  eq('"---" between company and location splits like "--"', oneEntry('## Experience', '### Co --- City', '**Engineer**', '2020-2024'), plainEntry);
+  eq('a bold company heading is unwrapped', oneEntry('## Experience', '### **Co** -- City', '**Engineer**', '2020-2024'), plainEntry);
+  eq('a trailing hard-break backslash on the title line is dropped', oneEntry('## Experience', '### Co -- City', '**Engineer**\\', '2020-2024'), plainEntry);
+  eq('escaped characters in a title are unescaped', oneEntry('## Experience', '### Co -- City', '**C\\# \\| Engineer**', '2020-2024')[0]?.title, 'C# | Engineer');
+  eq('an unrelated "## Skills" section is still not Experience', oneEntry('## Skills', '### Co -- City', '**Engineer**', '2020-2024'), []);
+
+  // Dates: any run of hyphens / en dashes / em dashes is one separator.
+  eq('"--" dates equal "-" dates', normalizeDates('09/2021 -- Present'), normalizeDates('09/2021 - Present'));
+  eq('"–" dates equal "-" dates', normalizeDates('09/2021 – Present'), normalizeDates('09/2021 - Present'));
+  eq('"—" dates equal "-" dates', normalizeDates('09/2021 — Present'), normalizeDates('09/2021-Present'));
+
+  // Nothing compared is never a pass (#4879).
+  const someTailored = parseTailoredExperience(inflatedPayload);
+  eq('zero parsed cv.md entries is unverified (cv-unparsed)',
+    diagnoseUnverified([], someTailored, checkTitles([], someTailored))?.reason, 'cv-unparsed');
+  const strangers = parseTailoredExperience({ experience: [{ company: 'Initech', role: 'Engineer', dates: '1999' }] });
+  eq('parsed cv.md entries with no pairs is unverified (no-pairs)',
+    diagnoseUnverified(cvEntries, strangers, checkTitles(cvEntries, strangers))?.reason, 'no-pairs');
+  eq('an empty payload is not flagged (nothing to check)',
+    diagnoseUnverified(cvEntries, [], checkTitles(cvEntries, []))?.reason ?? null, null);
+  const ambiguousOnly = checkTitles(dupCvEntries, parseTailoredExperience(dupCvPayload));
+  eq('an ambiguous-only run is reported as ambiguous, not as unverified',
+    diagnoseUnverified(dupCvEntries, parseTailoredExperience(dupCvPayload), ambiguousOnly), null);
+
   // CLI exit-code contract (modes/pdf.md Step 17a relies on this distinction):
   // a genuine input failure (missing/malformed cv.md or payload) must exit
   // non-zero so the pipeline stops and repairs the input, while a completed
@@ -480,7 +591,11 @@ function runSelfTest() {
 `;
     writeFileSync(join(cliTmp, 'cv.md'), validCv);
 
-    const runCli = (args, cwd = cliTmp) => spawnSync(process.execPath, [scriptPath, ...args], { cwd, encoding: 'utf-8' });
+    // cv.md resolves through getCareerOpsRoot(), not the cwd, so each run
+    // points CAREER_OPS_ROOT at its fixture directory explicitly.
+    const runCli = (args, cwd = cliTmp, root = cwd) => spawnSync(process.execPath, [scriptPath, ...args], {
+      cwd, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root },
+    });
 
     // Missing payload argument entirely -> usage error, exit 1.
     eq('CLI exits 1 with no payload argument', runCli([]).status, 1);
@@ -525,6 +640,40 @@ function runSelfTest() {
     eq('CLI exits 0 for a completed comparison that finds a title mismatch (warn-only)', mismatchRun.status, 0);
     eq('the exit-0 mismatch run still prints the warning', /title mismatch/i.test(mismatchRun.stdout), true);
 
+    // A cv.md the parser cannot read must not produce a green check (#4879).
+    const unparsedDir = mkdtempSync(join(tmpdir(), 'cv-title-check-unparsed-'));
+    try {
+      writeFileSync(join(unparsedDir, 'cv.md'), '# Jane Doe\n\n## Career\n\n### Acme Corp -- Remote\n\n**Senior Software Engineer**\n2020-2024\n');
+      writeFileSync(join(unparsedDir, 'p.json'), JSON.stringify({
+        experience: [{ company: 'Acme Corp', role: 'Engineering Lead', dates: '2020-2024' }],
+      }));
+      const unparsedRun = runCli(['p.json', '--summary'], unparsedDir);
+      eq('CLI exits 0 when cv.md cannot be parsed (warn-only)', unparsedRun.status, 0);
+      eq('an unparsed cv.md never prints the green check', /✅/.test(unparsedRun.stdout), false);
+      eq('an unparsed cv.md says the title check did not run', /title check did not run/.test(unparsedRun.stdout), true);
+      const unparsedJson = JSON.parse(runCli(['p.json'], unparsedDir).stdout);
+      eq('JSON output carries the unverified reason', unparsedJson.unverified?.reason, 'cv-unparsed');
+    } finally {
+      rmSync(unparsedDir, { recursive: true, force: true });
+    }
+
+    // cv.md comes from the data root, not the cwd: run from a directory with a
+    // decoy cv.md and point CAREER_OPS_ROOT at the real one.
+    const rootDir = mkdtempSync(join(tmpdir(), 'cv-title-check-root-'));
+    const cwdDir = mkdtempSync(join(tmpdir(), 'cv-title-check-cwd-'));
+    try {
+      writeFileSync(join(rootDir, 'cv.md'), validCv);
+      writeFileSync(join(cwdDir, 'cv.md'), '# Decoy\n');
+      writeFileSync(join(cwdDir, 'p.json'), JSON.stringify({
+        experience: [{ company: 'Acme Corp', role: 'Engineering Lead', dates: '2020-2024' }],
+      }));
+      const rootRun = runCli(['p.json', '--summary'], cwdDir, rootDir);
+      eq('CLI reads cv.md from CAREER_OPS_ROOT, not the cwd', /title mismatch/i.test(rootRun.stdout), true);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+      rmSync(cwdDir, { recursive: true, force: true });
+    }
+
     // A completed comparison that finds an ambiguous {company, dates} group
     // is likewise warn-only, not a failure.
     const ambiguousCv = validCv + `
@@ -558,12 +707,30 @@ function runSelfTest() {
 // ── CLI ──────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
+const USAGE = `Usage:
+  node cv-title-check.mjs <tailored-cv-payload.json> [--summary]
+  node cv-title-check.mjs --self-test
+
+Pairs each tailored-CV {company, dates} entry against cv.md's canonical entry
+and flags an exact-string job-title mismatch (case and whitespace normalized,
+never fuzzy). Warn-only: it edits neither file.
+
+  --summary     human-readable table instead of JSON
+  --self-test   run the built-in cases against no payload
+  --help, -h    show this message
+`;
+
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const payloadPathArg = args.find(a => !a.startsWith('--'));
 
 if (isMainModule(import.meta.url)) {
-  if (selfTestMode) {
+  // Checked before the operand, which --self-test also legitimately lacks:
+  // without this, `--help` fell through to the "Usage:" error path and exited 1
+  // while the real work was skipped for the wrong reason.
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+  } else if (selfTestMode) {
     runSelfTest();
   } else {
     if (!payloadPathArg || !existsSync(payloadPathArg)) {
@@ -593,20 +760,26 @@ if (isMainModule(import.meta.url)) {
       process.exit(1);
     }
     const result = checkTitles(cvEntries, tailoredEntries);
+    const unverified = diagnoseUnverified(cvEntries, tailoredEntries, result);
+    const compared = result.matched.length + result.mismatches.length;
 
     if (summaryMode) {
       console.log('\nCV Title Consistency Check');
       console.log('─'.repeat(40));
-      console.log(`Entries compared: ${result.matched.length + result.mismatches.length}`);
-      if (result.mismatches.length === 0) {
-        console.log('✅ No title drift found — every matched entry uses cv.md\'s canonical title.');
-      } else {
+      console.log(`Entries compared: ${compared}`);
+      if (unverified) {
+        console.log(`⚠️  ${unverified.message}`);
+      } else if (result.mismatches.length > 0) {
         console.log(`⚠️  ${result.mismatches.length} title mismatch(es) found:`);
         for (const m of result.mismatches) {
           console.log(`\n  ${m.company} (${m.dates})`);
           console.log(`    cv.md:        "${m.cvTitle}"`);
           console.log(`    tailored CV:  "${m.tailoredTitle}"`);
         }
+      } else if (compared > 0 || tailoredEntries.length === 0) {
+        // compared === 0 with only ambiguous groups is not a pass either:
+        // the ambiguous block below is the whole result.
+        console.log('✅ No title drift found — every matched entry uses cv.md\'s canonical title.');
       }
       if (result.ambiguous.length > 0) {
         console.log(`\n⚠️  ${result.ambiguous.length} ambiguous {company, dates} key(s) — multiple entries on one or both sides, not auto-resolved:`);
@@ -620,7 +793,9 @@ if (isMainModule(import.meta.url)) {
         console.log(`\n  (${result.unmatchedTailored.length} tailored entr${result.unmatchedTailored.length === 1 ? 'y has' : 'ies have'} no matching {company, dates} in cv.md — not checked)`);
       }
     } else {
-      console.log(JSON.stringify(result, null, 2));
+      // Additive key: null when the run was conclusive, {reason, message}
+      // when nothing was compared.
+      console.log(JSON.stringify({ ...result, unverified }, null, 2));
     }
 
     // Warn-only: a title mismatch is never a failing exit code.

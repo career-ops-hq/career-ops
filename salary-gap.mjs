@@ -21,10 +21,48 @@
  * They carry no trust tier and never participate in the fold/gap math above;
  * look them up with getStatedObservations() or `--stated-for <tracker#>`.
  *
+ * Relocation purchasing-power (#4694, jurisdiction-compliance-lens umbrella #2026):
+ * a transparent, bracket-tax-only comparison between a candidate's home
+ * province/state and a posting's destination, keyed off
+ * templates/jurisdiction-relocation-tax.yml. Every folded application also
+ * gets a `relocation` field when a posting location, an advertised figure, a
+ * resolvable home location, and the table are all available — absence of any
+ * of those is "not evaluated," never a guessed penalty. NOT financial or tax
+ * advice; see that table's own header for the full disclaimer.
+ *
  * Run: node salary-gap.mjs             (JSON)
  *      node salary-gap.mjs --summary   (human-readable)
  *      node salary-gap.mjs --stated-for <tracker#>   (prior stated-comp observations, JSON)
+ *      node salary-gap.mjs --relocation --gross <amount> --posting-location "<city, province>"
+ *                          [--home-location "<city, province>"] [--currency <code>]
+ *                                                (ad hoc relocation comparison, JSON)
+ *      node salary-gap.mjs --relocation --gross <amount> --posting-location-file <path>
+ *                          [--home-location "<city, province>"] [--currency <code>]
+ *                                                (same, but the posting location is read
+ *                                                 from a file instead of a shell argument —
+ *                                                 see CWE-78 note below)
  *      node salary-gap.mjs --self-test
+ *
+ * `--posting-location` vs `--posting-location-file` (#4696 CodeRabbit CWE-78
+ * finding): the posting location is the JD's own verbatim text — untrusted,
+ * external, JD-author-controlled. `modes/oferta.md` Signal 17 and
+ * `batch/batch-prompt.md`'s batch-worker equivalent (which runs with
+ * `--dangerously-skip-permissions`) both call this script from an agent-
+ * constructed Bash command. Interpolating that JD text directly into a
+ * double-quoted `--posting-location "<JD location>"` argument lets a crafted
+ * location containing `$(...)` or backticks execute as a shell command
+ * substitution before this script ever sees the string. `--posting-location-file
+ * <path>` sidesteps that only when the raw JD text never enters shell syntax:
+ * the agent first base64-encodes the complete UTF-8 location as a pure text
+ * transformation, then a fixed `node -e` decoder writes those bytes to a
+ * temporary file. A quoted heredoc is not safe because JD text equal to its
+ * fixed delimiter can close it early. The command line receives only the
+ * base64 alphabet and the agent-chosen file PATH, never raw JD text.
+ * `--posting-location`
+ * itself is unchanged and still accepted (e.g. for trusted/short values typed
+ * directly by a human), but the prompt-spec instructions in `modes/oferta.md`
+ * and `batch/batch-prompt.md` now use the file form for the JD-controlled
+ * value specifically.
  */
 
 import { readFileSync, existsSync, readdirSync } from 'fs';
@@ -34,10 +72,15 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
+// templates/ is SYSTEM layer (Data Contract) — resolved relative to this
+// script's own directory, never the (possibly different) user data root.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const RELOCATION_TABLE_PATH = join(SCRIPT_DIR, 'templates/jurisdiction-relocation-tax.yml');
 
 /**
  * Canonical form of a tracker#/report# so `29` and `029` are one key.
@@ -73,6 +116,28 @@ const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const statedForFlagIdx = args.indexOf('--stated-for');
 const statedForNum = statedForFlagIdx !== -1 ? args[statedForFlagIdx + 1] : null;
+// Relocation purchasing-power (#4694) — ad hoc mode: compute a comparison
+// directly from CLI inputs, without needing a tracker row or a saved report.
+// This is what modes/oferta.md Signal 17 calls during a FRESH evaluation,
+// before anything has been written to reports/ or the tracker.
+const relocationMode = args.includes('--relocation');
+const relocGrossRaw = flagValue(args, '--gross');
+const relocCurrency = flagValue(args, '--currency') ?? null;
+const relocPostingLocation = flagValue(args, '--posting-location') ?? null;
+// File form (#4696 CodeRabbit CWE-78 finding): the posting location is
+// JD-controlled, untrusted text. Reading it from a file the caller already
+// wrote — rather than interpolating it into this process's own argv — means
+// shell metacharacters in the JD text are never given to a shell to expand in
+// the first place. See the file header comment for the full rationale.
+const relocPostingLocationFile = flagValue(args, '--posting-location-file') ?? null;
+// `flagValue` alone cannot distinguish "flag absent" from "flag present but
+// given a missing/invalid operand" — both collapse to `undefined`/`null`
+// above. `hasFlag` sees the token itself, so the two cases can be told apart
+// and a present-but-malformed flag can fail loudly instead of silently
+// falling back to --posting-location or misreading the next flag as a path
+// (#4696 CodeRabbit follow-up finding).
+const relocPostingLocationFileFlagPresent = hasFlag(args, '--posting-location-file');
+const relocHomeLocationFlag = flagValue(args, '--home-location') ?? null;
 
 const TRUST = {
   actual: { contract: 3, 'offer-letter': 2, 'recruiter-verbal': 1, user: 0 },
@@ -135,6 +200,14 @@ function canonicalizeSeparators(numStr) {
 export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
+  // Keep period recognition separate from amount parsing, but allow an explicit
+  // annual suffix to coexist with the numeric value in Machine Summary data.
+  // It may appear on either side of a trailing currency token ("60k CAD per
+  // year" or "60k per year CAD"), so strip annual/currency/annual in that
+  // order. Other periods remain unparseable because callers must annualize them
+  // from the JD's own inputs before treating them as annual gross.
+  const stripAnnual = (value) => value.replace(/\s*(?:\/\s*(?:year|yr)|per\s+(?:year|annum)|annual(?:ly)?|yearly)\s*$/i, '').trim();
+  s = stripAnnual(s);
   // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
   // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
   // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
@@ -142,6 +215,7 @@ export function parseAmount(raw) {
   // prose ("competitive") still fails the numeric match below even after losing
   // its last three letters.
   s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
+  s = stripAnnual(s);
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(canonicalizeSeparators(numStr));
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
@@ -159,6 +233,14 @@ export function parseAmount(raw) {
     const v = toNum(single[1], single[2]);
     return v === null ? null : { min: v, max: v, mid: v };
   }
+  return null;
+}
+
+export function compensationPeriod(raw) {
+  const value = String(raw ?? '');
+  if (/(?:\/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b)/i.test(value)) return 'annual';
+  if (/(?:\/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b)/i.test(value)) return 'monthly';
+  if (/(?:\/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b)/i.test(value)) return 'hourly';
   return null;
 }
 
@@ -222,6 +304,11 @@ export function reportToObservation(content, num, date) {
   const company = yamlStr(body, 'company');
   const role = yamlStr(body, 'role');
   const adv = yamlStr(body, 'advertised_comp');
+  // posting_location (#4694): the JD's own stated work location, verbatim,
+  // when it requires relocation — feeds the relocation purchasing-power
+  // comparison (see computeRelocationAdjustment below). null when the JD
+  // states no location, same no-invented-data posture as advertised_comp.
+  const postingLocation = yamlStr(body, 'posting_location');
   // Currency = first standalone UPPERCASE 3-letter token, case-SENSITIVE on
   // purpose: lowercase 3-letter English words in sloppy values ("per", "and")
   // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
@@ -229,12 +316,287 @@ export function reportToObservation(content, num, date) {
   // a corrective TSV observation with an explicit currency overrides it.
   const currencyGuess = adv ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
   return {
-    company, role,
+    company, role, postingLocation,
     observation: adv === null ? null : {
       num, date, type: 'advertised', amount: adv, currency: currencyGuess,
       source: 'jd', note: 'from report Machine Summary', parsed: parseAmount(adv),
+      period: compensationPeriod(adv), postingLocation,
     },
   };
+}
+
+// --- Relocation purchasing-power (jurisdiction-compliance-lens umbrella #2026,
+// member #4694) ---
+//
+// Generic engine + jurisdiction-keyed table, same pattern as every other
+// umbrella member: the math below never hardcodes a country, a province, or a
+// rate — those live entirely in templates/jurisdiction-relocation-tax.yml.
+// Deliberately simplified (see that file's NEVER-ASSERT note): federal +
+// sub-national MARGINAL BRACKETS ONLY — no basic personal amount, credits,
+// CPP/EI, surtaxes, or cost-of-living adjustment. Every input is returned
+// alongside the output (inspectable, never opaque), and the `limitations`
+// string is part of the result, not an afterthought left to the caller.
+
+/**
+ * Load the relocation tax-bands table. Missing/unreadable file is a non-event
+ * here (same posture as loadProfileDesired below) — callers treat a null
+ * table as "no jurisdiction data available," never a crash.
+ *
+ * @param {string} [tablePath] - Override for tests.
+ * @returns {object|null} The `jurisdictions` map, or null.
+ */
+export function loadRelocationTable(tablePath = RELOCATION_TABLE_PATH) {
+  if (!existsSync(tablePath)) return null;
+  try {
+    const doc = yaml.load(readFileSync(tablePath, 'utf-8').replace(/\r\n/g, '\n'));
+    return doc?.jurisdictions && typeof doc.jurisdictions === 'object' ? doc.jurisdictions : null;
+  } catch {
+    return null;
+  }
+}
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Blocking context markers (#4696 CodeRabbit findings #2 and the follow-up
+// unseeded-province gap). A bare city-name alias ("Waterloo", "Hamilton",
+// "Surrey") collides with a same-named city outside the table's country, OR
+// with a same-named city in a Canadian province/territory the table simply
+// hasn't seeded yet ("Hamilton, Quebec" sharing its name with CA-ON's
+// Hamilton). Rather than try to enumerate every colliding city, block a
+// city-only match whenever the text ALSO names an unambiguous place the weak
+// match cannot be — a US state, the UK, New Zealand, … — OR one of the
+// Canadian provinces/territories not yet seeded in
+// templates/jurisdiction-relocation-tax.yml — real signal the city-name
+// alias alone cannot see.
+const BLOCKING_CONTEXT_MARKERS = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+  'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+  'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan',
+  'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+  'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina',
+  'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island',
+  'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont',
+  'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming',
+  'United States', 'USA',
+  'United Kingdom', 'UK', 'England', 'Scotland', 'Wales',
+  'New Zealand', 'Australia',
+  // Unseeded Canadian jurisdictions: a city alias must not override them.
+  'Quebec', 'Québec', 'QC', 'Manitoba', 'MB', 'Saskatchewan', 'SK',
+  'New Brunswick', 'NB', 'Prince Edward Island', 'PE',
+  'Newfoundland and Labrador', 'NL', 'Yukon', 'YT',
+  'Northwest Territories', 'NT', 'Nunavut', 'NU',
+];
+const hasBlockingContext = (text) => BLOCKING_CONTEXT_MARKERS.some(
+  (m) => new RegExp(`\\b${escapeRegExp(m)}\\b`, 'i').test(text),
+);
+
+// An alias is a "strong" signal (a province/state's own name or its short
+// abbreviation) when it either IS the jurisdiction's own name, or reduces to
+// a bare 2-letter uppercase code once leading punctuation is stripped (", ON"
+// / " ON" -> "ON"). Everything else (a city name) is a "weak" signal: on its
+// own it can be a same-named city in another country entirely.
+function isStrongAlias(alias, row) {
+  const bare = alias.replace(/^[,\s]+/, '').trim();
+  if (/^[A-Z]{2}$/.test(bare)) return true;
+  const provinceName = String(row?.jurisdiction_name ?? '').split(',')[0].trim();
+  return !!provinceName && bare.toLowerCase() === provinceName.toLowerCase();
+}
+
+// Whole-word match for a name/city alias; a short (2-letter) abbreviation
+// alias is matched case-SENSITIVELY with its own boundary set so "ON" never
+// fires on the "on" in "on-site" or "in office on Fridays".
+function textContainsAlias(text, alias) {
+  const bare = alias.replace(/^[,\s]+/, '').trim();
+  if (!bare) return false;
+  if (/^[A-Z]{2}$/.test(bare)) {
+    const re = new RegExp(`(^|[\\s,(])${escapeRegExp(bare)}(?=$|[\\s,).])`);
+    return re.test(text);
+  }
+  const re = new RegExp(`\\b${escapeRegExp(bare)}\\b`, 'i');
+  return re.test(text);
+}
+
+/**
+ * Match a free-text location string (the candidate's own config/profile.yml
+ * location, or a posting's stated work location) against the table's
+ * jurisdiction `aliases`.
+ *
+ * Evidence-strength honesty (umbrella rule #5): no match, or an ambiguous
+ * match against more than one DIFFERENT jurisdiction, returns null — never a
+ * guess. A federal-level row is never matched directly; it carries no aliases
+ * and is combined with whichever sub-national row matched instead.
+ *
+ * Matching is whole-word and (for short abbreviation aliases) case-sensitive
+ * (#4696 CodeRabbit finding #2) — a naive substring match previously turned
+ * "Austin, TX (on-site)" into CA-ON via the "on" in "on-site". A province/
+ * state name or abbreviation ("NS", "Ontario") is a STRONG signal and wins
+ * outright over a bare city name, which disambiguates "Halifax, NS (in
+ * office on Fridays)" to CA-NS only. When the only match is a bare city-name
+ * alias (no strong signal in the text at all), the text is also checked for
+ * an unambiguous blocking context marker — a US state, "UK", "New Zealand",
+ * … or an unseeded Canadian province/territory ("Quebec", "QC", …) — "Waterloo,
+ * Iowa", "Hamilton, New Zealand", "Surrey, UK" and "Hamilton, Quebec" all
+ * share city names with CA-ON/CA-BC towns but are not those towns, and a
+ * bare city name alone is not strong enough evidence to override that.
+ *
+ * @param {string} text - Free-text location.
+ * @param {object} jurisdictions - Table from loadRelocationTable().
+ * @returns {string|null} The matched jurisdiction code, or null.
+ */
+export function matchJurisdiction(text, jurisdictions) {
+  const s = String(text ?? '').trim();
+  if (!s || !jurisdictions) return null;
+
+  const strongMatches = new Set();
+  const weakMatches = new Set();
+  for (const [code, row] of Object.entries(jurisdictions)) {
+    if (row?.level === 'federal') continue;
+    let strongHit = false;
+    let weakHit = false;
+    for (const alias of row?.aliases ?? []) {
+      const a = String(alias ?? '').trim();
+      if (!a || !textContainsAlias(s, a)) continue;
+      if (isStrongAlias(a, row)) strongHit = true;
+      else weakHit = true;
+    }
+    if (strongHit) strongMatches.add(code);
+    else if (weakHit) weakMatches.add(code);
+  }
+
+  // A province/state name or abbreviation always wins over a bare city name,
+  // and resolves ambiguity between two jurisdictions that happen to share a
+  // city name's text (the weak match is simply discarded in that case).
+  if (strongMatches.size > 0) return strongMatches.size === 1 ? [...strongMatches][0] : null;
+  if (weakMatches.size !== 1) return null;
+
+  const onlyCode = [...weakMatches][0];
+  if (hasBlockingContext(s)) return null; // bare city name only, blocking context present -> no guess
+  return onlyCode;
+}
+
+/**
+ * Progressive bracket tax: each band's rate applies only to the slice of
+ * income inside it. `brackets` must be ascending by `up_to`, with the top
+ * (unbounded) bracket carrying `up_to: null`.
+ *
+ * @param {Array<{up_to: number|null, rate: number}>} brackets
+ * @param {number} income - Non-negative gross amount.
+ * @returns {number|null} Total tax, or null on malformed input.
+ */
+export function bracketTax(brackets, income) {
+  if (!Array.isArray(brackets) || brackets.length === 0 || !(income >= 0)) return null;
+  let tax = 0;
+  let floor = 0;
+  for (const b of brackets) {
+    const cap = b?.up_to === null || b?.up_to === undefined ? Infinity : Number(b.up_to);
+    const rate = Number(b?.rate);
+    if (!Number.isFinite(rate) || (Number.isFinite(cap) && cap <= floor)) return null; // malformed table, never silently mis-tax
+    const slice = Math.max(0, Math.min(income, cap) - floor);
+    tax += slice * rate;
+    floor = cap;
+    if (income <= cap) break;
+  }
+  return tax;
+}
+
+/**
+ * Transparent, bracket-only relocation purchasing-power comparison between
+ * the candidate's home jurisdiction and a posting's destination jurisdiction.
+ *
+ * NOT FINANCIAL OR TAX ADVICE — a corroborating data point only, per the
+ * umbrella's warn-only, human-in-the-loop rule. Never a verdict on whether the
+ * posting is a "good" or "bad" offer.
+ *
+ * @param {object} params
+ * @param {number} params.grossAnnual - Gross annual compensation, in `currency`.
+ * @param {string} params.homeCode - Jurisdiction code of the candidate's home province/state.
+ * @param {string} params.destCode - Jurisdiction code of the posting's work location.
+ * @param {object} params.jurisdictions - Table from loadRelocationTable().
+ * @param {string} [params.currency] - The currency `grossAnnual` is actually denominated
+ *   in (e.g. the advertised comp's own currency, or the ad hoc `--currency` flag).
+ *   A table row's `currency` field (all seeded rows carry one) must match this,
+ *   case-insensitively, or the comparison is refused rather than silently taxed
+ *   under the wrong jurisdiction's brackets (#4696 CodeRabbit finding #3).
+ * @returns {object} `{ ok: true, ... }` or `{ ok: false, reason }`.
+ */
+export function computeRelocationAdjustment({ grossAnnual, homeCode, destCode, jurisdictions, currency }) {
+  if (!jurisdictions) return { ok: false, reason: 'no-table' };
+  if (!(grossAnnual > 0)) return { ok: false, reason: 'no-gross-amount' };
+  if (!homeCode || !destCode) return { ok: false, reason: 'no-jurisdiction-match' };
+  if (homeCode === destCode) return { ok: false, reason: 'same-jurisdiction' };
+  const home = jurisdictions[homeCode];
+  const dest = jurisdictions[destCode];
+  if (!home || !dest) return { ok: false, reason: 'no-jurisdiction-match' };
+  if (home.country !== dest.country) return { ok: false, reason: 'cross-country-not-supported' };
+
+  // The brackets below are only meaningful in the table's own currency. Rows
+  // that declare one (every seeded CA-* row does) require a known, matching
+  // advertised/--currency value — an UNKNOWN or mismatched currency (e.g. a
+  // "150k USD" posting) must never be silently run through CAD brackets.
+  // Rows carrying no `currency` field (legacy/fixture tables) skip this check
+  // entirely, so existing non-CA fixtures keep behaving as before.
+  const tableCurrency = dest.currency ?? home.currency ?? null;
+  if (tableCurrency) {
+    const stated = currency ? String(currency).toUpperCase() : 'UNKNOWN';
+    if (stated === 'UNKNOWN' || stated !== String(tableCurrency).toUpperCase()) {
+      return { ok: false, reason: 'currency-mismatch' };
+    }
+  }
+
+  const federalCode = Object.keys(jurisdictions).find(
+    (c) => jurisdictions[c]?.level === 'federal' && jurisdictions[c]?.country === home.country,
+  );
+  const federal = federalCode ? jurisdictions[federalCode] : null;
+  if (!federal) return { ok: false, reason: 'no-federal-table' };
+
+  const sideFor = (row) => {
+    const federalTax = bracketTax(federal.brackets, grossAnnual);
+    const subnationalTax = bracketTax(row.brackets, grossAnnual);
+    if (federalTax === null || subnationalTax === null) return null;
+    const totalTax = federalTax + subnationalTax;
+    return {
+      jurisdiction: row.jurisdiction_name, federalTax, subnationalTax, totalTax,
+      takeHome: grossAnnual - totalTax, effectiveRate: totalTax / grossAnnual,
+    };
+  };
+  const homeSide = sideFor(home);
+  const destSide = sideFor(dest);
+  if (!homeSide || !destSide) return { ok: false, reason: 'malformed-brackets' };
+
+  return {
+    ok: true,
+    grossAnnual,
+    taxYear: dest.tax_year ?? home.tax_year ?? null,
+    home: homeSide,
+    dest: destSide,
+    takeHomeDeltaAbs: destSide.takeHome - homeSide.takeHome,
+    takeHomeDeltaPct: ((destSide.takeHome - homeSide.takeHome) / homeSide.takeHome) * 100,
+    limitations: 'Marginal tax brackets only (federal + provincial/state) — basic personal amount, credits, CPP/EI, surtaxes and cost-of-living are NOT modeled. Not financial or tax advice; a corroborating data point only.',
+  };
+}
+
+/**
+ * Convenience wrapper for a folded application object (see `fold` below):
+ * resolves both jurisdictions from free text and delegates to
+ * computeRelocationAdjustment, or returns null when the inputs needed to
+ * even attempt a match are not available (no posting location, no advertised
+ * figure, no home location, or no table) — absence of data is "not
+ * evaluated," never a guess.
+ *
+ * @param {object} a - An application from fold()'s `applications` array.
+ * @param {{jurisdictions: object|null, homeLocation: string|null}} ctx
+ * @returns {object|null}
+ */
+export function relocationForApplication(a, { jurisdictions, homeLocation }) {
+  const postingLocation = a?.advertised?.postingLocation;
+  if (!jurisdictions || !homeLocation || !postingLocation || !a?.advertised) return null;
+  if (a.advertised.period !== 'annual') return null;
+  const homeCode = matchJurisdiction(homeLocation, jurisdictions);
+  const destCode = matchJurisdiction(postingLocation, jurisdictions);
+  return computeRelocationAdjustment({
+    grossAnnual: a.advertised.value, homeCode, destCode, jurisdictions,
+    currency: a.advertised.currency,
+  });
 }
 
 const pctDelta = (from, to) => ((to - from) / from) * 100;
@@ -252,7 +614,12 @@ function pickEffective(type, candidates) {
   if (!usable.length) return null;
   usable.sort((a, b) => (tiers[b.source] - tiers[a.source]) || (a.date < b.date ? 1 : -1));
   const top = usable[0];
-  return { value: top.parsed.mid, source: top.source, date: top.date, currency: top.currency, raw: top.amount };
+  return {
+    value: top.parsed.mid, source: top.source, date: top.date,
+    currency: top.currency, raw: top.amount,
+    period: top.period ?? compensationPeriod(top.amount),
+    postingLocation: top.postingLocation ?? null,
+  };
 }
 
 // --- Fold + aggregates ---
@@ -309,7 +676,7 @@ export function fold(observations, apps, profileDesired) {
     if (advertised && actual && !advComparable) currencyMismatches.push({ num, comparison: 'advertised-vs-actual', currencies: [advertised.currency, actual.currency] });
     if (desired && actual && !desComparable) currencyMismatches.push({ num, comparison: 'desired-vs-actual', currencies: [desired.currency, actual.currency] });
     applications.push({
-      num, company: meta.company, role: meta.role,
+      num, company: meta.company, role: meta.role, postingLocation: meta.postingLocation ?? null,
       desired, advertised, actual, trail,
       advToActPct: advComparable ? pctDelta(advertised.value, actual.value) : null,
       desiredToActPct: desComparable ? pctDelta(desired.value, actual.value) : null,
@@ -319,7 +686,7 @@ export function fold(observations, apps, profileDesired) {
   for (const [num, meta] of appsByNum) {
     if (!byNum.has(num) && profileObs) {
       applications.push({
-        num, company: meta.company, role: meta.role,
+        num, company: meta.company, role: meta.role, postingLocation: meta.postingLocation ?? null,
         desired: pickEffective('desired', [profileObs]), advertised: null, actual: null,
         trail: [], advToActPct: null, desiredToActPct: null,
       });
@@ -828,7 +1195,216 @@ function selfTest() {
   assert(getStatedObservations(parseObservations('29\t2026-07-01\tstated\t90k\tCAD\tuser\t'), '029').length === 1,
     'stated lookup by padded id finds a plain row');
 
-  console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency guard)');
+  // reportToObservation / mapTrackerToApps: posting_location round-trips (#4694)
+  const RELOC_REPORT_FIXTURE = `# Eval: Fictional Corp — Backend Eng
+
+## Machine Summary
+
+\`\`\`yaml
+company: "Fictional Corp"
+role: "Backend Eng"
+advertised_comp: "60k CAD"
+posting_location: "Halifax, NS"
+\`\`\`
+`;
+  const relocReportObs = reportToObservation(RELOC_REPORT_FIXTURE, '050', '2026-09-01');
+  assert(relocReportObs.postingLocation === 'Halifax, NS', 'reportToObservation extracts posting_location verbatim');
+  assert(relocReportObs.observation?.postingLocation === 'Halifax, NS', 'the advertised observation retains its own report posting_location');
+  const relocMapped = mapTrackerToApps(
+    [{ num: '50', company: '', role: '', report: '[050](../reports/050-fictional-corp-2026-09-01.md)', notes: '' }],
+    new Map([['50', relocReportObs]]),
+  );
+  assert(relocMapped.apps['50']?.postingLocation === 'Halifax, NS', 'mapTrackerToApps carries posting_location onto the owning tracker row');
+  const relocShared = mapTrackerToApps([
+    { num: '50', company: 'Fictional Corp', role: 'Backend Eng', report: '[050](../reports/050-fictional-corp-2026-09-01.md)', notes: '' },
+    { num: '52', company: 'Other Corp', role: 'Other Eng', report: '[050](../reports/050-fictional-corp-2026-09-01.md)', notes: '' },
+  ], new Map([['50', relocReportObs]]));
+  assert(relocShared.apps['50']?.postingLocation === 'Halifax, NS', 'a shared report keeps its posting location on the owning row');
+  assert(relocShared.apps['52']?.postingLocation === null, 'a later row sharing the report does not inherit its owner\'s posting location');
+  const relocMappedNoReport = mapTrackerToApps([{ num: '51', company: 'Recruiter Co', role: 'Eng', report: '', notes: '' }], new Map());
+  assert(relocMappedNoReport.apps['51']?.postingLocation === null, 'a report-less tracker row gets postingLocation: null, never undefined');
+
+  // --- #4694: relocation purchasing-power (fictional fixture table — never the real one) ---
+  const RELOC_FIXTURE = {
+    'XX-FEDERAL': {
+      jurisdiction_name: 'Testland — Federal', country: 'Testland', level: 'federal',
+      brackets: [{ up_to: 50000, rate: 0.10 }, { up_to: null, rate: 0.20 }],
+    },
+    'XX-NORTH': {
+      jurisdiction_name: 'North Testland', country: 'Testland', level: 'provincial',
+      aliases: ['North Testland', ', NT', 'Testville'],
+      tax_year: 2026,
+      brackets: [{ up_to: 30000, rate: 0.05 }, { up_to: null, rate: 0.25 }],
+    },
+    'XX-SOUTH': {
+      jurisdiction_name: 'South Testland', country: 'Testland', level: 'provincial',
+      aliases: ['South Testland', ', ST', 'Southburg'],
+      tax_year: 2026,
+      brackets: [{ up_to: 100000, rate: 0.05 }],
+    },
+    'YY-OTHERCOUNTRY': {
+      jurisdiction_name: 'Otherland', country: 'Otherland', level: 'provincial',
+      aliases: ['Otherland'], brackets: [{ up_to: null, rate: 0.10 }],
+    },
+  };
+
+  // bracketTax: progressive, slice-by-slice
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, 40000) === 4000, '10% flat under first bracket');
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, 60000) === 50000 * 0.10 + 10000 * 0.20, 'progressive across two brackets');
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, 0) === 0, 'zero income -> zero tax');
+  assert(bracketTax([], 1000) === null, 'empty brackets -> null, never zero-tax by accident');
+  assert(bracketTax(null, 1000) === null, 'non-array brackets -> null');
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, -1) === null, 'negative income -> null');
+  assert(bracketTax([{ up_to: 100, rate: 'bogus' }], 50) === null, 'non-numeric rate -> null, never silently taxed at 0');
+  assert(bracketTax([{ up_to: 100, rate: 0.1 }, { up_to: 50, rate: 0.2 }], 200) === null,
+    'non-ascending brackets -> null, never silently mis-taxed');
+
+  // matchJurisdiction: aliases, ambiguity, federal rows excluded
+  assert(matchJurisdiction('Testville, XX', RELOC_FIXTURE) === 'XX-NORTH', 'city alias matches its province');
+  assert(matchJurisdiction('Someplace, NT', RELOC_FIXTURE) === 'XX-NORTH', 'abbreviation alias matches');
+  assert(matchJurisdiction('Nowhere special', RELOC_FIXTURE) === null, 'no alias match -> null, not a guess');
+  assert(matchJurisdiction('', RELOC_FIXTURE) === null, 'blank text -> null');
+  assert(matchJurisdiction('Testville', null) === null, 'no table -> null');
+  assert(matchJurisdiction('Testland Federal HQ', RELOC_FIXTURE) === null,
+    'federal-level row is never matched directly (it carries no aliases)');
+  const AMBIGUOUS_FIXTURE = {
+    A: { level: 'provincial', aliases: ['Springfield'] },
+    B: { level: 'provincial', aliases: ['Springfield'] },
+  };
+  assert(matchJurisdiction('Springfield', AMBIGUOUS_FIXTURE) === null,
+    'two different jurisdictions sharing an alias -> null, never an arbitrary pick');
+
+  // matchJurisdiction false-positive regression (#4696 CodeRabbit finding #2):
+  // whole-word + case-sensitive abbreviation matching, a province/state name or
+  // abbreviation always wins over a bare city name, and a bare city-name-only
+  // match is rejected when the text also carries an unambiguous non-Canadian
+  // context marker. Exercised against the REAL table (not a fixture) because
+  // the false positives were specifically against its real aliases.
+  {
+    const rt = loadRelocationTable();
+    assert(matchJurisdiction('Austin, TX (on-site)', rt) === null,
+      '"on-site" never false-matches the ON abbreviation (case-sensitive, word-boundary)');
+    assert(matchJurisdiction('Remote, Abu Dhabi', rt) === null,
+      '"Abu" never false-matches the AB abbreviation (case-sensitive)');
+    assert(matchJurisdiction('Abu Dhabi', rt) === null,
+      'bare "Abu Dhabi" never false-matches AB either');
+    assert(matchJurisdiction('Halifax, NS (in office on Fridays)', rt) === 'CA-NS',
+      'a real province abbreviation (NS) wins outright over the "on" in "on Fridays" -- no ambiguity');
+    assert(matchJurisdiction('Waterloo, Iowa', rt) === null,
+      'Waterloo is also an Iowa city -- the Iowa context blocks the ON city-alias match');
+    assert(matchJurisdiction('Hamilton, New Zealand', rt) === null,
+      'Hamilton is also a New Zealand city -- that context blocks the ON city-alias match');
+    assert(matchJurisdiction('Surrey, UK', rt) === null,
+      'Surrey is also a UK city -- that context blocks the BC city-alias match');
+    // True positives keep working: real Canadian cities/abbreviations still resolve.
+    assert(matchJurisdiction('Halifax, NS', rt) === 'CA-NS', 'real "Halifax, NS" still resolves to CA-NS');
+    assert(matchJurisdiction('Toronto, ON', rt) === 'CA-ON', 'real "Toronto, ON" still resolves to CA-ON');
+    assert(matchJurisdiction('Vancouver, BC', rt) === 'CA-BC', 'real "Vancouver, BC" still resolves to CA-BC');
+    assert(matchJurisdiction('Calgary, Alberta', rt) === 'CA-AB', 'real "Calgary, Alberta" still resolves to CA-AB');
+
+    // matchJurisdiction unseeded-province regression (#4696 CodeRabbit finding,
+    // follow-up round): a bare city-name alias must not win just because the
+    // OTHER province it also names has no row yet. "Hamilton" is a real
+    // Ontario city alias, but "Hamilton, Ontario, Canada" is itself (never
+    // blocked by its own province's name), while "Hamilton, Quebec"/"Hamilton,
+    // QC" names a different, unseeded Canadian province and must not fall back
+    // to CA-ON. "Victoria, Prince Edward Island" already returned null before
+    // this fix (no table city happens to collide), and keeps returning null.
+    assert(matchJurisdiction('Hamilton, Quebec', rt) === null,
+      'Hamilton is also a Quebec city -- the unseeded-province context blocks the ON city-alias match');
+    assert(matchJurisdiction('Hamilton, QC', rt) === null,
+      'the QC abbreviation blocks the ON city-alias match the same way the full name does');
+    assert(matchJurisdiction('Victoria, Prince Edward Island', rt) === null,
+      'Victoria, PEI still resolves to null (no colliding table city, unaffected by this fix)');
+  }
+
+  // computeRelocationAdjustment: transparent inputs, correct math, honest failure reasons
+  const reloc1 = computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'XX-SOUTH', jurisdictions: RELOC_FIXTURE });
+  assert(reloc1.ok === true, 'valid relocation comparison succeeds');
+  // home (North): fed 50000*.10+10000*.20=7000, prov 30000*.05+30000*.25=9000 -> total 16000, take-home 44000
+  assert(reloc1.home.totalTax === 16000 && reloc1.home.takeHome === 44000, `home side math, got ${JSON.stringify(reloc1.home)}`);
+  // dest (South): fed 7000, prov 60000*.05=3000 -> total 10000, take-home 50000
+  assert(reloc1.dest.totalTax === 10000 && reloc1.dest.takeHome === 50000, `dest side math, got ${JSON.stringify(reloc1.dest)}`);
+  assert(reloc1.takeHomeDeltaAbs === 6000, `South keeps $6000 more take-home than North at the same gross, got ${reloc1.takeHomeDeltaAbs}`);
+  assert(typeof reloc1.limitations === 'string' && reloc1.limitations.includes('Not financial or tax advice'),
+    'result always carries the not-financial-advice disclaimer');
+  assert(reloc1.grossAnnual === 60000, 'inputs are echoed back for transparency, not hidden behind the output');
+
+  assert(computeRelocationAdjustment({ grossAnnual: 0, homeCode: 'XX-NORTH', destCode: 'XX-SOUTH', jurisdictions: RELOC_FIXTURE }).reason === 'no-gross-amount',
+    'zero/missing gross -> honest failure reason');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'XX-NORTH', jurisdictions: RELOC_FIXTURE }).reason === 'same-jurisdiction',
+    'same jurisdiction both sides -> same-jurisdiction, nothing to show');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: null, jurisdictions: RELOC_FIXTURE }).reason === 'no-jurisdiction-match',
+    'unresolved destination code -> no-jurisdiction-match');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'YY-OTHERCOUNTRY', jurisdictions: RELOC_FIXTURE }).reason === 'cross-country-not-supported',
+    'cross-country comparison is explicitly out of scope, not silently computed wrong');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'XX-SOUTH', jurisdictions: null }).reason === 'no-table',
+    'missing table -> no-table');
+
+  // relocationForApplication: wraps fold()-shaped application objects; absence of any required
+  // input is "not evaluated" (null), never a guess
+  const relocApp = { advertised: { value: 60000, period: 'annual', postingLocation: 'Southburg, ST' } };
+  const relocResult = relocationForApplication(relocApp, { jurisdictions: RELOC_FIXTURE, homeLocation: 'Testville, NT' });
+  assert(relocResult?.ok === true && relocResult.dest.jurisdiction === 'South Testland', 'relocationForApplication resolves both sides from free text');
+  assert(relocationForApplication({ postingLocation: 'stale earlier location', advertised: { value: 60000, period: 'annual', postingLocation: null } }, { jurisdictions: RELOC_FIXTURE, homeLocation: 'Testville, NT' }) === null,
+    'no posting location -> null, not evaluated');
+  assert(relocationForApplication({ advertised: null }, { jurisdictions: RELOC_FIXTURE, homeLocation: 'Testville, NT' }) === null,
+    'no advertised figure -> null, not evaluated');
+  assert(relocationForApplication(relocApp, { jurisdictions: RELOC_FIXTURE, homeLocation: null }) === null,
+    'no resolvable home location -> null, not evaluated');
+  assert(relocationForApplication(relocApp, { jurisdictions: null, homeLocation: 'Testville, NT' }) === null,
+    'no table -> null, not evaluated');
+
+  // loadRelocationTable: the REAL table ships, parses, and every row satisfies its own schema
+  const realTable = loadRelocationTable();
+  assert(realTable !== null, 'the real templates/jurisdiction-relocation-tax.yml loads');
+  assert(realTable['CA-FEDERAL']?.level === 'federal', 'real table carries a CA-FEDERAL row');
+  assert(realTable['CA-ON'] && realTable['CA-NS'] && realTable['CA-AB'] && realTable['CA-BC'],
+    'real table carries the four seeded provinces');
+  for (const [code, row] of Object.entries(realTable)) {
+    assert(typeof row.as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.as_of), `${code} carries a quoted YYYY-MM-DD as_of`);
+    assert(Array.isArray(row.sources) && row.sources.length > 0, `${code} carries at least one source`);
+    assert(typeof row.official_source?.url === 'string' && row.official_source.url.startsWith('https://'), `${code} carries an official_source.url`);
+    assert(bracketTax(row.brackets, 75000) !== null, `${code}'s own brackets are well-formed (ascending, numeric rates)`);
+  }
+  const realHalifax = matchJurisdiction('Halifax, NS', realTable);
+  const realToronto = matchJurisdiction('Toronto, ON', realTable);
+  assert(realHalifax === 'CA-NS' && realToronto === 'CA-ON', 'real table resolves the issue #4694 example cities (Halifax NS, Toronto/Midland ON)');
+  assert(realTable['CA-ON']?.currency === 'CAD' && realTable['CA-NS']?.currency === 'CAD',
+    'every seeded real jurisdiction row declares its currency');
+  const realReloc = computeRelocationAdjustment({
+    grossAnnual: 60000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'CAD',
+  });
+  assert(realReloc.ok === true && realReloc.dest.takeHome < realReloc.home.takeHome,
+    `at the same $60k gross, NS's higher brackets leave less take-home than ON's — got ${JSON.stringify({ home: realReloc.home.takeHome, dest: realReloc.dest.takeHome })}`);
+
+  // currency-mismatch (#4696 CodeRabbit finding #3): a table row that declares
+  // a currency (every real CA-* row does) must never be silently taxed under
+  // the wrong currency's gross figure.
+  const usdMismatch = computeRelocationAdjustment({
+    grossAnnual: 150000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'USD',
+  });
+  assert(usdMismatch.ok === false && usdMismatch.reason === 'currency-mismatch',
+    `a USD gross figure against the CAD table must refuse, not silently tax as CAD, got ${JSON.stringify(usdMismatch)}`);
+  const unknownMismatch = computeRelocationAdjustment({
+    grossAnnual: 150000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'UNKNOWN',
+  });
+  assert(unknownMismatch.ok === false && unknownMismatch.reason === 'currency-mismatch',
+    'an UNKNOWN currency against a currency-bearing table row also refuses');
+  const omittedMismatch = computeRelocationAdjustment({
+    grossAnnual: 150000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable,
+  });
+  assert(omittedMismatch.ok === false && omittedMismatch.reason === 'currency-mismatch',
+    'no currency supplied at all is treated the same as UNKNOWN, never assumed to match');
+  const caseInsensitiveMatch = computeRelocationAdjustment({
+    grossAnnual: 60000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'cad',
+  });
+  assert(caseInsensitiveMatch.ok === true, 'currency comparison is case-insensitive ("cad" matches "CAD")');
+  // Legacy/fixture tables with no `currency` field on their rows skip the
+  // check entirely — RELOC_FIXTURE's own earlier `ok === true` assertions
+  // (reloc1, relocResult) already cover this with no currency argument at all.
+
+  console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency guard + relocation purchasing-power)');
 }
 
 // --- Real sources ---
@@ -888,6 +1464,7 @@ export function mapTrackerToApps(rows, reportsByNum) {
     if (!/^\d+$/.test(id)) continue;
     let company = row.company || null;
     let role = row.role || null;
+    let postingLocation = null; // #4694: no tracker-row equivalent — fills only from a linked report
     const seenReports = new Set();
     for (const link of extractTrackerReportLinks(row.report, row.notes)) {
       // Rule 5: the target is the report identity; a disagreeing label is
@@ -917,15 +1494,16 @@ export function mapTrackerToApps(rows, reportsByNum) {
       // a gap the tracker row left, never overwrite what the row states.
       if (!company) company = report.company || null;
       if (!role) role = report.role || null;
+      if (!postingLocation && owner === id) postingLocation = report.postingLocation || null;
       if (report.observation && owner === id) observations.push({ ...report.observation, num: id });
     }
-    apps[id] = { company: company || null, role: role || null };
+    apps[id] = { company: company || null, role: role || null, postingLocation: postingLocation || null };
   }
 
   // Rule 2: reports no row links keep their own id, unless a row owns it.
   for (const [rep, report] of reportsByNum) {
     if (linkedBy.has(rep) || Object.hasOwn(apps, rep)) continue;
-    apps[rep] = { company: report.company || null, role: report.role || null };
+    apps[rep] = { company: report.company || null, role: report.role || null, postingLocation: report.postingLocation || null };
     if (report.observation) observations.push({ ...report.observation, num: rep });
   }
 
@@ -1001,7 +1579,7 @@ function collectSources() {
     // No readable tracker: fall back to report filenames, which is what this
     // file did before #4351. An install without applications.md keeps working.
     for (const [num, report] of reportsByNum) {
-      apps[num] = { company: report.company || null, role: report.role || null };
+      apps[num] = { company: report.company || null, role: report.role || null, postingLocation: report.postingLocation || null };
       if (report.observation) observations.push({ ...report.observation, num });
     }
   }
@@ -1026,11 +1604,33 @@ function loadProfileDesired() {
   }
 }
 
+// #4694: the candidate's own home location, as free text, for jurisdiction
+// matching. `candidate.location` (e.g. "Toronto, ON") is preferred — it
+// already follows the "city, province/state abbreviation" convention used
+// throughout config/profile.example.yml; `location.city` is the fallback for
+// a profile that only fills in the structured `location:` block.
+function loadProfileLocation() {
+  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  if (!existsSync(profilePath)) return null;
+  try {
+    const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
+    const candidateLoc = profile?.candidate?.location;
+    if (typeof candidateLoc === 'string' && candidateLoc.trim()) return candidateLoc.trim();
+    const city = profile?.location?.city;
+    return typeof city === 'string' && city.trim() ? city.trim() : null;
+  } catch {
+    return null; // unreadable profile is a non-event here; doctor.mjs owns that complaint
+  }
+}
+
 // --- Output ---
 const fmtVal = (v) => (v >= 1000 && v % 500 === 0 ? `${v / 1000}k` : String(v));
 const fmtEff = (e) => (e ? `${fmtVal(e.value)} ${e.currency || ''} (${e.source}, ${e.date})`.replace('  ', ' ') : '—');
 const fmtPct = (p) => (p === null || p === undefined ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`);
 const daysOld = (date) => Math.max(0, Math.round((Date.now() - Date.parse(date)) / 86400000));
+// Rounded to the nearest $100 — this is a bracket-only estimate, never claim
+// cents-level precision on it.
+const fmtMoney = (v) => (Math.round(v / 100) * 100).toLocaleString('en-US');
 
 function printSummary(result) {
   const { applications, aggregates, quality } = result;
@@ -1051,6 +1651,10 @@ function printSummary(result) {
       console.log(`      actual     ${fmtEff(a.actual)}`);
       if (a.advToActPct !== null || a.desiredToActPct !== null) {
         console.log(`      gap: advertised→actual ${fmtPct(a.advToActPct)}, desired→actual ${fmtPct(a.desiredToActPct)}`);
+      }
+      if (a.relocation?.ok) {
+        const r = a.relocation;
+        console.log(`      relocation: ~$${fmtMoney(r.home.takeHome)} take-home in ${r.home.jurisdiction} vs ~$${fmtMoney(r.dest.takeHome)} in ${r.dest.jurisdiction} (bracket-tax estimate only, not financial/tax advice)`);
       }
     }
 
@@ -1146,11 +1750,80 @@ function main() {
     return;
   }
 
+  if (relocationMode) {
+    // Ad hoc mode (#4694): compute a relocation purchasing-power comparison
+    // directly from CLI inputs. This is what a FRESH evaluation uses —
+    // before anything has been written to reports/ or the tracker, there is
+    // no tracker# to fold against yet.
+    const gross = relocGrossRaw !== undefined ? parseAmount(relocGrossRaw)?.mid ?? null : null;
+    // --posting-location-file wins when both forms are given (#4696 CWE-78
+    // fix): the file is the safe, non-shell-interpolated path, so prefer it
+    // over the inline flag rather than silently falling back to the one a
+    // caller may have meant to replace.
+    let postingLocation = relocPostingLocation;
+    if (relocPostingLocationFileFlagPresent) {
+      // The flag is present — require a real operand before ever touching
+      // the filesystem. Missing (`--posting-location-file` as the last
+      // token, or `--posting-location-file=`) and operand-looks-like-another-flag
+      // (`--posting-location-file --home-location "X"`, which would otherwise
+      // silently read `--home-location` as the path) both fail here with a
+      // distinct, specific message — never falling through to
+      // --posting-location or to a confusing "Could not read" error about a
+      // flag name instead of a path.
+      if (!relocPostingLocationFile || relocPostingLocationFile.startsWith('-')) {
+        console.error(
+          `Usage: --posting-location-file requires a file path operand (got ${
+            relocPostingLocationFile ? `'${relocPostingLocationFile}', which looks like another flag` : 'none'
+          })`
+        );
+        process.exit(1);
+      }
+      try {
+        postingLocation = readFileSync(relocPostingLocationFile, 'utf-8').trim();
+      } catch (err) {
+        console.error(`Could not read --posting-location-file '${relocPostingLocationFile}': ${err.message}`);
+        process.exit(1);
+      }
+    }
+    if (gross === null || !postingLocation) {
+      console.error('Usage: node salary-gap.mjs --relocation --gross <amount> (--posting-location "<city, province>" | --posting-location-file <path>) [--home-location "<city, province>"] [--currency <code>]');
+      process.exit(1);
+    }
+    const jurisdictions = loadRelocationTable();
+    const homeLocation = relocHomeLocationFlag ?? loadProfileLocation();
+    const homeCode = matchJurisdiction(homeLocation, jurisdictions);
+    const destCode = matchJurisdiction(postingLocation, jurisdictions);
+    const result = computeRelocationAdjustment({
+      grossAnnual: gross, homeCode, destCode, jurisdictions, currency: relocCurrency,
+    });
+    console.log(JSON.stringify({
+      inputs: {
+        grossAnnual: gross, currency: relocCurrency,
+        homeLocation, postingLocation, homeCode, destCode,
+      },
+      ...result,
+    }, null, 2));
+    return;
+  }
+
   const { apps, observations, ambiguousIds, sharedReports, mislabeledReports } = collectSources();
   const result = fold(observations, apps, loadProfileDesired());
   result.quality.ambiguousIds = ambiguousIds ?? [];
   result.quality.sharedReports = sharedReports ?? [];
   result.quality.mislabeledReports = mislabeledReports ?? [];
+
+  // #4694: annotate each folded application with its relocation comparison,
+  // when there's enough data to even attempt one (posting location, an
+  // advertised figure, a resolvable home location, and the table). Absence
+  // of any of those is "not evaluated" (a.relocation stays null), never a
+  // guessed penalty.
+  {
+    const jurisdictions = loadRelocationTable();
+    const homeLocation = loadProfileLocation();
+    for (const a of result.applications) {
+      a.relocation = relocationForApplication(a, { jurisdictions, homeLocation });
+    }
+  }
 
   if (summaryMode) {
     printSummary(result);
@@ -1159,6 +1832,23 @@ function main() {
   }
 }
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node salary-gap.mjs [--summary] [--stated-for <tracker#>] [--self-test]
+
+  --summary                human-readable table instead of JSON
+  --stated-for <tracker#>  prior stated-comp observations for one tracked row
+  --self-test              run the built-in checks
+  --help, -h               print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   main();
 }

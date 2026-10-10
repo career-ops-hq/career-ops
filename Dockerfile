@@ -13,7 +13,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Optional: Go toolchain for the dashboard TUI (./dashboard).
 # Small footprint, keeps full feature parity with the README setup.
-ARG GO_VERSION=1.23.4
+# Must be >= the `go` line in dashboard/go.mod (checked by tests/go-floor.test.mjs), or
+# `go build` fetches a newer toolchain over the network and fails offline.
+ARG GO_VERSION=1.27.2
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl git tini latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-xetex; \

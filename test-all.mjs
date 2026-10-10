@@ -61,6 +61,7 @@ import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailu
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
 import { walkTree, listTree } from './lib/walk-tree.mjs';
+import { childFailureExcerpt } from './lib/failure-excerpt.mjs';
 import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
@@ -218,8 +219,13 @@ async function runDiscovered(filter = null) {
         const detail = lastRunFailure();
         fail(`${rel} — node:test suite failed (exit ${detail?.status ?? '?'})`);
         // Surface the runner's own summary; a bare "failed" is not actionable.
-        const tail = (detail?.stderr || detail?.stdout || '').split('\n').filter(Boolean).slice(-12);
-        for (const line of tail) console.log(`      ${line}`);
+        // The trailing window alone is not actionable either: node prints the
+        // error message above the frames, so a twelve-line tail kept
+        // `actual: false, expected: true` and dropped the interpolated value
+        // that says WHICH assertion and by how much (#4017).
+        for (const line of childFailureExcerpt(detail)) {
+          console.log(`      ${line}`);
+        }
       } else {
         // Both reporters: TAP prints "# pass N", the default spec reporter
         // prints "ℹ pass N". Cosmetic — the pass/fail verdict is the exit code.
@@ -483,26 +489,6 @@ const scripts = [
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'updater-migration-tests.mjs', expectExit: 0 },
-  // An outlier, measured on Windows CI the way tracker-writer-lock-tests.mjs
-  // once was (#2906). It spawns five node subprocesses
-  // (merge-tracker, verify-pipeline) against throwaway mkdtempSync trees, and
-  // that cost is the behaviour under test rather than slack to be trimmed.
-  //
-  // Measured on windows-latest across six green runs: 10.9s, 11.7s, 11.9s,
-  // 12.0s, 12.4s, 13.8s, which makes it the SLOWEST script in this section
-  // there, a hair above tracker-writer-lock-tests.mjs at 11.6s on the same run.
-  // A seventh run ran past the 30s default and was killed mid-suite
-  // (`exit null, signal SIGTERM`) while ubuntu, macos and every other check on
-  // that commit passed (#4010, same shape as #2906). Locally on an idle box it
-  // is 4.2s, so the spread is Windows process creation under runner load.
-  //
-  // SLOW_SCRIPT_WARN_FRACTION could not have given notice: at a typical 12s of
-  // 30s this never reaches the 75% warning, so it goes from silent to killed
-  // with nothing in between. The ceiling is the only signal it has.
-  //
-  // The writer-lock suite has since been made fast and moved into tests/ under
-  // the shared cap (#4759); #4758 is the same work for this one.
-  { name: 'tracker-columns-tests.mjs', expectExit: 0, timeoutMs: 180_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -1430,7 +1416,7 @@ try {
   const nonBambooPage = fakePage({ status: 200, finalUrl: URL, bodyText: '', applyControls: [] });
   nonBambooPage.reload = async () => { nonBambooReloadCalled = true; return { status: () => 200 }; };
   const nonBambooInsufficient = await checkUrlLiveness(nonBambooPage, URL);
-  if (nonBambooInsufficient.result === 'expired' && nonBambooInsufficient.code === 'insufficient_content' && !nonBambooReloadCalled) {
+  if (nonBambooInsufficient.result === 'uncertain' && nonBambooInsufficient.code === 'empty_page' && !nonBambooReloadCalled) {
     pass('the reload retry is scoped to BambooHR hosts only');
   } else {
     fail(`reload retry leaked to a non-BambooHR host: ${JSON.stringify(nonBambooInsufficient)}, reloadCalled=${nonBambooReloadCalled}`);
@@ -3686,9 +3672,14 @@ if (
   }
 
   // 6. Risk Summary row exists and follows the "activates automatically" pattern
+  // End bound is searched FROM the section start, not globally: any section
+  // added before Risk Summary that also carries a "Block format:" example
+  // would otherwise make the end index precede the start and slice to empty,
+  // failing this check for a reason that has nothing to do with the row.
+  const riskSummaryStart = ofertaMode.indexOf('## Risk Summary (after Block G)');
   const riskSummarySection = ofertaMode.slice(
-    ofertaMode.indexOf('## Risk Summary (after Block G)'),
-    ofertaMode.indexOf('Block format:')
+    riskSummaryStart,
+    ofertaMode.indexOf('Block format:', riskSummaryStart)
   );
   if (
     riskSummarySection.includes('AI-screening disclosure') &&
@@ -4223,6 +4214,16 @@ if (
   pass('AGENTS.md documents offer-prep and CLAUDE.md imports it');
 } else {
   fail('AGENTS.md missing offer-prep mode row or CLAUDE.md is not importing AGENTS.md');
+}
+
+// The trigger table is how a free-form request reaches a mode; a mode the
+// router exposes but the table omits is reachable only by its exact name (#4901).
+for (const mode of ['discover', 'text']) {
+  if (new RegExp(`^\\|[^\\n]*\\| \`${mode}\` \\|$`, 'm').test(agentsMdDoc)) {
+    pass(`AGENTS.md trigger table has a row for ${mode}`);
+  } else {
+    fail(`AGENTS.md trigger table has no row for ${mode} (#4901)`);
+  }
 }
 
 const dataContractDoc = readFile('DATA_CONTRACT.md');
@@ -8142,21 +8143,29 @@ try {
 
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const history = parseScanHistoryLine(historyRow);
+  // The stored cells carry the formula escaping; parseScanHistoryLine undoes it.
+  const stored = Object.fromEntries(SCAN_HISTORY_COLUMNS.map((name, i) => [name, historyRow.split('\t')[i]]));
   if (
     historyRow.split('\t').length === SCAN_HISTORY_COLUMNS.length && // every declared column, empty ones included
     !historyRow.includes('\n') && !historyRow.includes('\r') &&
-    history.posted_at === '' && // no postedAt on hostileOffer
-    history.trust_score === '' && history.trust_flags === '' && // no trust signal
+    !historyRow.split('\t').some(col => /[\r\n\t]/.test(col)) &&
+    history.posted_at === '' &&
+    history.trust_score === '' && history.trust_flags === '' &&
     history.url === 'https://jobs.example.com/123|evil' &&
     history.title.includes('- [ ] https://evil.example/job') &&
-    history.company === "'=ACME\\Corp | R&D" &&
-    history.location === "'@Remote EU" &&
-    history.requisition_id === "'=R1 DROP x" &&
-    history.language === "'@en -GB"
+    stored.company === "'=ACME\\Corp | R&D" &&
+    stored.location === "'@Remote EU" &&
+    stored.requisition_id === "'=R1 DROP x" &&
+    stored.language === "'@en -GB" &&
+    history.company === '=ACME\\Corp | R&D' &&
+    history.location === '@Remote EU' &&
+    history.requisition_id === '=R1 DROP x' &&
+    history.language === '@en -GB' &&
+    history.listing_key === ''
   ) {
-    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas');
+    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas; the reader gets the values back');
   } else {
-    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(history)}`);
+    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify({ stored, history })}`);
   }
 
   // ── postedAt persistence ──
@@ -8176,10 +8185,12 @@ try {
   const datedHistory = parseScanHistoryLine(formatScanHistoryRow(datedOffer, '2026-07-09'));
   const noDateHistory = parseScanHistoryLine(formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09'));
   if (
-    datedHistory.posted_at === '2026-06-18' && // epoch ms → YYYY-MM-DD
-    datedHistory.normalized_company === 'acme' && // normalized company key (#2093)
-    noDateHistory.posted_at === '' && // missing postedAt → empty, never a bogus date
-    noDateHistory.normalized_company === 'acme'
+    datedHistory.posted_at === '2026-06-18' &&
+    datedHistory.normalized_company === 'acme' &&
+    datedHistory.listing_key === '' &&
+    noDateHistory.posted_at === '' &&
+    noDateHistory.normalized_company === 'acme' &&
+    noDateHistory.listing_key === ''
   ) {
     pass('scan-history writer appends postedAt as an ISO trailing column (empty when absent)');
   } else {
@@ -8214,8 +8225,9 @@ try {
   const cleanHist = parseScanHistoryLine(formatScanHistoryRow(cleanOffer, '2026-07-09'));
   if (
     flaggedHist.trust_score === '60' && flaggedHist.trust_flags === 'missing_apply_url,suspicious_domain' &&
-    flaggedHist.normalized_company === 'acme' && // normalized company key (#2093)
-    cleanHist.trust_score === '' && cleanHist.trust_flags === '' // score 100 → not flagged → empty
+    flaggedHist.normalized_company === 'acme' &&
+    flaggedHist.listing_key === '' &&
+    cleanHist.trust_score === '' && cleanHist.trust_flags === '' && cleanHist.listing_key === ''
   ) {
     pass('scan-history writer appends trust score + flags trailing columns when flagged, empty otherwise (#1743)');
   } else {
@@ -12561,7 +12573,10 @@ try {
 // PDF was generated, so merge-tracker should flip only matching ❌ cells to ✅.
 console.log('\n🧪 Testing merge-tracker PDF flag sync from data/pdf-index.tsv (#1429)...');
 try {
-  const runPdfSyncFixture = (name, trackerRow, pdfIndex = null, additions = []) => {
+  // A manifest row only means PDF-ready while its file is on disk (#4777), so a
+  // fixture lists the files it expects to exist. The deleted-PDF cases live in
+  // tests/merge-tracker.test.mjs.
+  const runPdfSyncFixture = (name, trackerRow, pdfIndex = null, additions = [], pdfFiles = []) => {
     const tmp = mkdtempSync(join(tmpdir(), `career-ops-merge-pdf-${name}-`));
     mkdirSync(join(tmp, 'data'), { recursive: true });
     const additionsDir = join(tmp, 'additions');
@@ -12572,6 +12587,10 @@ try {
       '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
       trackerRow + '\n');
     if (pdfIndex !== null) writeFileSync(join(tmp, 'data', 'pdf-index.tsv'), pdfIndex);
+    for (const file of pdfFiles) {
+      mkdirSync(dirname(join(tmp, file)), { recursive: true });
+      writeFileSync(join(tmp, file), '%PDF-1.4\n');
+    }
     if (additions.length > 0) {
       mkdirSync(additionsDir, { recursive: true });
       for (const addition of additions) {
@@ -12595,6 +12614,8 @@ try {
     '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](../reports/012-acme-2026-01-04.md) | ok |',
     '# report\tpdf\thtml\tformat\tdate\n' +
       '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
+    [],
+    ['output/cv-acme.pdf'],
   );
   if (matching.result !== null && matching.merged.includes('| ✅ | [12](../reports/012-acme-2026-01-04.md) |')) {
     pass('merge-tracker flips a stale ❌ PDF cell when pdf-index.tsv has the row report number');
@@ -12633,6 +12654,7 @@ try {
       name: '001-umbrella.tsv',
       content: '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](../reports/041-umbrella-2026-01-07.md)\tok\n',
     }],
+    ['output/cv-umbrella.pdf'],
   );
   if (newAddition.result !== null && newAddition.merged.includes('| 1 | 2026-01-07 | Umbrella | Engineer | 4.1/5 | Evaluated | ✅ | [41](../reports/041-umbrella-2026-01-07.md) | ok |')) {
     pass('merge-tracker applies pdf-index.tsv to a newly merged tracker row in the same run');
@@ -12687,6 +12709,7 @@ try {
     reevalRow,
     '# report\tpdf\thtml\tformat\tdate\n1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
     [reevalTsv(2)],
+    ['output/acme-1.pdf', 'output/acme-2.pdf'],
   );
   const keptRow = keptFlag.merged.split('\n').find((l) => l.startsWith('| 3 ')) || '';
   if (keptFlag.result !== null && /\[2\]/.test(keptRow) && keptRow.split('|')[7].trim() === '✅') {
@@ -16312,6 +16335,70 @@ try {
     fail('tracker.mjs no longer writes the canonical 9-col header — BREAKING for the web reader; coordinate web/ in lockstep');
   }
 
+  // 55.1b tracker URL CELL form (#3516). The header label stays `URL`; what
+  // changed is the cell, which merge-tracker now writes as `[label](href)`.
+  //
+  // This belongs in the freeze section for the reason the section exists: the
+  // cell is read by three surfaces outside merge-tracker — the shared Node row
+  // parser, the Go dashboard (tier 0 of its JobURL chain since #3452), and,
+  // were the web ever to start reading it, the web. A reader that has not
+  // learned the link form does not fail loudly; `normalizeUrl('[l](u)')` is '',
+  // and '' means "no URL", so the row silently loses its exact-match dedup
+  // tier. Freezing the writer AND both readers here makes any future change to
+  // the form edit this assertion.
+  const mergeSrc = readFileSync(join(ROOT, 'merge-tracker.mjs'), 'utf-8');
+  const parseSrc = readFileSync(join(ROOT, 'tracker-parse.mjs'), 'utf-8');
+  const goCareerSrc = readFileSync(join(ROOT, 'dashboard', 'internal', 'data', 'career.go'), 'utf-8');
+  const historySeedsSrc = readFileSync(join(ROOT, 'history-ats-seeds.mjs'), 'utf-8');
+  const urlCellReaders = [
+    ["tracker-parse.mjs exports the shared extractor", /export function extractCellUrl\(/.test(parseSrc)],
+    ["merge-tracker.mjs writes the cell through formatUrlCell", /put\('url', formatUrlCell\(/.test(mergeSrc)],
+    ["merge-tracker.mjs reads the href before keying", /url: COLMAP\.url != null \? extractCellUrl\(/.test(mergeSrc)],
+    ["tracker-parse.mjs returns the href on parsed rows", /url: extractCellUrl\(at\('url'\)\)/.test(parseSrc)],
+    ["the Go dashboard extracts the href", /func extractCellURL\(/.test(goCareerSrc) && /JobURL:\s+extractCellURL\(at\("url"\)\)/.test(goCareerSrc)],
+    // history-ats-seeds reads the cell directly rather than through
+    // parseTrackerRow, so it is listed on its own.
+    ["history-ats-seeds.mjs extracts the href", /extractCellUrl\(cells\[columns\.url\]\)/.test(historySeedsSrc)],
+  ];
+  // The greps above prove the extraction is WRITTEN, not that it WINS. A later
+  // `row.url = at('url')` in parseTrackerRow overwrote the href with the raw
+  // cell after a merge from main, and every grep still passed. So also assert
+  // the behaviour: the shared parser hands back the href for a linked cell.
+  // scan.mjs's same-title requisition dedup (#4267) reads row.url from here.
+  {
+    const { resolveColumns, parseTrackerRow } = await import(pathToFileURL(join(ROOT, 'tracker-parse.mjs')).href);
+    const href = 'https://jobs.ashbyhq.com/acme/8a65908d';
+    const lines = [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|-----|',
+      `| 1 | 2026-01-01 | Acme | Engineer | 4.0/5 | Applied | ❌ | — | n | [ashby](${href}) |`,
+    ];
+    const got = parseTrackerRow(lines[2], resolveColumns(lines))?.url;
+    urlCellReaders.push([`parseTrackerRow returns the href for a linked cell (got ${JSON.stringify(got)})`, got === href]);
+  }
+  const brokenReaders = urlCellReaders.filter(([, ok]) => !ok).map(([label]) => label);
+  if (brokenReaders.length === 0) {
+    pass('tracker URL cell: written as a markdown link, and every reader extracts the href (#3516)');
+  } else {
+    fail(`tracker URL cell contract broken — ${brokenReaders.join('; ')}. A reader that misses the link form reads the row as having NO url and silently drops it to fuzzy dedup (#3516)`);
+  }
+
+  // 55.1c the boundary that kept the web out of this change: the TSV's `url`
+  // field stays a RAW url, and the web (which WRITES those TSVs) does not read
+  // the tracker's url cell — its field map has no `url` entry. If either half
+  // stops holding, the link form becomes a lockstep core+web change.
+  if (existsSync(join(ROOT, 'web', 'src', 'lib', 'tracker-table.mjs'))) {
+    const webTableSrc = readFileSync(join(ROOT, 'web', 'src', 'lib', 'tracker-table.mjs'), 'utf-8');
+    const webFieldBlock = webTableSrc.match(/const WEB_FIELD = \{[\s\S]*?\};/)?.[0] ?? '';
+    if (webFieldBlock && !/\burl:/.test(webFieldBlock)) {
+      pass('web tracker reader still ignores the URL column — the #3516 link form stays a core-only change');
+    } else {
+      fail('web tracker reader now maps the URL column: the markdown-link cell form (#3516) must be taught to it in lockstep, or the cell must go back to a raw URL');
+    }
+  } else {
+    console.log('   ⏭️  web/ not present (core-only install) — skipping the web URL-column boundary check');
+  }
+
   // 55.2 scan-history.tsv header prefix (lib/scan-history-columns.mjs, the
   // scanner's header and row order → web whats-new + first_seen map)
   const { SCAN_HISTORY_COLUMNS: scanHistoryColumns } = await import(pathToFileURL(join(ROOT, 'lib/scan-history-columns.mjs')).href);
@@ -16331,7 +16418,7 @@ try {
   // 55.3b below reads states.yml dynamically, so it inherits any such loss
   // instead of catching it: with `hired` removed both checks went green while
   // set-status.mjs would reject the terminal-success state as invalid.
-  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
   const missingStates = CANONICAL_STATE_IDS.filter((s) => !new RegExp(`^  - id: ${s}$`, 'm').test(statesSrc));
   if (missingStates.length === 0) {
     pass('templates/states.yml keeps every canonical status id (new ids may be appended)');
@@ -17410,8 +17497,7 @@ try {
     { url: 'https://x.example/j/1', source: 'lever', title: 'Data Engineer', company: 'Acme', location: 'Remote', description: longJd },
     '2026-07-06',
   ));
-  if (/^[0-9a-f]{16}$/.test(withBody.fingerprint) && withBody.normalized_company === 'acme') {
-    pass('formatScanHistoryRow appends a fingerprint column for described offers');
+  if (/^[0-9a-f]{16}$/.test(withBody.fingerprint) && withBody.normalized_company === 'acme' && withBody.listing_key === '') {    pass('formatScanHistoryRow appends a fingerprint column for described offers');
   } else {
     fail(`formatScanHistoryRow row: fingerprint=${JSON.stringify(withBody.fingerprint)}, normalized_company=${JSON.stringify(withBody.normalized_company)}`);
   }
@@ -17419,8 +17505,7 @@ try {
     { url: 'https://x.example/j/2', source: 'greenhouse', title: 'Data Engineer', company: 'Acme', location: '' },
     '2026-07-06',
   ));
-  if (withoutBody.fingerprint === '' && withoutBody.normalized_company === 'acme') {
-    pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
+  if (withoutBody.fingerprint === '' && withoutBody.normalized_company === 'acme' && withoutBody.listing_key === '') {    pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
   } else {
     fail(`formatScanHistoryRow (no body) row: fingerprint=${JSON.stringify(withoutBody.fingerprint)}, normalized_company=${JSON.stringify(withoutBody.normalized_company)}`);
   }

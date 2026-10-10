@@ -158,6 +158,7 @@ import { join } from 'path';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { splitStoryBlocks, isValidStory, getField, STORY_FIELDS } from './lib/story-bank.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -224,38 +225,99 @@ const STOPWORDS = new Set([
 ]);
 
 // ── Story-bank parsing ──────────────────────────────────────────────
-// Same block shape match-star.mjs's parseStories() already relies on
-// (`### [Theme] Title` headers, `**Label:** value` lines) — reimplemented
-// narrowly here rather than imported, so this checker doesn't take on a
-// dependency on match-star.mjs's STAR-specific fields it doesn't need.
+// Splitting and validity come from lib/story-bank.mjs, the same definition
+// match-star.mjs and negotiation-roi.mjs use (#4514). What this checker adds
+// is coverage: it keeps EVERY block and every table row outside a block, not
+// only the valid stories, because a figure in a malformed entry is still a
+// figure in story-bank.md. Hiding it from the checker would hide exactly the
+// unverified numbers #2947 exists to surface. Invalid entries are flagged,
+// never dropped.
+
+/** First `**Provenance:**` value in `text`, lowercased, or null. */
+function provenanceIn(text) {
+  // The marker must open its own line (optional indent, at most one list or
+  // quote marker). A `**Provenance:**` quoted inside another field's value is
+  // story text, not the story's marker (issue #4819).
+  const m = text.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
+  return m ? m[1].trim().toLowerCase() : null;
+}
 
 /**
- * Parse story-bank.md into blocks with title, provenance marker, and body.
+ * Parse story-bank.md into checkable entries: every `### ` block, valid or
+ * not; every run of text a story was cut off from by a table or heading; and
+ * every table row outside a block. Each is attributed to itself, so a figure
+ * is never credited to a field it isn't in.
+ *
+ * Provenance is the exception, on purpose. A story and the text cut off from
+ * it are ONE unit for the marker, as they were before a story ended at a
+ * table or heading: a marker in either covers both. Otherwise a Result line
+ * that happens to sit below a table would lose its story's
+ * `user-cannot-confirm` and come back as derived-unverified, asking the user
+ * to confirm a figure they already said they can't (the decay AGENTS.md's
+ * confirmation invariant forbids). Table rows inherit only that denial, never
+ * `source:` or `user-stated`: rows after a story are often separate Block F
+ * rows, and a denial can only make a classification stricter.
+ *
  * @param {string} content
- * @returns {Array<{title: string, provenance: string|null, body: string}>}
+ * @returns {Array<{kind: 'story'|'trailing'|'table-row', title: string, provenance: string|null, body: string, valid: boolean, line: number, actionAfterCut?: string}>}
  */
 function parseStoryBlocks(content) {
-  const blocks = content.split(/^### /m).slice(1);
-  const stories = [];
+  const { blocks, tableRows, trailing } = splitStoryBlocks(content);
 
-  for (const block of blocks) {
-    const lines = block.trim().split('\n');
-    const header = lines[0].trim();
-    if (!header) continue;
+  // The story's own text first, then its cut-off runs in file order: the
+  // first marker found is the unit's, the same rule as reading the block whole.
+  const unitProvenance = blocks.map((b, i) => [b.raw, ...trailing.filter((t) => t.story === i).map((t) => t.text)]
+    .map(provenanceIn).find((p) => p) ?? null);
 
-    const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
-    const title = themeMatch ? themeMatch[2].trim() : header;
+  const stories = blocks.map((b, i) => {
+    // An Action below the cut is why such a story reads as invalid; say so
+    // instead of "no Action", which sends the user looking for a missing line.
+    const cut = trailing.find((t) => t.story === i && getField(t.text, STORY_FIELDS.action));
+    return {
+      kind: 'story',
+      title: b.title || `(untitled, line ${b.line})`,
+      provenance: unitProvenance[i],
+      body: b.raw,
+      valid: isValidStory(b),
+      line: b.line,
+      ...(cut ? { actionAfterCut: cut.after } : {}),
+    };
+  });
 
-    // The marker must open its own line (optional indent, at most one list or
-    // quote marker). A `**Provenance:**` quoted inside another field's value is
-    // story text, not the story's marker (issue #4819).
-    const provMatch = block.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
-    const provenance = provMatch ? provMatch[1].trim().toLowerCase() : null;
+  const cutOff = trailing.map((t) => ({
+    kind: 'trailing',
+    title: `(after ${t.after}, line ${t.line}) in "${stories[t.story].title}"`,
+    provenance: unitProvenance[t.story],
+    body: t.text,
+    valid: false,
+    line: t.line,
+    after: t.after,
+  }));
 
-    stories.push({ title, provenance, body: block });
-  }
+  const rows = tableRows.map((r) => ({
+    kind: 'table-row',
+    title: `(table row, line ${r.line}) ${r.label}`.trim(),
+    provenance: r.story >= 0 && unitProvenance[r.story] === 'user-cannot-confirm' ? 'user-cannot-confirm' : null,
+    body: r.text,
+    valid: false,
+    line: r.line,
+  }));
 
-  return stories;
+  return [...stories, ...cutOff, ...rows];
+}
+
+/**
+ * Entries the other readers cannot see, with why.
+ * @param {ReturnType<typeof parseStoryBlocks>} entries
+ */
+function malformedEntries(entries) {
+  const reason = (e) => {
+    if (e.kind === 'table-row') return 'table row: not a ### block';
+    if (e.kind === 'trailing') return `text after a ${e.after} inside a story: the readers stop at the ${e.after}`;
+    if (e.actionAfterCut) return `its **A (Action):** line comes after a ${e.actionAfterCut}, where the readers stop`;
+    return 'no **A (Action):** line';
+  };
+  return entries.filter((e) => !e.valid).map((e) => ({ title: e.title, kind: e.kind, line: e.line, reason: reason(e) }));
 }
 
 // ── Claim extraction ─────────────────────────────────────────────────
@@ -552,7 +614,7 @@ function diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPa
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStoryBlocks, extractClaims, extractNumbers, classifyStoryBank, diagnose };
+export { parseStoryBlocks, malformedEntries, extractClaims, extractNumbers, classifyStoryBank, diagnose };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
@@ -795,7 +857,25 @@ Brings 15 years of unrelated professional background in adult education prior to
 
 // ── Main ─────────────────────────────────────────────────────────────
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node story-provenance-check.mjs [--summary] [--story-bank <path>] [--cv <path>] [--self-test]
+
+  --summary            human-readable table instead of JSON
+  --story-bank <path>  override the story-bank path
+  --cv <path>          override the cv.md path
+  --self-test          run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   if (selfTestMode) {
     runSelfTest();
   } else {
@@ -805,7 +885,13 @@ if (isMainModule(import.meta.url)) {
     const cvText = cvExists ? readFileSync(cvPath, 'utf-8') : '';
 
     const result = classifyStoryBank(storyBankText, cvText);
-    const storyCount = storyBankExists ? parseStoryBlocks(storyBankText).length : 0;
+    const entries = storyBankExists ? parseStoryBlocks(storyBankText) : [];
+    // Every `### ` block counts, valid or not: this checker did parse them and
+    // did check their figures. A missing Action is reported in `malformed`,
+    // not as "no stories parsed". Table rows don't count, so a bank of nothing
+    // but table rows is still a low-confidence result.
+    const storyCount = entries.filter((e) => e.kind === 'story').length;
+    const malformed = malformedEntries(entries);
     const claimCount = result.existing.length + result.supportedByResume.length
       + result.derivedUnverified.length + result.userCannotConfirm.length;
     const diagnosis = diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPath, cvPath);
@@ -828,6 +914,13 @@ if (isMainModule(import.meta.url)) {
       printBucket('derived-unverified (only in story-bank.md, unconfirmed)', '⚠️', result.derivedUnverified);
       printBucket('user-cannot-confirm (explicitly marked, durable)', '🔒', result.userCannotConfirm);
 
+      if (malformed.length) {
+        console.log('');
+        console.log(`  🧩 malformed — invisible to npm run star / negotiation-roi (${malformed.length})`);
+        for (const m of malformed) console.log(`     - ${m.title} — ${m.reason}`);
+        console.log('     Convert to the format in templates/story-bank.template.md.');
+      }
+
       if (diagnosis) {
         console.log('');
         console.log('  🚨 LOW CONFIDENCE: this is not a clean result.');
@@ -835,7 +928,7 @@ if (isMainModule(import.meta.url)) {
         console.log(`     (reason: ${diagnosis.reason})`);
       }
     } else {
-      console.log(JSON.stringify({ ...result, lowConfidence: diagnosis }, null, 2));
+      console.log(JSON.stringify({ ...result, malformed, lowConfidence: diagnosis }, null, 2));
     }
   }
 }

@@ -265,24 +265,30 @@ const SYSTEM_PATHS = [
   'patch-latex-content.mjs',
   'lib/ascii-fold.mjs',
   'lib/cli-flags.mjs',
+  'lib/failure-excerpt.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/node-floor.mjs',
   'lib/local-today.mjs',
   'lib/parse-date.mjs',
+  'lib/reply-proposals.mjs',
   'lib/placeholder-cell.mjs',
   'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
   'lib/scan-history-columns.mjs',
   'lib/small-board.mjs',
+  'lib/tsv-formula-escape.mjs',
   'lib/is-main-module.mjs',
   'lib/mjs-files.mjs',
   'lib/walk-tree.mjs',
   'lib/scratch-dirs.mjs',
+  'lib/story-bank.mjs',
   'lib/outcome-dir.mjs',
   'lib/outcome-types.mjs',
   'lib/latex-escape.mjs',
   'lib/cv-payload-schema.mjs',
+  'lib/cv-markdown.mjs',
   'lib/page-format.mjs',
+  'lib/template-manifest.mjs',
   'scan-hn.mjs',
   'scripts/check-syntax.mjs',
   'scripts/export-ats-text.mjs',
@@ -290,6 +296,9 @@ const SYSTEM_PATHS = [
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
+  // Ships alongside doctor.mjs, which imports it: an upgraded install whose
+  // updater had no entry for it would check out a doctor that cannot load.
+  'lib/title-filter-conflicts.mjs',
   // Retired 2026-09-05: the suite moved to tests/context-budget.test.mjs. The
   // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
   // drop it once a release has shipped past that move.
@@ -355,7 +364,8 @@ const SYSTEM_PATHS = [
 
   // ── Retired paths ─────────────────────────────────────────────────────────
   // These files no longer exist upstream: #3765 moved four root suites into
-  // tests/ (tracker-columns-tests.mjs stayed, for its timeout). They
+  // tests/, and #4758 moved tracker-columns-tests.mjs once it no longer
+  // needed its own timeout. They
   // stay in the manifest anyway, because SYSTEM_PATHS is what `apply()` prunes
   // AGAINST — `staleSystemFiles` (see pathMatchesManifest) only deletes a local
   // file that is gone from the remote tree AND matches an entry here. Drop the
@@ -381,6 +391,7 @@ const SYSTEM_PATHS = [
   'followup-seed-tests.mjs',
   'paste-reply-tests.mjs',
   'set-status-tests.mjs',
+  'tracker-columns-tests.mjs',
   // ── end retired paths ─────────────────────────────────────────────────────
   'user-agent.mjs',
   'doctor.mjs',
@@ -406,6 +417,7 @@ const SYSTEM_PATHS = [
   'check-table-freshness.mjs',
   'check-jd-archive.mjs',
   'fingerprint-core.mjs',
+  'listing-fingerprint.mjs',
   'process-quality.mjs',
   'company-history.mjs',
   'rejection-latency.mjs',
@@ -433,7 +445,6 @@ const SYSTEM_PATHS = [
   'openrouter-runner.mjs',
   'jd-similarity.mjs',
   'test-all.mjs',
-  'tracker-columns-tests.mjs',
   // Retired 2026-10-04: the suite moved to tests/tracker-writer-lock.test.mjs
   // (#4759). The entry stays so staleSystemFiles() prunes the orphan on an
   // upgraded install; drop it once a release has shipped past that move.
@@ -530,6 +541,7 @@ const SYSTEM_PATHS = [
   'README.ua.md',
   'README.zh-TW.md',
   'README.tr.md',
+  'README.vi.md',
   'CHANGELOG.md',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTORS.md',
@@ -588,7 +600,6 @@ const BOOTSTRAP_PATHS = [
   'reserve-report-num.mjs',
   'updater-migration-tests.mjs',
   'validate-portals.mjs',
-  'tracker-columns-tests.mjs',
   'plugins/',
   'plugins.mjs',
   'plugins-registry/',

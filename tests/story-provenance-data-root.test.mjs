@@ -35,7 +35,7 @@ function fixture(t) {
   }
   // Copy the actual dependency closure, without personal files or node_modules.
   mkdirSync(join(f.code.root, 'lib'));
-  for (const file of ['story-provenance-check.mjs', 'path-resolver.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs']) {
+  for (const file of ['story-provenance-check.mjs', 'path-resolver.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs', 'lib/story-bank.mjs']) {
     copyFileSync(join(ROOT, file), join(f.code.root, file));
   }
   return f;
@@ -74,7 +74,7 @@ function run(f, args, env) {
 
 function check(f, { env = {}, args = [], source = f.data, storyPath = source.story, cvPath = source.cv, bucket = 'existing', missing = null } = {}) {
   const report = JSON.parse(run(f, args, env));
-  assert.deepEqual(Object.keys(report).sort(), [...BUCKETS, 'lowConfidence'].sort());
+  assert.deepEqual(Object.keys(report).sort(), [...BUCKETS, 'malformed', 'lowConfidence'].sort());
   const expected = Object.fromEntries(BUCKETS.map((key) => [key, []]));
   if (missing !== 'no-story-bank') {
     expected.userCannotConfirm.push({ story: `${source.name} uncertain costs`, claim: '40%', pattern: 'percent' });

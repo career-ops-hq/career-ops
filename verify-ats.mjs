@@ -681,7 +681,14 @@ function auditAts(html, opts = {}) {
   // the glyph fill and overrides `color`, so it counts. A regex over the raw
   // style cannot tell a real declaration from text inside a string or comment,
   // so cssDeclarations splits the style first and each piece is tested alone.
-  const whiteDeclaration = /^\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i;
+  // Whitespace is CSS's five characters, not `\s`: U+00A0 is whitespace to
+  // JavaScript and an ordinary character to CSS, so `\u00A0color:#fff` names a
+  // property a browser drops.
+  const ws = '[ \\t\\n\\f\\r]*';
+  const whiteDeclaration = new RegExp(
+    `^${ws}(?:-webkit-text-fill-)?color${ws}:${ws}(?:#fff(?:fff)?\\b|white\\b|rgb\\(${ws}255${ws},${ws}255${ws},${ws}255${ws}\\))`,
+    'i',
+  );
   if (inlineStyles.some(s => cssDeclarations(s).some(d => whiteDeclaration.test(d)))) {
     hiddenSignals.push('white-on-white text');
   }
@@ -988,6 +995,26 @@ function runSelfTest() {
   ]) {
     const visible = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
     check(`${label} is not flagged as hidden text`, !hasIssue(visible.issues, 'hidden text'));
+  }
+  // U+00A0 is whitespace to JavaScript's \s but an ordinary character to CSS, so
+  // a non-breaking space in a declaration makes a browser drop it. Chromium
+  // paints none of these white; the form-feed and space-padded controls it does.
+  for (const [label, style] of [
+    ['a no-break space before the property', '\u00A0color:#fff'],
+    ['a no-break space after the colon', 'color:\u00A0#fff'],
+    ['a no-break space before the colon', 'color\u00A0:#fff'],
+    ['a no-break space inside rgb()', 'color:rgb(255,\u00A0255,255)'],
+  ]) {
+    const inert = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`${label} is not flagged as hidden text`, !hasIssue(inert.issues, 'hidden text'));
+  }
+  for (const [label, style] of [
+    ['a form feed before the property', '\fcolor:#fff'],
+    ['spaces around the colon', 'color : #fff'],
+    ['spaces inside rgb()', 'color:rgb( 255 , 255 , 255 )'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} still flags as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
   }
   // The anchor must not disable the detector: genuine white text still flags,
   // including after another declaration and when no declaration precedes it.

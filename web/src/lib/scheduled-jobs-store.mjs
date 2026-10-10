@@ -144,6 +144,18 @@ function takeOverStaleLock(lockDir) {
   return true;
 }
 
+// mkdir's "someone else has this" answer is not portable. POSIX says EEXIST;
+// Windows says EPERM/EACCES while another process is removing that directory
+// (pending delete), which is exactly what a releasing holder does. That is the
+// contention these loops exist for, not a failure. Same classification as the
+// core's isMkdirContention (pipeline-lock.mjs), which this module cannot
+// import: Next bundles it with the Turbopack root pinned to web/. Scoped to
+// win32 so a POSIX permission failure still throws at once; on Windows a
+// genuine one surfaces when the deadline passes.
+function isTransientMkdirError(error, platform = process.platform) {
+  return platform === "win32" && (error?.code === "EPERM" || error?.code === "EACCES");
+}
+
 async function withRecoveryGuard(resourcePath, options, fn) {
   const staleMs = options.staleMs ?? DEFAULT_STALE_MS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -160,17 +172,23 @@ async function withRecoveryGuard(resourcePath, options, fn) {
       fs.writeFileSync(path.join(guardDir, "owner.json"), JSON.stringify({ pid: process.pid, token, startedAt: new Date().toISOString() }), "utf8");
       break;
     } catch (error) {
-      if (error?.code !== "EEXIST") {
+      const transient = !created && isTransientMkdirError(error, options.platform);
+      if (error?.code !== "EEXIST" && !transient) {
         if (created) {
           try { fs.rmSync(guardDir, { recursive: true, force: true }); } catch { /* best effort */ }
         }
         throw error;
       }
-      if (readLockStatus(`${resourcePath}.recovery`, { staleMs }).stale) {
+      // Only an EEXIST guard is judged by age: a transient answer means the
+      // directory is mid-removal, not sitting there abandoned.
+      if (!transient && readLockStatus(`${resourcePath}.recovery`, { staleMs }).stale) {
         takeOverStaleLock(guardDir);
         continue;
       }
-      if (Date.now() >= deadline) throw new Error(`scheduled-jobs lock timeout: ${resourcePath}`);
+      if (Date.now() >= deadline) {
+        if (transient) throw error;
+        throw new Error(`scheduled-jobs lock timeout: ${resourcePath}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
   }
@@ -194,6 +212,7 @@ async function acquireResourceLock(resourcePath, options = {}) {
   fs.mkdirSync(path.dirname(lockDir), { recursive: true });
 
   for (;;) {
+    let transientError = null;
     const acquired = await withRecoveryGuard(resourcePath, options, () => {
       let created = false;
       try {
@@ -206,6 +225,12 @@ async function acquireResourceLock(resourcePath, options = {}) {
         );
         return true;
       } catch (error) {
+        // release() removes lockDir outside the recovery guard, so this mkdir
+        // can meet the same mid-removal answer as the guard's own.
+        if (!created && isTransientMkdirError(error, options.platform)) {
+          transientError = error;
+          return false;
+        }
         if (error?.code !== "EEXIST") {
           if (created) {
             try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch { /* best effort */ }
@@ -217,7 +242,7 @@ async function acquireResourceLock(resourcePath, options = {}) {
       }
     });
     if (acquired) break;
-    if (Date.now() >= deadline) throw new Error(`scheduled-jobs lock timeout: ${resourcePath}`);
+    if (Date.now() >= deadline) throw transientError ?? new Error(`scheduled-jobs lock timeout: ${resourcePath}`);
     await new Promise((resolve) => setTimeout(resolve, retryMs));
   }
 

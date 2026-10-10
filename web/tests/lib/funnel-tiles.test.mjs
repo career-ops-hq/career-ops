@@ -16,6 +16,12 @@ import { recoverFunnelStages, parseStatusLogStages } from '../../../funnel-stage
 import { fileURLToPath } from 'node:url';
 const coreRoot = fileURLToPath(new URL('../../../', import.meta.url));
 
+test('Assessment, including a discarded assessment, is not an interview achievement', async () => {
+  const apps = [{ n: '1', status: 'Assessment' }, { n: '2', status: 'Discarded' }];
+  assert.deepEqual(await cumulativeTilesWithHistory(apps,
+    '2\t2026-10-01\tAssessment\tDiscarded', coreRoot), { interviews: 0, offers: 0 });
+});
+
 test('history tiles resolve the configured checkout from an isolated runtime', async () => {
   const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'funnel-tiles-runtime-'));
   const previousCwd = process.cwd();
@@ -136,7 +142,7 @@ test('web tiles consume the core recovered-stage contract, including case normal
   const apps = states.map((status,i) => ({n:String(i+1),status}));
   const log = [18,19,20].map(n => `${n}\t2026-09-01\tinterview\tREJECTED`).join('\n');
   const ranks = [...recoverFunnelStages(new Map(states.map((s,i) => [i+1,s])), parseStatusLogStages(log)).values()];
-  assert.deepEqual(await cumulativeTilesWithHistory(apps, log, coreRoot), {interviews:ranks.filter(r => r >= 3).length, offers:ranks.filter(r => r >= 4).length});
+  assert.deepEqual(await cumulativeTilesWithHistory(apps, log, coreRoot), {interviews:ranks.filter(r => r >= 4).length, offers:ranks.filter(r => r >= 5).length});
   assert.equal((await cumulativeTilesWithHistory(apps, log, coreRoot)).interviews, 5);
   assert.deepEqual(await cumulativeTilesWithHistory([{n:'1',status:'Discarded'}], '1\t2026-09-01\toffer\tDiscarded', coreRoot), {interviews:1,offers:1});
 });

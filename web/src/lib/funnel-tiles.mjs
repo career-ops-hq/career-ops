@@ -68,5 +68,5 @@ export async function cumulativeTilesWithHistory(applications, content, coreRoot
     statuses.set(id, statusToken(app.status));
   }
   const values = [...recoverFunnelStages(statuses, parseStatusLogStages(content)).values()];
-  return { interviews: values.filter(n => n >= 3).length, offers: values.filter(n => n >= 4).length };
+  return { interviews: values.filter(n => n >= 4).length, offers: values.filter(n => n >= 5).length };
 }

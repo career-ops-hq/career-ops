@@ -1,5 +1,5 @@
 import { pass, fail } from './helpers.mjs';
-import { delegatedAuthorshipClaims, factClaims, verifyFacts } from '../verify-cv-facts.mjs';
+import { assertFacts, delegatedAuthorshipClaims, factClaims, verifyFacts } from '../verify-cv-facts.mjs';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -90,6 +90,136 @@ try {
     pass('tool claims split across with/in connectors');
   } else {
     fail(`connector-separated tool claims were not extracted: ${JSON.stringify(connectorTools)}`);
+  }
+
+  // #4394, documented limit. The connector split above is correct for a tool
+  // list, but the same `using X in Y` shape carries a place name just as
+  // often, and a capitalized proper noun clears isLikelyTool either way. No
+  // syntax rule measured so far tells the two apart without failing open on a
+  // real tool, so the place is still extracted and a user who means it clears
+  // it with an allow_facts entry. Each check below pins both halves: the
+  // extraction happens, and allow_facts is what clears it.
+  const limitSource = join(tmp, 'cv-place-limit.md');
+  writeFileSync(limitSource, 'Built the platform using Django. Shipped the redesign using Figma.');
+  const placeAllowConfig = join(tmp, 'cv-facts-place-allow.json');
+  writeFileSync(placeAllowConfig, JSON.stringify({
+    allow_metrics: [], allow_facts: ['Berlin', 'EMEA'], forbidden_phrases: [],
+  }));
+
+  const lifted = 'if extraction stops producing the place name, this limit has been lifted: update this test, do not delete it';
+  for (const [label, text, tool, place] of [
+    ['a city after "in"', 'Built the platform using Django in Berlin.', 'django', 'berlin'],
+    ['a region after "with ... in"', 'Shipped the redesign using Figma with the brand team in EMEA.', 'figma', 'emea'],
+  ]) {
+    const extracted = factClaims(text);
+    if (extracted.some(c => c.kind === 'tool' && c.value === tool)
+        && extracted.some(c => c.kind === 'tool' && c.value === place)) {
+      pass(`#4394 documented limit: ${label} is still extracted as a tool (${place})`);
+    } else {
+      // The allow_facts check below assumes the place is extracted, so its
+      // failure would only repeat this one under a misleading message.
+      fail(`#4394 documented limit changed for ${label}; ${lifted}: ${JSON.stringify(extracted)}`);
+      continue;
+    }
+
+    const unallowed = verifyFacts(text, { sourcePaths: [limitSource], configPath: config });
+    const allowed = verifyFacts(text, { sourcePaths: [limitSource], configPath: placeAllowConfig });
+    if (unallowed.verdict === 'block'
+        && unallowed.unsupportedFacts.length === 1
+        && unallowed.unsupportedFacts[0].value === place
+        && allowed.verdict === 'pass'
+        && allowed.unsupportedFacts.length === 0) {
+      pass(`#4394 documented limit: allow_facts clears ${label} (${place}) and nothing else blocks`);
+    } else {
+      fail(`#4394 allow_facts did not clear ${label}: ${JSON.stringify({ unallowed, allowed })}`);
+    }
+  }
+
+  // Skaidon's report on #4004. The comma joins clauses here, and "building"
+  // starts the next clause. The split leaves it alone as a whole fragment, and
+  // that exact fragment is prose (PROSE_FRAGMENTS). "ai" is a real claim: "not
+  // just using AI" does say AI was used, so it stays extracted and the source
+  // decides it.
+  const commaClause = factClaims('Uses agentic workflows daily, not just using AI, building for it.');
+  if (commaClause.some(c => c.kind === 'tool' && c.value === 'ai')
+      && !commaClause.some(c => c.value === 'building')) {
+    pass('#4394 "building" after a clause comma is prose, not a tool claim');
+  } else {
+    fail(`clause prose was extracted as a tool: ${JSON.stringify(commaClause)}`);
+  }
+
+  // Case does not make the bare word a name. A title-cased "Building" would
+  // otherwise pass the tool-shape check and block on a prose fragment.
+  for (const word of ['Building', 'BUILDING']) {
+    const cased = factClaims(`Uses agentic workflows daily, not just using AI, ${word} for it.`);
+    if (cased.some(c => c.kind === 'tool' && c.value === 'ai')
+        && !cased.some(c => c.value === 'building')) {
+      pass(`#4394 a bare "${word}" after a clause comma is prose, not a tool claim`);
+    } else {
+      fail(`a bare "${word}" was extracted as a tool: ${JSON.stringify(cased)}`);
+    }
+  }
+
+  // Only the "building" fragment is dropped. The list does not end there, so a
+  // name after it is still a claim the source has to back.
+  const buildingMidList = factClaims('Shipped the app using React and Redux, building with Kubernetes.');
+  if (['react', 'redux', 'kubernetes'].every(tool => buildingMidList.some(c => c.kind === 'tool' && c.value === tool))
+      && !buildingMidList.some(c => c.value === 'building')) {
+    pass('#4394 dropping "building" does not end the tool list');
+  } else {
+    fail(`"building" ended the tool list or was kept: ${JSON.stringify(buildingMidList)}`);
+  }
+
+  // Only the bare word is prose. A fragment that starts with "building" can
+  // still name a tool, so it stays a claim the source has to back.
+  const buildingWithTool = factClaims('Built dashboards using SQL, building Looker models.');
+  const buildingName = factClaims('Built the tower using Building Information Modeling.');
+  if (buildingWithTool.some(c => c.kind === 'tool' && c.value === 'sql')
+      && buildingWithTool.some(c => c.kind === 'tool' && c.value.includes('looker'))
+      && buildingName.some(c => c.kind === 'tool' && c.value === 'building information modeling')) {
+    pass('#4394 a tool inside a "building" fragment, or named with it, is still a claim');
+  } else {
+    fail(`a tool inside a "building" fragment was dropped: ${JSON.stringify({ buildingWithTool, buildingName })}`);
+  }
+
+  // The fix is the exact word, not its ending. A lowercase product that ends
+  // in -ing is still a claim after the first item. The review regression
+  // below covers the first item.
+  for (const [text, tool] of [
+    ['Built the backend using Java and spring.', 'spring'],
+    ['Ran paid search using Google Ads and bing.', 'bing'],
+  ]) {
+    const later = factClaims(text);
+    if (later.some(c => c.kind === 'tool' && c.value === tool)) {
+      pass(`#4394 a lowercase -ing product after the first item is still a claim (${tool})`);
+    } else {
+      fail(`a lowercase -ing product after the first item was dropped: ${JSON.stringify(later)}`);
+    }
+  }
+
+  // The "ai" half of the same report is evidence, not extraction. A source
+  // that says AI as a word backs the claim, and one that never says it blocks
+  // the same sentence. "AI-native" does not back it today, because
+  // sourceContainsFact does not read a hyphen as a word boundary. That is a
+  // separate question, and this test does not settle it. The title-cased
+  // clause runs through verifyFacts too, which passes a source to
+  // isLikelyTool, so the case rule is pinned on the path rendering uses.
+  const aiSource = join(tmp, 'cv-ai.md');
+  writeFileSync(aiSource, 'Uses agentic workflows daily. Built internal AI tooling for the sales team.');
+  for (const word of ['building', 'Building']) {
+    const aiText = `Uses agentic workflows daily, not just using AI, ${word} for it.`;
+    const aiBacked = verifyFacts(aiText, { sourcePaths: [aiSource], configPath: config });
+    const aiUnbacked = verifyFacts(aiText, { sourcePaths: [source], configPath: config });
+    if (aiBacked.verdict === 'pass'
+        && aiBacked.unsupportedFacts.length === 0
+        && aiUnbacked.verdict === 'block'
+        && aiUnbacked.unsupportedFacts.length === 1
+        && aiUnbacked.unsupportedFacts[0].kind === 'tool'
+        && aiUnbacked.unsupportedFacts[0].value === 'ai') {
+      pass(`#4394 "not just using AI, ${word} for it" passes when the source says AI as a word and blocks when it does not`);
+    } else {
+      fail(`the AI claim was not decided by source evidence (${word}): ${JSON.stringify({ aiBacked, aiUnbacked })}`);
+    }
   }
 
   const proseTools = factClaims('I worked with the team in London.');
@@ -447,6 +577,232 @@ try {
     pass('separate direct-work evidence wins over overlapping delegated work');
   } else {
     fail(`explicit direct-work evidence was ignored: ${JSON.stringify(directlySupported)}`);
+  }
+
+  // Scope-verb inflation and unsourced adoption claims (#3685), end to end
+  // through verifyFacts and its real source files. Both cases below were passed
+  // by the gate in a real run and had to be caught by hand.
+  const scopeSource = join(tmp, 'scope-cv.md');
+  writeFileSync(scopeSource, [
+    'Contributed to the migration to a service architecture.',
+    'Implemented the ingest pipeline for the analytics team.',
+  ].join('\n'));
+
+  const inflatedScope = verifyFacts('Led the migration to a service architecture.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  const scopeClaim = inflatedScope.unsupportedFacts.find(claim => claim.kind === 'scope');
+  // Which line was picked is the assertion, not its exact punctuation:
+  // factStatements keeps a statement's own trailing period when a line break
+  // supplied the delimiter, so pinning the full string would be brittle for a
+  // reason unrelated to this check.
+  if (inflatedScope.verdict === 'block'
+      && scopeClaim
+      && scopeClaim.sourceLine.includes('Contributed to the migration')
+      && !scopeClaim.sourceLine.includes('ingest')) {
+    pass('an upgraded scope verb blocks and names the source line');
+  } else {
+    fail(`scope inflation was not blocked: ${JSON.stringify(inflatedScope)}`);
+  }
+
+  const truthfulScope = verifyFacts('Implemented the ingest pipeline for the analytics team.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (truthfulScope.verdict === 'pass'
+      && !truthfulScope.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a bullet whose source carries the same verb passes');
+  } else {
+    fail(`a truthful scope claim was blocked: ${JSON.stringify(truthfulScope)}`);
+  }
+
+  // "worked on" is the participation wording #3685 names beside "contributed
+  // to". Reading it as no-evidence let every stronger rewrite of it through.
+  const workedOnSource = join(tmp, 'worked-on-cv.md');
+  writeFileSync(workedOnSource, 'Worked on the migration.\nWorked at Acme Labs as a Platform Engineer.');
+  const workedOn = verifyFacts('Led the migration.', {
+    sourcePaths: [workedOnSource], configPath: config,
+  });
+  if (workedOn.verdict === 'block'
+      && workedOn.unsupportedFacts.some(claim => claim.kind === 'scope' && claim.value === 'led the migration')) {
+    pass('a stronger verb over a "worked on" source blocks');
+  } else {
+    fail(`scope inflation over "worked on" was accepted: ${JSON.stringify(workedOn)}`);
+  }
+
+  // Employment wording is not a scope claim, so it must not become the weaker
+  // side of a comparison for anything it shares a noun with.
+  const employmentOnly = join(tmp, 'employment-cv.md');
+  writeFileSync(employmentOnly, 'Worked at Acme Labs on the billing migration.');
+  const employment = verifyFacts('Led the billing migration.', {
+    sourcePaths: [employmentOnly], configPath: config,
+  });
+  if (!employment.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('"worked at" is not treated as scope evidence');
+  } else {
+    fail(`employment wording was read as scope evidence: ${JSON.stringify(employment)}`);
+  }
+
+  // A verb binds to its own work item. The strong half of a compound source
+  // sentence must not vouch for the weak half.
+  const compoundSource = join(tmp, 'compound-cv.md');
+  writeFileSync(compoundSource, 'Contributed to the billing migration and led the payments rewrite.');
+  const compoundWeak = verifyFacts('Led the billing migration.', {
+    sourcePaths: [compoundSource], configPath: config,
+  });
+  const compoundStrong = verifyFacts('Led the payments rewrite.', {
+    sourcePaths: [compoundSource], configPath: config,
+  });
+  if (compoundWeak.unsupportedFacts.some(claim => claim.kind === 'scope')
+      && !compoundStrong.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a compound source binds each verb to its own work item');
+  } else {
+    fail(`compound source scoping is wrong: ${JSON.stringify({ compoundWeak, compoundStrong })}`);
+  }
+
+  // The source tier comes from the verb its clause opens with. A verb outside
+  // the table, or a title, cannot be ranked, so it supports the claim.
+  const unrankedCases = [
+    ['Built the billing platform.', 'Developed the billing platform.', 'an unranked source verb supports a tier-2 claim'],
+    ['Led the payments rewrite.', 'Managed the payments rewrite.', 'an unranked source verb supports a tier-3 claim'],
+    ['Built the customer support dashboard.', 'Developed the customer support dashboard.', 'a tier word inside the object is not the source verb'],
+    ['Led the onboarding platform team.', 'Customer Support Lead for the onboarding platform.', 'a title in the source supports the claim'],
+  ];
+  const unrankedSource = join(tmp, 'unranked-cv.md');
+  for (const [target, sourceLine, label] of unrankedCases) {
+    writeFileSync(unrankedSource, sourceLine);
+    const result = verifyFacts(target, { sourcePaths: [unrankedSource], configPath: config });
+    if (!result.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+      pass(label);
+    } else {
+      fail(`${label}, but it blocked: ${JSON.stringify(result)}`);
+    }
+  }
+
+  // The other direction. A heading names the work item without a verb, and a
+  // first-person source still opens with its verb after the pronoun.
+  const stillWeakerCases = [
+    ['### Billing migration\n\n- Contributed to the billing migration.', 'a heading that names the work item does not vouch for it'],
+    ['I contributed to the billing migration.', 'a first-person source keeps its verb tier'],
+  ];
+  for (const [sourceText, label] of stillWeakerCases) {
+    writeFileSync(unrankedSource, sourceText);
+    const result = verifyFacts('Led the billing migration.', { sourcePaths: [unrankedSource], configPath: config });
+    if (result.unsupportedFacts.some(claim => claim.kind === 'scope' && claim.value === 'led the billing migration')) {
+      pass(label);
+    } else {
+      fail(`${label}, but the inflated claim passed: ${JSON.stringify(result)}`);
+    }
+  }
+
+  // The scope and adoption word lists are English. On another language the
+  // checks do not run, and coverage says so instead of reporting a clean pass.
+  const englishSource = join(tmp, 'english-cv.md');
+  writeFileSync(englishSource, 'Contributed to the billing migration for the payments team.');
+  const germanSource = join(tmp, 'german-cv.md');
+  writeFileSync(germanSource, 'Mitarbeit an der Migration der Abrechnung für das Team und die Kunden.');
+  const languageCases = [
+    ['Lideré la migración de facturación para el equipo de pagos.', englishSource, 'a non-English document is reported as not checked'],
+    ['Led the billing migration.', germanSource, 'non-English sources are reported as not checked'],
+  ];
+  for (const [target, sourcePath, label] of languageCases) {
+    const result = verifyFacts(target, { sourcePaths: [sourcePath], configPath: config });
+    if (result.verdict === 'warn'
+        && result.coverage?.reason === 'scope-not-checked'
+        && !result.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+      pass(label);
+    } else {
+      fail(`${label}, but got: ${JSON.stringify(result)}`);
+    }
+  }
+
+  // A line that opens with the adjective "Driven" asserts no ownership.
+  const drivenSource = join(tmp, 'driven-cv.md');
+  writeFileSync(drivenSource, 'Contributed to billing systems.');
+  const drivenAdjective = verifyFacts('Driven backend engineer focused on billing systems.', {
+    sourcePaths: [drivenSource], configPath: config,
+  });
+  if (!drivenAdjective.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('a leading "Driven" adjective is not a scope verb');
+  } else {
+    fail(`"Driven" as an adjective was read as an ownership claim: ${JSON.stringify(drivenAdjective)}`);
+  }
+
+  const unsourcedAdoption = verifyFacts('Built internal tooling used daily across the engineering org.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  // A warning, not a block: the phrase list cannot see every way a source
+  // states reach, and a block would get a true bullet rewritten.
+  if (unsourcedAdoption.verdict === 'warn'
+      && unsourcedAdoption.advisoryFacts.some(claim => claim.kind === 'adoption' && claim.value === 'used daily')
+      && !unsourcedAdoption.unsupportedFacts.some(claim => claim.kind === 'adoption')) {
+    pass('an adoption claim absent from every source warns');
+  } else {
+    fail(`an unsourced adoption claim was accepted: ${JSON.stringify(unsourcedAdoption)}`);
+  }
+
+  const orgWide = verifyFacts('Rolled the linter out organization-wide.', {
+    sourcePaths: [scopeSource], configPath: config,
+  });
+  if (orgWide.verdict === 'warn'
+      && orgWide.advisoryFacts.some(claim => claim.kind === 'adoption' && claim.value === 'organization-wide')) {
+    pass('the spelled-out organization-wide claim warns');
+  } else {
+    fail(`organization-wide bypassed the gate: ${JSON.stringify(orgWide)}`);
+  }
+
+  // The source side is a lemma, so a truthful CV that paraphrases its own
+  // source is not punished for the rewording.
+  const paraphrased = join(tmp, 'paraphrase-cv.md');
+  writeFileSync(paraphrased, 'Three teams adopted the tool. The rollout went across the whole company.');
+  const paraphrase = verifyFacts('Adopted by 3 teams. Rolled out company-wide.', {
+    sourcePaths: [paraphrased], configPath: config,
+  });
+  if (!paraphrase.advisoryFacts.some(claim => claim.kind === 'adoption')) {
+    pass('a source that words its adoption differently still supports the claim');
+  } else {
+    fail(`a paraphrased adoption claim was blocked: ${JSON.stringify(paraphrase)}`);
+  }
+
+  const sourcedAdoption = join(tmp, 'adoption-cv.md');
+  writeFileSync(sourcedAdoption, 'Implemented the ingest pipeline, used daily by the analytics team.');
+  const adoptionAllowed = verifyFacts('Implemented the ingest pipeline, used daily by the analytics team.', {
+    sourcePaths: [sourcedAdoption], configPath: config,
+  });
+  if (adoptionAllowed.verdict === 'pass'
+      && !adoptionAllowed.advisoryFacts.some(claim => claim.kind === 'adoption')) {
+    pass('a source-backed adoption claim passes');
+  } else {
+    fail(`a source-backed adoption claim was blocked: ${JSON.stringify(adoptionAllowed)}`);
+  }
+
+  // A scope block names the weaker source and gives the exact allow_facts value.
+  let scopeError = '';
+  try {
+    assertFacts('Led the migration to a service architecture.', { sourcePaths: [scopeSource], configPath: config });
+  } catch (err) {
+    scopeError = err.message;
+  }
+  if (scopeError.includes('weaker verb')
+      && scopeError.includes('add "led the migration to a service architecture" to allow_facts')) {
+    pass('a scope block says the source is weaker and gives the allow_facts value');
+  } else {
+    fail(`scope block message is missing the reason or the allow_facts value: ${JSON.stringify(scopeError)}`);
+  }
+
+  // allow_facts is the existing escape hatch for a verified exception, and it
+  // has to reach the new kinds too or the only way past a false positive is to
+  // reword the CV.
+  const allowConfig = join(tmp, 'cv-facts-allow.json');
+  writeFileSync(allowConfig, JSON.stringify({
+    allow_metrics: [], allow_facts: ['led the migration to a service architecture'], forbidden_phrases: [],
+  }));
+  const allowed = verifyFacts('Led the migration to a service architecture.', {
+    sourcePaths: [scopeSource], configPath: allowConfig,
+  });
+  if (!allowed.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+    pass('allow_facts exempts a verified scope claim');
+  } else {
+    fail(`allow_facts did not reach the scope check: ${JSON.stringify(allowed)}`);
   }
 } finally {
   rmSync(tmp, { recursive: true, force: true });

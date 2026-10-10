@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { barePrefixDomainKeywords } from './title-keywords.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -215,6 +216,33 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // Consumed only by scan-ats-full.mjs's board gate (#3105). A bare list, not
+  // an object like the filters around it: the gate has one dimension. A
+  // negative domain term would have to mean "this employer is NOT in my
+  // industry because of one posting", which no single posting can establish,
+  // and the threshold is fixed at one by measurement rather than configurable.
+  //
+  // Validated even though its failure direction is the safe one. A malformed
+  // domain_filter leaves the gate OFF, which is exactly today's behaviour — but
+  // the user is then sweeping unguarded while believing the opposite, and the
+  // scanner cannot warn them, because an absent domain_filter is a legitimate
+  // configuration it has to stay silent about. That silence is what makes this
+  // the only place the typo can surface.
+  if (config.domain_filter !== undefined) {
+    if (!Array.isArray(config.domain_filter)) {
+      add(errors, 'domain_filter', 'domain_filter must be a list of keywords');
+    } else {
+      validateKeywordList(config.domain_filter, 'domain_filter', errors);
+      // A bare `word:` or `stem:` is nonblank, so the check above passes it,
+      // but it compiles to a term that never matches: the gate stays on and
+      // drops every complete board. Checked per AND-group term too, since
+      // `solana + word:` can never match either.
+      for (const idx of barePrefixDomainKeywords(config.domain_filter)) {
+        add(errors, `domain_filter[${idx}]`, 'a word:/stem: prefix needs a term after it');
+      }
+    }
+  }
+
   // #3438. Per-field whitelists a target can gate on instead of title. Each
   // block has the same shape as title_filter and is compiled by the same
   // buildTitleFilter(), so it gets the same structural checks for the same
@@ -288,17 +316,21 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
       if (config.content_filter.by_title_keyword !== undefined) {
         if (!isObject(config.content_filter.by_title_keyword)) {
-          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive keyword');
+          add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive (or title_filter_full.positive) keyword');
         } else {
+          // scan-ats-full matches titles against title_filter_full when it is
+          // set and scopes by_title_keyword by that match, so a key that only
+          // exists there is live config for the sweep, not dead config.
           const titlePositive = new Set(
-            (Array.isArray(config.title_filter?.positive) ? config.title_filter.positive : [])
+            [config.title_filter?.positive, config.title_filter_full?.positive]
+              .flatMap(list => (Array.isArray(list) ? list : []))
               .filter(k => typeof k === 'string')
               .map(k => k.trim().toLowerCase())
           );
           for (const [kw, rule] of Object.entries(config.content_filter.by_title_keyword)) {
             const path = `content_filter.by_title_keyword.${kw}`;
             if (!titlePositive.has(kw.trim().toLowerCase())) {
-              add(warnings, path, `"${kw}" does not match any title_filter.positive keyword and will never apply`);
+              add(warnings, path, `"${kw}" does not match any title_filter.positive or title_filter_full.positive keyword and will never apply`);
             }
             if (!isObject(rule)) {
               add(errors, path, 'must be an object with positive/negative keyword lists');

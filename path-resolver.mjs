@@ -90,7 +90,7 @@ export function rawTrackerPath(rootDir) {
 export function resolveTrackerPathForWrite(root) {
   const env = process.env.CAREER_OPS_TRACKER?.trim();
   if (env) {
-    // Same canonicalization as the read path (see the re-export above): an
+    // Same canonicalization as the read path (see canonicalizeTrackerPath): an
     // un-canonicalized env override derives divergent lock paths on symlinked
     // tmpdirs and breaks shared writer exclusion.
     return canonicalizeTrackerPath(env);

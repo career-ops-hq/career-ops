@@ -164,6 +164,9 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 ## G) İlan Meşruiyeti
 (Blok G'nin tam içeriği)
 
+## Karar (lead)
+(başvurulup başvurulmayacağı tek cümlede — `final_decision` alanını yeniden ifade eder, yukarıdaki Karar bölümüne bakın)
+
 ## Risk Summary
 (her risk sinyali için bir satır, sabit sıra — yukarıdaki Risk Summary bölümüne bakın)
 
@@ -263,9 +266,29 @@ Ardından `node merge-tracker.mjs` çalıştır.
 
 ---
 
+## Karar (lead)
+
+Blok G'den hemen sonra, `## Risk Summary` bloğundan önce bir `## Karar (lead)` bloğu yazın. Okuyucunun raporu açarken sorduğu tek soruyu yanıtlar: başvurmalı mıyım?
+
+**Türetilmiş, asla özgün.** `## Machine Summary` içindeki `final_decision` tek doğruluk kaynağıdır. Bu blok aynı kararı tek bir insan cümlesiyle yeniden ifade eder ve başka bir karar ortaya atmaz. Cümle ile alan çelişirse alan doğrudur, kusur cümledir. Kalın yazılan karar o alanın değerindir: Apply, Consider, Research first veya Skip.
+
+**`(lead)` işareti işlevseldir, ve bilinçli olarak dilden bağımsızdır.** Web rapor görünümü, işareti taşıyan bloğu sayfanın giriş vurgusuna yükseltir ve onu başlık sözcüğüne ya da blok harfine göre değil işarete göre tanır. Bu yüzden her çeviri kendi adını ve aynı parantezi korur: `## Karar (lead)`, `## Verdict (lead)`. `(lead)` asla çevrilmez, bu bloğa asla harf verilmez. A–H dizisinin dışındadır.
+
+**Yeni yargı yok.** Bu blok yazıldığında tüm girdiler zaten toplanmıştır. Kararı ve raporun daha önce ortaya koyduğu tek bir gerekçeyi yazın. Yeniden puanlamayın, yeni kanıt eklemeyin.
+
+Blok biçimi:
+
+```markdown
+## Karar (lead)
+
+**Apply.** Rolün temel ekseninde güçlü eşleşme, sert engel yok, ve Blok G High Confidence döndürdü.
+```
+
+---
+
 ## Risk Summary (Blok G'den sonra)
 
-Rapor gövdesini Blok G'nin hemen ardından, Blok H'den önce bir `## Risk Summary` bloğuyla kapatın — her risk sinyali için bir satır, sabit sıra. Böylece adayın gerçekten sorduğu soru ("bu şirkete katılmak güvenli mi?") Blok A, Blok G ve harici bir dosyayı zihinde birleştirmek yerine tek ekranda yanıtlanır.
+Rapor gövdesini, Blok G'yi izleyen `## Karar (lead)` bloğunun hemen ardından, Blok H'den önce bir `## Risk Summary` bloğuyla kapatın — her risk sinyali için bir satır, sabit sıra. Böylece adayın gerçekten sorduğu soru ("bu şirkete katılmak güvenli mi?") Blok A, Blok G ve harici bir dosyayı zihinde birleştirmek yerine tek ekranda yanıtlanır.
 
 **Yalnızca toplama, sıfır yeni yargı.** Her satır, kaynak sinyalin zaten ürettiği kararı alıntılar veya ona bağlanır. Özet asla yeniden puanlamaz, yeniden ağırlıklandırmaz veya kararı geçersiz kılmaz — bir satır yanlış görünüyorsa düzeltme buraya değil, kaynak sinyale aittir.
 

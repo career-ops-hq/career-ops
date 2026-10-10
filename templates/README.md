@@ -21,6 +21,7 @@ System-layer template files used by career-ops scripts and modes. These files ar
 | `jurisdiction-ai-screening-disclosure.yml` | `modes/oferta.md` (Block G signal 15) | Jurisdiction-keyed table of AI-hiring-screening disclosure obligations (e.g. NYC Local Law 144 AEDT bias-audit + candidate-notice, keyed `US-NY-NYC` and split into `job_location_condition` / `candidate_residency_condition` since the two duties trigger on different facts; Illinois AI Video Interview Act pre-interview consent; EU AI Act Article 26 high-risk-recruitment-AI notice, effective 2027-12-02 per a provisional May 2026 Digital Omnibus deferral from the original 2026-08-02 date — see the row's `enforcement_notes` for the pending-adoption caveat). Presence-based half (posting names AI/automated screening) can fire standalone; absence half is corroborating-only per the umbrella's evidence-strength rule — a posting's silence is never proof no disclosure happens later in the process (e.g. Illinois' law attaches to the interview step, not the ad). Prompt-level data reference, agent-judged matching — no script reads it. Contribution rule: no entry without a regulator-grade source, an effective date, an `as_of` verification date, and an official government/regulator `official_source.url`. |
 
 | `jurisdiction-prohibited-content.yml` | `modes/oferta.md` (Block G signal 10), `modes/apply.md` (Step 5c) | Jurisdiction-keyed table of content employers are legally prohibited from requiring/asking for (e.g. "Canadian experience" in Ontario postings, salary-history questions in California). Prompt-level data reference, agent-judged matching — no script reads it. Contribution rule: no entry without a citable legal source and effective date. |
+| `jurisdiction-relocation-tax.yml` | `salary-gap.mjs` (`loadRelocationTable`/`matchJurisdiction`/`computeRelocationAdjustment`), `modes/oferta.md` (Block G signal 16) | Jurisdiction-keyed table of federal + provincial/state marginal tax brackets (v1 seeds: CRA federal + Ontario, Nova Scotia, Alberta, British Columbia — 2026 rates). Script-driven, unlike most tables here: `salary-gap.mjs` reads it to compute a transparent, bracket-only relocation purchasing-power comparison when a posting's `posting_location` differs from the candidate's home province/state. Deliberately simplified (no basic personal amount, credits, CPP/EI, surtaxes, or cost-of-living index — the last scoped out as a v1 limitation, see the file's own header) and explicitly not financial/tax advice. Contribution rule: no entry without a regulator-grade source, an explicit `tax_year`, an `as_of` verification date, and an official tax-authority `official_source.url`. |
 
 ### cv-template.html
 
@@ -65,6 +66,23 @@ node cv-templates.mjs resolve cv modern  # absolute path to fill
 **These are not "just CSS".** Each carries the same contract as the base template, and `tests/cv-named-templates.test.mjs` enforces it: the `{{NAME}}`/`{{EXPERIENCE}}`/`{{EDUCATION}}` placeholders, every optional-section marker plus the `<!-- END -->` sentinel described above, a static system font stack (no bundled woff2), and ligatures disabled. Copy an existing variant when adding a sixth — a template that only looks right will drop a candidate's awards or leave a bare Skills heading.
 
 **Single column, always.** All colour in these variants is decoration over a strictly top-to-bottom text flow, so PDF extraction order is unaffected. Multi-column page layouts are the classic ATS parse failure and none of these use one.
+
+### Template packs
+
+A template that needs its own **DOM**, not just its own CSS, ships as a pack: a subdirectory of `templates/` holding `cv-template.<name>.html` next to its own `sections/`. `build-cv-html.mjs` resolves section partials relative to the template file, so a pack gets its own markup without touching the `templates/sections/` every flat template shares. The name still comes from the filename, never the directory, and a name claimed by both a flat file and a pack is an error at discovery (`cv-templates.mjs`).
+
+The one shipped so far is `templates/ats/` (`cv-template.ats.html`, name `ats`): a single-column layout with every section one block element per line, for ATS parsers that walk the DOM rather than the page. No grid anywhere, and the one `display: flex` is `.contact-row`, which pairs it with `flex-direction: column` to put each contact item on its own line — those children are inline elements, so without it they run together on a single line (#3838). A flex *column* is not a parallel column: nothing is placed side by side, which is what the `single-column-layout` rule in `ats-rules.yml` asks for ("no sidebars, no parallel columns"). A `display: flex` that introduces a **row** is the thing this pack exists to avoid; a column that stacks one datum per line is the pack doing its job.
+
+**Declare the sections a pack owns.** Partials cover seven sections — `competencies`, `experience`, `projects`, `education`, `certifications`, `awards`, `skills` — and any section a pack does not ship a partial for renders through the built-in builder, which emits the DOM the pack exists to replace. A malformed partial falls back the same way. Neither says anything in the output, so a pack's manifest can make ownership an explicit, checked claim:
+
+```html
+<!-- career-ops-template
+name: ATS Friendly
+sections: all
+-->
+```
+
+`sections: all` claims every section; `sections: experience, education` claims a subset. A declared section must exist (checked when the template resolves by name) and must parse with a non-empty `<!--ENTRY-->` zone (checked when the CV renders), or the build fails naming the file — it never falls back. Undeclared sections keep the silent fallback, so a pack written before this key exists behaves exactly as it did; a pack that declares nothing is simply a pack that has not made the claim. Prefer `sections: all` for a pack whose point is its DOM, as the ATS pack does: the alternative is being correct by a coincidence the pack never stated, which the next change to a built-in builder can end without any test noticing.
 
 ### resume-template.html
 
@@ -112,6 +130,6 @@ Pre-configured portal scanner with 45+ tracked companies and search queries. Con
 
 ### states.yml
 
-Defines the 9 canonical application states (`Evaluated`, `Applied`, `Responded`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`) with aliases for common variants. All pipeline scripts validate statuses against this file.
+Defines the 10 canonical application states (`Evaluated`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`) with aliases for common variants. All pipeline scripts validate statuses against this file.
 
 **Do not rename states** -- the dashboard and all scripts depend on these exact IDs. You can add aliases if you encounter new variants that should map to an existing state.

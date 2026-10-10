@@ -2,7 +2,7 @@
 // No filesystem access: the caller chooses the tracker and its sibling ledger.
 const RANKS = new Map([
   ['APPLIED', 1], ['RESPONDED', 2], ['REJECTED', 2],
-  ['INTERVIEW', 3], ['OFFER', 4], ['HIRED', 5],
+  ['ASSESSMENT', 3], ['INTERVIEW', 4], ['OFFER', 5], ['HIRED', 6],
 ]);
 
 export function funnelStageRank(status) {

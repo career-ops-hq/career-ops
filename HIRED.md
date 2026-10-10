@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=15 level=handle handle=RiyaMathew-11 role="Applied Sciences Intern - ML Team" sector="start-up - scale-up" geo="United Kingdom" weeks=16 link="https://github.com/career-ops-hq/career-ops/issues/4915" -->
+### Hire #15
+
+> I discovered career-ops around 6 months ago, and have been using it for targeted job discovery for AI-based internships and graduate roles towards the end of my master's degree at
+
+<a href="https://github.com/RiyaMathew-11"><img src="https://github.com/RiyaMathew-11.png?size=64" width="28" height="28" align="top" alt="@RiyaMathew-11"> **@RiyaMathew-11**</a> · Applied Sciences Intern - ML Team · United Kingdom · 16 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4915)
+
 <!-- hire n=14 level=role role="Electrical Engineering Intern" sector="Top 500 Fortune Company" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/4844" -->
 ### Hire #14
 

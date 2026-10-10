@@ -399,7 +399,7 @@ A report's own `advertised_comp` reaches a row through that row's Report link, n
 
 ## funnel-velocity
 
-Funnel calibration vs market benchmarks + stage velocity. Three payloads, decreasing availability: **calibration** — your funnel rates (canonical `ever*` definition imported from `stats.mjs`) vs candidate-side benchmark ranges from `templates/benchmarks.yml` (override: `config/benchmarks.yml` or `--benchmarks <path>`); **waiting** — in-flight Applied rows and elapsed days vs the typical first-response window (per-row factual reporting; applied-date priority: status-log observation > `Applied YYYY-MM-DD` in tracker notes > unknown, never guessed); **velocity** — median/p75 days per stage hop (Applied→Responded→Interview→Offer, Applied→Rejected separate) folded from `data/status-log.tsv`.
+Funnel calibration vs market benchmarks + stage velocity. Three payloads, decreasing availability: **calibration** — your funnel rates (canonical `ever*` definition imported from `stats.mjs`) vs candidate-side benchmark ranges from `templates/benchmarks.yml` (override: `config/benchmarks.yml` or `--benchmarks <path>`); **waiting** — in-flight Applied rows and elapsed days vs the typical first-response window (per-row factual reporting; applied-date priority: status-log observation > `Applied YYYY-MM-DD` in tracker notes > unknown, never guessed); **velocity** — median/p75 days per stage hop (Applied→Responded→Assessment→Interview→Offer, Applied→Rejected separate) folded from `data/status-log.tsv`.
 
 Statistical honesty is enforced in code: right-censored counts printed next to every median ("n still waiting, excluded"), same-day catch-up hops excluded and counted, no comparative multiplier claims below n=20 applied, above-range output carries a selection-bias note, every benchmark mention carries its year + "directional". Coverage, orphaned tracker numbers, unparseable lines, and unknown sources are always reported.
 
@@ -693,7 +693,7 @@ npm run rollback
 
 Tests whether job posting URLs are still live. Two rungs: a zero-token API check first (`liveness-api.mjs` — Greenhouse, Lever, Ashby, Workday, LinkedIn), falling back to headless Chromium (`liveness-browser.mjs`) for everything else or when the API is inconclusive. The browser rung detects expired patterns (e.g. "job no longer available"), HTTP 404/410, ATS redirect patterns, and apply-button presence, and supports multi-language expired patterns (English, German, French).
 
-Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that is still empty or still has no recognised apply control at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more.
+Many ATS are single-page apps that render the posting after the HTML has loaded, so the browser rung reads the page straight away and again every 250 ms until the verdict is decisive, giving up after 4 s; a page that still has no recognised apply control or still shows too little text at that point keeps that verdict. Same-origin iframes are read on every pass as part of the page, since iCIMS renders the whole posting inside one; if the poll gives up while such a frame is present, the check waits up to 6 s more for the frames to fill and reads the page once more. A page with no text at all by then reads `uncertain` (`empty_page`), not `expired`: it shows no posting, no closure notice and no error page.
 
 The LinkedIn rung reads the guest posting endpoint, which returns the rendered posting as HTML and answers HTTP 200 for closed postings as well as live ones. Liveness therefore comes from two independent signals in the body — the "No longer accepting applications" banner and the apply control — and the rung only concludes when they agree: banner without apply control is expired, apply control without banner is live, a body carrying both or neither is `uncertain`. That `uncertain` is final rather than a fall-through, because a headless fetch of `linkedin.com/jobs/view/{id}` lands on a generic search page rather than the posting, so the browser rung has nothing better to offer. The endpoint is unauthenticated and rate-limited, so the rung spaces its own requests.
 
@@ -707,9 +707,12 @@ npm run liveness -- https://a.com/job/1 https://b.com/job/2
 npm run liveness -- --file urls.txt
 npm run liveness -- --no-fallback https://a.com/job/1   # stay fully headless (no headed retry on anti-bot walls)
 npm run liveness -- --throttle=5000 --file urls.txt      # jittered wait between checks (rate-based WAFs)
+npm run liveness -- --no-record https://a.com/job/1     # check without writing the verdict to scan-history
 ```
 
 Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
+
+An `expired` verdict is also written to `data/scan-history.tsv` as a `skipped_expired` row, so a posting confirmed dead stops resurfacing in the web "new matches this week" feed. Only URLs the history already knows get a row, and each gets one until it is relisted. An `uncertain` verdict writes nothing, and neither does an `expired` one that only reads as an unrendered page (`insufficient_content`). `--no-record` makes the run leave no trace.
 
 **Exit codes:** `0` all URLs active, `1` any expired or uncertain.
 
@@ -719,7 +722,11 @@ Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
 
 Zero-token portal scanner. Runs configured local parsers for SSR/static career pages and hits ATS APIs (Greenhouse, Ashby, Lever) directly — no LLM tokens consumed. Reads `portals.yml` for target companies, outputs matching listings to stdout, and optionally appends to `data/pipeline.md`.
 
-`scan_history.recheck_after_days` in `portals.yml` lets old `added` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
+`--verify` checks new URLs through the shared liveness API rung first, with up to 10 concurrent checks and each provider's own rate limit. API verdicts need no browser; unsupported cases or API checks that return `null` fall back to sequential Playwright checks. An explicit `uncertain` API verdict, such as LinkedIn's ambiguous response, is final and does not fall through. Chromium is loaded and launched only when needed. `--throttle[=ms]` spaces browser checks, and `--headed-fallback` still retries browser challenges. If browser verification is needed but Chromium is unavailable, the scan fails with installation guidance rather than silently skipping verification.
+
+`--rediscover-404` also recognizes authoritative API 404/410 verdicts: for a tracked company with a careers domain, it searches that domain and requires a confirmed live replacement before migrating the URL. Soft closure signals do not trigger rediscovery.
+
+`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
 
 `scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
 
@@ -795,11 +802,34 @@ Postings without a usable publish date are dropped by default — a reverse scan
 
 `data/blacklist.md` is respected here too: blacklisted companies are skipped by default and reported in the summary. Pass `--include-blacklisted` to audit them instead; matching postings flow through annotated (`note: blacklisted: {reason}` in `data/pipeline.md`).
 
+### Domain filter — gating boards on the company (opt-in)
+
+Out here `title_filter` runs on the wrong axis. It asks the title to answer both *is this the right role* and *is this employer in my industry*, and a title cannot answer the second one — "Senior Backend Engineer" is character-for-character identical at a Solana infrastructure company and at a supermarket chain. `scan.mjs` never has that problem, because `tracked_companies` settles the employer before any title is read. The sweep deletes that premise, which leaves a choice with no good branch: keep broad keywords and every board matches, or drop them and go blind to exactly the roles the sweep exists to discover.
+
+An optional `domain_filter` list in `portals.yml` gates the **board** instead. Before any title is filtered, the sweep asks whether *any* posting on that board matches a domain keyword; if none does, the board is skipped whole.
+
+```yaml
+domain_filter:
+  - "solana"
+  - "defi"
+  - "stem:smart contract"
+```
+
+- **Opt-in.** No `domain_filter` key, no gate — every existing `portals.yml` sweeps exactly as before.
+- **Free.** The board is already fully in memory when filtering starts, so the gate costs one pass over an array and no HTTP request. A skipped board is *cheaper* than a scanned one: its postings are never title-filtered and never date-enriched, and undated providers (iCIMS) issue a detail request per surviving job that a gated board never pays for.
+- **The threshold is one matching posting**, and that is measured rather than cautious. Over 546 postings on 249 boards, raising it to two kept twelve boards and lost every genuine one: ten of the twelve qualified on `defi` appearing repeatedly inside a Portuguese "Deficiência" or an Ohio "Defiance". A repeated false-positive substring is a property of big boards, while a real find is one opening at a small company.
+- **Entries are matched as whole words by default** — the opposite of `title_filter`, where a plain keyword is a substring. A plain substring admitted 32 boards on one sweep of which 28 were junk, and one bad match admits a whole catalogue rather than one row. Prefix with `stem:` when the longer form is the common spelling (`stem:smart contract` for "Smart Contracts"); `word:` is accepted and is the default said explicitly. Both prefixes mean what they mean in `title_filter`.
+- **A truncated board is not gated on the truncated page.** Workday can cut a response short, and the sweep retries a *transient* cut sequentially. A board whose fetched page carries no domain term is therefore *deferred*, not skipped: it stays queued for the retry and the fuller result decides it. A *structural* cut (a fixed slice, depth or page budget) is never retried, since a repeat run reaches the same bound, so a structurally truncated board with no domain term is admitted ungated at once rather than deferred to a retry that would never run. This is the one case where the gate is not free — a board that ends up skipped has been fetched twice — and it is the price of not dropping an employer on evidence the code knew was incomplete. A truncated board that already matches is admitted immediately, and the retry never takes that back. A deferred board whose retry comes back truncated again is admitted ungated, not skipped: there is no third fetch, and the skipped-board count must only ever mean a board the gate could actually judge. It is still counted as an error for staying truncated. If the retry fetch fails outright, the deferred board's first page is processed ungated, so a match it already carried is not lost. A deferred board survives an interruption: the checkpoint records it, and `--resume` retries it even though the resume offset has moved past it. An iCIMS board stopped at the provider's page cap is never retried either, so, like a structural Workday cut, it is admitted ungated when its fetched pages carry no domain term.
+- **Skipped boards are counted, never silent.** The run summary reports how many boards were skipped and how many postings were never filtered; `--verbose` names each one, and `--json` carries `domainFilterActive`, `domainGatedBoards` and `domainGatedPostings`. The gate's real failure mode is a domain term you forgot, and a missing term costs a board — so keep the list generous and read the count.
+- **Not applied to `--seeds`.** A VC portfolio is already a curated corpus; gating it would be redundant.
+
+**Known limit — aggregators.** The gate assumes one board is one employer. A job aggregator carrying some in-domain roles passes at every threshold under every matcher and brings its unrelated postings with it. No threshold fixes that: the board is simply not an employer, and there the gate degrades to the ungated behaviour.
+
 ### Cross-listing detection
 
 `data/scan-history.tsv` carries a **SimHash fingerprint** of the JD text in its 8th column (`jd_fingerprint`), and the original posting date in its 9th column (`postedAt`). The fingerprint column exists to catch a specific double-submission hazard: the same role posted by the direct employer **and** by a recruitment agency, often with the employer name stripped from the agency listing. URL dedup and company+role dedup both miss this pair because the URLs and company names are different — but agencies rarely rewrite the requirements text, so a near-identical JD body is a reliable signal.
 
-The 12th column (`normalized_company`) stores the **canonical company key** — the raw company (col 5) run through the shared `normalizeCompanyName` (lowercased, punctuation/whitespace folded, trailing legal-entity suffixes stripped), so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all resolve to `acme`. It is written at scan time so repost/name matching (`detect-reposts.mjs`) keys on a stable value instead of re-deriving it or routing a legitimacy signal through script execution. The column is **additive and trailing**: rows written before it existed simply omit it, and consumers normalize the raw company on the fly for those rows (backward-compatible). All columns beyond col 7 are append-only — index-based readers (including the web parser, which reads only cols 0-6) are unaffected.
+The 12th column (`normalized_company`) stores the **canonical company key** — the raw company (col 5) run through the shared `normalizeCompanyName` (lowercased, punctuation/whitespace folded, trailing legal-entity suffixes stripped), so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all resolve to `acme`. It is written at scan time so repost/name-matching (`detect-reposts.mjs`) keys on a stable value instead of re-deriving it or routing a legitimacy signal through script execution. The 15th column (`listing_key`) stores the v1 strong ATS identity digest when Greenhouse, Ashby or Lever supplies a complete provider, board and posting ID triple; `scan.mjs` uses it to deduplicate URL aliases across and within scans. It is blank when that identity is incomplete. Both columns are **additive and trailing**: rows written before they existed simply omit them (backward-compatible). All columns beyond col 7 are append-only — index-based readers (including the web parser, which reads only cols 0-6) are unaffected.
 
 How it works:
 
@@ -902,7 +932,7 @@ node tracker.mjs export --out repaired.md --force  # write even when columns wou
 
 **The round-trip carries the layout, not only the values (#3703).** `sync` maps columns by header NAME, so a customized tracker (a `Location`, `Via` or `URL` column, or one of your own) indexes correctly — but `export` used to write nine fixed columns in a fixed order under a fixed `# Applications Tracker` title, so adopting its output cost you those columns with no warning, right after `sync` reported a clean index. Losing the `URL` column in particular disables `merge-tracker.mjs`'s deterministic dedup pass, which is not visible in the file either. `export` now replays the header row it read, puts unmapped cells back in their own columns, and keeps the lines before and after the table (your own title, a legend, a trailing note) plus the file's line endings. The schema itself is still the canonical nine fields — extra columns ride along by position, so they are preserved by `export` but not queryable via `query`.
 
-**What "lossless" covers, exactly.** The guarantee is about *structure*, not bytes: `export` preserves the layout and every value it does not deliberately repair. Concretely it keeps the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, the column set and every row's position in it, and CRLF vs LF. Enforced by `tracker-columns-tests.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose.
+**What "lossless" covers, exactly.** The guarantee is about *structure*, not bytes: `export` preserves the layout and every value it does not deliberately repair. Concretely it keeps the title, preamble and trailing lines *with their own whitespace* (they are copied, not re-rendered), the header and separator, the column set and every row's position in it, and CRLF vs LF. Enforced by `tests/tracker-columns.test.mjs`, including localized headers career-ops cannot name, unknown user columns, indented tables and indented prose.
 
 The round-trip `md → db → md` is **byte-identical** only for a one-table file that is already in canonical form and where `export` reports no losses. Three things change bytes without being losses, because each is either the point of the tool or cosmetic:
 
@@ -1112,6 +1142,12 @@ ATS paste length (250-500 words).
 npm run star -- "Tell me about a time you disagreed with a decision"
 ```
 
+Only `### ` blocks in the format of `templates/story-bank.template.md`, with
+an `**A (Action):**` line, count as stories. Table rows and blocks without an
+Action are listed on stderr as unreadable rather than silently dropped;
+`story-provenance-check.mjs` reports the same entries under `malformed`
+while still checking their figures.
+
 ---
 
 ## archive
@@ -1268,6 +1304,9 @@ Refusing rather than coercing is deliberate: there is no honest place to put a
 string `skills` value inside `skills[]`, and inventing the structure to hold it
 is the same authoring the lints exist to avoid.
 
+Reachable from a mode as the payload stage of `ats` — see [`modes/ats.md`](../modes/ats.md) for the agent-facing
+workflow, including the rule that the three lints are relayed to the user and never applied by the agent.
+
 Self-test: `node ats-payload.mjs --self-test`.
 
 ---
@@ -1361,7 +1400,7 @@ and `4` means the tracker lock timed out and the operation should be retried.
 
 ## sync-pdf-flags.mjs
 
-Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`.
+Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`. A manifest row counts only while the CV PDF it names is still on disk inside the workspace, so a deleted PDF no longer sets the flag, and a cover-letter row never does. `merge-tracker.mjs` applies the same rule when it syncs flags.
 
 `--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`.
 

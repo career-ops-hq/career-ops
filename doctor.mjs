@@ -5,13 +5,14 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import dotenv from 'dotenv';
+import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateProfile, EXAMPLE_PATH } from './validate-profile.mjs';
@@ -19,7 +20,9 @@ import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
+import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
+import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -137,13 +140,48 @@ function checkBillingSource() {
   };
 }
 
+// Whether each package.json dependency resolves from the code checkout the way
+// Node will at run time — not whether a node_modules directory exists. That
+// was wrong both ways: a git worktree with no node_modules of its own resolves
+// through the main checkout's (Node walks up parent directories), and a
+// node_modules installed before a dependency was added (undici, #4445) still
+// exists while the import fails. Every script loads its dependencies with ESM
+// `import`, whose bare-specifier lookup is node_modules in the code root and
+// each ancestor directory — and nothing else: unlike require(), it ignores
+// NODE_PATH and the global folders, so a package found only there would pass
+// here and still fail to import. A package counts as installed when one of
+// those node_modules holds it. Checking for its package.json, rather than
+// resolving the package, never consults an `exports` map that refuses the
+// lookup and never loads the package — doctor runs on every session's first
+// message.
+function findMissingDependencies(root) {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
+  const lookupDirs = [];
+  for (let dir = resolve(root); ; dir = dirname(dir)) {
+    lookupDirs.push(join(dir, 'node_modules'));
+    if (dirname(dir) === dir) break;
+  }
+  return Object.keys(manifest.dependencies || {}).filter((name) =>
+    !lookupDirs.some((dir) => existsSync(join(dir, name, 'package.json'))));
+}
+
 function checkDependencies() {
-  if (existsSync(join(codeRoot, 'node_modules'))) {
+  let missing;
+  try {
+    missing = findMissingDependencies(codeRoot);
+  } catch (err) {
+    return {
+      pass: false,
+      label: `Dependencies could not be checked: package.json unreadable (${err.message})`,
+      fix: 'Run doctor from a career-ops checkout, or pass --target <checkout>',
+    };
+  }
+  if (missing.length === 0) {
     return { pass: true, label: 'Dependencies installed' };
   }
   return {
     pass: false,
-    label: 'Dependencies not installed',
+    label: `Dependencies missing: ${missing.join(', ')}`,
     fix: 'Run: npm install',
   };
 }
@@ -201,6 +239,95 @@ function checkTrackedBakFiles(root) {
       "git ls-files '*.bak*'            # find them",
       'git rm --cached <each path>      # untrack, leaving the file on disk',
       'git commit -m "chore: untrack .bak backups"',
+    ],
+  };
+}
+
+// A checkout made without symlink support (Windows without Developer Mode,
+// core.symlinks=false) writes each per-CLI skill entrypoint as a regular file
+// holding only the symlink target text, so that CLI loads a ~43-byte skill with
+// no router in it (career-ops#4589). update-system.mjs apply repairs these via
+// ensureSkillEntrypoints, but apply returns early on an install that is already
+// up to date, so a fresh clone never reaches it and nothing else says why
+// /career-ops does nothing. Read-only on purpose (doctor must not write): it
+// names the stubs and the one command that materializes them.
+// One script for every shell, deliberately free of quote characters so each
+// shell can wrap it in its own: backticks for the one string, and both paths
+// arrive as separate argv words, never interpolated into the script. (Read back
+// with argv.at(-n): tests/main-guard-convention.test.mjs bans the literal
+// entry-path index in source files, printed strings included.)
+const MATERIALIZE_SCRIPT = 'import(require(`url`).pathToFileURL(process.argv.at(-2)).href).then(m=>console.log(m.materializeSkillEntrypoints(process.argv.at(-1))))';
+
+// --target accepts any path, so what is printed has to be literal when pasted.
+// Each shell expands something different inside the quoting it prefers:
+//   sh          single quotes are fully literal; a quote is closed, escaped, reopened
+//   PowerShell  single quotes are literal ($(...), $HOME stay text); a quote is
+//               escaped by doubling it, and PowerShell also treats the curly
+//               and low quotes as quote characters, so those double too
+//   cmd         double quotes are the only form, and %VAR% is expanded inside
+//               them with no escape on an interactive line (a Windows path may
+//               contain %, and a double quote cannot occur in one)
+const quoteSh = (v) => `'${v.replace(/'/g, `'\\''`)}'`;
+const quotePowerShell = (v) => `'${v.replace(/['\u2018\u2019\u201A\u201B]/g, (c) => c + c)}'`;
+const quoteCmd = (v) => `"${v}"`;
+
+function repairCommands(root) {
+  const mod = join(root, 'scaffolder', 'bin', 'skill-entrypoints.mjs');
+  const updater = join(root, 'update-system.mjs');
+  const forms = (quote) => ({
+    materialize: `node -e ${quote(MATERIALIZE_SCRIPT)} ${quote(mod)} ${quote(root)}`,
+    update: `node ${quote(updater)} apply --confirm`,
+  });
+  const lines = [];
+  const section = (heading, f) => lines.push(heading.materialize, f.materialize, heading.update, f.update);
+  const heading = {
+    materialize: 'Repair them now, no update needed:',
+    update: 'Or update (this only repairs them when an update is actually applied):',
+  };
+  if (process.platform !== 'win32') {
+    section(heading, forms(quoteSh));
+    return lines;
+  }
+  const label = (shell) => ({
+    materialize: `${heading.materialize} (${shell})`,
+    update: `${heading.update} (${shell})`,
+  });
+  section(label('PowerShell'), forms(quotePowerShell));
+  if (root.includes('%')) {
+    lines.push('cmd.exe form not shown: this path contains %, which cmd always expands. Use the PowerShell commands above.');
+  } else {
+    section(label('cmd.exe'), forms(quoteCmd));
+  }
+  return lines;
+}
+
+function checkSkillEntrypoints(root) {
+  const stubs = [];
+  for (const entry of SKILL_ENTRYPOINTS) {
+    const entryPath = join(root, ...entry.path.split('/'));
+    try {
+      const stat = lstatSync(entryPath);
+      if (stat.isSymbolicLink() || !stat.isFile()) continue;
+      if (readFileSync(entryPath, 'utf-8').trim() === entry.pointer) stubs.push(entry.path);
+    } catch {
+      // Missing or unreadable: not a stub. A CLI the user never installed is
+      // not worth a warning, and ensureSkillEntrypoints creates absent ones.
+    }
+  }
+  if (stubs.length === 0) {
+    return { pass: true, label: 'CLI skill entrypoints are real files or symlinks' };
+  }
+  return {
+    warn: true,
+    label: `${stubs.length} CLI skill entrypoint${stubs.length === 1 ? ' is' : 's are'} a symlink-target stub, not the skill — this checkout has no symlink support, so that CLI loads an empty /career-ops`,
+    // Materializing first: it is the repair that works on the clone this
+    // warning is most likely for, one that is already up to date, where apply
+    // returns before reaching ensureSkillEntrypoints. Both are built from the
+    // root the check just inspected, so they act on that checkout from whatever
+    // directory they are pasted into.
+    fix: [
+      ...stubs,
+      ...repairCommands(root),
     ],
   };
 }
@@ -668,6 +795,41 @@ function checkPlugins(root) {
 // WARN, never FAIL, like the plugin check below it: an unknown key is a typo,
 // not a broken install, and refusing to run would be a worse answer than naming
 // it.
+// cv.md exists but in a shape the CV checks cannot read (#4879). The prereq
+// check only proves the file is there; cv-title-check.mjs and
+// verify-cv-structure.mjs locate jobs through lib/cv-markdown.mjs, and a cv.md
+// whose Experience section they cannot find makes both run against nothing.
+// They do say so per run, but only once a tailored CV is already being built;
+// this says it at setup time. A warning, never a failure: cv.md is the user's
+// file and career-ops still works with it.
+function checkCvShape(root) {
+  const cvPath = join(root, 'cv.md');
+  if (!existsSync(cvPath)) return null;   // the prereq check owns "absent"
+  let text;
+  try {
+    text = readFileSync(cvPath, 'utf-8');
+  } catch (err) {
+    return { warn: true, label: `cv.md could not be read (${err.message})` };
+  }
+  const sections = findExperienceSections(text);
+  // Same entry rule verify-cv-structure.mjs parses with, so a stray
+  // "### Notes" under Experience is not counted as a job.
+  const entries = sections.flat().filter((line) => parseCompanyHeading(line) !== null).length;
+  if (entries > 0) {
+    return { pass: true, label: `cv.md: Experience section recognized (${entries} entr${entries === 1 ? 'y' : 'ies'})` };
+  }
+  return {
+    warn: true,
+    label: sections.length === 0
+      ? 'cv.md: no Experience section the CV checks recognize — title and structure checks will not run'
+      : 'cv.md: Experience section has no "### Company — Location" entries — title and structure checks will not run',
+    fix: [
+      `Name the section ${EXPERIENCE_HEADING_NAMES.map((n) => `"## ${n}"`).join(', ')}`,
+      'Start each job with "### Company — Location", then a bold **Title** line, then a dates line (see examples/cv-example.md)',
+    ],
+  };
+}
+
 function checkProfileShape(root) {
   const profilePath = process.env.CAREER_OPS_PROFILE || join(root, 'config', 'profile.yml');
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
@@ -701,6 +863,7 @@ async function main() {
     checkBillingSource(),
     checkDependencies(),
     checkTrackedBakFiles(codeRoot),
+    checkSkillEntrypoints(codeRoot),
     await checkPlaywright(),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
@@ -708,6 +871,8 @@ async function main() {
     checkFonts(),
     checkPersonalization(projectRoot),
     checkProfileShape(projectRoot),
+    checkTitleFilterConflicts(projectRoot),
+    checkCvShape(projectRoot),
     checkAutoDir('data'),
     checkPipelineFile(),
     checkAutoDir('output'),
@@ -840,6 +1005,41 @@ function checkPersonalization(root) {
 // prerequisites that AGENTS.md "First Run" lists. `--json` turns the trigger into
 // a deterministic mechanism the agent runs (instead of re-deriving it from prose),
 // and `--target <dir>` lets the test suite point it at a simulated virgin env.
+function titleFilterConflicts(root) {
+  // Same override the scanner honours (scan.mjs PORTALS_PATH), so a diagnosis
+  // describes the file a scan would actually read, not the default one.
+  const portalsPath = process.env.CAREER_OPS_PORTALS || join(root, 'portals.yml');
+  if (!existsSync(portalsPath)) return null;
+  let config;
+  try {
+    config = yaml.load(readFileSync(portalsPath, 'utf-8'));
+  } catch {
+    // A portals.yml that does not parse is a different check's problem; this
+    // one only has something to say about a file it could actually read.
+    return null;
+  }
+  const { conflicts } = findTitleFilterConflicts(config?.title_filter);
+  return conflicts.length > 0 ? conflicts : null;
+}
+
+// `main()` feeds the ordinary human-readable run; onboardingState() feeds
+// `--json`. Both need this check, and it is non-blocking in both: a positive
+// its own negatives veto is a configuration smell to fix, not a reason to
+// refuse to start, so it reports as a warning rather than a failure.
+function checkTitleFilterConflicts(root) {
+  const conflicts = titleFilterConflicts(root);
+  if (!conflicts) return { label: 'title_filter positives all reachable', pass: true };
+  const n = conflicts.length;
+  return {
+    label: `title_filter: ${n} positive${n === 1 ? '' : 's'} never keeps a title`,
+    warn: true,
+    fix: conflicts.flatMap((c) => [
+      `"${c.positive}" stands for "${c.title}", which negative "${c.negative}" vetoes`,
+      '  ask your agent: "which title_filter entries contradict each other?"',
+    ]),
+  };
+}
+
 function onboardingState(root) {
   const autoCopied = [];
   const templates = [
@@ -874,16 +1074,21 @@ function onboardingState(root) {
   // user-data layer and may point elsewhere under split-checkout installs.
   const mcpCheck = checkPlaywrightMcp(process.cwd(), activeCli);
   const unpersonalized = unpersonalizedFiles(root);
+  const titleFilterIssues = titleFilterConflicts(root);
   // Every other check in this function is data-layer and correctly uses this
   // function's own `root` parameter. The tracked-.bak check is the one
   // code-layer exception (#3867 finding 6) — it must read the module-level
   // codeRoot (the code checkout), which only differs from `root` when a real
   // split-checkout data root is in play and no --target was given.
   const bakCheck = checkTrackedBakFiles(codeRoot);
+  const skillCheck = checkSkillEntrypoints(codeRoot);
+  const cvShape = checkCvShape(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
+    ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
+    ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
@@ -911,6 +1116,8 @@ function onboardingState(root) {
     // to be visible — surfaced as its own field the agent can branch on rather
     // than a string it has to pattern-match out of `warnings`.
     unpersonalized,
+    // Present only when it fired: a coherent title_filter adds no key.
+    ...(titleFilterIssues ? { titleFilterConflicts: titleFilterIssues } : {}),
     warnings,
     autoCopied,
     plugins,

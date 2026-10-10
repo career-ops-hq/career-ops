@@ -87,6 +87,17 @@ const CALL_SITES = [
     probe: 'flags-only',
   },
   {
+    source: 'web/src/app/api/quiet-companies/route.ts',
+    script: 'rejection-latency.mjs',
+    // The route parses stdout, so the payload is the contract, not just exit 0.
+    expectJson: true,
+    // No flags: it prints JSON by default, like stats.mjs and upskill.mjs. With
+    // no data/active-interviews.md in the fixture it reports zero rows checked
+    // and still exits 0, which is the shape the route reads.
+    args: [],
+    probe: 'run',
+  },
+  {
     source: 'web/src/app/api/stats/route.ts',
     script: 'stats.mjs',
     // NO FLAGS. stats.mjs prints JSON by default and rejects `--json` outright
@@ -104,6 +115,16 @@ const CALL_SITES = [
     // the payload, not the status.
     args: [],
     probe: 'json-any-exit',
+  },
+  {
+    source: 'web/src/app/api/keyword-match/route.ts',
+    script: 'keyword-match.mjs',
+    // {{report}} is replaced with the fixture report below. This script takes a
+    // FILE as its first argument, so unlike every other site here the argv is
+    // only meaningful against a real report — and `--help` exits 1, so
+    // 'flags-only' cannot stand in for it either.
+    args: ['{{report}}', '--json'],
+    probe: 'run',
   },
   {
     source: 'web/src/lib/core/pipeline.ts',
@@ -197,6 +218,30 @@ export function runWebCoreArgvContract() {
       'utf-8',
     );
 
+    // The report the fixture tracker already links to, which until now was not
+    // written. keyword-match.mjs reads a report's `## Keywords extracted` block,
+    // so a probe of its argv needs one to exist.
+    const reportFile = join(sandbox, 'reports', '001-northwind-robotics-2026-01-05.md');
+    mkdirSync(join(sandbox, 'reports'), { recursive: true });
+    writeFileSync(
+      reportFile,
+      '**URL:** https://example.invalid/northwind\n**Legitimacy:** verified\n\n' +
+        '## Keywords extracted\n\n- Go\n- PostgreSQL\n- Kubernetes\n\n' +
+        '## Job Description (archived verbatim)\n\nFixture posting text.\n',
+      'utf-8',
+    );
+
+    // keyword-match.mjs compares the report against the CV at the data root and
+    // exits 1 when there is none, so the fixture needs both halves of the
+    // comparison. Two of the three keywords above appear here on purpose: the
+    // probe asserts the argv and the JSON shape, and a run with no overlap at
+    // all would exercise a narrower path than the web's.
+    writeFileSync(
+      join(sandbox, 'cv.md'),
+      '# Fixture CV\n\nBackend engineer. Go and PostgreSQL in production.\n',
+      'utf-8',
+    );
+
     const env = {
       ...process.env,
       CAREER_OPS_ROOT: sandbox,
@@ -213,8 +258,14 @@ export function runWebCoreArgvContract() {
 
     for (const site of CALL_SITES) {
       if (site.probe === 'none') continue;
-      const argv = site.probe === 'flags-only' ? [...site.args, '--help'] : site.args;
-      const label = `${site.script} ${argv.join(' ')}`.trim();
+      // {{report}} is the only token: a couple of scripts take a FILE rather
+      // than flags, and the file only exists once the sandbox is built.
+      const resolved = site.args.map((a) => (a === '{{report}}' ? reportFile : a));
+      const argv = site.probe === 'flags-only' ? [...resolved, '--help'] : resolved;
+      // Label with the TOKEN, not the resolved temp path: a failure message
+      // naming /var/folders/…/T/co-web-argv-xyz/reports/… is unreadable and
+      // changes every run.
+      const label = `${site.script} ${(site.probe === 'flags-only' ? [...site.args, '--help'] : site.args).join(' ')}`.trim();
       const result = spawnSync(NODE, [join(ROOT, site.script), ...argv], {
         cwd: ROOT,
         encoding: 'utf-8',
@@ -251,7 +302,12 @@ export function runWebCoreArgvContract() {
         fail(`${label} — ${why}`);
         continue;
       }
-      if (site.probe === 'run' && argv.includes('--json')) {
+      // JSON is asserted for a no-flag probe too. Three of these scripts
+      // (stats, upskill, rejection-latency) print JSON BY DEFAULT and reject a
+      // --json flag, so keying the check on the flag skipped exactly the sites
+      // whose routes parse stdout — a script that started printing a banner
+      // would have passed this probe and returned `available: false` in the app.
+      if (site.probe === 'run' && (argv.includes('--json') || site.expectJson)) {
         try {
           JSON.parse(result.stdout);
           pass(`${label} — exit 0, stdout parses as JSON (${site.source})`);
