@@ -58,6 +58,7 @@ import { normalizeCompanyName } from './invite-match.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import {
   parseFollowups,
   parseAppliedDate,
@@ -123,47 +124,15 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
+  // Unknown flags (and a missing operand) are rejected BEFORE --help is
+  // answered, so `--help --bogus` still fails. See lib/cli-flags.mjs.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  // A value flag's space-separated value must not be mistaken for an
-  // unrecognized flag just because it starts with `-` (mirrors
-  // scan-ats-full.mjs's adjacency rule).
-  const consumedValueIndices = new Set();
-  args.forEach((a, idx) => {
-    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
-      consumedValueIndices.add(idx + 1);
-    }
-  });
-
-  const unknownFlags = args.filter((a, idx) =>
-    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
-
-  const valueOf = (flag) => {
-    // `--flag=value` form first: `args.indexOf(flag)` is -1 for it, so the
-    // space-separated lookup below would silently drop the value otherwise.
-    const eq = args.find(a => a.startsWith(`${flag}=`));
-    if (eq) return eq.slice(flag.length + 1);
-    const idx = args.indexOf(flag);
-    if (idx === -1) return undefined;
-    return args[idx + 1];
-  };
-
-  // A value-taking flag must actually receive a non-empty value: without this
-  // guard `--company --summary` would consume `--summary` as the company name,
-  // and `--company ""` / `--company=` would filter to a company that does not
-  // exist. Reject the missing, the next-is-a-flag, and the empty-string cases in
-  // both the space-separated (`--company ""`) and equals (`--company=`) forms.
+  // A present-but-empty operand (`--company ""`, `--company=`) would filter to
+  // a company that does not exist; the shared guard only covers a missing one.
   for (let idx = 0; idx < args.length; idx += 1) {
     const flag = args[idx];
-    if (VALUE_FLAGS.includes(flag) && (args[idx + 1] === undefined || args[idx + 1] === '' || args[idx + 1].startsWith('--'))) {
+    if (VALUE_FLAGS.includes(flag) && args[idx + 1] === '') {
       console.error(`Error: ${flag} expects a value.`);
       console.error(USAGE);
       process.exit(1);
@@ -178,30 +147,15 @@ function parseArgs(argv) {
   // --silence-window must be a positive integer, validated before anything
   // runs: a NaN silently falling back to the default hides the user's typo,
   // and a zero/negative window would label every application silent.
-  const silenceWindowArg = valueOf('--silence-window');
+  const silenceWindowArg = flagValue(args, '--silence-window');
   if (silenceWindowArg !== undefined && !/^[1-9]\d*$/.test(silenceWindowArg)) {
     console.error(`Error: --silence-window expects a positive integer number of days, got "${silenceWindowArg}"`);
     console.error(USAGE);
     process.exit(1);
   }
 
-  // --emit-signal is a bare boolean flag, not a value flag: the unknown-flag
-  // check above strips a `--flag=value` suffix before matching against
-  // KNOWN_FLAGS, so `--emit-signal=true` passes that check silently. But the
-  // boolean read below is an exact-token `args.includes('--emit-signal')`,
-  // which is false for `--emit-signal=true` — so the flag would be accepted
-  // as "known" yet never actually turn signal emission on. Reject any `=`
-  // form explicitly so a typo fails loudly instead of silently emitting
-  // nothing.
-  const emitSignalValue = args.find(a => a.startsWith('--emit-signal='));
-  if (emitSignalValue) {
-    console.error('Error: --emit-signal does not accept a value.');
-    console.error(USAGE);
-    process.exit(1);
-  }
-
   const summaryMode = args.includes('--summary');
-  const company = valueOf('--company');
+  const company = flagValue(args, '--company');
   const emitSignal = args.includes('--emit-signal');
 
   // --emit-signal REQUIRES --summary (and is incompatible with --company).
@@ -226,8 +180,8 @@ function parseArgs(argv) {
     company,
     silenceWindowArg,
     includeStale: args.includes('--include-stale'),
-    scanHistoryOverride: valueOf('--scan-history'),
-    followupsOverride: valueOf('--followups'),
+    scanHistoryOverride: flagValue(args, '--scan-history'),
+    followupsOverride: flagValue(args, '--followups'),
     emitSignal,
   };
 }

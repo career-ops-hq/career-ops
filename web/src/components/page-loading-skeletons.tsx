@@ -30,11 +30,12 @@ export function FollowupsDueSectionSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-export function PipelineTableRowsSkeleton({ rows = 8 }: { rows?: number }) {
+export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: { rows?: number; trackerColumn?: boolean }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, i) => (
         <tr key={i}>
+          {trackerColumn && <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>}
           <td className="px-4 py-3">
             <div className="flex items-center gap-2.5">
               <Skeleton className="size-5 rounded-full" />
@@ -49,7 +50,7 @@ export function PipelineTableRowsSkeleton({ rows = 8 }: { rows?: number }) {
               <Skeleton className="h-4 w-20" />
             </div>
           </td>
-          <td className="whitespace-nowrap px-4 py-3"><Skeleton className="h-4 w-20" /></td>
+          <td className={`whitespace-nowrap px-4 py-3${trackerColumn ? " hidden lg:table-cell" : ""}`}><Skeleton className="h-4 w-20" /></td>
         </tr>
       ))}
     </>

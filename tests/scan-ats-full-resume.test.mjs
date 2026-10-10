@@ -141,6 +141,8 @@ const { loadCheckpoint, checkpointCompatible } = mod;
     ['non-numeric resumeAt', { name: 'workday', resumeAt: 'x', datasetLen: 10 }],
     ['negative resumeAt', { name: 'workday', resumeAt: -1, datasetLen: 10 }],
     ['missing name', { resumeAt: 5, datasetLen: 10 }],
+    ['non-array deferred', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: 3 }],
+    ['non-integer deferred index', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: [1, 'x'] }],
   ]) {
     writeFileSync(p, JSON.stringify({ version: 1, current }), 'utf-8');
     if (loadCheckpoint(p) === null) pass(`loadCheckpoint rejects malformed current (${label})`);
@@ -150,6 +152,12 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884 } }), 'utf-8');
   if (loadCheckpoint(p)?.current?.resumeAt === 500) pass('loadCheckpoint accepts a well-formed current');
   else fail('well-formed current rejected');
+
+  // The domain gate's deferred boards ride along in `current`, so a resumed
+  // run can retry the ones below its offset (#3304).
+  writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884, deferred: [12, 480] } }), 'utf-8');
+  if (JSON.stringify(loadCheckpoint(p)?.current?.deferred) === '[12,480]') pass('loadCheckpoint keeps the deferred board indices');
+  else fail('deferred board indices lost or rejected');
 
   // current: null is the legitimate "source finished" marker, not malformed.
   writeFileSync(p, JSON.stringify({ version: 1, current: null }), 'utf-8');

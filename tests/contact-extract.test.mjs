@@ -199,8 +199,9 @@ console.log('2. appendContact — direct unit import');
   check('contacts reader preserves literal apostrophes before formula characters', parsedLiteral.contacts[0]?.name === "'=Literal Name" && parsedLiteral.contacts[0]?.company === "'@Literal Co", JSON.stringify(parsedLiteral.contacts[0]));
   check('formula and literal-apostrophe values remain distinct identities', parsedLiteral.contacts[0]?.name !== parsedFormula.contacts[0]?.name);
 
+  const formulaEscape = await import(pathToFileURL(join(ROOT, 'lib/tsv-formula-escape.mjs')).href);
   for (const value of ['=Alex', "'=Alex", "''=Alex", "'''=Alex"]) {
-    check(`formula-cell codec round-trips ${JSON.stringify(value)}`, contactsMod.unescapeFormulaCell(contactsMod.escapeFormulaCell(value)) === value);
+    check(`formula-cell codec round-trips ${JSON.stringify(value)}`, formulaEscape.unescapeFormulaCell(formulaEscape.escapeFormulaCell(value)) === value);
   }
 
   const retainedPath = join(tmp('contact-extract-retained-'), 'data', 'contacts.tsv');
