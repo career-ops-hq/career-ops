@@ -349,8 +349,10 @@ export function pathIsInsideCanonical(childPath, parentDir) {
  * and merge-tracker.mjs), so they cannot disagree about what counts as present.
  * A manifest row only asserts the flag when it is a CV row (a `cover` row in
  * the kind column is skipped, as parsePdfIndex does), its pdf path resolves
- * inside `<workspaceRoot>/output`, and the file exists. Rows with a missing
- * file, a path outside output/, or a non-numeric report id are ignored.
+ * inside `<workspaceRoot>/output`, and that path is a regular file. existsSync
+ * alone is not enough: it is true for a directory too, so a row naming
+ * `output/` itself would count as a PDF. Rows with a missing file, a directory,
+ * a path outside output/, or a non-numeric report id are ignored.
  *
  * `workspaceRoot` must come from resolveWorkspaceRootFor(), not from the
  * canonicalized tracker path, or a symlinked data/ checks the wrong root (#3169).
@@ -373,9 +375,24 @@ export function presentPdfReports(manifestText, workspaceRoot) {
     if (num === '0' || present.has(num)) continue;
     const absPath = resolve(workspaceRoot, relPdf);
     if (!pathIsInsideCanonical(absPath, outputDir)) continue;
-    if (existsSync(absPath)) present.add(num);
+    if (isRegularFile(absPath)) present.add(num);
   }
   return present;
+}
+
+/**
+ * True when `path` exists and is a regular file (through symlinks), false for a
+ * directory, a dangling link, or anything stat() refuses to describe.
+ *
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isRegularFile(path) {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**
