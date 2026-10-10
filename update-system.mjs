@@ -355,6 +355,7 @@ const SYSTEM_PATHS = [
   'cv-title-check.mjs',
   'prepare-application.mjs',
   'application-artifacts.mjs',
+  'evaluation-cache.mjs',
   'batch-evaluate-gemini.mjs',
   'providers/',
   'data-static/',
