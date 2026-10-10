@@ -15,6 +15,11 @@
 // would wall off every edit to batch-runner.sh; exempting without the block
 // would restore the original hole.
 //
+// The guard also has to keep pace with update-system.mjs's USER_PATHS: a
+// user-layer path added there and not here (documents/, modes/_brief.md —
+// #4891) is private data the guard waves through. The last test below fails
+// the moment the two lists drift, unless the gap is allowlisted with a reason.
+//
 // The predicate is EVALUATED out of the workflow, not pattern-matched in it.
 // A regex-over-source check passes on a USER_PATHS entry that an isScaffold
 // change has quietly neutered, which is exactly the drift worth catching.
@@ -27,6 +32,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { USER_PATHS } from '../update-system.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const WORKFLOW = '.github/workflows/no-user-data.yml';
@@ -56,11 +62,11 @@ function loadGuard() {
   )();
 }
 
-/** @returns {string[]} Repo-relative paths git tracks under batch/. */
-function trackedBatchFiles() {
+/** @returns {string[]} Repo-relative paths git tracks under `dir`. */
+function trackedFiles(dir) {
   // -z for the same reason the rest of the suite uses it: a path containing a
   // newline must not split into two records and drop a file from the sweep.
-  return execFileSync('git', ['-C', ROOT, 'ls-files', '-z', '--', 'batch/'], { encoding: 'utf-8' })
+  return execFileSync('git', ['-C', ROOT, 'ls-files', '-z', '--', dir], { encoding: 'utf-8' })
     .split('\0')
     .filter(Boolean);
 }
@@ -97,13 +103,48 @@ test('the guard blocks generated batch/ worker output', () => {
   );
 });
 
-test('the generic scaffold exemptions still apply outside batch/', () => {
+test('the guard blocks scaffold-shaped files nested under documents/', () => {
   const isBlocked = loadGuard();
 
-  // batch/ narrows isScaffold to an exact allowlist. The other guarded
-  // directories keep the filename exemption they have always had, and several
-  // of them track a real .gitkeep or README.md, so narrowing it globally would
-  // fail every PR that touches those files.
+  // documents/ is the intake drop zone. An unpacked export or a folder of
+  // references may carry its own README.md, and under the filename rule it
+  // would pass carrying the user's identity data. Only the two tracked
+  // scaffold files at the top of documents/ are exempt.
+  const nested = [
+    'documents/private/README.md',
+    'documents/linkedin-export/README.md',
+    'documents/references/.gitkeep',
+  ];
+  const passed = nested.filter((f) => !isBlocked(f));
+  assert.deepEqual(passed, [], `the no-user-data guard would merge nested documents/ files: ${passed.join(', ')}`);
+});
+
+test('the guard exempts every tracked file under documents/', () => {
+  const isBlocked = loadGuard();
+  const tracked = trackedFiles('documents/');
+
+  assert.ok(
+    tracked.length >= 2,
+    `git ls-files found only ${tracked.length} tracked files under documents/ — the exemption ` +
+      'check would pass vacuously',
+  );
+
+  const blocked = tracked.filter(isBlocked);
+  assert.deepEqual(
+    blocked,
+    [],
+    `the no-user-data guard would block tracked documents/ scaffolding, failing every PR that ` +
+      `edits it: ${blocked.join(', ')}`,
+  );
+});
+
+test('the generic scaffold exemptions still apply outside batch/ and documents/', () => {
+  const isBlocked = loadGuard();
+
+  // batch/ and documents/ narrow isScaffold to an exact allowlist. The other
+  // guarded directories keep the filename exemption they have always had, and
+  // several of them track a real .gitkeep or README.md, so narrowing it
+  // globally would fail every PR that touches those files.
   const scaffoldElsewhere = [
     'data/.gitkeep',
     'reports/.gitkeep',
@@ -114,14 +155,14 @@ test('the generic scaffold exemptions still apply outside batch/', () => {
   assert.deepEqual(
     overblocked,
     [],
-    `the batch/ narrowing leaked into other directories and would block tracked ` +
+    `the batch/ and documents/ narrowing leaked into other directories and would block tracked ` +
       `scaffolding there: ${overblocked.join(', ')}`,
   );
 });
 
 test('the guard exempts every tracked source under batch/', () => {
   const isBlocked = loadGuard();
-  const tracked = trackedBatchFiles();
+  const tracked = trackedFiles('batch/');
 
   // Without this the assertion below is satisfied by an empty list, which is
   // what a failed git call or a renamed directory produces.
@@ -137,5 +178,32 @@ test('the guard exempts every tracked source under batch/', () => {
     [],
     `the no-user-data guard would block tracked batch/ sources, failing every PR that edits ` +
       `them: ${blocked.join(', ')}`,
+  );
+});
+
+// update-system.mjs USER_PATHS entries the guard deliberately does not block.
+// Each one needs a reason; an entry here that leaves USER_PATHS fails below.
+const NOT_GUARDED = new Map([
+  ['voice-dna.md', 'ships as a populated system default, so edits to it are legit'],
+  ['.claude/settings.json', 'project harness config, not gitignored, may legitimately be committed'],
+  ['.claude/hooks/', 'project harness config, not gitignored, may legitimately be committed'],
+]);
+
+test('the guard blocks every update-system.mjs user-layer path not allowlisted', () => {
+  const isBlocked = loadGuard();
+
+  const stale = [...NOT_GUARDED.keys()].filter((p) => !USER_PATHS.includes(p));
+  assert.deepEqual(stale, [], `NOT_GUARDED names paths update-system.mjs no longer lists: ${stale.join(', ')}`);
+
+  // A directory entry is probed with a file under it, since the guard sees
+  // file paths from listFiles, never bare directories.
+  const unguarded = USER_PATHS
+    .filter((p) => !NOT_GUARDED.has(p))
+    .filter((p) => !isBlocked(p.endsWith('/') ? `${p}private.pdf` : p));
+  assert.deepEqual(
+    unguarded,
+    [],
+    `update-system.mjs USER_PATHS entries the no-user-data guard lets through — add them to ` +
+      `${WORKFLOW} or to NOT_GUARDED with a reason: ${unguarded.join(', ')}`,
   );
 });

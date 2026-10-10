@@ -32,6 +32,18 @@ export function resolveOfferLimit(raw) {
 }
 
 /**
+ * A scan-history status that says the POSTING is gone, not merely that this row
+ * is not a fresh match. Matches `skipped_expired` (what the scanner and
+ * check-liveness write) and the legacy `added (expired)` suffix.
+ *
+ * Deliberately narrower than the route's own row filter: `skipped_dup` and
+ * `skipped_title` mean "this row is a duplicate / off-target", and retiring a
+ * URL on those would hide live postings — the exact failure this feed exists to
+ * avoid.
+ */
+const EXPIRED_STATUS = /expired/i;
+
+/**
  * Collect fresh, unique offers while keeping the response payload bounded.
  * `count` always represents the full result set; `offers` is only the slice the
  * caller asked to render. This prevents a UI card limit from masquerading as
@@ -44,6 +56,18 @@ export function collectWhatsNew(rows, { cutoff, toOffer, offerLimit = DEFAULT_OF
   let anyDated = false;
 
   const add = (columns, limit) => {
+    // A confirmed-dead row RETIRES its URL for the rest of the walk (#3891).
+    // scan-history is append-only, so proving a posting dead adds a row — it
+    // cannot edit the `added` row that first surfaced it. Rejecting only the
+    // dead row itself left that older `added` row free to resurface the
+    // posting on every request until the lookback window moved past it, which
+    // is what made a re-checked, provably dead posting keep coming back.
+    // Walking newest-first is what makes this safe: a posting re-listed at the
+    // same URL is reached (and counted) before its older death certificate.
+    if (EXPIRED_STATUS.test(columns[5] || "")) {
+      if (columns[0]) seen.add(columns[0]);
+      return;
+    }
     const offer = toOffer(columns);
     if (!offer || seen.has(offer.url)) return;
     seen.add(offer.url);

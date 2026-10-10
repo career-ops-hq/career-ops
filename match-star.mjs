@@ -18,6 +18,7 @@ import { readFileSync, existsSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { parseStories, splitStoryBlocks, isValidStory } from './lib/story-bank.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -44,54 +45,8 @@ const question = args
   .join(' ').trim();
 
 // ── Parser ───────────────────────────────────────────────────────────
-
-/**
- * Parse story-bank.md into structured story objects.
- * @param {string} content
- * @returns {Array<{title, theme, source, situation, task, action, result, reflection, tags}>}
- */
-function parseStories(content) {
-  const stories = [];
-  // Split on story headings: ### [Theme] Title
-  const blocks = content.split(/^### /m).slice(1);
-
-  for (const block of blocks) {
-    const lines  = block.trim().split('\n');
-    const header = lines[0].trim();
-
-    // Extract theme from [Theme] prefix if present
-    const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
-    const theme = themeMatch ? themeMatch[1].trim() : '';
-    const title = themeMatch ? themeMatch[2].trim() : header;
-
-    const get = (label) => {
-      const re  = new RegExp(`\\*\\*${label}:\\*\\*\\s*(.+)`);
-      const hit = block.match(re);
-      return hit ? hit[1].trim() : '';
-    };
-
-    const tagsRaw = get('Best for questions about');
-    const tags    = tagsRaw
-      ? tagsRaw.split(/[,;]/).map(t => t.trim().toLowerCase()).filter(Boolean)
-      : [];
-
-    if (!title || (!get('A \\(Action\\)') && !get('Action'))) continue; // skip template/empty blocks
-
-    stories.push({
-      title,
-      theme,
-      source:     get('Source'),
-      situation:  get('S \\(Situation\\)') || get('Situation'),
-      task:       get('T \\(Task\\)') || get('Task'),
-      action:     get('A \\(Action\\)') || get('Action'),
-      result:     get('R \\(Result\\)') || get('Result'),
-      reflection: get('Reflection'),
-      tags,
-    });
-  }
-
-  return stories;
-}
+// parseStories lives in lib/story-bank.mjs so every story-bank reader shares
+// one definition of a story (#4514). Re-exported below for existing callers.
 
 // ── Scoring ──────────────────────────────────────────────────────────
 
@@ -214,6 +169,18 @@ if (!existsSync(STORY_BANK_PATH)) {
 
 const content = readFileSync(STORY_BANK_PATH, 'utf-8');
 const stories = parseStories(content);
+
+// Say what is in the file but cannot be read, so an empty or short bank is
+// never mistaken for the whole story (#4514). Never rewrites the file: it is
+// user data, and converting it is the agent's job, with the user's say-so.
+const { blocks, tableRows } = splitStoryBlocks(content);
+const invalid = blocks.filter(b => !isValidStory(b));
+if (tableRows.length || invalid.length) {
+  console.error('⚠️  story-bank.md has entries this matcher cannot read:');
+  if (tableRows.length) console.error(`   - ${tableRows.length} table row(s) (lines ${tableRows.map(r => r.line).join(', ')})`);
+  for (const b of invalid) console.error(`   - "${b.title || '(untitled)'}" (line ${b.line}): no **A (Action):** line`);
+  console.error('   Ask your agent to convert them to the format in templates/story-bank.template.md.\n');
+}
 
 if (stories.length === 0) {
   console.error('No stories found in story-bank.md yet.');

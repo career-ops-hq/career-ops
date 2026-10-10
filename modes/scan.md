@@ -326,6 +326,8 @@ If a non-publicly accessible URL is found:
 
 Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
 
+Cells are stored with reversible spreadsheet-formula escaping: tabs and line breaks become spaces, and a cell starting with `=`, `+`, `-` or `@` — or with apostrophes followed by one of them — gets one more leading `'`, so a spreadsheet never runs it as a formula. `parseScanHistoryLine` (`lib/scan-history-columns.mjs`) strips exactly that one apostrophe, so read rows through it to get the written values back. A reader that splits lines itself sees the stored form.
+
 `skipped_location` and `skipped_age` record what `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed threshold is visible in the data rather than only as a summary counter, and they carry no dedup weight: both name a setting the user edits, so a row written under the old threshold must not suppress the same posting once it moves. Each posting gets one such row per status, not one per scan.
 
 The scanner writes the other statuses in that list itself: `skipped_no_apply_control` for a page that loaded without an Apply control, `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.

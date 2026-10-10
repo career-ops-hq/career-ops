@@ -23,7 +23,7 @@
 // that by pinning a frozen instant into a `node -e` child, which works when the
 // thing under test is an EXPORT. Two of these three are only reachable through
 // their CLI, and freezing a CLI's clock needs either a --import preload (Node
-// 18.19+, above this project's `>=18`) or an argv[1]-rewriting launcher, which
+// 18.19+, above the `>=18` floor this was written against) or an argv[1]-rewriting launcher, which
 // tests/main-guard-convention.test.mjs gates behind a named exemption.
 //
 // So: run the same command in TWO timezones 25 hours apart. Pacific/Kiritimati

@@ -69,6 +69,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 import { parseScanHistoryLine, scanHistoryLineHasColumn } from './lib/scan-history-columns.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -118,14 +119,6 @@ const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
 
 // --- Date helpers ---
-function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 function daysBetween(d1, d2) {
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
 }

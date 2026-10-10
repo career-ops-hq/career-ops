@@ -240,6 +240,24 @@ export function resolveTsvColumns(cells) {
   return { map, missing, duplicates, unknown };
 }
 
+// The dashboard also reads legacy rows with a leading pipe and tab-separated
+// cells. Opt in only where readers/writers handle that format: other writers
+// still rebuild pipe rows and must not silently start accepting tab rows. A tab
+// inside a normal pipe table is ordinary whitespace, not a column delimiter.
+export function trackerRowSeparator(line) {
+  return line.includes('\t') && line.split('|').length <= 3 ? '\t' : '|';
+}
+
+/** Return raw cells in the same index space as line.split('|'). */
+export function splitTrackerCells(line) {
+  if (trackerRowSeparator(line) === '|') return line.split('|');
+  const opening = line.indexOf('|');
+  if (opening < 0) return line.split('|');
+  const closing = line.trimEnd().endsWith('|') ? line.lastIndexOf('|') : -1;
+  const body = line.slice(opening + 1, closing > opening ? closing : undefined);
+  return [line.slice(0, opening), ...body.split('\t'), ...(closing > opening ? [line.slice(closing + 1)] : [])];
+}
+
 /**
  * Scan the table for a header row and build a field-name → column-index map.
  * Indexing matches `line.split('|')`. Returns null — caller should fall back to
@@ -247,12 +265,14 @@ export function resolveTsvColumns(cells) {
  * line can't yield a bogus mapping.
  *
  * @param {string[]} lines - All lines of applications.md.
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options] - Explicit legacy-layout support.
  * @returns {Object<string,number>|null}
  */
-export function detectColumns(lines) {
+export function detectColumns(lines, { allowTabs = false, allowIndentation = false } = {}) {
   for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const map = headerSchemaMap(line.split('|').map(s => s.trim().toLowerCase()));
+    if (!(allowIndentation ? line.trimStart() : line).startsWith('|')) continue;
+    const cells = allowTabs ? splitTrackerCells(line) : line.split('|');
+    const map = headerSchemaMap(cells.map(s => s.trim().toLowerCase()));
     if (map) return map;
   }
   return null;
@@ -261,10 +281,11 @@ export function detectColumns(lines) {
 /**
  * Convenience: detect the header layout, falling back to the legacy fixed one.
  * @param {string[]} lines
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options]
  * @returns {Object<string,number>}
  */
-export function resolveColumns(lines) {
-  return detectColumns(lines) || LEGACY_COLMAP;
+export function resolveColumns(lines, options) {
+  return detectColumns(lines, options) || LEGACY_COLMAP;
 }
 
 /**
@@ -275,11 +296,12 @@ export function resolveColumns(lines) {
  *
  * @param {string} line - One line from applications.md.
  * @param {Object<string,number>} [colmap] - From resolveColumns(); defaults to legacy.
- * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,location?,raw}`.
+ * @param {{allowTabs?: boolean, allowIndentation?: boolean}} [options] - Opt in only when writes preserve this layout.
+ * @returns {object|null} `{num,date,company,role,score,status,pdf,report,notes,url,location?,via?,raw}`.
  */
-export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
-  if (typeof line !== 'string' || !line.startsWith('|')) return null;
-  const parts = line.split('|').map(s => s.trim());
+export function parseTrackerRow(line, colmap = LEGACY_COLMAP, { allowTabs = false, allowIndentation = false } = {}) {
+  if (typeof line !== 'string' || !(allowIndentation ? line.trimStart() : line).startsWith('|')) return null;
+  const parts = (allowTabs ? splitTrackerCells(line) : line.split('|')).map(s => s.trim());
   // Dynamic width guard: a complete row splits into leading '' + one cell per
   // column (+ trailing '' when the row ends with a pipe). Anything shorter is
   // missing a cell, and a missing INTERIOR cell shifts every later column one
@@ -302,11 +324,20 @@ export function parseTrackerRow(line, colmap = LEGACY_COLMAP) {
     pdf: at('pdf'),
     report: at('report'),
     notes: at('notes'),
+    // The posting URL, always the HREF rather than the raw cell (#3516): the
+    // cell is written as a markdown link, and `normalizeUrl('[l](u)')` returns
+    // '' — which every consumer reads as "this row has no URL", not as a parse
+    // failure. Always present (''), never conditional on the column existing,
+    // so `row.url` means the same thing on every tracker layout.
+    url: extractCellUrl(at('url')),
     raw: line,
   };
   if (colmap.location != null) row.location = at('location');
   if (colmap.via != null) row.via = at('via');
-  if (colmap.url != null) row.url = at('url');
+  // No `row.url = at('url')` here. `url` is set above, always the HREF, and
+  // scan.mjs's same-title requisition dedup (#4267) reads it off this row:
+  // re-assigning the raw cell hands it `[label](href)`, from which no
+  // requisition id can be extracted, so two distinct openings read as one.
   return row;
 }
 
@@ -340,15 +371,17 @@ export function extractReqNumber(notes) {
 }
 
 /**
- * Extract report IDs referenced by one tracker Report cell.
+ * The destination of one markdown link, given everything between `](` and the
+ * matching `)`.
  *
- * Both the numeric markdown label and the local report filename are returned.
- * Keeping both makes tracker drift visible instead of silently trusting one
- * side of a malformed link. External URLs are ignored even when their path
- * happens to contain a reports/ segment.
+ * Deliberately not a `\(([^)]+)\)` one-liner: a destination may be wrapped in
+ * angle brackets, may contain balanced parentheses, and may escape either.
+ * Getting that wrong truncates the destination — and for the URL cell a
+ * truncated href is worse than none at all, because normalizeUrl() still parses
+ * it and it becomes a WRONG dedup key rather than an absent one.
  *
- * @param {string} reportCell - Raw Report cell value.
- * @returns {number[]} Unique positive report IDs in encounter order.
+ * @param {string} raw - Text after `](`, up to the closing paren.
+ * @returns {string|null} The destination, or null when there is none.
  */
 function markdownLinkDestination(raw) {
   const value = String(raw).trimStart();
@@ -381,7 +414,18 @@ function markdownLinkDestination(raw) {
   return destination ? destination.replace(/\\([\\()<> ])/g, '$1') : null;
 }
 
-function parseMarkdownLinks(value) {
+/**
+ * Every markdown link in a string, as `{label, target}` in encounter order.
+ *
+ * Shared by the two tracker cells that carry links — `Report`
+ * (`[61](../reports/061-….md)`) and `URL` (`[ashby](https://…)`, #3516) — so
+ * the strict destination handling above can never be half-applied to one of
+ * them. Exported for merge-tracker.mjs, the only writer of the URL cell.
+ *
+ * @param {string} value - A raw tracker cell.
+ * @returns {{label: string, target: string}[]}
+ */
+export function parseMarkdownLinks(value) {
   const links = [];
   let cursor = 0;
   while (cursor < value.length) {
@@ -423,6 +467,41 @@ function parseMarkdownLinks(value) {
     cursor = linkEnd + 1;
   }
   return links;
+}
+
+/**
+ * The posting URL a tracker `URL` cell points at, in either written form.
+ *
+ * The cell is written as a markdown link (`[careers.acme.com](https://…)`) so
+ * the table stays readable — a raw posting URL runs to 141 characters and
+ * pushes every other column off screen (#3516). Older trackers, and any row a
+ * merge has not rewritten since, still carry the bare URL. Both forms must
+ * produce the SAME dedup key, which is why the extraction lives HERE, in the
+ * shared row parser, rather than inside merge-tracker alone.
+ *
+ * THE FAILURE THIS PREVENTS IS SILENT. `normalizeUrl()` (url-key.mjs) starts
+ * with `new URL(s)` and returns '' when that throws, and '' means "this row has
+ * no URL" — not "parse error". So handing it a markdown-wrapped cell does not
+ * error: the row quietly drops out of merge-tracker's exact-match dedup tier
+ * (Pass 0) and falls back to fuzzy company+role, where two genuinely distinct
+ * postings at one employer merge into one row. The damage surfaces much later,
+ * with nothing tying it back to a formatting change.
+ *
+ * The first http(s) link target wins; a cell with no link (a bare URL, `N/A`,
+ * `—`, empty) is returned verbatim, so the callers' placeholder handling and
+ * normalizeUrl()'s "no key is not a key" rule keep working unchanged.
+ *
+ * @param {string} cellValue - Raw `URL` cell from a tracker row.
+ * @returns {string} The href, or the trimmed cell when it holds no link.
+ */
+export function extractCellUrl(cellValue) {
+  const value = String(cellValue ?? '').trim();
+  if (!value) return '';
+  for (const link of parseMarkdownLinks(value)) {
+    const target = String(link.target).trim().replace(/^<|>$/g, '');
+    if (/^https?:\/\//i.test(target)) return target;
+  }
+  return value;
 }
 
 function reportNumberFromTarget(rawTarget) {
@@ -484,6 +563,17 @@ export function extractTrackerReportLinks(reportCell, notesCell = '') {
   return links.length > 0 ? links : scanNotesForReportLinks(notesCell);
 }
 
+/**
+ * Extract report IDs referenced by one tracker Report cell.
+ *
+ * Both the numeric markdown label and the local report filename are returned.
+ * Keeping both makes tracker drift visible instead of silently trusting one
+ * side of a malformed link. External URLs are ignored even when their path
+ * happens to contain a reports/ segment.
+ *
+ * @param {string} reportCell - Raw Report cell value.
+ * @returns {number[]} Unique positive report IDs in encounter order.
+ */
 export function extractTrackerReportNumbers(reportCell, notesCell = '') {
   const numbers = new Set();
   for (const { target, label } of extractTrackerReportLinks(reportCell, notesCell)) {

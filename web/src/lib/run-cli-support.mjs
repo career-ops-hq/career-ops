@@ -5,6 +5,7 @@
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
+import { claudeUsageTokens } from "./claude-usage.mjs";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
@@ -29,13 +30,14 @@ const STATUS_RECONNECTING = "Reconnecting…";
  * formula is the only place that difference is visible (adapted from #2689,
  * which reached this from the accounting side).
  *
- * The dashboard's metric is TOKENS BILLED AT FULL RATE — `/api/usage/route.ts`
- * defines it as input + output + cache-creation, deliberately omitting
- * discounted cache reads.
+ * The dashboard's Claude metric is TOTAL TOKEN ACTIVITY — input + output +
+ * cache creation + cache reads. Cache reads are discounted, so this is a
+ * context-volume signal rather than a dollar-cost estimate. `/api/usage` and
+ * this per-run parser share `claudeUsageTokens` so those totals cannot drift.
  *
  *   Claude  `input_tokens` EXCLUDES cache reads (they live in
- *           `cache_read_input_tokens`), and cache writes are a separate pool
- *           billed at full rate. → input + output + cache_creation
+ *           `cache_read_input_tokens`), and cache writes are separate too.
+ *           → input + output + cache_creation + cache_read
  *   Codex   `input_tokens` INCLUDES `cached_input_tokens` (OpenAI's
  *           convention), so adding is double-counting and the cached portion
  *           must be SUBTRACTED. → (input − cached) + output
@@ -272,11 +274,9 @@ export function parseClaudeEvent(line) {
     // user most wants to see the cost of.
     const result = {};
     if (ev.usage) {
-      // Addition here, subtraction for Codex — see the header note. Claude's
-      // input_tokens excludes cache reads, so cache writes must be added back
-      // in; this is the same formula /api/usage uses.
-      const u = ev.usage;
-      result.tokens = tokenCount(u.input_tokens) + tokenCount(u.output_tokens) + tokenCount(u.cache_creation_input_tokens);
+      // Addition here, subtraction for Codex — see the header note. This shared
+      // helper keeps the per-run total identical to /api/usage.
+      result.tokens = claudeUsageTokens(ev.usage);
       if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
     }
     // A terminal failure, the counterpart of parseCodexEvent's turn.failed. The

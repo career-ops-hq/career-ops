@@ -47,7 +47,7 @@
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, rmSync, run, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, ROOT, hermeticGitRunner } from './helpers.mjs';
 import { gitIn, systemTreeDiffers, driftPathspecExcludingSkillEntrypoints } from '../update-system.mjs';
 
 const SYSTEM_PATHS = ['scan.mjs', '.agents/', '.claude/skills/', 'scaffolder/'];
@@ -55,13 +55,29 @@ const ENTRYPOINT_PATH = '.claude/skills/career-ops/SKILL.md';
 const SKILL_ENTRYPOINTS = [{ path: ENTRYPOINT_PATH }];
 const POINTER_TEXT = '../../../.agents/skills/career-ops/SKILL.md';
 
-function makeOrigin() {
-  const dir = mkdtempSync(join(tmpdir(), 'co-skill-drift-origin-'));
-  const g = (...args) => gitIn(dir, ...args);
-  g('init', '-q', '-b', 'main', '.');
+// Both fixture repos stage `.claude/skills/...` with `add -A`, so a
+// contributor's global ignore listing `.claude/` (a common entry, since
+// Claude Code writes worktrees and settings there) would silently drop the
+// entrypoint from the install's commit and the mode-split fixture check would
+// fail with `install=` — the fixture under test, not the updater. The runner
+// seals the config-file and env layers; the empty excludes file covers the
+// one default hermeticGitEnv cannot, $XDG_CONFIG_HOME/git/ignore, which git
+// reads whenever core.excludesFile is unset. Empty file, not /dev/null, for
+// the Windows reason given at makeUpdaterRepo() in helpers.mjs.
+function sealFixtureRepo(dir, g) {
+  const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
+  writeFileSync(emptyExcludes, '');
+  g('config', 'core.excludesFile', emptyExcludes);
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   g('config', 'commit.gpgsign', 'false');
+}
+
+function makeOrigin() {
+  const dir = mkdtempSync(join(tmpdir(), 'co-skill-drift-origin-'));
+  const g = hermeticGitRunner(dir);
+  g('init', '-q', '-b', 'main', '.');
+  sealFixtureRepo(dir, g);
   mkdirSync(join(dir, '.agents/skills/career-ops'), { recursive: true });
   mkdirSync(join(dir, 'scaffolder/bin'), { recursive: true });
   writeFileSync(join(dir, 'scan.mjs'), '// scan v1\n');
@@ -69,9 +85,14 @@ function makeOrigin() {
   writeFileSync(join(dir, 'scaffolder/bin/skill-entrypoints.mjs'), '// entrypoints v1\n');
   g('add', '-A');
   // The entrypoint ships as a real symlink upstream: git mode 120000, blob
-  // content is the pointer TEXT, not the target's content. gitIn() has no
-  // stdin seam, so this one plumbing step goes through helpers.mjs's run().
-  const pointerBlob = run('git', ['hash-object', '-w', '--stdin'], { cwd: dir, input: POINTER_TEXT });
+  // content is the pointer TEXT, not the target's content. The runner has no
+  // stdin seam, so the text is hashed from a scratch file inside .git/ (outside
+  // the work tree) — through g, so an inherited GIT_DIR cannot send the blob
+  // to some other repository. --no-filters: hash the bytes as written.
+  const pointerFile = join(dir, '.git', 'co-pointer-text');
+  writeFileSync(pointerFile, POINTER_TEXT);
+  const pointerBlob = g('hash-object', '-w', '--no-filters', pointerFile);
+  rmSync(pointerFile, { force: true });
   if (!pointerBlob) fail('fixture: git hash-object failed to write the pointer blob');
   g('update-index', '--add', '--cacheinfo', `120000,${pointerBlob},${ENTRYPOINT_PATH}`);
   g('commit', '-qm', 'base');
@@ -83,11 +104,9 @@ function makeOrigin() {
 // never a real OS symlink, so this fixture is portable to every CI platform.
 function cloneInstall(originDir) {
   const dir = mkdtempSync(join(tmpdir(), 'co-skill-drift-install-'));
-  gitIn(dir, 'clone', '-q', '-c', 'core.symlinks=false', originDir, '.');
-  const g = (...args) => gitIn(dir, ...args);
-  g('config', 'user.email', 'test@example.com');
-  g('config', 'user.name', 'Test');
-  g('config', 'commit.gpgsign', 'false');
+  const g = hermeticGitRunner(dir);
+  g('clone', '-q', '-c', 'core.symlinks=false', originDir, '.');
+  sealFixtureRepo(dir, g);
   return { dir, g };
 }
 

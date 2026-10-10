@@ -27,17 +27,28 @@
 //   business_unit, t_create/t_update (epoch SECONDS), canonicalPositionUrl,
 //   display_job_id.
 //
+// PCSX (tenants migrated to Eightfold's newer career-site API):
+//   https://<tenant>.eightfold.ai/api/pcsx/search?domain=<domain>&start=<n>
+//   A migrated tenant answers the v2 endpoint above with
+//   403 {"message": "Not authorized for PCSX"}. The provider then probes PCSX
+//   once on the same host and pages there for the rest of the walk.
+//   Response: { status, error, data: { count, positions: [...] } }, with
+//   positions naming fields differently (postedTs, atsJobId, positionUrl);
+//   normalizePcsxPage maps them onto the v2 names above.
+//
 // PAGE SIZE IS SERVER-CAPPED AT 10. Requesting num=25/50/100/200 all return
 // exactly 10 rows (measured against a 616-posting tenant). So a large board
 // costs count/10 requests; the page cap below is what keeps that bounded, and
 // `max_pages` on the entry raises it for a genuinely huge tenant.
 //
 // Known limitation: several tenants front the API with a WAF that 403s
-// datacenter/cloud egress IPs. That is an environment/IP issue, not a provider
+// datacenter/cloud egress IPs. When the PCSX probe is refused or absent too,
+// that 403 is what the provider reports. That is an environment/IP issue, not a provider
 // bug — the same request succeeds from a residential IP. A browser-like
 // User-Agent is sent to reduce (not eliminate) the friction.
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
+import { coerceId } from './_ids.mjs';
 
 const EIGHTFOLD_HOST_RE = /^[a-z0-9-]+\.eightfold\.ai$/i;
 
@@ -54,6 +65,12 @@ const MAX_PAGES_CAP = 1000;
 const INTER_PAGE_DELAY_MS = 250;
 
 const RETRY_POLICY = { retries: 3, baseDelayMs: 500, maxDelayMs: 8_000 };
+// PCSX tenants are the large ones (Microsoft: 2,395 postings), and Microsoft's
+// edge 429s a sustained walk at the v2 spacing above. Tuned against that edge:
+// 400ms between pages and a 2s-to-32s backoff walk the board where 250ms with a
+// 0.5s-to-8s backoff stalls partway.
+const PCSX_INTER_PAGE_DELAY_MS = 400;
+const PCSX_RETRY_POLICY = { retries: 5, baseDelayMs: 2_000, maxDelayMs: 32_000 };
 
 /**
  * SSRF guard — every request URL passes through here before it is fetched.
@@ -138,6 +155,56 @@ export function buildApiUrl(tenant, start = 0, num = PAGE_SIZE) {
 }
 
 /**
+ * Build the PCSX jobs URL for one page, on the SAME pinned tenant host.
+ *
+ * Eightfold is migrating tenants from `/api/apply/v2/jobs` to `/api/pcsx/search`.
+ * A tenant serves exactly one of the two and says so in a 403 body:
+ *   v2 on a migrated tenant   -> {"message": "Not authorized for PCSX"}
+ *   pcsx on a classic tenant  -> {"message": "PCSX is not enabled for this user."}
+ * Both paths are explicitly allowed by tenant robots.txt (`Allow: /api/apply`,
+ * `Allow: /api/pcsx`), and both live on the same `*.eightfold.ai` host this
+ * module already pins, so no new trust surface is introduced.
+ *
+ * @param {{host: string, domain?: (string|null)}} tenant
+ * @param {number} [start] - Row offset (0-based).
+ * @returns {string}
+ */
+export function buildPcsxUrl(tenant, start = 0) {
+  const params = new URLSearchParams();
+  if (tenant.domain) params.set('domain', tenant.domain);
+  params.set('start', String(start));
+  return `https://${tenant.host}/api/pcsx/search?${params.toString()}`;
+}
+
+/**
+ * Normalize one `/api/pcsx/search` page into the same envelope the v2 parser
+ * consumes: PCSX nests the payload one level deeper under `data`.
+ *
+ * Shape detection, NOT message matching. Eightfold returns only a free-text
+ * `message` on its 403s, and text like that is not a contract: the day they
+ * reword it, a string match silently stops working. A well-formed
+ * `data.positions` array is the capability check that cannot drift
+ * (the reason Google's own API guidance, AIP-193, tells clients to key on a
+ * machine-readable reason rather than on `message`).
+ *
+ * @param {any} json
+ * @returns {{positions: any[], count: (number|undefined)} | null} null when the
+ *   body is not a recognizable PCSX page.
+ */
+export function normalizePcsxPage(json) {
+  const data = json && typeof json === 'object' ? /** @type {any} */ (json).data : null;
+  if (!data || typeof data !== 'object' || !Array.isArray(data.positions)) return null;
+  // PCSX also renames fields the v2 parser reads: postedTs (epoch seconds) for
+  // t_create and atsJobId for ats_job_id (live /api/pcsx/search, 2026-10-07).
+  // Unmapped, every PCSX posting lost its date. positionUrl is left alone: the
+  // ?pid= fallback URL keeps postings seen before a migration on the same key.
+  const positions = data.positions.map((/** @type {any} */ p) => (p && typeof p === 'object'
+    ? { ...p, t_create: p.t_create ?? p.postedTs ?? p.creationTs, ats_job_id: p.ats_job_id ?? p.atsJobId ?? p.displayJobId }
+    : p));
+  return { positions, count: typeof data.count === 'number' ? data.count : undefined };
+}
+
+/**
  * Fallback posting URL for a position with no `canonicalPositionUrl`.
  *
  * @param {{host: string, domain?: (string|null)}} tenant
@@ -172,7 +239,8 @@ function assembleLocation(p) {
 }
 
 /**
- * Pure normalizer for one `/api/apply/v2/jobs` response. Exported for unit
+ * Pure normalizer for one `/api/apply/v2/jobs` response, or a PCSX page after
+ * normalizePcsxPage has mapped it onto the same shape. Exported for unit
  * tests. Returns [] for null / {} / non-array / {positions: null}.
  *
  * Drop rules (a dropped row is silently omitted, never emitted half-formed):
@@ -217,7 +285,10 @@ export function parseEightfoldResponse(json, tenant, companyName) {
       }
     }
     if (!url) {
-      const pid = p.id != null && `${p.id}`.trim() ? `${p.id}`.trim() : '';
+      // Same coercion and fallback as externalId below: a template literal
+      // turned an object id into "pid=[object Object]", one URL shared by every
+      // such posting, which URL dedup then collapsed into a single row.
+      const pid = coerceId(p.id) ?? coerceId(p.position_id);
       if (pid) url = buildJobUrl(tenant, pid);
     }
     if (!url) continue;
@@ -231,6 +302,23 @@ export function parseEightfoldResponse(json, tenant, companyName) {
     };
     const postedAt = epochSecondsToMs(p.t_create) ?? epochSecondsToMs(p.t_update);
     if (postedAt !== undefined) job.postedAt = postedAt;
+
+    // ATS-native identifier capture. Eightfold's own position id, plus
+    // the customer's upstream-ATS id when the tenant exposes one. Type-guarded
+    // like every other provider here — an unguarded String() coerced a tenant
+    // returning an object into the literal "[object Object]" and emitted that
+    // as though it were an id.
+    // ats_job_id is deliberately NOT in this chain. It is the customer's upstream
+    // REQ id, which is many-to-one with postings (see requisitionId in _types.js),
+    // so falling back to it would hand a consumer asking for per-posting identity a
+    // key that two sibling postings share. No posting id is better than a wrong one.
+    // Coerce each candidate on its own: `p.id ?? p.position_id` hands coerceId a
+    // present-but-unusable `id` (an object, an empty string) and never reaches the
+    // valid sibling, so the posting loses an id it had (CodeRabbit, #4076).
+    const ext = coerceId(p.id) ?? coerceId(p.position_id);
+    if (ext) job.externalId = ext;
+    const req = coerceId(p.ats_job_id);
+    if (req) job.requisitionId = req;
 
     out.push(job);
   }
@@ -274,25 +362,92 @@ export default {
     const all = [];
     /** @type {number|null} */
     let total = null;
+    // Which API this tenant serves, decided once per fetch and reused for every
+    // page: 'v2' unless its FIRST page answers 403, then 'pcsx' if the PCSX
+    // endpoint answers with a well-formed page. A 403 after v2 has served pages
+    // is not a migration signal, and switching mid-walk would splice two
+    // endpoints' orderings together (duplicated or skipped postings).
+    let api = 'v2';
+    let rateLimited = false;
 
     for (let page = 0; page < maxPages; page++) {
       const start = page * PAGE_SIZE;
-      const apiUrl = buildApiUrl(tenant, start, PAGE_SIZE);
-      assertEightfoldUrl(apiUrl); // SSRF guard before every fetch
-      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+      if (page > 0) await sleep(api === 'pcsx' ? PCSX_INTER_PAGE_DELAY_MS : INTER_PAGE_DELAY_MS, ctx);
 
-      const json = /** @type {any} */ (await fetchJsonWithRetry(
-        /** @type {any} */ (ctx),
-        apiUrl,
-        {
-          // redirect:'error' prevents SSRF via a server-side redirect; with
-          // assertEightfoldUrl above it guarantees the final hostname stays
-          // inside *.eightfold.ai.
-          redirect: 'error',
-          headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'application/json' },
-        },
-        RETRY_POLICY,
-      ));
+      /** One request on whichever API this tenant is on. */
+      const request = async (/** @type {string} */ which) => {
+        const url = which === 'pcsx' ? buildPcsxUrl(tenant, start) : buildApiUrl(tenant, start, PAGE_SIZE);
+        assertEightfoldUrl(url); // SSRF guard before every fetch
+        return /** @type {any} */ (await fetchJsonWithRetry(
+          /** @type {any} */ (ctx),
+          url,
+          {
+            // redirect:'error' prevents SSRF via a server-side redirect; with
+            // assertEightfoldUrl above it guarantees the final hostname stays
+            // inside *.eightfold.ai.
+            redirect: 'error',
+            headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT, Accept: 'application/json' },
+          },
+          which === 'pcsx' ? PCSX_RETRY_POLICY : RETRY_POLICY,
+        ));
+      };
+
+      let json;
+      try {
+        json = await request(api);
+      } catch (err) {
+        const status = /** @type {any} */ (err)?.status;
+        // A 403 on the classic endpoint is how a migrated tenant announces
+        // itself. It is deterministic, never retried (RFC 9110 §15.5.4, and
+        // _http.mjs's isRetryableError agrees), so it is a safe point to switch
+        // APIS ONCE rather than to give up: before this, every PCSX tenant read
+        // as the WAF case (module header) and the board silently returned zero postings.
+        if (api === 'v2' && page === 0 && status === 403) {
+          let pcsxJson = null;
+          try {
+            pcsxJson = await request('pcsx');
+          } catch (probeErr) {
+            // PCSX refusing too (403), or simply not existing on this host
+            // (404/410), makes the original 403 the real story: a WAF or
+            // datacenter-IP block. Surfacing the probe's 404 instead read as
+            // "board gone" to dead-boards.mjs, which skips a board after three
+            // misses. Any other probe failure (a 429, a 5xx, a network error) is
+            // its own problem, and reporting the v2 403 in its place would read
+            // as a deterministic block when the tenant is only busy or down.
+            if ([403, 404, 410].includes(/** @type {any} */ (probeErr)?.status)) throw err;
+            throw probeErr;
+          }
+          const page0 = normalizePcsxPage(pcsxJson);
+          if (!page0) {
+            // A 200 that is not a PCSX page means the endpoint moved again.
+            // Fail loudly with the 403 attached rather than returning nothing.
+            throw new Error(
+              `eightfold: ${entry.name} answered 403 on /api/apply/v2/jobs and an unrecognized body on /api/pcsx/search — neither API is readable`,
+              { cause: err },
+            );
+          }
+          api = 'pcsx';
+          json = { positions: page0.positions, ...(page0.count === undefined ? {} : { count: page0.count }) };
+        } else if (status === 429 && all.length > 0) {
+          // Large PCSX tenants rate-limit a sustained walk (measured: Microsoft
+          // 429s after ~20 pages at 1 req/s even with backoff). Keep the pages
+          // already collected and say the board is partial — never silently.
+          rateLimited = true;
+          break;
+        } else {
+          throw err;
+        }
+      }
+
+      // `in` throws on null or a primitive, so shape-check first: a PCSX page
+      // that decodes to `null` must reach the descriptive error below.
+      if (api === 'pcsx' && !(json && typeof json === 'object' && 'positions' in json)) {
+        const normalized = normalizePcsxPage(json);
+        if (!normalized) {
+          throw new Error(`eightfold: ${entry.name} returned an unrecognized /api/pcsx/search body at start=${start}`);
+        }
+        json = { positions: normalized.positions, ...(normalized.count === undefined ? {} : { count: normalized.count }) };
+      }
 
       all.push(...parseEightfoldResponse(json, tenant, entry.name));
 
@@ -310,7 +465,13 @@ export default {
       if (total !== null && start + PAGE_SIZE >= total) break;
     }
 
-    if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
+    if (rateLimited) {
+      console.error(`⚠️  eightfold: ${entry.name} stopped early on HTTP 429 (${all.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial, not empty`);
+      // Tagged on the array, as workday.mjs (workdayTruncated) and
+      // adp-workforcenow.mjs (adpTruncated) do, so a caller can tell this
+      // board from a complete one without reading stderr.
+      /** @type {any} */ (all).eightfoldTruncated = true;
+    } else if (total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
     }
 
