@@ -1,5 +1,5 @@
-import { decodeEntities } from './_html-entities.mjs';
 // @ts-check
+import { decodeEntities } from './_html-entities.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // We Work Remotely provider - board-wide RSS feed

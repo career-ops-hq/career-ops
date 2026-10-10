@@ -24,6 +24,13 @@
 //   entry-level field names (COMPANY, PERIOD, ROLE, etc.). When no partial file
 //   is found the built-in fallback builder is used, preserving full backward
 //   compatibility.
+//
+// Section completeness (#3852):
+//   A template's manifest may declare the sections it owns (`sections: all`,
+//   or a list — see lib/template-manifest.mjs). A declared section
+//   never falls back: a missing, malformed, or empty partial fails the render
+//   with the file named. Templates that declare nothing keep the silent
+//   fallback above.
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
@@ -33,6 +40,8 @@ import { tmpdir } from 'os';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
+import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
+import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -40,7 +49,7 @@ const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.html');
 const PLACEHOLDER_RE = /\{\{[A-Z_]+\}\}/g;
 const CONTACT_ROW_RE = /<div class="contact-row">[\s\S]*?<\/div>/;
 
-const PAGE_WIDTHS = { letter: '8.5in', a4: '210mm' };
+const PROFILE_PATH = resolve(DATA_ROOT, 'config', 'profile.yml');
 const PHOTO_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -302,25 +311,61 @@ function fillEntry(entryTemplate, blocks, fields, blockValues) {
 
 // Load section partials from the sections/ directory co-located with the
 // template. Returns a Map<sectionName, { entryTemplate, blocks }> for each
-// partial file found. Sections with no partial file are absent from the map
-// and fall back to the built-in builders.
+// partial file found.
+//
+// Two contracts, chosen by the template's manifest (#3852):
+//
+//   - A section the manifest declares (`sections: all`, or a list) is owned by
+//     the template. Its partial must exist, parse, and carry a non-empty ENTRY
+//     zone, or this throws and the render fails. Falling back would emit the
+//     built-in DOM the pack exists to replace, with nothing in the output
+//     saying so: a typo in experience.html produced a CV that rendered,
+//     validated, and passed the placeholder check with the two-column markup
+//     the pack was written to avoid.
+//   - A section the manifest does not declare keeps the original contract:
+//     absent from the map when there is no partial or the partial is
+//     malformed, so the built-in builder renders it.
+//
+// Every problem is collected before throwing so one run names them all.
 function loadSectionPartials(templatePath) {
   const sectionsDir = join(dirname(templatePath), 'sections');
+  let declared;
+  try {
+    declared = declaredSections(parseMeta(templatePath));
+  } catch (err) {
+    throw new Error(`Template ${templatePath}: ${err.message}`);
+  }
+  const owned = declared || new Set();
   const partials = new Map();
-  if (!existsSync(sectionsDir)) return partials;
+  const problems = [];
 
-  const sectionNames = [
-    'competencies', 'experience', 'projects', 'education', 'certifications', 'awards', 'skills',
-  ];
-  for (const name of sectionNames) {
+  for (const name of PARTIAL_SECTIONS) {
     const partialPath = join(sectionsDir, `${name}.html`);
-    if (!existsSync(partialPath)) continue;
-    try {
-      const source = readFileSync(partialPath, 'utf-8');
-      partials.set(name, parsePartial(source));
-    } catch {
-      // Silently skip malformed partial files — fall back to built-in builder.
+    const rel = `sections/${name}.html`;
+    if (!existsSync(partialPath)) {
+      if (owned.has(name)) problems.push(`${rel} is declared but does not exist`);
+      continue;
     }
+    let parsed;
+    try {
+      parsed = parsePartial(readFileSync(partialPath, 'utf-8'));
+    } catch (err) {
+      if (owned.has(name)) problems.push(`${rel} is declared but malformed: ${err.message}`);
+      continue; // undeclared: fall back to the built-in builder, as before
+    }
+    if (owned.has(name) && !parsed.entryTemplate) {
+      problems.push(`${rel} is declared but its ENTRY zone is empty`);
+      continue;
+    }
+    partials.set(name, parsed);
+  }
+
+  if (problems.length) {
+    throw new Error(
+      `Template ${templatePath} declares sections it cannot render:\n`
+        + problems.map((p) => `  - ${p}`).join('\n')
+        + '\nA declared section must ship a partial that parses — fix the file, or drop it from the manifest\'s "sections" list.'
+    );
   }
   return partials;
 }
@@ -356,12 +401,15 @@ function buildExperience(entries, partial) {
       const location = e.location
         ? `\n    <div class="job-location">${escapeHtml(e.location)}</div>`
         : '';
+      const context = e.context
+        ? `\n    <div class="job-context">${escapeHtml(e.context)}</div>`
+        : '';
       return `<div class="job">
     <div class="job-header">
       <span class="job-company">${escapeHtml(e.company)}</span>
       <span class="job-period">${escapeHtml(e.dates || e.period || '')}</span>
     </div>
-    <div class="job-role">${escapeHtml(e.role)}</div>${location}
+    <div class="job-role">${escapeHtml(e.role)}</div>${context}${location}
     <ul>
 ${bullets}
     </ul>
@@ -376,12 +424,14 @@ ${bullets}
       : '';
     const blockValues = new Map([
       ['LOCATION_BLOCK', { value: escapeHtml(e.location || ''), present: Boolean(e.location) }],
+      ['CONTEXT_BLOCK', { value: escapeHtml(e.context || ''), present: Boolean(e.context) }],
     ]);
     return fillEntry(entryTemplate, blocks, {
       COMPANY: escapeHtml(e.company || ''),
       PERIOD: escapeHtml(e.dates || e.period || ''),
       ROLE: escapeHtml(e.role || ''),
       LOCATION: escapeHtml(e.location || ''),
+      CONTEXT: escapeHtml(e.context || ''),
       BULLETS: bullets,
     }, blockValues);
   }).join('\n  ');
@@ -633,8 +683,12 @@ function buildContactRow(candidate) {
   if (c.location) {
     items.push(`<span>${escapeHtml(c.location)}</span>`);
   }
-  const sep = '\n      <span class="separator">|</span>\n      ';
-  return `<div class="contact-row">\n      ${items.join(sep)}\n    </div>`;
+  // Separators are generated by CSS (`.contact-row > *:not(:last-child)::after`)
+  // rather than emitted as their own elements. An element of its own is an
+  // independent box on both the flex and the inline path, so wrapping could put
+  // a separator at the start of a line; generated content belongs to the item
+  // before it and cannot be separated from it by a line break.
+  return `<div class="contact-row">\n      ${items.join('\n      ')}\n    </div>`;
 }
 
 function buildPhoto(candidate, name) {
@@ -644,10 +698,21 @@ function buildPhoto(candidate, name) {
   return `<img class="cv-photo cv-photo--${style}" src="${sanitizeImageSrc(photo)}" alt="${escapeHtml(name || '')}">`;
 }
 
+// Professional title / headline under the name (candidate.title). An ATS reads
+// this first to place the candidate ("Backend Engineer" vs "Accountant"); a CV
+// with no title forces the reader to infer the role. Empty/absent → no element,
+// so a payload without a title renders byte-identical to before.
+function buildTitle(candidate) {
+  const title = candidate && candidate.title != null ? String(candidate.title).trim() : '';
+  return title ? `<div class="header-title">${escapeHtml(title)}</div>` : '';
+}
+
 function renderReport(payload, partials) {
   const sectionTitles = { ...DEFAULT_SECTION_TITLES, ...(payload.sections || {}) };
   const candidate = payload.candidate || {};
-  const pageWidth = PAGE_WIDTHS[payload.page_format] || PAGE_WIDTHS.letter;
+  // The sheet this body has to fit is chosen by generate-pdf.mjs, so both read
+  // the same resolver rather than each keeping a fallback of their own.
+  const pageWidth = PAGE_WIDTHS[resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH })];
 
   const substitutions = {
     LANG: escapeHtml(payload.lang || 'en'),
@@ -671,6 +736,7 @@ function renderReport(payload, partials) {
     INTERESTS: buildInterests(payload.interests),
     SECTION_SKILLS: escapeHtml(sectionTitles.skills),
     SKILLS: buildSkills(payload.skills, partials.get('skills')),
+    CONSENT: escapeHtml((payload.consent || '').trim()),
   };
   return { substitutions, candidate };
 }
@@ -688,6 +754,14 @@ function renderHtml(template, payload, templatePath) {
   // no <img>), so they are rebuilt as whole blocks before placeholder fill.
   let html = template.replace(CONTACT_ROW_RE, () => buildContactRow(candidate));
   html = html.replace(/\{\{PHOTO\}\}/g, () => buildPhoto(candidate, candidate.name));
+  // Captures the placeholder's own leading newline + indentation so an empty
+  // title drops the whole line — matching just the token (as every other
+  // {{PLACEHOLDER}} above does) would leave a blank line where the token sat,
+  // which is not byte-identical to a template that never had the slot
+  // (CodeRabbit, #3763). With a title, the indentation is reused verbatim so
+  // output is unchanged from the token-only replace this replaces.
+  const titleBlock = buildTitle(candidate);
+  html = html.replace(/\n([ \t]*)\{\{TITLE_BLOCK\}\}/g, (_, indent) => (titleBlock ? `\n${indent}${titleBlock}` : ''));
 
   // Drop the optional sections (projects, education) that have no entries, so
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
@@ -762,7 +836,11 @@ async function main() {
     console.error('  the builder loads per-section HTML partial files from it');
     console.error('  (e.g. sections/experience.html). Partials control the DOM');
     console.error('  structure, tag names, and class names for each section.');
-    console.error('  When no partial file is found the built-in builder is used.');
+    console.error('  When no partial file is found the built-in builder is used —');
+    console.error('  unless the template manifest declares the section (#3852):');
+    console.error('  `sections: all` or `sections: experience, education` in the');
+    console.error('  <!-- career-ops-template --> block makes a missing or malformed');
+    console.error('  partial fail the build instead of falling back.');
     process.exit(args.includes('--help') ? 0 : 1);
   }
 
@@ -844,6 +922,7 @@ async function runSelfTest() {
       company: 'Test Corp',
       role: 'Test Engineer',
       location: 'Remote',
+      context: 'Seed-stage startup; joined as employee #7.',
       dates: 'June 2024 - Present',
       bullets: [
         'Built automated testing pipelines with CI/CD integration',
@@ -913,10 +992,18 @@ async function runSelfTest() {
   }
 
   // Guard the absent-field side of the same case: omitting candidate.github
-  // must drop both its anchor and its separator, leaving no dangling item.
+  // must drop its whole contact item, leaving no dangling one.
+  //
+  // Counted as ITEMS, not separator elements: separators are generated by CSS
+  // on each item but the last, so there is no separator node to count and an
+  // off-by-one in the item list is what a dangling separator would now look
+  // like. One fewer item is exactly the old "one fewer separator" assertion.
   const { github, ...candidateWithoutGithub } = sample.candidate;
   const htmlWithoutGithub = renderHtml(template, { ...sample, candidate: candidateWithoutGithub });
-  const countSeparators = (h) => (h.match(/class="separator"/g) || []).length;
+  const countSeparators = (h) => {
+    const row = h.match(/<div class="contact-row">([\s\S]*?)<\/div>/);
+    return row ? (row[1].match(/<\/a>|<\/span>/g) || []).length : 0;
+  };
   if (htmlWithoutGithub.includes('github.com/test')) {
     console.error('Self-test failed: github contact link rendered when candidate.github is absent');
     process.exit(1);
@@ -984,6 +1071,20 @@ async function runSelfTest() {
     console.error('Self-test failed: job-location block not rendered when location is present');
     process.exit(1);
   }
+  if (!html.includes('class="job-context"') || !html.includes('Seed-stage startup; joined as employee #7.')) {
+    console.error('Self-test failed: job-context block not rendered when context is present');
+    process.exit(1);
+  }
+  // context sits directly under the role, ahead of the location, on both paths:
+  // the section partial and the built-in builder (templates with no sections/).
+  const contextDiv = '<div class="job-context">Seed-stage startup; joined as employee #7.</div>';
+  for (const [path, out] of [['partial', html], ['built-in', buildExperience(sample.experience)]]) {
+    const [role, context, location] = ['class="job-role"', contextDiv, 'class="job-location"'].map(s => out.indexOf(s));
+    if (role === -1 || !(role < context && context < location)) {
+      console.error(`Self-test failed: ${path} builder did not render job-context between the role and the location`);
+      process.exit(1);
+    }
+  }
   if (!html.includes('class="edu-location"')) {
     console.error('Self-test failed: edu-location block not rendered when education location is present');
     process.exit(1);
@@ -1037,6 +1138,10 @@ async function runSelfTest() {
   }
   if (noLocHtml.includes('class="job-location"')) {
     console.error('Self-test failed: job-location block rendered when location is absent');
+    process.exit(1);
+  }
+  if (noLocHtml.includes('class="job-context"') || buildExperience(noLocSample.experience).includes('class="job-context"')) {
+    console.error('Self-test failed: job-context block rendered when context is absent');
     process.exit(1);
   }
   if (noLocHtml.includes('class="edu-location"')) {

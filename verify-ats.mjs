@@ -24,6 +24,7 @@ import { readFileSync, statSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs'; 
+import { asciiFold } from './lib/ascii-fold.mjs';
 
 const DEFAULT_MIN_SCORE = 70;
 
@@ -93,9 +94,59 @@ function collapse(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** Strip a fragment of inner tags to a plain-text label. */
+// The named entities a generated CV actually carries: the Latin-1 letters an
+// accented heading is written with, plus the five markup ones. Anything else
+// arrives numeric, which is handled generically below.
+const NAMED_ENTITIES = {
+  nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
+  ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
+  igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï', ntilde: 'ñ',
+  ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö', oslash: 'ø',
+  ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü', yacute: 'ý', yuml: 'ÿ',
+  szlig: 'ß', thorn: 'þ', eth: 'ð', scaron: 'š', zcaron: 'ž', oelig: 'œ',
+};
+
+/**
+ * Decode the HTML entities a generated CV carries, in ONE pass.
+ *
+ * Single-pass is what makes this safe. Chained `.replace()` calls have to
+ * decode `&amp;` last, or `&amp;lt;` becomes `&lt;` and then `<`, unescaping
+ * text that was never an entity. Here each match is replaced once and the
+ * replacement is never rescanned, so `&amp;lt;` yields `&lt;` whatever order
+ * the table is written in, and the ordering constraint disappears.
+ *
+ * Case-insensitive for named entities because generated markup is not
+ * consistent about it; numeric and hex forms are decoded generically.
+ * @param {string} text
+ * @returns {string}
+ */
+function decodeEntities(text) {
+  return text.replace(/&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (whole, body) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10);
+      // Lone surrogates and out-of-range values are not text; leave them literal.
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return whole;
+      if (code >= 0xd800 && code <= 0xdfff) return whole;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[body.toLowerCase()];
+    return named === undefined ? whole : named;
+  });
+}
+
+/**
+ * Strip a fragment of inner tags to a plain-text label.
+ *
+ * Entities are decoded, because this produces the section headings the scorer
+ * matches against. `Exp&eacute;rience` reached the matcher as
+ * `exp eacute rience` and matched nothing, so a French CV was reported as
+ * missing the Experience section it plainly has (#4261).
+ */
 function stripInline(fragment) {
-  return collapse(fragment.replace(/<[^>]+>/g, ' '));
+  return collapse(decodeEntities(fragment.replace(/<[^>]+>/g, ' ')));
 }
 
 /**
@@ -158,9 +209,18 @@ function cssTrim(text) {
  * @returns {string}
  */
 function describeFontName(name) {
-  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch =>
-    ch === ' ' ? ch : `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`
-  );
+  return name.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Zs}]/gu, ch => {
+    if (ch === ' ') return ch;
+    const code = ch.codePointAt(0);
+    // `\uXXXX` is only unambiguous up to U+FFFF. Above it the escape runs to
+    // five or six hex digits, and the reader has no way to tell where it ends:
+    // U+E0001 printed bare is `1`, which reads as `` followed by a
+    // literal "1", naming a different character than the one that was flagged.
+    // The braced form is the spelling that terminates itself.
+    return code > 0xffff
+      ? `\\u{${code.toString(16)}}`
+      : `\\u${code.toString(16).padStart(4, '0')}`;
+  });
 }
 
 /**
@@ -276,6 +336,70 @@ function extractInlineStyles(html) {
 }
 
 /**
+ * Split an inline style into its declarations the way a browser reads them. A
+ * `;` ends a declaration only outside a quoted string, a comment, and any open
+ * parentheses, brackets or braces. A backslash escapes the next character (CRLF
+ * counts as one), a comment counts as whitespace, and a raw newline ends a
+ * string early, as CSS does with a bad string. The body of an unquoted `url(` is
+ * raw text up to the first unescaped `)`, so a quote inside it opens nothing.
+ * One forward pass, so it stays linear on any input, including an unterminated
+ * string, comment, block or url.
+ * @param {string} style
+ * @returns {string[]}
+ */
+function cssDeclarations(style) {
+  const declarations = [];
+  const closers = [];
+  const isCssSpace = ch => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f';
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < style.length; i++) {
+    const c = style[i];
+    if (c === '\\' && i + 1 < style.length) {
+      const escaped = style[i + 1] === '\r' && style[i + 2] === '\n' ? '\r\n' : style[i + 1];
+      current += c + escaped;
+      i += escaped.length;
+      continue;
+    }
+    if (quote) {
+      current += c;
+      if (c === quote || c === '\n' || c === '\r' || c === '\f') quote = null;
+      continue;
+    }
+    if (c === '/' && style[i + 1] === '*') {
+      const end = style.indexOf('*/', i + 2);
+      i = end === -1 ? style.length : end + 1;
+      current += ' ';
+      continue;
+    }
+    if (c === ';' && closers.length === 0) {
+      declarations.push(current);
+      current = '';
+      continue;
+    }
+    if (c === '(' && /(?:^|[^\w\u0080-\uffff-])url$/i.test(style.slice(Math.max(0, i - 4), i))) {
+      let bodyStart = i + 1;
+      while (bodyStart < style.length && isCssSpace(style[bodyStart])) bodyStart++;
+      if (style[bodyStart] !== '"' && style[bodyStart] !== "'") {
+        let end = i + 1;
+        while (end < style.length && style[end] !== ')') end += style[end] === '\\' ? 2 : 1;
+        current += style.slice(i, end + 1);
+        i = Math.min(end, style.length - 1);
+        continue;
+      }
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(') closers.push(')');
+    else if (c === '[') closers.push(']');
+    else if (c === '{') closers.push('}');
+    else if (c === closers[closers.length - 1]) closers.pop();
+    current += c;
+  }
+  declarations.push(current);
+  return declarations;
+}
+
+/**
  * Candidate section headings: the template's `.section-title` divs plus any
  * generic <h1>–<h6>. Lowercased so downstream matching is case-insensitive.
  * @param {string} html
@@ -289,7 +413,16 @@ function extractHeadings(html) {
   for (const m of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) {
     out.push(stripInline(m[1]));
   }
-  return out.map(s => s.toLowerCase()).filter(Boolean);
+  // Folded to ASCII, because the patterns matched against these are ASCII by
+  // construction. Without it `Compétences` never matches `competenc` and
+  // `Expérience` never matches `experience`, so an accented heading reads
+  // as a missing section (#4261). Same fix lib/ascii-fold.mjs documents for
+  // verify-portals.mjs and providers/_trust-validator.mjs; this was the third
+  // instance. The unfolded text is kept too: folding is lossy for scripts with
+  // no ASCII base letter (スキル, مهارات), whose patterns must match the original.
+  return out
+    .flatMap(s => [s.toLowerCase(), asciiFold(s).toLowerCase()])
+    .filter(Boolean);
 }
 
 /**
@@ -349,10 +482,80 @@ function auditAts(html, opts = {}) {
 
   // 2. Standard section headings.
   const headingBlob = extractHeadings(html).join(' | ');
+  // Matched against BOTH the raw heading and its ASCII fold (extractHeadings
+  // emits each). The Latin terms are therefore written unaccented: `competenc`
+  // catches Competences, Competências and Competenze via the fold, so only
+  // genuinely different words need their own alternative.
+  //
+  // career-ops ships evaluation modes for ar, da, de, es, fr, hi, id, it, ja,
+  // ko, nl, pl, pt, ru, tr, ua, zh and zh-TW, and before this every one of
+  // them failed the gate on a structurally perfect CV. The Skills and
+  // experience terms are taken from the `| Skills |` and `| Career history |`
+  // rows of each modes/<lang>/README.md rather than invented here; the
+  // education terms had no such table and are the ordinary CV heading in each
+  // language. Native-speaker corrections welcome, as in #3223.
+  // Each term must START a word: `formation` must not be found inside
+  // `Information`, nor `formacion` inside `Informacion`. `\b` is ASCII-only, so
+  // the boundary is "not preceded by a letter or digit" in any script. Terms
+  // stay open on the right (`experien`, `competen`) and the German, Dutch and
+  // Danish compounds that put the key word LAST are listed whole.
+  const startsWord = (terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})`, 'u');
   const required = [
-    { name: 'Experience', re: /experience|work history|employment/ },
-    { name: 'Education', re: /education|academic/ },
-    { name: 'Skills', re: /skills|competenc|proficienc/ },
+    { name: 'Experience', re: startsWord([
+      'experience', 'work history', 'employment',          // en
+      'experien', 'esperienza',                            // es pt fr (folded); it spells it with an s
+      'erfahrung', 'berufserfahrung', 'arbeitserfahrung', 'werdegang', // de: compounds put it last
+      'ervaring', 'werkervaring', 'loopbaan',              // nl
+      'doswiadczenie', 'przebieg kariery',                 // pl
+      'deneyim',                                           // tr
+      'erhvervserfaring', 'karriereforlob',                // da
+      'riwayat karier', 'pengalaman',                      // id
+      'parcours professionnel',                            // fr
+      'trayectoria', 'trajetoria',                         // es pt
+      'percorso professionale',                            // it
+      '職務経歴', '職歴',                                    // ja
+      '경력',                                                // ko
+      'опыт работы',                                    // ru
+      'досвід роботи',                                    // ua
+      'الخبرات', 'التاريخ المهني',                        // ar
+      'करियर',                                              // hi
+      '工作经历', '工作經歷',                                  // zh zh-TW
+    ]) },
+    { name: 'Education', re: startsWord([
+      'education', 'academic',                             // en
+      'formation', 'formacion', 'formacao',                // fr es pt
+      'ausbildung', 'bildung', 'studium',                  // de
+      'istruzione',                                        // it
+      'opleiding',                                         // nl
+      'wyksztalcenie',                                     // pl
+      'egitim',                                            // tr
+      'uddannelse',                                        // da
+      'pendidikan',                                        // id
+      '学歴',                                                // ja
+      '학력',                                                // ko
+      'образование',                                      // ru
+      'освіта',                                              // ua
+      'التعليم', 'المؤهلات',                            // ar
+      'शिक्षा',                                             // hi
+      '教育背景', '學歷',                                    // zh zh-TW
+    ]) },
+    { name: 'Skills', re: startsWord([
+      'skills', 'competen', 'proficienc',                  // en, + es pt fr folded; 'competen' also covers it 'Competenze'
+      'kenntnisse', 'fachkenntnisse', 'sprachkenntnisse', 'fahigkeiten', // de
+      'habilidades',                                       // es pt
+      'vaardigheden',                                      // nl
+      'umiejetnosci',                                      // pl
+      'beceri',                                            // tr
+      'kompetenc', 'kernkompetenc',                        // da + pl/pt variants
+      'keahlian',                                          // id
+      'スキル',                                              // ja
+      '역량', '기술',                                          // ko
+      'навыки',                                              // ru
+      'навички',                                             // ua
+      'مهارات',                                             // ar
+      'कौशल',                                               // hi
+      '技能', '专业技能', '專業技能',                           // zh zh-TW: 專業技能 does not start with 技能
+    ]) },
   ];
   const missing = [];
   for (const s of required) {
@@ -473,7 +676,13 @@ function auditAts(html, opts = {}) {
   // headers, the header gradient), so scanning stylesheets for it would flag
   // normal templates. Inline `style="color:#fff"` on a text span is the classic
   // white-on-white stuffing trick and is the reliable signal.
-  if (inlineStyles.some(s => /color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s))) {
+  // The property must start its declaration, so `background-color:#fff` (a
+  // visible badge) is not read as `color:#fff`. `-webkit-text-fill-color` paints
+  // the glyph fill and overrides `color`, so it counts. A regex over the raw
+  // style cannot tell a real declaration from text inside a string or comment,
+  // so cssDeclarations splits the style first and each piece is tested alone.
+  const whiteDeclaration = /^\s*(?:-webkit-text-fill-)?color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i;
+  if (inlineStyles.some(s => cssDeclarations(s).some(d => whiteDeclaration.test(d)))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -528,7 +737,7 @@ export {
  * Build a clean, ATS-friendly CV HTML fixture for the self-test, with hooks to
  * override individual pieces (font, email, charset, sections, extra body) so a
  * single check can be regressed in isolation.
- * @param {{font?:string, email?:string, charset?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
+ * @param {{font?:string, email?:string, charset?:string, experience?:string, education?:string, skills?:string, extraBody?:string}} [overrides]
  * @returns {string} A full HTML document.
  */
 function buildCleanHtml(overrides = {}) {
@@ -536,6 +745,7 @@ function buildCleanHtml(overrides = {}) {
     font = "'Liberation Sans', Arial, sans-serif",
     email = '<a href="mailto:jane@example.com">jane@example.com</a>',
     charset = '<meta charset="UTF-8">',
+    experience = '<div class="section"><div class="section-title">Work Experience</div>\n    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,\n    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>',
     education = '<div class="section"><div class="section-title">Education</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
     skills = '<div class="section"><div class="section-title">Skills</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>',
     extraBody = '',
@@ -552,9 +762,7 @@ function buildCleanHtml(overrides = {}) {
     distributed systems. Led platform teams delivering resilient services on Kubernetes, with a
     focus on observability, cost efficiency, and clean, well-tested Python codebases used daily
     across the organization.</p></div>
-  <div class="section"><div class="section-title">Work Experience</div>
-    <p>Staff Engineer, Acme Corp (2020-present). Built and operated the core payments platform,
-    reducing incident rates and improving deployment cadence across multiple engineering teams.</p></div>
+  ${experience}
   <div class="section"><div class="section-title">Projects</div>
     <p>Open-source tracing toolkit adopted by several teams for latency debugging.</p></div>
   ${education}
@@ -588,6 +796,74 @@ function runSelfTest() {
   const noSections = auditAts(buildCleanHtml({ education: '', skills: '' }));
   check('missing Education+Skills is flagged', hasIssue(noSections.issues, 'Education') && hasIssue(noSections.issues, 'Skills'));
   check('missing two required sections is critical', hasCritical(noSections.issues));
+
+  // A CV in any language career-ops ships a mode for must clear the gate on the
+  // same structure an English one clears it on. Before #4261 every one of these
+  // was reported as missing all three sections, which is critical, so a
+  // structurally perfect non-English CV did not merely score lower: it FAILED.
+  {
+    const localized = {
+      fr: ['Expérience professionnelle', 'Formation', 'Compétences'],
+      de: ['Berufserfahrung', 'Ausbildung', 'Kenntnisse'],
+      es: ['Experiencia profesional', 'Formación', 'Competencias'],
+      it: ['Esperienza professionale', 'Istruzione', 'Competenze'],
+      pt: ['Experiência profissional', 'Formação', 'Habilidades'],
+      nl: ['Werkervaring', 'Opleiding', 'Vaardigheden'],
+      pl: ['Doświadczenie zawodowe', 'Wykształcenie', 'Umiejętności'],
+      tr: ['İş deneyimi', 'Eğitim', 'Beceriler'],
+      da: ['Erhvervserfaring', 'Uddannelse', 'Kompetencer'],
+      id: ['Pengalaman kerja', 'Pendidikan', 'Keahlian'],
+      ja: ['職務経歴', '学歴', 'スキル'],
+      ko: ['경력', '학력', '역량'],
+      ru: ['Опыт работы', 'Образование', 'Навыки'],
+      ua: ['Досвід роботи', 'Освіта', 'Навички'],
+      ar: ['الخبرات المهنية', 'التعليم', 'مهارات'],
+      hi: ['करियर इतिहास', 'शिक्षा', 'कौशल'],
+      zh: ['工作经历', '教育背景', '技能'],
+      'zh-TW': ['工作經歷', '學歷', '專業技能'],
+    };
+    const failing = Object.entries(localized)
+      .filter(([, [exp, edu, skl]]) => {
+        // Each localized heading REPLACES the English one, so the English fallback
+        // cannot satisfy the requirement on the localized heading's behalf.
+        const cv = auditAts(buildCleanHtml({
+          experience: `<div class="section"><div class="section-title">${exp}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>`,
+          education: `<div class="section"><div class="section-title">${edu}</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>`,
+          skills: `<div class="section"><div class="section-title">${skl}</div><p>Python, Kubernetes, Docker, PostgreSQL, distributed systems, CI/CD pipelines.</p></div>`,
+        }));
+        return hasIssue(cv.issues, 'missing standard section');
+      })
+      .map(([lang]) => lang);
+    check(`every localized mode's CV headings are recognized (${Object.keys(localized).length} languages)`,
+      failing.length === 0);
+  }
+
+  // The entity form of the same heading must read the same as the literal one:
+  // `Exp&eacute;rience` reached the matcher as `exp eacute rience`.
+  const entityHeading = auditAts(buildCleanHtml({
+    education: '<div class="section"><div class="section-title">&Eacute;ducation</div><p>B.S. Computer Science, State University, 2018. Graduated with honors.</p></div>',
+  }));
+  check('an HTML-entity heading is decoded before matching', !hasIssue(entityHeading.issues, 'missing standard section'));
+
+  // A term must start a word: `Personal Information` contains `formation` and
+  // `Informacion personal` contains `formacion`, and neither is an Education
+  // heading. A CV with no Education section must still be told so.
+  for (const heading of ['Personal Information', 'Informations personnelles', 'Información personal']) {
+    const noEdu = auditAts(buildCleanHtml({ education: `<div class="section"><div class="section-title">${heading}</div><p>Based in San Francisco.</p></div>` }));
+    check(`"${heading}" does not pass for Education`, hasIssue(noEdu.issues, 'missing standard section'));
+  }
+  // ...while the compounds that put the key word last are still recognized.
+  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring']) {
+    const compound = auditAts(buildCleanHtml({ experience: `<div class="section"><div class="section-title">${heading}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>` }));
+    check(`compound heading "${heading}" is recognized for Experience`, !hasIssue(compound.issues, 'missing standard section'));
+  }
+
+  // Decoding must not double-unescape: `&amp;lt;` is the literal text "&lt;",
+  // not "<". A single pass gives that for free, whatever order the table is in.
+  check('decodeEntities does not double-unescape', decodeEntities('&amp;lt;') === '&lt;');
+  check('decodeEntities reads decimal and hex forms', decodeEntities('&#233;&#xe9;&#XE9;') === 'ééé');
+  // An unknown or malformed entity is text, and must survive untouched.
+  check('decodeEntities leaves an unknown entity alone', decodeEntities('&nosuch; &#xZZ; R&D') === '&nosuch; &#xZZ; R&D');
 
   // Table-based layout ⇒ critical, reading order warning.
   const tableCv = auditAts(
@@ -670,6 +946,15 @@ function runSelfTest() {
   const nbspUnsafe = auditAts(buildCleanHtml({ font: "' Comic Sans MS', sans-serif" }));
   check('a flagged font keeps its real name', hasIssue(nbspUnsafe.issues, '\\u00a0comic sans ms'));
 
+  // Above the BMP a bare `\uXXXXX` does not say where it ends: U+E0001 printed
+  // as `1` reads as `` then "1", which is a different character.
+  const astralFont = auditAts(buildCleanHtml({ font: "'\u{E0001}Arial', sans-serif" }));
+  check('a format character above the BMP is escaped in braces', hasIssue(astralFont.issues, '\\u{e0001}arial'));
+
+  // …and the BMP spelling stays the familiar four-digit one, so the common
+  // case is not churned for the sake of the rare one.
+  check('a BMP character keeps the bare four-digit escape', hasIssue(nbspFont.issues, '\\u00a0arial'));
+
   // The Korean and Traditional Chinese stacks the template declares
   // unconditionally must not penalise a CV that never renders them.
   const cjkFallbacks = auditAts(buildCleanHtml({
@@ -691,6 +976,160 @@ function runSelfTest() {
   // Single-quoted inline styles must not bypass hidden-text detection.
   const hiddenSingleQuote = auditAts(buildCleanHtml({ extraBody: "<span style='color:#ffffff'>python rust golang aws terraform</span>" }));
   check('single-quoted white text is flagged', hasIssue(hiddenSingleQuote.issues, 'hidden text'));
+
+  // A white VALUE on a property that merely ends in `color` is visible text
+  // (a badge, a bordered callout), not white-on-white stuffing. `color:#fff`
+  // is a substring of `background-color:#fff`, so the signal is anchored on
+  // the start of a declaration. This mirrors atsLint in cv-templates.mjs.
+  for (const [label, style] of [
+    ['white background-color with dark text', 'background-color:#fff; color:#111'],
+    ['named white background-color with dark text', 'background-color:white;color:#222'],
+    ['white border-color with dark text', 'border-color:#fff; color:#000'],
+  ]) {
+    const visible = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`${label} is not flagged as hidden text`, !hasIssue(visible.issues, 'hidden text'));
+  }
+  // The anchor must not disable the detector: genuine white text still flags,
+  // including after another declaration and when no declaration precedes it.
+  for (const [label, style] of [
+    ['bare color:#fff', 'color:#fff'],
+    ['color:#ffffff after another declaration', 'font-weight:bold;color:#ffffff'],
+    ['color:white after a space', 'font-weight:bold; color:white'],
+    ['color:rgb(255,255,255)', 'color:rgb(255, 255, 255)'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} is still flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
+  // -webkit-text-fill-color paints the glyph fill and overrides `color`, so a
+  // white fill is white text. A CSS comment is whitespace to a browser, so a
+  // declaration behind one is still a declaration.
+  for (const [label, style] of [
+    ['-webkit-text-fill-color:#fff over dark color', '-webkit-text-fill-color:#fff;color:#111'],
+    ['-webkit-text-fill-color:white after another declaration', 'font-weight:bold;-webkit-text-fill-color:white;color:#111'],
+    ['color:#fff after a comment following a declaration', 'background:red;/**/color:#fff'],
+    ['color:#fff after a leading comment', '/**/color:#fff'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} is flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
+  // A comment inside a non-color declaration must not create a false positive.
+  const commentedBackground = auditAts(buildCleanHtml({ extraBody: '<span style="background-color:/**/#fff;color:#111">Senior engineer</span>' }));
+  check('white background-color with an inner comment is not flagged as hidden text', !hasIssue(commentedBackground.issues, 'hidden text'));
+  // A comment splits a CSS identifier in two, so `col/**/or` is not `color`. A
+  // browser drops that declaration, so it must not read as white text.
+  const splitIdent = auditAts(buildCleanHtml({ extraBody: '<span style="col/**/or:#fff">Senior engineer</span>' }));
+  check('a comment splitting the property name is not flagged as hidden text', !hasIssue(splitIdent.issues, 'hidden text'));
+  // Comment markers inside a quoted value belong to the string, not a comment.
+  // Reading them as one would delete the real declaration that sits between.
+  const quotedMarkers = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'/*';color:#fff;font-family:'*/'">python kubernetes aws rust golang</span>` }));
+  check('comment markers inside quoted values do not hide a real white declaration', hasIssue(quotedMarkers.issues, 'hidden text'));
+  // A quoted value can hold text that looks like a declaration. Here the real
+  // color is #111; the white one is inside a string, and the browser ignores it.
+  const quotedFake = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:';color/**/:#fff';color:#111">Senior engineer</span>` }));
+  check('a white declaration inside a quoted value is not flagged as hidden text', !hasIssue(quotedFake.issues, 'hidden text'));
+  // The comment pattern must not match across a `*/`. If it could, a run of
+  // comments splits exponentially many ways, and a style that fails to match
+  // at its end backtracks through every one of them.
+  const manyComments = `<span style=";${'/**/'.repeat(30)}colour:#fff">Senior engineer</span>`;
+  const auditStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: manyComments }));
+  check('a long run of comments does not backtrack catastrophically', performance.now() - auditStarted < 1000);
+  // Looking back for `url` on every open paren must not flatten the text built
+  // so far each time: that made a long run of `(` quadratic, seconds at 400k.
+  const manyParens = `<span style="${'('.repeat(400000)}">Senior engineer</span>`;
+  const parensStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: manyParens }));
+  check('a long run of open parentheses stays linear', performance.now() - parensStarted < 1000);
+  // An unterminated comment must not be rescanned from every semicolon. That
+  // made a long `;/*;/*` run quadratic: seconds at 100k characters.
+  const unterminated = `<span style="${';/*'.repeat(33334)}colour:#fff">Senior engineer</span>`;
+  const unterminatedStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: unterminated }));
+  check('a long run of unterminated comments stays linear', performance.now() - unterminatedStarted < 1000);
+  // A semicolon inside a string or a comment does not end a declaration, so
+  // white text written inside either one is never applied by the browser.
+  for (const [label, style] of [
+    ['inside a quoted value', `--x:'/*;color:#fff';color:#111`],
+    ['inside a comment', 'color:#111;/*;color:#fff*/'],
+  ]) {
+    const inert = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(inert.issues, 'hidden text'));
+  }
+  // An unterminated string runs to the end, and an escaped `;` is part of a
+  // value. Either way the white declaration after it is never applied.
+  for (const [label, style] of [
+    ['after an unterminated string', `font-family:'abc;color:#fff`],
+    ['after an escaped semicolon', 'a:b\\;color:#fff'],
+  ]) {
+    const swallowed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(swallowed.issues, 'hidden text'));
+  }
+  // A raw newline ends a quoted string early: CSS reads it as a bad string, so
+  // the declaration after it is real. Every CSS newline form counts.
+  for (const [label, nl] of [['LF', '\n'], ['CR', '\r'], ['FF', '\f'], ['CRLF', '\r\n']]) {
+    const broken = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x${nl};color:white">python kubernetes aws rust golang</span>` }));
+    check(`white text after a string broken by ${label} is flagged as hidden text`, hasIssue(broken.issues, 'hidden text'));
+  }
+  // An escaped newline inside a string is a continuation, and CRLF is one
+  // newline, so the backslash takes both characters. Taking only the CR left
+  // the LF to end the string early, and the quote after it opened a new one
+  // that swallowed the real declaration behind it.
+  for (const [label, nl] of [['LF', '\n'], ['CR', '\r'], ['FF', '\f'], ['CRLF', '\r\n']]) {
+    const continued = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x\\${nl}';color:white">python kubernetes aws rust golang</span>` }));
+    check(`white text after a string continued over an escaped ${label} is flagged as hidden text`, hasIssue(continued.issues, 'hidden text'));
+  }
+  // A style holding a double quote has to sit in a single-quoted attribute,
+  // or the attribute ends at that quote and the CSS under test is never seen.
+  const attrQuote = style => (style.includes('"') ? "'" : '"');
+  // The body of an unquoted url() is raw text up to the first `)`, so a quote
+  // inside it does not open a string. A browser treats that as a bad url and
+  // resumes after the `)`; reading the quote as a string swallowed everything
+  // after it, white declaration included.
+  for (const [label, style] of [
+    ['a double quote in an unquoted url()', 'background:url(foo";x);color:white'],
+    ['a single quote in an unquoted url()', "background:url(foo';x);color:white"],
+    ['an uppercase URL() with a quote in it', 'background:URL(foo";x);color:white'],
+    ['an escaped paren inside an unquoted url()', 'background:url(a\\);b";x);color:white'],
+    ['a stray open paren in an unquoted url()', 'background:url(a(b";x);color:white'],
+  ]) {
+    const badUrl = auditAts(buildCleanHtml({ extraBody: `<span style=${attrQuote(style)}${style}${attrQuote(style)}>python kubernetes aws rust golang</span>` }));
+    check(`white text after ${label} is flagged as hidden text`, hasIssue(badUrl.issues, 'hidden text'));
+  }
+  // The same raw-text rule must not release a `;` that really is inside the
+  // url, nor treat a quoted url() argument or a lookalike name as unquoted.
+  for (const [label, style] of [
+    ['inside an unquoted url()', 'background:url(data:x;color:white)'],
+    ['inside a quoted url()', `background:url("data:x;color:white")`],
+    ['inside an unterminated unquoted url()', 'background:url(foo;color:white'],
+    ['after a function whose name only ends in url', 'background:myurl(foo";x);color:white'],
+  ]) {
+    const inertUrl = auditAts(buildCleanHtml({ extraBody: `<span style=${attrQuote(style)}${style}${attrQuote(style)}>Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(inertUrl.issues, 'hidden text'));
+  }
+  // url() with whitespace and a quote after the paren is a normal function
+  // with a string argument, not an unquoted url. The `)` inside the string is
+  // what tells the two readings apart: read as raw text, the url would end at
+  // that `)` and the rest of the string would open a new one.
+  const spacedQuoted = auditAts(buildCleanHtml({ extraBody: `<span style="background:url(  'a)b'  );color:white">python kubernetes aws rust golang</span>` }));
+  check('white text after a quoted url() argument with leading space is flagged as hidden text', hasIssue(spacedQuoted.issues, 'hidden text'));
+  // A `;` inside parentheses or brackets belongs to that value, not to the
+  // declaration list, so it cannot start a new declaration.
+  for (const [label, style] of [
+    ['inside url()', 'background:url(data:x;color:white)'],
+    ['inside a function', 'background:foo(abc;color:white)'],
+    ['inside brackets', 'grid-template-areas:[a;color:white]'],
+  ]) {
+    const nested = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(nested.issues, 'hidden text'));
+  }
+  // A comment may sit on either side of the colon, and the declaration applies.
+  for (const [label, style] of [
+    ['a comment before the colon', 'color/**/:#fff'],
+    ['a comment after the colon', 'color:/**/#fff'],
+  ]) {
+    const commented = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`white text with ${label} is still flagged as hidden text`, hasIssue(commented.issues, 'hidden text'));
+  }
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));

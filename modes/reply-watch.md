@@ -71,3 +71,9 @@ Apply recommended status updates to data/applications.md? (y/N):
 ```
 
 Type `y` or `yes` to apply the changes. The script will rewrite the matched rows in `data/applications.md` and rebuild the derived SQLite index.
+
+For a role-less rejection that safely matches several eligible rows at one
+company, the digest keeps one email entry but lists one proposed `Rejected`
+update per row. This requires a reliable email `received_at`/`date`; without
+one, or when any tracked role is named, matching remains `ambiguous-match`.
+The same `y/N` prompt still guards the entire batch—nothing is auto-applied.

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { fenceArgs } from "./cli-fencing.mjs";
+import { prepareCliLaunch } from "./cli-launch.mjs";
 
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs) so
 // tests/lib/spawn-cli.test.mjs can import it directly under Node. Import it with the
@@ -57,7 +58,11 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
     );
   }
   const { args: fencedArgs } = fenceArgs({ ...fencing, args });
-  const child = spawn(binPath, fencedArgs, options);
+  // On Windows an npm-installed CLI is a script shim spawn() cannot run without a
+  // shell, so launch the .js/.exe it wraps (a no-op elsewhere; cli-launch.mjs).
+  // After fencing, so the fencers see the CLI's own argv rather than node's.
+  const launch = prepareCliLaunch(binPath, fencedArgs);
+  const child = spawn(launch.command, launch.args, options);
   child.stdin?.end();
   return child;
 }

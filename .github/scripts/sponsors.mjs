@@ -21,6 +21,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../../lib/is-main-module.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const README = join(ROOT, 'README.md');
@@ -31,7 +32,7 @@ const LOGO_HEIGHT = 48;
 // English copy of the section. Translations carry their own heading, intro and
 // note; only the rows are shared.
 export const HEADING = '## Sponsors';
-export const INTRO = "career-ops is free for candidates, forever. The companies below fund the maintainer's time and keep it that way.";
+export const INTRO = 'career-ops is free for candidates, forever. These companies sponsor the project:';
 export const NOTE = 'Sponsorship buys clearly labeled visibility, never influence: no amount of money changes the roadmap or places anything in the product. Sponsors never appear in evaluations, rankings or recommendations.';
 
 // Where the section sits in README.md: after the community section, before the
@@ -182,6 +183,6 @@ function main() {
   console.log(renderSection(loadSponsors()));
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   try { main(); } catch (e) { console.error(e.message); process.exit(1); }
 }

@@ -38,20 +38,21 @@
  *
  * Env:
  *   CAREER_OPS_REPLY_CANDIDATES  override the output JSON path (used by tests;
- *                                 defaults to data/reply-candidates.json next to
- *                                 this script, matching reply-watch.mjs's default)
+ *                                 defaults to data/reply-candidates.json under
+ *                                 the data root, matching reply-watch.mjs's default)
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
-  || path.join(__dirname, 'data', 'reply-candidates.json');
+const DATA_ROOT = getCareerOpsRoot();
+export const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
+  || path.join(DATA_ROOT, 'data', 'reply-candidates.json');
 
 
 /**
@@ -147,7 +148,7 @@ export function appendCandidate(candidate, candidatesPath = CANDIDATES_PATH) {
 // callback when the input isn't a real TTY — confirmed directly against this
 // Node build, not assumed. A single 'line' listener with manual state
 // tracking works identically on both TTY and piped/non-interactive stdin.
-function collectInteractive() {
+export function collectInteractive() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   let stage = 'subject';
   let subject = '';

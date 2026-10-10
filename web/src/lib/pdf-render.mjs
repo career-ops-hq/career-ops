@@ -172,7 +172,7 @@ export function cleanupPdfScratch(scratchDir, prefix) {
 /**
  * @typedef {Object} RenderedResult
  * @property {"rendered"} kind
- * @property {string[]} warnings - Non-fatal issues to surface to the user (e.g. a tracker row that was not marked).
+ * @property {string[]} warnings - Non-fatal issues to surface to the user (e.g. a renderer advisory, or a tracker row that was not marked).
  */
 /** @typedef {RenderFailedResult | RenderedResult} RenderResult */
 
@@ -196,6 +196,18 @@ export async function renderAndMarkPdf({ spawnFn, execPath, root, pdfPaths, form
 
   if (!render.ok) {
     return { kind: "render-failed", error: render.stderr || "PDF rendering failed." };
+  }
+
+  // A render that exits 0 can still have written advisories to stderr, and two
+  // of them matter to whoever asked for this PDF: the page-budget overflow
+  // (warning-only unless --strict-pages) and the CV fact check's advisory
+  // phrases. Reading render.stderr only in the failure branch above collected
+  // both and dropped them, so on the web path an unsupported claim the fact
+  // gate flagged reached nobody. One warning per line, blank lines skipped, so
+  // a clean render still reports none.
+  for (const line of render.stderr.split("\n")) {
+    const text = line.trim();
+    if (text) warnings.push(text);
   }
 
   // The PDF is the real deliverable and it already rendered successfully — a

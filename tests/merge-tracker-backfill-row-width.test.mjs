@@ -11,7 +11,7 @@
 // Driven as a CLI integration test through the CAREER_OPS_TRACKER /
 // CAREER_OPS_ADDITIONS overrides, matching tests/merge-tracker.test.mjs:
 // importing merge-tracker.mjs runs the CLI at import time.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, isolatedBatchStatePath } from './helpers.mjs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
@@ -40,7 +40,7 @@ function runBackfill({ rows, reports }) {
     const out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--backfill-urls'], {
       cwd: dir,
       encoding: 'utf-8',
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none') },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none'), CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(join(dir, 'none')) },
     });
     return { tracker: readFileSync(tracker, 'utf-8'), output: out, dir };
   } finally {
@@ -166,7 +166,7 @@ const urlCell = (text, n) => {
     ].join('\n'));
     const out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--backfill-urls'], {
       cwd: dir, encoding: 'utf-8',
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none') },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: join(dir, 'none'), CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(join(dir, 'none')) },
     });
     const text = readFileSync(tracker, 'utf-8');
     const parsed = readable(text, 7);
@@ -175,7 +175,9 @@ const urlCell = (text, n) => {
     } else {
       fail(`already-set short row left unreadable: ${rowFor(text, 7).trim()}`);
     }
-    if (parsed && urlCell(text, 7) === 'https://example.com/j/7') {
+    // The cell is rendered as a markdown link since #3516; what must survive
+    // the padding is the HREF, which is the dedup key.
+    if (parsed && urlCell(text, 7) === '[example.com](https://example.com/j/7)') {
       pass('padding an already-set row preserves its URL');
     } else {
       fail(`already-set row lost its URL: ${JSON.stringify(urlCell(text, 7))}`);
