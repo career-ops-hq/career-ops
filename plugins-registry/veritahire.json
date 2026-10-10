@@ -1,0 +1,19 @@
+{
+  "id": "veritahire",
+  "name": "career-ops-plugin-veritahire",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Find every employer near you hiring for your role right now: live US jobs from 19,000+ employers' own career sites, by keyword and commute radius, re-checked so you never chase a ghost job.",
+  "repo": "https://github.com/veritahire/career-ops-plugin-veritahire",
+  "sha": "1c12246b8971f05a0a9766af5b380ddea5ef3b95",
+  "hooks": [
+    "search",
+    "ingest"
+  ],
+  "requiredEnv": [],
+  "allowedHosts": [
+    "veritahire.com"
+  ],
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/4965",
+  "addedAt": "2026-10-10"
+}
