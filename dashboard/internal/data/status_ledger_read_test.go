@@ -77,8 +77,8 @@ func TestParseStatusLedgerLatestDate(t *testing.T) {
 	if got.Reached[8] != 1 {
 		t.Errorf("Reached[8] = %d, want 1 (lenient funnel rule unchanged)", got.Reached[8])
 	}
-	if got.Reached[1] != 3 {
-		t.Errorf("Reached[1] = %d, want 3", got.Reached[1])
+	if got.Reached[1] != 4 {
+		t.Errorf("Reached[1] = %d, want 4 (Interview follows Assessment)", got.Reached[1])
 	}
 	if parseFunnelHistory(ledger)[1] != got.Reached[1] {
 		t.Error("parseFunnelHistory must be the Reached view of parseStatusLedger")
@@ -121,7 +121,7 @@ func TestReadStatusLedgerFollowsTrackerOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ledger.LatestDate[1] != "2026-09-01" || ledger.Reached[1] != 4 {
+	if ledger.LatestDate[1] != "2026-09-01" || ledger.Reached[1] != 5 {
 		t.Fatalf("ledger beside overridden tracker = %+v", ledger)
 	}
 }
