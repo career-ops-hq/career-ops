@@ -145,6 +145,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/ru/*` | Russian language modes |
 | `modes/tr/*` | Turkish language modes |
 | `modes/ua/*` | Ukrainian language modes |
+| `modes/vi/*` | Vietnamese language modes |
 | `modes/zh/*` | Chinese language modes |
 | `modes/heuristics/*` | Shared candidate-facing application heuristics |
 | `CLAUDE.md` | Agent instructions (Claude Code) |
