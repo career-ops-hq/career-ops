@@ -17,11 +17,11 @@
 // "it does not exist". So this suite uses two independent recognizers, asserts
 // the known-affected files are all still seen, and FAILS on a tab-shaped block
 // it cannot classify rather than passing over it.
-import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join, relative } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { listTree } from '../lib/walk-tree.mjs';
 import { pass, fail, NODE, ROOT, isolatedBatchStatePath } from './helpers.mjs';
 
 console.log('\nLocalized tracker-addition templates (#3702)');
@@ -103,20 +103,10 @@ function fences(text) {
 
 // ---- Discovery -------------------------------------------------------------
 
+// listTree skips a checkout placed under modes/ — another tree's content, not
+// this repository's to hold to this contract (#3681/#3762) — on every descent.
 function walk(dir) {
-  const out = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) {
-      // A checkout placed under modes/ is another tree's content, and its mode
-      // files are not this repository's to hold to this contract (#3681/#3762).
-      if (isNestedCheckout(full)) continue;
-      out.push(...walk(full));
-    } else if (e.name.endsWith('.md')) {
-      out.push(full);
-    }
-  }
-  return out;
+  return listTree(dir, { match: /\.md$/ });
 }
 
 const dictating = [];   // files that show a concrete row

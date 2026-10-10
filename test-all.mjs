@@ -52,16 +52,17 @@ import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFil
 // EPERM) with linear backoff when given maxRetries, so default it everywhere
 // rather than at ~95 individual call sites. An explicit option still wins.
 const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
-import { join, dirname, basename, delimiter } from 'path';
+import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
+import { collectMjsFiles } from './lib/mjs-files.mjs';
+import { walkTree, listTree } from './lib/walk-tree.mjs';
 import { childFailureExcerpt } from './lib/failure-excerpt.mjs';
-import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
+import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -112,28 +113,18 @@ const readTextLF = (path) => normalizeEol(readFile(path));
 const TESTS_DIR = join(ROOT, 'tests');
 
 function discoverTests(dir) {
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A worktree under tests/ is a second checkout of this repository, and
-      // this walker does not merely read what it finds — it hands the files to
-      // the runner. Without this guard a stale checkout's suites execute
-      // against the current tree and the run prints "safe to push/merge" for
-      // them (#3762). `git worktree add` accepts any path, so nothing but this
-      // check keeps one out. Tested on children only: TESTS_DIR is never itself
-      // a checkout root, and the root exemption in `collectMjsFiles` exists for
-      // a case that cannot arise here.
-      if (isNestedCheckout(full)) continue;
-      out.push(...discoverTests(full));
-    } else if (entry.name.endsWith('.test.mjs')
-      // This is a Playwright suite, run by the dedicated CV visual job. It is
-      // named .test.mjs for the repository convention, but node --test cannot
-      // execute Playwright's test registration API.
-      && full !== join(TESTS_DIR, 'cv-visual', 'cv-visual.test.mjs')) out.push(full);
-  }
-  return out;
+  // walkTree sorts every level by name, so the run order is identical on every
+  // run and OS — the property #1440 asked for. It also refuses to descend into
+  // a nested checkout, which matters more here than anywhere else in this file:
+  // this walk does not READ what it finds, it hands it to the runner. A
+  // worktree parked under tests/ executed a stale checkout's suites against the
+  // current tree, and test-all.mjs printed "🟢 All tests passed — safe to
+  // push/merge" for them (#3762).
+  return listTree(dir, { match: /\.test\.mjs$/ })
+    // This is a Playwright suite, run by the dedicated CV visual job. It is
+    // named .test.mjs for the repository convention, but node --test cannot
+    // execute Playwright's test registration API.
+    .filter((f) => f !== join(TESTS_DIR, 'cv-visual', 'cv-visual.test.mjs'));
 }
 
 // Strip comment lines before grepping a discovered suite's source for a
@@ -534,49 +525,40 @@ try {
   // installed the web app's deps — copying it dominated this section (#2387).
   const EXCLUDE_AT_ANY_DEPTH = new Set(['node_modules', '.git']);
 
+  // Mirror `src` into `dest`. The nested-checkout skip this used to spell out
+  // is walkTree's now, applied on every descent and never to the walk root —
+  // which is exactly the asymmetry this needed (#3499). A linked worktree
+  // carries a `.git` FILE, so EXCLUDE_AT_ANY_DEPTH never fires on one, and
+  // copying it doubles this section's cost while seeding the throwaway tree
+  // with a stale duplicate of every script; but ROOT's own `.git` is
+  // legitimately a file when the suite is run FROM a worktree, where testing it
+  // would copy nothing at all.
   const copyDirSync = (src, dest, exclude = []) => {
-    const name = src.split(/[\\/]/).pop();
-    if (EXCLUDE_AT_ANY_DEPTH.has(name)) return;
-    // Everything else is a top-level workspace dir (data/, reports/, …) and is
-    // matched by basename ONLY at the repo root, so nested fixture subdirs such
-    // as test-fixtures/upgrade/state-*/data and .../reports still get copied.
-    if (dirname(src) === ROOT && exclude.includes(name)) return;
-    const stat = statSync(src);
-    // A leftover from an earlier interrupted run is not repository source, and
-    // copying one nests it inside this run's scratch — which is how #3940's
-    // `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to exist. This
-    // run's OWN scratch is already excluded by name just above; what this adds
-    // is the stale one the startup sweep could not remove, and — since that
-    // sweep deliberately leaves a live run's directory alone — the one a
-    // concurrent run is writing into right now.
-    //
-    // Directories only, which is why this reads `stat` rather than sitting with
-    // the name-based exclusions above: the prefix can name a FILE too, and
-    // dropping a source file from the copy would make a script check pass by
-    // not running it.
-    //
-    // At any depth, deliberately, where sweepScratchDirs() looks only at the top
-    // level. The two are asymmetric because their costs are: skipping a
-    // directory that turns out to be someone's oddly-named fixture loses a copy
-    // nothing reads, while DELETING it loses their work. Cheap to over-skip,
-    // expensive to over-delete.
-    if (stat.isDirectory() && isScratchDir(name)) return;
-    if (stat.isDirectory()) {
-      // A linked worktree is a whole second checkout of this repo and carries a
-      // `.git` FILE, not a directory, so the name-based exclusion above never
-      // fires on one (#3499). Copying it doubles this section's copy cost and
-      // seeds the throwaway tree with a stale duplicate of every script.
-      // Skipped below the root ONLY: `src === ROOT` on the first call, and
-      // ROOT's own `.git` is legitimately a file when the suite is being run
-      // FROM a worktree — testing it there would copy nothing at all.
-      if (src !== ROOT && isNestedCheckout(src)) return;
-      mkdirSync(dest, { recursive: true });
-      for (const entry of readdirSync(src)) {
-        copyDirSync(join(src, entry), join(dest, entry), exclude);
-      }
-    } else {
-      copyFileSync(src, dest);
-    }
+    mkdirSync(dest, { recursive: true });
+    // A leftover scratch copy from an interrupted run is skipped by walkTree at
+    // any depth, so this copy can no longer nest it inside its own — which is
+    // how #3940's `.tmp-script-test-OP9Bzd/.tmp-script-test-tBjFgy/…` came to
+    // exist. That includes the directory a concurrent run is writing into right
+    // now, which the startup sweep deliberately leaves alone. Directories only:
+    // a source FILE carrying the prefix is still copied, so no script check can
+    // pass by not running.
+    const mirror = (abs) => join(dest, relative(src, abs));
+    walkTree(src, {
+      // statSync semantics: a symlinked directory is descended and copied, as
+      // this has always done.
+      links: 'follow',
+      skip: (entry, _dir, depth) =>
+        EXCLUDE_AT_ANY_DEPTH.has(entry.name)
+        // Everything else is a top-level workspace dir (data/, reports/, …) and
+        // is matched by basename ONLY at the repo root (depth 0), so nested
+        // fixture subdirs such as test-fixtures/upgrade/state-*/data and
+        // .../reports still get copied.
+        || (depth === 0 && exclude.includes(entry.name)),
+      // Directories are materialised even when empty, which the old recursion
+      // did by mkdir-ing before it read.
+      onDir: (abs) => mkdirSync(mirror(abs), { recursive: true }),
+      onFile: (abs) => copyFileSync(abs, mirror(abs)),
+    });
   };
 
   const excludeDirs = [
@@ -3077,14 +3059,9 @@ if (shared.includes('_profile.md')) {
   // alone can't catch.
   const writingRefRe = /_shared\.md[^.\n]{0,40}(Voice DNA|Writing Style|Professional Writing)|(Voice DNA|Writing Style|Professional Writing)[^.\n]{0,40}_shared\.md/;
   const stale = [];
-  // `{ recursive: true }` descends on Node's side, so there is no per-directory
-  // decision to guard — a checkout under modes/ is filtered out of the RESULT
-  // instead. Verified: a worktree there made this check fail naming that other
-  // tree's file as a stale reference of ours (#3762).
-  const modeDocs = readdirSync(join(ROOT, 'modes'), { recursive: true })
-    .filter(p => typeof p === 'string' && p.endsWith('.md'))
-    .filter(p => !isUnderNestedCheckout(join(ROOT, 'modes'), p));
-  for (const f of modeDocs) {
+  const MODES_DIR = join(ROOT, 'modes');
+  for (const abs of listTree(MODES_DIR, { match: /\.md$/ })) {
+    const f = relative(MODES_DIR, abs);
     const src = readFile(`modes/${f.split(/[\\/]/).join('/')}`);
     if (writingRefRe.test(src)) stale.push(f);
   }
@@ -15931,20 +15908,16 @@ try {
   }
 
   // Recursively collect every .mjs under plugins/ (the deny-list must not be flat-only).
-  const allPluginMjs = [];
-  const walkMjs = (d) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const fp = join(d, e.name);
-      // NO nested-checkout guard here, deliberately — see the EXEMPT map in
-      // tests/mjs-files.test.mjs. This is a security scan over third-party
-      // code, so skipping a directory that carries a `.git` marker would let a
-      // plugin drop a `.git` file beside its sources and opt straight out of
-      // the deny-list. Same reasoning as plugins/_lock.mjs (#3762).
-      if (e.isDirectory()) walkMjs(fp);
-      else if (e.name.endsWith('.mjs')) allPluginMjs.push(fp);
-    }
-  };
-  walkMjs(join(ROOT, 'plugins'));
+  const allPluginMjs = listTree(join(ROOT, 'plugins'), {
+    match: /\.mjs$/,
+    // Deliberately walks INTO a nested checkout. This is a deny-list scan over
+    // third-party code, and a plugin directory that could opt out of it by
+    // planting a `.git` marker is a place to hide a child_process import.
+    allowNestedCheckouts: true,
+    // Links are followed for the same reason: `import()` resolves them, so a
+    // symlinked .mjs is code the plugin can load. See plugin-audit.mjs.
+    links: 'follow',
+  });
   const dangerRe = /(?:from|import\(|require\(\s*)['"](?:node:)?(?:child_process|playwright)['"]/;
   const offenders = allPluginMjs.filter(f => dangerRe.test(readFileSync(f, 'utf8'))).map(f => f.replace(ROOT + '/', ''));
   if (offenders.length === 0) pass('no bundled plugin imports child_process/playwright, recursively (no-spawn / HITL guard)');
@@ -16854,12 +16827,12 @@ try {
       let webUnits = [];
       try {
         const webLibRoot = join(ROOT, 'web', 'tests', 'lib');
-        webUnits = readdirSync(webLibRoot, { recursive: true })
-          .filter((f) => f.endsWith('.test.mjs'))
-          // A checkout under web/tests/lib holds another tree's suites; the
-          // parity walk below skips those the same way (#3762), so the gate
-          // must not run them.
-          .filter((f) => !isUnderNestedCheckout(webLibRoot, f))
+        // listTree rather than a recursive readdir: a checkout under
+        // web/tests/lib holds another tree's suites, and the parity walk below
+        // skips those the same way (#3762), so the gate must not run them. A
+        // missing root still throws, into the catch below.
+        webUnits = listTree(webLibRoot, { match: /\.test\.mjs$/ })
+          .map((abs) => relative(webLibRoot, abs))
           .sort()
           .map((f) => join('web', 'tests', 'lib', f));
       } catch (err) {
@@ -16904,16 +16877,10 @@ try {
       // sides, so this cannot rot into a stale list of its own.
       try {
         const webTestsRoot = join(ROOT, 'web', 'tests');
-        const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-          const p = join(dir, e.name);
-          // A checkout under web/tests/ holds another tree's suites; reporting
-          // them as ungated web suites is a false failure (#3762).
-          if (e.isDirectory()) return isNestedCheckout(p) ? [] : walk(p);
-          return e.isFile() && e.name.endsWith('.test.mjs') ? [p] : [];
-        });
         if (existsSync(webTestsRoot)) {
           const gated = new Set(webUnits.map((f) => join(ROOT, f)));
-          const ungated = walk(webTestsRoot).filter((f) => !gated.has(f)).sort();
+          const ungated = listTree(webTestsRoot, { match: /\.test\.mjs$/ })
+            .filter((f) => !gated.has(f)).sort();
           if (ungated.length === 0) {
             pass(`every web suite is gated by the required check (${webUnits.length} discovered)`);
           } else {

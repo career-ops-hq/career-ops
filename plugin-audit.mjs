@@ -11,9 +11,10 @@
 // or lazily-malicious author and gives the reviewer a checklist. A determined
 // attacker can obfuscate; the real controls are review + pinning + capability.
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { listTree } from './lib/walk-tree.mjs';
 
 // Built from fragments so the literal API/firewall tokens never appear verbatim
 // (keeps this file clean against any future repo-wide grep).
@@ -74,18 +75,20 @@ function collectSpecifiers(src) {
 }
 
 function listMjs(dir) {
-  const out = [];
-  const walk = (d, rel) => {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      if (e.name === 'node_modules' || e.name === '.git') continue;
-      const abs = path.join(d, e.name);
-      const r = rel ? `${rel}/${e.name}` : e.name;
-      if (e.isDirectory()) walk(abs, r);
-      else if (/\.(mjs|js|cjs)$/.test(e.name)) out.push({ abs, rel: r });
-    }
-  };
-  walk(dir, '');
-  return out;
+  return listTree(dir, {
+    match: /\.(mjs|js|cjs)$/,
+    skip: (e) => e.name === 'node_modules' || e.name === '.git',
+    // Deliberately walks INTO a nested checkout. This is a deny-list scan over
+    // third-party plugin code: a directory that could opt out of the audit by
+    // planting a `.git` marker is a place to hide a forbidden import.
+    allowNestedCheckouts: true,
+    // ...and follows links, for the same reason. `import()` resolves a symlink
+    // of either kind, so whatever a link reaches is code the plugin can load:
+    // a symlinked file (which the hand-rolled walk this replaced did read) and
+    // a symlinked directory (which it did not — a hole this closes). walkTree
+    // stops at a link onto its own ancestor, so a loop cannot hang the audit.
+    links: 'follow',
+  }).map((abs) => ({ abs, rel: path.relative(dir, abs).split(path.sep).join('/') }));
 }
 
 /**

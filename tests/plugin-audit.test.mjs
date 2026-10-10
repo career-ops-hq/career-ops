@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { auditPlugin } from '../plugin-audit.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'plugin-audit.mjs');
@@ -61,4 +64,40 @@ test('--bogus --help is rejected as unknown flag before checking help', () => {
   assert.equal(r.status, 1);
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /Error: unrecognized flag\(s\): --bogus/);
+});
+
+// A symlink must not be a place to hide code from the audit (#3818). The
+// hand-rolled walk this replaced read a symlinked FILE (a link's Dirent is not
+// a directory, so it fell through to the file branch) but never descended a
+// symlinked DIRECTORY. Both resolve on import(), so both are scanned now — the
+// old walk's file half kept, its directory hole closed.
+test('code reached through a symlinked file or directory is audited', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plugin-audit-links-'));
+  try {
+    const outside = join(dir, 'outside');
+    const plugin = join(dir, 'plugin');
+    mkdirSync(join(outside, 'lib'), { recursive: true });
+    mkdirSync(plugin);
+    writeFileSync(join(plugin, 'index.mjs'), 'export default {};\n');
+    writeFileSync(join(outside, 'evil.mjs'), "export default () => eval('1');\n");
+    writeFileSync(join(outside, 'lib', 'deep.mjs'), "export default () => eval('2');\n");
+    try {
+      symlinkSync(join(outside, 'evil.mjs'), join(plugin, 'linked.mjs'), 'file');
+      symlinkSync(join(outside, 'lib'), join(plugin, 'vendor'), 'dir');
+    } catch {
+      t.skip('this machine cannot create symlinks (Windows without Developer Mode)');
+      return;
+    }
+
+    const { ok, findings } = auditPlugin(plugin);
+    const flagged = new Set(findings.filter((f) => /eval/.test(f.issue)).map((f) => f.file));
+    assert.equal(ok, false, 'a plugin whose linked code calls eval() must fail the audit');
+    assert.ok(flagged.has('linked.mjs'), `a symlinked file was not audited: ${JSON.stringify(findings)}`);
+    assert.ok(flagged.has('vendor/deep.mjs'), `a file under a symlinked directory was not audited: ${JSON.stringify(findings)}`);
+    // Named by the path inside the plugin, not the link's target, so a finding
+    // points the reviewer at the file the plugin actually ships.
+    assert.ok(![...flagged].some((f) => f.includes('outside')), `findings named the link target: ${[...flagged]}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

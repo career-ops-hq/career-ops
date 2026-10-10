@@ -33,7 +33,7 @@ function linkForTest(t, target, path, directory = false) {
 function installCLI(root) {
   copyFileSync(join(ROOT, 'i18n-drift.mjs'), join(root, 'i18n-drift.mjs'));
   mkdirSync(join(root, 'lib'), { recursive: true });
-  for (const name of ['is-main-module.mjs', 'mjs-files.mjs', 'scratch-dirs.mjs']) {
+  for (const name of ['is-main-module.mjs', 'mjs-files.mjs', 'scratch-dirs.mjs', 'walk-tree.mjs']) {
     const source = join(ROOT, 'lib', name);
     if (existsSync(source)) copyFileSync(source, join(root, 'lib', name));
   }
