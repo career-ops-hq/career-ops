@@ -507,7 +507,7 @@ export async function POST(req: Request) {
         // spawned worker — whose sandbox is the repo — can write its slots file.
         jevDir = fs.mkdtempSync(path.join(careerOpsRoot(), ".jev-env-"));
         jevEnvelopePath = path.join(jevDir, "envelope.json");
-        const decide = runCoreScript("jev-decide", ["--jd", jdPath, "--out", jevEnvelopePath], JEV_DECIDE_TIMEOUT_MS);
+        const decide = runCoreScript("jev-decide", ["--jd", jdPath, "--out", jevEnvelopePath, "--timeout-ms", String(JEV_DECIDE_TIMEOUT_MS)], JEV_DECIDE_TIMEOUT_MS);
         if (decide.exitCode !== 0) {
           jevEnvelopePath = null;
         } else {

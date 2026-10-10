@@ -6,6 +6,8 @@ Usage:
   python3 scripts/jev_gatekeeper.py <tailored_resume.md> <job.txt> linter
   python3 scripts/jev_gatekeeper.py [<resume> <job>] --questions <json|@file> \
       [--state <text|@file>] [--model <id>] [--raw]
+  python3 scripts/jev_gatekeeper.py --micro --questions <json|@file> \
+      --state <text|@file> [--model <id>] [--raw]
 
 The first two are the legacy fixed rubrics: `triage` returns an
 `ats_pass_probability` (1-5) plus a `has_core_skills` boolean, and `linter`
@@ -18,6 +20,12 @@ ANY question object (choice / score / noul) supplied by the caller and returns
 each answer WITH its raw probability vector and confidence score, so a caller
 can build a completeness-escalation policy on top without a second model call.
 It is the same single POST: every question runs in parallel server-side.
+
+`--micro` is the isolated single-key escalation channel: exactly ONE question,
+and stdout carries just `{"decision": <option-key>, "confidence": <float>}`.
+jev-decide.mjs uses it to re-decide a critical categorical (machine enumeration)
+decision that came back below its confidence floor, string-in -> string-out,
+without regenerating any free text.
 
 Providers (first available key wins):
   OPENROUTER_API_KEY  -> https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13)
@@ -395,6 +403,52 @@ def run_decide(state_text, questions, raw=False, model_override=None):
     print(json.dumps(out))
 
 
+def run_micro(state_text, questions, raw=False, model_override=None):
+    """Single-key string evaluation for a confidence escalation: re-decide ONE
+    isolated critical-categorical question and print ONLY its option-key string,
+    confidence, provider and model. The caller (jev-decide.mjs) binds the
+    escalation to exactly the data key with the low confidence; the bounded
+    option set comes along in the payload so the model answers in closed form.
+
+    Same provider fallback loop and failure contract as run_decide; the output
+    shape is the envelope's `--micro` channel: {"decision", "confidence"}.
+    """
+    if len(state_text) > MAX_STATE_CHARS:
+        state_text = state_text[:MAX_STATE_CHARS] + "\n[truncated]"
+
+    def payload_for(provider):
+        return {
+            "model": model_override or provider["model"],
+            "state": state_text,
+            "questions": questions,
+        }
+
+    body, provider, elapsed_ms, total_ms = post_to_providers(payload_for)
+
+    answers = body.get("answers")
+    if not isinstance(answers, dict):
+        fail(f"Malformed response: missing answers ({json.dumps(body)[:300]})")
+
+    name, question = next(iter(questions.items()))
+    answer = answers.get(name)
+    if not isinstance(answer, dict):
+        fail(f"Malformed response: missing answer for {name!r} ({json.dumps(body)[:300]})")
+
+    decided = decode_decision(name, question, answer)
+    out = {
+        "decision": decided.get("value"),
+        "confidence": decided.get("confidence"),
+        "provider": provider["name"],
+        "model": body.get("model", model_override or provider["model"]),
+        "usage": body.get("usage") or {},
+    }
+    if raw:
+        out["raw_answer"] = answer
+
+    log_provider(provider, body, elapsed_ms, total_ms)
+    print(json.dumps(out))
+
+
 def parse_cli(argv):
     """Split argv into positionals and flags; no argparse so the 3-arg legacy
     form keeps working verbatim (tests assert exactly three positional args)."""
@@ -409,8 +463,8 @@ def parse_cli(argv):
             flags[a[2:]] = argv[i + 1]
             i += 2
             continue
-        if a == "--raw":
-            flags["raw"] = True
+        if a in ("--raw", "--micro"):
+            flags[a[2:]] = True
             i += 1
             continue
         positional.append(a)
@@ -439,6 +493,13 @@ def main(argv):
     positional, flags = parse_cli(argv)
     raw = bool(flags.get("raw"))
     model_override = flags.get("model")
+
+    if flags.get("micro"):
+        questions = load_questions(flags)
+        if flags.get("state") is None:
+            fail("decide mode needs --state <text|@file>, or <resume> <job> positional paths")
+        run_micro(load_spec(flags["state"]), questions, raw=raw, model_override=model_override)
+        return
 
     if flags.get("questions") is not None:
         questions = load_questions(flags)

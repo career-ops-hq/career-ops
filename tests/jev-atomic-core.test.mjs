@@ -35,11 +35,16 @@ import {
   QUESTION_TYPES,
   SCORE_MAX_LEVELS,
   SCORE_MIN_LEVELS,
+  applyMicroDecisions,
   buildRequest,
   confidenceEscalations,
+  criticalCategoricalDecisions,
   decodeAnswer,
   decodeAnswers,
+  escalateCriticalCategories,
   escalationWhen,
+  isCriticalCategorical,
+  isolatedMicroPayload,
   lowConfidenceQuestions,
   machineSummaryFields,
   machineSummaryFrom,
@@ -220,6 +225,150 @@ test('lowConfidenceQuestions only flags numeric confidences below the floor', ()
   assert.deepEqual(lowConfidenceQuestions(decoded, { threshold: 0.5 }), ['a']);
   assert.deepEqual(lowConfidenceQuestions(decoded), lowConfidenceQuestions(decoded, { threshold: DEFAULT_CONFIDENCE_FLOOR }));
   assert.deepEqual(lowConfidenceQuestions(null), []);
+});
+
+// --- confidence escalation (micro-LLM string evaluation, Item 2) ---
+
+/** A critical categorical is a `choice` mapping to a machineField, or an
+ * explicit `critical: true` — the Machine Summary enums. Anything else (plain
+ * choices, scores, booleans) is not worth a micro re-decision. */
+const ESQ = {
+  machine: { type: 'choice', instructions: 'pick a', criteria: { a: 'A', b: 'B' }, machineField: 'archetype' },
+  flagged: { type: 'choice', instructions: 'pick c', criteria: { c: 'C', d: 'D' }, critical: true },
+  plain: { type: 'choice', instructions: 'pick x', criteria: { x: 'X', y: 'Y' } },
+  score: { type: 'score', instructions: 'rate', criteria: [1, 2, 3], machineField: 'risk_level' },
+};
+
+test('isCriticalCategorical flags exactly the Machine Summary choice enums', () => {
+  assert.equal(isCriticalCategorical(ESQ.machine), true);
+  assert.equal(isCriticalCategorical(ESQ.flagged), true);
+  assert.equal(isCriticalCategorical(ESQ.plain), false);
+  assert.equal(isCriticalCategorical(ESQ.score), false);
+  assert.equal(isCriticalCategorical({ type: 'noul' }), false);
+  assert.equal(isCriticalCategorical(null), false);
+  assert.equal(isCriticalCategorical('nope'), false);
+});
+
+test('criticalCategoricalDecisions targets only low-confidence machine enums with a value', () => {
+  const decoded = {
+    machine: { value: 'a', confidence: 0.4, error: null },
+    flagged: { value: 'c', confidence: 0.9, error: null },
+    plain: { value: 'x', confidence: 0.2, error: null },
+    score: { value: 2, confidence: 0.3, error: null },
+  };
+  const names = criticalCategoricalDecisions(decoded, ESQ).map((t) => t.name);
+  assert.deepEqual(names, ['machine'], 'only the below-floor machine enum is a target');
+
+  assert.deepEqual(
+    criticalCategoricalDecisions(decoded, ESQ, { threshold: 0.95 }).map((t) => t.name).sort(),
+    ['flagged', 'machine'],
+    'the explicit critical:true enum escalates too; scores/plain choices never do',
+  );
+
+  assert.deepEqual(
+    criticalCategoricalDecisions(
+      { machine: { value: 'a', confidence: null, error: null } },
+      ESQ,
+    ),
+    [],
+    'a null confidence is not a target (there is nothing to escalate against)',
+  );
+  assert.deepEqual(
+    criticalCategoricalDecisions(
+      { machine: { value: null, confidence: 0.2, error: null } },
+      ESQ,
+    ),
+    [],
+    'an unanswered machine enum is not a target',
+  );
+  assert.deepEqual(criticalCategoricalDecisions(null, ESQ), []);
+  assert.deepEqual(criticalCategoricalDecisions({}, null), []);
+});
+
+test('isolatedMicroPayload carries ONLY the one key, its option set and the original', () => {
+  const p = isolatedMicroPayload('machine', ESQ.machine, { value: 'a', confidence: 0.4 });
+  assert.equal(p.kind, 'micro-escalation');
+  assert.equal(p.question.name, 'machine');
+  assert.equal(p.question.type, 'choice');
+  assert.deepEqual(p.question.criteria, { a: 'A', b: 'B' });
+  assert.equal(p.question.machineField, 'archetype');
+  assert.deepEqual(p.originally, { value: 'a', confidence: 0.4 });
+  assert.ok(!('questions' in p), 'the rest of the run never leaks into the payload');
+
+  assert.throws(() => isolatedMicroPayload('', ESQ.machine), /name/);
+  assert.throws(() => isolatedMicroPayload('plain', ESQ.plain), /not a critical categorical/);
+  assert.throws(() => isolatedMicroPayload('score', ESQ.score), /not a critical categorical/);
+});
+
+test('applyMicroDecisions merges micro strings and reports every failure advisory', () => {
+  const decoded = {
+    machine: { value: 'a', confidence: 0.4, machineField: 'archetype', error: null },
+    flagged: { value: 'c', confidence: 0.3, machineField: null, error: null },
+  };
+  const merged = applyMicroDecisions(ESQ, decoded, [
+    { name: 'machine', value: 'b', confidence: 0.98 },
+    { name: 'flagged', value: 'd' },
+    { name: 'plain', value: 'x' },
+    { name: 'machine', value: '' },
+    { name: 'machine', value: 'zzz' },
+  ]);
+  assert.deepEqual(merged.escalated, ['machine', 'flagged'], 'both critical enums re-decided');
+  assert.equal(merged.decoded.machine.value, 'b');
+  assert.equal(merged.decoded.machine.escalated, true);
+  assert.equal(merged.decoded.machine.escalationConfidence, 0.98);
+  assert.equal(merged.decoded.flagged.value, 'd');
+  assert.equal(merged.decoded.flagged.escalationConfidence, 1, 'default resolved confidence when the micro result carries none');
+  assert.ok(!('plain' in merged.decoded), 'non-target names never enter the decoded set');
+  assert.equal(Object.keys(merged.failures).length, 3, 'non-target, empty and unmatched options are each a failure');
+  assert.match(merged.failures[0].reason, /not a critical-categorical target/);
+  assert.match(merged.failures[1].reason, /returned no option string/);
+  assert.match(merged.failures[2].reason, /not among the question's own criteria keys/);
+});
+
+test('escalateCriticalCategories intercepts the run and re-decides only the flagged keys', () => {
+  const decoded = {
+    machine: { value: 'a', confidence: 0.4, machineField: 'archetype', error: null },
+    plain: { value: 'x', confidence: 0.2, error: null },
+  };
+  const calls = [];
+  const runMicro = (payload) => {
+    calls.push(payload.question.name);
+    return { name: payload.question.name, value: 'b', confidence: 0.97 };
+  };
+  const out = escalateCriticalCategories({ questions: ESQ, decoded, runMicro });
+  assert.deepEqual(calls, ['machine'], 'only the one below-floor critical key is evaluated');
+  assert.deepEqual(out.escalated, ['machine']);
+  assert.equal(out.decoded.machine.value, 'b');
+  assert.ok(out.unchanged.includes('plain'));
+  assert.equal(out.targets, 1);
+  assert.equal(out.failures.length, 0);
+  assert.equal(machineSummaryFrom(out.decoded).archetype, 'b', 'the envelope machine map reflects the escalation');
+
+  const again = escalateCriticalCategories({ questions: ESQ, decoded: out.decoded, runMicro });
+  assert.equal(again.targets, 0, 're-decided keys are above the floor and not re-escalated');
+  assert.deepEqual(again.escalated, []);
+});
+
+test('escalateCriticalCategories is advisory: a failing micro evaluator keeps the original', () => {
+  const decoded = { flagged: { value: 'c', confidence: 0.3, error: null } };
+  const out = escalateCriticalCategories({
+    questions: ESQ,
+    decoded,
+    runMicro: () => { throw new Error('provider down'); },
+  });
+  assert.equal(out.decoded.flagged.value, 'c', 'original low-confidence decision survives');
+  assert.equal(out.failures.length, 1);
+  assert.match(out.failures[0].reason, /provider down/);
+});
+
+test('escalateCriticalCategories requires an evaluator only when targets exist', () => {
+  const clean = { machine: { value: 'a', confidence: 0.9, error: null } };
+  const dirty = { machine: { value: 'a', confidence: 0.4, error: null } };
+  assert.throws(() => escalateCriticalCategories({ questions: ESQ, decoded: dirty }), /runMicro/);
+  const out = escalateCriticalCategories({ questions: ESQ, decoded: clean });
+  assert.equal(out.targets, 0);
+  assert.deepEqual(out.escalated, []);
+  assert.deepEqual(out.failures, []);
 });
 
 // --- decoding ---

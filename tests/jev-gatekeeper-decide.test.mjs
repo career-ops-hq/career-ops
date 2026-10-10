@@ -162,3 +162,48 @@ test('decode_decision surfaces confidence, probabilities and raw answers', (t) =
     assert.equal(c.confidence, 0.4);
   });
 });
+
+// --- the --micro single-key escalation channel ---
+
+test('--micro reaches the provider layer with the same missing-key gate', (t) => {
+  N(t, () => {
+    const r = run([GATEKEEPER, '--micro', '--questions', VALID_Q, '--state', 'RESUME: a']);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /Missing OPENROUTER_API_KEY/, '--micro is routed to a run, not to usage');
+  });
+});
+
+test('--micro without state explains what it needs', (t) => {
+  N(t, () => {
+    const r = run([GATEKEEPER, '--micro', '--questions', VALID_Q]);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /decide mode needs --state/);
+  });
+});
+
+test('run_micro prints exactly the envelope --micro channel via a patched provider', (t) => {
+  N(t, () => {
+    const script = [
+      'import importlib.util, io, json, sys',
+      'spec = importlib.util.spec_from_file_location("jg", "scripts/jev_gatekeeper.py")',
+      'jg = importlib.util.module_from_spec(spec); spec.loader.exec_module(jg)',
+      'def fake(payload_for):',
+      '    return ({"answers": {"q": {"choice": "b", "confidence": 0.93}}}, {"name": "fake", "model": "fake-model"}, 12, 12)',
+      'jg.post_to_providers = fake',
+      'buf = io.StringIO(); old = sys.stdout; sys.stdout = buf',
+      'try:',
+      '    jg.main(["--micro", "--questions", \'{"q":{"type":"choice","instructions":"pick","criteria":{"a":"A","b":"B"}}}\', "--state", "RESUME: a"])',
+      'finally:',
+      '    sys.stdout = old',
+      'print(buf.getvalue().strip())',
+    ].join('\n');
+    const r = run(['-c', script]);
+    assert.equal(r.code, 0, r.out);
+    const out = JSON.parse(r.out);
+    assert.equal(out.decision, 'b');
+    assert.equal(out.confidence, 0.93);
+    assert.equal(out.provider, 'fake');
+    assert.equal(out.model, 'fake-model');
+    assert.ok(!('answers' in out), 'raw answers never leak into the channel by default');
+  });
+});

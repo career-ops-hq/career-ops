@@ -37,7 +37,7 @@ console.log('\nweb → core argv contract');
 // every --flag literal anywhere in route.ts is checked against EVERY route.ts
 // entry — the guard cannot tell call sites within one file apart. Rather than
 // repeating the same union comment on all six, the union lives here once.
-const ROUTE_UNION_FLAGS = ['--mode', '--max-chars', '--jd', '--out', '--report', '--slots', '--envelope'];
+const ROUTE_UNION_FLAGS = ['--mode', '--max-chars', '--jd', '--out', '--report', '--slots', '--envelope', '--timeout-ms'];
 const CALL_SITES = [
   {
     source: 'web/src/app/api/followups/route.ts',
@@ -133,7 +133,10 @@ const CALL_SITES = [
   },
   {
     // Envelope B System One screen: the pre-spawn gatekeeper decide for a local
-    // JD (runCoreScript("jev-decide", ["--jd", jdPath, "--out", envelopePath])).
+    // JD (runCoreScript("jev-decide", ["--jd", jdPath, "--out", envelopePath,
+    // "--timeout-ms", String(JEV_DECIDE_TIMEOUT_MS)])). The explicit timeout
+    // (90s) is the route halving the inner spawn budget so a slow frame fails
+    // open at the decide layer before the route's own broader budget kills it.
     //
     // probe 'none', like the jev-post-linter entry above: a 'run' probe would
     // answer 21 Block A/D/G questions through the PROVIDER (spending the user's
@@ -144,10 +147,10 @@ const CALL_SITES = [
     // (tests/jev-decide.test.mjs), which drives main() with these exact flags.
     source: 'web/src/app/api/run/route.ts',
     script: 'jev-decide.mjs',
-    args: ['--jd', '<jd-path>', '--out', '<envelope.json>'],
+    args: ['--jd', '<jd-path>', '--out', '<envelope.json>', '--timeout-ms', '<ms>'],
     probe: 'none',
-    // --jd/--out are in `args`; the rest of the route.ts union rides in
-    // runtimeFlags (see ROUTE_UNION_FLAGS above).
+    // --jd/--out/--timeout-ms are in `args`; the rest of the route.ts union
+    // rides in runtimeFlags (see ROUTE_UNION_FLAGS above).
     runtimeFlags: ROUTE_UNION_FLAGS,
   },
   {
