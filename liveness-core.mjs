@@ -4,14 +4,18 @@
 // expired posting fell through to `no_apply_control` → uncertain → never filtered.
 // Normalize once at the entry point and spell every pattern below in the
 // normalized alphabet: ASCII quotes, no diacritics, collapsed whitespace.
-function normalizeForMatch(text = '') {
+//
+// keepLineBreaks collapses a run of whitespace that held a line break to "\n"
+// instead of " ". Every run becomes one character either way, so the two forms
+// of a text line up index for index.
+function normalizeForMatch(text = '', { keepLineBreaks = false } = {}) {
   if (typeof text !== 'string') return '';
   return text
     .replace(/[‘’ʼ′´`]/g, "'")
     .replace(/[“”″]/g, '"')
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, (run) => (keepLineBreaks && run.includes('\n') ? '\n' : ' '));
 }
 
 const HARD_EXPIRED_PATTERNS = [
@@ -81,7 +85,7 @@ const LISTING_PAGE_PATTERNS = [
 // expired?", and — before the closed-loop guard on the closed pattern above —
 // "This role is closed-loop control of the platform" prose. liveness-browser
 // hands classifyLiveness the whole page innerText plus same-origin iframe
-// text (liveness-browser.mjs:434), so those elements are in scope.
+// text (`readPage` in liveness-browser.mjs), so those elements are in scope.
 //
 // Moved down here so the same phrase in a dead-page scenario (nodesk.co's
 // bare "JOB EXPIRED" banner, no apply control, per #4175) still fires. The
@@ -164,19 +168,28 @@ function firstMatch(patterns, text = '') {
 // live posting as skipped_expired and every later scan skipped it.
 //
 // So an occurrence counts only when no time or condition word opens its clause:
-// none within ten words of the end of the match, with no clause punctuation in
-// between. The bound is what keeps real banners: normalizeForMatch() has joined
-// the page's lines, so a sign-in line ending "if you already have a profile"
-// runs straight into the banner under it, and that banner must still read as
-// one. Every occurrence is checked, since a page can carry the closing line in
-// its copy and a real banner above it.
+// none within ten words of the end of the match, with no clause punctuation and
+// no line break in between. The line break matters because a banner sits on a
+// line of its own, under page chrome that often ends without punctuation ("Sign
+// in if you already have a profile"). With the lines joined, that "if" opened
+// the banner's clause and the closed posting read as open. Every occurrence is
+// checked, since a page can carry the closing line in its copy and a real
+// banner above it.
+//
+// Words are separated by a single space because normalizeForMatch() leaves one
+// character per run of whitespace; "\n" is not a space, so the clause stops there.
 const TIME_OR_CONDITION_CLAUSE =
-  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as)\s+(?:[^\s.,;:!?…|•·]+\s+){0,9}[^\s.,;:!?…|•·]+$/i;
+  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/i;
 
-function firstStatedMatch(patterns, text = '') {
+// `lines` keeps its line breaks (normalizeForMatch with keepLineBreaks). The
+// patterns match on the joined text, as every other check here does, so a
+// banner broken over two lines still matches; only the clause test sees the
+// breaks.
+function firstStatedMatch(patterns, lines = '') {
+  const text = lines.replace(/\n/g, ' ');
   return patterns.find((pattern) => {
     for (const match of text.matchAll(new RegExp(pattern, `${pattern.flags}g`))) {
-      if (!TIME_OR_CONDITION_CLAUSE.test(text.slice(0, match.index + match[0].length))) return true;
+      if (!TIME_OR_CONDITION_CLAUSE.test(lines.slice(0, match.index + match[0].length))) return true;
     }
     return false;
   });
@@ -187,8 +200,9 @@ function hasApplyControl(controls = []) {
 }
 
 export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [] } = {}) {
-  const bodyText = normalizeForMatch(rawBodyText);
-  const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map(normalizeForMatch);
+  const bodyLines = normalizeForMatch(rawBodyText, { keepLineBreaks: true });
+  const bodyText = bodyLines.replace(/\n/g, ' ');
+  const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map((control) => normalizeForMatch(control));
 
   if (status === 404 || status === 410) {
     return { result: 'expired', code: 'http_gone', reason: `HTTP ${status}` };
@@ -226,7 +240,7 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
     return { result: 'expired', code: 'expired_url', reason: `redirect to ${finalUrl}` };
   }
 
-  const expiredBody = firstStatedMatch(HARD_EXPIRED_PATTERNS, bodyText);
+  const expiredBody = firstStatedMatch(HARD_EXPIRED_PATTERNS, bodyLines);
   if (expiredBody) {
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
   }
@@ -268,4 +282,85 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   }
 
   return { result: 'uncertain', code: 'no_apply_control', reason: 'content present but no visible apply control found' };
+}
+
+// A scan-history status that already carries a death certificate for its row:
+// `skipped_expired` (what scan.mjs writes) and the legacy `added (expired)`
+// suffix older histories carry. Deliberately NOT the other `skipped_*` states —
+// skipped_dup / skipped_title / skipped_no_apply_control say "this row is not a
+// fresh match", which is a different claim from "this posting is gone".
+const EXPIRED_HISTORY_STATUS = /expired/i;
+
+/**
+ * Plan the `skipped_expired` scan-history rows for a batch of liveness verdicts.
+ *
+ * The pure half of recording a liveness sweep (#3891). Kept here rather than in
+ * the CLI so its four invariants are testable without a browser:
+ *
+ *   - **Only `expired`.** `uncertain` is a timeout or a bot wall, never a death
+ *     certificate; recording it would bury a live posting behind a network
+ *     hiccup, a strictly worse failure than the one this closes.
+ *   - **Not an unrendered page.** The browser rung reads a page under 300
+ *     characters with no closure notice and no apply control as
+ *     `insufficient_content`, which is mostly a page that had not rendered yet.
+ *     AGENTS.md calls a loading placeholder unconfirmed, not closed, and
+ *     batch-evaluate-gemini.mjs skips the same code. A dead posting that reads
+ *     this way gets no row, as it did before this recorder existed.
+ *   - **Only URLs the history already knows.** A liveness sweep is not a
+ *     discovery channel: a URL scan-history never saw has no row to retire, and
+ *     inventing one would put a posting nothing surfaced into the dedup set.
+ *   - **Once each.** A URL already carrying an expired row is left alone, so
+ *     re-running the sweep is idempotent.
+ *
+ * A planned row is emitted under the history's OWN spelling of the URL, not the
+ * caller's: the web feed keys its dedup on the verbatim `url` cell, so a row
+ * written under a different spelling would not line up with the `added` row it
+ * exists to retire. Matching is done through the injected `normalizeUrl` (the
+ * scanner's `normalizeUrlForDedup`) rather than an import, so this module stays
+ * free of scan.mjs — liveness-browser.mjs imports it.
+ *
+ * @param {string} scanHistoryText - Raw data/scan-history.tsv contents ('' when absent).
+ * @param {{url: string, result: string, code?: string}[]} verdicts - One entry per checked URL.
+ * @param {(url: string) => string} [normalizeUrl] - Dedup-key normalizer.
+ * @returns {{url: string, source: string, title: string, company: string, location: string, fingerprint: string}[]}
+ *   Offer-shaped rows for `appendToScanHistory(rows, date, 'skipped_expired')`.
+ */
+export function planExpiredHistoryRows(scanHistoryText = '', verdicts = [], normalizeUrl = (url) => url) {
+  const knownByKey = new Map(); // dedup key -> Map(verbatim url -> row fields)
+  const recorded = new Set();   // verbatim urls that already carry an expired row
+
+  // slice(1) skips the header, the same convention collectSeenUrls uses.
+  for (const line of String(scanHistoryText ?? '').split('\n').slice(1)) {
+    const [url, , portal = '', title = '', company = '', status = '', location = ''] = line.split('\t');
+    if (!url) continue;
+    const key = normalizeUrl(url);
+    if (!knownByKey.has(key)) knownByKey.set(key, new Map());
+    // fingerprint is pinned empty rather than carried: it is discovery-time JD
+    // content, it still lives on the row being retired, and a stale copy on a
+    // dead row is only noise for the cross-listing check.
+    knownByKey.get(key).set(url, { url, source: portal, title, company, location, fingerprint: '' });
+    // The file is append-only and chronological, so the last row for a URL says
+    // what it is now. A later `added` row is a relisting: it un-retires the URL
+    // so a second death can be recorded, instead of the first retirement
+    // silencing every one after it. An empty status cell reads as `added`, the
+    // convention collectSeenUrls already uses.
+    if (EXPIRED_HISTORY_STATUS.test(status)) recorded.add(url);
+    else if ((status || 'added') === 'added') recorded.delete(url);
+  }
+
+  const rows = [];
+  const claimed = new Set();
+  for (const verdict of verdicts ?? []) {
+    if (verdict?.result !== 'expired' || verdict.code === 'insufficient_content') continue;
+    const candidate = typeof verdict.url === 'string' ? verdict.url.trim() : '';
+    if (!candidate) continue;
+    const known = knownByKey.get(normalizeUrl(candidate));
+    if (!known) continue;
+    for (const [url, fields] of known) {
+      if (recorded.has(url) || claimed.has(url)) continue;
+      claimed.add(url);
+      rows.push(fields);
+    }
+  }
+  return rows;
 }

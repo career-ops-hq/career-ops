@@ -89,13 +89,13 @@ func TestLocalizedTrackerHeaders(t *testing.T) {
 					}
 					want := append([]string(nil), layout.cells...)
 					want[cols["status"]] = "Interview"
-					want[cols["notes"]] = "keep this note scheduled"
+					want[cols["notes"]] = "keep this note; scheduled"
 					gotLines := strings.Split(string(updated), "\n")
 					if gotLines[0] != header || !reflect.DeepEqual(splitTrackerRow(gotLines[2]), want) {
 						t.Fatalf("writer changed cells outside Status/Notes:\n%s", updated)
 					}
 					changed := ParseApplications(dir)
-					if len(changed) != 1 || changed[0].Status != "Interview" || changed[0].Notes != "keep this note scheduled" {
+					if len(changed) != 1 || changed[0].Status != "Interview" || changed[0].Notes != "keep this note; scheduled" {
 						t.Fatalf("writer output did not roundtrip: %+v", changed)
 					}
 				})

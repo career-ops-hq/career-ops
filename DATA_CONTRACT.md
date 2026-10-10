@@ -37,7 +37,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/career-profile.yml` | Your source-backed Master Career Profile; written only after explicit review of imported CV facts |
 | `data/applications.db` | Derived query index over `applications.md` (SQLite, rebuilt by `node tracker.mjs sync` — safe to delete) |
 | `data/pipeline.md` | Your URL inbox |
-| `data/scan-history.tsv` | Your scan history: one tab-separated row per posting the scanners have seen. Columns are append-only — a new column goes at the end and existing ones never move — so older rows may have fewer columns, and a missing cell reads as empty. The column order is declared in `lib/scan-history-columns.mjs`; what each column holds is in the Scan History table of `modes/scan.md`. |
+| `data/scan-history.tsv` | Your scan history: one tab-separated row per posting the scanners have seen. Columns are append-only — a new column goes at the end and existing ones never move — so older rows may have fewer columns, and a missing cell reads as empty. The column order is declared in `lib/scan-history-columns.mjs`; what each column holds is in the Scan History table of `modes/scan.md`. A cell that would run as a spreadsheet formula is stored with one extra leading `'`; `parseScanHistoryLine` removes it. |
 | `data/scan-runs.tsv` | Your per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
 | `data/scheduled-jobs.json` | Your local scheduled-scan definitions, queue, and bounded run history (written by the web UI and `web/scripts/scheduled-jobs-runner.mjs`) |
 | `data/portal-health.tsv` | Consecutive reachability status for scanned portals (appended by `scan.mjs`; statuses: `reachable`, `empty`, `slug_gone`, `network`, `auth`, `server`, `unknown`, `unverified_zero` — the last four joined the vocabulary later, so older files carry only the first four; `unverified_zero` means a provider returned no jobs without any observed successful HTTP response and counts toward the failure streak) |
@@ -45,7 +45,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/follow-ups.md` | Your follow-up history |
 | `data/active-interviews.md` | Your active interview processes, incl. inline `[process-friction]` notes (read by `process-quality.mjs`) |
 | `data/agent-inbox.md` | Your append-only request queue drained at session start (written by `agent-inbox.mjs`) |
-| `data/reply-candidates.json` | Your normalized employer-reply candidates (subject, body, sender, signal — read by `reply-watch.mjs`) |
+| `data/reply-candidates.json` | Your normalized employer-reply candidates (subject, body, sender, signal, plus optional `received_at`/`date` — read by `reply-watch.mjs`; a reliable received date is required for date-guarded company-wide rejection suggestions) |
 | `data/reply-proposals/*.json` | Local integration status proposals with quoted evidence; read-only until explicit review in `reply-watch.mjs`. Acceptance writes status plus a `[reply-proposal:<digest>]` Notes receipt atomically through `set-status.mjs`; keep receipts to prevent replay. See `docs/REPLY_PROPOSALS.md` for the v1 draft contract; the format may change until a real producer writes to the directory. |
 | `data/pdf-index.tsv` | PDF↔report linkage manifest (written by `generate-pdf.mjs`, read by `find.mjs`, the dashboard, and the `email` mode) |
 | `data/offers/*` | Your received offers/contracts, promise notes, prep reports, and reply drafts (PII — gitignored, written by the `offer-prep` mode) |

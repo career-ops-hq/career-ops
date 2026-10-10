@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { claudeUsageTokens } from "@/lib/claude-usage.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ function compute(): Usage {
       const u = d.message?.usage;
       const ts = d.timestamp ? Date.parse(d.timestamp) : NaN;
       if (!u || Number.isNaN(ts) || ts < w7) continue;
-      const tok = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      const tok = claudeUsageTokens(u);
       t7 += tok;
       m7 += 1;
       if (ts >= w5) {
