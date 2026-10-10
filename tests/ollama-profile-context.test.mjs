@@ -94,6 +94,8 @@ const server = createServer((req, res) => {
     if (req.url === '/api/chat') {
       res.end(JSON.stringify({
         message: { role: 'assistant', content: responseText },
+        done: true,
+        done_reason: 'stop',
         prompt_eval_count: 10,
         eval_count: 5,
       }));
