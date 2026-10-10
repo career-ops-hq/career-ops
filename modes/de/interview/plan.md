@@ -150,3 +150,5 @@ Speichere den Plan unter `interview-prep/{company-slug}-{role-slug}.md`, falls k
 - **Plane immer Erholungszeit ein.** Ein ausgeruhter Kandidat schneidet besser ab als einer, der bis zuletzt paukt.
 - **Erfinde niemals falsche Unternehmensinfos.** Wenn du keine Recherche hast, sag es — erfinde keine Kulturaussagen oder technischen Details über das Unternehmen.
 - **Erfinde niemals Aussagen für den Kandidaten.** Der Anchor Sentence und die Talking Points vor dem Interview in der Kurzreferenz (Step 4) müssen auf dem beruhen, was der Kandidat tatsächlich hat — `cv.md`, `article-digest.md` oder die Story Bank. Formuliere keine Aussagen, die von Erfahrung oder Kennzahlen abhängen, die der Kandidat nicht hat. Wenn eine Aussage in `interview-prep/retracted-claims.md` steht, nimm sie niemals auf.
+
+
