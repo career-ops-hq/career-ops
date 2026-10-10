@@ -248,7 +248,7 @@ Levels are additive — they are executed in order, and results are merged and d
    - The filter applies to every source, including an employer's own ATS board; there is no per-source exemption. An old posting date is not evidence that a role is closed — evergreen roles may remain open for months. To include them, increase the window or disable `max_posting_age_days` (affects all sources), then verify the specific posting before applying. CLI date-window flags still apply independently.
 
 7. **Deduplicate** against 3 sources:
-   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_location` or `skipped_age`, which never count as seen; see Scan History)
+   - `scan-history.tsv` → exact URL already seen (except rows marked `skipped_location`, `skipped_age` or `skipped_no_apply_control`, which never count as seen; see Scan History)
    - `applications.md` → normalized company + role already evaluated
    - `pipeline.md` → exact URL already in pending or processed list
 
@@ -330,7 +330,9 @@ Cells are stored with reversible spreadsheet-formula escaping: tabs and line bre
 
 `skipped_location` and `skipped_age` record what `location_filter` and `max_posting_age_days` removed. They exist so a mis-aimed threshold is visible in the data rather than only as a summary counter, and they carry no dedup weight: both name a setting the user edits, so a row written under the old threshold must not suppress the same posting once it moves. Each posting gets one such row per status, not one per scan.
 
-The scanner writes the other statuses in that list itself: `skipped_no_apply_control` for a page that loaded without an Apply control, `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.
+`skipped_no_apply_control` marks a page that loaded without a recognised Apply control. It also carries no dedup weight: the check not finding a button is not proof the posting is closed, so the next scan verifies the URL again. Unlike the other two observational statuses, which are decided from data already in hand, this re-check costs a browser load every time the URL comes up. It is recorded once per posting.
+
+The scanner writes the other statuses in that list itself: `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.
 
 ```tsv
 url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key
