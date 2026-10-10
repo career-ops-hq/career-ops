@@ -24,7 +24,7 @@ import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { parsePdfIndex } from './find.mjs';
+import { parsePdfIndex, livePdfIndex } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber } from './tracker-parse.mjs';
 // Corporate-form vocabulary, shared with invite-match.mjs rather than copied,
 // for the same reason normalizeCompany lives in tracker-utils: a second private
@@ -505,12 +505,18 @@ function isUnscoreable(s) {
  * data/pdf-index.tsv is gitignored and only exists after generate-pdf.mjs has
  * written at least one PDF. Missing manifest = nothing to sync.
  *
+ * Only rows whose PDF is still on disk come back (#4777): every reader of this
+ * map turns a hit into a ✅, and a row outlives the file it names.
+ *
  * @returns {Map<string,string>} Normalized report# → PDF path.
  */
 function loadPdfIndex() {
-  return existsSync(PDF_INDEX_FILE)
-    ? parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8'))
-    : new Map();
+  if (!existsSync(PDF_INDEX_FILE)) return new Map();
+  return livePdfIndex(
+    parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8')),
+    DATA_ROOT,
+    (message) => console.warn(`⚠️  ${message}`),
+  );
 }
 
 /**

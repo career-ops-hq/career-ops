@@ -1343,7 +1343,7 @@ and `4` means the tracker lock timed out and the operation should be retried.
 
 ## sync-pdf-flags.mjs
 
-Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`.
+Reconciles the tracker's PDF column (`applications.md`) against `data/pdf-index.tsv`. When a PDF is generated after initial evaluation, this script upgrades matching tracker rows to `✅`. A manifest row counts only while the CV PDF it names is still on disk inside the workspace, so a deleted PDF no longer sets the flag, and a cover-letter row never does. `merge-tracker.mjs` applies the same rule when it syncs flags.
 
 `--prune` mode reconciles `data/pdf-index.tsv` against disk by dropping manifest rows whose PDF files no longer exist or fall outside the `output/` directory. Prune is dry-run by default — pass `--write` to commit changes. `--dry-run` takes precedence over `--write`.
 

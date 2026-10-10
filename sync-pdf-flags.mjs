@@ -25,6 +25,7 @@ import { join, resolve, dirname } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, resolveWorkspaceRoot, pathIsInsideCanonical } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { parsePdfIndex, livePdfIndex } from './find.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(DATA_ROOT);
@@ -187,14 +188,11 @@ if (existsSync(PDF_MANIFEST)) {
     }
     process.exit(2);
   }
-  for (const line of content.split('\n')) {
-    if (!line.trim() || line.startsWith('#')) continue;
-    const parts = line.split('\t');
-    const reportVal = parts[0]?.trim();
-    if (reportVal && /^\d+$/.test(reportVal)) {
-      const norm = parseInt(reportVal, 10);
-      if (norm > 0) manifestReports.add(norm);
-    }
+  // A manifest row only means PDF-ready when a CV PDF it names is still on
+  // disk. merge-tracker.mjs asks the same question the same way (#4777).
+  const live = livePdfIndex(parsePdfIndex(content), DATA_ROOT, (message) => console.warn(`⚠️  ${message}`));
+  for (const report of live.keys()) {
+    if (/^\d+$/.test(report) && Number(report) > 0) manifestReports.add(Number(report));
   }
 }
 

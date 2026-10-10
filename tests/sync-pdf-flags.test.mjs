@@ -1,9 +1,9 @@
 // tests/sync-pdf-flags.test.mjs — regression coverage for syncing tracker PDF flags.
 
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, warn, NODE, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { execFileSync, spawnSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 
 console.log('\nsync-pdf-flags.mjs — PDF flag reconciliation');
@@ -36,11 +36,20 @@ function runSync() {
     const pdfIndex = join(work, 'pdf-index.tsv');
     writeFileSync(tracker, TRACKER_HEADER);
     writeFileSync(pdfIndex, PDF_MANIFEST);
+
+    // Every pdf the manifest names must exist, 4-massive included. A row is only
+    // PDF-ready when its file is on disk, so leaving that one out would let the
+    // "4-draft is not a report number" case pass for the wrong reason.
+    mkdirSync(join(work, 'output'), { recursive: true });
+    for (const pdf of ['1-acme-cv.pdf', '2-globex-cv.pdf', '3-initech-cv.pdf', '4-massive-cv.pdf']) {
+      writeFileSync(join(work, 'output', pdf), '%PDF-1.4\n');
+    }
     
     execFileSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], {
       encoding: 'utf-8',
       timeout: 30000,
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+      cwd: work,
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
     });
     
     return readFileSync(tracker, 'utf-8');
@@ -509,6 +518,195 @@ console.log('\nsync-pdf-flags.mjs — a deleted PDF leaves a stale manifest row 
       pass('a manifest row whose PDF is gone leaves the corrected ❌ alone');
     } else {
       fail(`the corrected ❌ was reverted from a manifest row whose PDF is gone: ${rowOf(2)}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+// ── #4777: which manifest rows count as a generated CV ────────────────────────
+//
+// The decision lives in livePdfIndex (find.mjs), shared with merge-tracker.mjs.
+// These cases run the real script, so they also pin what the helper cannot see
+// for itself: that this script calls it, parses the manifest with the
+// kind-aware parser, and resolves paths under the root generate-pdf.mjs wrote
+// them for rather than the root of the canonical tracker path.
+console.log('\nsync-pdf-flags.mjs — which manifest rows count as a generated CV (#4777)');
+
+const TRACKER_FOR = (...rows) => [
+  '# Applications Tracker',
+  '',
+  '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+  '|---|------|---------|------|-------|--------|-----|--------|-------|',
+  ...rows,
+  '',
+].join('\n');
+const ROW = (n, company, flag) => `| ${n} | 2026-01-0${n} | ${company} | SE | 4.0/5 | Evaluated | ${flag} | [${n}](reports/${n}-${company.toLowerCase()}.md) | |`;
+const rowIn = (text, n) => text.split('\n').find((l) => l.startsWith(`| ${n} |`)) || '';
+const PDF_HEADER = '# report\tpdf\thtml\tformat\tdate\tkind';
+
+{
+  const work = mkdtempSync(join(tmpdir(), 'cops-sync-kind-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    mkdirSync(join(work, 'output'), { recursive: true });
+    // Both files are on disk. Report 5 has only a cover letter in the manifest,
+    // report 6 has a CV. The PDF column describes the CV.
+    writeFileSync(join(work, 'output', '5-acme-cover.pdf'), '%PDF-1.4\n');
+    writeFileSync(join(work, 'output', '6-globex-cv.pdf'), '%PDF-1.4\n');
+    writeFileSync(tracker, TRACKER_FOR(ROW(5, 'Acme', '❌'), ROW(6, 'Globex', '❌')));
+    writeFileSync(pdfIndex, [
+      PDF_HEADER,
+      '5\toutput/5-acme-cover.pdf\toutput/5-acme-cover.html\tletter\t2026-01-05\tcover',
+      '6\toutput/6-globex-cv.pdf\toutput/6-globex.html\tletter\t2026-01-06\tcv',
+      '',
+    ].join('\n'));
+
+    execFileSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: work,
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    const after = readFileSync(tracker, 'utf-8');
+
+    if (rowIn(after, 6).includes('✅')) {
+      pass('a CV row whose PDF is on disk flips its cell, with a cover row beside it');
+    } else {
+      fail(`a live CV row did not flip its cell: ${rowIn(after, 6)}`);
+    }
+    if (rowIn(after, 5).includes('❌')) {
+      pass('a report with only a cover letter on disk is not PDF-ready');
+    } else {
+      fail(`a cover-letter row set the CV flag: ${rowIn(after, 5)}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+{
+  // data/ symlinked out of the repo, the natural workaround for #524. The
+  // tracker and manifest are reached through the link; the PDF sits in the
+  // repo's own output/, which is where generate-pdf.mjs wrote it (#3169).
+  const parent = mkdtempSync(join(tmpdir(), 'cops-sync-symlinked-data-'));
+  try {
+    const repo = join(parent, 'repo');
+    const external = join(parent, 'external');
+    mkdirSync(join(repo, 'output'), { recursive: true });
+    mkdirSync(join(external, 'data'), { recursive: true });
+    writeFileSync(join(repo, 'output', '1-acme-cv.pdf'), '%PDF-1.4\n');
+    writeFileSync(join(external, 'data', 'applications.md'), TRACKER_FOR(ROW(1, 'Acme', '❌')));
+    writeFileSync(join(external, 'data', 'pdf-index.tsv'), [
+      PDF_HEADER,
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\tletter\t2026-01-01\tcv',
+      '',
+    ].join('\n'));
+    symlinkSync(join(external, 'data'), join(repo, 'data'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    const env = { ...process.env, CAREER_OPS_ROOT: repo };
+    delete env.CAREER_OPS_TRACKER;
+    delete env.CAREER_OPS_PDF_INDEX;
+    execFileSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], { encoding: 'utf-8', timeout: 30000, cwd: repo, env });
+
+    const after = readFileSync(join(external, 'data', 'applications.md'), 'utf-8');
+    if (rowIn(after, 1).includes('✅')) {
+      pass('a PDF in the repo flips its cell when data/ is a symlink out of the repo');
+    } else {
+      fail(`a live PDF was not found under a symlinked data/: ${rowIn(after, 1)}`);
+    }
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+}
+
+{
+  const parent = mkdtempSync(join(tmpdir(), 'cops-sync-outside-'));
+  try {
+    const work = join(parent, 'work');
+    const outside = join(parent, 'outside');
+    mkdirSync(work, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'cv.pdf'), '%PDF-1.4\n');
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    writeFileSync(tracker, TRACKER_FOR(ROW(1, 'Acme', '❌')));
+    writeFileSync(pdfIndex, [PDF_HEADER, '1\t../outside/cv.pdf\t\tletter\t2026-01-01\tcv', ''].join('\n'));
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: work,
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    const after = readFileSync(tracker, 'utf-8');
+    if (result.status === 0 && rowIn(after, 1).includes('❌') && /outside the workspace/.test(result.stderr)) {
+      pass('a PDF outside the workspace does not set the flag, and the run says why');
+    } else {
+      fail(`an outside path set the flag or went unreported: status=${result.status}, row=${rowIn(after, 1)}, stderr=${JSON.stringify(result.stderr)}`);
+    }
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+}
+
+{
+  // The old inline parse counted a row that named no file, because it had
+  // nothing to check. A row with no pdf names nothing that could be on disk.
+  const work = mkdtempSync(join(tmpdir(), 'cops-sync-no-pdf-column-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    writeFileSync(tracker, TRACKER_FOR(ROW(1, 'Acme', '❌')));
+    writeFileSync(pdfIndex, [PDF_HEADER, '1\t\t\tletter\t2026-01-01\tcv', ''].join('\n'));
+    execFileSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: work,
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    const after = readFileSync(tracker, 'utf-8');
+    if (rowIn(after, 1).includes('❌')) {
+      pass('a manifest row that names no PDF does not set the flag');
+    } else {
+      fail(`a row with an empty pdf column set the flag: ${rowIn(after, 1)}`);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+if (process.platform === 'win32') {
+  warn('presence-unknown case not exercised on win32: a self-referential link needs symlink privilege');
+} else {
+  const work = mkdtempSync(join(tmpdir(), 'cops-sync-unknown-presence-'));
+  try {
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    mkdirSync(join(work, 'output'), { recursive: true });
+    writeFileSync(join(work, 'output', '1-acme-cv.pdf'), '%PDF-1.4\n');
+    // A link to itself fails stat with ELOOP: neither present nor provably absent.
+    symlinkSync('loop.pdf', join(work, 'output', 'loop.pdf'));
+    writeFileSync(tracker, TRACKER_FOR(ROW(1, 'Acme', '❌'), ROW(2, 'Globex', '❌')));
+    writeFileSync(pdfIndex, [
+      PDF_HEADER,
+      '1\toutput/1-acme-cv.pdf\t\tletter\t2026-01-01\tcv',
+      '2\toutput/loop.pdf\t\tletter\t2026-01-02\tcv',
+      '',
+    ].join('\n'));
+
+    const result = spawnSync(NODE, [join(ROOT, 'sync-pdf-flags.mjs')], {
+      encoding: 'utf-8',
+      timeout: 30000,
+      cwd: work,
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_TRACKER: tracker, CAREER_OPS_PDF_INDEX: pdfIndex },
+    });
+    const after = readFileSync(tracker, 'utf-8');
+    if (result.status === 0 && rowIn(after, 1).includes('✅') && rowIn(after, 2).includes('❌') && /cannot tell/.test(result.stderr)) {
+      pass('a path whose presence cannot be told is skipped with a warning, and the batch still runs');
+    } else {
+      fail(`unknown presence was mishandled: status=${result.status}, rows=${rowIn(after, 1)} / ${rowIn(after, 2)}, stderr=${JSON.stringify(result.stderr)}`);
     }
   } finally {
     rmSync(work, { recursive: true, force: true });

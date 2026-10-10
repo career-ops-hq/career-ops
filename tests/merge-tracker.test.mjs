@@ -771,6 +771,9 @@ try {
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, TRACKER_HEADER + seed);
     writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    // A manifest row only counts while its PDF is on disk (#4777).
+    mkdirSync(join(work, 'output'), { recursive: true });
+    writeFileSync(join(work, 'output', '1.pdf'), '%PDF-1.4\n');
     
     // Normal run should trigger sync and flip the PDF flag
     const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
@@ -798,6 +801,10 @@ try {
     mkdirSync(addsDir, { recursive: true });
     writeFileSync(tracker, TRACKER_HEADER + seed);
     writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n1\toutput/1.pdf\toutput/1.html\ta4\t2026-01-01\n');
+    // The PDF is on disk, so without --dry-run this row would flip. That makes
+    // the unchanged ❌ below a statement about dry-run and not about a missing file.
+    mkdirSync(join(workDry, 'output'), { recursive: true });
+    writeFileSync(join(workDry, 'output', '1.pdf'), '%PDF-1.4\n');
     
     // Create a pending addition so the merge has something to "dry-run"
     writeFileSync(join(addsDir, '2-globex.tsv'), '2\t2026-01-02\tGlobex\tEng\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\t\n');

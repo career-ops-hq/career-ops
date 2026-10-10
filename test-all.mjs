@@ -12600,7 +12600,10 @@ try {
 // PDF was generated, so merge-tracker should flip only matching ❌ cells to ✅.
 console.log('\n🧪 Testing merge-tracker PDF flag sync from data/pdf-index.tsv (#1429)...');
 try {
-  const runPdfSyncFixture = (name, trackerRow, pdfIndex = null, additions = []) => {
+  // A manifest row only means PDF-ready while its file is on disk (#4777), so a
+  // fixture lists the files it expects to exist. A row without a file is the
+  // deleted-PDF case.
+  const runPdfSyncFixture = (name, trackerRow, pdfIndex = null, additions = [], pdfFiles = []) => {
     const tmp = mkdtempSync(join(tmpdir(), `career-ops-merge-pdf-${name}-`));
     mkdirSync(join(tmp, 'data'), { recursive: true });
     const additionsDir = join(tmp, 'additions');
@@ -12611,6 +12614,10 @@ try {
       '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
       trackerRow + '\n');
     if (pdfIndex !== null) writeFileSync(join(tmp, 'data', 'pdf-index.tsv'), pdfIndex);
+    for (const file of pdfFiles) {
+      mkdirSync(dirname(join(tmp, file)), { recursive: true });
+      writeFileSync(join(tmp, file), '%PDF-1.4\n');
+    }
     if (additions.length > 0) {
       mkdirSync(additionsDir, { recursive: true });
       for (const addition of additions) {
@@ -12634,6 +12641,8 @@ try {
     '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](../reports/012-acme-2026-01-04.md) | ok |',
     '# report\tpdf\thtml\tformat\tdate\n' +
       '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
+    [],
+    ['output/cv-acme.pdf'],
   );
   if (matching.result !== null && matching.merged.includes('| ✅ | [12](../reports/012-acme-2026-01-04.md) |')) {
     pass('merge-tracker flips a stale ❌ PDF cell when pdf-index.tsv has the row report number');
@@ -12672,6 +12681,7 @@ try {
       name: '001-umbrella.tsv',
       content: '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](../reports/041-umbrella-2026-01-07.md)\tok\n',
     }],
+    ['output/cv-umbrella.pdf'],
   );
   if (newAddition.result !== null && newAddition.merged.includes('| 1 | 2026-01-07 | Umbrella | Engineer | 4.1/5 | Evaluated | ✅ | [41](../reports/041-umbrella-2026-01-07.md) | ok |')) {
     pass('merge-tracker applies pdf-index.tsv to a newly merged tracker row in the same run');
@@ -12726,12 +12736,57 @@ try {
     reevalRow,
     '# report\tpdf\thtml\tformat\tdate\n1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
     [reevalTsv(2)],
+    ['output/acme-1.pdf', 'output/acme-2.pdf'],
   );
   const keptRow = keptFlag.merged.split('\n').find((l) => l.startsWith('| 3 ')) || '';
   if (keptFlag.result !== null && /\[2\]/.test(keptRow) && keptRow.split('|')[7].trim() === '✅') {
     pass('a re-eval keeps ✅ when the NEW report does have a generated PDF (#2594)');
   } else {
     fail(`re-eval wrongly cleared a valid PDF flag: ${keptRow.trim()}`);
+  }
+
+  // A manifest row outlives its file: generate-pdf.mjs evicts a row only on
+  // re-generation, so deleting output/*.pdf leaves every row standing (#4777).
+  // Each of merge-tracker's three readers of the manifest must treat that row
+  // as absent, or the flag it was corrected from comes straight back.
+  const goneRow = runPdfSyncFixture(
+    'gone',
+    '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](../reports/012-acme-2026-01-04.md) | ok |',
+    '# report\tpdf\thtml\tformat\tdate\n012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
+  );
+  if (goneRow.result !== null && goneRow.merged.includes('| ❌ | [12](../reports/012-acme-2026-01-04.md) |')) {
+    pass('merge-tracker leaves a corrected ❌ alone when the manifest row\'s PDF is gone (#4777)');
+  } else {
+    fail('merge-tracker re-asserted ✅ from a manifest row whose PDF no longer exists');
+  }
+
+  const goneAddition = runPdfSyncFixture(
+    'gone-addition',
+    '',
+    '# report\tpdf\thtml\tformat\tdate\n041\toutput/cv-umbrella.pdf\toutput/cv-umbrella.html\tletter\t2026-01-07\n',
+    [{
+      name: '001-umbrella.tsv',
+      content: '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](../reports/041-umbrella-2026-01-07.md)\tok\n',
+    }],
+  );
+  if (goneAddition.result !== null && goneAddition.merged.includes('| 1 | 2026-01-07 | Umbrella | Engineer | 4.1/5 | Evaluated | ❌ | [41](../reports/041-umbrella-2026-01-07.md) | ok |')) {
+    pass('a newly merged row stays ❌ when its manifest row\'s PDF is gone (#4777)');
+  } else {
+    fail('a newly merged row was marked ✅ from a manifest row whose PDF no longer exists');
+  }
+
+  const goneReeval = runPdfSyncFixture(
+    'reeval-gone',
+    reevalRow,
+    '# report\tpdf\thtml\tformat\tdate\n1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
+    [reevalTsv(2)],
+    ['output/acme-1.pdf'],
+  );
+  const goneReevalRow = goneReeval.merged.split('\n').find((l) => l.startsWith('| 3 ')) || '';
+  if (goneReeval.result !== null && /\[2\]/.test(goneReevalRow) && goneReevalRow.split('|')[7].trim() === '❌') {
+    pass('a re-eval does not take ✅ from a manifest row whose new report PDF is gone (#4777)');
+  } else {
+    fail(`re-eval set ✅ from a manifest row with no PDF behind it: ${goneReevalRow.trim()}`);
   }
 } catch (e) {
   fail(`merge-tracker PDF flag sync test crashed: ${e.message}`);
