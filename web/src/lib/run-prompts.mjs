@@ -9,8 +9,15 @@ import { CV_ENVELOPE_INSTRUCTION } from "./cv-envelope.mjs";
 
 /**
  * @param {{kind: string, input: string, memory?: string, today?: string, reportNum?: string,
- *          cliId?: string, hasPlaywright?: boolean, jevPrior?: object|null}} opts
+ *          cliId?: string, hasPlaywright?: boolean, jevPrior?: object|null,
+ *          jevCompile?: {slotsPath: string, facts: string}|null}} opts
  * @returns {string}
+ * When `jevCompile` is set for kind "evaluate", the prompt is the Envelope B
+ * variant: the worker reads modes/oferta.md for Blocks A-F + G scoring intent,
+ * writes ONLY its free-text slots to `slotsPath`, leaves the
+ * `<!-- machine-summary-slot -->` marker in the report, and the host composes
+ * the Machine Summary from System One decisions + those slots afterwards.
+ * Without it the legacy prompt is emitted byte-identical.
  */
 export function buildPrompt({
   kind = "evaluate",
@@ -21,6 +28,7 @@ export function buildPrompt({
   cliId = "",
   hasPlaywright = false,
   jevPrior = null,
+  jevCompile = null,
 }) {
   const mem = memory.trim() ? `\n\nDurable notes about the user (from their profile):\n${memory.trim()}\n` : "";
   const todayStr = today || new Date().toISOString().slice(0, 10);
@@ -94,11 +102,14 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
     ? `\n\nA cheap deterministic ATS-screen pre-pass (TypeSafe Jev, no text generation) scored this posting ${jevPrior.score?.toFixed(2)}/5, band "${jevPrior.band}", core-skills ${jevPrior.hasCoreSkills ? "present" : "not established"} — correlating r=0.743 with the candidate's own prior evaluations. Treat it ONLY as a weak prior to confirm or overturn from the JD and the primary files. It is NOT a score, NOT a verdict, and must NEVER lower a block score on its own.`
     : "";
 
-  return `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${todayStr}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.${priorLine}
+  const head = `You are running the OFFICIAL career-ops job evaluation, HEADLESS, on the user's own machine. Today is ${todayStr}. Run the REAL career-ops evaluation — do NOT improvise your own scoring.`;
 
-1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: oferta.md names cv.md, config/profile.yml and modes/_profile.md as the primary sources and directs you to read them at the point of use (13/18/4 explicit references) — do not bulk-pre-read them here. ${sourceLine}
+  // Shared persistence + close. `stepNum`/`neverNum` are parameterized so the
+  // Envelope B branch can insert its own steps 2-3 ahead without forking this
+  // block; default numbering keeps the legacy output byte-identical.
+  const persistSuffix = (stepNum = 2, neverNum = 3) => `
 
-2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
+${stepNum}. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${todayStr}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
    c. Append a TSV to batch/tracker-additions/{num}-{company-slug}.tsv with THIS header row first (real tab characters, not the four-space escape):
@@ -108,12 +119,77 @@ num\tdate\tcompany\trole\tscore\tstatus\tpdf\treport\tnotes
    d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
    e. Release the reservation sentinel: run \`node reserve-report-num.mjs --release <num>\` with the number from (a). Skipping this leaks \`reports/{num}-RESERVED.md\` — an abandoned run's sentinel counts as an occupied report number forever, so every later evaluation is pushed one higher for a report that will never exist. modes/pipeline.md step (d) and every market mode's pipeline.md/oferta.md already require this release; this prompt did not, which is how the Airtel APM run (2026-09-28) orphaned 158 and 159.
 
-3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
+${neverNum}. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
 After everything above is written and merged, output EXACTLY one final line, nothing after it:
 VERDICT: {score}/5 — {reason in 12 words or fewer}
 
 ${isLocal ? "Posting source" : "Posting URL"}: ${input}`;
+
+  // Envelope B (jev-decide.mjs + jev-inject.mjs): the Machine Summary is NOT
+  // written free-form. System One (Jev) adjudicates the bounded enums; the worker
+  // writes ONLY its residual free-text slots to `slotsPath` and leaves the
+  // `<!-- machine-summary-slot -->` marker; the host composes the validated block
+  // afterwards via jev-inject.mjs. Default off — when `jevCompile` is absent this
+  // builder emits the byte-identical legacy prompt (see the envelope test).
+  if (jevCompile) {
+    const { slotsPath, facts } = jevCompile;
+    return `${head}${priorLine}
+
+1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy). Ground the fit in THIS person: oferta.md names cv.md, config/profile.yml and modes/_profile.md as the primary sources and directs you to read them at the point of use (13/18/4 explicit references) — do not bulk-pre-read them here. ${sourceLine}
+
+The Machine Summary is NOT yours to write — it is compiled deterministically by the host from System One machine decisions plus your free-text slots below. These System One facts are adjudicated readings of the same JD: ${facts}
+
+2. Write your free-text slots to the file ${slotsPath} as JSON via a Bash heredoc, with EXACTLY these keys (the composed block is validated against batch/batch-prompt.md's Machine Summary schema; a malformed slot voids the envelope and the report keeps whatever prose you left instead):
+
+\`\`\`json
+{
+  "company": "Company Name",
+  "role": "Role Title",
+  "score": 4.2,
+  "final_decision": "Apply | Consider | Research first | Skip",
+  "hard_stops": ["..."],
+  "soft_gaps": ["..."],
+  "top_strengths": ["..."],
+  "next_action": "one concrete next step",
+  "discard_reasons": ["..."],
+  "via": null,
+  "company_confidential": false,
+  "advertised_comp": null,
+  "reports_to": null,
+  "requirement_importance": [
+    {
+      "requirement": "JD requirement",
+      "jd_signal": "verbatim JD quote or null",
+      "evidence": "stated | structural | inferred",
+      "importance": "critical | high | meaningful | preferred | low_signal",
+      "match": "strong | partial | missing | na"
+    }
+  ],
+  "risk_summary": {
+    "classification": "clear | flagged | not_evaluated",
+    "culture": "pass | caution | fail | not_evaluated",
+    "interview_redflags": "none | caution | warning | not_evaluated",
+    "ai_infra": "consistent | mismatch | not_evaluated",
+    "ai_screening_disclosure": "disclosed | corroborating_only | no_match | not_evaluated"
+  }
+}
+\`\`\`
+
+Rules: score is numeric only, no "/5". evidence "stated" requires a verbatim jd_signal quote from the JD; never "critical"/"high" importance with evidence "inferred". Use [] for empty arrays and null (never "N/A") for an absent via/advertised_comp/reports_to. company_confidential is true only when you concluded the end employer is unknown. Do NOT include legitimacy_tier, risk_level, work_auth, archetype, confidence, or risk_summary.legitimacy — System One supplies those fields.
+
+3. In the report markdown, where a hand-written Machine Summary block would go, write EXACTLY these two lines (no yaml fence, no prose):
+
+## Machine Summary
+
+<!-- machine-summary-slot -->
+
+Set the report header's **Archetype:** and **Legitimacy:** rows from the System One facts above.${persistSuffix(4, 5)}`;
+  }
+
+  return `${head}${priorLine}
+
+1. Read modes/oferta.md and follow it EXACTLY (blocks A–F, G posting-legitimacy, and the Machine Summary). Ground the fit in THIS person: oferta.md names cv.md, config/profile.yml and modes/_profile.md as the primary sources and directs you to read them at the point of use (13/18/4 explicit references) — do not bulk-pre-read them here. ${sourceLine}${persistSuffix()}`;
 }
 
 export default buildPrompt;

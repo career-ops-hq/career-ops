@@ -79,6 +79,9 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
+# Envelope B per-job runtime state written by batch-runner.sh (joins the same
+# gitignored family as .resolved-prompt-*; never committed)
+.jev-*
 node_modules/
 bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)

@@ -51,6 +51,11 @@ MODEL=""  # explicit override; otherwise resolved from config/profile.yml spend_
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
 CLI=claude
+# Envelope B System One compose (opt-in): when 1, each worker gets a pre-spawn
+# Block A/D/G gatekeeper decide, a truncated prompt that writes ONLY free-text
+# Machine Summary slots, and a post-report deterministic compose+inject. Shared
+# gate with the web lane; anything else is 0 (legacy hand-written summary).
+JEV_COMPOSE="${CAREER_OPS_JEV_COMPOSE:-0}"
 RATE_LIMIT_SLEEP=300
 BATCH_PAUSED=false
 STATUS_ONLY=false
@@ -1263,6 +1268,30 @@ process_offer() {
 
   echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
 
+  # ---------------------------------------------------------------------------
+  # Envelope B System One compose (opt-in): run a Block A/D/G gatekeeper decide
+  # on the prefetched JD BEFORE the worker spawns; if it produces an envelope,
+  # truncate the worker prompt to free-text prose slots and compose the
+  # deterministic ## Machine Summary block into the finished report afterwards.
+  # Every failure path here leaves evb_active=false and the worker keeps the
+  # legacy hand-written Machine Summary instructions — the envelope NEVER gates
+  # the run, exactly like the web lane's fail-open contract.
+  # ---------------------------------------------------------------------------
+  local evb_active=false
+  local envelope_file="" slots_file="" evb_facts=""
+  if [[ "$JEV_COMPOSE" == "1" ]]; then
+    envelope_file="$BATCH_DIR/.jev-envelope-${id}.json"
+    slots_file="$BATCH_DIR/.jev-slots-${id}.json"
+    if [[ -s "$jd_file" ]] && node "$PROJECT_DIR/jev-decide.mjs" --jd "$jd_file" --out "$envelope_file" > "$BATCH_DIR/.jev-decide-${id}.log" 2>&1; then
+      local evb_ok="0"
+      evb_ok="$(node -e 'const fs=require("fs");try{const e=JSON.parse(fs.readFileSync(process.argv[1],"utf-8"));process.stdout.write(e.status==="ok"?"1":"0")}catch{process.stdout.write("0")}' "$envelope_file" 2>/dev/null || true)"
+      if [[ "$evb_ok" == "1" ]]; then
+        evb_active=true
+        evb_facts="$(node -e 'const fs=require("fs");try{const e=JSON.parse(fs.readFileSync(process.argv[1],"utf-8"));process.stdout.write(typeof e.facts==="string"?e.facts:"")}catch{}' "$envelope_file" 2>/dev/null || true)"
+      fi
+    fi
+  fi
+
   # Build the prompt with placeholders replaced
   local prompt
   if [[ "$SKIP_PDF" == "true" ]]; then
@@ -1276,6 +1305,25 @@ process_offer() {
   prompt="$prompt Report number: $report_num"
   prompt="$prompt Date: $date"
   prompt="$prompt Batch ID: $id"
+
+  # Envelope B override: when the decide screen produced an envelope, the worker
+  # writes ONLY its free-text Machine Summary slots and leaves the block to the
+  # host compose. Escaped backticks stay literal inside the double-quoted string.
+  if [[ "$evb_active" == "true" ]]; then
+    echo "    🔷 Envelope B active — System One compose for #$id"
+    prompt="$prompt
+
+ENVELOPE B (System One compose is ACTIVE for this report):
+The ## Machine Summary block of this report is composed by the host from System One machine decisions plus your free-text slots. Do this:
+1. Run the full A-F evaluation normally (Blocks A through F) and write the report .md with every other section unchanged.
+2. Write your free-text Machine Summary slot values to the file $slots_file as JSON via a Bash heredoc, with EXACTLY these keys: score, final_recommendation, legs, cons, risk_summary, next_action, advertised_comp, company_confidential, reports_to, requirement_importance, via.
+   - score: a number or a certified value string like \"4.2/5\"
+   - via: null
+   - legs: array; cons: array
+   - risk_summary: an object; set its legitimacy key from the System One facts below
+3. In the report .md, write \`## Machine Summary\` as a heading, put the marker line <!-- machine-summary-slot --> directly under it, and leave that block empty — the host fills it at the end.
+These System One facts are adjudicated readings of the same JD (cite them, do not relitigate): ${evb_facts}"
+  fi
 
   local log_file="$LOGS_DIR/${report_num}-${id}.log"
 
@@ -1512,6 +1560,23 @@ process_offer() {
       release_report_num "$report_num"
       echo "    ❌ Failed (no report file on disk, attempt $retries)"
       return 0
+    fi
+
+    # Envelope B compose step: fuse the worker's free-text slots with the
+    # System One envelope into the deterministic ## Machine Summary block.
+    # Fail-open — if the decide screen or the inject breaks anywhere, the
+    # report keeps whatever block the worker wrote, untouched.
+    if [[ "$evb_active" == "true" ]]; then
+      local report_file inject_status
+      report_file="$(compgen -G "$REPORTS_DIR/${report_num}-*.md" | head -1)"
+      if [[ -n "$report_file" ]]; then
+        inject_status="$(node "$PROJECT_DIR/jev-inject.mjs" --report "$report_file" --slots "$slots_file" --envelope "$envelope_file" 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{const o=JSON.parse(d);process.stdout.write(o.status==="done"?"done":o.status)}catch{process.stdout.write("unavailable")}})' || true)"
+        if [[ "$inject_status" == "done" ]]; then
+          echo "    🔷 Machine Summary composed from System One (report $report_num)"
+        else
+          echo "    ⚠️  Envelope B compose ${inject_status:-unavailable} — worker block kept as written"
+        fi
+      fi
     fi
 
     # Check min-score gate

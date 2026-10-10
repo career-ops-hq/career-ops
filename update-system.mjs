@@ -376,6 +376,19 @@ export const SYSTEM_PATHS = [
   // array with a regex over quoted spans, so a stray quote here parses as a
   // bogus path entry.
   'append-jev-log.mjs',
+  // Envelope B System One screen: runs the Block A/D/G decide through the
+  // gatekeeper and emits the Machine Summary machine-facts envelope for the
+  // web and batch lanes. Root level because rootScript() resolves
+  // <careerOpsRoot>/<name>.mjs only; fail-open to a legacy hand-written
+  // Machine Summary. NOTE: keep this comment free of apostrophes and quotes -
+  // updater-migration-tests.mjs extracts the array with a regex over quoted
+  // spans, so a stray quote here parses as a bogus path entry.
+  'jev-decide.mjs',
+  // Envelope B compose step: fuses the Jev envelope with the worker prose
+  // slots and injects the deterministic Machine Summary block into a finished
+  // report. Fail-open, never damages a report. Same root-level and comment
+  // rules as jev-decide.mjs.
+  'jev-inject.mjs',
   'liveness-api.mjs',
   'liveness-browser.mjs',
   'browser-extract.mjs',

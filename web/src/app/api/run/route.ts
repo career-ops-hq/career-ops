@@ -87,6 +87,15 @@ const GATE3_EXTRACT_TIMEOUT_MS = 20_000;
 /** The ledger append is advisory — never let it hold a finished run open long. */
 const GATE3_LEDGER_TIMEOUT_MS = 15_000;
 
+/**
+ * Envelope B System One screen (jev-decide). Runs BEFORE the generative worker
+ * spawns, so it cannot hold the stream open alongside the worker; the budget is
+ * for a gatekeeper decide over the 21 Block A/D/G questions on a local JD.
+ * Advisory by construction: a timeout/unavailable envelope falls back to the
+ * legacy hand-written Machine Summary.
+ */
+const JEV_DECIDE_TIMEOUT_MS = 90_000;
+
 /** Trim to a bounded string; a subprocess can emit anything. */
 function gate3Text(value: unknown, max = 300): string {
   return String(value ?? "").trim().slice(0, max);
@@ -477,7 +486,50 @@ export async function POST(req: Request) {
     }
   }
 
-  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, reportNum, cliId, hasPlaywright, jevPrior });
+  // Envelope B compose (opt-in: env CAREER_OPS_JEV_COMPOSE=1, local JD only):
+  // a pre-spawn System One decide + a truncated prompt (LLM writes ONLY its
+  // residual free-text slots) + a post-run deterministic inject. Every failure
+  // path below drops the envelope and the run falls back to the legacy prompt /
+  // hand-written Machine Summary, byte for byte.
+  let jevCompile: { slotsPath: string; facts: string } | null = null;
+  let jevEnvelopePath: string | null = null;
+  let jevDir: string | null = null;
+  if (
+    kind === "evaluate" &&
+    input.startsWith("local:") &&
+    !forceRun &&
+    process.env.CAREER_OPS_JEV_COMPOSE === "1"
+  ) {
+    try {
+      const jdPath = path.join(careerOpsRoot(), input.slice("local:".length));
+      if (fs.existsSync(jdPath)) {
+        // The dir lives INSIDE the workspace (gitignored as .jev-*) so the
+        // spawned worker — whose sandbox is the repo — can write its slots file.
+        jevDir = fs.mkdtempSync(path.join(careerOpsRoot(), ".jev-env-"));
+        jevEnvelopePath = path.join(jevDir, "envelope.json");
+        const decide = runCoreScript("jev-decide", ["--jd", jdPath, "--out", jevEnvelopePath], JEV_DECIDE_TIMEOUT_MS);
+        if (decide.exitCode !== 0) {
+          jevEnvelopePath = null;
+        } else {
+          const envelope = JSON.parse(decide.output);
+          if (envelope.status === "ok") {
+            jevCompile = {
+              slotsPath: path.join(jevDir, "slots.json"),
+              facts: typeof envelope.facts === "string" ? envelope.facts : "",
+            };
+          } else {
+            jevEnvelopePath = null;
+          }
+        }
+      }
+    } catch {
+      /* fail-open: a broken System One screen never blocks an evaluation */
+      jevCompile = null;
+      jevEnvelopePath = null;
+    }
+  }
+
+  const prompt = buildPrompt({ kind, input, memory: readMemory(), today, reportNum, cliId, hasPlaywright, jevPrior, jevCompile });
 
   // "worker" surface: opencode opts into NDJSON here only. The assistant and
   // cv/ingest routes call usesStreamJson() with the default and are unaffected.
@@ -597,6 +649,10 @@ export async function POST(req: Request) {
           closed = true;
           if (killer) clearTimeout(killer);
           if (releaseWrite) { releaseWrite(); releaseWrite = null; }
+          if (jevDir) {
+            try { fs.rmSync(jevDir, { recursive: true, force: true }); } catch { /* */ }
+            jevDir = null;
+          }
           try { controller.close(); } catch { /* */ }
         }
       };
@@ -775,17 +831,44 @@ export async function POST(req: Request) {
         // THIS run must have added a report file — not merely a higher global
         // count (a concurrent eval could have written someone else's report).
         let wroteReport = true;
+        let newReportFile: string | null = null;
         if (persists && reportsBefore) {
           wroteReport = false;
           try {
             for (const f of fs.readdirSync(reportsDir)) {
               if (f.endsWith(".md") && !f.endsWith("-RESERVED.md") && !reportsBefore.has(f)) {
                 wroteReport = true;
+                newReportFile = path.join(reportsDir, f);
                 break;
               }
             }
           } catch {
             wroteReport = false;
+          }
+        }
+
+        // Envelope B compose step. Only when the pre-spawn decide produced an
+        // envelope AND THIS run wrote a report. jev-inject fuses the worker's
+        // prose slots with the System One machine fields and injects the
+        // deterministic `## Machine Summary` block. Fail-open: any failure leaves
+        // whatever block the worker wrote, untouched.
+        if (jevCompile && jevEnvelopePath && wroteReport && newReportFile) {
+          try {
+            const injectRes = JSON.parse(
+              runCoreScript(
+                "jev-inject",
+                ["--report", newReportFile, "--slots", jevCompile.slotsPath, "--envelope", jevEnvelopePath],
+                JEV_DECIDE_TIMEOUT_MS,
+              ).output,
+            );
+            if (injectRes.status === "done") {
+              send({
+                type: "status",
+                label: `Machine Summary composed deterministically from System One facts (${injectRes.mode ?? "injected"})`,
+              });
+            }
+          } catch {
+            /* advisory compose — the report already exists regardless */
           }
         }
         const cleanExit = code === 0; // non-zero OR null (killed/signal) = NOT clean

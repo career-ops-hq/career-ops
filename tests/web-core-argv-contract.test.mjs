@@ -30,6 +30,14 @@ console.log('\nweb → core argv contract');
 //   'none'       — the call site spawns node with an inline module rather than
 //                  a root script with flags; listed so the enumeration at the
 //                  bottom stays complete.
+//
+// route.ts holds SIX runCoreScript() call sites (gate3 linter capture + ledger,
+// jev triage ledger, browser-extract JD capture, and the Envelope B
+// jev-decide/jev-inject pair). The static half of this file scans by SOURCE, so
+// every --flag literal anywhere in route.ts is checked against EVERY route.ts
+// entry — the guard cannot tell call sites within one file apart. Rather than
+// repeating the same union comment on all six, the union lives here once.
+const ROUTE_UNION_FLAGS = ['--mode', '--max-chars', '--jd', '--out', '--report', '--slots', '--envelope'];
 const CALL_SITES = [
   {
     source: 'web/src/app/api/followups/route.ts',
@@ -68,12 +76,9 @@ const CALL_SITES = [
     script: 'jev-post-linter.mjs',
     args: ['<tailored-payload.json>', '<target-jd.txt>'],
     probe: 'none',
-    // The static half scans by SOURCE, so every --flag literal anywhere in
-    // route.ts is checked against THIS entry too. --mode / --max-chars belong to
-    // the browser-extract call in the same file and are declared there; they are
-    // repeated here because the guard cannot tell two call sites in one file
-    // apart. See the browser-extract entry for why they are runtime-only.
-    runtimeFlags: ['--mode', '--max-chars'],
+    // runtimeFlags is the route.ts union (ROUTE_UNION_FLAGS): the static guard
+    // scans by SOURCE so every route.ts flag literal must be covered here.
+    runtimeFlags: ROUTE_UNION_FLAGS,
   },
   {
     // Gate 3's URL-input JD capture: captureUrlJdText() calls
@@ -89,15 +94,9 @@ const CALL_SITES = [
     script: 'browser-extract.mjs',
     args: ['<url>', '--mode', 'jd', '--max-chars', '30000'],
     probe: 'none',
-    // --mode / --max-chars appear as inline literals in route.ts, so the static
-    // half of this file wants them in `args` — but the only probe that could
-    // exercise them would launch a headless browser and hit the network. They
-    // are validated by the script itself instead: browser-extract.mjs declares
-    // them in KNOWN_FLAGS (line 656) and runs validateFlags() before any
-    // browser launch (line 807), so a typo exits 1 with "unrecognized flag(s)".
-    // Declaring them here records that deliberate choice rather than silently
-    // leaving the guard unsatisfied.
-    runtimeFlags: ['--mode', '--max-chars'],
+    // --mode / --max-chars are already in `args`; the rest of the route.ts
+    // union rides in runtimeFlags (see ROUTE_UNION_FLAGS above).
+    runtimeFlags: ROUTE_UNION_FLAGS,
   },
   {
     // Gate 3's on-disk ledger append, fired from collectGate3Telemetry after a
@@ -113,12 +112,8 @@ const CALL_SITES = [
     script: 'append-gate3-log.mjs',
     args: ['<id>', '<company>', '<role>', '<decision>', '<reason>'],
     probe: 'none',
-    // The static half scans by SOURCE, so every --flag literal anywhere in
-    // route.ts is checked against each of this file's three entries. --mode /
-    // --max-chars belong to the browser-extract call and are declared on that
-    // entry; repeated here because the guard cannot tell call sites in one file
-    // apart.
-    runtimeFlags: ['--mode', '--max-chars'],
+    // runtimeFlags is the route.ts union (ROUTE_UNION_FLAGS).
+    runtimeFlags: ROUTE_UNION_FLAGS,
   },
   {
     // Jev System 1 triage ledger: fire-and-forget persistence of the calibrated
@@ -133,12 +128,45 @@ const CALL_SITES = [
     script: 'append-jev-log.mjs',
     args: ['<id>', '<score>', '<band>', '<wallMs>'],
     probe: 'none',
-    // The static half scans by SOURCE, so every --flag literal anywhere in
-    // route.ts is checked against each of this file's entries. --mode /
-    // --max-chars belong to the browser-extract call and are declared on that
-    // entry; repeated here because the guard cannot tell call sites in one file
-    // apart.
-    runtimeFlags: ['--mode', '--max-chars'],
+    // runtimeFlags is the route.ts union (ROUTE_UNION_FLAGS).
+    runtimeFlags: ROUTE_UNION_FLAGS,
+  },
+  {
+    // Envelope B System One screen: the pre-spawn gatekeeper decide for a local
+    // JD (runCoreScript("jev-decide", ["--jd", jdPath, "--out", envelopePath])).
+    //
+    // probe 'none', like the jev-post-linter entry above: a 'run' probe would
+    // answer 21 Block A/D/G questions through the PROVIDER (spending the user's
+    // model budget), and a 'flags-only' probe cannot work — jev-decide.mjs has
+    // no validateFlags()/--help; it parses a fixed argv and exits 2 with usage
+    // on anything else. When the env gate is off the call does not even exist
+    // at runtime. The full decide contract is covered by its own unit suite
+    // (tests/jev-decide.test.mjs), which drives main() with these exact flags.
+    source: 'web/src/app/api/run/route.ts',
+    script: 'jev-decide.mjs',
+    args: ['--jd', '<jd-path>', '--out', '<envelope.json>'],
+    probe: 'none',
+    // --jd/--out are in `args`; the rest of the route.ts union rides in
+    // runtimeFlags (see ROUTE_UNION_FLAGS above).
+    runtimeFlags: ROUTE_UNION_FLAGS,
+  },
+  {
+    // Envelope B compose step: fuse the worker's prose slots with the System
+    // One envelope and inject the deterministic Machine Summary block
+    // (runCoreScript("jev-inject", ["--report", report, "--slots", slotsPath,
+    // "--envelope", envelopePath])).
+    //
+    // probe 'none' for the same two reasons as the jev-decide entry: a real
+    // probe would mutate a report file, and there is no --help/validateFlags()
+    // to probe (fixed argv + exit 2 usage). The inject contract is covered by
+    // tests/jev-inject.test.mjs, which drives main() with these exact flags.
+    source: 'web/src/app/api/run/route.ts',
+    script: 'jev-inject.mjs',
+    args: ['--report', '<report.md>', '--slots', '<slots.json>', '--envelope', '<envelope.json>'],
+    probe: 'none',
+    // --report/--slots/--envelope are in `args`; the rest of the route.ts union
+    // rides in runtimeFlags (see ROUTE_UNION_FLAGS above).
+    runtimeFlags: ROUTE_UNION_FLAGS,
   },
   {
     source: 'web/src/lib/core/status-update.ts',
