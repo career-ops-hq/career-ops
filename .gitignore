@@ -13,7 +13,7 @@ local/
 # Match the root entry itself as well as its contents: the user data root may
 # be a symlink to storage outside the checkout, which child globs cannot reach.
 /data
-!data/
+!/data/
 data/*
 !data/.gitkeep
 !data/offers/
@@ -32,7 +32,7 @@ reports/*.md
 reports/**/*.md
 !reports/.gitkeep
 /output
-!output/
+!/output/
 output/*
 !output/.gitkeep
 # batch/ holds generated worker output. Ignore the directory and allowlist the
@@ -73,7 +73,7 @@ batch/tracker-additions/**/*.tsv
 # drops here. Fetched postings are user data — never stage them.
 batch/tmp/
 /jds
-!jds/
+!/jds/
 jds/*
 !jds/.gitkeep
 
@@ -87,7 +87,7 @@ jds/*
 
 # Interview prep (accumulated STAR+R stories — user data)
 interview-prep/*
-!interview-prep/
+!/interview-prep/
 !interview-prep/.gitkeep
 # Session transcripts hold real interviewer names/companies — ignore content,
 # ship only the system-owned scaffold (README + .gitkeep). #1242
@@ -250,7 +250,7 @@ plan/
 # Profile intake sources (master CV / LinkedIn export / diplomas / references
 # — user PII, never commit). Ship only the system-owned scaffold. #1723
 /documents
-!documents/
+!/documents/
 documents/*
 !documents/.gitkeep
 !documents/README.md
@@ -258,3 +258,11 @@ documents/*
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
 data/agent-inbox.md
+
+# Older installs keep unanchored scaffold negations because reconcileGitignore()
+# only appends rules. Re-ignore matching user-layer folders under data/ after
+# those legacy patterns so personal files stay out of git status and commits.
+data/jds/
+data/output/
+data/documents/
+data/interview-prep/
