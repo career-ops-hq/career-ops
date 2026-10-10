@@ -24,20 +24,22 @@ function readFile(path) {
 
 // The heading shape the report parser recognizes. web/src/lib/report-sections.mjs
 // (imported by web/src/components/report-view.tsx) splits a body on /^##\s+(.*)$/
-// and promotes a heading ending in `(lead)` or `(verdict)`, so `##` must be
-// followed by whitespace, any kind but a newline, as `\s` reads it there.
-// `##Verdict (lead)` and `### Verdict (lead)` are not sections at all, and a
-// guard that accepted them would pass on a heading the web view never promotes.
-const LEAD_HEADING = /^##[^\S\n]+[^\n]*\((?:lead|verdict)\)[^\S\n]*$/gmi;
+// and promotes a heading ending in `(lead)` or `(verdict)`. The mode contract
+// requires the language-invariant `(lead)` marker (modes/oferta.md), so this
+// guard matches `(lead)` only. `##` must be followed by whitespace, any kind
+// but a newline, as `\s` reads it there. `##Verdict (lead)` and
+// `### Verdict (lead)` are not sections at all, and a guard that accepted them
+// would pass on a heading the web view never promotes.
+const LEAD_HEADING = /^##[^\S\n]+[^\n]*\(lead\)[^\S\n]*$/gmi;
 const leadHeadings = (text) => {
   LEAD_HEADING.lastIndex = 0;
   return [...text.matchAll(LEAD_HEADING)];
 };
 
-// The guard itself: it must accept every `(lead)`/`(verdict)` heading the parser
-// promotes and reject what the parser does not read as a heading. A bare
-// `## Verdict` is promoted by the parser and rejected here on purpose, because
-// the marker is the contract.
+// The guard itself: it must accept every `(lead)` heading the parser promotes
+// and reject what the parser does not read as a heading. A bare `## Verdict`
+// and a `(verdict)` heading are promoted by the parser and rejected here on
+// purpose, because the `(lead)` marker is the contract.
 //
 // web/ is not in update-system.mjs's SYSTEM_PATHS but tests/ is, so this file
 // reaches checkouts with no web/ at all, where a static import would fail the
@@ -52,16 +54,18 @@ if (!existsSync(join(ROOT, 'web', 'src'))) {
   const { splitSections, isVerdictHeading } = await import(pathToFileURL(WEB_REPORT_SECTIONS).href);
   const accepted = ['## Verdict (lead)', '## Veredicto (lead)', '## 结论 (lead)', '##\tVeredicto (lead)', '##\u00a0Verdict (lead)'];
   const rejected = ['##Verdict (lead)', '### Verdict (lead)', '#Verdict (lead)', 'Verdict (lead)'];
+  const contractRejected = ['## Veredicto (verdict)', '## Verdict'];
   const parserPromotes = (line) =>
     splitSections(`${line}\nbody`).sections.some((sec) => isVerdictHeading(sec.heading));
   const wrong = [
     ...accepted.filter((l) => leadHeadings(l).length !== 1 || !parserPromotes(l)),
     ...rejected.filter((l) => leadHeadings(l).length !== 0 || parserPromotes(l)),
+    ...contractRejected.filter((l) => leadHeadings(l).length !== 0 || !parserPromotes(l)),
   ];
   if (wrong.length > 0) {
-    fail(`lead-heading guard disagrees with the report parser on: ${wrong.map((l) => JSON.stringify(l)).join(', ')}`);
+    fail(`lead-heading guard misjudges, against the report parser or the (lead) contract: ${wrong.map((l) => JSON.stringify(l)).join(', ')}`);
   } else {
-    pass(`lead-heading guard matches the report parser on ${accepted.length} accepted and ${rejected.length} rejected headings`);
+    pass(`lead-heading guard matches the report parser on ${accepted.length} accepted and ${rejected.length} rejected headings, and rejects ${contractRejected.length} the parser promotes without the (lead) marker`);
   }
 }
 

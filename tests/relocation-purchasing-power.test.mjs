@@ -631,9 +631,13 @@ test('modes/oferta.md Block G carries Signal 17 and its Risk Summary row', () =>
   assert.match(oferta, /\*\*17\. Relocation Purchasing Power\*\*/, 'Signal 17 heading present');
   assert.match(oferta, /node salary-gap\.mjs --relocation --gross/, 'Signal 17 instructs running the real CLI, not hand-computing the arithmetic');
   assert.match(oferta, /Not financial or tax advice|not financial or tax advice/i, 'Signal 17 carries the not-financial/tax-advice disclaimer');
+  // The end bound is searched from the section start, as in test-all.mjs's
+  // #2892 check: a block placed before Risk Summary that shows its own
+  // "Block format:" would otherwise end the slice before it starts.
+  const riskSummaryStart = oferta.indexOf('## Risk Summary (after Block G)');
   const riskSummarySection = oferta.slice(
-    oferta.indexOf('## Risk Summary (after Block G)'),
-    oferta.indexOf('Block format:'),
+    riskSummaryStart,
+    oferta.indexOf('Block format:', riskSummaryStart),
   );
   assert.match(riskSummarySection, /Relocation purchasing power/, 'Risk Summary table carries the relocation purchasing-power row');
 });
