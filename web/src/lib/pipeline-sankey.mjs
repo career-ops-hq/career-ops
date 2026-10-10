@@ -28,6 +28,7 @@ export const NODE_DEFS = [
   { id: "rejectedApply", label: "Rejected (no interview)", rank: 2, tone: "danger" },
   { id: "discarded", label: "Discarded", rank: 2, tone: "muted" },
   { id: "screening", label: "Screening", rank: 3, tone: "info" },
+  { id: "assessment", label: "Assessment", rank: 3, tone: "info" },
   { id: "interview", label: "Interview", rank: 3, tone: "success" },
   { id: "offer", label: "Offer", rank: 3, tone: "success" },
   { id: "hired", label: "Hired", rank: 3, tone: "success" },
@@ -41,7 +42,7 @@ const ADVANCED = new Set(["INTERVIEW", "OFFER", "HIRED"]);
 // submission: the core counts it in neither `submitted` nor `decided`
 // (modes/patterns.md). A Discarded row stays under Submitted only when the
 // status log shows it reached one of these; otherwise it leaves from Tracked.
-const SUBMITTED_OR_LATER = new Set(["APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "HIRED", "REJECTED"]);
+const SUBMITTED_OR_LATER = new Set(["APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED", "REJECTED"]);
 
 const LEAVES = [
   "skip",
@@ -49,6 +50,7 @@ const LEAVES = [
   "discardedEarly",
   "waiting",
   "screening",
+  "assessment",
   "interview",
   "offer",
   "hired",
@@ -143,6 +145,7 @@ export function classifyLeaf(app, log) {
   if (status === "EVALUATED") return "evaluated";
   if (status === "APPLIED") return "waiting";
   if (status === "RESPONDED") return "screening";
+  if (status === "ASSESSMENT") return "assessment";
   if (status === "INTERVIEW") return "interview";
   if (status === "OFFER") return "offer";
   if (status === "HIRED") return "hired";
@@ -170,6 +173,7 @@ export function buildPipelineSankey(apps, log = []) {
 
   const engaged =
     counts.screening +
+    counts.assessment +
     counts.interview +
     counts.offer +
     counts.hired +
@@ -187,6 +191,7 @@ export function buildPipelineSankey(apps, log = []) {
     rejectedApply: counts.rejectedApply,
     discarded: counts.discarded,
     screening: counts.screening,
+    assessment: counts.assessment,
     interview: counts.interview,
     offer: counts.offer,
     hired: counts.hired,
@@ -206,6 +211,7 @@ export function buildPipelineSankey(apps, log = []) {
     { source: "submitted", target: "rejectedApply", value: values.rejectedApply },
     { source: "submitted", target: "discarded", value: values.discarded },
     { source: "engaged", target: "screening", value: values.screening },
+    { source: "engaged", target: "assessment", value: values.assessment },
     { source: "engaged", target: "interview", value: values.interview },
     { source: "engaged", target: "offer", value: values.offer },
     { source: "engaged", target: "hired", value: values.hired },

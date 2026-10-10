@@ -265,10 +265,12 @@ const SYSTEM_PATHS = [
   'patch-latex-content.mjs',
   'lib/ascii-fold.mjs',
   'lib/cli-flags.mjs',
+  'lib/failure-excerpt.mjs',
   'lib/gemini-node-floor.mjs',
   'lib/node-floor.mjs',
   'lib/local-today.mjs',
   'lib/parse-date.mjs',
+  'lib/reply-proposals.mjs',
   'lib/placeholder-cell.mjs',
   'lib/tracker-addition.mjs',
   'lib/scan-summary-marker.mjs',
@@ -293,6 +295,9 @@ const SYSTEM_PATHS = [
   'story-provenance-check.mjs',
   'lib/latex-content.mjs',
   'lib/context-budget.mjs',
+  // Ships alongside doctor.mjs, which imports it: an upgraded install whose
+  // updater had no entry for it would check out a doctor that cannot load.
+  'lib/title-filter-conflicts.mjs',
   // Retired 2026-09-05: the suite moved to tests/context-budget.test.mjs. The
   // entry stays so staleSystemFiles() prunes the orphan on an upgraded install;
   // drop it once a release has shipped past that move.
@@ -411,6 +416,7 @@ const SYSTEM_PATHS = [
   'check-table-freshness.mjs',
   'check-jd-archive.mjs',
   'fingerprint-core.mjs',
+  'listing-fingerprint.mjs',
   'process-quality.mjs',
   'company-history.mjs',
   'rejection-latency.mjs',
@@ -534,6 +540,7 @@ const SYSTEM_PATHS = [
   'README.ua.md',
   'README.zh-TW.md',
   'README.tr.md',
+  'README.vi.md',
   'CHANGELOG.md',
   'CODE_OF_CONDUCT.md',
   'CONTRIBUTORS.md',

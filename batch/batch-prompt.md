@@ -353,9 +353,21 @@ Signals 1-5 and 7-9 set the tier. Signal 6 is `not evaluated` in batch, so it ne
 
 Use one tier: **High Confidence**, **Proceed with Caution**, or **Suspicious**. Present observations, not accusations, and explain thin evidence.
 
+#### Verdict (lead)
+
+Write a `## Verdict (lead)` block directly after Block G and before `## Risk Summary`. It restates `final_decision` as one human sentence and never introduces a different call: if the sentence and the field disagree, the field is right. The bolded call is that field's value (Apply, Consider, Research first, Skip), followed by one reason drawn from what the report already established. No re-scoring, no new evidence.
+
+The `(lead)` marker is what the web report view promotes into the page's lead callout, and it is identified by the marker rather than by a heading word, so a translated heading resolves identically. Translate the noun, never `(lead)`, and never letter this block.
+
+```markdown
+## Verdict (lead)
+
+**Apply.** Strong match on the role's core axis with no hard stops, and Block G returned High Confidence.
+```
+
 #### Risk Summary (after Block G)
 
-Close the report body with a `## Risk Summary` block directly after Block G's section — one row per risk signal, fixed order, three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **Aggregation only, zero new judgment:** each row quotes the verdict already produced by its source signal; it never re-scores or overrides.
+Close the report body with a `## Risk Summary` block directly after the `## Verdict (lead)` block, which follows Block G's section — one row per risk signal, fixed order, three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **Aggregation only, zero new judgment:** each row quotes the verdict already produced by its source signal; it never re-scores or overrides.
 
 **`— not evaluated` is a first-class state:** a signal that this worker cannot evaluate is explicitly declared — NEVER omit the row — so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it just found no redflags file), not a fourth free-floating state.
 
@@ -589,6 +601,7 @@ Then include:
 - `## E) Personalization Plan`
 - `## F) Interview Plan`
 - `## G) Posting Legitimacy`
+- `## Verdict (lead)`
 - `## Risk Summary`
 - `## Score Evidence`
 - `## Extracted Keywords`
@@ -683,7 +696,7 @@ Headerless files in the legacy 9-column order (`num date company role status sco
 
 **Optional fields:** if the offer came through an agency/recruiter (#1596), add a `via` column to the header and put the agency name (for example `Hays`) in it. In a headerless file the same value travels as a labeled trailing field `via={Agency}` — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
 
-Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Interview`, `Offer`, `Rejected`, `Discarded`, `SKIP`.
+Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`.
 
 Use `{{REPORT_NUM}}` as the tracker `num`. The batch coordinator reserves this number before launching the worker, so do not calculate a local `max+1`.
 

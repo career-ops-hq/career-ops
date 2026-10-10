@@ -11,8 +11,9 @@
 // Ashby a longer timeout plus a backoff+jitter retry (the backoff spaces
 // requests out to dodge rate-limiting).
 // See .planning/codebase/ashby-scan-abort-diagnosis.md.
-import { fetchJsonWithRetry } from './_http.mjs';
+import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const ASHBY_TIMEOUT_MS = 30_000;
 const ASHBY_RETRIES = 2;
@@ -156,7 +157,7 @@ export function parseCompensation(job) {
 const ALLOWED_ASHBY_HOSTS = new Set(['api.ashbyhq.com']);
 
 /** @param {string} url */
-function assertAshbyUrl(url) {
+function assertAshbyUrl(url, hosts = ALLOWED_ASHBY_HOSTS) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -164,8 +165,8 @@ function assertAshbyUrl(url) {
     throw new Error(`ashby: invalid URL: ${url}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`ashby: URL must use HTTPS: ${url}`);
-  if (!ALLOWED_ASHBY_HOSTS.has(parsed.hostname))
-    throw new Error(`ashby: untrusted hostname "${parsed.hostname}" — must be one of: ${[...ALLOWED_ASHBY_HOSTS].join(', ')}`);
+  if (!hosts.has(parsed.hostname))
+    throw new Error(`ashby: untrusted hostname "${parsed.hostname}" — must be one of: ${[...hosts].join(', ')}`);
   return url;
 }
 
@@ -182,6 +183,105 @@ function resolveApiUrl(entry) {
   const match = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
   if (!match) return null;
   return `https://api.ashbyhq.com/posting-api/job-board/${match[1]}?includeCompensation=true`;
+}
+
+const EMBED_HOST = 'jobs.ashbyhq.com';
+
+/**
+ * Resolve the board slug for the embed source.
+ * @param {import('./_types.js').PortalEntry} entry
+ * @returns {string|null}
+ */
+function resolveBoardSlug(entry) {
+  const explicit = /** @type {any} */ (entry).ashby?.board;
+  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
+  const match = (entry.careers_url || '').match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * The embed page Ashby's own documented embed script loads.
+ *
+ * `<script src="https://jobs.ashbyhq.com/{slug}/embed?version=2">` builds its
+ * iframe with `urlForIframe.searchParams.set("embed", "js")` ("This will always
+ * be set"), so this is the same server-rendered page every careers site that
+ * embeds an Ashby board already requests. robots.txt on jobs.ashbyhq.com
+ * disallows only /meeting/, /b/ and /api/.
+ *
+ * @param {string} slug
+ * @returns {string}
+ */
+export function buildEmbedUrl(slug) {
+  return `https://${EMBED_HOST}/${encodeURIComponent(slug)}?embed=js`;
+}
+
+// The embed page hydrates from a single assignment of a JSON object.
+const APP_DATA_START_RE = /window\.__appData\s*=\s*\{/;
+
+/**
+ * The JSON object assigned to window.__appData, as source text. A brace scan
+ * that skips string contents, because a lazy regex up to the first `};` cut
+ * the object at any title, team name or theme CSS containing that sequence.
+ *
+ * @param {string} html
+ * @returns {string|null|undefined} the object text; null when the assignment
+ *   is absent; undefined when it starts but never closes.
+ */
+function appDataSource(html) {
+  const m = APP_DATA_START_RE.exec(html);
+  if (!m) return null;
+  const start = m.index + m[0].length - 1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < html.length; i++) {
+    const c = html[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+    } else if (c === '"') {
+      inString = true;
+    } else if (c === '{') {
+      depth++;
+    } else if (c === '}' && --depth === 0) {
+      return html.slice(start, i + 1);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Pull the job board out of the embed page.
+ *
+ * Three outcomes, deliberately distinct — a company that disabled its posting
+ * API and a slug that does not exist BOTH answer 404 on the API, and only this
+ * page tells them apart:
+ *   - a jobBoard object        -> the board exists and is readable
+ *   - jobBoard: null           -> no such board (a nonexistent slug renders
+ *                                 `"organization":null,"jobBoard":null`)
+ *   - no parseable __appData   -> Ashby changed the page
+ *
+ * @param {string} html
+ * @returns {{jobPostings: any[]} | null} null when jobBoard is absent/null.
+ * @throws when __appData itself cannot be found or parsed.
+ */
+export function parseEmbedAppData(html) {
+  const source = appDataSource(html || '');
+  if (source === null) throw new Error('ashby: embed page carried no window.__appData — Ashby changed the embed markup');
+  let data;
+  try {
+    if (source === undefined) throw new Error('unterminated');
+    data = JSON.parse(source);
+  } catch {
+    throw new Error('ashby: embed page __appData did not parse as JSON — Ashby changed the embed markup');
+  }
+  const board = data?.jobBoard;
+  if (!board || typeof board !== 'object') return null;
+  if (!Array.isArray(board.jobPostings)) {
+    throw new Error('ashby: embed jobBoard carried no jobPostings array — Ashby changed the embed payload');
+  }
+  return { jobPostings: board.jobPostings };
 }
 
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
@@ -273,12 +373,95 @@ function formatLocation(j) {
   return [...new Set(parts)].join(' · ');
 }
 
+/**
+ * Read a board from the embed page instead of the posting API.
+ *
+ * @param {import('./_types.js').PortalEntry} entry
+ * @param {import('./_types.js').Context} ctx
+ * @returns {Promise<import('./_types.js').Job[]>}
+ */
+async function fetchFromEmbed(entry, ctx) {
+  const slug = resolveBoardSlug(entry);
+  if (!slug) throw new Error(`ashby: cannot derive the board slug for ${entry.name} — set ashby.board or a jobs.ashbyhq.com careers_url`);
+  const url = buildEmbedUrl(slug);
+  // Its own one-host set, deliberately NOT added to ALLOWED_ASHBY_HOSTS: that
+  // would also let a portals.yml `api:` entry point at the embed page.
+  assertAshbyUrl(url, new Set([EMBED_HOST]));
+  const html = /** @type {string} */ (await fetchTextWithRetry(
+    ctx,
+    url,
+    { timeoutMs: ASHBY_TIMEOUT_MS, redirect: 'error' },
+    { retries: ASHBY_RETRIES, baseDelayMs: ASHBY_BACKOFF_BASE_MS },
+  ));
+  const board = parseEmbedAppData(html);
+  if (!board) {
+    // The page rendered, and it says there is no such board. That is the same
+    // condition the posting API reports as 404, and it has to stay loud: a
+    // mistyped or migrated slug returning [] would read as "no open roles"
+    // on every scan from here on.
+    const err = new Error(`ashby: no job board at ${url} — the slug does not exist (jobBoard: null)`);
+    /** @type {any} */ (err).status = 404;
+    throw err;
+  }
+  // The slug comes from portals.yml, not the payload, and buildEmbedUrl above
+  // already encoded it (a slug encodeURIComponent rejects never gets this far).
+  const encodedSlug = encodeURIComponent(slug);
+  return board.jobPostings.map((/** @type {any} */ p) => {
+    // A row the payload mangled is dropped on its own, never the board: a null
+    // entry, or one with no usable id. The id is the URL's last segment, so
+    // without it `String(undefined)` minted ".../undefined" — a dead link that
+    // passed the title/url filter (CodeRabbit, #4298). The URL is built from
+    // the coerced value.
+    if (!p || typeof p !== 'object') return null;
+    const id = coerceId(p.id);
+    if (id === undefined) return null;
+    // Same location rendering as the posting API path, so a board reads the
+    // same whichever source served it — in particular the "Remote" marker:
+    // scan.mjs's location_filter sees only this string, so a remote posting
+    // whose locationName is a city would otherwise fail `allow: ["Remote"]`
+    // (CodeRabbit, #4298). The embed payload names places `locationName`
+    // where the API says `location`; nothing else differs.
+    const location = formatLocation({
+      location: p.locationName,
+      secondaryLocations: Array.isArray(p.secondaryLocations)
+        ? p.secondaryLocations.map((/** @type {any} */ l) => ({ location: l?.locationName }))
+        : [],
+      workplaceType: p.workplaceType,
+      isRemote: p.isRemote,
+    });
+    // The id comes from the embed payload, so it is host-controlled: a lone
+    // surrogate in it would make encodeURIComponent throw and take the whole
+    // board down mid-map. Drop that one posting instead (_safe-url.mjs).
+    const encodedId = safeEncodeURIComponent(id);
+    return {
+      title: p.title || '',
+      url: encodedId === null ? '' : `https://${EMBED_HOST}/${encodedSlug}/${encodedId}`,
+      company: entry.name,
+      location,
+      // The embed payload carries neither descriptionPlain nor publishedAt —
+      // the posting API's two extras — and compensation only as a display string
+      // (compensationTierSummary), which is not parsed: a bare "$" names no
+      // currency. An absent date means "unknown", never
+      // "stale", so nothing is invented here. workplaceType is folded into
+      // location above, exactly as on the API path, and not emitted on its own.
+    };
+  }).filter((/** @type {any} */ j) => j && j.title && j.url);
+}
+
 /** @type {Provider} */
 export default {
   id: 'ashby',
 
   detect(entry) {
     try {
+      // An opted-in embed entry is Ashby's even when careers_url is a corporate
+      // page: `ashby.board` names the board then, and without this branch an
+      // entry with no explicit `provider:` never reached the embed source
+      // (CodeRabbit, #4298). The URL is the one fetch() will actually read.
+      if (/** @type {any} */ (entry).ashby?.embed) {
+        const slug = resolveBoardSlug(entry);
+        if (slug) return { url: buildEmbedUrl(slug) };
+      }
       const apiUrl = resolveApiUrl(entry);
       return apiUrl ? { url: apiUrl } : null;
     } catch {
@@ -287,6 +470,20 @@ export default {
   },
 
   async fetch(entry, ctx) {
+    // Opt-in embed source. Some companies turn the public posting API off while
+    // their board stays published: api.ashbyhq.com answers 404, and the board is
+    // still served to every careers page that embeds it. `ashby: { embed: true }`
+    // reads that page instead.
+    //
+    // Opt-in rather than an automatic 404 fallback, on measurement: of 460
+    // boards sampled from the sweep dataset, 107 answered 404 and exactly ONE
+    // was an API-disabled live board. An automatic fallback would spend a second
+    // request on every dead board in every sweep (#2840 counted 684 of them) to
+    // recover ~1%, and would turn a mistyped slug from a loud error into a
+    // silent empty board.
+    if (/** @type {any} */ (entry).ashby?.embed) {
+      return await fetchFromEmbed(entry, ctx);
+    }
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`ashby: cannot derive API URL for ${entry.name}`);
     assertAshbyUrl(apiUrl);
@@ -317,10 +514,14 @@ export default {
       { retries: ASHBY_RETRIES, baseDelayMs: ASHBY_BACKOFF_BASE_MS },
     ));
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const boardSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1] || '';
     return jobs.map(/** @param {any} j */ (j) => ({
       title: j.title || '',
       url: j.jobUrl || '',
       company: entry.name,
+      listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
+        ? { ats_provider: 'ashby', board_slug: boardSlug, posting_id: j.id }
+        : undefined,
       // Ashby's posting uuid — the only stable id this board API exposes
       // (no separate employer requisition field), so requisitionId is left unset
       // rather than guessed at.

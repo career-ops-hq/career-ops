@@ -288,13 +288,14 @@ export async function syncTrackerPdfFlags(options = {}) {
 }
 
 if (isMainModule(import.meta.url)) {
-  const flags = { dryRun: false, json: false, prune: false, write: false };
+  const flags = { dryRun: false, json: false, prune: false, write: false, help: false };
   const unknownOptions = [];
   for (const arg of process.argv.slice(2)) {
     if (arg === '--dry-run') flags.dryRun = true;
     else if (arg === '--json') flags.json = true;
     else if (arg === '--prune') flags.prune = true;
     else if (arg === '--write') flags.write = true;
+    else if (arg === '--help' || arg === '-h') flags.help = true;
     else unknownOptions.push(arg);
   }
 
@@ -308,7 +309,13 @@ if (isMainModule(import.meta.url)) {
   // --dry-run must win over --write
   if (flags.dryRun) flags.write = false;
 
-  if (unknownOptions.length > 0) {
+  // Before the unknown-option branch: --help landed in unknownOptions, so
+  // asking what the flags are exited 1 with an error about the flag you asked
+  // about. It is also before the --write/--prune check, which is a usage
+  // diagnostic and not what was asked for.
+  if (flags.help) {
+    console.log(USAGE);
+  } else if (unknownOptions.length > 0) {
     const error = `unknown option(s): ${unknownOptions.join(', ')}`;
     if (flags.json) console.error(JSON.stringify({ error, code: 'unknown-option' }));
     else console.error(`Error: ${error}\n${USAGE}`);

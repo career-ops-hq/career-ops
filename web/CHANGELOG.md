@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.14.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.13.0...web-v0.14.0) (2026-10-10)
+
+
+### Features
+
+* **cv-templates:** add atsLint, with the ATS rules as data in templates/ats-rules.yml ([#3900](https://github.com/career-ops-hq/career-ops/issues/3900)) ([6f1a74e](https://github.com/career-ops-hq/career-ops/commit/6f1a74e8e37119f01a68a397187025e7dacc804a))
+* **i18n:** support language.modes_dir as a list of declared markets ([#3798](https://github.com/career-ops-hq/career-ops/issues/3798)) ([d31a138](https://github.com/career-ops-hq/career-ops/commit/d31a138e8b3dc1971a43e15931623112c8a83246))
+* **templates:** let a template pack declare the sections it owns ([#3852](https://github.com/career-ops-hq/career-ops/issues/3852)) ([#3916](https://github.com/career-ops-hq/career-ops/issues/3916)) ([261d3c5](https://github.com/career-ops-hq/career-ops/commit/261d3c53bd836c14016cb93b6092180bca13f686))
+* **web:** add local scheduled scans ([#2628](https://github.com/career-ops-hq/career-ops/issues/2628)) ([85b67f5](https://github.com/career-ops-hq/career-ops/commit/85b67f527c14ebd08c8aa00bedeff28182499978))
+* **web:** add route-aware loading feedback ([#4338](https://github.com/career-ops-hq/career-ops/issues/4338)) ([e049608](https://github.com/career-ops-hq/career-ops/commit/e04960897029429c2dd23cc0a3bd3a8996d26ef1))
+* **web:** Analytics progress + insights views, read from the core ([#4576](https://github.com/career-ops-hq/career-ops/issues/4576)) ([2d38488](https://github.com/career-ops-hq/career-ops/commit/2d38488012c172a1fbbb2d025d7b51eed8a3bbcb))
+* **web:** edit application status inline in Pipeline ([#4701](https://github.com/career-ops-hq/career-ops/issues/4701)) ([b89ef7e](https://github.com/career-ops-hq/career-ops/commit/b89ef7e27ca7ccf8380c8a8571dbd8732b26b845))
+* **web:** keep context during loading transitions ([#4473](https://github.com/career-ops-hq/career-ops/issues/4473)) ([e691fa6](https://github.com/career-ops-hq/career-ops/commit/e691fa68693abbed25eb301532c0294408e5edb9))
+* **web:** preserve assistant conversations and earlier context ([#4495](https://github.com/career-ops-hq/career-ops/issues/4495)) ([f9e9139](https://github.com/career-ops-hq/career-ops/commit/f9e91394657a229b351df7ff451f6b6d59b08967))
+* **web:** surface post-interview silence on the Follow-ups page ([#4586](https://github.com/career-ops-hq/career-ops/issues/4586)) ([9f0b533](https://github.com/career-ops-hq/career-ops/commit/9f0b5333fd6b2bf44a851814fe85b18c0c0b4a5e))
+
+
+### Bug Fixes
+
+* **funnel:** retain replies and historical stages across surfaces ([#4374](https://github.com/career-ops-hq/career-ops/issues/4374)) ([ead56e8](https://github.com/career-ops-hq/career-ops/commit/ead56e8c158ea8353636f85600062b0b1102cdb4))
+* **liveness:** record the expired verdict so a dead posting stops resurfacing ([#3905](https://github.com/career-ops-hq/career-ops/issues/3905)) ([1a68591](https://github.com/career-ops-hq/career-ops/commit/1a6859146193413307c496895a408fc620779b19))
+* **pipeline:** break sort ties on the row number, so newest-first reorders a date ([#4333](https://github.com/career-ops-hq/career-ops/issues/4333)) ([c4f2c3f](https://github.com/career-ops-hq/career-ops/commit/c4f2c3fcbd22979143a0e6115bd2718a820ac41b))
+* **web/apply:** never hand the planner a ref to a submit control, and guard every action by element facts ([#3834](https://github.com/career-ops-hq/career-ops/issues/3834)) ([a6637dd](https://github.com/career-ops-hq/career-ops/commit/a6637ddf9a8025118187ac85c5af425fd80a6b55))
+* **web:** bind the dashboard to loopback by default ([#3716](https://github.com/career-ops-hq/career-ops/issues/3716)) ([7062ed5](https://github.com/career-ops-hq/career-ops/commit/7062ed507ba07d3c876dc07f759897be8a4d82ea))
+* **web:** confirm paid assistant fan-out with cost estimates ([#4746](https://github.com/career-ops-hq/career-ops/issues/4746)) ([b3b62b4](https://github.com/career-ops-hq/career-ops/commit/b3b62b4cdce4e982697547f1f3e961a33b0843a3))
+* **web:** count cached input in usage meter ([#4744](https://github.com/career-ops-hq/career-ops/issues/4744)) ([088d0dd](https://github.com/career-ops-hq/career-ops/commit/088d0ddd1c90a07eb9df650dec7f7fec2f079e65))
+* **web:** fall back from a stale saved cliId on every AI route, not just Run ([#4638](https://github.com/career-ops-hq/career-ops/issues/4638)) ([431f593](https://github.com/career-ops-hq/career-ops/commit/431f5933bcb14d178cdff47cc6faa2bcc600407b))
+* **web:** pre-fill apply answers from the CV attached to the same form ([#4404](https://github.com/career-ops-hq/career-ops/issues/4404)) ([414ff23](https://github.com/career-ops-hq/career-ops/commit/414ff238679a186e74bcd3b0415f3fb4e49dce38))
+* **web:** read the whole of modes/_profile.md, not just the managed block ([#4008](https://github.com/career-ops-hq/career-ops/issues/4008)) ([f4c52d1](https://github.com/career-ops-hq/career-ops/commit/f4c52d19a29c805ca7ad2e1f4ce767e6c70b8708))
+* **web:** require confirmed worker stream completion ([#4107](https://github.com/career-ops-hq/career-ops/issues/4107)) ([7860d2f](https://github.com/career-ops-hq/career-ops/commit/7860d2f146769a730e185cbda808020d18d6723b))
+* **web:** update vulnerable dependencies ([#4670](https://github.com/career-ops-hq/career-ops/issues/4670)) ([077ff80](https://github.com/career-ops-hq/career-ops/commit/077ff80bd0391db2df74dd57ee78002a580bc859))
+* **web:** validate profile updates before writing ([#4500](https://github.com/career-ops-hq/career-ops/issues/4500)) ([b208464](https://github.com/career-ops-hq/career-ops/commit/b2084646acdc2bc34ad48ed8b7292d48c3aa3561))
+
 ## [0.13.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.12.0...web-v0.13.0) (2026-10-01)
 
 

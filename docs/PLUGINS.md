@@ -56,6 +56,13 @@ See `plugins/README.md` for the full contract + the honest trust model (plain
 ESM has no hard sandbox — bundled plugins are code-reviewed; your own are your
 trust).
 
+For human-confirmed tracker transitions, #3333 proposes a separate local
+drop-file bridge read by `reply-watch.mjs`: see the draft
+[reply proposal contract](REPLY_PROPOSALS.md). It adds no hook kind and grants
+no tracker-write permission to plugins. The directory and row format are
+accepted as a v1 draft: they may change until a real producer writes to the
+directory.
+
 ## Publishing + getting approved
 
 1. Develop locally, then publish your plugin as its **own public GitHub repo**

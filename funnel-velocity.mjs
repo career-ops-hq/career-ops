@@ -89,7 +89,11 @@ const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction', 'reply-watc
 // mixes offers and rejections reads grim and means nothing.
 const HOPS = [
   { key: 'appliedToResponded', from: 'Applied', to: 'Responded' },
-  { key: 'respondedToInterview', from: 'Responded', to: 'Interview' },
+  { key: 'respondedToAssessment', from: 'Responded', to: 'Assessment' },
+  { key: 'assessmentToInterview', from: 'Assessment', to: 'Interview' },
+  // Keep the direct hop for legacy rows that moved from Responded straight to
+  // Interview before Assessment became a first-class lifecycle stage.
+  { key: 'respondedToInterview', from: 'Responded', to: 'Interview', excludeIntermediate: 'Assessment' },
   { key: 'interviewToOffer', from: 'Interview', to: 'Offer' },
   { key: 'appliedToRejected', from: 'Applied', to: 'Rejected' },
 ];
@@ -218,7 +222,10 @@ export function computeVelocity(timelines, todayStr) {
     for (const timeline of timelines.values()) {
       const fromIdx = timeline.findIndex(o => o.to === hop.from && o.dayMath);
       if (fromIdx === -1) continue;
-      const next = timeline.slice(fromIdx + 1).find(o => o.to === hop.to && o.dayMath);
+      const later = timeline.slice(fromIdx + 1);
+      const nextIdx = later.findIndex(o => o.to === hop.to && o.dayMath);
+      const next = nextIdx === -1 ? null : later[nextIdx];
+      if (next && hop.excludeIntermediate && later.slice(0, nextIdx).some(o => o.to === hop.excludeIntermediate)) continue;
       if (next) {
         const d = daysBetween(timeline[fromIdx].date, next.date);
         if (d === null || d < 0) continue;
@@ -594,6 +601,22 @@ function selfTest() {
   check(velocity.appliedToResponded.censored === 3, `velocity: expected 3 censored, got ${velocity.appliedToResponded.censored}`);
   check(velocity.appliedToRejected.censored === 0, 'velocity: rejection hop does not double-count censoring');
   check(velocity.interviewToOffer.n === 1 && velocity.interviewToOffer.insufficientData, 'velocity: I→O n=1 insufficient');
+
+  const ASSESSMENT_FIXTURE = [
+    '10\t2026-06-01\tApplied\tResponded\tset-status\t',
+    '10\t2026-06-04\tResponded\tAssessment\tset-status\t',
+    '10\t2026-06-09\tAssessment\tInterview\tset-status\t',
+  ].join('\n');
+  const assessmentVelocity = computeVelocity(
+    foldObservations(parseStatusLog(ASSESSMENT_FIXTURE, states).observations),
+    TODAY,
+  );
+  check(assessmentVelocity.respondedToAssessment.n === 1,
+    `velocity: Responded→Assessment expected n=1, got ${assessmentVelocity.respondedToAssessment.n}`);
+  check(assessmentVelocity.assessmentToInterview.n === 1,
+    `velocity: Assessment→Interview expected n=1, got ${assessmentVelocity.assessmentToInterview.n}`);
+  check(assessmentVelocity.respondedToInterview.n === 0,
+    `velocity: Assessment path must not count as legacy Responded→Interview, got n=${assessmentVelocity.respondedToInterview.n}`);
 
   // three completed A→R measurements → median renders
   const logWithThird = LOG_FIXTURE + '\n4\t2026-06-27\tApplied\tResponded\tset-status\t';

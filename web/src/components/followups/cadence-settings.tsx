@@ -14,7 +14,7 @@ const FIELDS: { key: ProfileCadenceKey; label: string; hint: string }[] = [
   { key: "applied_subsequent_days", label: "Between follow-ups", hint: "days between nudges while Applied" },
   { key: "applied_max_followups", label: "Max follow-ups", hint: "after this many with no reply the lead goes cold" },
   { key: "responded_initial_days", label: "Reply window", hint: "answer a company response within this many days" },
-  { key: "responded_subsequent_days", label: "Responded cadence", hint: "days between touches while in Responded" },
+  { key: "responded_subsequent_days", label: "Responded / assessment cadence", hint: "days between touches while in Responded or Assessment" },
   { key: "interview_thankyou_days", label: "Thank-you note", hint: "due within this many days of reaching Interview" },
 ];
 

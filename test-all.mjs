@@ -61,6 +61,7 @@ import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailu
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
 import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './tests/evaluation-mode-parity-helpers.mjs';
+import { childFailureExcerpt } from './lib/failure-excerpt.mjs';
 import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
@@ -231,8 +232,13 @@ async function runDiscovered(filter = null) {
         const detail = lastRunFailure();
         fail(`${rel} — node:test suite failed (exit ${detail?.status ?? '?'})`);
         // Surface the runner's own summary; a bare "failed" is not actionable.
-        const tail = (detail?.stderr || detail?.stdout || '').split('\n').filter(Boolean).slice(-12);
-        for (const line of tail) console.log(`      ${line}`);
+        // The trailing window alone is not actionable either: node prints the
+        // error message above the frames, so a twelve-line tail kept
+        // `actual: false, expected: true` and dropped the interpolated value
+        // that says WHICH assertion and by how much (#4017).
+        for (const line of childFailureExcerpt(detail)) {
+          console.log(`      ${line}`);
+        }
       } else {
         // Both reporters: TAP prints "# pass N", the default spec reporter
         // prints "ℹ pass N". Cosmetic — the pass/fail verdict is the exit code.
@@ -3693,9 +3699,14 @@ if (
   }
 
   // 6. Risk Summary row exists and follows the "activates automatically" pattern
+  // End bound is searched FROM the section start, not globally: any section
+  // added before Risk Summary that also carries a "Block format:" example
+  // would otherwise make the end index precede the start and slice to empty,
+  // failing this check for a reason that has nothing to do with the row.
+  const riskSummaryStart = ofertaMode.indexOf('## Risk Summary (after Block G)');
   const riskSummarySection = ofertaMode.slice(
-    ofertaMode.indexOf('## Risk Summary (after Block G)'),
-    ofertaMode.indexOf('Block format:')
+    riskSummaryStart,
+    ofertaMode.indexOf('Block format:', riskSummaryStart)
   );
   if (
     riskSummarySection.includes('AI-screening disclosure') &&
@@ -8165,8 +8176,9 @@ try {
   if (
     historyRow.split('\t').length === SCAN_HISTORY_COLUMNS.length && // every declared column, empty ones included
     !historyRow.includes('\n') && !historyRow.includes('\r') &&
-    history.posted_at === '' && // no postedAt on hostileOffer
-    history.trust_score === '' && history.trust_flags === '' && // no trust signal
+    !historyRow.split('\t').some(col => /[\r\n\t]/.test(col)) &&
+    history.posted_at === '' &&
+    history.trust_score === '' && history.trust_flags === '' &&
     history.url === 'https://jobs.example.com/123|evil' &&
     history.title.includes('- [ ] https://evil.example/job') &&
     stored.company === "'=ACME\\Corp | R&D" &&
@@ -8176,7 +8188,8 @@ try {
     history.company === '=ACME\\Corp | R&D' &&
     history.location === '@Remote EU' &&
     history.requisition_id === '=R1 DROP x' &&
-    history.language === '@en -GB'
+    history.language === '@en -GB' &&
+    history.listing_key === ''
   ) {
     pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas; the reader gets the values back');
   } else {
@@ -8200,10 +8213,12 @@ try {
   const datedHistory = parseScanHistoryLine(formatScanHistoryRow(datedOffer, '2026-07-09'));
   const noDateHistory = parseScanHistoryLine(formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09'));
   if (
-    datedHistory.posted_at === '2026-06-18' && // epoch ms → YYYY-MM-DD
-    datedHistory.normalized_company === 'acme' && // normalized company key (#2093)
-    noDateHistory.posted_at === '' && // missing postedAt → empty, never a bogus date
-    noDateHistory.normalized_company === 'acme'
+    datedHistory.posted_at === '2026-06-18' &&
+    datedHistory.normalized_company === 'acme' &&
+    datedHistory.listing_key === '' &&
+    noDateHistory.posted_at === '' &&
+    noDateHistory.normalized_company === 'acme' &&
+    noDateHistory.listing_key === ''
   ) {
     pass('scan-history writer appends postedAt as an ISO trailing column (empty when absent)');
   } else {
@@ -8238,8 +8253,9 @@ try {
   const cleanHist = parseScanHistoryLine(formatScanHistoryRow(cleanOffer, '2026-07-09'));
   if (
     flaggedHist.trust_score === '60' && flaggedHist.trust_flags === 'missing_apply_url,suspicious_domain' &&
-    flaggedHist.normalized_company === 'acme' && // normalized company key (#2093)
-    cleanHist.trust_score === '' && cleanHist.trust_flags === '' // score 100 → not flagged → empty
+    flaggedHist.normalized_company === 'acme' &&
+    flaggedHist.listing_key === '' &&
+    cleanHist.trust_score === '' && cleanHist.trust_flags === '' && cleanHist.listing_key === ''
   ) {
     pass('scan-history writer appends trust score + flags trailing columns when flagged, empty otherwise (#1743)');
   } else {
@@ -16423,7 +16439,7 @@ try {
   // 55.3b below reads states.yml dynamically, so it inherits any such loss
   // instead of catching it: with `hired` removed both checks went green while
   // set-status.mjs would reject the terminal-success state as invalid.
-  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
   const missingStates = CANONICAL_STATE_IDS.filter((s) => !new RegExp(`^  - id: ${s}$`, 'm').test(statesSrc));
   if (missingStates.length === 0) {
     pass('templates/states.yml keeps every canonical status id (new ids may be appended)');
@@ -17508,8 +17524,7 @@ try {
     { url: 'https://x.example/j/1', source: 'lever', title: 'Data Engineer', company: 'Acme', location: 'Remote', description: longJd },
     '2026-07-06',
   ));
-  if (/^[0-9a-f]{16}$/.test(withBody.fingerprint) && withBody.normalized_company === 'acme') {
-    pass('formatScanHistoryRow appends a fingerprint column for described offers');
+  if (/^[0-9a-f]{16}$/.test(withBody.fingerprint) && withBody.normalized_company === 'acme' && withBody.listing_key === '') {    pass('formatScanHistoryRow appends a fingerprint column for described offers');
   } else {
     fail(`formatScanHistoryRow row: fingerprint=${JSON.stringify(withBody.fingerprint)}, normalized_company=${JSON.stringify(withBody.normalized_company)}`);
   }
@@ -17517,8 +17532,7 @@ try {
     { url: 'https://x.example/j/2', source: 'greenhouse', title: 'Data Engineer', company: 'Acme', location: '' },
     '2026-07-06',
   ));
-  if (withoutBody.fingerprint === '' && withoutBody.normalized_company === 'acme') {
-    pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
+  if (withoutBody.fingerprint === '' && withoutBody.normalized_company === 'acme' && withoutBody.listing_key === '') {    pass('formatScanHistoryRow leaves the fingerprint empty when no description is available');
   } else {
     fail(`formatScanHistoryRow (no body) row: fingerprint=${JSON.stringify(withoutBody.fingerprint)}, normalized_company=${JSON.stringify(withoutBody.normalized_company)}`);
   }

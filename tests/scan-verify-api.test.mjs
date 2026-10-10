@@ -114,7 +114,7 @@ await test('empty batches and terminal API uncertainty need no browser', async (
   let calls = 0;
   const dependencies = { checkApi: async () => { calls += 1; return uncertain; }, loadPlaywright: noBrowser };
   const empty = await verifyOffers([], {}, dependencies);
-  assert.deepEqual(empty, { verified: [], expired: [], dropped: [], invalid: [], migrated: [] });
+  assert.deepEqual(empty, { verified: [], expired: [], dropped: [], invalid: [], migrated: [], verificationStatusByOffer: new Map() });
   assert.equal(calls, 0);
   const item = offer('https://www.linkedin.com/jobs/view/123');
   const result = await verifyOffers([item], {}, dependencies);

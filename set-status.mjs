@@ -103,6 +103,7 @@ import { readFileSync, existsSync, appendFileSync } from 'fs';
 import { join, dirname, resolve, sep, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { createHash } from 'node:crypto';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow, normalizeTextKey, splitTrackerCells, trackerRowSeparator } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -156,6 +157,8 @@ const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "...
                      pass it when the transition happened earlier than it's recorded)
   --source NAME      Attribution for the transition ledger: set-status (default)
                      or web (a caller delegating to this script)
+  --expect-tracker HASH  Require the tracker's exact UTF-8 content to match this
+                     lowercase SHA-256 hash; checked under the writer lock
   --force            Allow a numeric selector despite a report-link mismatch, or despite a
                      report-less row whose number another row claims as its report link
   --dry-run          Resolve and validate, but write nothing
@@ -210,8 +213,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, repairStatusLog: false, repairFollowup: false, json: false };
-const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source' };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, repairStatusLog: false, repairFollowup: false, json: false, expectTracker: null };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -267,6 +270,9 @@ for (let i = 0; i < rawArgs.length; i++) {
     }
     if (a === '--source' && !WRITER_SOURCES.has(value)) {
       failUsage(`--source expects one of ${[...WRITER_SOURCES].join(', ')}, got "${value}"`);
+    }
+    if (a === '--expect-tracker' && (value.length !== 64 || !/^[a-f0-9]{64}$/.test(value))) {
+      failUsage('--expect-tracker expects a lowercase SHA-256 hash (64 hex characters)');
     }
     flags[VALUE_FLAGS[a]] = value;
     i++;
@@ -502,6 +508,13 @@ try {
   content = readFileSync(APPS_FILE, 'utf-8');
 } catch (err) {
   failWith(EXIT_NOT_FOUND, 'read-failure', `Cannot read tracker at ${APPS_FILE}: ${err.message}`);
+}
+// Guard the whole file, not just the selected row: reply-watch also checks
+// receipt notes on other rows before confirming a proposal. A write anywhere
+// between that check and acquiring this lock invalidates the reviewed snapshot.
+if (flags.expectTracker !== null
+    && createHash('sha256').update(content, 'utf8').digest('hex') !== flags.expectTracker) {
+  failWith(EXIT_AMBIGUOUS, 'tracker-changed', 'Tracker changed since review; review the current tracker before retrying');
 }
 const lines = content.split('\n');
 const parseOptions = { allowTabs: true, allowIndentation: true };

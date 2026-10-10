@@ -14,6 +14,7 @@ export const CANONICAL_STATES = [
   "Evaluated",
   "Applied",
   "Responded",
+  "Assessment",
   "Interview",
   "Offer",
   "Hired",
@@ -23,12 +24,12 @@ export const CANONICAL_STATES = [
 ] as const;
 
 /** Status dot colour, mirroring the Go TUI: green hired/interview/offer, sky
- *  applied/responded, red skip/rejected, gray discarded, neutral evaluated. */
+ *  applied/responded/assessment, red skip/rejected, gray discarded, neutral evaluated. */
 export function statusDot(status: string): string {
   const c = canonStatus(status);
   // Hired is the terminal win — the best outcome, never a neutral gray dot.
   if (c.includes("HIRED") || c.includes("INTERVIEW") || c.includes("OFFER")) return "bg-emerald-400";
-  if (c.includes("APPLIED") || c.includes("RESPONDED")) return "bg-sky-400";
+  if (c.includes("APPLIED") || c.includes("RESPONDED") || c.includes("ASSESSMENT")) return "bg-sky-400";
   if (c.includes("REJECTED") || c.includes("SKIP")) return "bg-red-400";
   if (c.includes("DISCARDED")) return "bg-zinc-600";
   return "bg-zinc-500"; // Evaluated / unknown

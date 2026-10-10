@@ -322,6 +322,7 @@ If a non-publicly accessible URL is found:
 | 12 | `normalized_company` | `acme` | Canonical company key (`normalizeCompanyName`) so `Acme Inc.`, `Acme, Inc.` and `ACME  Inc` all match; col 5 stays faithful to what the provider returned |
 | 13 | `requisition_id` | `ID2608-00427A` | The employer's requisition id, when the provider reads one from a dedicated ATS field (`Job.requisitionId`); empty otherwise. Company+role dedup keeps two same-titled postings apart when their requisitions differ |
 | 14 | `language` | `en-GB` | Language of the posting text as the source names it (a code or a name), when the provider reports it (`Job.language`); empty otherwise. Read by the opt-in `scan_history.dedup_include_language` |
+| 15 | `listing_key` | `listing_v1_…` | Strong local ATS identity key when the provider supplies a complete resolved identity; blank when it cannot |
 
 Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
 
@@ -332,12 +333,12 @@ Cells are stored with reversible spreadsheet-formula escaping: tabs and line bre
 The scanner writes the other statuses in that list itself: `skipped_no_apply_control` for a page that loaded without an Apply control, `skipped_invalid_url` and `skipped_blocked_host` for a URL the input guard rejected, and `cooldown:{company}:{until}` for a posting held back by a cooldown window until that date. `skipped_dup` and `skipped_title` come from the agent workflow above.
 
 ```tsv
-url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme		
-https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de
+url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme			listing_v1_…
+https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de	listing_v1_example
 ```
 
-The first row comes from a provider that reports no requisition id or language, so its last two cells are empty; the second from one that reports both.
+The first row comes from a provider that reports no requisition id or language, so its `requisition_id` and `language` cells are empty while `listing_key` still carries the key from its resolved ATS identity; the second comes from one that reports all three.
 
 ### Filtering by posted date
 

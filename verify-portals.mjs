@@ -652,7 +652,12 @@ export async function verifyCompanies(
     const name = typeof company.name === 'string' ? company.name : '(unnamed)';
     const match =
       parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
-    if (match) {
+    // An Ashby entry that opts into the embed source (`ashby: { embed: true }`)
+    // is one whose posting API is disabled. Tier 1 probes exactly that API, so
+    // it would report a live board as a wrong slug; the provider layer below
+    // reads the embed page instead.
+    const embedOnly = match?.ats === 'ashby' && /** @type {any} */ (company).ashby?.embed === true;
+    if (match && !embedOnly) {
       const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
       if (probe.status === 'live' || probe.status === 'empty') {
         results.push({ name, ...probe });

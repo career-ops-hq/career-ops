@@ -68,6 +68,23 @@ func TestComputeProgressMetricsRatesIncludeHired(t *testing.T) {
 	}
 }
 
+func TestComputeProgressMetricsTreatsAssessmentAsRespondedBeforeInterview(t *testing.T) {
+	pm := ComputeProgressMetrics(appsWithStatuses("Assessment"))
+
+	if got := stageCount(pm, "Applied"); got != 1 {
+		t.Errorf("Applied = %d, want 1", got)
+	}
+	if got := stageCount(pm, "Responded"); got != 1 {
+		t.Errorf("Responded = %d, want 1", got)
+	}
+	if got := stageCount(pm, "Assessment"); got != 1 {
+		t.Errorf("Assessment = %d, want 1", got)
+	}
+	if got := stageCount(pm, "Interview"); got != 0 {
+		t.Errorf("Interview = %d, want 0 before an interview", got)
+	}
+}
+
 // The cumulative tiers must stay ordered: each stage is a superset of the next.
 func TestComputeProgressMetricsFunnelIsMonotonic(t *testing.T) {
 	pm := ComputeProgressMetrics(appsWithStatuses(

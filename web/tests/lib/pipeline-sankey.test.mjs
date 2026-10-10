@@ -9,6 +9,16 @@ import path from "node:path";
 import "../helpers/web-ts-alias-loader.mjs";
 import { classifyLeaf, buildPipelineSankey, layoutSankey, parseStatusLog, statusToken } from "../../src/lib/pipeline-sankey.mjs";
 
+test("Assessment has its own engaged leaf and records a submitted application", () => {
+  const graph = buildPipelineSankey([{ n: '1', status: 'Assessment' }]);
+  assert.equal(classifyLeaf({ n: '1', status: 'online assessment' }, []), 'assessment');
+  assert.equal(graph.nodes.find(node => node.id === 'assessment')?.value, 1);
+  assert.equal(graph.nodes.find(node => node.id === 'submitted')?.value, 1);
+  assert.ok(!graph.nodes.some(node => node.id === 'interview'));
+  assert.equal(classifyLeaf({ n: '1', status: 'Discarded' },
+    [{ num: 1, from: 'Assessment', to: 'Discarded' }]), 'discarded');
+});
+
 test("statusToken uses canonStatus aliases (same map as Analytics)", () => {
   assert.equal(statusToken("Interview"), "INTERVIEW");
   assert.equal(statusToken("Interview 2026-08-20"), "INTERVIEW");

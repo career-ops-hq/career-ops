@@ -562,6 +562,8 @@ func NormalizeStatus(raw string) string {
 		return "skip"
 	case strings.Contains(s, "interview") || strings.Contains(s, "entrevista") || strings.Contains(s, "mülakat") || strings.Contains(s, "mulakat"):
 		return "interview"
+	case s == "assessment" || s == "screening" || s == "online assessment" || s == "online_assessment" || s == "online screening":
+		return "assessment"
 	case s == "offer" || strings.Contains(s, "oferta") || strings.Contains(s, "teklif"):
 		return "offer"
 	case strings.Contains(s, "responded") || strings.Contains(s, "respondido") || strings.Contains(s, "yanıt verildi") || strings.Contains(s, "yanıt_verildi") || strings.Contains(s, "yanit verildi") || strings.Contains(s, "yanit_verildi"):
@@ -872,7 +874,7 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 // Reject malformed UI input cheaply; the writer validates against states.yml.
 func isCanonicalStatusName(status string) bool {
 	switch strings.ToLower(status) {
-	case "evaluated", "applied", "responded", "interview", "offer", "hired", "rejected", "discarded", "skip":
+	case "evaluated", "applied", "responded", "assessment", "interview", "offer", "hired", "rejected", "discarded", "skip":
 		return true
 	}
 	return false
@@ -892,20 +894,22 @@ func StatusPriority(status string) int {
 		return 0
 	case "offer":
 		return 1
-	case "responded":
+	case "assessment":
 		return 2
-	case "applied":
+	case "responded":
 		return 3
-	case "evaluated":
+	case "applied":
 		return 4
-	case "skip":
+	case "evaluated":
 		return 5
-	case "rejected":
+	case "skip":
 		return 6
-	case "discarded":
+	case "rejected":
 		return 7
-	default:
+	case "discarded":
 		return 8
+	default:
+		return 9
 	}
 }
 
@@ -940,19 +944,20 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 	}
 
 	// Funnel: each stage counts all apps that reached at least that stage.
-	// An app in "interview" has passed through evaluated -> applied -> responded -> interview.
+	// An app in "interview" has passed through evaluated -> applied -> responded -> assessment -> interview.
 	// "hired" is terminal success and proves every earlier stage (a landed job
 	// proves the offer, the interviews, the response, and the submission), so it
-	// counts into all four tiers — matching computeFunnel() in stats.mjs, the
+	// counts into all four existing funnel tiers — matching computeFunnel() in stats.mjs, the
 	// canonical funnel definition, whose docstring already describes this exact
 	// math as mirroring this function.
 	total := len(apps)
-	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
-	responded := statusCounts["responded"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
+	applied := statusCounts["applied"] + statusCounts["responded"] + statusCounts["assessment"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
+	responded := statusCounts["responded"] + statusCounts["assessment"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"] + statusCounts["rejected"]
+	assessment := statusCounts["assessment"] + statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
 	interview := statusCounts["interview"] + statusCounts["offer"] + statusCounts["hired"]
 	offer := statusCounts["offer"] + statusCounts["hired"]
 	if len(history) > 0 {
-		applied, responded, interview, offer = 0, 0, 0, 0
+		applied, responded, assessment, interview, offer = 0, 0, 0, 0, 0
 		ranks := make(map[int]int)
 		var unnumberedRanks []int
 		for _, app := range apps {
@@ -982,9 +987,12 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 				responded++
 			}
 			if rank >= 3 {
-				interview++
+				assessment++
 			}
 			if rank >= 4 {
+				interview++
+			}
+			if rank >= 5 {
 				offer++
 			}
 		}
@@ -1000,6 +1008,7 @@ func ComputeProgressMetrics(apps []model.CareerApplication, history ...map[int]i
 		{Label: "Tracked", Count: total, Pct: 100.0},
 		{Label: "Applied", Count: applied, Pct: safePct(applied, total)},
 		{Label: "Responded", Count: responded, Pct: safePct(responded, applied)},
+		{Label: "Assessment", Count: assessment, Pct: safePct(assessment, applied)},
 		{Label: "Interview", Count: interview, Pct: safePct(interview, applied)},
 		{Label: "Offer", Count: offer, Pct: safePct(offer, applied)},
 	}

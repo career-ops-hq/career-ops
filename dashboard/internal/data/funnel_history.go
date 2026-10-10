@@ -18,10 +18,12 @@ func funnelRank(status string) int {
 		return 1
 	case "responded", "rejected":
 		return 2
-	case "interview":
+	case "assessment":
 		return 3
-	case "offer", "hired":
+	case "interview":
 		return 4
+	case "offer", "hired":
+		return 5
 	}
 	return 0
 }
