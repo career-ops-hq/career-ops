@@ -60,7 +60,7 @@ import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { collectMjsFiles, isNestedCheckout, isUnderNestedCheckout } from './lib/mjs-files.mjs';
-import { failureExcerpt } from './lib/failure-excerpt.mjs';
+import { childFailureExcerpt } from './lib/failure-excerpt.mjs';
 import { SCRATCH_PREFIX, isScratchDir, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
@@ -232,7 +232,7 @@ async function runDiscovered(filter = null) {
         // error message above the frames, so a twelve-line tail kept
         // `actual: false, expected: true` and dropped the interpolated value
         // that says WHICH assertion and by how much (#4017).
-        for (const line of failureExcerpt(detail?.stderr || detail?.stdout || '')) {
+        for (const line of childFailureExcerpt(detail)) {
           console.log(`      ${line}`);
         }
       } else {

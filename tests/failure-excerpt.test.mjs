@@ -27,7 +27,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { failureExcerpt } from '../lib/failure-excerpt.mjs';
+import { failureExcerpt, childFailureExcerpt } from '../lib/failure-excerpt.mjs';
 
 // `node --test` output for a single failing assert.ok, captured verbatim on
 // node 24.20.0. Only the absolute path of the temporary suite is shortened, so
@@ -116,6 +116,43 @@ test('output stays bounded when a suite fails in bulk', () => {
     `AssertionError [ERR_ASSERTION]: failure number ${i}`).join('\n');
   const out = failureExcerpt(bulk);
   assert.ok(out.length <= 20, `excerpt grew to ${out.length} lines`);
+});
+
+// node's runner writes its failure report to stdout. A warning from the child
+// lands on stderr. Choosing `stderr || stdout` printed the warning and dropped
+// the assertion, so any suite that warned lost the message again.
+const WARNING = [
+  '(node:4242) ExperimentalWarning: VM Modules is an experimental feature',
+  '(Use `node --trace-warnings ...` to show where the warning was created)',
+].join('\n');
+
+test('a warning on stderr does not hide the assertion on stdout', () => {
+  const out = childFailureExcerpt({ stdout: REAL_FAILURE, stderr: WARNING }).join('\n');
+  assert.match(out, /gave up after 103ms/);
+  assert.match(out, /pipeline-lock\.test\.mjs:447:10/);
+
+  // The selection it replaces lost the message on this exact input.
+  const old = failureExcerpt(WARNING || REAL_FAILURE).join('\n');
+  assert.doesNotMatch(old, /gave up after 103ms/);
+});
+
+test('a crash reported only on stderr still surfaces', () => {
+  const crash = 'SyntaxError: Unexpected token \'}\'\n    at file:///repo/tests/broken.test.mjs:9:1';
+  const out = childFailureExcerpt({ stdout: '', stderr: crash }).join('\n');
+  assert.match(out, /SyntaxError: Unexpected token/);
+});
+
+test('both streams together stay inside the single-stream bound', () => {
+  const bulk = (tag) => Array.from({ length: 200 }, (_, i) =>
+    `AssertionError [ERR_ASSERTION]: ${tag} failure ${i}`).join('\n');
+  const out = childFailureExcerpt({ stdout: bulk('stdout'), stderr: bulk('stderr') });
+  assert.ok(out.length <= 20, `excerpt grew to ${out.length} lines`);
+});
+
+test('a run with no output on either stream produces nothing', () => {
+  assert.deepEqual(childFailureExcerpt({ stdout: '', stderr: '' }), []);
+  assert.deepEqual(childFailureExcerpt(undefined), []);
+  assert.deepEqual(childFailureExcerpt(null), []);
 });
 
 test('empty and whitespace-only input produce nothing', () => {
