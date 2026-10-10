@@ -345,9 +345,16 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
 
     const extractApplyControls = () => {
+      // A design-system button is a custom element: UKG Pro (UltiPro) renders
+      // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
+      // native <button> inside its shadow root has no text of its own (the
+      // label is slotted in), so the element itself is the control to read.
+      // No selector matches a tag-name suffix, hence the filter.
+      const customButtons = Array.from(document.querySelectorAll('*'))
+        .filter((element) => element.localName.endsWith('-button'));
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
-      );
+      ).concat(customButtons);
 
       return candidates
         .filter((element) => {
