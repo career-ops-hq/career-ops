@@ -2096,44 +2096,6 @@ export function driftPathspecExcludingSkillEntrypoints(systemPaths, skillEntrypo
 }
 
 /**
- * System-layer files this install changed locally that the update is about to
- * overwrite (#2337).
- *
- * apply() checks out every SYSTEM_PATHS entry from the upstream ref — a raw
- * checkout, not a merge — so a local fix to a system file is discarded with no
- * diff, no warning, and no list. The system layer stays system-owned (this is
- * NOT a merge, by design); the point is telling people what they are about to
- * lose.
- *
- * A file is reported only when it can be ATTRIBUTED to a local edit, which
- * takes two steps:
- *
- *   1. The candidate set is the difference from the last state the install is
- *      known to have started from: the commit it shares with upstream
- *      (merge-base), or, when the two histories share nothing at all (a fresh
- *      `git init` copy, a shallow clone), the install's own first commit. A
- *      copy with no local edits therefore reports nothing, even though every
- *      file upstream has changed since differs from upstream.
- *   2. Each candidate is attributed to whichever side last wrote it, by two
- *      batched history lookups:
- *      - an update commit that changed the file: reported only while the
- *        worktree still differs from the version that update installed. Equal
- *        content is upstream's own version, so the checkout costs nothing
- *        (#3094); a preserved customization is folded into the update commit
- *        WITHOUT a change, which is why the comparison is per file and not per
- *        update (#4170);
- *      - no update commit ever changed the file: reported unless upstream
- *        published that exact content for the path since the merge-base. That
- *        is a fix upstream adopted identically and has since moved past, where
- *        the content is upstream's now and the file must keep updating instead
- *        of staying pinned. Anything else is the user's.
- *
- * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
- * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
- * @param {{git?: Function}} [ctx] - injectable git runner, for tests.
- * @returns {string[]} repo-relative file paths, sorted.
- */
-/**
  * The withheld update's staged snapshot, when it is still the state on disk.
  *
  * The ref is durable and the state it describes is not, so trusting it on sight
@@ -2206,6 +2168,44 @@ export function stagedUpdateBaseline(runGit, paths) {
   return null;
 }
 
+/**
+ * System-layer files this install changed locally that the update is about to
+ * overwrite (#2337).
+ *
+ * apply() checks out every SYSTEM_PATHS entry from the upstream ref — a raw
+ * checkout, not a merge — so a local fix to a system file is discarded with no
+ * diff, no warning, and no list. The system layer stays system-owned (this is
+ * NOT a merge, by design); the point is telling people what they are about to
+ * lose.
+ *
+ * A file is reported only when it can be ATTRIBUTED to a local edit, which
+ * takes two steps:
+ *
+ *   1. The candidate set is the difference from the last state the install is
+ *      known to have started from: the commit it shares with upstream
+ *      (merge-base), or, when the two histories share nothing at all (a fresh
+ *      `git init` copy, a shallow clone), the install's own first commit. A
+ *      copy with no local edits therefore reports nothing, even though every
+ *      file upstream has changed since differs from upstream.
+ *   2. Each candidate is attributed to whichever side last wrote it, by two
+ *      batched history lookups:
+ *      - an update commit that changed the file: reported only while the
+ *        worktree still differs from the version that update installed. Equal
+ *        content is upstream's own version, so the checkout costs nothing
+ *        (#3094); a preserved customization is folded into the update commit
+ *        WITHOUT a change, which is why the comparison is per file and not per
+ *        update (#4170);
+ *      - no update commit ever changed the file: reported unless upstream
+ *        published that exact content for the path since the merge-base. That
+ *        is a fix upstream adopted identically and has since moved past, where
+ *        the content is upstream's now and the file must keep updating instead
+ *        of staying pinned. Anything else is the user's.
+ *
+ * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
+ * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
+ * @param {{git?: Function}} [ctx] - injectable git runner, for tests.
+ * @returns {string[]} repo-relative file paths, sorted.
+ */
 export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ctx = {}) {
   const runGit = ctx.git || git;
   if (!paths || paths.length === 0) return [];
@@ -2252,17 +2252,11 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
   } catch {
     mergeBase = null;
   }
-  // A withheld update (branch guard, #3846) leaves that snapshot STAGED and
-  // uncommitted, so there is no updater commit to be the baseline and the next
-  // run would read the previous run's own files as local edits — preserving
-  // them, writing .bak copies, and skipping exactly the delta it came to
-  // install. Measured: with an updater commit at v1, an uncommitted v2 tree and
-  // upstream at v3, the file lands in the at-risk set. stagedUpdateBaseline()
-  // answers with that snapshot while it is genuinely still there, and with null
-  // once it is not. It leaves the ref in place either way — deleting a snapshot
-  // that fails the check breaks the stash round trip, which is why that case is
-  // pinned by a test; read its doc before changing that.
-  let baseline = stagedUpdateBaseline(runGit, paths) || mergeBase;
+  // A pending snapshot identifies files delivered by the withheld update,
+  // not a replacement for the install's history baseline. Preserved local
+  // customizations must remain candidates even when the snapshot carries them.
+  const stagedBaseline = stagedUpdateBaseline(runGit, paths);
+  let baseline = mergeBase;
   if (!baseline) {
     try {
       baseline = runGit('rev-list', '--max-parents=0', 'HEAD')
@@ -2307,6 +2301,22 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     } catch {
       // Unreadable history (shallow clone): report the candidates rather than
       // guess, same degradation contract as diffNames.
+    }
+
+    if (stagedBaseline) {
+      try {
+        const message = runGit('log', '-1', '--format=%B', stagedBaseline);
+        const marker = message.split('\n').find(line => line.startsWith('Career-Ops-Preserved: '));
+        const preserved = new Set(marker ? JSON.parse(marker.slice('Career-Ops-Preserved: '.length)) : []);
+        const delivered = runGit(
+          'diff-tree', '--no-commit-id', '--name-only', '-r', stagedBaseline, '--', ...paths,
+        ).split('\n').map(line => line.trim()).filter(Boolean);
+        for (const file of delivered) {
+          if (changedLocally.has(file) && !preserved.has(file)) deliveredBy.set(file, stagedBaseline);
+        }
+      } catch {
+        // Unreadable snapshot metadata keeps the ordinary attribution.
+      }
     }
 
     // Compare each candidate against the update commit that installed it,
@@ -2944,7 +2954,16 @@ export function stagedPathsOutside(owned, preserved = [], run = (...args) => git
   // work into the commit, which is the exact #915 bug 2 regression this guard
   // exists to prevent. NUL-delimited output is unambiguous and unquoted.
   const staged = run('diff', '--cached', '--name-only', '-z');
-  if (!staged) return [];
+  return pathsOutsideUpdate(staged, owned, preserved);
+}
+
+/** Unstaged tracked paths that must be isolated before switching branches. */
+export function unstagedPathsOutside(owned, preserved = [], run = (...args) => gitRawIn(ROOT, ...args)) {
+  return pathsOutsideUpdate(run('diff', '--name-only', '-z'), owned, preserved);
+}
+
+function pathsOutsideUpdate(listed, owned, preserved) {
+  if (!listed) return [];
 
   const files = new Set();
   const dirs = [];
@@ -2958,7 +2977,7 @@ export function stagedPathsOutside(owned, preserved = [], run = (...args) => git
   // `git diff --name-only` / `git ls-files`, which never emit directories.
   const preservedFiles = new Set(preserved);
 
-  return staged.split('\0')
+  return listed.split('\0')
     .filter(path => path !== '')
     .filter(path => preservedFiles.has(path)
       || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
@@ -3759,7 +3778,7 @@ export function updateCommitCommand(version, usedIndexCommit, expandedPathsToSta
  * which also makes it a snapshot the user could check out if they ever want it.
  *
  * @param {string} version - Target version, for the recorded commit's message.
- * @param {object} [ctx] - `{ git }` runner override, for tests.
+ * @param {object} [ctx] - Git runner override and preservedPaths excluded from update attribution.
  * @returns {void}
  */
 export function recordStagedUpdate(version, ctx = {}) {
@@ -3783,6 +3802,9 @@ export function recordStagedUpdate(version, ctx = {}) {
       '-c', 'user.email=updater@career-ops.invalid',
       'commit-tree', tree, '-p', runGit('rev-parse', 'HEAD'),
       '-m', `career-ops staged update to v${version} (uncommitted)`,
+      // The snapshot includes the whole index, including preserved user work.
+      // Record its exclusions so it cannot claim those paths as delivered.
+      '-m', `Career-Ops-Preserved: ${JSON.stringify(ctx.preservedPaths || [])}`,
     );
     runGit('update-ref', STAGED_UPDATE_REF, commit);
   } catch {
@@ -3828,14 +3850,16 @@ export function clearStagedUpdate(ctx = {}) {
  * @param {string[]} [params.unrelatedStaged] - Staged paths this update does not
  *   own, from stagedPathsOutside(). The paths themselves, not a flag: option 2's
  *   escape hatch is only runnable if it can name what to move.
+ * @param {string[]} [params.unrelatedUnstaged] - Unstaged tracked paths outside the update.
  * @returns {string} Multi-line notice.
  */
 export function skippedBranchCommitNotice({
-  currentBranch, defaultBranch, version, commitCommand, unrelatedStaged = [],
+  currentBranch, defaultBranch, version, commitCommand, unrelatedStaged = [], unrelatedUnstaged = [],
 }) {
   const branch = shellQuoteArg(defaultBranch);
   const stashMessage = shellQuoteArg(`career-ops v${version}`);
   const ownWorkMessage = shellQuoteArg('my work');
+  const ownWorkPaths = [...new Set([...unrelatedStaged, ...unrelatedUnstaged])];
   return [
     '',
     `Update applied but NOT committed: you are on '${currentBranch}', not '${defaultBranch}'.`,
@@ -3871,7 +3895,13 @@ export function skippedBranchCommitNotice({
       `       NOTE: ${unrelatedStaged.length === 1 ? 'one other path is' : `${unrelatedStaged.length} other paths are`} staged besides this update. \`stash push --staged\``,
       '       takes the whole index, so option 2 would move them too. Take them out of',
       '       the index first, scoped to their own paths — unstaging is not enough:',
-      `         git stash push -m ${ownWorkMessage} -- ${unrelatedStaged.map(shellQuoteArg).join(' ')}`,
+    ] : []),
+    ...(unrelatedUnstaged.length > 0 ? [
+      '       NOTE: unrelated unstaged changes remain in the working tree after',
+      '       `stash push --staged`. Stash or commit them before switching branches.',
+    ] : []),
+    ...(ownWorkPaths.length > 0 ? [
+      `         git stash push -m ${ownWorkMessage} -- ${ownWorkPaths.map(shellQuoteArg).join(' ')}`,
     ] : []),
     '  3. Undo the update entirely:',
     '       node update-system.mjs rollback',
@@ -4519,13 +4549,16 @@ async function apply() {
         // Leave the next run a truthful baseline for these staged files, so it
         // does not mistake this update's own output for the user's local edits
         // and preserve the very files it came to install (#3846).
-        recordStagedUpdate(remote);
+        recordStagedUpdate(remote, { preservedPaths });
         console.log(skippedBranchCommitNotice({
           currentBranch: branchDecision.currentBranch,
           defaultBranch: branchDecision.defaultBranch,
           version: remote,
           commitCommand: updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage),
           unrelatedStaged: unrelated,
+          unrelatedUnstaged: unstagedPathsOutside(
+            [...ownedPaths, ...materializedSkillEntrypoints], preservedPaths,
+          ),
         }));
       } else if (usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
