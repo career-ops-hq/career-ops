@@ -204,7 +204,11 @@ func (m ProgressModel) renderFunnel() string {
 		label := labelStyle.Render(stage.Label)
 
 		pctStr := ""
-		if i > 0 {
+		// Same denominator, same rule as the rates below: safePct returns 0 when
+		// nothing was applied, so " (0%)" beside every stage would be reporting a
+		// share that was never computed. With no denominator the count alone is
+		// the honest answer.
+		if i > 0 && m.metrics.RatesDenominator > 0 {
 			pctStr = fmt.Sprintf(" (%.0f%%)", stage.Pct)
 		}
 		count := countStyle.Render(fmt.Sprintf("  %d%s", stage.Count, pctStr))
@@ -279,6 +283,11 @@ func (m ProgressModel) renderScoreDistribution() string {
 	return strings.Join(lines, "\n")
 }
 
+// rateUnavailable stands in for a rate with nothing to divide by. An em dash
+// rather than "0.0%" or "n/a": it reads as "not measured yet" and cannot be
+// mistaken for a measurement, which is the whole point.
+const rateUnavailable = "   —  "
+
 func (m ProgressModel) renderRates() string {
 	padStyle := lipgloss.NewStyle().Padding(0, 2)
 	sectionTitle := lipgloss.NewStyle().Bold(true).Foreground(m.theme.Sky)
@@ -290,20 +299,28 @@ func (m ProgressModel) renderRates() string {
 	valueStyle := lipgloss.NewStyle().Bold(true)
 	sepStyle := lipgloss.NewStyle().Foreground(m.theme.Overlay)
 
-	responseColor := m.rateColor(m.metrics.ResponseRate)
-	interviewColor := m.rateColor(m.metrics.InterviewRate)
-	offerColor := m.rateColor(m.metrics.OfferRate)
-
 	sep := sepStyle.Render("  |  ")
 
-	rates := labelStyle.Render(i18n.Current.RateResponse) +
-		valueStyle.Foreground(responseColor).Render(fmt.Sprintf("%.1f%%", m.metrics.ResponseRate)) +
+	// Nothing applied means the three rates were never computed, so they are
+	// ABSENT rather than 0%. Printing the zero value put the user's search in
+	// the worst colour band before they had sent a single application; the em
+	// dash says "not yet" where "0.0%" said "failing". Same rule as
+	// rateOrNull() on the web side, which gates each rate on the count it was
+	// taken over rather than on its own value.
+	renderRate := func(label string, rate float64) string {
+		if m.metrics.RatesDenominator == 0 {
+			return labelStyle.Render(label) +
+				valueStyle.Foreground(m.theme.Overlay).Render(rateUnavailable)
+		}
+		return labelStyle.Render(label) +
+			valueStyle.Foreground(m.rateColor(rate)).Render(fmt.Sprintf("%.1f%%", rate))
+	}
+
+	rates := renderRate(i18n.Current.RateResponse, m.metrics.ResponseRate) +
 		sep +
-		labelStyle.Render(i18n.Current.RateInterview) +
-		valueStyle.Foreground(interviewColor).Render(fmt.Sprintf("%.1f%%", m.metrics.InterviewRate)) +
+		renderRate(i18n.Current.RateInterview, m.metrics.InterviewRate) +
 		sep +
-		labelStyle.Render(i18n.Current.RateOffer) +
-		valueStyle.Foreground(offerColor).Render(fmt.Sprintf("%.1f%%", m.metrics.OfferRate))
+		renderRate(i18n.Current.RateOffer, m.metrics.OfferRate)
 
 	lines = append(lines, padStyle.Render(rates))
 

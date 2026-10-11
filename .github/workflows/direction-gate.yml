@@ -1,0 +1,54 @@
+name: Direction gate
+
+# Check REQUERIDO (ruleset `main`) que impide fusionar lo que Santiago no ha decidido.
+# Cero reglas de contenido: solo lee labels y falla si la PR lleva `direction/needs-santiago`.
+# La política de dirección se evalúa en la sesión del maintainer (policy-check); este check es el ancla
+# dura para la merge queue y el auto-merge. El label lo quita `batch apply` con el OK literal de Santiago.
+#
+# merge_group: la PR solo entra en cola con este check en verde, así que en principio ya no lleva el
+# label. El script intenta leer el número de PR del head_ref de la cola (gh-readonly-queue/main/pr-N-…)
+# y vuelve a comprobar los labels: un label puesto DESPUÉS de entrar en cola también bloquea. Si el
+# número no es legible, pasa: el gate ya se evaluó sobre la PR.
+# Nunca hace checkout del código de la PR: solo lee .github/scripts de la rama base.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  merge_group:
+  # Manual: evalúa la PR y CREA el check `direction-gate` en su head (Checks API). Para PRs cuyo merge ref es anterior a este
+  # workflow (GitHub no lanza pull_request para ellas) o cuando un aluvión de labels no generó runs. Lo lanza bin/act-gate.mjs.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Número de PR'
+        required: true
+        type: string
+
+permissions:
+  pull-requests: read
+  contents: read
+  checks: write   # solo para workflow_dispatch: crear el check en el head de la PR
+
+# Sin concurrency a propósito: con cancel-in-progress, dos eventos de label casi a la vez (labeler + pr-triage al abrir una PR)
+# dejaban un run CANCELADO en el head, y GitHub cuenta todos los checks direction-gate: la PR quedaba BLOCKED aunque otro estuviera
+# en verde (#3974 y 10 más, 24-sep). Cada run lee los labels actuales y tarda segundos: correr en paralelo es inofensivo.
+
+jobs:
+  direction-gate:
+    name: direction-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # En pull_request el checkout por defecto sería el merge commit con código del fork: se fuerza main.
+          ref: main
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: Check direction label
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.inputs.pr }}
+        run: node .github/scripts/direction-gate.mjs

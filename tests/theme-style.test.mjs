@@ -2,7 +2,7 @@
 // (#1837): token parsing, style-block building/sanitizing, HTML injection, and a
 // guard that the shipped templates actually read the variables with defaults.
 import { pass, fail, ROOT } from './helpers.mjs';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { pathToFileURL } from 'url';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -15,10 +15,13 @@ try {
   } = await import(pathToFileURL(join(ROOT, 'theme-style.mjs')).href);
 
   // styleTokensFrom: recognized keys → css vars; ignore unknown/non-string/missing
-  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', nope: 'x', font_weight: 700 });
-  if (t['--accent-color'] === '#2563eb' && t['--secondary-color'] === '#111827' && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
-      && !('--font-weight' in t) && Object.keys(t).length === 5) {
-    pass('styleTokensFrom maps the 5 recognized keys and ignores unknown/non-string');
+  const t = styleTokensFrom({ accent_color: '#2563eb', secondary_color: '#111827', tag_color: '#0e7490', tag_bg: '#ecfeff', tag_border: '#a5f3fc', font_family: 'Outfit, sans-serif', font_size: '10pt', margin: '0.5in', job_break_inside: 'avoid', project_break_inside: 'avoid', nope: 'x', font_weight: 700 });
+  if (t['--accent-color'] === '#2563eb' && t['--secondary-color'] === '#111827'
+      && t['--tag-color'] === '#0e7490' && t['--tag-bg'] === '#ecfeff' && t['--tag-border'] === '#a5f3fc'
+      && t['--font-family'] === 'Outfit, sans-serif' && t['--font-size'] === '10pt' && t['--page-margin'] === '0.5in'
+      && t['--job-break-inside'] === 'avoid' && t['--project-break-inside'] === 'avoid'
+      && !('--font-weight' in t) && Object.keys(t).length === 10) {
+    pass('styleTokensFrom maps the 10 recognized keys and ignores unknown/non-string');
   } else {
     fail(`styleTokensFrom => ${JSON.stringify(t)}`);
   }
@@ -128,6 +131,128 @@ try {
       fail(`${tpl}: hasRoot=${hasRoot} usesVar=${usesVar} leftoverHardcoded=${leftoverHardcoded} circular=${circular}`);
     }
   }
+
+  // Template contract (#3242 for roles, and the sibling token for projects):
+  // every shipped template keeps ITS OWN current pagination behavior as the
+  // effective default, so an opt-in token changes nobody's layout. For roles,
+  // resume-template.html and templates/ats/cv-template.ats.html have always
+  // kept a role whole (avoid) and the rest let a role flow across a page break
+  // (auto, per #1145). For projects, every template currently lets an entry
+  // split, so the effective default is auto everywhere.
+  //
+  // Both places that carry a default are pinned: the :root token default, which
+  // is what actually resolves in the templates that declare one, and the rule's
+  // var() fallback, the only default in the templates that don't. The modern and
+  // legacy properties are checked separately with a property boundary, so
+  // `page-break-inside:` can never satisfy the `break-inside:` check, and the
+  // legacy alias must come first: declared last it wins the cascade and turns
+  // any keyword it does not accept (avoid-page) into auto. A token may be
+  // declared on :root only. On body or anything inside it, a declaration would
+  // beat the profile override, which arrives as a later :root block; :root-only
+  // also keeps a single place to read the default.
+  //
+  // Parameterized over the tokens rather than copied per token: the subtle parts
+  // (legacy-first ordering, :root-only, alias rejection, exact match on the root
+  // declaration) must not drift between two tokens making the same promise about
+  // different entries.
+  {
+    const { listTemplates } = await import(pathToFileURL(join(ROOT, 'cv-templates.mjs')).href);
+
+    // Innermost `selector { body }` rules of every <style> block, with
+    // comments stripped (they hold braces and token names) and {{PLACEHOLDER}}s
+    // neutralized as template-page-breaks.test.mjs does, since a placeholder's
+    // braces would hide its whole rule. An @media wrapper yields its inner rules.
+    const cssRules = (src) => [...[...src.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)]
+      .map((m) => m[1]).join('\n').replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\{\{[^{}]*\}\}/g, 'PLACEHOLDER')
+      .matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map(([, selector, body]) => ({ selector: selector.trim(), body }));
+    // CSS property names are ASCII case-insensitive.
+    const declRe = (prop) => new RegExp(`(?:^|[\\s;{])${prop}\\s*:\\s*([^;}]+)`, 'gi');
+    const declValues = (body, prop) => [...body.matchAll(declRe(prop))].map((m) => m[1].replace(/\s+/g, ' ').trim());
+    const declIndex = (body, prop) => body.search(declRe(prop));
+    // A rule targets `.cls` when the subject compound of any selector in its
+    // list carries the class: `.job`, `div.job`, `.job:last-child`,
+    // `:is(.job, .x)`, but not `.job li` or `.job-company`.
+    const selectorList = (sel) => sel.split(/,(?![^()]*\))/).map((s) => s.trim());
+    const subject = (s) => s.replace(/\([^()]*\)/g, (m) => m.replace(/[\s>+~]/g, '')).split(/\s*[\s>+~]\s*/).pop();
+    const targets = (sel, cls) => selectorList(sel).some((s) => new RegExp(`\\.${cls}(?![\\w-])`).test(subject(s)));
+
+    const ROOT_DECLARED = {
+      'templates/cv-template.html': true,
+      'templates/cv-template.compact.html': true,
+      'templates/cv-template.executive.html': true,
+      'templates/cv-template.jake.html': true,
+      'templates/cv-template.leadership.html': true,
+      'templates/cv-template.modern.html': true,
+      'templates/cv-template.zh-minimal.html': false,
+      'templates/resume-template.html': false,
+      'templates/ats/cv-template.ats.html': true,
+    };
+    // [effective default, declared on :root]
+    const withDefaults = (defaults) => Object.fromEntries(
+      Object.entries(ROOT_DECLARED).map(([tpl, root]) => [tpl, [defaults[tpl], root]]));
+    const ALL_AUTO = Object.fromEntries(Object.keys(ROOT_DECLARED).map((t) => [t, 'auto']));
+
+    const TOKENS = [
+      {
+        key: 'job_break_inside', cssVar: '--job-break-inside', cls: 'job', label: '#3242',
+        expected: withDefaults({
+          ...ALL_AUTO,
+          'templates/resume-template.html': 'avoid',
+          'templates/ats/cv-template.ats.html': 'avoid',
+        }),
+      },
+      {
+        key: 'project_break_inside', cssVar: '--project-break-inside', cls: 'project',
+        label: 'project opt-in',
+        // resume-template.html has always kept a project whole (it grouped
+        // .project with .edu-item under break-inside: avoid); every other
+        // template lets one split.
+        expected: withDefaults({ ...ALL_AUTO, 'templates/resume-template.html': 'avoid' }),
+      },
+    ];
+
+    for (const tok of TOKENS) {
+      for (const v of ['avoid', 'auto']) {
+        const block = buildThemeStyleBlock(styleTokensFrom({ [tok.key]: v }));
+        if (block.includes(`${tok.cssVar}: ${v};`)) pass(`${tok.key}: ${v} reaches the injected :root block`);
+        else fail(`${tok.key}: ${v} => ${block}`);
+      }
+
+      // A new template must declare its default here, or the opt-in would ship
+      // dead in it (template-page-breaks.test.mjs discovers templates the same way).
+      const discovered = listTemplates('cv').filter((t) => t.format === 'html')
+        .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
+      const unlisted = discovered.filter((t) => !(t in tok.expected));
+      if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);
+      else fail(`templates with no declared ${tok.key} default: ${unlisted.join(', ') || '(none discovered)'}`);
+
+      for (const [tpl, [value, declaresRoot]] of Object.entries(tok.expected)) {
+        const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
+        const owned = rules.filter((r) => targets(r.selector, tok.cls));
+        const want = `var(${tok.cssVar}, ${value})`;
+        const modern = owned.flatMap((r) => declValues(r.body, 'break-inside'));
+        const legacy = owned.flatMap((r) => declValues(r.body, 'page-break-inside'));
+        const aliases = owned.flatMap((r) => [...declValues(r.body, '-webkit-column-break-inside'), ...declValues(r.body, 'all')]);
+        const legacyFirst = owned.every((r) => {
+          const legacyAt = declIndex(r.body, 'page-break-inside');
+          const modernAt = declIndex(r.body, 'break-inside');
+          return legacyAt === -1 || modernAt === -1 || legacyAt < modernAt;
+        });
+        const tokenDecls = rules.flatMap((r) => declValues(r.body, tok.cssVar).map((v) => `${r.selector} => ${v}`));
+        const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
+        // Exact rather than `every`: a :root block the parse lost must fail, not pass on an empty list.
+        const rootDefaultOk = JSON.stringify(tokenDecls) === JSON.stringify(declaresRoot ? [`:root => ${value}`] : []);
+        if (readsToken(modern) && readsToken(legacy) && !aliases.length && legacyFirst && rootDefaultOk) {
+          pass(`${tpl}: .${tok.cls} page-break-inside then break-inside read ${tok.cssVar} with its own default (${value})${declaresRoot ? ', matching its :root default' : ''}`);
+        } else {
+          fail(`${tpl}: ${tok.label} contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
+        }
+      }
+    }
+  }
+
   // Regression: localized CJK font stacks must honor the profile
   // --font-family override while keeping their curated fallbacks active after it.
   {
@@ -215,6 +340,36 @@ try {
       fail(`page-margin cascade order/value wrong: root=${rootDefaultIdx} override=${overrideIdx} pageSetup=${pageSetupIdx} usesVar=${pageSetupUsesVar}`);
     }
   }
+  // The competency-tag palette was three hardcoded literals, so a profile could
+  // recolor the accents and then had nowhere to go for the tags — and a template
+  // edit is reverted by every `update-system.mjs apply`. Two things must hold: the
+  // template still READS each token (an unreferenced var makes an override inert),
+  // and each :root default is byte-identical to the literal it replaced (or every
+  // existing CV silently changes color).
+  {
+    const DEFAULTS = {
+      '--tag-color':  'hsl(187, 74%, 28%)',
+      '--tag-bg':     'hsl(187, 40%, 95%)',
+      '--tag-border': 'hsl(187, 40%, 88%)',
+    };
+    // every template that carried these literals, not just the default one — a token
+    // the resume/zh templates don't read is a style: key that silently does nothing there
+    const TEMPLATES = ['templates/cv-template.html', 'templates/cv-template.zh-minimal.html', 'templates/resume-template.html'];
+    for (const tpl of TEMPLATES) {
+    const tplSrc = readFileSync(join(ROOT, tpl), 'utf-8');
+    const wrongDefault = Object.entries(DEFAULTS).filter(([v, d]) => !tplSrc.includes(`${v}: ${d};`));
+    const unreferenced = Object.keys(DEFAULTS).filter(v => !tplSrc.includes(`var(${v})`));
+    const selfReferential = Object.keys(DEFAULTS).filter(v => tplSrc.includes(`${v}: var(${v})`));
+    const strays = tplSrc.split('\n')
+      .filter(l => /hsl\(187, 74%, 28%\)|hsl\(187, 40%, (?:95|88)%\)/.test(l) && !/^\s*--tag-/.test(l));
+    if (!wrongDefault.length && !unreferenced.length && !selfReferential.length && !strays.length) {
+      pass(`${tpl}: tag tokens keep the exact colors they replaced, are read, and leave no literal behind`);
+    } else {
+      fail(`${tpl} tag tokens: wrongDefault=${JSON.stringify(wrongDefault)} unreferenced=${unreferenced} selfRef=${selfReferential} strays=${JSON.stringify(strays)}`);
+    }
+    }
+  }
+
 } catch (e) {
   fail(`theme-style tests crashed: ${e.message}`);
 }

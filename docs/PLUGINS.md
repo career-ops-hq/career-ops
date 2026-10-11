@@ -46,11 +46,22 @@ imported), an `index.mjs` (default-exports your hooks), and optionally a
 — there is no auto-submit hook. Producers **return** `Job[]`; the engine writes
 them. Reach the network **only** through `ctx.fetch` (your manifest
 `allowedHosts` is enforced, with SSRF protection). Keys arrive via `ctx.env`,
-non-secret settings via `ctx.settings`.
+non-secret settings via `ctx.settings`. To deduplicate the postings you return —
+or to compare a posting against one you have already seen — use
+`ctx.normalizePostingUrl(url)`, which is the same key the tracker and scanner
+build. It returns `''` when there is nothing to key on, and `''` means *no key*:
+never match one `''` against another.
 
 See `plugins/README.md` for the full contract + the honest trust model (plain
 ESM has no hard sandbox — bundled plugins are code-reviewed; your own are your
 trust).
+
+For human-confirmed tracker transitions, #3333 proposes a separate local
+drop-file bridge read by `reply-watch.mjs`: see the draft
+[reply proposal contract](REPLY_PROPOSALS.md). It adds no hook kind and grants
+no tracker-write permission to plugins. The directory and row format are
+accepted as a v1 draft: they may change until a real producer writes to the
+directory.
 
 ## Publishing + getting approved
 

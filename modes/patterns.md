@@ -17,7 +17,7 @@ When interview sessions are available, it also reads *what the candidate actuall
 
 ## Minimum Threshold
 
-Before running analysis, check: does `data/applications.md` have at least 5 entries that were actually sent (Applied, Responded, Interview, Offer, Hired, Rejected)? SKIP and Discarded rows are not submissions and do not count toward the floor.
+Before running analysis, check: does `data/applications.md` have at least 5 entries that were actually sent (Applied, Responded, Assessment, Interview, Offer, Hired, Rejected)? SKIP and Discarded rows are not submissions and do not count toward the floor.
 
 If not, tell the user:
 > "Not enough data yet -- {N}/5 applications have progressed beyond evaluation. Keep applying and come back when you have more outcomes to analyze."
@@ -60,7 +60,7 @@ If the script returns `error`, display the error message and exit.
 each report's `**URL:**` (community ATS with clean fingerprints only: Greenhouse,
 Lever, Ashby, Workday — white-labeled ATS are not URL-detectable and fall into an
 unreported `unknown` bucket). `advanceRate` = share that reached
-`Responded`/`Interview`/`Offer` (a bare `Applied` does **not** count).
+`Responded`/`Assessment`/`Interview`/`Offer` (a bare `Applied` does **not** count).
 
 Motivation: *Algorithmic Monocultures in Hiring* (Bommasani et al., FAccT 2026,
 [arXiv:2605.27371](https://arxiv.org/abs/2605.27371)) — rejections through a shared

@@ -11,6 +11,6 @@
   "allowedHosts": [],
   "skill": true,
   "license": "MIT",
-  "version": "0.1.0",
-  "sha": "d19e128135ee1b900e093a67311ca8d6251b9211"
+  "version": "0.1.3",
+  "sha": "8d56d3a80cad7221042ed9ebe5d972fa81015995"
 }

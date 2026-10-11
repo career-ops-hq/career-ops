@@ -8,10 +8,12 @@ Cuando el candidato pegue una oferta (texto o URL), SIEMPRE entregar los 7 bloqu
 
 Cuando el candidato pegue una **URL** (no texto de la JD), confirmar que la oferta sigue activa antes de evaluar. Un enlace muerto nunca debe llegar al Bloque A.
 
+**LinkedIn:** aplicar primero AGENTS.md → **LinkedIn JD loading guard (#4121)**, antes de navegar o usar fallbacks. Reutilizar el contenido y el intento de modos anteriores. Un skeleton de carga o una JD inaccesible queda sin confirmar, no cerrada; detenerse antes del Bloque A hasta obtener texto real, sin volver a navegar.
+
 1. Obtener el contenido de la página: si se llegó aquí desde `auto-pipeline` (su Paso 0.5 ya navegó y validó el enlace), reutilizar esa captura — no navegar de nuevo. En un envío directo de URL, navegar con Playwright (`browser_navigate` + `browser_snapshot`). **Opt-in:** si `scan.extractor: cli` está configurado en `config/profile.yml`, ejecutar `node browser-extract.mjs <url>` (por defecto `--mode jd`), **retrocediendo silenciosamente** a `browser_navigate` + `browser_snapshot` si falla.
 2. Clasificar la publicación:
    - **Evidencia de oferta activa:** título/rol + descripción real o ruta de candidatura/apply
-   - **Evidencia de oferta cerrada:** expirada/cerrada/"ya no acepta candidaturas", JD ausente con solo nav/footer, redirección a página genérica, o 404/410
+   - **Evidencia de oferta cerrada:** expirada/cerrada/"ya no acepta candidaturas", JD ausente con solo nav/footer tras descartar contenido aún cargando o inaccesible, redirección a página genérica, o 404/410
 3. Si la oferta parece cerrada, **detenerse antes del Bloque A**: informar al candidato que el enlace está muerto, y si la entrada provino de `data/pipeline.md`, marcarla `- [x] ~~Empresa | Rol~~ — oferta nieaktywna`. No generar evaluación, report ni CV.
 4. Si el candidato pegó texto de la JD (sin URL), la disponibilidad no se puede verificar — anotarlo y continuar.
 
@@ -301,9 +303,29 @@ Ejecutar `node company-history.mjs --company <empresa>` pasando el nombre como a
 
 ---
 
+## Veredicto (lead)
+
+Escribir un bloque `## Veredicto (lead)` justo después del Bloque G y antes de `## Risk Summary`. Responde a la única pregunta con la que el lector abrió el report: ¿me presento?
+
+**Derivado, nunca originador.** `final_decision` en `## Machine Summary` es la fuente de verdad. Este bloque repite esa misma decisión en una frase humana y nunca introduce otra distinta: si la frase y el campo discrepan, manda el campo y la frase es el defecto. La decisión en negrita es el valor de ese campo: Apply, Consider, Research first o Skip.
+
+**La marca `(lead)` es funcional, e invariante entre idiomas a propósito.** La vista web del report promueve a destacado de cabecera el bloque que lleva la marca, y lo identifica por la marca, no por la palabra del encabezado ni por la letra del bloque. Cada traducción conserva su propio sustantivo y el mismo paréntesis: `## Veredicto (lead)`, `## Verdict (lead)`. Nunca traducir `(lead)`, y nunca asignar letra a este bloque: queda fuera de la secuencia A–H.
+
+**Sin juicio nuevo.** Cuando se escribe este bloque ya están todas las entradas. Dar la decisión más un motivo tomado de lo que el report ya estableció. No repuntuar, no añadir evidencia.
+
+Formato del bloque:
+
+```markdown
+## Veredicto (lead)
+
+**Apply.** Match alto en el eje central del rol, sin bloqueos duros, y el Bloque G devolvió High Confidence.
+```
+
+---
+
 ## Risk Summary (después del Bloque G)
 
-Cerrar el report con un bloque `## Risk Summary` después del Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
+Cerrar el report con un bloque `## Risk Summary` después del bloque `## Veredicto (lead)`, que sigue al Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
 
 Tres estados por fila: `✅ {conclusión}` / `⚠️ {hallazgo}` / `— not evaluated`. **`— not evaluated` es estado de primera clase.** Excepción: Interview red flags → `— no interview sessions yet`.
 
@@ -390,6 +412,9 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 
 ## G) Legitimidad de la publicación
 (contenido completo del bloque G)
+
+## Veredicto (lead)
+(la decisión de presentarse o no, en una frase — repite `final_decision`, ver la sección Veredicto arriba)
 
 ## Risk Summary
 (una fila por señal de riesgo, orden fijo — ver la sección Risk Summary arriba)

@@ -998,8 +998,9 @@ ${sections.join('\n')}</div>
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
-      'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
+      'generate-pdf.mjs', 'cv-experience-order.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
       'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+      'cv-sections-core.mjs',
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
@@ -1011,6 +1012,9 @@ ${sections.join('\n')}</div>
     // before parsing an argument.
     mkdirSync(join(sandbox, 'lib'), { recursive: true });
     copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+    // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
+    // module scope, so the copy needs it for the same reason.
+    copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
@@ -1135,8 +1139,9 @@ export const chromium = {
   try {
     const script = join(sandbox, 'generate-pdf.mjs');
     for (const f of [
-      'generate-pdf.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
+      'generate-pdf.mjs', 'cv-experience-order.mjs', 'theme-style.mjs', 'tracker-utils.mjs',
       'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
+      'cv-sections-core.mjs',
     ]) {
       copyFileSync(join(ROOT, f), join(sandbox, f));
     }
@@ -1148,6 +1153,9 @@ export const chromium = {
     // before parsing an argument.
     mkdirSync(join(sandbox, 'lib'), { recursive: true });
     copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+    // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
+    // module scope, so the copy needs it for the same reason.
+    copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from

@@ -76,6 +76,39 @@ try {
     fail(`resolveConfig jobs-endpoint-as-api wrong: base=${brandJobsEndpoint.base} jobsApi=${brandJobsEndpoint.jobsApi}`);
   }
 
+  // A /go/<Category>/<id>/ saved-search page copied from a careers site is not a
+  // brand prefix: it must resolve to the tenant root, where the tile endpoint
+  // answers, not to .../go/<Category>/<id>/tile-search-results/ (200, zero tiles).
+  const goRoot = 'https://jobs.canadalife.com';
+  for (const [label, url] of [
+    ['category page', `${goRoot}/go/All-Jobs/9170201/`],
+    ['category page with a locale query', `${goRoot}/go/All-Jobs/9170201/?locale=en_US`],
+    ['paginated category page', `${goRoot}/go/All-Jobs/9170201/25/`],
+    ['category page without a trailing slash', `${goRoot}/go/All-Jobs/9170201`],
+  ]) {
+    const go = resolveConfig({ name: 'Canada Life', careers_url: url });
+    if (go.base === goRoot && go.tileApi === `${goRoot}/tile-search-results/` && go.jobsApi === `${goRoot}/services/recruiting/v1/jobs`) {
+      pass(`resolveConfig: /go/<Category>/<id>/ ${label} resolves to the tenant root`);
+    } else {
+      fail(`resolveConfig /go/ ${label} wrong: base=${go.base} tileApi=${go.tileApi}`);
+    }
+  }
+  const brandGo = resolveConfig({ name: 'Bluebeam', careers_url: 'https://careers.nemetschek.com/Bluebeam/go/Sales/123/' });
+  if (brandGo.base === 'https://careers.nemetschek.com/Bluebeam' && brandGo.tileApi === 'https://careers.nemetschek.com/Bluebeam/tile-search-results/') {
+    pass('resolveConfig: a brand segment in front of /go/<Category>/<id>/ is kept');
+  } else {
+    fail(`resolveConfig brand + /go/ wrong: base=${brandGo.base} tileApi=${brandGo.tileApi}`);
+  }
+  // Only a /go/ page is stripped: a brand whose own name is "go", or a path that
+  // merely contains /go/, must be left alone.
+  const goBrand = resolveConfig({ name: 'X', careers_url: 'https://careers.example.com/go/' });
+  const goDeep = resolveConfig({ name: 'X', careers_url: 'https://careers.example.com/Brand/go/jobs/' });
+  if (goBrand.base === 'https://careers.example.com/go' && goDeep.base === 'https://careers.example.com/Brand/go/jobs') {
+    pass('resolveConfig: a path that is not /go/<Category>/<numeric id>/ is left alone');
+  } else {
+    fail(`resolveConfig over-stripped a non-category /go/ path: ${goBrand.base} | ${goDeep.base}`);
+  }
+
   // detect() — literal SF hosts auto-claim; branded RMK hosts (jobs.zf.com) do
   // NOT (they carry no "successfactors" string and rely on explicit provider:).
   if (sf.detect({ name: 'X', careers_url: 'https://acme.successfactors.eu/careers' })) {

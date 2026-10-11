@@ -21,14 +21,12 @@
  * would still let a cold parallel burst through. With both, the 29 above
  * becomes 1.
  *
- * Why patch `dns.lookup` rather than configure the HTTP client: career-ops
- * depends on no HTTP library — providers call the global `fetch()`. Node
- * exposes no supported way to give `fetch()` a custom resolver without
- * taking on `undici` as a direct dependency to build an `Agent` with a
- * `connect.lookup` option. Patching the `node:dns` module object keeps the
- * dependency list untouched: `net.connect` reads `dns.lookup` at call time,
- * so importing this file once (`_http.mjs` does) covers every provider and
- * every direct `fetch()` in the process.
+ * Why patch `dns.lookup` rather than configure each HTTP client: providers
+ * normally call the global `fetch()`. `net.connect` reads `dns.lookup` at call
+ * time, so importing this file once (`_http.mjs` does) covers direct requests
+ * without changing their dispatcher. Proxy opt-in uses an undici dispatcher
+ * only for provider requests; direct and NO_PROXY requests still need this
+ * cache and address guard.
  *
  * Scope of the patch — deliberately narrow:
  *   - Only the callback-style `dns.lookup` on the `node:dns` module object.
@@ -50,7 +48,7 @@
  */
 
 import dns from 'node:dns';
-import { inProviderFetch, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
+import { inProviderFetch, isTrustedProxyLookup, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 
 /**
  * DNS failures that mean *the resolver itself refused or failed*, as opposed
@@ -268,7 +266,7 @@ export function createCachedLookup(realLookup, options = {}) {
         ? rest[0].map((entry) => entry && entry.address)
         : [rest[0]];
       const bad = addresses.find((address) => isBlockedAddress(address));
-      if (bad !== undefined) return callback(blockedAddressError(hostname, bad));
+      if (bad !== undefined && !isTrustedProxyLookup(hostname)) return callback(blockedAddressError(hostname, bad));
       return callback(err, ...rest);
     };
   }

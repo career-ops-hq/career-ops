@@ -5,6 +5,7 @@ import { resolve, join } from 'path';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 // CAREER_OPS_BATCH_STATE overrides the batch-state.tsv path — the same override
@@ -13,7 +14,10 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const batchStateFile = process.env.CAREER_OPS_BATCH_STATE
   ? resolve(process.env.CAREER_OPS_BATCH_STATE)
   : join(__dirname, 'batch', 'batch-state.tsv');
-const reportsDir = join(__dirname, 'reports');
+// reports/ is User Layer (DATA_CONTRACT.md), so it follows the data root —
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data — not the code
+// checkout. batch/ and modes/ are System Layer and stay on __dirname.
+const reportsDir = join(getCareerOpsRoot(), 'reports');
 
 const USAGE = `career-ops batch tailor — bulk generate tailored CVs for high-scoring batch jobs
 
@@ -110,7 +114,12 @@ for (let i = 0; i < toProcess.length; i++) {
   
   // Try to find the local report file to pass to the agent
   const matchingReport = reports.find(f => f.startsWith(`${job.reportNum}-`) && f.endsWith('.md'));
-  const reportContext = matchingReport ? `\nThe evaluation report is available at: reports/${matchingReport}` : '';
+  // Absolute, for the same reason as modes/pdf.md below: with a split data
+  // root, a bare `reports/...` points the worker at the code checkout, where
+  // the report does not exist.
+  const reportPath = matchingReport ? join(reportsDir, matchingReport) : null;
+  if (reportPath) console.log(`  Report: ${reportPath}`);
+  const reportContext = reportPath ? `\nThe evaluation report is available at: ${reportPath}` : '';
   
   const prompt = `Tailor the CV for this role and generate the HTML and PDF CVs. \nURL: ${job.url}\nReport number: ${job.reportNum}${reportContext}`;
   

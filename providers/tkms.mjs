@@ -28,6 +28,7 @@
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { sleep } from './_http.mjs';
 
 const MAX_PAGES = 60; // safety cap on request count (60*20 = 1200 postings)
 const MAX_JOBS = 1000; // cap total postings pulled
@@ -156,13 +157,12 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`tkms: cannot resolve jobs host for ${entry.name}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
 
     for (let page = 0; page < maxPages; page++) {
-      if (page > 0) await wait(PAGE_DELAY_MS);
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       const json = await ctx.fetchJson(cfg.queryApi, {
         method: 'POST',
         redirect: 'error',

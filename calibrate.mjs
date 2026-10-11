@@ -436,7 +436,24 @@ function selfTest() {
 // against the real tracker inside the test process.
 import { isMainModule } from './lib/is-main-module.mjs';
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node calibrate.mjs [--json] [--min-band-n <n>] [--self-test]
+
+  --json           full JSON to stdout
+  --min-band-n <n> per-band sample floor (default 5)
+  --self-test      run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) selfTest();
 

@@ -25,14 +25,14 @@
 import { writeFileSync, mkdirSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo } from './helpers.mjs';
-import { gitIn, addPaths, isTracked, expandToShippedFiles, stagingFileList } from '../update-system.mjs';
+import { addPaths, isTracked, expandToShippedFiles, stagingFileList } from '../update-system.mjs';
 
 // Shared with updater-is-tracked.test.mjs so the git-isolation pins live in one
 // body: dropping one has to redden both suites, not leave this one quietly
 // unprotected. `root` is the second half of the seam here — addPaths resolves
 // paths against it to decide what is a directory, and without it the guard
 // would lstat the real repository instead of this fixture.
-const makeRepo = () => makeUpdaterRepo(gitIn, { prefix: 'co-addpaths-', includeRoot: true });
+const makeRepo = () => makeUpdaterRepo({ prefix: 'co-addpaths-', includeRoot: true });
 
 // -z for the same reason the expansion uses it: under core.quotePath (the
 // default) git renders a non-ASCII name as "modes/\346\227\245...", so a

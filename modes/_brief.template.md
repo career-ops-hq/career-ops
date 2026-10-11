@@ -1,8 +1,8 @@
 # {Your Name} — Triage Brief
 
 <!-- ============================================================
-     THIS FILE IS YOURS. Copy it to `modes/_brief.md` (doctor.mjs
-     auto-copies it on first run) and fill in the placeholders.
+     THIS FILE IS YOURS. Copy it to `modes/_brief.md` and fill in the placeholders.
+     Onboarding can copy it with `node doctor.mjs --json --init-templates`.
      It is USER LAYER — never auto-updated by `node update-system.mjs`.
 
      PURPOSE: Compact context for first-pass triage agents

@@ -21,28 +21,123 @@
  * They carry no trust tier and never participate in the fold/gap math above;
  * look them up with getStatedObservations() or `--stated-for <tracker#>`.
  *
+ * Relocation purchasing-power (#4694, jurisdiction-compliance-lens umbrella #2026):
+ * a transparent, bracket-tax-only comparison between a candidate's home
+ * province/state and a posting's destination, keyed off
+ * templates/jurisdiction-relocation-tax.yml. Every folded application also
+ * gets a `relocation` field when a posting location, an advertised figure, a
+ * resolvable home location, and the table are all available — absence of any
+ * of those is "not evaluated," never a guessed penalty. NOT financial or tax
+ * advice; see that table's own header for the full disclaimer.
+ *
  * Run: node salary-gap.mjs             (JSON)
  *      node salary-gap.mjs --summary   (human-readable)
  *      node salary-gap.mjs --stated-for <tracker#>   (prior stated-comp observations, JSON)
+ *      node salary-gap.mjs --relocation --gross <amount> --posting-location "<city, province>"
+ *                          [--home-location "<city, province>"] [--currency <code>]
+ *                                                (ad hoc relocation comparison, JSON)
+ *      node salary-gap.mjs --relocation --gross <amount> --posting-location-file <path>
+ *                          [--home-location "<city, province>"] [--currency <code>]
+ *                                                (same, but the posting location is read
+ *                                                 from a file instead of a shell argument —
+ *                                                 see CWE-78 note below)
  *      node salary-gap.mjs --self-test
+ *
+ * `--posting-location` vs `--posting-location-file` (#4696 CodeRabbit CWE-78
+ * finding): the posting location is the JD's own verbatim text — untrusted,
+ * external, JD-author-controlled. `modes/oferta.md` Signal 17 and
+ * `batch/batch-prompt.md`'s batch-worker equivalent (which runs with
+ * `--dangerously-skip-permissions`) both call this script from an agent-
+ * constructed Bash command. Interpolating that JD text directly into a
+ * double-quoted `--posting-location "<JD location>"` argument lets a crafted
+ * location containing `$(...)` or backticks execute as a shell command
+ * substitution before this script ever sees the string. `--posting-location-file
+ * <path>` sidesteps that only when the raw JD text never enters shell syntax:
+ * the agent first base64-encodes the complete UTF-8 location as a pure text
+ * transformation, then a fixed `node -e` decoder writes those bytes to a
+ * temporary file. A quoted heredoc is not safe because JD text equal to its
+ * fixed delimiter can close it early. The command line receives only the
+ * base64 alphabet and the agent-chosen file PATH, never raw JD text.
+ * `--posting-location`
+ * itself is unchanged and still accepted (e.g. for trusted/short values typed
+ * directly by a human), but the prompt-spec instructions in `modes/oferta.md`
+ * and `batch/batch-prompt.md` now use the file form for the JD-controlled
+ * value specifically.
  */
 
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
+// templates/ is SYSTEM layer (Data Contract) — resolved relative to this
+// script's own directory, never the (possibly different) user data root.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const RELOCATION_TABLE_PATH = join(SCRIPT_DIR, 'templates/jurisdiction-relocation-tax.yml');
+
+/**
+ * Canonical form of a tracker#/report# so `29` and `029` are one key.
+ *
+ * Column 1 of the observation log is a tracker#, and the docs tell the user to
+ * write it plainly (`29`), while report filenames are zero-padded to three
+ * digits (`029-*.md`). Joining those as raw strings made padding load-bearing:
+ * the same row wrote two different keys depending on how it was typed.
+ *
+ * Digits only, so `*` (the profile-desired pseudo-row) and anything unexpected
+ * pass through untouched rather than collapsing into each other.
+ *
+ * @param {string|number} raw - An id as written by a human or a filename.
+ * @returns {string} The id without leading zeros, or the input trimmed.
+ */
+export function normalizeId(raw) {
+  const s = String(raw ?? '').trim();
+  return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
+}
+
+// Sort ids the way a reader expects: 9 before 10. Once ids are unpadded,
+// localeCompare would order them lexicographically ('10' < '9'), which the
+// previous zero-padded keys had hidden.
+const compareIds = (a, b) => {
+  const na = /^\d+$/.test(a), nb = /^\d+$/.test(b);
+  if (na && nb) return Number(a) - Number(b);
+  if (na !== nb) return na ? -1 : 1;
+  return a.localeCompare(b);
+};
 
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const statedForFlagIdx = args.indexOf('--stated-for');
 const statedForNum = statedForFlagIdx !== -1 ? args[statedForFlagIdx + 1] : null;
+// Relocation purchasing-power (#4694) — ad hoc mode: compute a comparison
+// directly from CLI inputs, without needing a tracker row or a saved report.
+// This is what modes/oferta.md Signal 17 calls during a FRESH evaluation,
+// before anything has been written to reports/ or the tracker.
+const relocationMode = args.includes('--relocation');
+const relocGrossRaw = flagValue(args, '--gross');
+const relocCurrency = flagValue(args, '--currency') ?? null;
+const relocPostingLocation = flagValue(args, '--posting-location') ?? null;
+// File form (#4696 CodeRabbit CWE-78 finding): the posting location is
+// JD-controlled, untrusted text. Reading it from a file the caller already
+// wrote — rather than interpolating it into this process's own argv — means
+// shell metacharacters in the JD text are never given to a shell to expand in
+// the first place. See the file header comment for the full rationale.
+const relocPostingLocationFile = flagValue(args, '--posting-location-file') ?? null;
+// `flagValue` alone cannot distinguish "flag absent" from "flag present but
+// given a missing/invalid operand" — both collapse to `undefined`/`null`
+// above. `hasFlag` sees the token itself, so the two cases can be told apart
+// and a present-but-malformed flag can fail loudly instead of silently
+// falling back to --posting-location or misreading the next flag as a path
+// (#4696 CodeRabbit follow-up finding).
+const relocPostingLocationFileFlagPresent = hasFlag(args, '--posting-location-file');
+const relocHomeLocationFlag = flagValue(args, '--home-location') ?? null;
 
 const TRUST = {
   actual: { contract: 3, 'offer-letter': 2, 'recruiter-verbal': 1, user: 0 },
@@ -105,6 +200,14 @@ function canonicalizeSeparators(numStr) {
 export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
+  // Keep period recognition separate from amount parsing, but allow an explicit
+  // annual suffix to coexist with the numeric value in Machine Summary data.
+  // It may appear on either side of a trailing currency token ("60k CAD per
+  // year" or "60k per year CAD"), so strip annual/currency/annual in that
+  // order. Other periods remain unparseable because callers must annualize them
+  // from the JD's own inputs before treating them as annual gross.
+  const stripAnnual = (value) => value.replace(/\s*(?:\/\s*(?:year|yr)|per\s+(?:year|annum)|annual(?:ly)?|yearly)\s*$/i, '').trim();
+  s = stripAnnual(s);
   // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
   // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
   // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
@@ -112,6 +215,7 @@ export function parseAmount(raw) {
   // prose ("competitive") still fails the numeric match below even after losing
   // its last three letters.
   s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
+  s = stripAnnual(s);
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(canonicalizeSeparators(numStr));
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
@@ -129,6 +233,14 @@ export function parseAmount(raw) {
     const v = toNum(single[1], single[2]);
     return v === null ? null : { min: v, max: v, mid: v };
   }
+  return null;
+}
+
+export function compensationPeriod(raw) {
+  const value = String(raw ?? '');
+  if (/(?:\/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b)/i.test(value)) return 'annual';
+  if (/(?:\/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b)/i.test(value)) return 'monthly';
+  if (/(?:\/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b)/i.test(value)) return 'hourly';
   return null;
 }
 
@@ -163,8 +275,9 @@ export function parseObservations(content) {
 // NOT folded/trust-ranked like desired/advertised/actual — every prior statement
 // stays visible (a candidate needs the full trail, not just the "best" one).
 export function getStatedObservations(observations, num) {
+  const want = normalizeId(num);
   return observations
-    .filter(o => o.type === 'stated' && o.num === num)
+    .filter(o => o.type === 'stated' && normalizeId(o.num) === want)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
@@ -191,6 +304,11 @@ export function reportToObservation(content, num, date) {
   const company = yamlStr(body, 'company');
   const role = yamlStr(body, 'role');
   const adv = yamlStr(body, 'advertised_comp');
+  // posting_location (#4694): the JD's own stated work location, verbatim,
+  // when it requires relocation — feeds the relocation purchasing-power
+  // comparison (see computeRelocationAdjustment below). null when the JD
+  // states no location, same no-invented-data posture as advertised_comp.
+  const postingLocation = yamlStr(body, 'posting_location');
   // Currency = first standalone UPPERCASE 3-letter token, case-SENSITIVE on
   // purpose: lowercase 3-letter English words in sloppy values ("per", "and")
   // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
@@ -198,12 +316,287 @@ export function reportToObservation(content, num, date) {
   // a corrective TSV observation with an explicit currency overrides it.
   const currencyGuess = adv ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
   return {
-    company, role,
+    company, role, postingLocation,
     observation: adv === null ? null : {
       num, date, type: 'advertised', amount: adv, currency: currencyGuess,
       source: 'jd', note: 'from report Machine Summary', parsed: parseAmount(adv),
+      period: compensationPeriod(adv), postingLocation,
     },
   };
+}
+
+// --- Relocation purchasing-power (jurisdiction-compliance-lens umbrella #2026,
+// member #4694) ---
+//
+// Generic engine + jurisdiction-keyed table, same pattern as every other
+// umbrella member: the math below never hardcodes a country, a province, or a
+// rate — those live entirely in templates/jurisdiction-relocation-tax.yml.
+// Deliberately simplified (see that file's NEVER-ASSERT note): federal +
+// sub-national MARGINAL BRACKETS ONLY — no basic personal amount, credits,
+// CPP/EI, surtaxes, or cost-of-living adjustment. Every input is returned
+// alongside the output (inspectable, never opaque), and the `limitations`
+// string is part of the result, not an afterthought left to the caller.
+
+/**
+ * Load the relocation tax-bands table. Missing/unreadable file is a non-event
+ * here (same posture as loadProfileDesired below) — callers treat a null
+ * table as "no jurisdiction data available," never a crash.
+ *
+ * @param {string} [tablePath] - Override for tests.
+ * @returns {object|null} The `jurisdictions` map, or null.
+ */
+export function loadRelocationTable(tablePath = RELOCATION_TABLE_PATH) {
+  if (!existsSync(tablePath)) return null;
+  try {
+    const doc = yaml.load(readFileSync(tablePath, 'utf-8').replace(/\r\n/g, '\n'));
+    return doc?.jurisdictions && typeof doc.jurisdictions === 'object' ? doc.jurisdictions : null;
+  } catch {
+    return null;
+  }
+}
+
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Blocking context markers (#4696 CodeRabbit findings #2 and the follow-up
+// unseeded-province gap). A bare city-name alias ("Waterloo", "Hamilton",
+// "Surrey") collides with a same-named city outside the table's country, OR
+// with a same-named city in a Canadian province/territory the table simply
+// hasn't seeded yet ("Hamilton, Quebec" sharing its name with CA-ON's
+// Hamilton). Rather than try to enumerate every colliding city, block a
+// city-only match whenever the text ALSO names an unambiguous place the weak
+// match cannot be — a US state, the UK, New Zealand, … — OR one of the
+// Canadian provinces/territories not yet seeded in
+// templates/jurisdiction-relocation-tax.yml — real signal the city-name
+// alias alone cannot see.
+const BLOCKING_CONTEXT_MARKERS = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+  'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+  'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan',
+  'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+  'New Hampshire', 'New Jersey', 'New Mexico', 'New York', 'North Carolina',
+  'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island',
+  'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont',
+  'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming',
+  'United States', 'USA',
+  'United Kingdom', 'UK', 'England', 'Scotland', 'Wales',
+  'New Zealand', 'Australia',
+  // Unseeded Canadian jurisdictions: a city alias must not override them.
+  'Quebec', 'Québec', 'QC', 'Manitoba', 'MB', 'Saskatchewan', 'SK',
+  'New Brunswick', 'NB', 'Prince Edward Island', 'PE',
+  'Newfoundland and Labrador', 'NL', 'Yukon', 'YT',
+  'Northwest Territories', 'NT', 'Nunavut', 'NU',
+];
+const hasBlockingContext = (text) => BLOCKING_CONTEXT_MARKERS.some(
+  (m) => new RegExp(`\\b${escapeRegExp(m)}\\b`, 'i').test(text),
+);
+
+// An alias is a "strong" signal (a province/state's own name or its short
+// abbreviation) when it either IS the jurisdiction's own name, or reduces to
+// a bare 2-letter uppercase code once leading punctuation is stripped (", ON"
+// / " ON" -> "ON"). Everything else (a city name) is a "weak" signal: on its
+// own it can be a same-named city in another country entirely.
+function isStrongAlias(alias, row) {
+  const bare = alias.replace(/^[,\s]+/, '').trim();
+  if (/^[A-Z]{2}$/.test(bare)) return true;
+  const provinceName = String(row?.jurisdiction_name ?? '').split(',')[0].trim();
+  return !!provinceName && bare.toLowerCase() === provinceName.toLowerCase();
+}
+
+// Whole-word match for a name/city alias; a short (2-letter) abbreviation
+// alias is matched case-SENSITIVELY with its own boundary set so "ON" never
+// fires on the "on" in "on-site" or "in office on Fridays".
+function textContainsAlias(text, alias) {
+  const bare = alias.replace(/^[,\s]+/, '').trim();
+  if (!bare) return false;
+  if (/^[A-Z]{2}$/.test(bare)) {
+    const re = new RegExp(`(^|[\\s,(])${escapeRegExp(bare)}(?=$|[\\s,).])`);
+    return re.test(text);
+  }
+  const re = new RegExp(`\\b${escapeRegExp(bare)}\\b`, 'i');
+  return re.test(text);
+}
+
+/**
+ * Match a free-text location string (the candidate's own config/profile.yml
+ * location, or a posting's stated work location) against the table's
+ * jurisdiction `aliases`.
+ *
+ * Evidence-strength honesty (umbrella rule #5): no match, or an ambiguous
+ * match against more than one DIFFERENT jurisdiction, returns null — never a
+ * guess. A federal-level row is never matched directly; it carries no aliases
+ * and is combined with whichever sub-national row matched instead.
+ *
+ * Matching is whole-word and (for short abbreviation aliases) case-sensitive
+ * (#4696 CodeRabbit finding #2) — a naive substring match previously turned
+ * "Austin, TX (on-site)" into CA-ON via the "on" in "on-site". A province/
+ * state name or abbreviation ("NS", "Ontario") is a STRONG signal and wins
+ * outright over a bare city name, which disambiguates "Halifax, NS (in
+ * office on Fridays)" to CA-NS only. When the only match is a bare city-name
+ * alias (no strong signal in the text at all), the text is also checked for
+ * an unambiguous blocking context marker — a US state, "UK", "New Zealand",
+ * … or an unseeded Canadian province/territory ("Quebec", "QC", …) — "Waterloo,
+ * Iowa", "Hamilton, New Zealand", "Surrey, UK" and "Hamilton, Quebec" all
+ * share city names with CA-ON/CA-BC towns but are not those towns, and a
+ * bare city name alone is not strong enough evidence to override that.
+ *
+ * @param {string} text - Free-text location.
+ * @param {object} jurisdictions - Table from loadRelocationTable().
+ * @returns {string|null} The matched jurisdiction code, or null.
+ */
+export function matchJurisdiction(text, jurisdictions) {
+  const s = String(text ?? '').trim();
+  if (!s || !jurisdictions) return null;
+
+  const strongMatches = new Set();
+  const weakMatches = new Set();
+  for (const [code, row] of Object.entries(jurisdictions)) {
+    if (row?.level === 'federal') continue;
+    let strongHit = false;
+    let weakHit = false;
+    for (const alias of row?.aliases ?? []) {
+      const a = String(alias ?? '').trim();
+      if (!a || !textContainsAlias(s, a)) continue;
+      if (isStrongAlias(a, row)) strongHit = true;
+      else weakHit = true;
+    }
+    if (strongHit) strongMatches.add(code);
+    else if (weakHit) weakMatches.add(code);
+  }
+
+  // A province/state name or abbreviation always wins over a bare city name,
+  // and resolves ambiguity between two jurisdictions that happen to share a
+  // city name's text (the weak match is simply discarded in that case).
+  if (strongMatches.size > 0) return strongMatches.size === 1 ? [...strongMatches][0] : null;
+  if (weakMatches.size !== 1) return null;
+
+  const onlyCode = [...weakMatches][0];
+  if (hasBlockingContext(s)) return null; // bare city name only, blocking context present -> no guess
+  return onlyCode;
+}
+
+/**
+ * Progressive bracket tax: each band's rate applies only to the slice of
+ * income inside it. `brackets` must be ascending by `up_to`, with the top
+ * (unbounded) bracket carrying `up_to: null`.
+ *
+ * @param {Array<{up_to: number|null, rate: number}>} brackets
+ * @param {number} income - Non-negative gross amount.
+ * @returns {number|null} Total tax, or null on malformed input.
+ */
+export function bracketTax(brackets, income) {
+  if (!Array.isArray(brackets) || brackets.length === 0 || !(income >= 0)) return null;
+  let tax = 0;
+  let floor = 0;
+  for (const b of brackets) {
+    const cap = b?.up_to === null || b?.up_to === undefined ? Infinity : Number(b.up_to);
+    const rate = Number(b?.rate);
+    if (!Number.isFinite(rate) || (Number.isFinite(cap) && cap <= floor)) return null; // malformed table, never silently mis-tax
+    const slice = Math.max(0, Math.min(income, cap) - floor);
+    tax += slice * rate;
+    floor = cap;
+    if (income <= cap) break;
+  }
+  return tax;
+}
+
+/**
+ * Transparent, bracket-only relocation purchasing-power comparison between
+ * the candidate's home jurisdiction and a posting's destination jurisdiction.
+ *
+ * NOT FINANCIAL OR TAX ADVICE — a corroborating data point only, per the
+ * umbrella's warn-only, human-in-the-loop rule. Never a verdict on whether the
+ * posting is a "good" or "bad" offer.
+ *
+ * @param {object} params
+ * @param {number} params.grossAnnual - Gross annual compensation, in `currency`.
+ * @param {string} params.homeCode - Jurisdiction code of the candidate's home province/state.
+ * @param {string} params.destCode - Jurisdiction code of the posting's work location.
+ * @param {object} params.jurisdictions - Table from loadRelocationTable().
+ * @param {string} [params.currency] - The currency `grossAnnual` is actually denominated
+ *   in (e.g. the advertised comp's own currency, or the ad hoc `--currency` flag).
+ *   A table row's `currency` field (all seeded rows carry one) must match this,
+ *   case-insensitively, or the comparison is refused rather than silently taxed
+ *   under the wrong jurisdiction's brackets (#4696 CodeRabbit finding #3).
+ * @returns {object} `{ ok: true, ... }` or `{ ok: false, reason }`.
+ */
+export function computeRelocationAdjustment({ grossAnnual, homeCode, destCode, jurisdictions, currency }) {
+  if (!jurisdictions) return { ok: false, reason: 'no-table' };
+  if (!(grossAnnual > 0)) return { ok: false, reason: 'no-gross-amount' };
+  if (!homeCode || !destCode) return { ok: false, reason: 'no-jurisdiction-match' };
+  if (homeCode === destCode) return { ok: false, reason: 'same-jurisdiction' };
+  const home = jurisdictions[homeCode];
+  const dest = jurisdictions[destCode];
+  if (!home || !dest) return { ok: false, reason: 'no-jurisdiction-match' };
+  if (home.country !== dest.country) return { ok: false, reason: 'cross-country-not-supported' };
+
+  // The brackets below are only meaningful in the table's own currency. Rows
+  // that declare one (every seeded CA-* row does) require a known, matching
+  // advertised/--currency value — an UNKNOWN or mismatched currency (e.g. a
+  // "150k USD" posting) must never be silently run through CAD brackets.
+  // Rows carrying no `currency` field (legacy/fixture tables) skip this check
+  // entirely, so existing non-CA fixtures keep behaving as before.
+  const tableCurrency = dest.currency ?? home.currency ?? null;
+  if (tableCurrency) {
+    const stated = currency ? String(currency).toUpperCase() : 'UNKNOWN';
+    if (stated === 'UNKNOWN' || stated !== String(tableCurrency).toUpperCase()) {
+      return { ok: false, reason: 'currency-mismatch' };
+    }
+  }
+
+  const federalCode = Object.keys(jurisdictions).find(
+    (c) => jurisdictions[c]?.level === 'federal' && jurisdictions[c]?.country === home.country,
+  );
+  const federal = federalCode ? jurisdictions[federalCode] : null;
+  if (!federal) return { ok: false, reason: 'no-federal-table' };
+
+  const sideFor = (row) => {
+    const federalTax = bracketTax(federal.brackets, grossAnnual);
+    const subnationalTax = bracketTax(row.brackets, grossAnnual);
+    if (federalTax === null || subnationalTax === null) return null;
+    const totalTax = federalTax + subnationalTax;
+    return {
+      jurisdiction: row.jurisdiction_name, federalTax, subnationalTax, totalTax,
+      takeHome: grossAnnual - totalTax, effectiveRate: totalTax / grossAnnual,
+    };
+  };
+  const homeSide = sideFor(home);
+  const destSide = sideFor(dest);
+  if (!homeSide || !destSide) return { ok: false, reason: 'malformed-brackets' };
+
+  return {
+    ok: true,
+    grossAnnual,
+    taxYear: dest.tax_year ?? home.tax_year ?? null,
+    home: homeSide,
+    dest: destSide,
+    takeHomeDeltaAbs: destSide.takeHome - homeSide.takeHome,
+    takeHomeDeltaPct: ((destSide.takeHome - homeSide.takeHome) / homeSide.takeHome) * 100,
+    limitations: 'Marginal tax brackets only (federal + provincial/state) — basic personal amount, credits, CPP/EI, surtaxes and cost-of-living are NOT modeled. Not financial or tax advice; a corroborating data point only.',
+  };
+}
+
+/**
+ * Convenience wrapper for a folded application object (see `fold` below):
+ * resolves both jurisdictions from free text and delegates to
+ * computeRelocationAdjustment, or returns null when the inputs needed to
+ * even attempt a match are not available (no posting location, no advertised
+ * figure, no home location, or no table) — absence of data is "not
+ * evaluated," never a guess.
+ *
+ * @param {object} a - An application from fold()'s `applications` array.
+ * @param {{jurisdictions: object|null, homeLocation: string|null}} ctx
+ * @returns {object|null}
+ */
+export function relocationForApplication(a, { jurisdictions, homeLocation }) {
+  const postingLocation = a?.advertised?.postingLocation;
+  if (!jurisdictions || !homeLocation || !postingLocation || !a?.advertised) return null;
+  if (a.advertised.period !== 'annual') return null;
+  const homeCode = matchJurisdiction(homeLocation, jurisdictions);
+  const destCode = matchJurisdiction(postingLocation, jurisdictions);
+  return computeRelocationAdjustment({
+    grossAnnual: a.advertised.value, homeCode, destCode, jurisdictions,
+    currency: a.advertised.currency,
+  });
 }
 
 const pctDelta = (from, to) => ((to - from) / from) * 100;
@@ -221,15 +614,25 @@ function pickEffective(type, candidates) {
   if (!usable.length) return null;
   usable.sort((a, b) => (tiers[b.source] - tiers[a.source]) || (a.date < b.date ? 1 : -1));
   const top = usable[0];
-  return { value: top.parsed.mid, source: top.source, date: top.date, currency: top.currency, raw: top.amount };
+  return {
+    value: top.parsed.mid, source: top.source, date: top.date,
+    currency: top.currency, raw: top.amount,
+    period: top.period ?? compensationPeriod(top.amount),
+    postingLocation: top.postingLocation ?? null,
+  };
 }
 
 // --- Fold + aggregates ---
 export function fold(observations, apps, profileDesired) {
+  // Both sides of the join are canonicalised, so a row written `29` and a row
+  // written `029` fold into one application instead of two keys, one of which
+  // silently matched a different row's report (#4351).
+  const appsByNum = new Map(Object.entries(apps ?? {}).map(([k, v]) => [normalizeId(k), v]));
   const byNum = new Map();
   for (const o of observations) {
-    if (!byNum.has(o.num)) byNum.set(o.num, []);
-    byNum.get(o.num).push(o);
+    const key = normalizeId(o.num);
+    if (!byNum.has(key)) byNum.set(key, []);
+    byNum.get(key).push(o);
   }
 
   const applications = [];
@@ -237,14 +640,14 @@ export function fold(observations, apps, profileDesired) {
   const currencyMismatches = [];
   const unparseable = observations
     .filter(o => o.parsed === null && o.amount && o.amount !== '?')
-    .map(o => ({ num: o.num, type: o.type, raw: o.amount }));
+    .map(o => ({ num: normalizeId(o.num), type: o.type, raw: o.amount }));
   // pickEffective only trusts sources in TRUST[type]'s vocabulary — anything else
   // (e.g. the `recruiter_verbal` underscore typo) must be reported, not silently
   // dropped. Report-derived obs are always `jd` and profile obs `profile`, so in
   // practice only TSV lines can land here.
   const invalidSources = observations
     .filter(o => TRUST[o.type] && !Object.hasOwn(TRUST[o.type], o.source))
-    .map(o => ({ num: o.num, type: o.type, source: o.source }));
+    .map(o => ({ num: normalizeId(o.num), type: o.type, source: o.source }));
 
   const profileObs = profileDesired?.amount ? {
     num: '*', date: '0000-00-00', type: 'desired', amount: profileDesired.amount,
@@ -257,7 +660,8 @@ export function fold(observations, apps, profileDesired) {
   }
 
   for (const [num, obs] of byNum) {
-    if (!apps[num]) { orphans.push({ num, count: obs.length }); continue; }
+    const meta = appsByNum.get(num);
+    if (!meta) { orphans.push({ num, count: obs.length }); continue; }
     const trail = [...obs].sort((a, b) => (a.date < b.date ? -1 : 1));
     const desired = pickEffective('desired', profileObs ? [...obs, profileObs] : obs);
     const advertised = pickEffective('advertised', obs);
@@ -272,23 +676,23 @@ export function fold(observations, apps, profileDesired) {
     if (advertised && actual && !advComparable) currencyMismatches.push({ num, comparison: 'advertised-vs-actual', currencies: [advertised.currency, actual.currency] });
     if (desired && actual && !desComparable) currencyMismatches.push({ num, comparison: 'desired-vs-actual', currencies: [desired.currency, actual.currency] });
     applications.push({
-      num, company: apps[num].company, role: apps[num].role,
+      num, company: meta.company, role: meta.role, postingLocation: meta.postingLocation ?? null,
       desired, advertised, actual, trail,
       advToActPct: advComparable ? pctDelta(advertised.value, actual.value) : null,
       desiredToActPct: desComparable ? pctDelta(desired.value, actual.value) : null,
     });
   }
   // apps with no observations at all but a profile desired still get the default
-  for (const [num, meta] of Object.entries(apps)) {
+  for (const [num, meta] of appsByNum) {
     if (!byNum.has(num) && profileObs) {
       applications.push({
-        num, company: meta.company, role: meta.role,
+        num, company: meta.company, role: meta.role, postingLocation: meta.postingLocation ?? null,
         desired: pickEffective('desired', [profileObs]), advertised: null, actual: null,
         trail: [], advToActPct: null, desiredToActPct: null,
       });
     }
   }
-  applications.sort((a, b) => a.num.localeCompare(b.num));
+  applications.sort((a, b) => compareIds(a.num, b.num));
 
   const byCurrency = {};
   const byCompanyRole = {};
@@ -331,7 +735,7 @@ export function fold(observations, apps, profileDesired) {
     aggregates: { byCurrency, byCompanyRole },
     quality: {
       orphans, unparseable, invalidSources,
-      currencyMismatches: currencyMismatches.sort((a, b) => a.num.localeCompare(b.num)),
+      currencyMismatches: currencyMismatches.sort((a, b) => compareIds(a.num, b.num)),
       withoutActual: applications.filter(a => !a.actual).length, latestObservation: today,
     },
   };
@@ -404,6 +808,31 @@ company: "Initech"
 role: "Platform"
 score: 4.0
 advertised_comp: null
+\`\`\`
+`;
+
+// #4351: a report whose number (029) collides with a DIFFERENT tracker row's
+// number (29). Acme is report 029, linked from tracker row 1; tracker row 29 is
+// Globex and has no report.
+const REPORT_FIXTURE_4351_029 = `# Eval: Acme — Staff Engineer
+
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff Engineer"
+advertised_comp: "100k EUR"
+\`\`\`
+`;
+
+const REPORT_FIXTURE_4368_006 = `# Eval: Globex — Engineer
+
+## Machine Summary
+
+\`\`\`yaml
+company: "Globex"
+role: "Engineer"
+advertised_comp: "200k EUR"
 \`\`\`
 `;
 
@@ -514,7 +943,10 @@ function selfTest() {
   const crossCurrencyObs = parseObservations('004\t2026-06-30\tactual\t88k\tGBP\toffer-letter\tcross-currency on purpose');
   const result = fold([...obs, ...reportObs, ...crossCurrencyObs], apps, { amount: '90k', currency: 'EUR' });
 
-  const a1 = result.applications.find(a => a.num === '001');
+  // Ids in folded output are canonical (#4351): the fixture writes the padded
+  // form a user would type, and the join resolves it, so lookups go through
+  // normalizeId rather than hardcoding the unpadded result.
+  const a1 = result.applications.find(a => a.num === normalizeId('001'));
   // trust precedence: contract 86k (2026-07-05) wins over offer-letter 84k even though
   // BOTH lose to nothing — and specifically contract beats recruiter-verbal 90k
   assert(a1.actual.value === 86000 && a1.actual.source === 'contract', '001 actual = contract 86k');
@@ -526,7 +958,7 @@ function selfTest() {
   // trajectory preserved
   assert(a1.trail.filter(t => t.type === 'actual').length === 3, '001 keeps full actual trail');
 
-  const a2 = result.applications.find(a => a.num === '002');
+  const a2 = result.applications.find(a => a.num === normalizeId('002'));
   // the later recruiter_verbal (underscore typo) 99k and toString (prototype key)
   // 120k must NOT become effective — unrecognized sources are excluded from
   // pickEffective (Object.hasOwn, not `in`) and reported instead
@@ -534,7 +966,7 @@ function selfTest() {
   assert(a2.desired.source === 'profile' && a2.desired.value === 90000, '002 desired falls back to profile');
 
   // cross-currency guard: advertised USD vs actual GBP, desired EUR vs actual GBP
-  const a4 = result.applications.find(a => a.num === '004');
+  const a4 = result.applications.find(a => a.num === normalizeId('004'));
   assert(a4.advertised.currency === 'USD' && a4.actual.currency === 'GBP', '004 mixed currencies folded');
   assert(a4.advToActPct === null, `004 cross-currency adv->act pct must be null, got ${a4.advToActPct}`);
   assert(a4.desiredToActPct === null, `004 cross-currency desired->act pct must be null, got ${a4.desiredToActPct}`);
@@ -543,14 +975,14 @@ function selfTest() {
     'GBP aggregates exclude cross-currency comparisons');
 
   // data quality
-  assert(result.quality.orphans.length === 1 && result.quality.orphans[0].num === '007', 'orphan 007 reported');
+  assert(result.quality.orphans.length === 1 && result.quality.orphans[0].num === normalizeId('007'), 'orphan 007 reported');
   assert(result.quality.unparseable.length === 1 && result.quality.unparseable[0].raw === '9ok', 'typo 9ok reported');
   assert(result.quality.invalidSources.length === 2, `2 invalid sources reported, got ${result.quality.invalidSources.length}`);
-  assert(result.quality.invalidSources.some(s => s.num === '002' && s.type === 'actual' && s.source === 'recruiter_verbal'),
+  assert(result.quality.invalidSources.some(s => s.num === normalizeId('002') && s.type === 'actual' && s.source === 'recruiter_verbal'),
     'unrecognized source recruiter_verbal reported in invalidSources');
   // prototype-key source: `'toString' in tiers` is true via Object.prototype, so an
   // `in` check would let it through and poison the trust sort — must land here instead
-  assert(result.quality.invalidSources.some(s => s.num === '002' && s.type === 'actual' && s.source === 'toString'),
+  assert(result.quality.invalidSources.some(s => s.num === normalizeId('002') && s.type === 'actual' && s.source === 'toString'),
     'prototype-key source toString reported in invalidSources, not treated as trusted');
   // unparseable profile target must be reported, not silently dropped
   const badProfile = fold([], {}, { amount: 'competitive', currency: 'EUR' });
@@ -558,20 +990,20 @@ function selfTest() {
     'unparseable profile target reported');
   const mm = result.quality.currencyMismatches;
   assert(mm.length === 4, `4 currency mismatches reported, got ${mm.length}`);
-  assert(mm.some(m => m.num === '004' && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'USD' && m.currencies[1] === 'GBP'),
+  assert(mm.some(m => m.num === normalizeId('004') && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'USD' && m.currencies[1] === 'GBP'),
     'advertised-vs-actual mismatch reported for 004');
-  assert(mm.some(m => m.num === '004' && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'GBP'),
+  assert(mm.some(m => m.num === normalizeId('004') && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'GBP'),
     'desired-vs-actual mismatch reported for 004');
 
   // UNKNOWN guard: advertised_comp without a currency token (guess UNKNOWN) vs actual
   // logged with currency UNKNOWN — never comparable, even though the strings match
-  const a5 = result.applications.find(a => a.num === '005');
+  const a5 = result.applications.find(a => a.num === normalizeId('005'));
   assert(a5.advertised.currency === 'UNKNOWN' && a5.actual.currency === 'UNKNOWN', '005 both sides UNKNOWN currency');
   assert(a5.advToActPct === null, `005 UNKNOWN-vs-UNKNOWN adv->act pct must be null, got ${a5.advToActPct}`);
   assert(a5.desiredToActPct === null, `005 EUR-vs-UNKNOWN desired->act pct must be null, got ${a5.desiredToActPct}`);
-  assert(mm.some(m => m.num === '005' && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'UNKNOWN' && m.currencies[1] === 'UNKNOWN'),
+  assert(mm.some(m => m.num === normalizeId('005') && m.comparison === 'advertised-vs-actual' && m.currencies[0] === 'UNKNOWN' && m.currencies[1] === 'UNKNOWN'),
     'UNKNOWN-vs-UNKNOWN skip reported for 005');
-  assert(mm.some(m => m.num === '005' && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'UNKNOWN'),
+  assert(mm.some(m => m.num === normalizeId('005') && m.comparison === 'desired-vs-actual' && m.currencies[0] === 'EUR' && m.currencies[1] === 'UNKNOWN'),
     'known-vs-UNKNOWN skip reported for 005');
   const unk = result.aggregates.byCurrency.UNKNOWN;
   assert(unk.confirmed === 1 && unk.meanAdvToActPct === null && unk.atOrAboveAdvertised === 0 && unk.atOrAboveDesired === 0,
@@ -602,32 +1034,553 @@ function selfTest() {
   assert(legacy.aggregates.byCompanyRole['#101'].company === 'report #101' && legacy.aggregates.byCompanyRole['#101'].role !== null,
     'legacy bucket display fields render without null');
 
-  console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency guard)');
+  // --- #4351: column 1 is a tracker#, and the join honours it ---
+
+  // normalizeId: padding is not identity, and non-numeric ids pass through
+  assert(normalizeId('029') === '29' && normalizeId('29') === '29', 'padded and plain ids canonicalize together');
+  assert(normalizeId(29) === '29', 'numeric input accepted');
+  assert(normalizeId('*') === '*' && normalizeId('') === '', 'non-numeric ids pass through untouched');
+  assert(normalizeId('0') === '0', 'zero survives normalization');
+
+  // The scenario from #4351: tracker row 1 links report 029 (Acme); tracker row
+  // 29 (Globex) is recruiter-sourced and has no report at all.
+  const trackerRows = [
+    { num: '1', company: 'Acme', role: 'Staff Engineer', report: '[029](../reports/029-acme-2026-01-01.md)', notes: '' },
+    { num: '29', company: 'Globex', role: 'Principal Engineer', report: '', notes: 'recruiter-sourced' },
+  ];
+  const reportsByNum = new Map([
+    ['29', reportToObservation(REPORT_FIXTURE_4351_029, '029', '2026-01-01')],
+  ]);
+  const mapped = mapTrackerToApps(trackerRows, reportsByNum);
+
+  assert(mapped.apps['29'].company === 'Globex', 'a report-less tracker row still resolves, from the row itself');
+  assert(mapped.apps['1'].company === 'Acme', 'a row that links a report keeps its own company');
+  // The report's advertised figure belongs to the row that links it (row 1), not
+  // to the row that happens to share the report's number (row 29).
+  const advOn1 = mapped.observations.filter(o => o.num === '1' && o.type === 'advertised');
+  assert(advOn1.length === 1 && advOn1[0].parsed.mid === 100000, "report 029's advertised figure attaches to tracker row 1");
+  assert(!mapped.observations.some(o => o.num === '29' && o.type === 'advertised'), 'nothing from report 029 leaks onto tracker row 29');
+  assert(mapped.ambiguousIds.length === 1 && mapped.ambiguousIds[0].num === '29' && mapped.ambiguousIds[0].linkedBy === '1',
+    'the id that means two different applications is reported, not silently resolved');
+
+  // Both spellings of the tracker# land on Globex, and neither reaches Acme.
+  for (const written of ['29', '029']) {
+    const obs = parseObservations(`${written}\t2026-01-05\tactual\t150k\tEUR\trecruiter-verbal\tGlobex`);
+    const folded = fold(obs, mapped.apps, null);
+    const globex = folded.applications.find(a => a.num === '29');
+    const acme = folded.applications.find(a => a.num === '1');
+    assert(folded.quality.orphans.length === 0, `tracker# written as "${written}" is not an orphan`);
+    assert(globex && globex.company === 'Globex' && globex.actual.value === 150000,
+      `tracker# written as "${written}" folds onto Globex`);
+    assert(!acme || acme.actual === null, `tracker# written as "${written}" never puts Globex's figure on Acme`);
+  }
+
+  // A report the tracker does not link keeps its own id (rule 2), but a row that
+  // owns that id wins (rule 3 resolves to the row, which rule 2 must not undo).
+  const unlinked = mapTrackerToApps(
+    [{ num: '4', company: 'Initech', role: 'Platform', report: '', notes: '' }],
+    new Map([['9', reportToObservation(REPORT_FIXTURE_001, '009', '2026-06-20')]]),
+  );
+  assert(unlinked.apps['9']?.company === 'Acme', 'an unlinked report still registers under its own number');
+  assert(unlinked.apps['4']?.company === 'Initech', 'tracker rows survive alongside unlinked reports');
+  const claimed = mapTrackerToApps(
+    [{ num: '9', company: 'RowNine', role: 'Eng', report: '', notes: '' }],
+    new Map([['9', reportToObservation(REPORT_FIXTURE_001, '009', '2026-06-20')]]),
+  );
+  assert(claimed.apps['9'].company === 'RowNine', 'a tracker row keeps an id an unlinked report also claims');
+
+  // Ids sort the way a reader expects once they are unpadded (9 before 10).
+  const sortRows = [10, 9, 1].map(n => ({ num: String(n), company: `C${n}`, role: 'R', report: '', notes: '' }));
+  const sortObs = parseObservations([10, 9, 1].map(n => `${n}\t2026-01-0${1}\tactual\t1k\tEUR\tcontract\t`).join('\n'));
+  const sorted = fold(sortObs, mapTrackerToApps(sortRows, new Map()).apps, null);
+  assert(sorted.applications.map(a => a.num).join(',') === '1,9,10', `unpadded ids sort numerically, got ${sorted.applications.map(a => a.num).join(',')}`);
+
+  // A report linked from two tracker rows (a repost / duplicate row) is one
+  // application's figure, not two: it attaches to the first row only, and the
+  // other row is reported rather than silently receiving a copy (#4368 review).
+  const dupRows = [
+    { num: '1', company: 'Acme', role: 'Eng', report: '[5](../reports/005-acme-2026-01-01.md)', notes: '' },
+    { num: '2', company: 'Acme', role: 'Eng (repost)', report: '[5](../reports/005-acme-2026-01-01.md)', notes: '' },
+  ];
+  const dup = mapTrackerToApps(dupRows, new Map([['5', reportToObservation(REPORT_FIXTURE_4351_029, '005', '2026-01-01')]]));
+  const dupAdv = dup.observations.filter(o => o.type === 'advertised');
+  assert(dupAdv.length === 1 && dupAdv[0].num === '1', `a shared report's figure attaches once, to the first row; got ${dupAdv.map(o => o.num).join(',') || 'none'}`);
+  assert(dup.sharedReports.length === 1 && dup.sharedReports[0].report === '5' && dup.sharedReports[0].owner === '1'
+    && dup.sharedReports[0].alsoLinkedBy.join(',') === '2', 'the second linking row is reported in sharedReports');
+  assert(dup.apps['2']?.company === 'Acme', 'the second row is still an application in its own right');
+  const dupFolded = fold(dup.observations, dup.apps, null);
+  assert(dupFolded.applications.filter(a => a.advertised).length === 1, 'one posting is never counted as two advertised figures in the fold');
+  assert(mapped.sharedReports.length === 0, 'a report linked from exactly one row is not reported as shared');
+
+  // A Report link whose label disagrees with its target names ONE report: the
+  // target, the file the row is actually joined against. Attaching both numbers
+  // put two companies' advertised figures on one row and the fold kept whichever
+  // arrived last (#4368 review).
+  const mislabelRows = [
+    { num: '1', company: 'Acme', role: 'Eng', report: '[5](../reports/006-globex-2026-01-01.md)', notes: '' },
+  ];
+  const mislabelReports = new Map([
+    ['5', reportToObservation(REPORT_FIXTURE_4351_029, '005', '2026-01-01')],
+    ['6', reportToObservation(REPORT_FIXTURE_4368_006, '006', '2026-01-01')],
+  ]);
+  const mislabel = mapTrackerToApps(mislabelRows, mislabelReports);
+  const advOnMislabeled = mislabel.observations.filter(o => o.num === '1' && o.type === 'advertised');
+  assert(advOnMislabeled.length === 1, `a mismatched link attaches one advertised figure, not two; got ${advOnMislabeled.length}`);
+  assert(advOnMislabeled[0].parsed.mid === 200000, `the link target's figure is the one joined, got ${advOnMislabeled[0].parsed.mid}`);
+  assert(mislabel.mislabeledReports.length === 1 && mislabel.mislabeledReports[0].num === '1'
+    && mislabel.mislabeledReports[0].label === '5' && mislabel.mislabeledReports[0].report === '6',
+    `the conflicting label is reported separately, got ${JSON.stringify(mislabel.mislabeledReports)}`);
+  // The label's report was never linked by this row, so rule 2 still applies to
+  // it — it keeps its own id instead of being swallowed by the mismatched link.
+  assert(mislabel.apps['5']?.company === 'Acme', "the labelled-but-unlinked report keeps its own id");
+  const mislabelFolded = fold(mislabel.observations, mislabel.apps, null);
+  assert(mislabelFolded.applications.find(a => a.num === '1').advertised.value === 200000,
+    'the fold sees only the target report on the mismatched row');
+
+  // A label that agrees with its target, or is absent, is not a mismatch.
+  for (const cell of ['[6](../reports/006-globex-2026-01-01.md)', '[006](../reports/006-globex-2026-01-01.md)',
+    '../reports/006-globex-2026-01-01.md', '[report](../reports/006-globex-2026-01-01.md)']) {
+    const agreed = mapTrackerToApps([{ num: '1', company: 'Acme', role: 'Eng', report: cell, notes: '' }], mislabelReports);
+    assert(agreed.mislabeledReports.length === 0, `"${cell}" is not reported as mislabeled`);
+    assert(agreed.observations.filter(o => o.num === '1' && o.type === 'advertised').length === 1,
+      `"${cell}" attaches exactly one advertised figure to the row`);
+  }
+
+  // The mismatch remediation is per entry, like ambiguousIds: two rows with
+  // different label/target pairs must not be told about one shared pair.
+  const multiMislabel = fold([], { '1': { company: 'X', role: 'R' }, '2': { company: 'Y', role: 'R' } }, null);
+  multiMislabel.quality.ambiguousIds = [];
+  multiMislabel.quality.sharedReports = [];
+  multiMislabel.quality.mislabeledReports = [{ num: '1', label: '5', report: '6' }, { num: '2', label: '8', report: '9' }];
+  const mislabelPrinted = [];
+  const realLogMislabel = console.log;
+  console.log = (...parts) => { mislabelPrinted.push(parts.join(' ')); };
+  try { printSummary(multiMislabel); } finally { console.log = realLogMislabel; }
+  const m1 = mislabelPrinted.find(l => l.includes('#1: label says report 5'));
+  const m2 = mislabelPrinted.find(l => l.includes('#2: label says report 8'));
+  assert(m1 && m1.includes('points at report 6') && !m1.includes('report 9'), `#1's line names its own target, got: ${m1}`);
+  assert(m2 && m2.includes('points at report 9') && !m2.includes('report 6'), `#2's line names its own target, got: ${m2}`);
+
+  // extractTrackerReportLinks keeps label and target apart; the flattened
+  // membership helper it now backs must still answer for BOTH numbers, because
+  // find.mjs and set-status.mjs rely on a collision matching either spelling.
+  const links = extractTrackerReportLinks('[5](../reports/006-globex-2026-01-01.md)');
+  assert(links.length === 1 && links[0].target === 6 && links[0].label === 5,
+    `the link's target and label are both reported, got ${JSON.stringify(links)}`);
+  assert(extractTrackerReportNumbers('[5](../reports/006-globex-2026-01-01.md)').join(',') === '5,6',
+    'the membership helper still returns label and target, in that order');
+  assert(extractTrackerReportLinks('', '[9](../reports/009-acme-2026-01-01.md)')[0]?.target === 9,
+    'an empty Report cell still falls back to a report link in Notes');
+  assert(extractTrackerReportLinks('[report](https://example.com/reports/006-x.md)').length === 0,
+    'an absolute URL is not a local report link');
+
+  // The ambiguous-id remediation names each entry's own owner. Two ids owned by
+  // two different rows must not both be told to re-point at the first one.
+  const multiAmbig = fold([], { '7': { company: 'X', role: 'R' }, '9': { company: 'Y', role: 'R' } }, null);
+  multiAmbig.quality.ambiguousIds = [{ num: '7', linkedBy: '3' }, { num: '9', linkedBy: '4' }];
+  multiAmbig.quality.sharedReports = [];
+  const printed = [];
+  const realLog = console.log;
+  console.log = (...parts) => { printed.push(parts.join(' ')); };
+  try { printSummary(multiAmbig); } finally { console.log = realLog; }
+  const line7 = printed.find(l => l.includes('#7: tracker row #7'));
+  const line9 = printed.find(l => l.includes('#9: tracker row #9'));
+  assert(line7 && line7.includes('re-point it to #3') && !line7.includes('#4'), `#7's remediation names row #3 only, got: ${line7}`);
+  assert(line9 && line9.includes('re-point it to #4') && !line9.includes('#3'), `#9's remediation names row #4, not the first entry's row, got: ${line9}`);
+  assert(!printed.some(l => /re-point it at tracker row/.test(l)), 'no single shared remediation line pointing every id at one row');
+
+  // --stated-for tolerates either spelling (mirror of the fold join)
+  const statedPad = parseObservations('029\t2026-07-01\tstated\t90k\tCAD\tuser\t\tpanel\tJane');
+  assert(getStatedObservations(statedPad, '29').length === 1, 'stated lookup by plain id finds a padded row');
+  assert(getStatedObservations(parseObservations('29\t2026-07-01\tstated\t90k\tCAD\tuser\t'), '029').length === 1,
+    'stated lookup by padded id finds a plain row');
+
+  // reportToObservation / mapTrackerToApps: posting_location round-trips (#4694)
+  const RELOC_REPORT_FIXTURE = `# Eval: Fictional Corp — Backend Eng
+
+## Machine Summary
+
+\`\`\`yaml
+company: "Fictional Corp"
+role: "Backend Eng"
+advertised_comp: "60k CAD"
+posting_location: "Halifax, NS"
+\`\`\`
+`;
+  const relocReportObs = reportToObservation(RELOC_REPORT_FIXTURE, '050', '2026-09-01');
+  assert(relocReportObs.postingLocation === 'Halifax, NS', 'reportToObservation extracts posting_location verbatim');
+  assert(relocReportObs.observation?.postingLocation === 'Halifax, NS', 'the advertised observation retains its own report posting_location');
+  const relocMapped = mapTrackerToApps(
+    [{ num: '50', company: '', role: '', report: '[050](../reports/050-fictional-corp-2026-09-01.md)', notes: '' }],
+    new Map([['50', relocReportObs]]),
+  );
+  assert(relocMapped.apps['50']?.postingLocation === 'Halifax, NS', 'mapTrackerToApps carries posting_location onto the owning tracker row');
+  const relocShared = mapTrackerToApps([
+    { num: '50', company: 'Fictional Corp', role: 'Backend Eng', report: '[050](../reports/050-fictional-corp-2026-09-01.md)', notes: '' },
+    { num: '52', company: 'Other Corp', role: 'Other Eng', report: '[050](../reports/050-fictional-corp-2026-09-01.md)', notes: '' },
+  ], new Map([['50', relocReportObs]]));
+  assert(relocShared.apps['50']?.postingLocation === 'Halifax, NS', 'a shared report keeps its posting location on the owning row');
+  assert(relocShared.apps['52']?.postingLocation === null, 'a later row sharing the report does not inherit its owner\'s posting location');
+  const relocMappedNoReport = mapTrackerToApps([{ num: '51', company: 'Recruiter Co', role: 'Eng', report: '', notes: '' }], new Map());
+  assert(relocMappedNoReport.apps['51']?.postingLocation === null, 'a report-less tracker row gets postingLocation: null, never undefined');
+
+  // --- #4694: relocation purchasing-power (fictional fixture table — never the real one) ---
+  const RELOC_FIXTURE = {
+    'XX-FEDERAL': {
+      jurisdiction_name: 'Testland — Federal', country: 'Testland', level: 'federal',
+      brackets: [{ up_to: 50000, rate: 0.10 }, { up_to: null, rate: 0.20 }],
+    },
+    'XX-NORTH': {
+      jurisdiction_name: 'North Testland', country: 'Testland', level: 'provincial',
+      aliases: ['North Testland', ', NT', 'Testville'],
+      tax_year: 2026,
+      brackets: [{ up_to: 30000, rate: 0.05 }, { up_to: null, rate: 0.25 }],
+    },
+    'XX-SOUTH': {
+      jurisdiction_name: 'South Testland', country: 'Testland', level: 'provincial',
+      aliases: ['South Testland', ', ST', 'Southburg'],
+      tax_year: 2026,
+      brackets: [{ up_to: 100000, rate: 0.05 }],
+    },
+    'YY-OTHERCOUNTRY': {
+      jurisdiction_name: 'Otherland', country: 'Otherland', level: 'provincial',
+      aliases: ['Otherland'], brackets: [{ up_to: null, rate: 0.10 }],
+    },
+  };
+
+  // bracketTax: progressive, slice-by-slice
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, 40000) === 4000, '10% flat under first bracket');
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, 60000) === 50000 * 0.10 + 10000 * 0.20, 'progressive across two brackets');
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, 0) === 0, 'zero income -> zero tax');
+  assert(bracketTax([], 1000) === null, 'empty brackets -> null, never zero-tax by accident');
+  assert(bracketTax(null, 1000) === null, 'non-array brackets -> null');
+  assert(bracketTax(RELOC_FIXTURE['XX-FEDERAL'].brackets, -1) === null, 'negative income -> null');
+  assert(bracketTax([{ up_to: 100, rate: 'bogus' }], 50) === null, 'non-numeric rate -> null, never silently taxed at 0');
+  assert(bracketTax([{ up_to: 100, rate: 0.1 }, { up_to: 50, rate: 0.2 }], 200) === null,
+    'non-ascending brackets -> null, never silently mis-taxed');
+
+  // matchJurisdiction: aliases, ambiguity, federal rows excluded
+  assert(matchJurisdiction('Testville, XX', RELOC_FIXTURE) === 'XX-NORTH', 'city alias matches its province');
+  assert(matchJurisdiction('Someplace, NT', RELOC_FIXTURE) === 'XX-NORTH', 'abbreviation alias matches');
+  assert(matchJurisdiction('Nowhere special', RELOC_FIXTURE) === null, 'no alias match -> null, not a guess');
+  assert(matchJurisdiction('', RELOC_FIXTURE) === null, 'blank text -> null');
+  assert(matchJurisdiction('Testville', null) === null, 'no table -> null');
+  assert(matchJurisdiction('Testland Federal HQ', RELOC_FIXTURE) === null,
+    'federal-level row is never matched directly (it carries no aliases)');
+  const AMBIGUOUS_FIXTURE = {
+    A: { level: 'provincial', aliases: ['Springfield'] },
+    B: { level: 'provincial', aliases: ['Springfield'] },
+  };
+  assert(matchJurisdiction('Springfield', AMBIGUOUS_FIXTURE) === null,
+    'two different jurisdictions sharing an alias -> null, never an arbitrary pick');
+
+  // matchJurisdiction false-positive regression (#4696 CodeRabbit finding #2):
+  // whole-word + case-sensitive abbreviation matching, a province/state name or
+  // abbreviation always wins over a bare city name, and a bare city-name-only
+  // match is rejected when the text also carries an unambiguous non-Canadian
+  // context marker. Exercised against the REAL table (not a fixture) because
+  // the false positives were specifically against its real aliases.
+  {
+    const rt = loadRelocationTable();
+    assert(matchJurisdiction('Austin, TX (on-site)', rt) === null,
+      '"on-site" never false-matches the ON abbreviation (case-sensitive, word-boundary)');
+    assert(matchJurisdiction('Remote, Abu Dhabi', rt) === null,
+      '"Abu" never false-matches the AB abbreviation (case-sensitive)');
+    assert(matchJurisdiction('Abu Dhabi', rt) === null,
+      'bare "Abu Dhabi" never false-matches AB either');
+    assert(matchJurisdiction('Halifax, NS (in office on Fridays)', rt) === 'CA-NS',
+      'a real province abbreviation (NS) wins outright over the "on" in "on Fridays" -- no ambiguity');
+    assert(matchJurisdiction('Waterloo, Iowa', rt) === null,
+      'Waterloo is also an Iowa city -- the Iowa context blocks the ON city-alias match');
+    assert(matchJurisdiction('Hamilton, New Zealand', rt) === null,
+      'Hamilton is also a New Zealand city -- that context blocks the ON city-alias match');
+    assert(matchJurisdiction('Surrey, UK', rt) === null,
+      'Surrey is also a UK city -- that context blocks the BC city-alias match');
+    // True positives keep working: real Canadian cities/abbreviations still resolve.
+    assert(matchJurisdiction('Halifax, NS', rt) === 'CA-NS', 'real "Halifax, NS" still resolves to CA-NS');
+    assert(matchJurisdiction('Toronto, ON', rt) === 'CA-ON', 'real "Toronto, ON" still resolves to CA-ON');
+    assert(matchJurisdiction('Vancouver, BC', rt) === 'CA-BC', 'real "Vancouver, BC" still resolves to CA-BC');
+    assert(matchJurisdiction('Calgary, Alberta', rt) === 'CA-AB', 'real "Calgary, Alberta" still resolves to CA-AB');
+
+    // matchJurisdiction unseeded-province regression (#4696 CodeRabbit finding,
+    // follow-up round): a bare city-name alias must not win just because the
+    // OTHER province it also names has no row yet. "Hamilton" is a real
+    // Ontario city alias, but "Hamilton, Ontario, Canada" is itself (never
+    // blocked by its own province's name), while "Hamilton, Quebec"/"Hamilton,
+    // QC" names a different, unseeded Canadian province and must not fall back
+    // to CA-ON. "Victoria, Prince Edward Island" already returned null before
+    // this fix (no table city happens to collide), and keeps returning null.
+    assert(matchJurisdiction('Hamilton, Quebec', rt) === null,
+      'Hamilton is also a Quebec city -- the unseeded-province context blocks the ON city-alias match');
+    assert(matchJurisdiction('Hamilton, QC', rt) === null,
+      'the QC abbreviation blocks the ON city-alias match the same way the full name does');
+    assert(matchJurisdiction('Victoria, Prince Edward Island', rt) === null,
+      'Victoria, PEI still resolves to null (no colliding table city, unaffected by this fix)');
+  }
+
+  // computeRelocationAdjustment: transparent inputs, correct math, honest failure reasons
+  const reloc1 = computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'XX-SOUTH', jurisdictions: RELOC_FIXTURE });
+  assert(reloc1.ok === true, 'valid relocation comparison succeeds');
+  // home (North): fed 50000*.10+10000*.20=7000, prov 30000*.05+30000*.25=9000 -> total 16000, take-home 44000
+  assert(reloc1.home.totalTax === 16000 && reloc1.home.takeHome === 44000, `home side math, got ${JSON.stringify(reloc1.home)}`);
+  // dest (South): fed 7000, prov 60000*.05=3000 -> total 10000, take-home 50000
+  assert(reloc1.dest.totalTax === 10000 && reloc1.dest.takeHome === 50000, `dest side math, got ${JSON.stringify(reloc1.dest)}`);
+  assert(reloc1.takeHomeDeltaAbs === 6000, `South keeps $6000 more take-home than North at the same gross, got ${reloc1.takeHomeDeltaAbs}`);
+  assert(typeof reloc1.limitations === 'string' && reloc1.limitations.includes('Not financial or tax advice'),
+    'result always carries the not-financial-advice disclaimer');
+  assert(reloc1.grossAnnual === 60000, 'inputs are echoed back for transparency, not hidden behind the output');
+
+  assert(computeRelocationAdjustment({ grossAnnual: 0, homeCode: 'XX-NORTH', destCode: 'XX-SOUTH', jurisdictions: RELOC_FIXTURE }).reason === 'no-gross-amount',
+    'zero/missing gross -> honest failure reason');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'XX-NORTH', jurisdictions: RELOC_FIXTURE }).reason === 'same-jurisdiction',
+    'same jurisdiction both sides -> same-jurisdiction, nothing to show');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: null, jurisdictions: RELOC_FIXTURE }).reason === 'no-jurisdiction-match',
+    'unresolved destination code -> no-jurisdiction-match');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'YY-OTHERCOUNTRY', jurisdictions: RELOC_FIXTURE }).reason === 'cross-country-not-supported',
+    'cross-country comparison is explicitly out of scope, not silently computed wrong');
+  assert(computeRelocationAdjustment({ grossAnnual: 60000, homeCode: 'XX-NORTH', destCode: 'XX-SOUTH', jurisdictions: null }).reason === 'no-table',
+    'missing table -> no-table');
+
+  // relocationForApplication: wraps fold()-shaped application objects; absence of any required
+  // input is "not evaluated" (null), never a guess
+  const relocApp = { advertised: { value: 60000, period: 'annual', postingLocation: 'Southburg, ST' } };
+  const relocResult = relocationForApplication(relocApp, { jurisdictions: RELOC_FIXTURE, homeLocation: 'Testville, NT' });
+  assert(relocResult?.ok === true && relocResult.dest.jurisdiction === 'South Testland', 'relocationForApplication resolves both sides from free text');
+  assert(relocationForApplication({ postingLocation: 'stale earlier location', advertised: { value: 60000, period: 'annual', postingLocation: null } }, { jurisdictions: RELOC_FIXTURE, homeLocation: 'Testville, NT' }) === null,
+    'no posting location -> null, not evaluated');
+  assert(relocationForApplication({ advertised: null }, { jurisdictions: RELOC_FIXTURE, homeLocation: 'Testville, NT' }) === null,
+    'no advertised figure -> null, not evaluated');
+  assert(relocationForApplication(relocApp, { jurisdictions: RELOC_FIXTURE, homeLocation: null }) === null,
+    'no resolvable home location -> null, not evaluated');
+  assert(relocationForApplication(relocApp, { jurisdictions: null, homeLocation: 'Testville, NT' }) === null,
+    'no table -> null, not evaluated');
+
+  // loadRelocationTable: the REAL table ships, parses, and every row satisfies its own schema
+  const realTable = loadRelocationTable();
+  assert(realTable !== null, 'the real templates/jurisdiction-relocation-tax.yml loads');
+  assert(realTable['CA-FEDERAL']?.level === 'federal', 'real table carries a CA-FEDERAL row');
+  assert(realTable['CA-ON'] && realTable['CA-NS'] && realTable['CA-AB'] && realTable['CA-BC'],
+    'real table carries the four seeded provinces');
+  for (const [code, row] of Object.entries(realTable)) {
+    assert(typeof row.as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.as_of), `${code} carries a quoted YYYY-MM-DD as_of`);
+    assert(Array.isArray(row.sources) && row.sources.length > 0, `${code} carries at least one source`);
+    assert(typeof row.official_source?.url === 'string' && row.official_source.url.startsWith('https://'), `${code} carries an official_source.url`);
+    assert(bracketTax(row.brackets, 75000) !== null, `${code}'s own brackets are well-formed (ascending, numeric rates)`);
+  }
+  const realHalifax = matchJurisdiction('Halifax, NS', realTable);
+  const realToronto = matchJurisdiction('Toronto, ON', realTable);
+  assert(realHalifax === 'CA-NS' && realToronto === 'CA-ON', 'real table resolves the issue #4694 example cities (Halifax NS, Toronto/Midland ON)');
+  assert(realTable['CA-ON']?.currency === 'CAD' && realTable['CA-NS']?.currency === 'CAD',
+    'every seeded real jurisdiction row declares its currency');
+  const realReloc = computeRelocationAdjustment({
+    grossAnnual: 60000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'CAD',
+  });
+  assert(realReloc.ok === true && realReloc.dest.takeHome < realReloc.home.takeHome,
+    `at the same $60k gross, NS's higher brackets leave less take-home than ON's — got ${JSON.stringify({ home: realReloc.home.takeHome, dest: realReloc.dest.takeHome })}`);
+
+  // currency-mismatch (#4696 CodeRabbit finding #3): a table row that declares
+  // a currency (every real CA-* row does) must never be silently taxed under
+  // the wrong currency's gross figure.
+  const usdMismatch = computeRelocationAdjustment({
+    grossAnnual: 150000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'USD',
+  });
+  assert(usdMismatch.ok === false && usdMismatch.reason === 'currency-mismatch',
+    `a USD gross figure against the CAD table must refuse, not silently tax as CAD, got ${JSON.stringify(usdMismatch)}`);
+  const unknownMismatch = computeRelocationAdjustment({
+    grossAnnual: 150000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'UNKNOWN',
+  });
+  assert(unknownMismatch.ok === false && unknownMismatch.reason === 'currency-mismatch',
+    'an UNKNOWN currency against a currency-bearing table row also refuses');
+  const omittedMismatch = computeRelocationAdjustment({
+    grossAnnual: 150000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable,
+  });
+  assert(omittedMismatch.ok === false && omittedMismatch.reason === 'currency-mismatch',
+    'no currency supplied at all is treated the same as UNKNOWN, never assumed to match');
+  const caseInsensitiveMatch = computeRelocationAdjustment({
+    grossAnnual: 60000, homeCode: realToronto, destCode: realHalifax, jurisdictions: realTable, currency: 'cad',
+  });
+  assert(caseInsensitiveMatch.ok === true, 'currency comparison is case-insensitive ("cad" matches "CAD")');
+  // Legacy/fixture tables with no `currency` field on their rows skip the
+  // check entirely — RELOC_FIXTURE's own earlier `ok === true` assertions
+  // (reloc1, relocResult) already cover this with no currency argument at all.
+
+  console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency guard + relocation purchasing-power)');
 }
 
 // --- Real sources ---
 const REPORT_FILE_RE = /^(\d{3})-.*-(\d{4}-\d{2}-\d{2})\.md$/;
 
-function collectSources() {
+/**
+ * Resolve applications from tracker rows, reaching each row's report through
+ * its Report link — the same way `set-status.mjs`, `outcome.mjs` and
+ * `check-jd-archive.mjs` already do it.
+ *
+ * Column 1 of `salary-observations.tsv` is documented as a tracker#, but this
+ * file used to build its application map from `reports/NNN-*.md` filenames, so
+ * it was really joining on report#. Those are two independent counters that
+ * "diverge permanently once any row exists without a report" (set-status.mjs),
+ * which had three consequences (#4351): a report-less row could never match and
+ * every observation on it was called an orphan; and once an id was padded to
+ * silence that orphan, the figure attached to whichever report happened to carry
+ * the same number — a different company, with no warning.
+ *
+ * Identity rules, in order:
+ *   1. A tracker row owns its own id. Company and role come from the row, so a
+ *      recruiter-sourced or backfilled row with no report folds like any other.
+ *   2. A report the tracker does not link still registers under its own number,
+ *      but only if no tracker row already claims that id. This keeps working for
+ *      logs written before the tracker carried Report links, without letting a
+ *      report re-take an id that belongs to a row.
+ *   3. A collision — report R exists, a tracker row is also numbered R, and
+ *      that report belongs to a different row — resolves to the tracker row and
+ *      is reported in `quality.ambiguousIds`, because a log written under the old
+ *      report#-join semantics means something different now and that should be
+ *      visible rather than silent.
+ *   4. A report linked from more than one tracker row (a repost, a duplicate
+ *      row) belongs to the first row in tracker order. Only that row receives its
+ *      advertised figure, so one posting is never counted as two applications;
+ *      every other linking row is named in `quality.sharedReports`.
+ *   5. A Report link whose numeric label disagrees with its target
+ *      (`[5](../reports/006-globex-….md)`) names one report, the target — the
+ *      file this row will actually be joined against. Attaching both numbers
+ *      put two companies' advertised figures on one row, and the fold then kept
+ *      whichever arrived last. The label is reported in
+ *      `quality.mislabeledReports` instead, because it is a tracker typo the
+ *      user should fix, not a second application.
+ *
+ * @param {object[]} rows - Parsed tracker rows from `parseTrackerRow`.
+ * @param {Map<string,object>} reportsByNum - Normalised report# -> `reportToObservation` result.
+ * @returns {{apps: object, observations: object[], ambiguousIds: object[], sharedReports: object[], mislabeledReports: object[]}}
+ */
+export function mapTrackerToApps(rows, reportsByNum) {
   const apps = {};
   const observations = [];
+  const linkedBy = new Map(); // report# -> tracker# that links it FIRST (its owner)
+  const alsoLinkedBy = new Map(); // report# -> later tracker#s that link the same report
+  const mislabeled = []; // Report links whose label names a different report than the target
 
-  if (existsSync(REPORTS_DIR)) {
-    for (const file of readdirSync(REPORTS_DIR)) {
-      const m = file.match(REPORT_FILE_RE);
-      if (!m) continue;
-      const [, num, date] = m;
-      let content;
-      try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
-      const r = reportToObservation(content, num, date);
-      if (r) {
-        apps[num] = { company: r.company, role: r.role };
-        if (r.observation) observations.push(r.observation);
-      } else {
-        // report exists but has no Machine Summary (legacy) — still a valid
-        // tracker row, so log observations against it are NOT orphans
-        apps[num] = { company: null, role: null };
+  for (const row of rows ?? []) {
+    const id = normalizeId(row?.num);
+    if (!/^\d+$/.test(id)) continue;
+    let company = row.company || null;
+    let role = row.role || null;
+    let postingLocation = null; // #4694: no tracker-row equivalent — fills only from a linked report
+    const seenReports = new Set();
+    for (const link of extractTrackerReportLinks(row.report, row.notes)) {
+      // Rule 5: the target is the report identity; a disagreeing label is
+      // reported and then dropped, never joined as a second report.
+      const rep = normalizeId(link.target);
+      const label = link.label == null ? null : normalizeId(link.label);
+      if (label !== null && label !== rep
+        && !mislabeled.some(m => m.num === id && m.label === label && m.report === rep)) {
+        mislabeled.push({ num: id, label, report: rep });
       }
+      // Two links to the same report in one cell are one link's worth of figure.
+      if (seenReports.has(rep)) continue;
+      seenReports.add(rep);
+      const report = reportsByNum.get(rep);
+      if (!linkedBy.has(rep)) linkedBy.set(rep, id);
+      // A report belongs to one application. When a later row links a report an
+      // earlier row already owns (a repost, or a duplicate row), attaching its
+      // figure again would count one posting as two applications in every
+      // aggregate. The first row in tracker order keeps it; the rest are reported.
+      const owner = linkedBy.get(rep);
+      if (owner !== id) {
+        if (!alsoLinkedBy.has(rep)) alsoLinkedBy.set(rep, []);
+        if (!alsoLinkedBy.get(rep).includes(id)) alsoLinkedBy.get(rep).push(id);
+      }
+      if (!report) continue;
+      // A legacy report (no Machine Summary) yields null company/role; only fill
+      // a gap the tracker row left, never overwrite what the row states.
+      if (!company) company = report.company || null;
+      if (!role) role = report.role || null;
+      if (!postingLocation && owner === id) postingLocation = report.postingLocation || null;
+      if (report.observation && owner === id) observations.push({ ...report.observation, num: id });
+    }
+    apps[id] = { company: company || null, role: role || null, postingLocation: postingLocation || null };
+  }
+
+  // Rule 2: reports no row links keep their own id, unless a row owns it.
+  for (const [rep, report] of reportsByNum) {
+    if (linkedBy.has(rep) || Object.hasOwn(apps, rep)) continue;
+    apps[rep] = { company: report.company || null, role: report.role || null, postingLocation: report.postingLocation || null };
+    if (report.observation) observations.push({ ...report.observation, num: rep });
+  }
+
+  // Rule 3: surface ids whose meaning changes between the two join semantics.
+  const ambiguousIds = [];
+  for (const [rep, owner] of linkedBy) {
+    if (owner !== rep && Object.hasOwn(apps, rep)) ambiguousIds.push({ num: rep, linkedBy: owner });
+  }
+
+  // Rule 4: a report linked from more than one row. Its figure went to the owner
+  // only; name every other row so the duplicate is visible, not silently dropped.
+  const sharedReports = [...alsoLinkedBy]
+    .map(([report, others]) => ({ report, owner: linkedBy.get(report), alsoLinkedBy: others.sort(compareIds) }))
+    .sort((a, b) => compareIds(a.report, b.report));
+
+  return {
+    apps, observations,
+    ambiguousIds: ambiguousIds.sort((a, b) => compareIds(a.num, b.num)),
+    sharedReports,
+    mislabeledReports: mislabeled.sort((a, b) => compareIds(a.num, b.num) || compareIds(a.label, b.label)),
+  };
+}
+
+function readReportsByNum() {
+  const reportsByNum = new Map();
+  if (!existsSync(REPORTS_DIR)) return reportsByNum;
+  for (const file of readdirSync(REPORTS_DIR)) {
+    const m = file.match(REPORT_FILE_RE);
+    if (!m) continue;
+    const [, num, date] = m;
+    let content;
+    try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
+    const r = reportToObservation(content, num, date);
+    // A report with no Machine Summary is still a real application, so it
+    // registers with null company/role rather than being dropped.
+    reportsByNum.set(normalizeId(num), r ?? { company: null, role: null, observation: null });
+  }
+  return reportsByNum;
+}
+
+function readTrackerRows() {
+  let trackerPath;
+  try { trackerPath = resolveTrackerPath(CAREER_OPS); } catch { return null; }
+  if (!trackerPath || !existsSync(trackerPath)) return null;
+  let lines;
+  try { lines = readFileSync(trackerPath, 'utf-8').split('\n'); } catch { return null; }
+  const colmap = resolveColumns(lines);
+  const rows = [];
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
+function collectSources() {
+  const reportsByNum = readReportsByNum();
+  const rows = readTrackerRows();
+  const observations = [];
+  let apps = {};
+  let ambiguousIds = [];
+  let sharedReports = [];
+  let mislabeledReports = [];
+
+  if (rows) {
+    const mapped = mapTrackerToApps(rows, reportsByNum);
+    apps = mapped.apps;
+    observations.push(...mapped.observations);
+    ambiguousIds = mapped.ambiguousIds;
+    sharedReports = mapped.sharedReports;
+    mislabeledReports = mapped.mislabeledReports;
+  } else {
+    // No readable tracker: fall back to report filenames, which is what this
+    // file did before #4351. An install without applications.md keeps working.
+    for (const [num, report] of reportsByNum) {
+      apps[num] = { company: report.company || null, role: report.role || null, postingLocation: report.postingLocation || null };
+      if (report.observation) observations.push({ ...report.observation, num });
     }
   }
 
@@ -635,7 +1588,7 @@ function collectSources() {
     observations.push(...parseObservations(readFileSync(OBS_PATH, 'utf-8')));
   }
 
-  return { apps, observations };
+  return { apps, observations, ambiguousIds, sharedReports, mislabeledReports };
 }
 
 function loadProfileDesired() {
@@ -651,11 +1604,33 @@ function loadProfileDesired() {
   }
 }
 
+// #4694: the candidate's own home location, as free text, for jurisdiction
+// matching. `candidate.location` (e.g. "Toronto, ON") is preferred — it
+// already follows the "city, province/state abbreviation" convention used
+// throughout config/profile.example.yml; `location.city` is the fallback for
+// a profile that only fills in the structured `location:` block.
+function loadProfileLocation() {
+  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  if (!existsSync(profilePath)) return null;
+  try {
+    const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
+    const candidateLoc = profile?.candidate?.location;
+    if (typeof candidateLoc === 'string' && candidateLoc.trim()) return candidateLoc.trim();
+    const city = profile?.location?.city;
+    return typeof city === 'string' && city.trim() ? city.trim() : null;
+  } catch {
+    return null; // unreadable profile is a non-event here; doctor.mjs owns that complaint
+  }
+}
+
 // --- Output ---
 const fmtVal = (v) => (v >= 1000 && v % 500 === 0 ? `${v / 1000}k` : String(v));
 const fmtEff = (e) => (e ? `${fmtVal(e.value)} ${e.currency || ''} (${e.source}, ${e.date})`.replace('  ', ' ') : '—');
 const fmtPct = (p) => (p === null || p === undefined ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`);
 const daysOld = (date) => Math.max(0, Math.round((Date.now() - Date.parse(date)) / 86400000));
+// Rounded to the nearest $100 — this is a bracket-only estimate, never claim
+// cents-level precision on it.
+const fmtMoney = (v) => (Math.round(v / 100) * 100).toLocaleString('en-US');
 
 function printSummary(result) {
   const { applications, aggregates, quality } = result;
@@ -676,6 +1651,10 @@ function printSummary(result) {
       console.log(`      actual     ${fmtEff(a.actual)}`);
       if (a.advToActPct !== null || a.desiredToActPct !== null) {
         console.log(`      gap: advertised→actual ${fmtPct(a.advToActPct)}, desired→actual ${fmtPct(a.desiredToActPct)}`);
+      }
+      if (a.relocation?.ok) {
+        const r = a.relocation;
+        console.log(`      relocation: ~$${fmtMoney(r.home.takeHome)} take-home in ${r.home.jurisdiction} vs ~$${fmtMoney(r.dest.takeHome)} in ${r.dest.jurisdiction} (bracket-tax estimate only, not financial/tax advice)`);
       }
     }
 
@@ -711,10 +1690,33 @@ function printSummary(result) {
     console.log('  unrecognized sources: none');
   }
   if (quality.orphans.length) {
-    console.log(`  ⚠ ${quality.orphans.length} orphaned tracker#${quality.orphans.length === 1 ? '' : 's'} (observations without a matching report — renumbering/dedup can strand them):`);
+    console.log(`  ⚠ ${quality.orphans.length} orphaned tracker#${quality.orphans.length === 1 ? '' : 's'} (no tracker row carries that number — renumbering/dedup can strand them):`);
     for (const o of quality.orphans) console.log(`      #${o.num} (${o.count} observation${o.count === 1 ? '' : 's'})`);
   } else {
     console.log('  orphaned observations: none');
+  }
+  if (quality.ambiguousIds?.length) {
+    console.log(`  ⚠ ${quality.ambiguousIds.length} id${quality.ambiguousIds.length === 1 ? '' : 's'} mean${quality.ambiguousIds.length === 1 ? 's' : ''} two different applications (column 1 is a tracker#, so these resolve to the tracker row):`);
+    // Remediation is per entry: each ambiguous id can belong to a different row,
+    // so one shared "re-point it at row N" line would send users to the wrong row.
+    for (const a of quality.ambiguousIds) {
+      console.log(`      #${a.num}: tracker row #${a.num}, but report ${a.num} belongs to tracker row #${a.linkedBy} — if an older observation on #${a.num} meant the report, re-point it to #${a.linkedBy}`);
+    }
+  }
+  if (quality.sharedReports?.length) {
+    console.log(`  ⚠ ${quality.sharedReports.length} report${quality.sharedReports.length === 1 ? ' is' : 's are'} linked from more than one tracker row (its advertised figure is counted once, on the first row):`);
+    for (const s of quality.sharedReports) {
+      console.log(`      report ${s.report}: counted on #${s.owner}, also linked from ${s.alsoLinkedBy.map(n => `#${n}`).join(', ')}`);
+    }
+  }
+  if (quality.mislabeledReports?.length) {
+    const n = quality.mislabeledReports.length;
+    console.log(`  ⚠ ${n} Report link${n === 1 ? '' : 's'} name${n === 1 ? 's' : ''} a different report than ${n === 1 ? 'it points' : 'they point'} at (the link target is the report that was joined; the label was not):`);
+    // Per entry, like ambiguousIds: each row's label and target are its own, so
+    // one shared line would name the wrong pair of numbers for every other row.
+    for (const m of quality.mislabeledReports) {
+      console.log(`      #${m.num}: label says report ${m.label}, link points at report ${m.report} — joined report ${m.report}; fix the label or re-point the link`);
+    }
   }
   if (quality.currencyMismatches.length) {
     console.log(`  ⚠ ${quality.currencyMismatches.length} cross-currency comparison${quality.currencyMismatches.length === 1 ? '' : 's'} skipped (no FX conversion — excluded from all gap math):`);
@@ -748,8 +1750,80 @@ function main() {
     return;
   }
 
-  const { apps, observations } = collectSources();
+  if (relocationMode) {
+    // Ad hoc mode (#4694): compute a relocation purchasing-power comparison
+    // directly from CLI inputs. This is what a FRESH evaluation uses —
+    // before anything has been written to reports/ or the tracker, there is
+    // no tracker# to fold against yet.
+    const gross = relocGrossRaw !== undefined ? parseAmount(relocGrossRaw)?.mid ?? null : null;
+    // --posting-location-file wins when both forms are given (#4696 CWE-78
+    // fix): the file is the safe, non-shell-interpolated path, so prefer it
+    // over the inline flag rather than silently falling back to the one a
+    // caller may have meant to replace.
+    let postingLocation = relocPostingLocation;
+    if (relocPostingLocationFileFlagPresent) {
+      // The flag is present — require a real operand before ever touching
+      // the filesystem. Missing (`--posting-location-file` as the last
+      // token, or `--posting-location-file=`) and operand-looks-like-another-flag
+      // (`--posting-location-file --home-location "X"`, which would otherwise
+      // silently read `--home-location` as the path) both fail here with a
+      // distinct, specific message — never falling through to
+      // --posting-location or to a confusing "Could not read" error about a
+      // flag name instead of a path.
+      if (!relocPostingLocationFile || relocPostingLocationFile.startsWith('-')) {
+        console.error(
+          `Usage: --posting-location-file requires a file path operand (got ${
+            relocPostingLocationFile ? `'${relocPostingLocationFile}', which looks like another flag` : 'none'
+          })`
+        );
+        process.exit(1);
+      }
+      try {
+        postingLocation = readFileSync(relocPostingLocationFile, 'utf-8').trim();
+      } catch (err) {
+        console.error(`Could not read --posting-location-file '${relocPostingLocationFile}': ${err.message}`);
+        process.exit(1);
+      }
+    }
+    if (gross === null || !postingLocation) {
+      console.error('Usage: node salary-gap.mjs --relocation --gross <amount> (--posting-location "<city, province>" | --posting-location-file <path>) [--home-location "<city, province>"] [--currency <code>]');
+      process.exit(1);
+    }
+    const jurisdictions = loadRelocationTable();
+    const homeLocation = relocHomeLocationFlag ?? loadProfileLocation();
+    const homeCode = matchJurisdiction(homeLocation, jurisdictions);
+    const destCode = matchJurisdiction(postingLocation, jurisdictions);
+    const result = computeRelocationAdjustment({
+      grossAnnual: gross, homeCode, destCode, jurisdictions, currency: relocCurrency,
+    });
+    console.log(JSON.stringify({
+      inputs: {
+        grossAnnual: gross, currency: relocCurrency,
+        homeLocation, postingLocation, homeCode, destCode,
+      },
+      ...result,
+    }, null, 2));
+    return;
+  }
+
+  const { apps, observations, ambiguousIds, sharedReports, mislabeledReports } = collectSources();
   const result = fold(observations, apps, loadProfileDesired());
+  result.quality.ambiguousIds = ambiguousIds ?? [];
+  result.quality.sharedReports = sharedReports ?? [];
+  result.quality.mislabeledReports = mislabeledReports ?? [];
+
+  // #4694: annotate each folded application with its relocation comparison,
+  // when there's enough data to even attempt one (posting location, an
+  // advertised figure, a resolvable home location, and the table). Absence
+  // of any of those is "not evaluated" (a.relocation stays null), never a
+  // guessed penalty.
+  {
+    const jurisdictions = loadRelocationTable();
+    const homeLocation = loadProfileLocation();
+    for (const a of result.applications) {
+      a.relocation = relocationForApplication(a, { jurisdictions, homeLocation });
+    }
+  }
 
   if (summaryMode) {
     printSummary(result);
@@ -758,6 +1832,23 @@ function main() {
   }
 }
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node salary-gap.mjs [--summary] [--stated-for <tracker#>] [--self-test]
+
+  --summary                human-readable table instead of JSON
+  --stated-for <tracker#>  prior stated-comp observations for one tracked row
+  --self-test              run the built-in checks
+  --help, -h               print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   main();
 }

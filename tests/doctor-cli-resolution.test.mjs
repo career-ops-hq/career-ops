@@ -4,9 +4,9 @@
 // paths themselves. See plan/opencode-json-ignore.md for context.
 // Each scenario uses a fresh --target dir so no MCP config / .env / env
 // leaks across cases.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 

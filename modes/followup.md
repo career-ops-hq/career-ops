@@ -34,7 +34,7 @@ Parse the JSON output. It contains:
 |-----|----------|
 | `metadata` | Analysis date, total tracked, actionable count, overdue/urgent/cold/waiting counts |
 | `entries` | Per-application: company, role, status, days since application, follow-up count, urgency, next follow-up date, extracted contacts, report path |
-| `cadenceConfig` | Cadence rules (applied: 7 days, responded: 3 days, interview: 1 day) |
+| `cadenceConfig` | Cadence rules (applied: 7 days, responded/assessment: 3 days, interview: 1 day) |
 
 If no actionable entries, tell the user:
 > "No active applications to follow up on. Apply to some roles first with `/career-ops` and come back when they're aging."
@@ -77,6 +77,8 @@ Use visual indicators:
 - **OVERDUE** — follow-up is past due
 - **waiting (X days)** — on track, follow-up scheduled
 - **COLD** — 2+ follow-ups sent, suggest closing
+
+`Assessment` is a lifecycle stage distinct from `Interview`. It uses the responded cadence: the first check-in is due after 1 day, then every 3 days while no newer follow-up is logged. Use the assessment log (`data/assessments.tsv`) for platform, subject, score, and completion details.
 
 ## Step 3 — Generate Follow-up Drafts
 
@@ -234,6 +236,7 @@ After showing all drafts, summarize:
 |--------|----------------|------------|-------------|
 | Applied | 7 days after application | Every 7 days | 2 (then mark cold) |
 | Responded | 1 day (urgent reply) | Every 3 days | No limit |
+| Assessment | 1 day (assessment invite/submission) | Every 3 days | No limit |
 | Interview | 1 day after (thank-you) | Every 3 days | No limit |
 
 These defaults can be overridden via `node followup-cadence.mjs --applied-days N`.

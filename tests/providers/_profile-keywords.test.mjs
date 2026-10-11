@@ -2,11 +2,14 @@
 import { writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, rmSync } from '../helpers.mjs';
 import { pathToFileURL } from 'url';
 
 console.log('\nProvider helper — _profile-keywords');
 
+// Declared outside the try so the finally below can remove it: a step that
+// throws after mkdtempSync used to skip the rmSync and leave the dir in tmp.
+let tmp;
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/_profile-keywords.mjs')).href);
   const { profileTargetKeywords, resolveProfileKeywords } = mod;
@@ -39,7 +42,7 @@ try {
     fail('profileTargetKeywords should return [] for a profile with no target_roles');
   }
 
-  const tmp = mkdtempSync(join(tmpdir(), 'career-ops-profile-keywords-'));
+  tmp = mkdtempSync(join(tmpdir(), 'career-ops-profile-keywords-'));
   const profilePath = join(tmp, 'profile.yml');
   writeFileSync(profilePath, [
     'target_roles:',
@@ -72,4 +75,6 @@ try {
   }
 } catch (e) {
   fail(`_profile-keywords tests crashed: ${e.message}`);
+} finally {
+  if (tmp) rmSync(tmp, { recursive: true, force: true });
 }

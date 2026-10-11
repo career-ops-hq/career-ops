@@ -40,7 +40,7 @@
  *   - Tracker row resolves to a TERMINAL state (Rejected, Discarded, SKIP,
  *     Hired): no finding at all, not even a warning. The application is
  *     done; a dead JD carries no further risk.
- *   - Tracker row resolves to a LIVE state (Evaluated, Applied, Responded,
+ *   - Tracker row resolves to a LIVE state (Evaluated, Applied, Responded, Assessment,
  *     Interview, Offer), OR the join can't resolve the row (no match,
  *     ambiguous match, or an unreadable/unparseable tracker) — a soft
  *     `jd-archive-review-due` finding, same severity shape as
@@ -230,6 +230,17 @@ const NON_CONTENT_MARKERS = [
     category: 'js-required',
     reason: 'looks like a "please enable JavaScript" shell, not a posting',
     re: /(please enable javascript|this site requires javascript|<noscript)/i,
+  },
+  {
+    category: 'bot-challenge',
+    // Matched on established challenge PHRASES, deliberately not the bare
+    // word "captcha" — a real posting can legitimately mention CAPTCHA as a
+    // technology (a security-engineering role's requirements, say), and that
+    // single word alone is not distinctive enough to tell the two apart.
+    // These phrases are how the actual interstitial page renders, not a
+    // topic a JD would describe.
+    reason: 'looks like a bot-verification/challenge page, not a posting',
+    re: /(checking your browser before accessing|verify(?:ing)? (?:that )?you are (?:a )?human|please stand by,? while we (?:are )?check(?:ing)? your browser|cloudflare ray id|captcha verification required to continue)/i,
   },
 ];
 
@@ -432,7 +443,9 @@ export function checkJdArchive(reportsDir, jdsDir, { trackerPath = null, statesP
   const classification = classifyReportsByTrackerState(trackerPath, statesPath);
   const trackerCaptures = mapTrackerCaptureLinks(trackerPath, jdsDir);
 
-  const files = readdirSync(reportsDir).filter((f) => f.endsWith('.md')).sort();
+  const files = readdirSync(reportsDir)
+    .filter((f) => f.endsWith('.md') && !/^\d+-RESERVED\.md$/.test(f))
+    .sort();
 
   for (const file of files) {
     reportsScanned += 1;

@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 // Rheinmetall provider — single-company (like ibm.mjs / dassault.mjs). The
 // public vacancy list at https://www.rheinmetall.com/{lang}/career/vacancies is
@@ -39,8 +40,13 @@ export function resolveListUrl(entry) {
   const raw = entry.api || entry.careers_url || '';
   try {
     const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     const host = u.host.toLowerCase();
     if (host !== 'rheinmetall.com' && !host.endsWith('.rheinmetall.com')) return null;
+    // The apex 301s to www and http 301s to https (same registrable domain). Pin
+    // both here so the transport's redirect:'error' never refuses a URL detect() accepts.
+    if (host === 'rheinmetall.com') u.host = 'www.rheinmetall.com';
+    u.protocol = 'https:';
     if (/\/career\/vacancies\/?$/.test(u.pathname)) return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
     // Any other rheinmetall.com URL (e.g. the branded career hub) → EN default.
     return `${u.origin}/en/career/vacancies`;
@@ -114,13 +120,12 @@ export default {
     if (!listUrl) throw new Error(`rheinmetall: cannot resolve vacancies URL for ${entry.name}`);
     const origin = new URL(listUrl).origin;
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await wait(PAGE_DELAY_MS);
+      if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       const html = await ctx.fetchText(`${listUrl}?page=${page}`, {
         headers: { accept: 'text/html' },
       });

@@ -74,6 +74,16 @@ try {
   }
 
   if (
+    mokahr.detect({ name: 'X', careers_url: 'https://hire-r1.mokahr.com/social-recruitment/example-pay/100008889' }) !== null &&
+    mokahr.detect({ name: 'X', careers_url: 'https://hire-r1-ats.mokahr.com/social-recruitment/example-pay/100008889' }) === null &&
+    mokahr.detect({ name: 'X', careers_url: 'https://hire-r2.mokahr.com/social-recruitment/example-pay/100008889' }) === null
+  ) {
+    pass('mokahr.detect() claims the hire-r1 regional host but no other mokahr.com subdomain');
+  } else {
+    fail('mokahr.detect() should allow exactly app.mokahr.com and hire-r1.mokahr.com');
+  }
+
+  if (
     mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/social-recruitment/lingjuninvest/46355' }) === null &&
     mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/social-recruitment/shopee/74378' }) === null &&
     mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/apply/shopee/74378' }) !== null
@@ -229,9 +239,10 @@ try {
       sleeps,
       ctx: {
         sleep: async (ms) => { sleeps.push(ms); },
-        fetchJson: async (_url, opts) => {
+        fetchJson: async (url, opts) => {
           const body = JSON.parse(opts.body);
           const call = {
+            url,
             keyword: body.keyword,
             offset: body.offset,
             limit: body.limit,
@@ -297,6 +308,38 @@ try {
   } else {
     fail(`mokahr.fetch() malformed full page: ${malformedFullPageJobs.length} jobs, ${malformedFullPage.calls.length} requests`);
   }
+
+  const R1_ENTRY = { name: 'Example Pay', careers_url: 'https://hire-r1.mokahr.com/social-recruitment/example-pay/100008889' };
+  const regional = mkCtx(() => ({ success: true, data: { jobs: [mkJob('r1', '区域岗位')] } }));
+  const regionalJobs = await mokahr.fetch(R1_ENTRY, regional.ctx);
+  if (
+    paged.calls[0].url === 'https://app.mokahr.com/api/outer/ats-apply/website/jobs/v2' &&
+    regional.calls[0]?.url === 'https://hire-r1.mokahr.com/api/outer/ats-apply/website/jobs/v2' &&
+    regionalJobs[0]?.url === `${R1_ENTRY.careers_url}#/job/r1`
+  ) {
+    pass('mokahr.fetch() calls the API and builds job links on the careers_url host (app or hire-r1)');
+  } else {
+    fail(`mokahr.fetch() regional host: calls=${JSON.stringify([paged.calls[0].url, regional.calls[0]?.url])} job=${regionalJobs[0]?.url}`);
+  }
+
+  // mkCtx always encrypts, so these hand-built contexts cover hire-r1's plaintext responses.
+  const plaintextCtx = (body) => ({ sleep: async () => {}, fetchJson: async () => body });
+  const plaintextJobs = await mokahr.fetch(
+    R1_ENTRY,
+    plaintextCtx({ code: 0, success: true, data: { jobs: [mkJob('p1', '明文岗位')] } }),
+  );
+  if (plaintextJobs.length === 1 && plaintextJobs[0].title === '明文岗位') {
+    pass('mokahr.fetch() accepts the plaintext response hire-r1 returns instead of the encrypted envelope');
+  } else {
+    fail(`mokahr.fetch() plaintext response → ${JSON.stringify(plaintextJobs)}`);
+  }
+
+  let plaintextErrorThrew = false;
+  try {
+    await mokahr.fetch(R1_ENTRY, plaintextCtx({ code: 102, success: false, msg: '参数错误。{0}', data: {} }));
+  } catch { plaintextErrorThrew = true; }
+  if (plaintextErrorThrew) pass('mokahr.fetch() still surfaces an in-band success:false on a plaintext response');
+  else fail('mokahr.fetch() should throw on a plaintext success:false first response');
 
   if (paged.calls[0].siteId === 123456 && paged.calls[0].orgId === 'example-labs') {
     pass('mokahr.fetch() extracts siteId/orgId from the tenant careers_url');

@@ -5,7 +5,7 @@
 import { createServer } from 'node:http';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, withLocalServerAs } from '../helpers.mjs';
 
 console.log('\nProvider — _http timeout');
 
@@ -41,17 +41,24 @@ const server = createServer((req, res) => {
 });
 server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const base = `http://127.0.0.1:${server.address().port}`;
+// The provider guard refuses a loopback destination, so the requests go to a
+// public-looking origin and the transport is pointed at the local server.
+const base = 'http://stalls.example.test';
+const viaLocal = (fn) => withLocalServerAs(base, `http://127.0.0.1:${server.address().port}`, fn);
+// A refusal by the guard is an error too, and the two stalled-body checks
+// below pass on ANY rejection. Make sure what they time is the abort.
+const isAbort = (err) => { const e = err?.cause ?? err; return e?.name === 'AbortError' || e?.name === 'TimeoutError' || /abort|timed? ?out/i.test(String(err?.message ?? '')); };
 
 // 1. Stalled body must abort within the timeout window, not hang.
 {
   const t0 = Date.now();
   try {
-    await hardTimeout(fetchJson(`${base}/stall`, { timeoutMs: 300 }), 8_000, 'fetchJson /stall');
+    await hardTimeout(viaLocal(() => fetchJson(`${base}/stall`, { timeoutMs: 300 })), 8_000, 'fetchJson /stall');
     fail('fetchJson resolved on a stalled body');
-  } catch {
+  } catch (err) {
     const elapsed = Date.now() - t0;
-    if (elapsed < MAX_ABORT_MS) pass(`fetchJson aborted stalled body read in ${elapsed}ms`);
+    if (!isAbort(err)) fail(`fetchJson /stall failed for another reason than the abort: ${err?.message}`);
+    else if (elapsed < MAX_ABORT_MS) pass(`fetchJson aborted stalled body read in ${elapsed}ms`);
     else fail(`fetchJson took ${elapsed}ms to abort a stalled body (timeout not covering body read)`);
   }
 }
@@ -60,18 +67,19 @@ const base = `http://127.0.0.1:${server.address().port}`;
 {
   const t0 = Date.now();
   try {
-    await hardTimeout(fetchText(`${base}/stall`, { timeoutMs: 300 }), 8_000, 'fetchText /stall');
+    await hardTimeout(viaLocal(() => fetchText(`${base}/stall`, { timeoutMs: 300 })), 8_000, 'fetchText /stall');
     fail('fetchText resolved on a stalled body');
-  } catch {
+  } catch (err) {
     const elapsed = Date.now() - t0;
-    if (elapsed < MAX_ABORT_MS) pass(`fetchText aborted stalled body read in ${elapsed}ms`);
+    if (!isAbort(err)) fail(`fetchText /stall failed for another reason than the abort: ${err?.message}`);
+    else if (elapsed < MAX_ABORT_MS) pass(`fetchText aborted stalled body read in ${elapsed}ms`);
     else fail(`fetchText took ${elapsed}ms to abort a stalled body`);
   }
 }
 
 // 3. Happy path still works after the refactor.
 {
-  const ok = await fetchJson(`${base}/ok`, { timeoutMs: 2_000 });
+  const ok = await viaLocal(() => fetchJson(`${base}/ok`, { timeoutMs: 2_000 }));
   if (ok && ok.ok === true) pass('fetchJson still parses a completed body');
   else fail(`fetchJson happy path broken: ${JSON.stringify(ok)}`);
 }

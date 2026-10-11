@@ -120,6 +120,7 @@ test('--json emits exactly one clean successful receipt', () => {
       added: 0,
       added_urls: [],
       errors: [],
+      unverified_zero: [],
       dry_run: true,
     });
     assert.match(result.stderr, /Portal Scan/);

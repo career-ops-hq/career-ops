@@ -42,6 +42,7 @@ import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -152,13 +153,45 @@ export function computeDelta(state, sources) {
   });
 }
 
+/**
+ * Raised when the ingest ledger exists and cannot be trusted.
+ *
+ * Its own class so the CLI boundary can report it as a one-line message the way
+ * every other expected failure in this file does, while a genuine bug still
+ * arrives as a stack trace.
+ */
+class StateError extends Error {
+  constructor(message) { super(message); this.name = 'StateError'; }
+}
+
 function loadState() {
+  // Absent is a first run — an empty ledger is correct.
   if (!existsSync(STATE_FILE)) return { ingested: {} };
+  let parsed;
   try {
-    return JSON.parse(readFileSync(STATE_FILE, 'utf-8')) || { ingested: {} };
-  } catch {
-    return { ingested: {} };
+    parsed = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+  } catch (err) {
+    // Existing and unreadable is NOT a first run. Returning an empty ledger
+    // makes every already-ingested document look new, so intake re-proposes
+    // additions the user has already reviewed — and the review is the whole
+    // human-in-the-loop step this mode exists for. Saying so costs one message;
+    // hiding it costs the user's trust in the proposals.
+    throw new StateError(
+      `${STATE_FILE} is not valid JSON (${String(err.message).split('\n')[0]}) — `
+      + 'fix or delete it; deleting means already-ingested documents are proposed again.',
+    );
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new StateError(`${STATE_FILE} does not contain a JSON object — fix or delete it.`);
+  }
+  // Absent is an empty ledger and `{}` is right. Present but not an object is
+  // the same silent reset one level down — it was replaced with `{}` and then
+  // written back by commitState, so every reviewed document looked new again.
+  if (parsed.ingested === undefined || parsed.ingested === null) parsed.ingested = {};
+  else if (typeof parsed.ingested !== 'object' || Array.isArray(parsed.ingested)) {
+    throw new StateError(`${STATE_FILE} has an "ingested" that is not an object — fix or delete it.`);
+  }
+  return parsed;
 }
 
 function listSourceFiles() {
@@ -341,7 +374,10 @@ function commitState(result, only = []) {
     count += 1;
   }
   mkdirSync(dirname(STATE_FILE), { recursive: true });
-  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+  // Atomic for the same reason as hired-share's: a truncating write that is
+  // interrupted leaves unparseable JSON, which is the condition the loader
+  // above now refuses to silently paper over.
+  writeFileAtomic(STATE_FILE, JSON.stringify(state, null, 2) + '\n');
   return count;
 }
 
@@ -483,4 +519,16 @@ function main() {
   else console.log(JSON.stringify(result, null, 2));
 }
 
-if (isMain) main();
+if (isMain) {
+  // Only StateError. Every other expected failure in main() already prints one
+  // line and exits 1; a ledger this function cannot trust is the one that
+  // reaches here as a throw, because it is raised deep inside extractAll().
+  // Anything else is a bug in this script and keeps its stack trace.
+  try {
+    main();
+  } catch (err) {
+    if (!(err instanceof StateError)) throw err;
+    console.error(err.message);
+    process.exit(1);
+  }
+}

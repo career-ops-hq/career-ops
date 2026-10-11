@@ -177,6 +177,33 @@ for (const path of timestampedBackupProbes) {
   else fail(`${path}: git check-ignore could not answer — ${stderr}`);
 }
 
+// The backups' sibling, from the same two writers: the temp file an atomic
+// write renames into place. `.{name}.{pid}.{ts}.{uuid}.tmp` (tracker-utils.mjs
+// writeFileAtomic and web/src/lib/core/safe-write.ts atomicWrite), plus the
+// `{file}.tmp-{pid}-{uuid}` shape safe-write.ts used before they were aligned —
+// a checkout that predates the alignment can still have one lying around.
+//
+// It exists only between the write and the rename, so a passing rename leaves
+// nothing. A rename that THROWS does: Windows contention for the destination
+// handle (the #3006/#3046 class), ENOSPC, a read-only mount. What it leaves is
+// a byte-for-byte copy of cv.md / profile.yml / portals.yml under a second
+// name — the same PII the backup probes above exist for, reached by a different
+// door.
+const atomicWriteTempProbes = [
+  '.cv.md.4821.1755900000000.1e0d6a0e-1b7c-4a1a-9f4a-7c1d2b3e4f56.tmp',
+  '.applications.md.4821.1755900000000.1e0d6a0e.tmp',
+  'cv.md.tmp-4821-1e0d6a0e-1b7c-4a1a-9f4a-7c1d2b3e4f56',
+  'config/profile.yml.tmp-4821-1e0d6a0e',
+  'portals.yml.tmp-4821-1e0d6a0e',
+];
+
+for (const path of atomicWriteTempProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — a leaked atomic-write temp file holds the same PII as the original`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 // The tracker's DERIVED SQLite index (tracker.mjs, #918), which carries the
 // same content as the markdown it indexes — company, role, score, status,
 // notes.

@@ -5,6 +5,10 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — workday');
 
+// Expected jobs.workdayTruncated value, spelled out locally rather than
+// imported from providers/workday.mjs — see the same constant in
+// workday-facet-split.test.mjs for why.
+const TRANSIENT = 'transient';
 
 try {
   const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
@@ -176,6 +180,68 @@ try {
     } else {
       fail(`workdayDedupKey() mishandled the underscore base: ${wd('R26_05710-1')} / ${wd('R26_05710')}`);
     }
+
+    // #3882: a hyphenated base carrying Workday's "-N" collapses to the
+    // un-suffixed base, as an unhyphenated one already did. Real pairs from
+    // public tenants, sampled in #3882 (lambweston, unimelb).
+    const hyphenatedPairs = [
+      ['REQ-271559', ['REQ-271559-1']],
+      ['JR-017459', ['JR-017459-1']],
+      ['JR-016640', ['JR-016640-2']],
+    ];
+    const hyphenatedMissed = hyphenatedPairs.filter(([base, variants]) =>
+      wd(base) !== keyOf(base) || variants.some((v) => wd(v) !== keyOf(base)));
+    if (hyphenatedMissed.length === 0) {
+      pass('workdayDedupKey() strips the disambiguator off a hyphenated base (REQ-271559-1, JR-017459-1, JR-016640-2)');
+    } else {
+      fail(`workdayDedupKey() did not collapse hyphenated bases: ${hyphenatedMissed.map(([b]) => b).join(', ')}`);
+    }
+
+    // The short form the base-shape check actually protects: "R-25" splits to
+    // a base of "r", which has no digit, so the tail is the ID and stays.
+    if (wd('R-25') === keyOf('R-25') && wd('R-26') === keyOf('R-26')) {
+      pass('workdayDedupKey() keeps a short hyphen tail whole (R-25, R-26 — base "r" is not requisition-shaped)');
+    } else {
+      fail(`workdayDedupKey() stripped a short hyphen tail: ${wd('R-25')} / ${wd('R-26')}`);
+    }
+
+    // A tenant numbering its own IDs with a hyphenated, zero-padded counter
+    // must not start folding: "-01".."-09" are padded and "-10".."-12" are two
+    // digits, while Workday's disambiguator on a hyphenated base is one digit.
+    const ownSeries = Array.from({ length: 12 }, (_, i) => `REQ-2026-${String(i + 1).padStart(2, '0')}`);
+    const seriesChanged = ownSeries.filter((t) => wd(t) !== keyOf(t));
+    if (seriesChanged.length === 0) {
+      pass('workdayDedupKey() keeps a padded REQ-2026-01..-12 series as twelve distinct keys');
+    } else {
+      fail(`workdayDedupKey() folded a padded series: ${seriesChanged.join(', ')}`);
+    }
+
+    // #3882 acceptance: every key the fixtures above produced before the
+    // hyphenated-base change, pinned literally. Scan history is re-keyed
+    // through this function, so a key that moves would re-add a posting the
+    // user has already seen.
+    const pinned = [
+      ['R11312', 'R11312'], ['R11312-2', 'R11312'], ['R11312-3', 'R11312'],
+      ['R260022205', 'R260022205'], ['R260022205-2', 'R260022205'],
+      ['R26007842', 'R26007842'], ['R26007842-1', 'R26007842'],
+      ['R266069', 'R266069'], ['R266069-1', 'R266069'],
+      ['R53113', 'R53113'], ['R53113-2', 'R53113'],
+      ['JR1126610', 'JR1126610'], ['JR1126610-1', 'JR1126610'],
+      ['R2000678390', 'R2000678390'], ['R2000678390-1', 'R2000678390'],
+      ['R26_05710', 'R26_05710'], ['R26_05710-1', 'R26_05710'],
+      ['R-2593225', 'R-2593225'], ['R-2592964', 'R-2592964'],
+      ['JR26-39350', 'JR26-39350'], ['JR26-42996', 'JR26-42996'],
+      ['R-058589', 'R-058589'], ['R-101976', 'R-101976'], ['R-4253', 'R-4253'], ['R-103502', 'R-103502'],
+      ['R2026-00707', 'R2026-00707'], ['R2026-01237', 'R2026-01237'],
+      ['R2026-01334', 'R2026-01334'], ['R2026-01355', 'R2026-01355'],
+      ['JR00123', 'JR00123'], ['JR_2024_00123', 'JR_2024_00123'], ['R100', 'R100'],
+    ];
+    const moved = pinned.filter(([tail, reqId]) => wd(tail) !== keyOf(reqId));
+    if (moved.length === 0) {
+      pass(`workdayDedupKey() leaves all ${pinned.length} pre-existing fixture keys exactly where they were`);
+    } else {
+      fail(`workdayDedupKey() moved existing keys: ${moved.map(([t]) => `${t} → ${wd(t)}`).join(', ')}`);
+    }
   }
 
   // Two different tenants reusing the same bare requisition number must not
@@ -258,6 +324,30 @@ try {
     pass('workday.detect() works without locale segment in path');
   } else {
     fail(`workday.detect(no-locale) returned ${JSON.stringify(hitNoLocale)}`);
+  }
+
+  // myworkdaysite.com — same product, tenant in the path (/recruiting/{tenant}/{site}).
+  const hitSite = workday.detect({ name: 'Guidewire', careers_url: 'https://wd5.myworkdaysite.com/recruiting/guidewire/external' });
+  if (hitSite && hitSite.url === 'https://wd5.myworkdaysite.com/wday/cxs/guidewire/external/jobs') {
+    pass('workday.detect() resolves a myworkdaysite.com board to its CXS endpoint');
+  } else {
+    fail(`workday.detect(myworkdaysite) returned ${JSON.stringify(hitSite)}`);
+  }
+
+  // One myworkdaysite host serves many tenants, so the dedup key carries the
+  // path tenant: two tenants sharing a requisition ID stay apart, while one
+  // tenant's cross-site reposts still collapse.
+  {
+    const posting = { jobPostings: [{ title: 'SRE', externalPath: '/job/Remote/SRE_R100' }] };
+    const keyFor = (careers_url) => workday.dedupKey(parseWorkdayResponse(posting, { name: 'X', careers_url })[0]);
+    const [acme, other, acmeOtherSite] = ['acme/careers', 'other/careers', 'acme/indeed']
+      .map((path) => keyFor(`https://wd1.myworkdaysite.com/recruiting/${path}`));
+    if (acme === 'workday:wd1.myworkdaysite.com/recruiting/acme:r100'
+        && other === 'workday:wd1.myworkdaysite.com/recruiting/other:r100' && acmeOtherSite === acme) {
+      pass('workdayDedupKey() scopes myworkdaysite.com by path tenant: two tenants on one host stay apart, one tenant\'s sites collapse');
+    } else {
+      fail(`workdayDedupKey() myworkdaysite tenant scope: ${JSON.stringify({ acme, other, acmeOtherSite })}`);
+    }
   }
 
   // detect() — null cases
@@ -659,10 +749,10 @@ try {
       throw new Error('fetch failed'); // every page-2 attempt dies
     });
     const { result: jobs } = await captureConsoleErrors(() => workday.fetch(entry, ctx));
-    if (jobs.workdayTruncated === true && jobs.length === 20) {
-      pass('fetch-error truncation tags jobs.workdayTruncated');
+    if (jobs.workdayTruncated === TRANSIENT && jobs.length === 20) {
+      pass(`fetch-error truncation tags jobs.workdayTruncated='${TRANSIENT}'`);
     } else {
-      fail(`expected workdayTruncated tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
+      fail(`expected workdayTruncated='${TRANSIENT}' tag on 20 partial jobs, got tag=${jobs.workdayTruncated} len=${jobs.length}`);
     }
   }
 
@@ -743,6 +833,88 @@ try {
     pass('workday.fetch() truncation warning reports the real attempt count for a non-retryable failure (1, not the retry-cap upper bound)');
   } else {
     fail(`workday non-retryable 4xx warning: expected "after 1 attempts", got ${JSON.stringify(non429Warnings)}`);
+  }
+
+  // fetch() dead-tenant detection — a page-0 422 followed by a careers page
+  // carrying Workday's maintenance marker is relabeled as a synthetic 404, so
+  // dead-boards.mjs's existing 404 path (shared with every other provider)
+  // picks it up with no separate counter or threshold.
+  const deadEntry = { name: 'DeadCo', careers_url: 'https://deadco.wd5.myworkdayjobs.com/careers' };
+  let deadFetchTextOpts;
+  try {
+    await workday.fetch(deadEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async (_url, opts) => { deadFetchTextOpts = opts; const err = new Error('HTTP 500'); err.status = 500; err.body = '<script>window.location.href = "https://community.workday.com/maintenance-page";</script>'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead tenant');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 422 + maintenance-page careers body as a synthetic 404');
+    else fail(`workday dead-tenant relabel: expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+  if (deadFetchTextOpts?.redirect === 'manual') pass('workday.fetch() passes redirect:"manual" on the careers-page confirmation fetch (inspects Location, never follows it — SSRF guard)');
+  else fail(`workday dead-tenant confirmation fetch: expected redirect:"manual", got ${JSON.stringify(deadFetchTextOpts)}`);
+
+  // fetch() dead-board detection — a page-0 401/403 followed by a careers
+  // page redirecting to Workday's own outage page is also relabeled as a
+  // synthetic 404 (a per-board signal: a restricted/retired board redirects
+  // here even while other boards on the same tenant answer normally).
+  const outageEntry = { name: 'OutageCo', careers_url: 'https://outageco.wd105.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(outageEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 403'); err.status = 403; throw err; },
+      { fetchText: async () => { const err = new Error('HTTP 302'); err.status = 302; err.location = 'https://wd105.myworkday.com/wday/drs/outage?t=outageco&s=careers'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead board');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 403 + outage-page redirect as a synthetic 404');
+    else fail(`workday outage-redirect relabel: expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+
+  // A redirect to anywhere else (e.g. a tenant rename) must not be mistaken
+  // for the outage page.
+  const renamedEntry = { name: 'RenamedCo', careers_url: 'https://renamedco.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(renamedEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 401'); err.status = 401; throw err; },
+      { fetchText: async () => { const err = new Error('HTTP 302'); err.status = 302; err.location = 'https://renamedco.wd5.myworkdayjobs.com/NewSiteName'; throw err; } },
+    ));
+    fail('workday.fetch() should have thrown the original 401 for an unrelated redirect');
+  } catch (err) {
+    if (err.status === 401) pass('workday.fetch() leaves a 401 with a non-outage redirect unrelabeled');
+    else fail(`workday non-outage redirect: expected status 401, got ${JSON.stringify(err.status)}`);
+  }
+
+  // A 200 careers page whose body still carries the maintenance marker is
+  // also relabeled — every confirmed case so far reaches the marker through
+  // a non-2xx status, but a 200-status variant is worth covering since the
+  // marker is safe to check unconditionally (confirmed live: a known-alive
+  // tenant's 200 body does NOT carry this string, unlike the outage-page URL,
+  // which is boilerplate present on every Workday page regardless of health).
+  const dead200Entry = { name: 'Dead200Co', careers_url: 'https://dead200co.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(dead200Entry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async () => '<script>window.location.href = "https://community.workday.com/maintenance-page";</script>' },
+    ));
+    fail('workday.fetch() should have thrown for a confirmed-dead tenant on a 200 careers page');
+  } catch (err) {
+    if (err.status === 404) pass('workday.fetch() relabels a 422 + maintenance-page marker on a 200 careers body as a synthetic 404');
+    else fail(`workday dead-tenant relabel (200 body): expected status 404, got ${JSON.stringify(err.status)}`);
+  }
+
+  // Same 422, but the careers page is clean (no maintenance marker) — the
+  // original 422 must propagate unchanged, not get swept into "dead" on the
+  // status code alone (measured live: 2 of 614 raw-422 tenants were like this).
+  const flakyEntry = { name: 'FlakyCo', careers_url: 'https://flakyco.wd5.myworkdayjobs.com/careers' };
+  try {
+    await workday.fetch(flakyEntry, mkWorkdayCtx(
+      async () => { const err = new Error('HTTP 422'); err.status = 422; throw err; },
+      { fetchText: async () => '<html><body><div id="root">FlakyCo careers</div></body></html>' },
+    ));
+    fail('workday.fetch() should have thrown the original 422 for a live tenant');
+  } catch (err) {
+    if (err.status === 422) pass('workday.fetch() leaves a 422 with a clean careers page unrelabeled');
+    else fail(`workday flaky-422: expected status 422, got ${JSON.stringify(err.status)}`);
   }
 
   // fetch() early-stop — once a page's postings are all clearly past

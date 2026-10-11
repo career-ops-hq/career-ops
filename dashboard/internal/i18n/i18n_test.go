@@ -16,6 +16,7 @@ func TestStatusLabel(t *testing.T) {
 		{"offer", "Offer", "Teklif", "Oferta"},
 		{"hired", "Hired", "İşe Alındı", "Contratada"},
 		{"responded", "Responded", "Yanıt Verildi", "Respondida"},
+		{"assessment", "Assessment", "Değerlendirme", "Prueba"},
 		{"applied", "Applied", "Başvuruldu", "Aplicada"},
 		{"evaluated", "Evaluated", "Değerlendirildi", "Evaluada"},
 		{"skip", "SKIP", "Uygun Değil", "OMITIR"},
@@ -143,15 +144,24 @@ func TestRuntimeLanguageManagement(t *testing.T) {
 		t.Errorf("after SetLang(\"fr\"), GetLang() = %q; want \"en\"", GetLang())
 	}
 
-	// Test ToggleLang
+	// Test ToggleLang. It CYCLES every language rather than flipping between
+	// two: this assertion used to read Tr -> En, which was written before
+	// Spanish existed and left Es unreachable from the toggle key. See
+	// TestToggleLangReachesEveryLanguage.
+	SetLang("en")
 	ToggleLang()
 	if Current != &Tr || GetLang() != "tr" {
 		t.Errorf("after ToggleLang() from En, GetLang() = %q; want \"tr\"", GetLang())
 	}
 
 	ToggleLang()
+	if Current != &Es || GetLang() != "es" {
+		t.Errorf("after ToggleLang() from Tr, GetLang() = %q; want \"es\"", GetLang())
+	}
+
+	ToggleLang()
 	if Current != &En || GetLang() != "en" {
-		t.Errorf("after ToggleLang() from Tr, GetLang() = %q; want \"en\"", GetLang())
+		t.Errorf("after ToggleLang() from Es, GetLang() = %q; want \"en\"", GetLang())
 	}
 }
 

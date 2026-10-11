@@ -26,6 +26,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { isolatedBatchStatePath } from './helpers.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,7 +72,7 @@ function merge(opts) {
       encoding: 'utf-8',
       timeout: 30_000,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
     });
 
     const text = readFileSync(tracker, 'utf-8');
@@ -125,7 +126,7 @@ test('a LEGACY tracker with no Via column keeps its existing behaviour', () => {
   // tag is cleared on purpose, so empty-vs-empty is the NORMAL state for a
   // genuine same-agency re-blast rather than a missing signal. Requiring a
   // value there would turn every legacy re-blast into a duplicate row —
-  // tracker-columns-tests.mjs §12b asserts exactly that case, and caught this
+  // tracker-columns.test.mjs (Test 12b) asserts exactly that case, and caught this
   // when the first version of the fix was not gated.
   //
   // So #3410 is closed for a migrated tracker and unchanged for a legacy one,
@@ -148,7 +149,7 @@ test('a LEGACY tracker with no Via column keeps its existing behaviour', () => {
       ['2', '2026-02-10', '?', 'Data Engineer', 'Applied', '4.3/5', '✅', '—', 're-blast', 'via=Hays'].join('\t') + '\n');
     execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
       encoding: 'utf-8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir },
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
     });
     const rows = readFileSync(tracker, 'utf-8').split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l));
     assert.equal(rows.length, 1, 'a legacy same-agency re-blast must still update in place');

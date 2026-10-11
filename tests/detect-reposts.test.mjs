@@ -27,6 +27,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { pass, fail } from './helpers.mjs';
+import { parseDate } from '../lib/parse-date.mjs';
 
 console.log('\ndetect-reposts.mjs — repost detection');
 
@@ -64,17 +65,9 @@ function d(iso) {
 }
 
 // ============================================================================
-// 1. parseDate (replicated for testing — internal function not exported)
+// 1. parseDate
 // ============================================================================
 console.log('\n--- 1. parseDate ---');
-
-function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
 
 // Valid dates
 ok('valid date 2026-01-01', parseDate('2026-01-01') !== null);

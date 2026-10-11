@@ -104,7 +104,8 @@ function parseLocation(block) {
   const m =
     block.match(/list-item-location[^>]*>([\s\S]*?)<\/span>/i) ||
     block.match(/class="[^"]*\blocation\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div|li)>/i) ||
-    block.match(/glyphicon-map-marker[\s\S]{0,80}?>([^<]{2,60})</i);
+    block.match(/glyphicon-map-marker[\s\S]{0,80}?>([^<]{2,60})</i) ||
+    block.match(/icon-address[^>]*><\/span>([^<]{2,80})</i);
   return m ? clean(m[1]) : '';
 }
 
@@ -129,12 +130,25 @@ export function assertParsedSomething(html, url) {
   );
 }
 
+// Tenants vary the result class: Synopsys uses `article--result`, Siemens
+// appends a position index (`article--result 1`). Accept any suffix.
+// careers.avature.net renders `article--jobs` cards instead (seen 2026-09-28).
+const ARTICLE_PATTERN = /<article class="article article--(?:result|jobs)\b[^"]*"[\s\S]*?<\/article>/;
+
+/**
+ * Number of result cards on a page, before `parseArticles` drops any (no
+ * JobDetail link, empty title). The short-page stop compares this count, not
+ * the parsed one. Shares `ARTICLE_PATTERN` with `parseArticles`.
+ * @param {string} htmlText
+ */
+export function countArticles(htmlText) {
+  return (String(htmlText ?? '').match(new RegExp(ARTICLE_PATTERN, 'g')) || []).length;
+}
+
 /** @param {string} htmlText @param {string} origin */
 export function parseArticles(htmlText, origin) {
   const out = [];
-  // Tenants vary the result class: Synopsys uses `article--result`, Siemens
-  // appends a position index (`article--result 1`). Accept any suffix.
-  const re = /<article class="article article--result[^"]*"[\s\S]*?<\/article>/g;
+  const re = new RegExp(ARTICLE_PATTERN, 'g');
   let a;
   while ((a = re.exec(htmlText)) !== null) {
     const block = a[0];
@@ -144,7 +158,10 @@ export function parseArticles(htmlText, origin) {
     // anchor for tenants (e.g. Rohde & Schwarz) whose title link carries no
     // class. Share/mailto buttons url-encode the path (%2FJobDetail%2F) so they
     // never match the literal `/JobDetail/` and can't be mistaken for the title.
+    // An `article--jobs` card's class="link" anchor is a "View more" button, so
+    // its h3 header title anchor is tried first.
     const urlM =
+      block.match(/article__header__text__title[^>]*>\s*<a[^>]*href="([^"]*\/JobDetail\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/) ||
       block.match(/<a[^>]*class="link"[^>]*href="([^"]*\/JobDetail\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/) ||
       block.match(/<a[^>]*href="([^"]*\/JobDetail\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/);
     if (!urlM) continue;
@@ -207,7 +224,7 @@ export default {
         redirect: 'error',
         headers: { accept: 'text/html' },
       });
-      return { url, html: htmlText, articles: parseArticles(htmlText, cfg.origin) };
+      return { url, html: htmlText, articles: parseArticles(htmlText, cfg.origin), cards: countArticles(htmlText) };
     };
     // Absorb a page's articles, returning how many were not already seen.
     const absorb = (articles) => {
@@ -257,7 +274,7 @@ export default {
       if (page === 0 && result.articles.length === 0) assertParsedSomething(result.html, result.url);
 
       if (fresh === 0) break; // empty page / looped / offset ignored / last page
-      if (result.articles.length < PAGE_SIZE) break; // last page
+      if (result.cards < PAGE_SIZE) break; // last page (raw card count, not the parsed one)
     }
     return jobs;
   },

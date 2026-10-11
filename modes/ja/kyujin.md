@@ -6,10 +6,12 @@
 
 候補者が **URL**（JD テキストではなく）を貼り付けた場合、評価を始める前に求人がまだ live であることを確認する。Dead link は Block A に進めない。404 / expired page に対して A-G 評価、report、PDF を作るのは無駄。
 
+**LinkedIn:** navigate や fallback の前に AGENTS.md → **LinkedIn JD loading guard (#4121)** を適用する。前の mode の内容と試行回数を引き継ぐ。Skeleton のまま、または JD が読めない場合は closed ではなく unconfirmed。再 navigate せず、実際の JD テキストが得られるまで Block A の前で止まる。
+
 1. ページ内容を取得する。`auto-pipeline` から来た場合（Step 0.5 がすでに navigate し、link を確認済み）、その snapshot を再利用する。直接 URL が渡された場合は Playwright（`browser_navigate` + `browser_snapshot`）で navigate し、title、URL、visible content を読む。
 2. 投稿を分類する：
    - **active posting evidence:** title/role + 実際の job description または application/apply path
-   - **closed posting evidence:** expired/closed/"no longer accepting applications"、JD がなく nav/footer だけ、generic careers/search page への hard redirect、404/410
+   - **closed posting evidence:** expired/closed/"no longer accepting applications"、読み込み中やアクセス不能ではないと確認した上で JD がなく nav/footer だけ、generic careers/search page への hard redirect、404/410
 3. 投稿が closed に見える場合は、**Block A の前で stop**：候補者に link が dead であると伝える。entry が `data/pipeline.md` 由来なら、`- [x] ~~Company | Role~~ -- 求人非アクティブ` として mark する。評価、report、CV は生成しない。
 4. 候補者が JD テキストだけを貼った場合（URL なし）、liveness は確認できない。その limitation を note して進む。確認する link がないため。
 
@@ -222,9 +224,29 @@ I am happy to discuss further at your convenience.
 
 ---
 
+## 判定 (lead)
+
+ブロック G の直後、`## Risk Summary` の前に `## 判定 (lead)` ブロックを書く。読者がレポートを開いた唯一の問い、すなわち「応募すべきか」に答えるブロックである。
+
+**派生であり、判断を新たに生まない。** 唯一の情報源は `## Machine Summary` の `final_decision`。本ブロックは同じ判断を人間の一文で言い直すだけで、別の判断を持ち込まない。文とフィールドが食い違う場合はフィールドが正しく、本ブロックが欠陥である。太字の判断はそのフィールドの値、すなわち Apply、Consider、Research first、Skip のいずれか。
+
+**`(lead)` マーカーは機能を担い、意図的に言語非依存である。** Web のレポート表示は、見出し語やブロック文字ではなくこのマーカーによって当該ブロックを冒頭の要点として引き上げる。したがって各言語は自国語の名詞と同じ括弧書きを保つ（`## Verdict (lead)`、`## Вердикт (lead)`）。`(lead)` は翻訳せず、本ブロックに文字も付けない。A–H の系列外である。
+
+**新しい判断を加えない。** ここを書く時点で入力はすべて揃っている。判断と、レポートが既に確立した内容に基づく理由を一つ述べる。再採点も証拠の追加も行わない。
+
+ブロック形式:
+
+```markdown
+## 判定 (lead)
+
+**Apply.** 職務の中核軸で強く一致し、ハードストップなし。ブロック G は High Confidence。
+```
+
+---
+
 ## Risk Summary (ブロック G の後)
 
-レポート本文は、ブロック G の直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
+レポート本文は、ブロック G に続く `## 判定 (lead)` ブロックの直後・ブロック H の前に `## Risk Summary` ブロックで締めくくります。リスクシグナルごとに1行、順序は固定です。これにより、候補者が実際に知りたいこと（「この会社は入って安全か？」）が、ブロック A・ブロック G・外部ファイルを頭の中で突き合わせることなく、1画面で分かります。
 
 **集約のみで、新たな judgment は行いません。** 各行は、元のシグナルがすでに出した判定を引用またはリンクします。サマリーが再採点・再重み付け・上書きを行うことは決してありません。ある行が誤って見える場合、修正すべきは元のシグナル側であり、ここではありません。
 
@@ -300,6 +322,9 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 
 ## G) Posting Legitimacy
 (full content of block G)
+
+## 判定 (lead)
+(応募可否の判断を一文で — `final_decision` の言い直し、上記の判定セクションを参照)
 
 ## Risk Summary
 (リスクシグナルごとに1行、順序は固定 — 上記の Risk Summary セクションを参照)

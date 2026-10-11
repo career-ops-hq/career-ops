@@ -13,10 +13,11 @@ const requiredGuardrails = [
   '<!-- guardrail:no-fabrication -->',
   '<!-- guardrail:source-exclusivity -->',
   '<!-- guardrail:human-approval -->',
+  '<!-- guardrail:agency-confirmation -->',
 ];
 const expectedLocalizedModes = [
   'ar', 'da', 'de', 'es', 'fr', 'hi', 'id', 'it', 'ja',
-  'ko', 'nl', 'pl', 'pt', 'ru', 'tr', 'ua', 'zh-TW', 'zh',
+  'ko', 'nl', 'pl', 'pt', 'ru', 'sg', 'tr', 'ua', 'zh-TW', 'zh',
 ];
 
 const localizedModeNames = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })

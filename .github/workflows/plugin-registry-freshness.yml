@@ -1,0 +1,54 @@
+name: 'Plugin registry freshness'
+
+# Compares every plugins-registry/<id>.json pin against that plugin's latest
+# PUBLISHED GitHub release.
+#
+# Scheduled, deliberately. plugin-registry-validate.yml runs on
+# `pull_request` with `paths: plugins-registry/**`, and the event that makes a
+# pin stale — a plugin cutting a release in its own repo — changes nothing
+# here. No PR, no run. A pin is therefore only ever checked at the one moment
+# it is guaranteed correct: when it is written. Wiring this check into the PR
+# workflow would have left it a gate that never fires.
+#
+# Read-only and secretless beyond the job's own GITHUB_TOKEN, which is used
+# only to raise the unauthenticated API rate limit. Nothing is cloned and no
+# plugin code runs: this reads release metadata, not plugin contents.
+#
+# No `pull_request` trigger, on purpose. This job reports the state of the
+# REGISTRY, not the correctness of the code, and the registry is allowed to be
+# dirty: a pin goes stale the moment someone else publishes a release, through
+# no fault of the PR under review. Gating merges on it would block every
+# unrelated PR until whoever is on hand bumps a third party's pin — and it
+# would deadlock the pin bumps themselves, since the registry CI permits only
+# one changed plugins-registry/*.json per PR. The check's own correctness is
+# covered by tests/registry-pin-freshness.test.mjs, which test-all discovers
+# and runs on every PR.
+on:
+  schedule:
+    - cron: '0 7 * * 1' # Weekly, Monday 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freshness:
+    name: Compare pins against published releases
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # Exits non-zero when a pin trails its release, AND when a lookup fails.
+      # An unreachable repo is reported as an error rather than passing quietly:
+      # a check that could not see is not a check that found nothing.
+      - name: Check registry pins against latest releases
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node validate-plugin-registry.mjs --check-stale

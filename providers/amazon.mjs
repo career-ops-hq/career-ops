@@ -57,6 +57,36 @@ function toEpochMs(job) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// A multi-city req names only its primary city in normalized_location /
+// location; every city is in `locations`, an array of JSON-encoded strings.
+// Keep the primary first and join the rest with " · ", the multi-location
+// shape location_filter already expects (see workable.mjs), so a req that
+// also lists another city is not filtered out on its primary alone.
+const str = (v) => (typeof v === 'string' ? v.trim() : '');
+
+function formatLocation(job) {
+  const primary = str(job.normalized_location) || str(job.location);
+  const cities = primary ? [primary] : [];
+  // Every spelling seen so far: one city can arrive as "Denver, Colorado, USA"
+  // in one entry and only as "US, CO, Denver" in another.
+  const seen = new Set(cities);
+  for (const entry of Array.isArray(job.locations) ? job.locations : []) {
+    let loc;
+    try {
+      loc = typeof entry === 'string' ? JSON.parse(entry) : entry;
+    } catch {
+      continue;
+    }
+    const spelled = str(loc?.location);
+    const name = str(loc?.normalizedLocation) || spelled;
+    // The primary may be either spelling ("Arlington, Virginia, USA" or
+    // "US, VA, Arlington"), so check both before appending.
+    if (name && !seen.has(name) && !seen.has(spelled)) cities.push(name);
+    for (const s of [name, spelled]) if (s) seen.add(s);
+  }
+  return cities.join(' · ');
+}
+
 /** @type {Provider} */
 export default {
   id: 'amazon',
@@ -95,7 +125,7 @@ export default {
           title: (j.title || '').trim(),
           url: url2,
           company: j.company_name || entry.name,
-          location: (j.normalized_location || j.location || '').trim(),
+          location: formatLocation(j),
           postedAt: toEpochMs(j),
         });
       }

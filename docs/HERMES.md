@@ -8,7 +8,7 @@ Hermes is not a special case for career-ops. The pipeline is the same set of mar
 
 - Hermes Agent, desktop app or terminal, already working
 - This repository cloned somewhere on your machine
-- Node.js 18 or newer, which the helper scripts require
+- Node.js 22.13 or newer, which the helper scripts require
 
 ## Step 1 — Clone and install once
 
@@ -97,9 +97,17 @@ node openai-eval.mjs --url <endpoint> --model <model> --file jds/<posting>.txt
 
 - Keeping an interactive session to about ten evaluations is a practical ceiling. Past that, output quality degrades before your quota does.
 
-### Interactive only
+### Headless workers
 
-Nothing in this repository drives a `hermes` binary headlessly, so there is no Hermes worker path and `batch/batch-runner.sh` stays Claude Code-specific. Everything else, including the full evaluation pipeline, works interactively.
+The web UI can run Hermes in one-shot mode for explicitly non-writing workers:
+
+```bash
+hermes chat -q "<prompt>" --oneshot -Q --no-restore-cwd
+```
+
+This returns one plain-text answer without resuming an unrelated session. The worker inherits Hermes's configured tools, approvals, memory, and project-context rules. In the web UI, Hermes is supported only for explicitly non-writing workers such as research and PDF drafting; career-ops rejects Hermes for evaluation and portal-repair workers because no verified Hermes permission adapter exists. Hermes is not supported by batch ranking (`--cli hermes` exits with an error); batch ranking remains a separate workflow and writes only its own guarded annotations. Do not use Hermes for unattended mutation workflows.
+
+The interactive workflow remains available for tasks that benefit from session continuity.
 
 ## If something looks wrong
 
@@ -107,7 +115,7 @@ Nothing in this repository drives a `hermes` binary headlessly, so there is no H
 |---|---|
 | Hermes offers no career-ops modes and seems unaware of the repo | The session is not running in the checkout, or `hermes skills trust` was never run. Check with `hermes skills list` |
 | The agent ignores the repository's rules | The rules file was dropped by the scanner. Look for the block marker, and describe quoted examples rather than quoting them |
-| A script errors immediately | `npm install` has not been run in the checkout, or Node is older than 18 |
+| A script errors immediately | `npm install` has not been run in the checkout, or Node is older than 22.13 |
 | Nothing happens after you paste a link | The posting is dead and the liveness check stopped the run. That is the check working |
 
 ## What the agent will never do

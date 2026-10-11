@@ -20,8 +20,8 @@
  *   bucket rather than being silently guessed.
  *
  * Resolution (see compareLifecycle):
- *   Tier 1 (auto-resolve) — templates/states.yml's 8 canonical states have a
- *   one-way lifecycle order: Evaluated -> Applied -> Responded -> Interview
+ *   Tier 1 (auto-resolve) — templates/states.yml's canonical states have a
+ *   one-way lifecycle order: Evaluated -> Applied -> Responded -> Assessment -> Interview
  *   -> {Offer | Rejected | Discarded | SKIP} (the last four are terminal, no
  *   further order among them, but any of them supersedes an earlier stage).
  *   If the two files disagree and one side is strictly later-stage, that's
@@ -137,6 +137,7 @@ const STATUS_ALIASES = {
   'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
   'applied': 'applied', 'sent': 'applied',
   'respondido': 'responded',
+  'screening': 'assessment', 'online assessment': 'assessment', 'online_assessment': 'assessment', 'online screening': 'assessment',
   'entrevista': 'interview',
   'oferta': 'offer',
   'rechazado': 'rejected', 'rechazada': 'rejected',
@@ -146,7 +147,7 @@ const STATUS_ALIASES = {
 };
 
 /**
- * Normalize an applications.md status cell to one of the 8 canonical ids.
+ * Normalize an applications.md status cell to one of the canonical ids.
  * @param {string} raw
  * @returns {string}
  */
@@ -157,7 +158,7 @@ export function normalizeStatus(raw) {
 }
 
 // active-interviews.md's Status column tracks a per-round state (Scheduled,
-// Confirmed, Completed, Rejected, ...), not one of the 8 canonical tracker
+// Confirmed, Completed, Rejected, ...), not one of the canonical tracker
 // states directly. Only the terminal outcomes below carry unambiguous
 // tracker-status meaning; anything else (Scheduled/Confirmed/Completed/
 // Pending/unrecognized) means the row is simply present in the live
@@ -175,7 +176,7 @@ const INTERVIEW_ROUND_STATUS_MAP = {
 };
 
 /**
- * Normalize an active-interviews.md Status cell to one of the 8 canonical
+ * Normalize an active-interviews.md Status cell to one of the canonical
  * ids, defaulting to "interview" (presence in the live interview log implies
  * at least that stage) when the cell isn't a recognized terminal outcome.
  * @param {string} raw
@@ -764,7 +765,26 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node tracker-sync-check.mjs [--summary] [--porcelain] [--apps-file <path>] [--interviews-file <path>] [--self-test]
+
+  --summary                 human-readable table instead of JSON
+  --porcelain               machine-readable lines
+  --apps-file <path>        override the tracker path
+  --interviews-file <path>  override the active-interviews path
+  --self-test               run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   if (selfTestMode) {
     runSelfTest();
   }

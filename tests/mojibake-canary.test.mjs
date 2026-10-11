@@ -9,9 +9,9 @@
 //
 // Run:  node test-all.mjs --only mojibake-canary
 
-import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { readFileSync } from 'fs';
+import { relative } from 'path';
+import { trackedFiles } from '../lib/mjs-files.mjs';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nmojibake-canary — double-encoded UTF-8 detection in templates/ and modes/');
@@ -187,52 +187,37 @@ if (allLatinExtendedPassed) {
 // Repo-wide scan: walk templates/ and modes/ and check every file.
 console.log('  Repo-wide scan: templates/ and modes/');
 
-const treesToScan = [
-  { path: join(ROOT, 'templates'), relativePath: 'templates' },
-  { path: join(ROOT, 'modes'), relativePath: 'modes' },
-];
+// Scoped to the two trees this canary owns, enumerated through
+// lib/mjs-files.mjs's tracked-file list rather than a private readdir walk
+// (#3890). The walk this replaces had no skip-list at all, so it read whatever
+// a given checkout happened to have dropped under templates/ or modes/ — and
+// it would have thrown ENOENT on a path git listed but the working tree did not
+// have, which is an ordinary mid-merge state. Only tracked content can ship
+// mojibake to a user, so tracked content is exactly what this scans.
+//
+// It also subsumes the isNestedCheckout guard the walk carried: a checkout
+// parked under templates/ or modes/ is another tree's content, and mojibake in
+// it is not this repository's defect to report (#3762). Its files are untracked
+// HERE, so the index never names them, and an initialised submodule arrives as
+// one gitlink the enumerator drops — no per-directory rule to remember.
+const TREES = ['templates/', 'modes/'];
 let filesScanned = 0;
 let filesWithMojibake = 0;
 
-/**
- * Recursively walk a directory and check every file for mojibake.
- * @param {string} dir - Directory to walk.
- * @param {string} relativePath - Relative path for error reporting.
- */
-function walkAndCheck(dir, relativePath = '') {
-  const entries = readdirSync(dir, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const fullPath = join(dir, entry.name);
-    const entryRelativePath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
-    
-    if (entry.isDirectory()) {
-      // A checkout placed under templates/ or modes/ is another tree's content,
-      // and mojibake in it is not this repository's defect to report (#3762).
-      // Unlikely there — but "unlikely" is the assumption that let a worktree
-      // under tests/ run its own suites as ours.
-      if (isNestedCheckout(fullPath)) continue;
-      walkAndCheck(fullPath, entryRelativePath);
-    } else if (entry.isFile()) {
-      filesScanned++;
-      const content = readFileSync(fullPath, 'utf-8');
-      const lines = content.split('\n');
-      
-      for (let i = 0; i < lines.length; i++) {
-        if (containsMojibake(lines[i])) {
-          filesWithMojibake++;
-          fail(`Mojibake found in ${entryRelativePath} at line ${i + 1}: "${lines[i].trim()}"`);
-          // Don't report every line in the same file — one failure per file is enough
-          // to signal the problem without spamming the log.
-          break;
-        }
-      }
+for (const file of trackedFiles(ROOT, (rel) => TREES.some((t) => rel.startsWith(t)))) {
+  const relativePath = relative(ROOT, file).split('\\').join('/');
+  filesScanned++;
+  const lines = readFileSync(file, 'utf-8').split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    if (containsMojibake(lines[i])) {
+      filesWithMojibake++;
+      fail(`Mojibake found in ${relativePath} at line ${i + 1}: "${lines[i].trim()}"`);
+      // Don't report every line in the same file — one failure per file is enough
+      // to signal the problem without spamming the log.
+      break;
     }
   }
-}
-
-for (const tree of treesToScan) {
-  walkAndCheck(tree.path, tree.relativePath);
 }
 
 if (filesScanned === 0) {

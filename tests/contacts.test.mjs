@@ -362,6 +362,7 @@ try {
   mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(tmpRoot, 'lib/cli-flags.mjs'));
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(tmpRoot, 'lib/is-main-module.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/tsv-formula-escape.mjs'), join(tmpRoot, 'lib/tsv-formula-escape.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -481,6 +482,7 @@ try {
   mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/cli-flags.mjs'), join(emptyRoot, 'lib/cli-flags.mjs'));
   copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/is-main-module.mjs'), join(emptyRoot, 'lib/is-main-module.mjs'));
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib/tsv-formula-escape.mjs'), join(emptyRoot, 'lib/tsv-formula-escape.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);

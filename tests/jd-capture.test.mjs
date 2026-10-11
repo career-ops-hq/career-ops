@@ -5,7 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 
-const { findCaptureForReport, reportPrefix } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
+const { captureSlug, findCaptureForReport, reportPrefix } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
 
 console.log('\njd-capture.mjs — report-keyed capture lookup');
 
@@ -33,6 +33,7 @@ try {
   // ── reportPrefix ───────────────────────────────────────────────────────────
   check('reportPrefix pads to three digits', reportPrefix(64) === '064');
   check('reportPrefix leaves 3-digit numbers alone', reportPrefix(563) === '563');
+  check('captureSlug matches archive-posting punctuation semantics', captureSlug('Foo&Bar Inc.') === 'foobar-inc');
   check('reportPrefix does not truncate 4-digit numbers', reportPrefix(1024) === '1024');
   check('reportPrefix accepts a numeric string', reportPrefix('64') === '064');
 

@@ -19,6 +19,7 @@
 // not just inferred from field naming.
 
 import { decodeEntities } from './_html-entities.mjs';
+import { countryNameFromIso } from './_country.mjs';
 
 const GEM_API_URL = 'https://jobs.gem.com/api/public/graphql/batch';
 const ALLOWED_GEM_HOSTS = new Set(['jobs.gem.com', 'api.gem.com']);
@@ -166,10 +167,31 @@ function resolveBoardId(entry) {
 // requires exactly two nonempty path segments rather than a digit-only id.
 const GEM_POSTING_PATH_RE = /^\/[^/?#]+\/[^/?#]+\/?$/;
 
-/** @param {any} loc */
+/**
+ * Whole-word, case-insensitive containment (same check as ashby's, breezy's
+ * and recruitee's containsWholeWord).
+ * @param {string} text
+ * @param {string} word
+ */
+function containsWholeWord(text, word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
+/**
+ * Location name plus the country behind `isoCountry` when the name doesn't
+ * already say it. Gem sends the country only as an ISO code ("USA", "GBR"),
+ * which location_filter can't match, so "London" or "Remote, US" never showed
+ * the country a block/allow list names — the same gap fixed for ashby,
+ * breezy and recruitee.
+ * @param {any} loc
+ */
 function formatLocation(loc) {
   const parts = [];
-  if (typeof loc?.name === 'string' && loc.name.trim()) parts.push(loc.name.trim());
+  let place = typeof loc?.name === 'string' ? loc.name.trim() : '';
+  const country = countryNameFromIso(loc?.isoCountry);
+  if (country && !containsWholeWord(place, country)) place = place ? `${place}, ${country}` : country;
+  if (place) parts.push(place);
   if (loc?.isRemote) parts.push('Remote');
   return parts.join(' · ');
 }

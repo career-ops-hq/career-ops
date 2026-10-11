@@ -18,6 +18,16 @@
 import { readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
 
+/** Slug grammar used by archive-posting.mjs for capture name fields. */
+export function captureSlug(text) {
+  return String(text ?? '')
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
 /** Zero-pad a report number to the 3-digit form used by reports/ filenames. */
 export function reportPrefix(num) {
   return String(num).padStart(3, '0');

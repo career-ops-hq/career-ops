@@ -30,11 +30,11 @@ jobs:
       group: hired-wall
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - uses: actions/setup-node@v7
+        with: { node-version: 24 }
       - name: Parse issue and append entry
         id: entry
         uses: actions/github-script@v9

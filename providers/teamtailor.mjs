@@ -1,5 +1,5 @@
-import { decodeEntities } from './_html-entities.mjs';
 // @ts-check
+import { decodeEntities } from './_html-entities.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Teamtailor provider — per-tenant public RSS feed.

@@ -107,6 +107,33 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ── writing is opt-in: no --rebuild/--add means no writes (#4896) ───────────
+{
+  const dir = mkdtempSync(join(tmpdir(), 'hired-wall-'));
+  mkdirSync(join(dir, 'docs'), { recursive: true });
+  const wall = '# W\n\n<!-- ENTRIES -->\n\n<!-- /ENTRIES -->\n';
+  const countJson = '{\n  "count": 0,\n  "updatedAt": "2000-01-01"\n}\n';
+  writeFileSync(join(dir, 'HIRED.md'), wall);
+  writeFileSync(join(dir, 'docs', 'hired-count.json'), countJson);
+  writeFileSync(join(dir, 'docs', 'hired-wall.svg'), 'old-svg');
+  const unchanged = () => readFileSync(join(dir, 'HIRED.md'), 'utf8') === wall
+    && readFileSync(join(dir, 'docs', 'hired-count.json'), 'utf8') === countJson
+    && readFileSync(join(dir, 'docs', 'hired-wall.svg'), 'utf8') === 'old-svg';
+  for (const extra of [[], ['--fetch-avatars']]) {
+    let refused = false;
+    try {
+      execFileSync(process.execPath, [join(ROOT, 'hired-wall-build.mjs'), '--root', dir, ...extra], { stdio: 'pipe' });
+    } catch { refused = true; }
+    const label = ['--root', ...extra].join(' ');
+    if (refused && unchanged()) pass(`no action flag (${label}) exits non-zero and writes nothing`);
+    else fail(`no action flag (${label}): refused=${refused}, files unchanged=${unchanged()}`);
+  }
+  execFileSync(process.execPath, [join(ROOT, 'hired-wall-build.mjs'), '--rebuild', '--root', dir], { stdio: 'pipe' });
+  if (readFileSync(join(dir, 'docs', 'hired-wall.svg'), 'utf8').startsWith('<svg')) pass('--rebuild still writes the derived surfaces');
+  else fail('--rebuild did not regenerate docs/hired-wall.svg');
+  rmSync(dir, { recursive: true, force: true });
+}
+
 // ── share flow: tracker detection, weeks math, prefilled URL ────────────────
 {
   const tracker = ['| # | Fecha | Empresa | Puesto | Score | Estado | PDF | Report | Notas |',

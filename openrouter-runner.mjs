@@ -25,6 +25,7 @@ import readline from 'node:readline';
 import * as yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import { normalizedTrackerScore } from './lib/tracker-addition.mjs';
 import {
   formatReportNumber, releaseReportNumbers, reserveReportNumbers,
 } from './reserve-report-num.mjs';
@@ -87,8 +88,11 @@ const PROVIDER_PRIORITY = [
 let freeModels = null;   // string[]
 let modelIndex = 0;      // current position in rotation
 
-// Persistent blacklist file — survives process restarts
-const BLACKLIST_FILE = path.join(__dirname, 'data', 'model-blacklist.json');
+// Persistent blacklist file — survives process restarts. data/ is User Layer
+// (gitignored runtime state), so it follows the data root like every other
+// data/ path this runner touches.
+const BLACKLIST_DIR  = path.join(getCareerOpsRoot(), 'data');
+const BLACKLIST_FILE = path.join(BLACKLIST_DIR, 'model-blacklist.json');
 function loadPersistedBlacklist() {
   try {
     const data = JSON.parse(fs.readFileSync(BLACKLIST_FILE, 'utf-8'));
@@ -97,7 +101,7 @@ function loadPersistedBlacklist() {
 }
 function saveBlacklist(set) {
   try {
-    fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+    fs.mkdirSync(BLACKLIST_DIR, { recursive: true });
     fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...set], null, 2), 'utf-8');
   } catch {}
 }
@@ -108,6 +112,7 @@ if (blacklistedModels.size > 0) {
   console.log(`[blacklist] Loaded ${blacklistedModels.size} pre-blacklisted model(s) from disk.`);
 }
 // 429 failure count per model — auto-blacklist after 3 consecutive 429s
+// (a success or any other failure resets the count)
 const rateLimitCounts = {};
 
 // ---------------------------------------------------------------------------
@@ -334,6 +339,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const usage = normalizeOpenAIUsage(data.usage);
 
       modelIndex = (modelIndex + attempt + 1) % active.length;
+      delete rateLimitCounts[model];
       console.log('OK');
       return { content, usage };
 
@@ -359,6 +365,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
           await new Promise(r => setTimeout(r, 800));
         }
       } else {
+        delete rateLimitCounts[model];
         console.log(`FAILED (${msg})`);
         await new Promise(r => setTimeout(r, 800));
       }
@@ -367,6 +374,10 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
   throw new Error(`All ${active.length} active models failed. Last error: ${lastError?.message}`);
 }
+
+// Exported so tests/openrouter-runner-429-reset.test.mjs can script fetch()
+// against the real rotation and blacklist logic without a network or a CLI run.
+export { callOpenRouter, rateLimitCounts, blacklistedModels };
 
 // ---------------------------------------------------------------------------
 // Context loading
@@ -536,8 +547,8 @@ function markPipelineDone(url) {
 // silently, because every reader skips a malformed or missing row quietly.
 //
 // Delegating fixes three things at once that were all symptoms of hand-rolling
-// the write: the lock, the row format (formatScanHistoryRow emits all twelve
-// columns; this module wrote seven and created a seven-column header), and the
+// the write: the lock, the row format (formatScanHistoryRow emits every trailing
+// column; this module wrote seven and created a seven-column header), and the
 // date (the shared path stamps the local day, this one stamped the UTC day —
 // the defect #3240/#3241 fixed in the other scanners, which this module escaped
 // because that census finds scanners by looking for appendToScanHistory calls).
@@ -694,8 +705,8 @@ async function cmdEvaluate(input, ctx) {
   let reservedNumbers;
   try {
     reservedNumbers = await reserveReportNumbers(1, {
-      rootDir: __dirname,
-      reportsDir: path.join(__dirname, 'reports'),
+      rootDir: DATA_ROOT,
+      reportsDir: path.join(DATA_ROOT, 'reports'),
     });
   } catch (e) {
     console.error(`Could not reserve a report number: ${e.message}`);
@@ -715,9 +726,28 @@ async function cmdEvaluate(input, ctx) {
     const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
     writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${result}`);
 
-    const scoreMatch  = result.match(/(?:score|puntuaci[oó]n)[^\d]*(\d+\.?\d*)/i);
-    const scoreValue  = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
-    const scoreStr    = isFinite(scoreValue) ? `${scoreValue.toFixed(1)}/5` : '';
+    // Capture the DENOMINATOR when the model writes one. The old pattern took
+    // only the numeric prefix, so `Score: 8/10` yielded `8` and the cell became
+    // `8.0/5` -- a ten-point score reinterpreted as a five-point one. That
+    // satisfies SCORE_CELL_RE, so it merged as a genuine score and fed
+    // stats.mjs's averages. normalizedTrackerScore refuses a denominator that
+    // is not 5, but only if it is handed one (#3796).
+    //
+    // The capture runs to END OF LINE rather than stopping at a denominator
+    // adjacent to the number. Requiring adjacency read `Score: 4.2 (strong
+    // fit)/10` -- a ten-point score with an annotation -- as a bare 4.2 and
+    // wrote `4.2/5`, the same wrong number the numeric prefix used to produce.
+    // The cost is that an unrelated fraction later in the line (`Score: 4.2 --
+    // matched 3/4 axes`) is refused as N/A rather than guessed at. That is the
+    // trade the shared helper already documents and the gemini path already
+    // pins: N/A is recoverable, a wrong score is not.
+    const scoreMatch  = result.match(/(?:score|puntuaci[oó]n)[^\d]*(\d+(?:\.\d+)?[^\r\n]*)/i);
+    // An unparseable score used to become the EMPTY string, and merge-tracker
+    // refuses a blank required cell ("use the documented sentinel rather than a
+    // blank cell") -- so the evaluation was skipped whole, the same loss #3796
+    // documents for the drifted copies. The shared helper returns the `N/A`
+    // sentinel (#1799), which merges as an unscored row instead of as nothing.
+    const scoreStr    = normalizedTrackerScore(scoreMatch ? scoreMatch[1] : '');
     const companyName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
     const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
@@ -737,7 +767,7 @@ async function cmdEvaluate(input, ctx) {
     return relPath;
   } finally {
     try {
-      await releaseReportNumbers(reservedNumbers, { reportsDir: path.join(__dirname, 'reports') });
+      await releaseReportNumbers(reservedNumbers, { reportsDir: path.join(DATA_ROOT, 'reports') });
     } catch (e) {
       console.warn(`Could not release report reservation: ${e.message}`);
     }
@@ -783,7 +813,7 @@ async function cmdApply(ref, ctx) {
     reportContent = readFile(ref);
   } else {
     const numStr = String(ref).padStart(3, '0');
-    const reportsDir = path.join(__dirname, 'reports');
+    const reportsDir = path.join(DATA_ROOT, 'reports');
     const dirEntries = fs.existsSync(reportsDir) ? fs.readdirSync(reportsDir) : [];
     const matches = dirEntries.filter(f => f.startsWith(numStr));
     if (matches.length === 0) {

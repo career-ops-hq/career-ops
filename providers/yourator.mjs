@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { sleep } from './_http.mjs';
+
 // Yourator provider — yourator.co, a Taiwanese job board focused on startups
 // and digital roles. Public JSON API, no auth, no cookie, no Referer:
 //
@@ -201,7 +203,7 @@ export default {
       // intermediate page would silently truncate the board.
       if (json.payload.hasMore !== true) break;
       if (page < maxPages) {
-        await (ctx.sleep ? ctx.sleep(PAGE_DELAY_MS) : new Promise(r => setTimeout(r, PAGE_DELAY_MS)));
+        await sleep(PAGE_DELAY_MS, ctx);
       }
     }
     return out;

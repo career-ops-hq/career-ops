@@ -49,6 +49,9 @@ test('blocks loopback, private, link-local and reserved ranges', () => {
     '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', 'fe80::1%eth0', 'ff02::1',
     '::ffff:127.0.0.1',     // IPv4-mapped loopback
     '::ffff:169.254.169.254',
+    '::ffff:7f00:1',        // the same two in hex, as the URL parser prints them
+    '::ffff:a9fe:a9fe',
+    '::7f00:1',             // IPv4-compatible loopback in hex
   ]) {
     assert.equal(isBlockedAddress(address), true, `${address} should be blocked`);
   }
@@ -61,6 +64,7 @@ test('allows ordinary public addresses, including the range boundaries', () => {
     '100.63.255.255',                  // just below 100.64.0.0/10
     '192.169.0.1',                     // just above 192.168.0.0/16
     '2606:4700::1111', '2001:4860:4860::8888', '::ffff:8.8.8.8',
+    '::ffff:808:808',                  // 8.8.8.8, IPv4-mapped in hex
   ]) {
     assert.equal(isBlockedAddress(address), false, `${address} should be allowed`);
   }
@@ -83,6 +87,42 @@ test('a provider fetch to a name resolving to loopback is refused', async () => 
       (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
       'localhost resolved to loopback and was connected to anyway',
     );
+  } finally { srv.close(); }
+});
+
+test('a provider fetch to a LITERAL private address is refused, in every spelling', async () => {
+  // A numeric host never reaches dns.lookup, so the lookup-time guard cannot
+  // see it. These were all fetched on the direct path while `localhost` was
+  // refused (reported privately by Greg Tyree).
+  const srv = await localServer();
+  try {
+    for (const host of ['127.0.0.1', '[::ffff:127.0.0.1]', '[::1]', '2130706433', '0x7f000001', '0177.0.0.1', '127.1']) {
+      await assert.rejects(
+        () => fetchText(`http://${host}:${srv.port}/`, { timeoutMs: 4000 }),
+        (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
+        `http://${host}/ is loopback and was connected to anyway`,
+      );
+    }
+  } finally { srv.close(); }
+});
+
+test('a literal metadata or RFC1918 address is refused before any connection', async () => {
+  for (const host of ['169.254.169.254', '10.0.0.1', '192.168.1.1', '172.16.0.1', '[fe80::1]', '[fd00::1]']) {
+    const started = Date.now();
+    await assert.rejects(
+      () => fetchText(`http://${host}/latest/meta-data/`, { timeoutMs: 4000 }),
+      (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
+      `http://${host}/ was dialled`,
+    );
+    assert.ok(Date.now() - started < 1000, `${host}: refused by the guard, not by a connect timeout`);
+  }
+});
+
+test('a NON-provider fetch to a literal loopback address still works', async () => {
+  const srv = await localServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${srv.port}/`);
+    assert.equal(await res.text(), 'SECRET-LOCAL-DATA');
   } finally { srv.close(); }
 });
 

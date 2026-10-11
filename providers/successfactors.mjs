@@ -89,7 +89,16 @@ export function resolveConfig(entry) {
   // slash, so all of those collapse to the same brand-scoped base instead of
   // doubling the endpoint segment onto itself. Single-domain tenants (the
   // common case) have an empty pathname, so base === origin unchanged.
+  //
+  // A saved-search "category" page, /go/<Category-Name>/<numericId>/ (with an
+  // optional /<offset>/ once it is paginated, /go/All-Jobs/9170201/25/), is the
+  // URL people copy from a careers page. It is not a brand prefix: tacked in
+  // front of /tile-search-results/ it answers 200 with a full page and zero
+  // tiles, which reads as a healthy empty board. Strip it so the tile endpoint
+  // resolves to the tenant root; a brand segment in FRONT of /go/ survives
+  // (/Bluebeam/go/X/123/ -> /Bluebeam).
   const path = u.pathname
+    .replace(/\/go\/[^/]+\/\d+(?:\/\d+)?\/?$/i, '')
     .replace(/\/(?:search|tile-search-results|services\/recruiting\/v1\/jobs)\/?$/i, '')
     .replace(/\/+$/, '');
   const base = u.origin + path;

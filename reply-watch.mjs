@@ -14,19 +14,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
-  openTrackerTransaction, rebuildRow, resolveTrackerPath,
+  openTrackerTransaction, rebuildRow, resolveTrackerPath, loadCanonicalStates,
 } from './tracker-utils.mjs';
+import { readReplyProposals, hasProposalReceipt } from './lib/reply-proposals.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { parseFollowups } from './followup-cadence.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
-const APPS_FILE = resolveTrackerPath(__dirname);
-const FOLLOWUPS_FILE = path.join(__dirname, 'data', 'follow-ups.md');
+// Every file here is user layer, so it resolves against the data root
+// (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data marker), never the
+// script's own directory — which is only the default when none is configured.
+const DATA_ROOT = getCareerOpsRoot();
+export const DEFAULT_CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
+  || path.join(DATA_ROOT, 'data', 'reply-candidates.json');
+export const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+export const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 // Helper to ask a question in the CLI
 function askQuestion(query) {
@@ -34,10 +45,13 @@ function askQuestion(query) {
     input: process.stdin,
     output: process.stdout
   });
-  return new Promise((resolve) => rl.question(query, (ans) => {
-    rl.close();
-    resolve(ans);
-  }));
+  return new Promise((resolve) => {
+    rl.once('close', () => resolve(''));
+    rl.question(query, (ans) => {
+      resolve(ans);
+      rl.close();
+    });
+  });
 }
 
 // Generate custom signal description based on keywords
@@ -118,28 +132,7 @@ function loadFollowups() {
   if (!fs.existsSync(FOLLOWUPS_FILE)) {
     return [];
   }
-  const content = fs.readFileSync(FOLLOWUPS_FILE, 'utf-8');
-  const lines = content.split('\n');
-  const followups = [];
-  for (const line of lines) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 8) continue;
-    const num = parseInt(parts[1], 10);
-    const appNum = parseInt(parts[2], 10);
-    if (isNaN(num) || isNaN(appNum)) continue;
-    followups.push({
-      num,
-      appNum,
-      date: parts[3],
-      company: parts[4],
-      role: parts[5],
-      channel: parts[6],
-      contact: parts[7],
-      notes: parts[8] || ''
-    });
-  }
-  return followups;
+  return parseFollowups(fs.readFileSync(FOLLOWUPS_FILE, 'utf-8'));
 }
 
 // Apply an approved batch in one locked read/modify/write transaction. Reading
@@ -154,8 +147,9 @@ function groupStatusRecommendations(recommendations) {
     const existing = transitions.get(key);
     if (existing) {
       existing.count++;
+      existing.proposals.push(...(recommendation.proposals ?? []));
     } else {
-      transitions.set(key, { ...recommendation, count: 1 });
+      transitions.set(key, { ...recommendation, proposals: [...(recommendation.proposals ?? [])], count: 1 });
     }
   }
 
@@ -169,7 +163,47 @@ function groupStatusRecommendations(recommendations) {
   return { updates, conflicts };
 }
 
+// Re-read after the prompt, then compare the entire tracker under the canonical
+// writer's lock. This protects both the reviewed row and receipt absence across
+// ALL rows, including two concurrent reviews of one message targeting different
+// applications. Status + receipt share the writer's single atomic replacement.
+function applyProposalUpdate(update) {
+  const content = fs.readFileSync(APPS_FILE, 'utf8');
+  const lines = content.split('\n');
+  const columns = resolveColumns(lines);
+  const apps = lines.map(line => parseTrackerRow(line, columns)).filter(Boolean);
+  const matches = apps.filter(app => app.num === update.num);
+  if (matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(update.snapshot)) {
+    console.warn(`Skipped #${update.num}: tracker row changed during review; review again`);
+    return;
+  }
+  if (update.proposals.some(p => hasProposalReceipt(apps, p.receipt))) {
+    console.warn(`Skipped #${update.num}: proposal was already accepted during review`);
+    return;
+  }
+  const digest = createHash('sha256').update(content).digest('hex');
+  try {
+    const output = execFileSync(process.execPath, [path.join(CODE_ROOT, 'set-status.mjs'),
+      '--row', String(update.num), update.newStatus, '--source', 'reply-watch',
+      '--expect-tracker', digest, '--note', update.proposals.map(p => p.receipt).join('; '), '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const result = JSON.parse(output);
+    console.log(`Updated #${result.num} to ${result.newStatus}`);
+    if (result.statusLogged === false) console.warn(`Warning: status-log append failed for #${result.num}; status and receipt were saved`);
+  } catch (err) {
+    let reason = 'canonical writer failed; review again before retrying';
+    try { reason = JSON.parse(err.stdout).code ?? reason; } catch { /* no structured result */ }
+    console.warn(`Skipped #${update.num}: ${reason}`);
+  }
+}
+
 async function updateTrackerStatuses(updates, onApplied = null) {
+  if (updates.length === 0) {
+    return { applied: new Set(), alreadyCurrent: new Set(), conflicts: new Map(), missing: new Set(), recommendationConflicts: [] };
+  }
   const trackerTransaction = await openTrackerTransaction(APPS_FILE);
 
   try {
@@ -223,16 +257,19 @@ async function main() {
   validateFlags(args, KNOWN_FLAGS, USAGE);
 
   const candidatesPath = positional[0] || DEFAULT_CANDIDATES_PATH;
-  ensureCandidatesFile(candidatesPath);
+  // An integration-only review must not manufacture candidate emails. Preserve
+  // the legacy demo behavior only when no proposal directory is present.
+  const hasProposalDirectory = Boolean(fs.lstatSync(path.join(DATA_ROOT, 'data', 'reply-proposals'), { throwIfNoEntry: false }));
+  if (!hasProposalDirectory) ensureCandidatesFile(candidatesPath);
 
-  if (!fs.existsSync(candidatesPath)) {
+  if (positional[0] && !fs.existsSync(candidatesPath)) {
     console.error(`Error: candidates file not found at ${candidatesPath}`);
     process.exit(1);
   }
 
   let candidates;
   try {
-    candidates = JSON.parse(fs.readFileSync(candidatesPath, 'utf-8'));
+    candidates = fs.existsSync(candidatesPath) ? JSON.parse(fs.readFileSync(candidatesPath, 'utf-8')) : [];
   } catch (e) {
     console.error(`Error parsing candidates JSON: ${e.message}`);
     process.exit(1);
@@ -252,9 +289,16 @@ async function main() {
     const classification = classifyReply(cand);
 
     let headerStr = '';
-    if (match.application_num !== null) {
-      const app = apps.find(a => a.num === match.application_num);
-      headerStr = `${app.company} — ${app.role}`;
+    const matchedApplicationNums = Array.isArray(match.application_nums)
+      ? match.application_nums
+      : (match.application_num !== null ? [match.application_num] : []);
+
+    if (matchedApplicationNums.length > 1) {
+      headerStr = `${match.company_hint} — company-wide rejection (${matchedApplicationNums.length} applications)`;
+    } else if (matchedApplicationNums.length === 1) {
+      const applicationNum = matchedApplicationNums[0];
+      const app = apps.find(a => a.num === applicationNum);
+      headerStr = app ? `${app.company} — ${app.role}` : (cand.subject || match.company_hint || cand.from || 'Unknown');
     } else {
       headerStr = cand.subject || match.company_hint || cand.from || 'Unknown';
     }
@@ -275,19 +319,34 @@ async function main() {
     console.log(`   Suggested tracker update: ${classification.suggestedTrackerUpdate}`);
     console.log('');
 
-    if (match.application_num !== null && classification.suggestedTrackerUpdate !== 'none' && classification.suggestedTrackerUpdate !== 'Needs Review') {
-      const app = apps.find(a => a.num === match.application_num);
-      if (app && app.status !== classification.suggestedTrackerUpdate) {
-        recommendations.push({
-          num: app.num,
-          company: app.company,
-          role: app.role,
-          oldStatus: app.status,
-          newStatus: classification.suggestedTrackerUpdate
-        });
+    if (matchedApplicationNums.length > 0 && classification.suggestedTrackerUpdate !== 'none' && classification.suggestedTrackerUpdate !== 'Needs Review') {
+      for (const applicationNum of matchedApplicationNums) {
+        const app = apps.find(a => a.num === applicationNum);
+        if (app && app.status !== classification.suggestedTrackerUpdate) {
+          recommendations.push({
+            num: app.num,
+            company: app.company,
+            role: app.role,
+            oldStatus: app.status,
+            newStatus: classification.suggestedTrackerUpdate,
+            snapshot: app,
+          });
+        }
       }
     }
   });
+
+  const proposals = readReplyProposals(DATA_ROOT, APPS_FILE, apps,
+    loadCanonicalStates(path.join(CODE_ROOT, 'templates', 'states.yml')));
+  for (const warning of proposals.warnings) console.warn(warning);
+  for (const recommendation of proposals.recommendations) {
+    const proposal = recommendation.proposals[0];
+    console.log(`Proposal for #${recommendation.num}: ${JSON.stringify(recommendation.company)} — ${JSON.stringify(recommendation.role)}`);
+    console.log(`   Source (unverified): ${proposal.source.kind}/${proposal.source.account_id}/${proposal.source.message_id}`);
+    console.log(`   Evidence (quoted, untrusted): ${JSON.stringify(proposal.evidence)}`);
+    console.log(`   Suggested tracker update: ${recommendation.oldStatus} → ${recommendation.newStatus}\n`);
+  }
+  recommendations.push(...proposals.recommendations);
 
   const groupedRecommendations = groupStatusRecommendations(recommendations);
   if (groupedRecommendations.conflicts.length > 0) {
@@ -310,12 +369,17 @@ async function main() {
     });
     console.log('');
 
-    const answer = await askQuestion(`Apply recommended status updates to ${APPS_FILE}? (y/N): `);
-    if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+    const answer = (await askQuestion(`Apply recommended status updates to ${APPS_FILE}? (y/N, or comma-separated row IDs): `)).trim().toLowerCase();
+    const rowIds = /^\d+(?:\s*,\s*\d+)*$/.test(answer) ? answer.split(',').map(Number) : [];
+    const acceptAll = answer === 'y' || answer === 'yes';
+    const selected = acceptAll ? updates : rowIds.length > 0 && rowIds.every(num => updates.some(u => u.num === num))
+      ? updates.filter(u => rowIds.includes(u.num)) : [];
+    if (selected.length > 0) {
       const statusLogFile = path.join(path.dirname(APPS_FILE), 'status-log.tsv');
       const todayStr = localToday();
 
-      const result = await updateTrackerStatuses(updates, (applied, updatesByNum) => {
+      const legacyUpdates = selected.filter(update => update.proposals.length === 0);
+      const result = await updateTrackerStatuses(legacyUpdates, (applied, updatesByNum) => {
         for (const num of applied) {
           const u = updatesByNum.get(num);
           if (u) {
@@ -328,7 +392,7 @@ async function main() {
           }
         }
       });
-      for (const r of updates) {
+      for (const r of legacyUpdates) {
         const count = r.count > 1 ? ` (${r.count} replies)` : '';
         if (result.applied.has(r.num)) {
           console.log(`Updated #${r.num} to ${r.newStatus}${count}`);
@@ -340,12 +404,15 @@ async function main() {
           console.warn(`Skipped #${r.num}: row no longer exists in the tracker`);
         }
       }
+      for (const update of selected.filter(u => u.proposals.length > 0)) applyProposalUpdate(update);
       console.log('\n✅ Tracker review complete');
 
       // Sync tracker DB if tracker.mjs exists
       try {
-        const { execSync } = await import('child_process');
-        execSync('node tracker.mjs sync', { stdio: 'ignore' });
+        execFileSync(process.execPath, [path.join(CODE_ROOT, 'tracker.mjs'), 'sync'], {
+          stdio: 'ignore',
+          env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
+        });
         console.log('Synced database index (applications.db).');
       } catch (e) {
         // ignore
@@ -356,7 +423,9 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Fatal:', err);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  main().catch(err => {
+    console.error('Fatal:', err);
+    process.exit(1);
+  });
+}

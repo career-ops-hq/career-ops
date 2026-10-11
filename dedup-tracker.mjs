@@ -3,7 +3,8 @@
  * dedup-tracker.mjs — Remove duplicate entries from applications.md
  *
  * Groups by normalized company, then merges only rows whose full role title
- * matches exactly (case- and whitespace-normalized). Keeps entry with highest
+ * matches exactly (case- and whitespace-normalized) and whose posting URLs, when
+ * both rows carry one, do not conflict. Keeps entry with highest
  * score. If discarded entry had more advanced status, preserves that status.
  * Merges notes.
  *
@@ -15,6 +16,7 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { normalizeUrl } from './url-key.mjs';
 import {
   openTrackerTransaction, rebuildRow, normalizeCompany,
 } from './tracker-utils.mjs';
@@ -53,13 +55,19 @@ const STATUS_RANK = {
   'evaluated': 2,
   'applied': 3,
   'responded': 4,
-  'interview': 5,
-  'offer': 6,
+  'assessment': 5,
+  'interview': 6,
+  'offer': 7,
   // Hired outranks everything: the accepted-job record must never lose a
   // dedup contest to a repost row (aliases from templates/states.yml).
-  'hired': 7,
-  'accepted': 7,
-  'accept': 7,
+  'hired': 8,
+  'accepted': 8,
+  'accept': 8,
+  // Assessment aliases from templates/states.yml.
+  'screening': 5,
+  'online assessment': 5,
+  'online_assessment': 5,
+  'online screening': 5,
   // Spanish aliases — kept for backwards compat with existing tracker data
   'no_aplicar': 0,
   'no aplicar': 0,
@@ -70,10 +78,10 @@ const STATUS_RANK = {
   'evaluada': 2,
   'aplicado': 3,
   'respondido': 4,
-  'entrevista': 5,
-  'oferta': 6,
-  'contratado': 7,
-  'contratada': 7,
+  'entrevista': 6,
+  'oferta': 7,
+  'contratado': 8,
+  'contratada': 8,
 };
 
 /**
@@ -116,7 +124,7 @@ function statusRank(status) {
  * matches from silently deleting an active application record.
  *
  * @param {string} status - Raw status value from the tracker row.
- * @returns {boolean} True when the row is Applied, Responded, Interview, or Offer.
+ * @returns {boolean} True when the row is Applied, Responded, Assessment, Interview, or Offer.
  */
 function isAdvancedStatus(status) {
   return statusRank(status) >= STATUS_RANK.applied;
@@ -197,6 +205,22 @@ function normalizeRole(role) {
 }
 
 /**
+ * Check whether two tracker rows name two different postings.
+ *
+ * Only two present-and-different keys are evidence: a blank or placeholder URL
+ * yields no key from normalizeUrl() and is UNKNOWN, never a conflict.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {boolean} True when both rows carry a URL and the URLs differ.
+ */
+function urlsConflict(a, b) {
+  const urlA = normalizeUrl(a.url);
+  const urlB = normalizeUrl(b.url);
+  return Boolean(urlA && urlB && urlA !== urlB);
+}
+
+/**
  * Decide whether two same-company tracker rows should be deduplicated.
  *
  * Rows merge only when they describe the same opening: either the exact same
@@ -211,11 +235,21 @@ function normalizeRole(role) {
  * status, report link, and notes unless the rows are the exact same report
  * identity.
  *
+ * Two present-and-different posting URLs veto every tier, report identity
+ * included (#4562). That is the rule merge-tracker.mjs applies (`urlDiffers`),
+ * through the same normalizeUrl(): two rows cannot be one application while
+ * naming two postings. A blank or placeholder URL yields no key and is
+ * UNKNOWN, never a conflict, so rows without URLs behave exactly as before.
+ * Blocking fails toward a duplicate the user can see; merging on a conflict
+ * deletes a real application.
+ *
  * @param {object} a - First parsed applications.md row.
  * @param {object} b - Second parsed applications.md row.
  * @returns {boolean} True when dedup may cluster the two rows as duplicates.
  */
 function roleMatch(a, b) {
+  if (urlsConflict(a, b)) return false;
+
   if (sameReportIdentity(a, b)) return true;
   if (normalizeRole(a.role) !== normalizeRole(b.role)) return false;
 
@@ -364,7 +398,11 @@ for (const [company, companyEntries] of groups) {
 
     for (let j = i + 1; j < companyEntries.length; j++) {
       if (processed.has(j)) continue;
+      // roleMatch() only compares against the seed row, so a seed with no URL
+      // would admit two rows naming different postings and one would be
+      // deleted. Check the candidate's URL against every member already in.
       if (roleMatch(companyEntries[i], companyEntries[j])
+          && !cluster.some(member => urlsConflict(member, companyEntries[j]))
           && (!isBlindGroup || withinBlindWindow(companyEntries[i].date, companyEntries[j].date))) {
         cluster.push(companyEntries[j]);
         processed.add(j);

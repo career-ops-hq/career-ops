@@ -35,13 +35,19 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { join, resolve } from 'path';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// The data root's portals.yml, the same default verify-portals.mjs sweeps
+// (#4254). A bare 'portals.yml' resolved against the cwd, so under an external
+// data root (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data) this
+// reported "nothing to fix" for the file verify-portals had just flagged, or
+// with --fix rewrote a stale copy in whatever directory it was run from.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(getCareerOpsRoot(), 'portals.yml');
 
 const KNOWN_FLAGS = ['--apply', '--dry-run', '--file', '--fix', '--help', '-h'];
 const VALUE_FLAGS = ['--file'];
@@ -296,7 +302,13 @@ export function computeFixes(rawText, results, { dateStr = new Date().toISOStrin
   // invalidated by a fix applied further down.
   const pending = [];
   for (const r of results) {
+    // `suggested` must carry a writable ats/slug. A result can now also carry
+    // `suggested.rejectedAlternate` — a live board the identity gate refused — and
+    // that is reporting only. Without this guard a rejected-only result would pass
+    // the truthiness check below and applyFix would write `undefined/undefined`
+    // into portals.yml (#4230).
     if (r.status !== 'missing' || !r.suggested) continue;
+    if (!r.suggested.ats || !r.suggested.slug) continue;
     const block = blocksByName.get(r.name);
     if (!block) continue; // name mismatch — leave untouched rather than guess
     pending.push({ r, block });

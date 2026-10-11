@@ -5,7 +5,7 @@
 // Each scenario uses a fresh --target dir so no MCP config leaks across cases.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -21,10 +21,10 @@ const DOCTOR = join(ROOT, 'doctor.mjs');
 // Scenarios that exercise the plugin path pass their own CLAUDE_CONFIG_DIR.
 const EMPTY_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'co-mcp-emptycfg-'));
 
-function runDoctor(cwd, args, env) {
+function runDoctor(cwd, args, env, { executionCwd = cwd } = {}) {
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
-      cwd,
+      cwd: executionCwd,
       // Order matters: the empty dir must override an ambient CLAUDE_CONFIG_DIR
       // from the developer's own shell, while a scenario's explicit env still wins.
       env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
@@ -34,6 +34,19 @@ function runDoctor(cwd, args, env) {
     return JSON.parse(out);
   } catch (e) {
     return { _error: e.message, _stderr: e.stderr ? String(e.stderr) : '' };
+  }
+}
+
+function runDoctorHuman(cwd, env, { executionCwd = cwd } = {}) {
+  try {
+    return execFileSync(NODE, [DOCTOR, '--target', cwd], {
+      cwd: executionCwd,
+      env: { ...process.env, CLAUDE_CONFIG_DIR: EMPTY_CONFIG_DIR, ...env },
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) {
+    return `${e.stdout ? String(e.stdout) : ''}${e.stderr ? String(e.stderr) : ''}`;
   }
 }
 
@@ -61,6 +74,39 @@ function expectWarn(state, msg) {
 const PLAYWRIGHT_RE = /playwright mcp/i;
 
 try {
+  // Split checkout: MCP config lives beside doctor.mjs, while --target points
+  // at the user-data root. The CLI never reads a decoy config in that data root.
+  {
+    const dataRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-data-'));
+    const codeRoot = mkdtempSync(join(tmpdir(), 'co-mcp-split-code-'));
+    const codeConfig = join(codeRoot, '.mcp.json');
+    try {
+      writeFileSync(join(dataRoot, '.mcp.json'), JSON.stringify({
+        mcpServers: { unrelated: { command: 'false' } },
+      }));
+      writeFileSync(codeConfig, JSON.stringify({
+        mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest'] } },
+      }));
+      const state = runDoctor(dataRoot, [], {}, { executionCwd: codeRoot });
+      if (state.playwright_mcp?.claude === true
+          && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w))) {
+        pass('split checkout reads Playwright MCP config from code root');
+      } else {
+        fail(`split checkout ignored code-root MCP config: ${JSON.stringify(state)}`);
+      }
+      const human = runDoctorHuman(dataRoot, {}, { executionCwd: codeRoot });
+      if (/Playwright MCP server configured \(claude\)/.test(human)
+          && !/Playwright MCP tools not detected/.test(human)) {
+        pass('human doctor output reads Playwright MCP config from code root');
+      } else {
+        fail(`human doctor output ignored code-root MCP config: ${human}`);
+      }
+    } finally {
+      rmSync(codeRoot, { recursive: true, force: true });
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  }
+
   // 1. Default CLI (no flag/env/.env), no MCP config anywhere → warning fires.
   {
     const dir = mkdtempSync(join(tmpdir(), 'co-mcp-1-'));
@@ -757,6 +803,107 @@ try {
       rmSync(dir, { recursive: true, force: true });
       rmSync(home, { recursive: true, force: true });
     }
+  }
+
+  // 31-37. `claude mcp add` writes to ~/.claude.json, not to any file in the
+  //        checkout (#4392): user scope under the top-level `mcpServers`,
+  //        local scope (the default) under `projects[<dir>].mcpServers`. The
+  //        file sits at $CLAUDE_CONFIG_DIR/.claude.json when that is set, and
+  //        at ~/.claude.json (NOT ~/.claude/.claude.json) otherwise.
+  //        Claude Code keys `projects` by the physical path, so the fixtures
+  //        use realpathSync: macOS tmpdirs live behind the /var -> /private/var
+  //        symlink, and process.cwd() in the child returns the physical one.
+  {
+    const PW_SERVER = { type: 'stdio', command: 'npx', args: ['@playwright/mcp@latest'], env: {} };
+    const withClaudeJson = (content, fn) => {
+      const dir = mkdtempSync(join(tmpdir(), 'co-mcp-cj-'));
+      const cfg = mkdtempSync(join(tmpdir(), 'co-mcp-cjcfg-'));
+      try {
+        const body = typeof content === 'function' ? content(realpathSync(dir)) : content;
+        writeFileSync(join(cfg, '.claude.json'), typeof body === 'string' ? body : JSON.stringify(body));
+        fn(dir, cfg);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+        rmSync(cfg, { recursive: true, force: true });
+      }
+    };
+    const detected = (state) => state.playwright_mcp?.claude === true
+      && !state.warnings.some((w) => PLAYWRIGHT_RE.test(w));
+    const warned = (state) => state.playwright_mcp?.claude === false
+      && state.warnings.some((w) => PLAYWRIGHT_RE.test(w));
+
+    // 31. User scope: top-level mcpServers.
+    withClaudeJson({ mcpServers: { playwright: PW_SERVER } }, (dir, cfg) => {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: cfg });
+      if (!expectWarn(state, '#31 user scope')) return;
+      if (detected(state)) pass('user-scope server in .claude.json → detected (#4392)');
+      else fail(`#31 unexpected state: ${JSON.stringify(state)}`);
+    });
+
+    // 32. Local scope: projects[<launch dir>].mcpServers, the `claude mcp add` default.
+    withClaudeJson((real) => ({ projects: { [real]: { mcpServers: { playwright: PW_SERVER } } } }), (dir, cfg) => {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: cfg });
+      if (!expectWarn(state, '#32 local scope')) return;
+      if (detected(state)) pass('local-scope server under the launch dir key → detected (#4392)');
+      else fail(`#32 unexpected state: ${JSON.stringify(state)}`);
+    });
+
+    // 33. Claude Code on Windows stores one directory under two spellings
+    //     (C:\... and C:/...) and the local-scope server can sit under either,
+    //     while the other entry has no mcpServers. Matching must fold slash
+    //     direction and case, and merge every key that matches rather than
+    //     stopping at the first hit. The exact-spelling, empty entry comes
+    //     first so a first-hit lookup would miss.
+    withClaudeJson((real) => ({
+      projects: {
+        [real]: { mcpServers: {} },
+        [real.replace(/\//g, '\\').toUpperCase()]: { mcpServers: { playwright: PW_SERVER } },
+      },
+    }), (dir, cfg) => {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: cfg });
+      if (!expectWarn(state, '#33 dual spelling')) return;
+      if (detected(state)) pass('local-scope server under the other slash/case spelling of the launch dir → detected (#4392)');
+      else fail(`#33 unexpected state: ${JSON.stringify(state)}`);
+    });
+
+    // 34. Malformed .claude.json → unconfigured, no crash.
+    withClaudeJson('{ "mcpServers": { "playwright": [ }', (dir, cfg) => {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: cfg });
+      if (!expectWarn(state, '#34 malformed .claude.json')) return;
+      if (warned(state)) pass('malformed .claude.json → unconfigured, doctor does not crash');
+      else fail(`#34 unexpected state: ${JSON.stringify(state)}`);
+    });
+
+    // 35. A local-scope server registered for a DIFFERENT project must not count.
+    withClaudeJson((real) => ({
+      projects: { [`${real}-other`]: { mcpServers: { playwright: PW_SERVER } } },
+    }), (dir, cfg) => {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: cfg });
+      if (!expectWarn(state, '#35 other project')) return;
+      if (warned(state)) pass('local-scope server under another project key → still warns');
+      else fail(`#35 unexpected state: ${JSON.stringify(state)}`);
+    });
+
+    // 36. Without CLAUDE_CONFIG_DIR the file is ~/.claude.json, beside (not
+    //     inside) ~/.claude/. HOME points at a tmpdir, so the real one is never read.
+    withClaudeJson({ mcpServers: { playwright: PW_SERVER } }, (dir, cfg) => {
+      const state = runDoctor(dir, [], { CLAUDE_CONFIG_DIR: '', HOME: cfg, USERPROFILE: cfg });
+      if (!expectWarn(state, '#36 HOME fallback')) return;
+      if (detected(state)) pass('no CLAUDE_CONFIG_DIR → reads ~/.claude.json (#4392)');
+      else fail(`#36 unexpected state: ${JSON.stringify(state)}`);
+    });
+
+    // 37. .claude.json is Claude Code's file; OpenCode never loads it.
+    withClaudeJson({ mcpServers: { playwright: PW_SERVER } }, (dir, cfg) => {
+      const state = runDoctor(dir, ['--cli', 'opencode'], { CLAUDE_CONFIG_DIR: cfg });
+      if (!expectWarn(state, '#37 opencode ignores .claude.json')) return;
+      if (state.playwright_mcp?.opencode === false
+          && state.warnings.some((w) => PLAYWRIGHT_RE.test(w) && /active cli: opencode/i.test(w))) {
+        pass('--cli opencode ignores .claude.json → still warns');
+      } else {
+        fail(`#37 unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
   }
 
 } catch (e) {
