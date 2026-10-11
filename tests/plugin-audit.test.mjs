@@ -34,9 +34,8 @@ test('-h prints usage and exits 0', () => {
 
 test('--bogus unrecognized flag is rejected and exits 1', () => {
   const r = runAudit('--bogus');
-  assert.match(r.stderr, /Error: unrecognized flag\(s\): --bogus/);
-  assert.match(r.stderr, /Usage:/);
-  assert.notEqual(r.status, 0, 'unrecognized flag must exit non-zero');
+  assert.match(r.stderr, /Error: unrecognized flag\(s\): --bogus\. Valid flags: --help, -h/);
+  assert.equal(r.status, 1, 'unrecognized flag must exit 1');
 });
 
 test('valid directory runs the audit', () => {
