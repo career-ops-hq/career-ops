@@ -1007,11 +1007,9 @@ function SimplifyMenu({ onImported }: { onImported: () => void }) {
           </button>
         </div>
       )}
-      {result && (
-        <div className="absolute right-0 top-full z-10 mt-1 rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg whitespace-nowrap">
-          {result}
-        </div>
-      )}
+      <div role="status" aria-live="polite" className={result ? "absolute right-0 top-full z-10 mt-1 rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg whitespace-nowrap" : "sr-only"}>
+        {result}
+      </div>
     </div>
   );
 }
