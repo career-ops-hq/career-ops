@@ -123,13 +123,9 @@ export async function POST(req: NextRequest) {
   const tsvDir = path.join(root, "batch", "tracker-additions");
   fs.mkdirSync(tsvDir, { recursive: true });
 
-  /** Strip tabs and newlines so user-provided values cannot corrupt TSV columns. */
-  const sanitize = (s: string) => s.replace(/[\t\r\n]/g, " ");
-
   let nextNum = apps.reduce((m, a) => Math.max(m, parseInt(a.n) || 0), 0) + 1;
   let importedCount = 0;
   let skipped = 0;
-  const writtenTsvFiles: string[] = [];
 
   for (const row of rows) {
     const company = p(row, "Company Name", "Company");
@@ -144,23 +140,23 @@ export async function POST(req: NextRequest) {
     existingKeys.add(key);
 
     const rawStatus = p(row, "Status");
+    const location = p(row, "Location", "City", "Region");
     const url = p(row, "URL", "Job URL", "Link", "Apply URL", "Application URL");
     const notes = p(row, "Notes", "Note", "Comments");
 
     const num = String(nextNum++);
     const noteParts: string[] = [];
     noteParts.push("source:simplify");
-    if (notes) noteParts.push(sanitize(notes));
+    if (notes) noteParts.push(notes);
 
     const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
     const tsvFile = path.join(tsvDir, `${num.padStart(3, "0")}-${slug}.tsv`);
     const header = "num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl";
     const tsvRow = [
-      num, today, sanitize(company), sanitize(role), mapStatus(rawStatus),
-      "N/A", "❌", "—", noteParts.join(" | "), sanitize(url) || "",
+      num, today, company, role, mapStatus(rawStatus), "N/A", "❌", "—",
+      noteParts.join(" | "), url || "",
     ].join("\t");
     fs.writeFileSync(tsvFile, `${header}\n${tsvRow}\n`);
-    writtenTsvFiles.push(tsvFile);
     importedCount++;
   }
 
@@ -171,10 +167,6 @@ export async function POST(req: NextRequest) {
         cwd: root, encoding: "utf8", timeout: 60000,
       });
     } catch (err) {
-      // Clean up TSV files so a retry doesn't produce duplicates
-      for (const f of writtenTsvFiles) {
-        try { fs.unlinkSync(f); } catch { /* ignore */ }
-      }
       return NextResponse.json(
         { error: `merge failed: ${err instanceof Error ? err.message : String(err)}` },
         { status: 500 },

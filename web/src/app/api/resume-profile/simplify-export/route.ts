@@ -65,16 +65,7 @@ export async function GET() {
 
   let profile: ResumeProfile;
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
-    // Default missing fields so a partial profile doesn't throw
-    profile = {
-      name: raw.name ?? "",
-      education: raw.education ?? { school: "", degree: "", expected: "" },
-      certifications: Array.isArray(raw.certifications) ? raw.certifications : [],
-      skills: raw.skills && typeof raw.skills === "object" ? raw.skills : {},
-      experience: Array.isArray(raw.experience) ? raw.experience : [],
-      projects: Array.isArray(raw.projects) ? raw.projects : [],
-    };
+    profile = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
     return NextResponse.json(
       { error: "resume profile is corrupt" },
@@ -89,26 +80,26 @@ export async function GET() {
     lastName,
     education: [
       {
-        school: profile.education.school ?? "",
-        degree: profile.education.degree ?? "",
-        graduationDate: profile.education.expected ?? "",
+        school: profile.education.school,
+        degree: profile.education.degree,
+        graduationDate: profile.education.expected,
       },
     ],
     experience: profile.experience.map((e) => {
-      const { startDate, endDate } = parseDateRange(e.dates ?? "");
+      const { startDate, endDate } = parseDateRange(e.dates);
       return {
-        title: e.title ?? "",
-        company: e.company ?? "",
-        location: e.location ?? "",
+        title: e.title,
+        company: e.company,
+        location: e.location,
         startDate,
         endDate,
-        description: Array.isArray(e.bullets) ? e.bullets.join("\n") : "",
+        description: e.bullets.join("\n"),
       };
     }),
     projects: profile.projects.map((p) => ({
-      name: p.name ?? "",
-      description: Array.isArray(p.bullets) ? p.bullets.join("\n") : "",
-      technologies: Array.isArray(p.tech) ? p.tech : [],
+      name: p.name,
+      description: p.bullets.join("\n"),
+      technologies: p.tech,
     })),
     skills: Object.values(profile.skills).flat(),
     certifications: profile.certifications,
