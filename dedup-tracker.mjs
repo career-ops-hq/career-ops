@@ -12,13 +12,14 @@
  */
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import {
   openTrackerTransaction, rebuildRow, normalizeCompany,
+  loadCanonicalStates, resolveCanonicalState,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -44,6 +45,13 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.
 mkdirSync(dirname(APPS_FILE), { recursive: true });
+
+// templates/states.yml is system layer: it lives beside this script, not in the
+// data root. Unreadable means only the spellings in STATUS_RANK are known.
+let CANONICAL_STATES = [];
+try {
+  CANONICAL_STATES = loadCanonicalStates(join(dirname(fileURLToPath(import.meta.url)), 'templates', 'states.yml'));
+} catch { /* fall back to STATUS_RANK alone */ }
 
 // Status advancement order (higher = more advanced in pipeline)
 // Aplicado > Rechazado because active application > terminal state
@@ -113,7 +121,16 @@ function normalizeStatus(status) {
  * @returns {number} Numeric rank from STATUS_RANK, or 0 for unknown statuses.
  */
 function statusRank(status) {
-  return STATUS_RANK[normalizeStatus(status)] || 0;
+  const key = normalizeStatus(status);
+  if (Object.hasOwn(STATUS_RANK, key)) return STATUS_RANK[key];
+  // A status that is not spelled above may still be a states.yml alias
+  // ("Sent", "Aplicada", "Başvuruldu", "Mülakat"...) that the dashboard and
+  // set-status.mjs read as a real state. Ranking it 0 made an Applied row look
+  // like a throwaway and let a higher-scored Evaluated sibling delete it.
+  const label = resolveCanonicalState(key, CANONICAL_STATES);
+  return label && Object.hasOwn(STATUS_RANK, label.toLowerCase())
+    ? STATUS_RANK[label.toLowerCase()]
+    : 0;
 }
 
 /**
