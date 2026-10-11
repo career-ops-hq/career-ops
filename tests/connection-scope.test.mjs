@@ -13,6 +13,11 @@ console.log('\nconnection scope — per-board connection pools');
 const mod = await import(pathToFileURL(join(ROOT, 'providers/_connection-scope.mjs')).href);
 const { withConnectionScope, currentConnectionScope, _resetConnectionScopeForTests } = mod;
 
+// An inherited CAREER_OPS_CONNECTION_SCOPE=0 would turn scoping off for every
+// test below; run them with it on and put the caller's setting back at the end.
+const originalScopeSetting = process.env.CAREER_OPS_CONNECTION_SCOPE;
+delete process.env.CAREER_OPS_CONNECTION_SCOPE;
+
 // A scope exists inside the unit and nowhere else.
 {
   const outside = currentConnectionScope();
@@ -85,15 +90,18 @@ const { withConnectionScope, currentConnectionScope, _resetConnectionScopeForTes
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     servers.push(server);
   }
-  for (const server of servers) {
-    await withConnectionScope(async () => {
-      const { fetch: scopedFetch, agent } = currentConnectionScope();
-      const res = await scopedFetch(`http://127.0.0.1:${server.address().port}/`, { dispatcher: agent });
-      await res.text();
-    });
+  try {
+    for (const server of servers) {
+      await withConnectionScope(async () => {
+        const { fetch: scopedFetch, agent } = currentConnectionScope();
+        const res = await scopedFetch(`http://127.0.0.1:${server.address().port}/`, { dispatcher: agent });
+        await res.text();
+      });
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  } finally {
+    await Promise.all(servers.map((server) => new Promise((r) => server.close(r))));
   }
-  await new Promise((r) => setTimeout(r, 100));
-  for (const server of servers) server.close();
   if (open === 0 && peak >= 1) pass(`every socket closed when its unit ended (peak ${peak}, open after ${open})`);
   else fail(`sockets still open after their units ended: ${open} (peak ${peak})`);
 }
@@ -106,3 +114,6 @@ const { withConnectionScope, currentConnectionScope, _resetConnectionScopeForTes
   if (single && multi) pass('single-host sources unscoped; workday, icims and bamboohr scoped');
   else fail(`singleHost flags: ${JSON.stringify(Object.fromEntries(Object.entries(SOURCES).map(([k, v]) => [k, v.singleHost])))}`);
 }
+
+if (originalScopeSetting === undefined) delete process.env.CAREER_OPS_CONNECTION_SCOPE;
+else process.env.CAREER_OPS_CONNECTION_SCOPE = originalScopeSetting;
