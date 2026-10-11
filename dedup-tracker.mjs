@@ -20,7 +20,7 @@ import { normalizeUrl } from './url-key.mjs';
 import {
   openTrackerTransaction, rebuildRow, normalizeCompany,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeVia, extractReqNumber } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -221,6 +221,25 @@ function urlsConflict(a, b) {
 }
 
 /**
+ * Check whether two tracker rows carry two different requisition ids in Notes.
+ *
+ * The rule merge-tracker.mjs applies as `reqNumDiffers` (#1524): an id missing
+ * on either side is UNKNOWN, and only two present-and-different ids are evidence
+ * that the rows are distinct openings. An employer posts one title once per city
+ * or country, each copy with its own job id, and merge-tracker keeps those rows
+ * apart on purpose; deleting one here would silently reverse that decision.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {boolean} True when both rows carry a recognizable id and they differ.
+ */
+function reqNumsConflict(a, b) {
+  const reqA = extractReqNumber(a.notes);
+  const reqB = extractReqNumber(b.notes);
+  return Boolean(reqA && reqB && reqA !== reqB);
+}
+
+/**
  * Decide whether two same-company tracker rows should be deduplicated.
  *
  * Rows merge only when they describe the same opening: either the exact same
@@ -240,6 +259,9 @@ function urlsConflict(a, b) {
  * through the same normalizeUrl(): two rows cannot be one application while
  * naming two postings. A blank or placeholder URL yields no key and is
  * UNKNOWN, never a conflict, so rows without URLs behave exactly as before.
+ * Two present-and-different requisition ids in Notes (`Job id 8157736` vs
+ * `Job id 8157738`, the #1524 rule) veto every tier the same way, so one title
+ * posted once per city or country keeps one row per posting.
  * Blocking fails toward a duplicate the user can see; merging on a conflict
  * deletes a real application.
  *
@@ -249,6 +271,7 @@ function urlsConflict(a, b) {
  */
 function roleMatch(a, b) {
   if (urlsConflict(a, b)) return false;
+  if (reqNumsConflict(a, b)) return false;
 
   if (sameReportIdentity(a, b)) return true;
   if (normalizeRole(a.role) !== normalizeRole(b.role)) return false;
@@ -400,9 +423,10 @@ for (const [company, companyEntries] of groups) {
       if (processed.has(j)) continue;
       // roleMatch() only compares against the seed row, so a seed with no URL
       // would admit two rows naming different postings and one would be
-      // deleted. Check the candidate's URL against every member already in.
+      // deleted. Check the candidate's URL and requisition id against every
+      // member already in.
       if (roleMatch(companyEntries[i], companyEntries[j])
-          && !cluster.some(member => urlsConflict(member, companyEntries[j]))
+          && !cluster.some(member => urlsConflict(member, companyEntries[j]) || reqNumsConflict(member, companyEntries[j]))
           && (!isBlindGroup || withinBlindWindow(companyEntries[i].date, companyEntries[j].date))) {
         cluster.push(companyEntries[j]);
         processed.add(j);
