@@ -56,6 +56,7 @@ import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
+import { withConnectionScope } from './providers/_connection-scope.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
@@ -253,6 +254,9 @@ export const SOURCES = {
     provider: greenhouse,
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
@@ -262,6 +266,9 @@ export const SOURCES = {
     provider: lever,
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
     dataset: `${DATASET_BASE}/lever_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
@@ -271,6 +278,9 @@ export const SOURCES = {
     provider: ashby,
     // Whole directory behind one host — see SINGLE_HOST_CONCURRENCY.
     concurrency: SINGLE_HOST_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
@@ -887,7 +897,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
     const hostKey = (() => {
       try { return new URL(entry.careers_url).hostname.toLowerCase(); } catch { return seed.vendor; }
     })();
-    await withHostSlot(hostKey, async () => {
+    await withHostSlot(hostKey, () => withConnectionScope(async () => {
       if (quarantinedHosts.has(hostKey)) {
         errors++;
         if (opts.verbose) console.error(`  ✗ ${seed.vendor}-history/${entry.name}: host skipped after an earlier timeout`);
@@ -916,7 +926,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
         // quarantining prevents queued work from replacing it.
         operationPromise.catch(() => {});
       }
-    });
+    }));
   });
 
   return {
@@ -933,6 +943,16 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
 // timeouts in _http.mjs, an unforeseen hang (DNS, a provider bug) must cost
 // one company, not freeze a worker slot for the rest of a 12k-company sweep.
 const COMPANY_TIMEOUT_MS = 5 * 60_000;
+
+// Run one board's unit of work. For a source that gives every tenant its own
+// hostname (workday, icims, bamboohr), the board gets a private connection
+// pool that is destroyed when it finishes; without it, the process keeps one
+// idle socket per tenant for the rest of the run, and a full sweep exhausts
+// local connection capacity partway through (see providers/_connection-scope.mjs).
+// Single-host sources share one pool already and run unscoped.
+function boardScope(source, fn) {
+  return source.singleHost ? fn() : withConnectionScope(fn);
+}
 
 export function createKeyedLimiter(limit) {
   const states = new Map();
@@ -1407,7 +1427,7 @@ async function main() {
         // The whole per-company unit — fetch AND processJobs (which may issue
         // per-job detail-page requests via provider.enrichDate) — runs inside
         // one watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
-        await withTimeout((async () => {
+        await boardScope(source, () => withTimeout((async () => {
           // Most boards in a public directory hold nothing the title filter
           // wants; where the provider can list a board cheaply, find that out
           // before downloading every posting body.
@@ -1457,7 +1477,7 @@ async function main() {
           }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
           await processJobs(jobs, name, source.provider, entry.name);
-        })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
+        })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`));
       } catch (err) {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
@@ -1520,7 +1540,7 @@ async function main() {
       log(`\n  ↻ retrying ${truncated.length} truncated board(s) sequentially...`);
       for (const entry of truncated) {
         try {
-          await withTimeout((async () => {
+          await boardScope(source, () => withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
             // Where a board deferred by the parallel sweep is actually decided.
@@ -1545,7 +1565,7 @@ async function main() {
                 console.error(`  ✗ ${name}/${entry.name}: ${why} after sequential retry`);
               }
             }
-          })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`);
+          })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name} (retry)`));
         } catch (err) {
           errors++;
           recordBoardResult(deadBoards, name, boardKey(entry), err?.status);
