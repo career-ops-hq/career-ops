@@ -38,6 +38,7 @@ import {
   updateCommitCommand,
   gitIn,
   gitQuietIn,
+  unstagedPathsOutside,
 } from '../update-system.mjs';
 
 // A throwaway repo with one commit on `main`, no remote. Remotes are added per
@@ -326,7 +327,9 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
     } else if (!remedy) {
       fail(`no runnable remedy line in the notice:\n${notice}`);
     } else {
-      execFileSync(bash, ['-c', remedy], { cwd: dir, stdio: 'pipe' });
+      const shell = bashSource() === 'wsl' ? 'wsl' : bash;
+      const shellArgs = bashSource() === 'wsl' ? ['-e', 'bash', '-c', remedy] : ['-c', remedy];
+      execFileSync(shell, shellArgs, { cwd: dir, stdio: 'pipe' });
       const staged = gitIn(dir, 'diff', '--cached', '--name-only').split('\n').filter(Boolean);
       const onDisk = existsSync(join(dir, 'sys.mjs'));
       const movedOut = unrelatedStaged.every(p => !staged.includes(p) && !existsSync(join(dir, p)));
@@ -339,6 +342,43 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Unstaged work needs the same isolation, even with no unrelated index entries.
+{
+  const { dir, g } = makeRepo();
+  cleanups.push(dir);
+  writeFileSync(join(dir, 'mine.txt'), 'original work\n');
+  writeFileSync(join(dir, 'sys.mjs'), 'old system\n');
+  g('add', 'mine.txt', 'sys.mjs');
+  g('commit', '-qm', 'fixture');
+  writeFileSync(join(dir, 'mine.txt'), 'unstaged work\n');
+  writeFileSync(join(dir, 'sys.mjs'), 'refreshed system\n');
+  g('add', 'sys.mjs');
+  const rawGit = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf-8' });
+  const unrelatedUnstaged = unstagedPathsOutside(['sys.mjs'], [], rawGit);
+  const notice = skippedBranchCommitNotice({
+    currentBranch: 'feat/x', defaultBranch: 'main', version: '1.33.0',
+    commitCommand: 'git commit -m "x"', unrelatedUnstaged,
+  });
+  const remedy = notice.split('\n').map(line => line.trim())
+    .find(line => line.startsWith('git stash push -m'));
+  if (unrelatedUnstaged.join(',') === 'mine.txt'
+      && notice.includes('unrelated unstaged changes')
+      && notice.includes('Stash or commit them before switching branches.')
+      && remedy === "git stash push -m 'my work' -- mine.txt") {
+    pass('option 2 detects and warns about unrelated work that is only unstaged');
+  } else {
+    fail(`unstaged-only recovery notice is incomplete: ${notice}`);
+  }
+  g('stash', 'push', '-m', 'my work', '--', 'mine.txt');
+  if (g('diff', '--cached', '--name-only') === 'sys.mjs'
+      && g('diff', '--name-only') === ''
+      && g('show', 'stash@{0}:mine.txt') === 'unstaged work') {
+    pass('isolating unstaged work leaves the update staged and preserves the user edit');
+  } else {
+    fail('unstaged-work recovery moved the update or lost the user edit');
   }
 }
 
@@ -398,6 +438,27 @@ function stashStagedArgs(g) {
     pass('withheld update is not mistaken for a local edit on the next run');
   } else {
     fail(`baseline wrong: unrecorded=${JSON.stringify(withoutRecord)} recorded=${JSON.stringify(withRecord)}`);
+  }
+}
+
+// The snapshot must not hide local customizations the withheld update preserved.
+for (const staged of [false, true]) {
+  const { dir, g, gitAt } = repoWithWithheldUpdate();
+  g('reset', '--hard', 'HEAD');
+  writeFileSync(join(dir, 'custom.mjs'), 'original\n');
+  g('add', 'custom.mjs');
+  g('commit', '-qm', 'fixture');
+  writeFileSync(join(dir, 'custom.mjs'), 'my local customization\n');
+  g('add', 'custom.mjs');
+  if (!staged) g('commit', '-qm', 'local customization');
+  writeFileSync(join(dir, 'sys.mjs'), 'v2\n');
+  g('add', 'sys.mjs');
+  recordStagedUpdate('2.0.0', { git: gitAt, preservedPaths: ['custom.mjs'] });
+  const atRisk = locallyModifiedSystemFiles(['sys.mjs', 'custom.mjs'], 'upstream', { git: gitAt, root: dir });
+  if (atRisk.includes('custom.mjs') && !atRisk.includes('sys.mjs')) {
+    pass(`a withheld update keeps a ${staged ? 'staged' : 'committed'} preserved customization protected`);
+  } else {
+    fail(`preserved customization lost with staged=${staged}: ${JSON.stringify(atRisk)}`);
   }
 }
 
