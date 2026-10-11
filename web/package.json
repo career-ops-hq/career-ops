@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
@@ -20,7 +20,6 @@
     "js-yaml": "^5.4.1",
     "lucide-react": "^1.8.0",
     "next": "16.3.8",
-    "pdf-parse": "^2.4.5",
     "playwright-core": "^1.61.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target, Search, BarChart3, Send, Download, Upload } from "lucide-react";
+import { Plus, GraduationCap, ExternalLink, Trash2, FileText, ChevronDown, AlertTriangle, Clock, Bell, RefreshCw, Filter, Target, Search, BarChart3, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -259,7 +259,6 @@ export function InternshipsView() {
               </button>
             ))}
           </div>
-          <SimplifyMenu onImported={fetchData} />
           <Button onClick={() => setShowAdd(true)} size="sm">
             <Plus className="h-4 w-4" /> Add
           </Button>
@@ -925,140 +924,3 @@ function UpdatesView({
   );
 }
 
-function SimplifyMenu({ onImported }: { onImported: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
-
-  const exportProfile = async () => {
-    setOpen(false);
-    const res = await fetch("/api/resume-profile/simplify-export");
-    if (!res.ok) {
-      setResult(res.status === 404 ? "Upload a resume first" : "Export failed");
-      setTimeout(() => setResult(null), 3000);
-      return;
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "simplify-profile.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const importSimplify = () => {
-    setOpen(false);
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".csv";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setImporting(true);
-      try {
-        const csv = await file.text();
-        const res = await fetch("/api/internships/import-simplify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ csv }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setResult(`Imported ${data.imported}, skipped ${data.skipped} duplicates`);
-          onImported();
-        } else {
-          const err = await res.json().catch(() => null);
-          setResult(err?.error ?? "Import failed");
-        }
-      } finally {
-        setImporting(false);
-        setTimeout(() => setResult(null), 4000);
-      }
-    };
-    input.click();
-  };
-
-  const importGitHub = async (sections?: string[]) => {
-    setOpen(false);
-    setImporting(true);
-    try {
-      const res = await fetch("/api/internships/import-github", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sections, usOnly: true }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setResult(`Imported ${data.imported} roles (${data.filtered} non-US filtered, ${data.skipped} dupes, ${data.closed} closed)`);
-        onImported();
-      } else {
-        const err = await res.json().catch(() => null);
-        setResult(err?.error ?? "GitHub import failed");
-      }
-    } finally {
-      setImporting(false);
-      setTimeout(() => setResult(null), 5000);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setOpen(!open)}
-        disabled={importing}
-      >
-        {importing ? "Importing..." : "Simplify"}
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-10 mt-1 w-64 rounded-lg border border-border bg-surface py-1 shadow-lg">
-          <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">SimplifyJobs GitHub</div>
-          <button
-            onClick={() => importGitHub(["Data Science"])}
-            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            DS / AI / ML roles (US only)
-          </button>
-          <button
-            onClick={() => importGitHub(["Software Engineering"])}
-            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Software Engineering (US only)
-          </button>
-          <button
-            onClick={() => importGitHub()}
-            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            All categories (US only)
-          </button>
-          <hr className="my-1 border-border" />
-          <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Simplify App</div>
-          <button
-            onClick={importSimplify}
-            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            Import from Simplify CSV
-          </button>
-          <button
-            onClick={exportProfile}
-            className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-surface-hover transition-colors"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Export profile for Simplify
-          </button>
-        </div>
-      )}
-      {result && (
-        <div className="absolute right-0 top-full z-10 mt-1 rounded-lg border border-border bg-surface px-3 py-2 text-xs shadow-lg whitespace-nowrap">
-          {result}
-        </div>
-      )}
-    </div>
-  );
-}
