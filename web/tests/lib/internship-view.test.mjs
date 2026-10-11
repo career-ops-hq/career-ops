@@ -73,6 +73,7 @@ function appToInternship(app) {
     deadline: tags.deadline,
     workAuth: tags.workAuth,
     gradEligibility: tags.gradEligibility,
+    resumeFile: tags.resumeFile,
   };
 }
 
@@ -198,6 +199,46 @@ test('appToInternship: empty applyLink becomes undefined', () => {
     report: '', applyLink: '', notes: '', via: '', followUp: '',
   };
   assert.equal(appToInternship(app).url, undefined);
+});
+
+// --- resumeFile ---
+
+test('appToInternship: extracts resumeFile from notes tags', () => {
+  const app = {
+    n: '7', date: '2026-10-05', company: 'TestCo', role: 'SWE Intern',
+    location: 'NYC', score: '', status: 'Applied', pdf: '',
+    report: '', applyLink: '', notes: 'track:SWE | resumeFile:abc123-resume.pdf', via: '', followUp: '',
+  };
+  const result = appToInternship(app);
+  assert.equal(result.resumeFile, 'abc123-resume.pdf');
+  assert.equal(result.track, 'SWE');
+});
+
+test('appToInternship: resumeFile is undefined when not in notes', () => {
+  const app = {
+    n: '8', date: '2026-10-05', company: 'TestCo', role: 'PM Intern',
+    location: '', score: '', status: 'Evaluated', pdf: '',
+    report: '', applyLink: '', notes: 'track:PM', via: '', followUp: '',
+  };
+  assert.equal(appToInternship(app).resumeFile, undefined);
+});
+
+test('encodeNoteTags: includes resumeFile when present', () => {
+  const result = encodeNoteTags({ track: 'DS', resumeFile: 'my-resume.pdf' }, '');
+  assert.equal(result, 'track:DS | resumeFile:my-resume.pdf');
+});
+
+test('encodeNoteTags: omits resumeFile when empty', () => {
+  const result = encodeNoteTags({ track: 'DS', resumeFile: '' }, '');
+  assert.equal(result, 'track:DS');
+});
+
+test('resumeFile round-trip: encode then parse preserves filename', () => {
+  const encoded = encodeNoteTags({ track: 'SWE', resumeFile: 'tailored-v2.pdf' }, 'Great fit');
+  const parsed = parseNoteTags(encoded);
+  assert.equal(parsed.resumeFile, 'tailored-v2.pdf');
+  assert.equal(parsed.track, 'SWE');
+  assert.equal(parsed._plain, 'Great fit');
 });
 
 // --- Round-trip: encode then parse ---

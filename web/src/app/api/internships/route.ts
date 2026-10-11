@@ -28,6 +28,7 @@ export type Internship = {
   deadline?: string;
   workAuth?: string;
   gradEligibility?: string;
+  resumeFile?: string;
 };
 
 /** Status mapping: internship UI statuses → canonical tracker states */
@@ -102,6 +103,7 @@ export function appToInternship(app: Application): Internship {
     deadline: tags.deadline,
     workAuth: tags.workAuth,
     gradEligibility: tags.gradEligibility,
+    resumeFile: tags.resumeFile,
   };
 }
 
@@ -156,6 +158,7 @@ export async function POST(req: NextRequest) {
       deadline: body.deadline,
       workAuth: body.workAuth,
       gradEligibility: body.gradEligibility,
+      resumeFile: body.resumeFile,
     },
     body.notes ?? "",
   );
@@ -219,7 +222,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(added ? appToInternship(added) : { id: num, company, role, status: body.status ?? "wishlist" }, { status: 201 });
 }
 
-// PUT: update status via set-status.mjs
+// PUT: update status and/or resumeFile via set-status.mjs
 export async function PUT(req: NextRequest) {
   let body: Record<string, string>;
   try {
@@ -230,8 +233,73 @@ export async function PUT(req: NextRequest) {
 
   const id = body.id; // tracker row #
   const newStatus = body.status;
+  const resumeFile = "resumeFile" in body ? body.resumeFile : undefined;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
+  const root = careerOpsRoot();
+
+  // If resumeFile is being updated, rebuild the Notes column tags
+  if (resumeFile !== undefined) {
+    const apps = readApplications();
+    const app = apps.find((a) => a.n === id);
+    if (!app) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    const tags = parseNoteTags(app.notes);
+    const oldNotes = app.notes;
+
+    // Rebuild tags with updated resumeFile
+    const newNotes = encodeNoteTags(
+      {
+        track: tags.track,
+        source: tags.source,
+        requirements: tags.requirements,
+        deadline: tags.deadline,
+        workAuth: tags.workAuth,
+        gradEligibility: tags.gradEligibility,
+        resumeFile: resumeFile || undefined, // empty string → remove tag
+      },
+      tags._plain || "",
+    );
+
+    if (newNotes !== oldNotes) {
+      const canonStatus = newStatus
+        ? (STATUS_TO_CANONICAL[newStatus] ?? newStatus)
+        : app.status;
+      const args = [
+        rootScript("set-status"),
+        "--row", id,
+        canonStatus,
+        "--source", "web",
+        "--json",
+      ];
+      // Use --replace-note when there are existing notes, --note when empty
+      const isEmptyNotes = !oldNotes || oldNotes === "—" || oldNotes === "-";
+      if (isEmptyNotes) {
+        if (newNotes) args.push("--note", newNotes);
+      } else {
+        args.push("--replace-note", oldNotes, "--note", newNotes || "—");
+      }
+      try {
+        execFileSync(process.execPath, args, {
+          cwd: root,
+          encoding: "utf8",
+          timeout: 30000,
+        });
+      } catch (err) {
+        return NextResponse.json(
+          { error: `update failed: ${err instanceof Error ? err.message : String(err)}` },
+          { status: 500 },
+        );
+      }
+      // Status was already handled in the same set-status call
+      const updated = readApplications();
+      const updatedApp = updated.find((a) => a.n === id);
+      if (!updatedApp) return NextResponse.json({ error: "not found" }, { status: 404 });
+      return NextResponse.json(appToInternship(updatedApp));
+    }
+  }
+
+  // Status-only update (no resumeFile change)
   if (newStatus) {
     const canonStatus = STATUS_TO_CANONICAL[newStatus] ?? newStatus;
     try {
@@ -242,7 +310,7 @@ export async function PUT(req: NextRequest) {
         "--source", "web",
         "--json",
       ], {
-        cwd: careerOpsRoot(),
+        cwd: root,
         encoding: "utf8",
         timeout: 30000,
       });
