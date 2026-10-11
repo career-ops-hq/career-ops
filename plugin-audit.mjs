@@ -13,6 +13,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // Built from fragments so the literal API/firewall tokens never appear verbatim
@@ -42,26 +43,6 @@ const KNOWN_FLAGS = ['--help', '-h'];
 const USAGE = `Usage:
   node plugin-audit.mjs <plugin-dir>
   node plugin-audit.mjs --help`;
-
-function parseArgs(argv) {
-  const args = argv.slice(2);
-
-  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
-
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  return {
-    dir: args.find(a => !a.startsWith('-'))
-  };
-}
 
 function collectSpecifiers(src) {
   const specs = [];
@@ -115,7 +96,9 @@ export function auditPlugin(dir) {
 
 // CLI: node plugin-audit.mjs <dir>
 if (isMainModule(import.meta.url)) {
-  const { dir } = parseArgs(process.argv);
+  const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE);
+  const dir = args.find(a => !a.startsWith('-'));
   if (!dir) { console.error(USAGE); process.exit(2); }
   let result;
   try { result = auditPlugin(path.resolve(dir)); } catch (e) { console.error('audit failed:', e.message); process.exit(2); }
