@@ -1362,7 +1362,10 @@ export async function mergeTracker(options = {}) {
         const isHeader = parts[colmap.num] === '#';
         const isSeparator = /^[-: ]*$/.test(parts.join(''));
         const insert = isHeader ? 'Via' : isSeparator ? '-----' : '—';
-        const cells = [...parts.slice(1, companyIdx + 1), insert, ...parts.slice(companyIdx + 1, parts.length - 1)];
+        // Only a closing pipe adds a padding cell; otherwise the last part is
+        // real data (Notes, URL, or a custom column) and must survive migration.
+        const end = line.trimEnd().endsWith('|') ? parts.length - 1 : parts.length;
+        const cells = [...parts.slice(1, companyIdx + 1), insert, ...parts.slice(companyIdx + 1, end)];
         changed++;
         return isSeparator
           ? `|${cells.map(c => c || '---').join('|')}|`
