@@ -224,6 +224,19 @@ try {
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.zohorecruit.com/jobs/Careers/101',
   );
+
+  // staffam.normalizeRow — mapped over pageProps.jobs; slug.en and category.code
+  // both become URL path segments.
+  const { normalizeRow } = await load('staffam.mjs');
+  check(
+    'staffam.normalizeRow',
+    () => [
+      { id: 1, title: { en: 'Bad' }, slug: { en: `${LONE}bad` }, category: { code: 'software-development' } },
+      { id: 2, title: { en: 'Bad cat' }, slug: { en: 'ok' }, category: { code: `${LONE}cat` } },
+      { id: 3, title: { en: 'Good' }, slug: { en: 'g-1' }, category: { code: 'software-development' } },
+    ].map(normalizeRow).filter(Boolean),
+    (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -251,7 +264,7 @@ try {
   const CONVERTED = [
     'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
     'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'platsbanken.mjs',
-    'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
+    'staffam.mjs', 'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
 
   // Bare `encodeURIComponent` on a url line that is reviewed as safe: the value

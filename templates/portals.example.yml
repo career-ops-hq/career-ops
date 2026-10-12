@@ -1853,6 +1853,12 @@ search_queries:
 #   provider: senjob                      # listings only; robots.txt keeps CVs off-limits
 #   enabled: true                         # ~40 postings/page, tech roles are a thin slice
 #
+# - name: staff.am                        # Armenia's dominant board (EN/AM/RU UI)
+#   provider: staffam                     # server-rendered Next.js; reads the embedded __NEXT_DATA__
+#   categories: [software-development]    # optional — path segments from staff.am/en/jobs/{category}
+#   max_pages: 40                         # per category; 50 postings/page, whole board ≈ 24 pages
+#   enabled: true
+#
 # - name: ITviec                          # Vietnam's largest IT board (English UI)
 #   provider: itviec                      # server-rendered listing; no auth, no JS
 #   searchKeywords: backend               # optional — narrows via the URL path
