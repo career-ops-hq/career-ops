@@ -121,6 +121,7 @@ export function ApplyChecklist({
 
       <Section title="Portal tips">
         <table className="w-full text-sm">
+          <caption className="sr-only">Portal tips</caption>
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-faint">
               <th className="py-2 pr-4 font-medium">Portal</th>
