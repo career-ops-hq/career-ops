@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { PageFrame } from "@/components/page-frame";
+import { MarkPdfReadyButton } from "@/components/mark-pdf-ready-button";
 import { saveStatus } from "@/lib/pipeline-status.mjs";
 
 type CopyItem = { label: string; text: string };
@@ -28,7 +29,9 @@ export function ApplyChecklist({
   cvMissing,
   tips,
   trackerNum,
+  reportNum,
   status,
+  pdfReady,
 }: {
   company: string;
   role: string;
@@ -43,7 +46,9 @@ export function ApplyChecklist({
   cvMissing: boolean;
   tips: Tip[];
   trackerNum: string | null;
+  reportNum: number | null;
   status: string;
+  pdfReady: boolean;
 }) {
   return (
     <PageFrame className="max-w-3xl">
@@ -136,8 +141,10 @@ export function ApplyChecklist({
       <Section title="After you submit">
         <div className="flex flex-wrap items-start gap-2">
           <AppliedButton trackerNum={trackerNum} status={status} />
+          <SeedButton trackerNum={trackerNum} />
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} />
         </div>
-        {!trackerNum && <p className="mt-2 text-xs text-faint">Applied needs a tracker row.</p>}
+        {!trackerNum && <p className="mt-2 text-xs text-faint">Applied and seed follow-up need a tracker row.</p>}
       </Section>
     </PageFrame>
   );
@@ -228,6 +235,48 @@ function AppliedButton({ trackerNum, status }: { trackerNum: string | null; stat
       <button type="button" className={PILL} disabled={!trackerNum || busy || applied} onClick={markApplied}>
         {busy ? "Saving…" : "Applied"}
       </button>
+      {error && <span className="max-w-xs text-xs text-red-500">{error}</span>}
+    </span>
+  );
+}
+
+function SeedButton({ trackerNum }: { trackerNum: string | null }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+
+  async function seed() {
+    if (!trackerNum || busy) return;
+    setBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const res = await fetch("/api/followups/seed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: trackerNum }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(typeof body?.error === "string" ? body.error : "Could not seed the follow-up.");
+        return;
+      }
+      setNote(body?.seeded === false ? "Already seeded." : "Follow-up seeded.");
+      router.refresh();
+    } catch {
+      setError("Could not seed the follow-up.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <button type="button" className={PILL} disabled={!trackerNum || busy} onClick={seed}>
+        {busy ? "Saving…" : "Seed follow-up"}
+      </button>
+      {note && <span className="text-xs text-muted">{note}</span>}
       {error && <span className="max-w-xs text-xs text-red-500">{error}</span>}
     </span>
   );
