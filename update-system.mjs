@@ -2617,7 +2617,7 @@ export function stagedUpdateBaseline(runGit, paths) {
  *        of staying pinned. Anything else is the user's.
  *
  * @param {string[]} paths - manifest entries (files or `dir/` prefixes).
- * @param {string} upstreamRef - ref being checked out, normally FETCH_HEAD.
+ * @param {string} upstreamRef - Ref being checked out; apply passes its pinned target commit.
  * @param {{git?: Function}} [ctx] - injectable git runner, for tests.
  * @returns {string[]} repo-relative file paths, sorted.
  */

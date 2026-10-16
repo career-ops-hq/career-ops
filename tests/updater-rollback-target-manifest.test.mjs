@@ -431,6 +431,9 @@ function readMaybe(path) {
       'paired-ref fixture did not arrange its FETCH_HEAD distractor',
     );
 
+    // A withheld update leaves a durable baseline that rollback must clear.
+    g('update-ref', 'refs/career-ops/staged-update', 'HEAD');
+
     const result = runRollback(dir);
     const userCv = readMaybe(join(dir, 'cv.md'));
     const userSibling = readMaybe(join(dir, 'writing-samples/private.md'));
@@ -438,6 +441,11 @@ function readMaybe(path) {
       result.status === 0 && !result.error,
       'real rollback CLI succeeds with a readable paired target ref',
       `paired rollback failed (status ${result.status}): ${outputOf(result)}`,
+    );
+    check(
+      g('for-each-ref', '--format=%(refname)', 'refs/career-ops/staged-update') === '',
+      'successful rollback clears the withheld update baseline',
+      'rollback left the withheld update baseline behind',
     );
     check(
       readMaybe(join(dir, 'system/root.txt')) === 'backup root\n'
