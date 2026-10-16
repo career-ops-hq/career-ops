@@ -34,15 +34,25 @@ export async function GET(req: NextRequest) {
   const n = (req.nextUrl.searchParams.get("n") ?? "").trim();
   const company = (req.nextUrl.searchParams.get("company") ?? "").trim();
   const application = (req.nextUrl.searchParams.get("application") ?? "").trim();
+  const kind = req.nextUrl.searchParams.get("kind") === "cover" ? "cover" : "cv";
+
+  // Cover letters only resolve through the report-number index. The application
+  // and company-slug paths below are CV-only and would serve a tailored CV under
+  // a cover download link when kind=cover arrives without n.
+  if (kind === "cover" && !n) {
+    return new Response("indexed cover letter is unavailable", { status: 404 });
+  }
 
   // Preferred path: resolve the EXACT PDF indexed for this report number
   // (data/pdf-index.tsv). Two applications at the same company have two
   // different tailored CVs — the company-slug fallback below can't tell them
   // apart and would open the wrong report's PDF.
+  // kind=cover reads the cover row and stops. Falling through would serve a CV
+  // from the company-slug scan under a cover download link.
   if (n) {
     // A malformed n (typo, tampered query string) must not silently fall
     if (!/^\d+$/.test(n)) return new Response("invalid report number", { status: 400 });
-    const exact = await pdfPathStatusForReport(n);
+    const exact = await pdfPathStatusForReport(n, kind);
     if (exact.status === "found") {
       try {
         return servePdf(exact.path);
@@ -50,7 +60,9 @@ export async function GET(req: NextRequest) {
         return new Response("could not read the PDF", { status: 500 });
       }
     }
-    if (exact.status === "rejected") return new Response("indexed tailored CV is unavailable", { status: 404 });
+    if (exact.status === "rejected" || kind === "cover") {
+      return new Response(kind === "cover" ? "indexed cover letter is unavailable" : "indexed tailored CV is unavailable", { status: 404 });
+    }
     // No index entry (e.g. a report generated before pdf-index.tsv existed) —
     // fall through to the company-slug heuristic below rather than 404 on a
     // real, existing tailored CV.

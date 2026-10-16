@@ -58,7 +58,8 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
-    source: 'web/src/app/api/status/route.ts',
+    // /api/status spawns set-status.mjs through runSetStatus.
+    source: 'web/src/lib/core-cli.ts',
     script: 'set-status.mjs',
     // The route builds ['--row', row, canon, '--source', 'web', '--json'];
     // row 1 and Responded are the fixture tracker's row and a canonical state.
@@ -142,6 +143,22 @@ const CALL_SITES = [
     // rather than the not-found fallback.
     args: ['--company', 'Northwind Robotics'],
     probe: 'run',
+  },
+  {
+    // /api/followups/seed passes [row, '--json'] through postCoreScript and runCoreCli.
+    source: 'web/src/lib/core-cli.ts',
+    script: 'followup-seed.mjs',
+    args: ['1', '--json'],
+    probe: 'json-any-exit',
+  },
+  {
+    // /api/pdf-ready passes [report, '--json'] through postCoreScript and runCoreCli. The
+    // fixture has no PDF on disk, so the script refuses, but it still has to
+    // accept the argv and answer in JSON the route can map.
+    source: 'web/src/lib/core-cli.ts',
+    script: 'mark-pdf-ready.mjs',
+    args: ['1', '--json'],
+    probe: 'json-any-exit',
   },
   {
     source: 'web/src/lib/core/pipeline.ts',
