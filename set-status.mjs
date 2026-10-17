@@ -1066,6 +1066,11 @@ const result = {
   tracker: APPS_FILE,
 };
 
+const oldLabel = resolveCanonicalState(oldStatus, states);
+if (statusChanged && !flags.dryRun && states.find(s => s.label === oldLabel)?.terminal) {
+  console.warn(`⚠ #${target.num} was ${oldLabel}, a terminal state. Reopened as ${newStatus}.`);
+}
+
 if (flags.json) {
   // JSON must be the last thing written to stdout; machine callers parse stdout as one JSON document.
   console.log(JSON.stringify(result, null, 2));
