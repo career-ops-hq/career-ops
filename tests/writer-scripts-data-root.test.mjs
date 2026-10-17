@@ -30,6 +30,7 @@ import { linkNodeModules } from './helpers.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -236,7 +237,7 @@ test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', (
     // Positive first. Every assertion below is an ABSENCE, and a child that
     // died at module load satisfies all of them while proving nothing -- the
     // same vacuity CodeRabbit caught in the generate-pdf case on #4486.
-    assert.equal(r.status, 0, `set-status exited ${r.status}:\n${r.all.slice(0, 600)}`);
+    assert.equal(r.status, 0, describeSpawn(r, `set-status exited ${r.status}:\n${r.all.slice(0, 600)}`));
     assert.doesNotMatch(r.all, /No tracker found/i,
       `the marker was ignored and it looked beside the script:\n${r.all.slice(0, 400)}`);
     const tracker = readFileSync(join(f.dataRoot, 'data', 'applications.md'), 'utf-8');

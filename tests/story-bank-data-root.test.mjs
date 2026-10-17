@@ -32,6 +32,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -144,7 +145,7 @@ test('--story-bank and --cv still override', () => {
       cwd: f.decoyCwd, encoding: 'utf-8', timeout: 60_000,
       env: { ...process.env, CAREER_OPS_ROOT: f.dataRoot, CAREER_OPS_DATA_DIR: '' },
     });
-    assert.equal(r.status, 0, `explicit paths were not honoured: ${r.stdout}${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `explicit paths were not honoured`));
   } finally {
     cleanup(f);
     rmSync(other, { recursive: true, force: true, maxRetries: 10 });
