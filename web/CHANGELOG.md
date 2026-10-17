@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.16.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.15.0...web-v0.16.0) (2026-10-17)
+
+
+### Features
+
+* **web:** add an apply checklist page for each application ([#5131](https://github.com/career-ops-hq/career-ops/issues/5131)) ([45dff32](https://github.com/career-ops-hq/career-ops/commit/45dff32688963da15370d5d651cf863f7448deee))
+
+
+### Bug Fixes
+
+* **doctor:** diagnose half-filled profile sections using core sectionState ([#5126](https://github.com/career-ops-hq/career-ops/issues/5126)) ([#5311](https://github.com/career-ops-hq/career-ops/issues/5311)) ([afefa44](https://github.com/career-ops-hq/career-ops/commit/afefa4408e9fb4357340c26a5b0b2180a2c6774a))
+* **web:** a rate with nothing applied is absent, not 0.0% ([#5371](https://github.com/career-ops-hq/career-ops/issues/5371)) ([ffcb79b](https://github.com/career-ops-hq/career-ops/commit/ffcb79b1fc4ed2efe8b4f88e2596ed805beac5cc))
+* **web:** a vendor rate from one application is not a rate ([#5372](https://github.com/career-ops-hq/career-ops/issues/5372)) ([9ad6a3e](https://github.com/career-ops-hq/career-ops/commit/9ad6a3e8bf7117e5281df3d0909ba30174bb4e3b))
+* **web:** cut redundant tracker row tab stops ([#5361](https://github.com/career-ops-hq/career-ops/issues/5361)) ([2e3e1f2](https://github.com/career-ops-hq/career-ops/commit/2e3e1f2e070f9fc33fe3610f9b7b25bb706567ff))
+* **web:** expose Assistant request feedback and reply access ([#5245](https://github.com/career-ops-hq/career-ops/issues/5245)) ([35788de](https://github.com/career-ops-hq/career-ops/commit/35788de02abd364710830b58bc5b4ebe5da4faf8))
+* **web:** expose worker state and coalesce terminal feedback ([#5356](https://github.com/career-ops-hq/career-ops/issues/5356)) ([4fe6ef5](https://github.com/career-ops-hq/career-ops/commit/4fe6ef5f1b855472b07e31ab89cd2d580c477b61))
+* **web:** group a flagged posting on Today the way its report labels it ([#5332](https://github.com/career-ops-hq/career-ops/issues/5332)) ([7ac3233](https://github.com/career-ops-hq/career-ops/commit/7ac3233ccb6e3c23a6d654e63975898b88ef3828)), closes [#5300](https://github.com/career-ops-hq/career-ops/issues/5300)
+* **web:** honor CAREER_OPS_PORTALS on portals page and API ([#5360](https://github.com/career-ops-hq/career-ops/issues/5360)) ([0013c09](https://github.com/career-ops-hq/career-ops/commit/0013c09ea46f6964e86ab917ac3d4582611735a9))
+* **web:** keep an extracted posting url intact ([#5149](https://github.com/career-ops-hq/career-ops/issues/5149)) ([d91bbf2](https://github.com/career-ops-hq/career-ops/commit/d91bbf296aa10f95c6f0d3d219d258f384ec3ac9))
+* **web:** match ai and pm as whole words when bucketing archetypes ([#5152](https://github.com/career-ops-hq/career-ops/issues/5152)) ([cd0a448](https://github.com/career-ops-hq/career-ops/commit/cd0a4486ef308b54f8811b67e6247277425460ef))
+* **web:** match padded pipeline ids to tracker rows numerically ([#5156](https://github.com/career-ops-hq/career-ops/issues/5156)) ([37edc27](https://github.com/career-ops-hq/career-ops/commit/37edc277ac6020b8d1a7c162a4488471000f3b76))
+* **web:** stop reading account executive as an executive level ([#5155](https://github.com/career-ops-hq/career-ops/issues/5155)) ([6fb3b35](https://github.com/career-ops-hq/career-ops/commit/6fb3b35324c0600106b05d5c63c47ca7ad5c03f5))
+* **web:** treat CAREER_OPS_PORTALS as the portals file in doctorState ([#5310](https://github.com/career-ops-hq/career-ops/issues/5310)) ([a1830c4](https://github.com/career-ops-hq/career-ops/commit/a1830c44583382581c4716b8ab970709e25fcc7e))
+
+
+### Performance Improvements
+
+* **web:** send inbox postings only to the pipeline inbox tab ([#5221](https://github.com/career-ops-hq/career-ops/issues/5221)) ([602a3d5](https://github.com/career-ops-hq/career-ops/commit/602a3d525456c174b8628663041947c9a68c34c2))
+
 ## [0.15.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.14.0...web-v0.15.0) (2026-10-15)
 
 
