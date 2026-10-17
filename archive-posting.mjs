@@ -23,7 +23,8 @@
  */
 
 import { chromium } from 'playwright';
-import { writeFile, readFile } from 'fs/promises';
+import { open, unlink, readFile } from 'fs/promises';
+import { createHash } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -197,8 +198,9 @@ function today() {
  * report number, which is what makes the capture findable later: the date and
  * the scraped company/role all change between runs, the report number does not.
  */
-function captureFilename(company, role) {
-  const base = `${today()}_${captureSlug(company)}_${captureSlug(role)}.pdf`;
+function captureFilename(company, role, url) {
+  const identity = createHash('sha256').update(url).digest('hex').slice(0, 16);
+  const base = `${today()}_${captureSlug(company)}_${captureSlug(role)}_${identity}.pdf`;
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
@@ -407,12 +409,6 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
 
-    const filename = captureFilename(company, role);
-    const outputPath = join(JDS_DIR, filename);
-    const reference = `local:jds/${filename}`;
-
-    console.log(`   Output:  jds/${filename}`);
-
     mkdirSync(JDS_DIR, { recursive: true });
 
     const pdfBuffer = await page.pdf({
@@ -422,7 +418,32 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       preferCSSPageSize: false,
     });
 
-    await writeFile(outputPath, pdfBuffer);
+    const baseFilename = captureFilename(company, role, url);
+    let filename;
+    // URL identity separates requisitions; exclusive creation also preserves
+    // older snapshots of the same URL, including simultaneous captures.
+    for (let attempt = 0; ; attempt++) {
+      filename = attempt ? baseFilename.replace(/\.pdf$/, `-${attempt + 1}.pdf`) : baseFilename;
+      const outputPath = join(JDS_DIR, filename);
+      let file;
+      try {
+        file = await open(outputPath, 'wx');
+      } catch (err) {
+        if (err.code === 'EEXIST') continue;
+        throw err;
+      }
+      try {
+        await file.writeFile(pdfBuffer);
+      } catch (err) {
+        await file.close();
+        await unlink(outputPath);
+        throw err;
+      }
+      await file.close();
+      break;
+    }
+    const reference = `local:jds/${filename}`;
+    console.log(`   Output:  jds/${filename}`);
 
     const sizeKb = (pdfBuffer.length / 1024).toFixed(1);
     console.log(`Saved (${sizeKb} KB)`);
@@ -464,7 +485,7 @@ async function main() {
       const urlCompany = extractCompanyFromUrl(url);
       const resolvedCompany = overrideCompany || company || urlCompany || 'unknown';
       const resolvedRole = overrideRole || role || 'job';
-      const filename = captureFilename(resolvedCompany, resolvedRole);
+      const filename = captureFilename(resolvedCompany, resolvedRole, url);
       const reference = `local:jds/${filename}`;
       console.log(`\n🔗  ${url}`);
       console.log(`   Company: ${resolvedCompany}`);
