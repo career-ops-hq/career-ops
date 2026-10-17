@@ -313,6 +313,7 @@ const SYSTEM_PATHS = [
   'lib/syntax-check.mjs',
   'lib/syntax-check-child.mjs',
   'lib/walk-tree.mjs',
+  'lib/dir-lock.mjs',
   'lib/scratch-dirs.mjs',
   'lib/story-bank.mjs',
   'lib/outcome-dir.mjs',

@@ -35,7 +35,7 @@ for (const file of [
   'cv-sections-core.mjs', 'path-resolver.mjs',
 ]) copyFileSync(join(ROOT, file), join(sandbox, file));
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
-for (const file of ['is-main-module.mjs', 'page-format.mjs']) {
+for (const file of ['is-main-module.mjs', 'page-format.mjs', 'dir-lock.mjs']) {
   copyFileSync(join(ROOT, 'lib', file), join(sandbox, 'lib', file));
 }
 mkdirSync(join(sandbox, 'data'), { recursive: true });

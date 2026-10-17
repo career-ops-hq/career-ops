@@ -767,8 +767,14 @@ test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not 
 });
 
 test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
-  const policyModule = join(REPO_ROOT, 'pipeline-lock.mjs');
-  const sources = collectMjsFiles(REPO_ROOT).filter((f) => f !== SELF && f !== policyModule);
+  const policyModule = join(REPO_ROOT, 'lib', 'dir-lock.mjs');
+  // The web's copy of the policy module is the policy, not a re-derivation of
+  // it, for exactly as long as it is byte-identical (#5358). A drifted copy is
+  // scanned like any other file.
+  const webMirror = join(REPO_ROOT, 'web', 'src', 'lib', 'core', 'dir-lock.mjs');
+  const mirrorIsPolicy = existsSync(webMirror) && readFileSync(webMirror).equals(readFileSync(policyModule));
+  const sources = collectMjsFiles(REPO_ROOT)
+    .filter((f) => f !== SELF && f !== policyModule && !(mirrorIsPolicy && f === webMirror));
 
   // A guard that cannot look must never pass: an empty or tiny scan means the
   // walk failed, not that the repository is clean.
@@ -1002,7 +1008,7 @@ for (const [label, value] of [
     const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
     process.env.CAREER_OPS_OWNERLESS_GRACE_MS = value;
     try {
-      const lock = await import(`../pipeline-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
+      const lock = await import(`../lib/dir-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
       assert.equal(
         lock.OWNERLESS_GRACE_MS, 1_000,
         `${label} is not a floor, so the 1000ms default must stand`,
@@ -1028,7 +1034,7 @@ test('a valid CAREER_OPS_OWNERLESS_GRACE_MS is still honored (control)', async (
   const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
   process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '2500';
   try {
-    const lock = await import('../pipeline-lock.mjs?grace-good');
+    const lock = await import('../lib/dir-lock.mjs?grace-good');
     assert.equal(lock.OWNERLESS_GRACE_MS, 2_500, 'a finite positive override must reach the floor');
   } finally {
     if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
@@ -1041,7 +1047,7 @@ test('the ownerless grace floor honors CAREER_OPS_OWNERLESS_GRACE_MS', async () 
   const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
   process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '30000';
   try {
-    const lock = await import('../pipeline-lock.mjs?grace-env');
+    const lock = await import('../lib/dir-lock.mjs?grace-env');
     const dir = join(root, 'x.lock');
     mkdirSync(dir, { recursive: true });
     backdate(dir, 5_000); // ownerless and 5s old: past the 1s default floor

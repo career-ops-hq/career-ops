@@ -4,7 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import * as yaml from "js-yaml";
 
 import {
@@ -215,24 +216,53 @@ test("manual claims allow paused jobs but exclude deleted and unknown jobs", () 
   assert.equal(claimManualJob({ jobs: [], runs: [], queue: [] }, base.id, now), null);
 });
 
+// The lock is the shared directory-lock protocol (lib/dir-lock.mjs, through the
+// web mirror at src/lib/core/dir-lock.mjs). Its fs calls are named imports, so a
+// patch of the default `fs` object reaches it only once syncBuiltinESMExports()
+// pushes the patch into those bindings, the same technique the core's
+// tests/dir-lock.test.mjs uses. The code under test runs unmodified and meets
+// each fault at the exact line.
+function patchFs(name, wrap) {
+  const original = fs[name];
+  fs[name] = wrap(original);
+  syncBuiltinESMExports();
+  return () => {
+    fs[name] = original;
+    syncBuiltinESMExports();
+  };
+}
+
+const errno = (code, target) => Object.assign(new Error(`${code}: injected, '${target}'`), { code, path: target });
+
+// A lock left by a holder that crashed: its owner pid is a process that has
+// exited, so the protocol judges it stale and acquisition must go through the
+// recover guard to reclaim it.
+function plantStaleLock(resource) {
+  const lockDir = `${resource}.lock`;
+  const exited = spawnSync(process.execPath, ["-e", ""]);
+  fs.mkdirSync(lockDir);
+  fs.writeFileSync(path.join(lockDir, "owner.json"), JSON.stringify({ pid: exited.pid, token: "crashed", started_at: new Date().toISOString() }), "utf8");
+  return lockDir;
+}
+
 test("lock creation cleans directories when owner metadata writes fail", async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-lock-write-failure-"));
   const resource = path.join(temp, "resource");
-  const originalWrite = fs.writeFileSync;
+  const owner = path.join(`${resource}.lock`, "owner.json");
+  const restore = patchFs("writeFileSync", (original) => (file, ...args) => {
+    if (String(file) === owner) {
+      const error = new Error("injected owner write failure");
+      error.code = "EIO";
+      throw error;
+    }
+    return original(file, ...args);
+  });
   try {
-    fs.writeFileSync = (file, ...args) => {
-      if (String(file).endsWith(`${path.sep}owner.json`) && !String(file).includes(`${path.sep}resource.recovery.lock${path.sep}`)) {
-        const error = new Error("injected owner write failure");
-        error.code = "EIO";
-        throw error;
-      }
-      return originalWrite(file, ...args);
-    };
     await assert.rejects(withResourceLock(resource, async () => {}), /injected owner write failure/);
     assert.equal(fs.existsSync(`${resource}.lock`), false);
-    assert.equal(fs.existsSync(`${resource}.recovery.lock`), false);
+    assert.equal(fs.existsSync(`${resource}.lock.recover`), false);
   } finally {
-    fs.writeFileSync = originalWrite;
+    restore();
     fs.rmSync(temp, { recursive: true, force: true });
   }
 });
@@ -240,38 +270,51 @@ test("lock creation cleans directories when owner metadata writes fail", async (
 // Windows answers mkdir on a directory another process is removing at that
 // instant (pending delete) with EPERM/EACCES rather than EEXIST. Seen on
 // windows-latest as `EPERM: operation not permitted, mkdir '…resource.recovery.lock'`
-// out of the real-contender race test below. `platform` is passed explicitly so
-// both halves are exercised on every runner.
+// out of the real-contender race test below.
+//
+// This store used to classify that answer by platform: contention on win32, an
+// immediate throw elsewhere, with a `platform` option so both halves ran on
+// every runner. The shared protocol classifies by error code alone
+// (isMkdirContention), on every platform, and these tests follow it. POSIX
+// never answers mkdir with EPERM for contention, so the cost there is only
+// this: a genuine permissions failure waits out the lock budget instead of
+// throwing at once, and then surfaces as a timeout that names the EPERM (the
+// "persistent" test below). The core took that trade for #2777 because the
+// alternative on Windows was a writer killed mid-contention and its item lost.
 function injectMkdirFailures(target, code, failures = Number.POSITIVE_INFINITY) {
-  const originalMkdir = fs.mkdirSync;
-  const state = { attempts: 0, restore: () => { fs.mkdirSync = originalMkdir; } };
-  fs.mkdirSync = (dir, ...args) => {
+  const state = { attempts: 0 };
+  state.restore = patchFs("mkdirSync", (original) => (dir, ...args) => {
     if (String(dir) === target) {
       state.attempts += 1;
       if (state.attempts <= failures) {
         const error = new Error(`${code}: operation not permitted, mkdir '${dir}'`);
         error.code = code;
+        error.path = String(dir);
         throw error;
       }
     }
-    return originalMkdir(dir, ...args);
-  };
+    return original(dir, ...args);
+  });
   return state;
 }
 
-for (const [label, suffix] of [["recovery guard", ".recovery.lock"], ["resource lock", ".lock"]]) {
+// The guard is `<resource>.lock.recover`, the protocol's name, not the old
+// `<resource>.recovery.lock`, and it is taken only when the lock is contended:
+// to reach it, these tests plant a crashed holder's lock first.
+for (const [label, suffix, stale] of [["recover guard", ".lock.recover", true], ["resource lock", ".lock", false]]) {
   for (const code of ["EPERM", "EACCES"]) {
-    test(`${label} mkdir retries a Windows ${code} as contention instead of crashing`, async () => {
+    test(`${label} mkdir retries ${code} as contention instead of crashing`, async () => {
       const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-mkdir-retry-"));
       const resource = path.join(temp, "resource");
+      if (stale) plantStaleLock(resource);
       const injected = injectMkdirFailures(`${resource}${suffix}`, code, 3);
       try {
         let entered = false;
-        await withResourceLock(resource, async () => { entered = true; }, { platform: "win32", retryMs: 1 });
+        await withResourceLock(resource, async () => { entered = true; }, { retryMs: 1 });
         assert.equal(entered, true);
         assert.equal(injected.attempts, 4);
         assert.equal(fs.existsSync(`${resource}.lock`), false);
-        assert.equal(fs.existsSync(`${resource}.recovery.lock`), false);
+        assert.equal(fs.existsSync(`${resource}.lock.recover`), false);
       } finally {
         injected.restore();
         fs.rmSync(temp, { recursive: true, force: true });
@@ -279,40 +322,91 @@ for (const [label, suffix] of [["recovery guard", ".recovery.lock"], ["resource 
     });
   }
 
-  test(`${label} mkdir still throws a persistent Windows EPERM once the deadline passes`, async () => {
+  // Formerly: the persistent EPERM surfaced as itself. Now it surfaces as the
+  // lock's timeout, whose message keeps "lock timeout" (the routes map that to a
+  // 409) and names the mkdir error, so a real permissions problem is still
+  // distinguishable from a crowded lock.
+  test(`a persistent ${label} mkdir EPERM times out naming the error`, async () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-mkdir-deadline-"));
     const resource = path.join(temp, "resource");
+    if (stale) plantStaleLock(resource);
     const injected = injectMkdirFailures(`${resource}${suffix}`, "EPERM");
     try {
       await assert.rejects(
-        withResourceLock(resource, async () => {}, { platform: "win32", retryMs: 1, timeoutMs: 40 }),
-        (error) => error.code === "EPERM",
+        withResourceLock(resource, async () => {}, { retryMs: 1, timeoutMs: 40 }),
+        (error) => error.code === "LOCK_TIMEOUT"
+          && error.lastMkdirError === "EPERM"
+          && /scheduled-jobs lock timeout/.test(error.message)
+          && error.message.includes(`last mkdir error=EPERM on ${resource}${suffix}`),
       );
-      assert.ok(injected.attempts > 1, "the guard gave up without retrying");
-      assert.equal(fs.existsSync(`${resource}.lock`), false);
-      assert.equal(fs.existsSync(`${resource}.recovery.lock`), false);
-    } finally {
-      injected.restore();
-      fs.rmSync(temp, { recursive: true, force: true });
-    }
-  });
-
-  test(`${label} mkdir EPERM stays an immediate failure off Windows`, async () => {
-    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-mkdir-posix-"));
-    const resource = path.join(temp, "resource");
-    const injected = injectMkdirFailures(`${resource}${suffix}`, "EPERM");
-    try {
-      await assert.rejects(
-        withResourceLock(resource, async () => {}, { platform: "linux", retryMs: 1 }),
-        (error) => error.code === "EPERM",
-      );
-      assert.equal(injected.attempts, 1);
+      assert.ok(injected.attempts > 1, "the lock gave up without retrying");
+      assert.equal(fs.existsSync(`${resource}.lock`), stale, "only the planted lock may remain");
+      assert.equal(fs.existsSync(`${resource}.lock.recover`), false);
     } finally {
       injected.restore();
       fs.rmSync(temp, { recursive: true, force: true });
     }
   });
 }
+
+// The old takeover renamed a stale lock aside before deleting it, and treated
+// any rename error but ENOENT/EEXIST/ENOTEMPTY as fatal. On Windows a rename
+// of a directory another process has open fails EBUSY/EPERM, so recovering a
+// crashed holder's lock could itself crash the writer. The protocol removes
+// the judged directory instead, and a contended removal is a retry.
+for (const code of ["EBUSY", "EPERM"]) {
+  test(`recovering a stale lock whose removal meets ${code} retries instead of crashing`, async () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-takeover-"));
+    const resource = path.join(temp, "resource");
+    const lockDir = plantStaleLock(resource);
+    let rmFailures = 0;
+    const restoreRm = patchFs("rmSync", (original) => (target, ...args) => {
+      if (String(target) === lockDir && rmFailures < 2) {
+        rmFailures += 1;
+        throw errno(code, lockDir);
+      }
+      return original(target, ...args);
+    });
+    const restoreRename = patchFs("renameSync", (original) => (from, ...args) => {
+      if (String(from) === lockDir) throw errno(code, lockDir);
+      return original(from, ...args);
+    });
+    try {
+      let entered = false;
+      await withResourceLock(resource, async () => { entered = true; }, { retryMs: 1 });
+      assert.equal(entered, true);
+      assert.equal(rmFailures, 2);
+      assert.equal(fs.existsSync(lockDir), false);
+    } finally {
+      restoreRename();
+      restoreRm();
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+}
+
+test("lock status reports a live holder, a crashed holder and no lock", async () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-status-"));
+  const resource = path.join(temp, "resource");
+  try {
+    assert.deepEqual(readLockStatus(resource), { exists: false, active: false, stale: false, owner: null });
+    await withResourceLock(resource, async () => {
+      const live = readLockStatus(resource);
+      assert.equal(live.exists, true);
+      assert.equal(live.active, true);
+      assert.equal(live.stale, false);
+      assert.equal(live.owner.pid, process.pid);
+    });
+    plantStaleLock(resource);
+    const crashed = readLockStatus(resource);
+    assert.equal(crashed.exists, true);
+    assert.equal(crashed.active, false);
+    assert.equal(crashed.stale, true);
+    assert.equal(crashed.owner.token, "crashed");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
 
 test("roles-found parsing matches both scanner output formats", () => {
   assert.equal(extractRolesFound("full", JSON.stringify({ postingsKept: 7 })), 7);
@@ -410,61 +504,42 @@ test("concurrent real contenders never overlap while taking over or releasing a 
 });
 
 // The interleaving behind the race test's intermittent ENOENT, replayed in one
-// process. Our guard mkdir gets EEXIST. The holder then releases before we read
-// its owner.json, and our stat of the guard fails. Before we act on that, a
-// second contender wins the mkdir and starts writing its owner.json. A stat we
-// could not complete proves nothing about staleness, so we must wait and leave
-// the contender's new guard alone. ENOENT is the POSIX face; EPERM is how
-// Windows answers for a directory that is mid-removal.
+// process. Our guard mkdir gets EEXIST. The holder then releases its guard
+// before we stat it, and a second contender wins the mkdir and starts its own
+// reclaim. A stat we could not complete proves nothing about staleness, so we
+// must wait and leave the contender's new guard alone. ENOENT is the POSIX
+// face; EPERM is how Windows answers for a directory that is mid-removal.
 for (const statCode of ["ENOENT", "EPERM"]) {
-  test(`a guard whose stat fails with ${statCode} is not taken from the contender who re-creates it`, async () => {
+  test(`a recover guard whose stat fails with ${statCode} is not taken from the contender who re-creates it`, async () => {
     const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-vanish-"));
     const resource = path.join(temp, "resource");
-    const guardDir = `${resource}.recovery.lock`;
-    const guardOwner = path.join(guardDir, "owner.json");
-    const originalRead = fs.readFileSync;
-    const originalStat = fs.statSync;
-    let contender = null;
+    const guardDir = `${resource}.lock.recover`;
+    // A crashed holder's lock, so acquisition has to go through the guard, and
+    // a live holder of that guard, so our own guard mkdir meets EEXIST.
+    plantStaleLock(resource);
     fs.mkdirSync(guardDir);
-    fs.writeFileSync(guardOwner, JSON.stringify({ pid: process.pid, token: "holder" }), "utf8");
+    let contender = null;
+    const restore = patchFs("statSync", (original) => (file, ...args) => {
+      if (String(file) !== guardDir || contender !== null) return original(file, ...args);
+      // The holder releases its guard just before we look...
+      fs.rmdirSync(guardDir);
+      // ...and a second contender takes it, holding it for 30ms.
+      fs.mkdirSync(guardDir);
+      contender = new Promise((resolve) => setTimeout(() => {
+        const survived = fs.existsSync(guardDir);
+        fs.rmSync(guardDir, { recursive: true, force: true });
+        resolve(survived);
+      }, 30));
+      throw errno(statCode, String(file));
+    });
     try {
-      fs.readFileSync = (file, ...args) => {
-        if (String(file) === guardOwner && contender === null && fs.existsSync(guardOwner)) {
-          fs.unlinkSync(guardOwner);
-          fs.rmdirSync(guardDir);
-        }
-        return originalRead(file, ...args);
-      };
-      fs.statSync = (file, ...args) => {
-        if (String(file) !== guardDir || contender !== null) return originalStat(file, ...args);
-        try {
-          originalStat(file, ...args);
-        } catch {
-          // The released guard is gone, as the real stat just proved.
-        }
-        fs.mkdirSync(guardDir);
-        contender = new Promise((resolve) => setTimeout(() => {
-          let error = null;
-          try {
-            fs.writeFileSync(guardOwner, JSON.stringify({ pid: process.pid, token: "contender" }), "utf8");
-          } catch (writeError) {
-            error = writeError;
-          }
-          fs.rmSync(guardDir, { recursive: true, force: true });
-          resolve(error);
-        }, 30));
-        const error = new Error(`${statCode}: injected stat failure, stat '${file}'`);
-        error.code = statCode;
-        throw error;
-      };
       let entered = false;
       await withResourceLock(resource, async () => { entered = true; }, { retryMs: 5, timeoutMs: 2_000 });
       assert.equal(entered, true);
       assert.ok(contender, "the injected interleaving never ran");
-      assert.equal(await contender, null, "the contender's new guard was taken over before it could write owner.json");
+      assert.equal(await contender, true, "the contender's guard was taken from it while it held it");
     } finally {
-      fs.readFileSync = originalRead;
-      fs.statSync = originalStat;
+      restore();
       await contender;
       fs.rmSync(temp, { recursive: true, force: true });
     }

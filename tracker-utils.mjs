@@ -8,20 +8,14 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, mkdirSync, statSync, lstatSync, existsSync, realpathSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, chmodSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
 import * as yaml from 'js-yaml';
-// One definition for both locks: this module and pipeline-lock.mjs implement
-// the same directory-lock protocol on purpose, and #2777 showed how the two
-// copies drift — pipeline-lock learned that Windows answers mkdir/rm with
-// EPERM/EACCES/EBUSY under contention while this file still treated anything
-// but EEXIST as fatal, killing a writer and losing its item.
-import {
-  isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy, sameLockDirectory,
-  lockRecoveryVerdict, RECOVER_STALE,
-} from './pipeline-lock.mjs';
+// The lock protocol is lib/dir-lock.mjs, shared with every other core lock.
+// This module only picks the tracker's lock directory, timing and error.
+import { acquireDirLock } from './lib/dir-lock.mjs';
 import { normalizeTextKey } from './tracker-parse.mjs';
 
 /**
@@ -32,7 +26,7 @@ import { normalizeTextKey } from './tracker-parse.mjs';
  * now, so a local copy would be a constant this file no longer enforces — free
  * to drift from the one that actually decides.
  */
-export { OWNERLESS_GRACE_MS } from './pipeline-lock.mjs';
+export { OWNERLESS_GRACE_MS } from './lib/dir-lock.mjs';
 
 /**
  * Rebuild a markdown table row from the cells produced by `line.split('|')`.
@@ -482,52 +476,15 @@ export function trackerLockDirFor(appsFile) {
 }
 
 /**
- * Pause the async lock flow for a fixed number of milliseconds.
- *
- * Used in the lock retry loop, where waiting briefly avoids a tight CPU spin
- * while another process owns the tracker lock.
- *
- * @param {number} ms - Milliseconds to wait before resolving.
- * @returns {Promise<void>} Resolves after the requested delay.
- */
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Read lock ownership metadata from a tracker lock directory.
- *
- * The metadata contains the owner PID, a unique release token, the acquisition
- * timestamp, and the tracker path. Invalid or missing metadata is treated as
- * unreadable so the stale-lock recovery path can fall back to directory age.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @returns {object|null} Parsed owner metadata, or null when unavailable.
- */
-function readLockOwner(lockDir) {
-  try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-// The recovery judgment comes from pipeline-lock rather than a second copy of
-// it. "Mirrors pipeline-lock" was the previous arrangement, and mirroring is
-// precisely what drifts: this copy still answered a bare boolean, so "the
-// directory was gone when I looked" reached the caller as a licence to DELETE
-// whatever is at that path now — a lock a rival acquirer may have created in
-// between, whose winner then dies with ENOENT writing its own owner.json.
-
-/**
  * Acquire an exclusive filesystem lock for one tracker mutation.
  *
  * The critical section must cover the full read/modify/write/move sequence, not
  * just the final write. Otherwise two processes can read the same old tracker
  * snapshot, compute independent updates, and let the later writer erase rows
- * written by the earlier one. The lock is implemented with atomic directory
- * creation, owner metadata, retry/backoff, stale-owner recovery, and a release
- * token so one process cannot delete another process's newer lock.
+ * written by the earlier one. The protocol (atomic directory creation, owner
+ * metadata, jittered retry, stale-owner recovery, and a token-checked release
+ * so one process cannot delete another process's newer lock) is
+ * lib/dir-lock.mjs, the same one every other core lock uses.
  *
  * @param {string} lockDir - Directory path used as the lock sentinel.
  * @param {object} [options] - Lock timing options.
@@ -540,210 +497,33 @@ function readLockOwner(lockDir) {
  * Lock handle with metadata and an idempotent release method.
  */
 export async function acquireTrackerLock(lockDir, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const recoverGuardDir = `${lockDir}.recover`;
-  const token = randomUUID();
-  const startedAt = Date.now();
-  let attempts = 0;
-  let staleRecovered = false;
-
-  // Jitter and the progress rule come from pipeline-lock rather than a fourth
-  // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
-  // on plain elapsed time, so it carried both defects #2506 and #2835 removed
-  // from the definition: waiters woke in lockstep and re-raced, and a caller
-  // waiting on a healthy lock being handed round briskly was killed anyway.
-  //
-  // There is no separate maxWaitMs knob here, so no hardDeadline is passed and
-  // the policy applies its own ceiling. Writing one out here would put a fourth
-  // copy of that bound in the tree, and a copy that drifts changes retry timing
-  // silently — nothing fails, so nothing reports it (#3895).
-  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline: Date.now() + timeoutMs,
+  // Test-only ordering signal for the cross-process writer-lock suite. It is
+  // emitted only after this process successfully creates the recover guard,
+  // and remains on disk after that short-lived directory is removed. The
+  // parent can therefore prove both contention and guard creation without
+  // sampling a sub-millisecond window. Production callers have no marker path
+  // and keep the existing lock behavior.
+  const testWaitingMarker = process.env.NODE_ENV === 'test'
+    ? process.env.CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER
+    : undefined;
+  return acquireDirLock(lockDir, {
+    timeoutMs: options.timeoutMs ?? 60_000,
+    retryMs: options.retryMs ?? 75,
+    staleMs: options.staleMs ?? 10 * 60_000,
+    owner: { tracker: options.tracker ?? '' },
+    removeLock: typeof options.removeLock === 'function' ? options.removeLock : undefined,
+    onRecoverGuard: testWaitingMarker
+      ? () => writeFileSync(testWaitingMarker, JSON.stringify({
+        pid: process.pid, lockDir, guardCreated: true,
+      }), { flag: 'wx' })
+      : undefined,
+    // Tagged so callers can tell "lock is busy, retry later" apart from
+    // filesystem/configuration failures rethrown out of the acquisition loop.
+    timeoutError: () => Object.assign(
+      new Error(`Timed out waiting for tracker lock at ${lockDir}`),
+      { code: 'LOCK_TIMEOUT' },
+    ),
   });
-  for (;;) {
-    if (holderStillWedged() || ceilingReached()) break;
-    attempts++;
-    try {
-      mkdirSync(lockDir);
-      try {
-        writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
-          pid: process.pid,
-          token,
-          started_at: new Date().toISOString(),
-          tracker: options.tracker ?? '',
-        }, null, 2));
-      } catch (ownerErr) {
-        // ENOENT writing owner.json means the just-won lock directory is
-        // gone: another caller (mis)judged it reclaimable and deleted it.
-        // A lost race, not a failure — re-enter the loop and compete again
-        // (mirrors pipeline-lock; dying here loses the caller's write).
-        if (ownerErr?.code === 'ENOENT') continue;
-        // We created the dir but could not record ownership. An empty,
-        // owner-less lock dir would block every future locker until the
-        // staleMs age-out — remove what we just created before rethrowing.
-        // Scoped to the owner write only: the mkdir contention path is still
-        // handled by the outer catch. Best-effort removal: a contended rm
-        // must not mask ownerErr, and the orphan ages out regardless.
-        rmLockArtifactSync(lockDir);
-        throw ownerErr;
-      }
-
-      let ownerVerified = false;
-      let verifiedDir = null;
-      let released = false;
-      const removeLock = typeof options.removeLock === 'function'
-        ? options.removeLock
-        : path => rmSync(path, { recursive: true, force: true });
-      return {
-        attempts,
-        waitMs: Date.now() - startedAt,
-        staleRecovered,
-        release() {
-          if (released) return;
-          if (ownerVerified) {
-            let currentDir;
-            try {
-              currentDir = statSync(lockDir);
-            } catch (err) {
-              if (err?.code === 'ENOENT') {
-                released = true;
-                return;
-              }
-              throw err;
-            }
-            if (!sameLockDirectory(verifiedDir, currentDir)) {
-              released = true;
-              return;
-            }
-            const owner = readLockOwner(lockDir);
-            if (owner && owner.token !== token) {
-              released = true;
-              return;
-            }
-            if (!owner && existsSync(join(lockDir, 'owner.json'))) {
-              throw new Error(`Cannot verify tracker lock ownership at ${lockDir}`);
-            }
-          } else {
-            let beforeRead;
-            try {
-              beforeRead = statSync(lockDir);
-            } catch (err) {
-              if (err?.code === 'ENOENT') {
-                released = true;
-                return;
-              }
-              throw err;
-            }
-            const owner = readLockOwner(lockDir);
-            if (owner?.token !== token) {
-              if (owner) released = true;
-              else throw new Error(`Cannot verify tracker lock ownership at ${lockDir}`);
-              return;
-            }
-            const afterRead = statSync(lockDir);
-            if (!sameLockDirectory(beforeRead, afterRead)) {
-              released = true;
-              return;
-            }
-            ownerVerified = true;
-            verifiedDir = afterRead;
-          }
-          // Best-effort, mirroring pipeline-lock's release: ownership was
-          // verified above, so a contended rm (Windows EPERM/EBUSY while
-          // another process stats the directory) must not kill a caller whose
-          // work already succeeded — the orphaned lock ages out via
-          // lockRecoveryVerdict. Injected removeLock hooks (fault tests) keep
-          // their errors: only the known contention codes are swallowed.
-          try {
-            removeLock(lockDir);
-          } catch (rmErr) {
-            if (!isRmContention(rmErr)) throw rmErr;
-          }
-          released = true;
-        },
-      };
-    } catch (err) {
-      // Not just EEXIST: Windows reports a lock directory that is mid-create
-      // or mid-remove by another process as EPERM/EACCES. That is contention,
-      // not failure — treating it as fatal is how a concurrent writer dies and
-      // its write is lost (#2777, measured on windows-latest).
-      if (!isMkdirContention(err)) throw err;
-      noteWaiting();
-
-      let hasRecoverGuard = false;
-      try {
-        mkdirSync(recoverGuardDir);
-        hasRecoverGuard = true;
-      } catch (guardErr) {
-        if (!isMkdirContention(guardErr)) throw guardErr;
-        // A process killed between creating the guard and its cleanup leaves
-        // the guard behind forever, permanently disabling stale-lock recovery
-        // for every future writer. The guard normally lives for milliseconds,
-        // so an old one is judged stale by the same age rule as a
-        // metadata-free lock and removed; the next loop iteration can then
-        // take the guard and run recovery.
-        //
-        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
-        // the guard is mid-flight right now, and reasoning about the age of a
-        // directory we cannot even stat reliably would evict a live guard.
-        // STALE only: a guard already gone needs no eviction, and evicting on
-        // that answer deletes the guard another caller has just taken.
-        if (guardErr.code === 'EEXIST'
-          && lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
-          rmLockArtifactSync(recoverGuardDir);
-        }
-      }
-
-      if (hasRecoverGuard) {
-        // Test-only ordering signal for the cross-process writer-lock suite.
-        // It is emitted only after this process successfully creates the
-        // recover guard, and remains on disk after that short-lived directory
-        // is removed. The parent can therefore prove both contention and
-        // guard creation without sampling a sub-millisecond window. Production
-        // callers have no marker path and keep the existing lock behavior.
-        const testWaitingMarker = process.env.NODE_ENV === 'test'
-          ? process.env.CAREER_OPS_TRACKER_TEST_LOCK_WAIT_MARKER
-          : undefined;
-        if (testWaitingMarker) {
-          try {
-            writeFileSync(testWaitingMarker, JSON.stringify({
-              pid: process.pid, lockDir, guardCreated: true,
-            }), { flag: 'wx' });
-          } catch {
-            // The hook is observational only; the bounded test wait reports a
-            // marker-write failure without changing lock acquisition behavior.
-          }
-        }
-
-        try {
-          // STALE only. VANISHED means the lock was absent when we looked, and
-          // by the time this line runs another acquirer may have won the mkdir
-          // and be partway through writing owner.json — deleting on that answer
-          // destroys a live lock and kills its winner with ENOENT.
-          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
-            if (rmLockArtifactSync(lockDir)) {
-              staleRecovered = true;
-              continue;
-            }
-            // rm hit contention: another process is touching the stale lock at
-            // this instant — back off instead of treating the collision as fatal.
-          }
-        } finally {
-          rmLockArtifactSync(recoverGuardDir);
-        }
-      }
-
-      await sleep(backoffMs());
-    }
-  }
-
-  // Tag the timeout so callers can tell "lock is busy, retry later" apart
-  // from filesystem/configuration failures rethrown out of the loop above.
-  const timeoutErr = new Error(`Timed out waiting for tracker lock at ${lockDir}`);
-  timeoutErr.code = 'LOCK_TIMEOUT';
-  throw timeoutErr;
 }
 
 /**
@@ -805,7 +585,7 @@ export const RENAME_RETRY_DELAYS_MS = [1, 2, 5, 10, 25, 50, 100];
 /**
  * Is this error Windows saying "the destination is busy right now"?
  *
- * Exported for the same reason `pipeline-lock.mjs` exports `isMkdirContention`
+ * Exported for the same reason `lib/dir-lock.mjs` exports `isMkdirContention`
  * and `isRmContention`: one definition, testable, and no second copy to drift.
  *
  * @param {unknown} err - Error thrown by a rename attempt.
@@ -838,7 +618,7 @@ function sleepSync(ms) {
  * `readFileSync` from a reporting script. The handle is released in
  * milliseconds, so a short backoff converts a lost write into a completed one.
  *
- * This mirrors `isMkdirContention` / `isRmContention` in pipeline-lock.mjs.
+ * This mirrors `isMkdirContention` / `isRmContention` in lib/dir-lock.mjs.
  * Same reasoning as #2777: treating portable-looking contention as fatal is how
  * a write gets LOST, and the tracker is the canonical store.
  *
