@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-sonnet-5+effort-medium, rep 1, profile ai-engineer.
+# Report: 001-northwind-ai-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3.2
+ARCHETYPE: Agentic / Automation
+ARCHETYPE_RAW: Agentic / Automation
+LEGITIMACY: Proceed with Caution
+DECISION: Consider
+WORK_AUTH: not_needed
+COST_USD: 1.0066510000000002
+TURNS: 19
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: missing risk_summary.culture; missing risk_summary.interview_redflags; missing risk_summary.ai_infra; missing risk_summary.ai_screening_disclosure
+EXPECT_FAILURES: none
+---END_SUMMARY---

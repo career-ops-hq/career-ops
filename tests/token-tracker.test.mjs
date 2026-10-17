@@ -94,6 +94,31 @@ try {
       fail(`estimateCost for ${model} failed: expected ${expected}, got ${actual}`);
     }
   }
+
+  // 9. Current Claude models price cache reads at their own (0.1x-class) rate,
+  //    not the generic 0.5x fallback, and resolve through provider prefixes and
+  //    OpenRouter's dotted version spelling without landing on a shorter sibling.
+  //    1M uncached + 1M cached input + 1M output:
+  const claudeUsage = { prompt_tokens: 2000000, completion_tokens: 1000000, cached_tokens: 1000000 };
+  const claudeCases = [
+    ['claude-haiku-4-5', 'claude', 1 + 0.1 + 5],
+    ['claude-sonnet-5', 'claude', 2 + 0.2 + 10],
+    ['claude-opus-5', 'claude', 5 + 0.5 + 25],
+    ['anthropic/claude-opus-5-5', 'openrouter', 4 + 0.2 + 20],
+    ['anthropic/claude-sonnet-4.6', 'openrouter', 3 + 0.3 + 15],
+    ['claude-some-future-model', 'claude', 2 + 0.2 + 10], // falls back to the standard tier (Sonnet 5)
+  ];
+  const prevModel = process.env.CAREER_OPS_MODEL;
+  process.env.CAREER_OPS_MODEL = 'set'; // OpenRouter is only priced when a model is pinned
+  for (const [model, provider, expected] of claudeCases) {
+    const actual = estimateCost(model, claudeUsage, provider);
+    if (actual !== null && Math.abs(actual - expected) < 1e-9) {
+      pass(`estimateCost prices ${model} (${provider}) at current Claude rates`);
+    } else {
+      fail(`estimateCost for ${model} (${provider}) failed: expected ${expected}, got ${actual}`);
+    }
+  }
+  if (prevModel === undefined) delete process.env.CAREER_OPS_MODEL; else process.env.CAREER_OPS_MODEL = prevModel;
 } catch (e) {
   fail(`token-tracker tests crashed: ${e.message}`);
 }

@@ -94,6 +94,19 @@ try {
     /^work_auth:/m.test(machineSummary),
     'batch Machine Summary YAML schema contains work_auth',
   );
+
+  // oferta.md carries its own copy of the Machine Summary skeleton: a pointer
+  // to batch-prompt.md alone left Haiku 4.5 meeting the full contract in 0 of
+  // 30 recorded runs; with the copy inline, 6 of 15
+  // (evals/results/README.md). The copy is only safe while it stays identical
+  // to the batch schema it mirrors.
+  const yamlFence = (text) => (text.match(/```yaml\n([\s\S]*?)```/) || [])[1] || '';
+  const batchSkeleton = yamlFence(machineSummary);
+  const ofertaSkeleton = yamlFence(section(oferta, '**Machine Summary (required):**', '**JD archival (required'));
+  assert(
+    batchSkeleton.length > 0 && ofertaSkeleton === batchSkeleton,
+    'oferta.md Machine Summary skeleton is identical to batch-prompt.md\'s',
+  );
 } catch (error) {
   fail(`prompt parity tests crashed: ${error.message}`);
 }

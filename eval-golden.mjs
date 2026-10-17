@@ -18,9 +18,10 @@
  *   - per-model $/run      → COST_PER_RUN_USD (empty until routing rates agreed)
  *
  * Usage:
- *   node eval-golden.mjs --replay --model cheap-stub     # offline, deterministic ($0)
+ *   node eval-golden.mjs --replay --model cheap-stub --allow-missing  # offline, deterministic ($0);
+ *                                          the stub covers only the 10 v1 cases
  *   node eval-golden.mjs --live   --model gpt-4o-mini    # calls openai-eval.mjs (needs key + cv.md)
- *   npm run eval:golden -- --replay --model cheap-stub
+ *   npm run eval:golden -- --replay --model claude-opus-5-5
  */
 
 import { readFileSync, readdirSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
@@ -61,6 +62,8 @@ if (args.includes('--help') || args.includes('-h')) {
   --model <id>     Candidate model id to evaluate (default: cheap-stub)
   --golden <dir>   Golden-set directory (default: evals/golden)
   --fixtures <dir> Replay fixtures directory (default: sibling of --golden)
+  --allow-missing  Replay: grade only the recorded cases instead of failing on
+                   cases with no fixture for --model
   --help           Show this help
 `);
   process.exit(0);
@@ -68,6 +71,7 @@ if (args.includes('--help') || args.includes('-h')) {
 
 const mode  = args.includes('--live') ? 'live' : 'replay';
 const model = argValue('--model') || 'cheap-stub';
+const allowMissing = args.includes('--allow-missing');
 const goldenDir = argValue('--golden') || GOLDEN_DIR;
 // Keep fixtures next to the golden set so a custom --golden dir resolves its
 // own fixtures (the default lands on evals/fixtures); override with --fixtures.
@@ -106,8 +110,10 @@ function fixtureModelId(m) {
  * Parse the machine-readable summary block produced by the eval scripts.
  *
  * @param {string} text - Raw model output containing a SCORE_SUMMARY block.
- * @returns {{score: number, archetype: string}} Parsed score/archetype; score
- *   is NaN and archetype is "unknown" when the block is missing or malformed.
+ * @returns {{score: number, archetype: string, expectFailures: string}} Parsed
+ *   score/archetype; score is NaN and archetype is "unknown" when the block is
+ *   missing or malformed. expectFailures is the case's failed objective checks
+ *   (evals/record-claude.mjs fixtures), empty when none or not recorded.
  */
 function parseSummary(text) {
   const block = text.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
@@ -118,6 +124,7 @@ function parseSummary(text) {
   return {
     score:     parseFloat(field('SCORE')),
     archetype: (field('ARCHETYPE') || 'unknown').toLowerCase(),
+    expectFailures: field('EXPECT_FAILURES') === 'none' ? '' : field('EXPECT_FAILURES'),
   };
 }
 
@@ -215,10 +222,23 @@ console.log(`(row ✅ needs both archetype + score; the gate counts archetype ag
 let archetypeHits = 0;
 const deltas = [];
 const latencies = [];
+// Replay only: cases never recorded for this model. A missing recording says
+// nothing about the model, so these leave the agreement denominator — but they
+// fail the gate unless --allow-missing asks for the recorded subset, so a plain
+// pass always means every case was graded.
+const unrecorded = [];
+// Cases whose recorded objective `expect` checks failed (e.g. an injected
+// instruction not flagged). Archetype agreement cannot see these; they fail
+// the gate on their own.
+const expectMisses = [];
 
 for (const tc of cases) {
   const t0 = Date.now();
   let parsed;
+  if (mode === 'replay' && !existsSync(join(fixtureDir, `${tc.id}__${fixtureModelId(model)}.txt`))) {
+    unrecorded.push(tc.id);
+    continue;
+  }
   try {
     parsed = parseSummary(getCompletion(tc));
   } catch (err) {
@@ -234,31 +254,51 @@ for (const tc of cases) {
   const scoreOk = Number.isFinite(delta) && delta <= SCORE_TOLERANCE;
   if (archetypeMatch) archetypeHits++;
   deltas.push(delta);
+  if (parsed.expectFailures) expectMisses.push(tc.id);
 
-  const ok = archetypeMatch && scoreOk;
+  const ok = archetypeMatch && scoreOk && !parsed.expectFailures;
   console.log(
     `  ${ok ? '✅' : '❌'} ${tc.id}: ` +
     `archetype ${parsed.archetype} vs ${String(tc.label.archetype).toLowerCase()} ` +
     `(${archetypeMatch ? 'match' : 'MISS'}); ` +
     `score ${parsed.score} vs ${tc.label.score} (Δ${Number.isFinite(delta) ? delta.toFixed(2) : 'n/a'}); ` +
+    `${parsed.expectFailures ? `expect FAILED: ${parsed.expectFailures}; ` : ''}` +
     `${mode === 'live' ? `${latencyMs}ms` : 'replay'}`,
   );
 }
 
-const agreement = archetypeHits / cases.length;
+const graded = cases.length - unrecorded.length;
+const agreement = graded ? archetypeHits / graded : 0;
 const finiteDeltas = deltas.filter(Number.isFinite);
 const meanDelta = finiteDeltas.length ? finiteDeltas.reduce((a, b) => a + b, 0) / finiteDeltas.length : NaN;
 // Cases whose SCORE was missing/malformed produce a NaN delta and drop out of
 // the mean — surface that count so a model can't hide failures behind a low mean.
-const unscored = cases.length - finiteDeltas.length;
+const unscored = graded - finiteDeltas.length;
 const cost = COST_PER_RUN_USD[model];
 
 console.log('\n  ── summary ──');
-console.log(`  archetype agreement : ${(agreement * 100).toFixed(0)}%  (gate ≥ ${(MIN_ARCHETYPE_AGREEMENT * 100).toFixed(0)}%)`);
-console.log(`  mean |Δscore|       : ${Number.isFinite(meanDelta) ? meanDelta.toFixed(2) : 'n/a'}  over ${finiteDeltas.length}/${cases.length} scored${unscored ? ` (${unscored} unscored)` : ''}  (tolerance ±${SCORE_TOLERANCE})`);
+if (unrecorded.length) {
+  console.log(`  not recorded        : ${unrecorded.length} case(s) have no fixture for "${model}" — skipped: ${unrecorded.join(', ')}`);
+}
+console.log(`  archetype agreement : ${(agreement * 100).toFixed(0)}%  over ${graded} graded  (gate ≥ ${(MIN_ARCHETYPE_AGREEMENT * 100).toFixed(0)}%)`);
+console.log(`  mean |Δscore|       : ${Number.isFinite(meanDelta) ? meanDelta.toFixed(2) : 'n/a'}  over ${finiteDeltas.length}/${graded} scored${unscored ? ` (${unscored} unscored)` : ''}  (tolerance ±${SCORE_TOLERANCE})`);
+if (expectMisses.length) console.log(`  expect checks       : ${expectMisses.length} case(s) failed: ${expectMisses.join(', ')}`);
 if (mode === 'live') console.log(`  median latency      : ${median(latencies)}ms`);
 console.log(`  est. $/run          : ${cost != null ? `$${cost}` : 'n/a — TODO(#1354)'}`);
 
-const passed = agreement >= MIN_ARCHETYPE_AGREEMENT;
-console.log(`\n  ${passed ? '✅ PASS' : '❌ FAIL'} — archetype agreement ${passed ? 'meets' : 'below'} gate\n`);
+const reasons = [];
+if (graded === 0) {
+  reasons.push(`nothing recorded for "${model}" — record fixtures first`);
+} else {
+  if (unrecorded.length && !allowMissing) {
+    reasons.push(`${unrecorded.length} case(s) not recorded — record them, or pass --allow-missing to grade the ${graded} recorded`);
+  }
+  if (agreement < MIN_ARCHETYPE_AGREEMENT) reasons.push('archetype agreement below gate');
+  if (expectMisses.length) reasons.push(`${expectMisses.length} case(s) failed their expect checks`);
+}
+const passed = reasons.length === 0;
+const verdict = passed
+  ? `archetype agreement meets gate${unrecorded.length ? ` over the ${graded} recorded case(s)` : ''}`
+  : reasons.join('; ');
+console.log(`\n  ${passed ? '✅ PASS' : '❌ FAIL'} — ${verdict}\n`);
 process.exit(passed ? 0 : 1);

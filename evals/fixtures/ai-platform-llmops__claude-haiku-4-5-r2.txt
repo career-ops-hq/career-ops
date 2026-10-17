@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5, rep 2, profile ai-engineer.
+# Report: 001-meridian-labs-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 4.8
+ARCHETYPE: AI Platform / LLMOps
+ARCHETYPE_RAW: AI Platform / LLMOps Engineer
+LEGITIMACY: High Confidence
+DECISION: null
+WORK_AUTH: null
+COST_USD: 0.2625002
+TURNS: 20
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key report_number; extra key url; extra key title; extra key location; extra key posting_legitimacy_tier; extra key score_breakdown; extra key recommendation; extra key match_summary; extra key critical_gaps; extra key caution_flags; extra key next_actions; extra key culture_screen; extra key compensation_advertised; extra key compensation_reliability; extra key work_authorization; missing legitimacy_tier; missing final_decision; missing hard_stops; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; missing work_auth; missing discard_reasons; missing via; missing company_confidential; missing advertised_comp; missing reports_to; missing requirement_importance; missing risk_summary
+EXPECT_FAILURES: none
+---END_SUMMARY---

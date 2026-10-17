@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5+schema-inline, rep 1, profile ai-engineer.
+# Report: 001-halcyon-robotics-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3.5
+ARCHETYPE: AI Forward Deployed
+ARCHETYPE_RAW: AI Forward Deployed Engineer
+LEGITIMACY: Proceed with Caution
+DECISION: null
+WORK_AUTH: null
+COST_USD: 0.278942
+TURNS: 14
+CONTRACT: machine_summary=false jd_archive=true tracker=true
+SCHEMA_ISSUES: no Machine Summary YAML
+EXPECT_FAILURES: none
+---END_SUMMARY---

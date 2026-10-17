@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5, rep 1, profile ai-engineer.
+# Report: 001-fathom-ai-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 4.6
+ARCHETYPE: AI Platform / LLMOps
+ARCHETYPE_RAW: AI Platform / LLMOps + Agentic
+LEGITIMACY: High Confidence
+DECISION: null
+WORK_AUTH: null
+COST_USD: 0.3077392
+TURNS: 17
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key date_evaluated; extra key match_with_cv; extra key north_star_alignment; extra key compensation; extra key cultural_signals; extra key red_flags; extra key work_authorization; extra key archetype_fit; extra key key_matches; missing final_decision; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; missing work_auth; missing discard_reasons; missing via; missing company_confidential; missing reports_to; 5 requirement_importance row(s) off-schema (e.g. not a map); extra key risk_summary.posting_legitimacy; extra key risk_summary.employment_classification; extra key risk_summary.culture_screen; extra key risk_summary.interview_red_flags; extra key risk_summary.ai_infrastructure_mismatch; missing risk_summary.legitimacy; missing risk_summary.classification; missing risk_summary.culture; missing risk_summary.interview_redflags; missing risk_summary.ai_infra; missing risk_summary.ai_screening_disclosure
+EXPECT_FAILURES: none
+---END_SUMMARY---
