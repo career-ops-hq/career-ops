@@ -309,8 +309,9 @@ export function resolveStudio(doc, edits) {
  * @returns {{op: "same"|"del"|"ins", text: string}[]}
  */
 export function wordDiff(before, after) {
-  const a = before.split(/(\s+)/).filter(Boolean);
-  const b = after.split(/(\s+)/).filter(Boolean);
+  const tokens = (t) => t.match(/\s+|[,;:](?=\s|$)|[^\s,;:]+|[,;:]/g) ?? [];
+  const a = tokens(before);
+  const b = tokens(after);
   const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
   const out = [];
@@ -331,5 +332,47 @@ export function wordDiff(before, after) {
   }
   while (i < a.length) push("del", a[i++]);
   while (j < b.length) push("ins", b[j++]);
+  return readableRuns(out);
+}
+
+const SHORT_SAME = 2;
+
+/**
+ * A raw word diff of a rewrite interleaves small matches ("the", ",") between
+ * changes and reads as noise. Short unchanged stretches between two changes
+ * are folded into the change, and each change prints as all removed words,
+ * then all inserted words.
+ *
+ * @param {{op: "same"|"del"|"ins", text: string}[]} parts
+ */
+function readableRuns(parts) {
+  const isShort = (t) => t.trim().split(/\s+/).filter(Boolean).length <= SHORT_SAME;
+  const out = [];
+  let del = "";
+  let ins = "";
+  const flush = () => {
+    if (del) out.push({ op: "del", text: del });
+    if (ins) out.push({ op: "ins", text: ins });
+    del = "";
+    ins = "";
+  };
+  parts.forEach((p, k) => {
+    if (p.op === "del") del += p.text;
+    else if (p.op === "ins") ins += p.text;
+    else if (
+      (del || ins) &&
+      k < parts.length - 1 &&
+      isShort(p.text) &&
+      ((parts[k - 1]?.op === "del" && parts[k + 1]?.op === "ins") ||
+        (parts[k - 1]?.op === "ins" && parts[k + 1]?.op === "del"))
+    ) {
+      del += p.text;
+      ins += p.text;
+    } else {
+      flush();
+      out.push(p);
+    }
+  });
+  flush();
   return out;
 }

@@ -143,7 +143,8 @@ export function parseBlocks(html) {
  * @typedef {{hidden: Set<string>, order: Record<string, string[]>, text: Record<string, string>}} BlockView
  */
 
-function arrange(children, order) {
+/** @template {{id: string}} T @param {T[]} children @param {string[] | undefined} order @returns {T[]} */
+export function arrange(children, order) {
   if (!order) return children;
   const byId = new Map(children.map((c) => [c.id, c]));
   const picked = order.map((id) => byId.get(id)).filter(Boolean);
