@@ -62,17 +62,19 @@ const PAYLOAD = {
  * fold → resolve template → build → gate. The optional PDF render is skipped
  * (it needs Playwright, and the step marks it optional).
  */
-function runDocumentedStep(payload) {
+function runDocumentedStep(payload, report = '') {
+  const seg = report ? `-${report}` : '';
   const dir = mkdtempSync(join(tmpdir(), 'pdf-ats-variant-'));
   const dataRoot = join(dir, 'root');
   mkdirSync(join(dataRoot, 'config'), { recursive: true });
   mkdirSync(join(dir, 'output'), { recursive: true });
   writeFileSync(join(dataRoot, 'cv.md'), CV_MD);
-  const styledJson = join(dir, 'cv-jane-smith-acme.json');
+  const styledJson = join(dir, `cv-jane-smith${seg}-acme.json`);
   writeFileSync(styledJson, JSON.stringify(payload, null, 2));
   const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
 
   const fill = (cmd, atsTemplate) => cmd
+    .replaceAll('[-{report}]', seg) // empty for a standalone run with no report number
     .replaceAll('{candidate}', 'jane-smith')
     .replaceAll('{company}', 'acme')
     .replaceAll('/tmp/', `${dir}/`)
@@ -128,6 +130,19 @@ test('the documented commands produce a gated ATS variant with competencies unde
     assert.doesNotMatch(text, /class="competency-tag"/, 'no CSS-separated tag spans in the ATS render');
     assert.deepEqual(JSON.parse(readFileSync(styledJson, 'utf-8')), PAYLOAD,
       'the styled payload must keep its competency grid; only the ATS copy is folded');
+  } finally {
+    cleanup();
+  }
+});
+
+test('with a report number, every path carries it before the company', () => {
+  const { dir, steps, cleanup } = runDocumentedStep(PAYLOAD, '042');
+  try {
+    for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}\n${s.stderr}`);
+    assert.ok(existsSync(join(dir, 'output', 'cv-jane-smith-042-acme-ats.html')),
+      'output/cv-{candidate}-{report}-{company}-ats.html must be written');
+    assert.ok(existsSync(join(dir, 'cv-jane-smith-042-acme-ats.json')),
+      '/tmp/cv-{candidate}-{report}-{company}-ats.json must be written');
   } finally {
     cleanup();
   }

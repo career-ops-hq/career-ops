@@ -177,7 +177,7 @@ If the role on screen differs from the one evaluated:
 
 The document uploaded to the form is the tailored CV the `pdf` mode built for this
 report — the active bundle's `cv/tailored/vNNN/cv.pdf`, or a flat
-`output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`. It is deliberately not `cv.md`:
+`output/cv-{candidate}[-{report}]-{company}-{YYYY-MM-DD}.pdf`. It is deliberately not `cv.md`:
 bullets are reselected and reordered, role framing is rewritten toward the
 employer's domain, and engagements may be regrouped under an umbrella firm. A
 reviewer reads the structured fields and the attached document side by side, so a
@@ -196,7 +196,7 @@ tailoring that made the application relevant.
 2. Several tailoring versions? The bundle keys them `v001`, `v002`, and so on. Take
    the highest one that exists on disk, and pass it back as `--version N` when you
    want the other paths beside it.
-3. No bundle, so a flat `output/cv-{candidate}-{company}-{YYYY-MM-DD}.html`.
+3. No bundle, so a flat `output/cv-{candidate}[-{report}]-{company}-{YYYY-MM-DD}.html`.
    `data/pdf-index.tsv` can shorten the search here, but it is a hint and not an
    answer. Its columns are `report \t pdf \t html \t format \t date` and there is
    no document-kind column: `generate-pdf.mjs` drops every earlier row for a report
