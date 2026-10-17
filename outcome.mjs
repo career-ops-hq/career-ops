@@ -481,7 +481,7 @@ if (postingArchived && resolvedPostingPath) {
   }
 }
 
-// 4. Append entry to outcome.md
+// 4. Prepare the journal entry (no write until the tracker confirms it)
 const outcomeLogPath = join(outcomeDir, 'outcome.md');
 const entryHeader = `## Entry: ${today()}`;
 const newEntry = `${entryHeader}
@@ -492,18 +492,6 @@ const newEntry = `${entryHeader}
 > ${flags.feedback ? flags.feedback.replace(/\r?\n/g, '\n> ') : 'None recorded'}
 - **Notes**: ${noteToAppend}
 `;
-
-if (existsSync(outcomeLogPath)) {
-  const existingLog = readFileSync(outcomeLogPath, 'utf-8');
-  if (!existingLog.includes(newEntry.trim())) {
-    writeFileSync(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry);
-  }
-} else {
-  const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
-
-${newEntry}`;
-  writeFileSync(outcomeLogPath, initialLog);
-}
 
 // 5. Update tracker via set-status.mjs
 const setStatusArgs = [
@@ -525,6 +513,23 @@ try {
   setStatusResult = JSON.parse(statusOutput);
 } catch (err) {
   failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+}
+
+// Publish the committed journal only after set-status confirms the transition.
+try {
+  if (existsSync(outcomeLogPath)) {
+    const existingLog = readFileSync(outcomeLogPath, 'utf-8');
+    if (!existingLog.includes(newEntry.trim())) {
+      writeFileSync(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry);
+    }
+  } else {
+    const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
+
+${newEntry}`;
+    writeFileSync(outcomeLogPath, initialLog);
+  }
+} catch (err) {
+  failExit(`Tracker updated, but outcome journal could not be saved: ${err.message}`, 'journal-write-failed', 1);
 }
 
 // 6. Clean up output/ — only ever removes a file whose archived copy in
