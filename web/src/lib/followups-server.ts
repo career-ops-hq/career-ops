@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { withFollowupsLock, FollowupsBusyError } from "@/lib/core/followups-lock";
 import { followupsEnabledFromProfile } from "@/lib/followups-setting.mjs";
 
@@ -73,7 +74,7 @@ export function followupsWriteError(e: unknown, fallback = "write failed"): Resp
 /** False only when config/profile.yml sets follow_ups.enabled: false. */
 export function readFollowupsEnabled(): boolean {
   try {
-    return followupsEnabledFromProfile(yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8")));
+    return followupsEnabledFromProfile(yaml.load(fs.readFileSync(getProfilePath(careerOpsRoot()), "utf8")));
   } catch {
     return true;
   }

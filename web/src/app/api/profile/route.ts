@@ -4,6 +4,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
 
 export const runtime = "nodejs";
@@ -70,7 +71,7 @@ export async function POST(req: Request) {
   if (Object.keys(proposed).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
 
   const root = careerOpsRoot();
-  const file = path.join(root, "config", "profile.yml");
+  const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
   let seeded = false;
   // DATA-LOSS GUARD (maintainer, bug-class #649/#704/#920/#958): distinguish

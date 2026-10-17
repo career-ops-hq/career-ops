@@ -4,6 +4,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { readJsonObject } from "@/lib/json-body";
@@ -74,7 +75,7 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
 }
 
 export async function GET() {
-  const file = path.join(careerOpsRoot(), "config", "profile.yml");
+  const file = getProfilePath(careerOpsRoot());
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
   let enabled = true;
   if (fs.existsSync(file)) {
@@ -121,7 +122,7 @@ export async function POST(req: Request) {
   }
 
   const root = careerOpsRoot();
-  const file = path.join(root, "config", "profile.yml");
+  const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
