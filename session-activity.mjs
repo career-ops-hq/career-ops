@@ -46,6 +46,7 @@ import { createHash, randomUUID } from 'crypto';
 import { join, resolve } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { lockRecoveryVerdict, RECOVER_STALE, rmLockArtifactSync, sameLockDirectory } from './pipeline-lock.mjs';
 
 const ROOT = getCareerOpsRoot();
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
@@ -103,6 +104,31 @@ function isStale(entry, path, ttlMs) {
   return false;
 }
 
+// Only stale removal is guarded. A competing recovery returns immediately;
+// ordinary claims still use exclusive file creation and remain advisory.
+function acquireReclaimGuard(path) {
+  const guard = `${path}.recover`;
+  try {
+    mkdirSync(guard);
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+    // Reuse the existing lock policy so a crashed recovery ages out without
+    // treating an unreadable or just-created guard as abandoned.
+    let judged;
+    try { judged = statSync(guard); } catch (err) {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    }
+    if (lockRecoveryVerdict(guard, DEFAULT_TTL_MS) === RECOVER_STALE) {
+      try {
+        if (sameLockDirectory(judged, statSync(guard))) rmLockArtifactSync(guard);
+      } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    }
+    return null;
+  }
+  return () => rmLockArtifactSync(guard);
+}
+
 /**
  * Report whether `key` currently has a live claim, without taking one.
  *
@@ -135,28 +161,41 @@ export function claimActivity(key, options = {}) {
   if (existing && !isStale(existing, path, ttlMs)) {
     return { claimed: false, owner: existing, token: null };
   }
-  if (existing) {
-    // Stale (dead pid or past TTL) — safe to reclaim.
-    try { unlinkSync(path); } catch (err) { if (err?.code !== 'ENOENT') throw err; }
-  }
-
-  const token = randomUUID();
-  const entry = {
-    key: String(key),
-    token,
-    pid: process.pid,
-    process_bound: options.processBound === true,
-    label: options.label || null,
-    claimed_at: new Date().toISOString(),
-  };
-  try {
-    writeFileSync(path, JSON.stringify(entry), { flag: 'wx' });
-    return { claimed: true, owner: entry, token };
-  } catch (err) {
-    if (err?.code !== 'EEXIST') throw err;
-    // Lost the race to another session claiming the same key at the same
-    // instant — report their claim rather than erroring.
+  const releaseGuard = existing ? acquireReclaimGuard(path) : null;
+  if (existing && !releaseGuard) {
     return { claimed: false, owner: readSentinel(path), token: null };
+  }
+  try {
+    if (releaseGuard) {
+      const current = readSentinel(path);
+      if (current && !isStale(current, path, ttlMs)) {
+        return { claimed: false, owner: current, token: null };
+      }
+      if (current) {
+        try { unlinkSync(path); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+      }
+    }
+
+    const token = randomUUID();
+    const entry = {
+      key: String(key),
+      token,
+      pid: process.pid,
+      process_bound: options.processBound === true,
+      label: options.label || null,
+      claimed_at: new Date().toISOString(),
+    };
+    try {
+      writeFileSync(path, JSON.stringify(entry), { flag: 'wx' });
+      return { claimed: true, owner: entry, token };
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+      // Lost the race to another session claiming the same key at the same
+      // instant — report their claim rather than erroring.
+      return { claimed: false, owner: readSentinel(path), token: null };
+    }
+  } finally {
+    releaseGuard?.();
   }
 }
 
@@ -187,7 +226,13 @@ export function gcStaleActivity(options = {}) {
     const path = join(activityDir, name);
     const entry = readSentinel(path);
     if (isStale(entry, path, ttlMs)) {
-      try { unlinkSync(path); removed++; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+      const releaseGuard = acquireReclaimGuard(path);
+      if (!releaseGuard) continue;
+      try {
+        if (isStale(readSentinel(path), path, ttlMs)) {
+          try { unlinkSync(path); removed++; } catch (err) { if (err.code !== 'ENOENT') throw err; }
+        }
+      } finally { releaseGuard(); }
     }
   }
   return removed;
