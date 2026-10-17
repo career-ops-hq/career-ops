@@ -21,6 +21,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { basename, resolve, dirname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
+import * as yaml from 'js-yaml';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -132,12 +133,15 @@ function detectAts(url) {
 function readProfile() {
   const profilePath = resolve(DATA_ROOT, 'config/profile.yml');
   if (!existsSync(profilePath)) return {};
-  const raw = readFileSync(profilePath, 'utf-8');
-
-  const pick = (key) => {
-    const m = raw.match(new RegExp(`^\\s*${key}:\\s*["']?([^"'\\n]+?)["']?\\s*$`, 'm'));
-    return m ? m[1].trim() : '';
-  };
+  let profile;
+  try {
+    profile = yaml.load(readFileSync(profilePath, 'utf-8')) ?? {};
+    if (typeof profile !== 'object' || Array.isArray(profile)) throw new Error('expected a mapping');
+  } catch (err) {
+    console.error(`Error: invalid profile YAML at ${profilePath}: ${err.message}`);
+    process.exit(1);
+  }
+  const pick = key => String(profile[key] ?? '').trim();
 
   const fullName = pick('full_name');
   const [firstName, ...rest] = fullName.split(' ');
