@@ -139,6 +139,7 @@ Simpan evaluasi lengkap ke `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (isi lengkap blok F)
 
 ## G) Draft jawaban untuk lamaran
+<!-- career-ops:draft-answers -->
 (hanya jika score >= 4.5 -- draft jawaban untuk formulir lamaran)
 
 ---

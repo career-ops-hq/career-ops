@@ -152,7 +152,7 @@ Before drafting answers, read the matched report's Block G fixed-term finding an
 
    - **Exit 0** → the JSON on stdout is the base snapshot of previous answers. `null` means the report has no section; treat it as a fresh application.
    - **Non-zero exit** → the section is partially unreadable and strict mode refused it, naming every unreadable line on stderr. Do NOT fall back to reading the section as prose, and do NOT proceed with a partial base — a silently dropped answer looks like an answer the candidate never gave, and an absorbed one corrupts an answer they did give. Show the candidate the named lines and ask whether to fix the report first or continue without the affected answers.
-   - A **Section H** (`## H) Draft Application Answers`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes:
+   - The evaluation's **draft-answers block** (drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes. Do not look for it by heading: it is `## H) Draft Application Answers` in the canonical mode but a translated name, and sometimes `## G)`, in localized ones. The reader finds it by the `<!-- career-ops:draft-answers -->` marker the modes emit under that heading:
 
      ```bash
      node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft

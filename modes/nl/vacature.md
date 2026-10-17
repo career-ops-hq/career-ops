@@ -139,6 +139,7 @@ Sla de volledige evaluatie op in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (volledige inhoud van blok F)
 
 ## G) Conceptantwoorden voor de sollicitatie
+<!-- career-ops:draft-answers -->
 (alleen bij score >= 4,5 -- conceptantwoorden voor het sollicitatieformulier)
 
 ---
