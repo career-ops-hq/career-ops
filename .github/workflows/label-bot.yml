@@ -14,6 +14,7 @@ on:
         type: string
 
 permissions:
+  contents: read         # el checkout de .github/scripts (sin él, «Repository not found» en un fork privado: #4635, #4616)
   pull-requests: write   # solo PRs (la validación rechaza issues): basta para la API de labels, como actions/labeler
   actions: write         # redisparar direction-gate cuando cambia una label direction/*
 
