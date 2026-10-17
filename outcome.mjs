@@ -18,7 +18,7 @@
  * Synchronizes tracker status using set-status.mjs under shared tracker lock.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
+import { accessSync, constants, statSync, readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'fs';
 import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -248,6 +248,12 @@ let isPdf = false;
 
 // Case A: A custom CV path is explicitly passed via CLI options.
 if (flags.cv) {
+  try {
+    if (!statSync(flags.cv).isFile()) throw new Error('not a file');
+    accessSync(flags.cv, constants.R_OK);
+  } catch (err) {
+    failExit(`Selected CV is not a readable file: ${flags.cv} (${err.message})`, 'invalid-cv', 1);
+  }
   cvResolvedPath = flags.cv;
   isPdf = flags.cv.toLowerCase().endsWith('.pdf');
 } else {
