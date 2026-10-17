@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { dump as yamlDump, load as yamlLoad } from 'js-yaml';
 import { rmSync } from './helpers.mjs';
 import { extractJobFacts, invalidateJobFacts, lookupJobFacts } from '../evaluation-cache.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const identityUrl = new URL('../listing-fingerprint.mjs', import.meta.url);
@@ -355,7 +356,7 @@ function runCli(...args) {
 test('cache CLI help works without identity dependency and rejects unknown flags', () => {
   for (const flag of ['--help', '-h']) {
     const result = runCli(flag);
-    assert.equal(result.status, 0, result.all);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(result.all, /usage:/i);
   }
   const bad = runCli('--help', '--bogus');
@@ -388,6 +389,6 @@ test('missing identity dependency returns an explicit miss without deriving a su
   const path = join(root, 'input.json');
   writeFileSync(path, '{}');
   const result = runCli('--identity', path, '--liveness', path, '--reports', root);
-  assert.equal(result.status, 0, result.all);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.deepEqual(JSON.parse(result.stdout), { status: 'miss', reason: 'listing-identity-unavailable' });
 });

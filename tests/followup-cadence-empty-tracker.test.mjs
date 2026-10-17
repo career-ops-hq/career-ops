@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'followup-cadence.mjs');
@@ -28,7 +29,7 @@ function runWithTracker(trackerContent) {
 
 test('an empty tracker exits 0 with noData and a zeroed report', () => {
   const result = runWithTracker('# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|------|---------|------|-------|--------|-----|--------|-------|\n');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stdout}${result.stderr}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   const json = JSON.parse(result.stdout);
   assert.equal(json.error, 'No applications found in tracker.');
   assert.equal(json.noData, true);

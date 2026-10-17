@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const doctor = fileURLToPath(new URL('../doctor.mjs', import.meta.url));
 
@@ -41,7 +42,7 @@ require('node:module').syncBuiltinESMExports();
     env: { ...process.env, LC_ALL: 'zh_CN.UTF-8', LANGUAGE: 'zh_CN', CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' },
   });
   assert.equal(result.error, undefined);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(result.stderr, '');
   const state = JSON.parse(result.stdout);
   return { warnings: state.warnings.join('\n'), env: JSON.parse(readFileSync(capture, 'utf8')) };

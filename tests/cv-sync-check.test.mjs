@@ -24,6 +24,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -81,7 +82,7 @@ test('a complete setup passes', () => {
       'candidate:\n  full_name: "Jane Roe"\n  email: jane@example.com\n  location: Lisbon\n');
     const r = runAgainst(dir);
     assert.ok(!looksLikeCrash(r.all), r.all.slice(0, 400));
-    assert.equal(r.status, 0, `expected a clean pass, got ${r.status}:\n${r.all.slice(0, 400)}`);
+    assert.equal(r.status, 0, describeSpawn(r, `expected a clean pass, got ${r.status}:\n${r.all.slice(0, 400)}`));
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
   }

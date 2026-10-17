@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fixReportLinks } from '../fix-report-links.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const HEADER = [
@@ -256,7 +257,7 @@ test('unknown flag is rejected; --help prints usage', withRoot((root) => {
   assert.match(bad.out, /--dryrun/);
   assert.equal(tracker(root), before, 'a mistyped flag must not fall through to a live run');
   const help = run(root, ['--help']);
-  assert.equal(help.status, 0);
+  assert.equal(help.status, 0, describeSpawn(help));
   assert.match(help.out, /Usage: node fix-report-links\.mjs/);
 }));
 
