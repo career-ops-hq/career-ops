@@ -8,6 +8,7 @@
   },
   "scripts": {
     "doctor": "node doctor.mjs",
+    "ui": "node scripts/ui-server.mjs",
     "or": "node openrouter-runner.mjs",
     "or:scan": "node openrouter-runner.mjs scan",
     "or:pipeline": "node openrouter-runner.mjs pipeline",

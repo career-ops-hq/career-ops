@@ -272,3 +272,10 @@ data/interview-prep/
 /tectonic.exe
 /tectonic.part
 /tectonic.part.exe
+
+# Web UI local runtime and environment
+.career-ops.env
+**/.career-ops.env
+.next/
+web/.next/
+web/out/
