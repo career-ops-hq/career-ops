@@ -18,11 +18,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs, { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import fs, { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, utimesSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireDirLock, DirLockTimeoutError } from '../lib/dir-lock.mjs';
+import {
+  acquireDirLock, tryAcquireDirLockSync, lockRecoveryVerdict, DirLockTimeoutError, RECOVER_LIVE, RECOVER_STALE,
+} from '../lib/dir-lock.mjs';
 import { acquirePortalHealthLock, LockTimeoutError as PortalLockTimeoutError } from '../portal-health-lock.mjs';
 import { acquirePipelineLock } from '../pipeline-lock.mjs';
 import { acquireTrackerLock } from '../tracker-utils.mjs';
@@ -248,3 +251,68 @@ test('a stamp that stays unreadable falls back to the directory we created', asy
   assert.equal(ownerToken(lockDir), lock.token, 'and it really does carry our stamp');
   lock.release();
 });
+
+// The non-waiting entry point makes the same pass acquireDirLock does, so it is
+// not a weaker lock: a live holder answers null, and a crashed holder's lock is
+// reclaimed in line rather than reported busy for ever.
+test('tryAcquireDirLockSync answers busy for a live holder and reclaims a crashed one', (t) => {
+  const dir = scratch(t, 'dir-lock-sync-');
+  const lockDir = join(dir, 'x.lock');
+  plantPeerLock(fs.writeFileSync, lockDir);
+  assert.equal(tryAcquireDirLockSync(lockDir, { staleMs: 60_000 }), null);
+  assert.equal(ownerToken(lockDir), 'peer', 'a live holder keeps its lock');
+
+  rmSync(lockDir, { recursive: true, force: true });
+  mkdirSync(lockDir);
+  const exited = spawnSync(process.execPath, ['-e', '']);
+  fs.writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: exited.pid, token: 'crashed', started_at: new Date().toISOString() }));
+  const lock = tryAcquireDirLockSync(lockDir, { staleMs: 60_000 });
+  assert.ok(lock, 'a crashed holder does not block a non-waiting caller');
+  assert.equal(lock.staleRecovered, true);
+  assert.equal(ownerToken(lockDir), lock.token);
+  lock.release();
+  assert.equal(existsSync(lockDir), false);
+});
+
+// A plain FILE at the lock path is never a live lock under this protocol; it is
+// a leftover from a caller that locked with an O_EXCL file at that name before
+// moving here (the web's chat store did). Reading owner.json through it fails
+// ENOTDIR, which used to read as "could not look" and pinned it LIVE for ever.
+// It is ownerless, so the age rule decides: respected while fresh, reclaimed
+// once old.
+test('a leftover lock file at the lock path is judged by age, not pinned live for ever', async (t) => {
+  const dir = scratch(t, 'dir-lock-file-');
+  const lockDir = join(dir, 'x.lock');
+  fs.writeFileSync(lockDir, '');
+  assert.equal(lockRecoveryVerdict(lockDir, 60_000), RECOVER_LIVE, 'a fresh file may be a save in flight');
+  assert.equal(tryAcquireDirLockSync(lockDir, { staleMs: 60_000 }), null);
+  const dayAgo = new Date(Date.now() - 86_400_000);
+  utimesSync(lockDir, dayAgo, dayAgo);
+  assert.equal(lockRecoveryVerdict(lockDir, 60_000), RECOVER_STALE);
+  const lock = await acquireDirLock(lockDir, FAST);
+  assert.equal(lock.staleRecovered, true);
+  assert.ok(fs.statSync(lockDir).isDirectory());
+  lock.release();
+  assert.equal(existsSync(lockDir), false);
+});
+
+// The non-waiting entry point shares the read-back rule, not just the pass: an
+// inconclusive read of its own stamp is re-read and then settled by identity,
+// never taken as lost (which would answer "busy" against its own lock and leave
+// it orphaned under this process's live pid).
+for (const [label, times] of [['for a moment', 2], ['for good', Infinity]]) {
+  test(`tryAcquireDirLockSync: a stamp unreadable ${label} is still ours`, (t) => {
+    const dir = scratch(t, 'dir-lock-sync-readback-');
+    const lockDir = join(dir, 'x.lock');
+    const reads = failOwnerReads(lockDir, times);
+    t.after(() => reads.restore());
+    const lock = tryAcquireDirLockSync(lockDir, { staleMs: 60_000 });
+    assert.ok(lock, 'acquired, not reported busy against its own lock');
+    assert.equal(lock.attempts, 1);
+    assert.ok(reads.failed >= 2, 'the read-back met the injected failures');
+    reads.restore();
+    assert.equal(ownerToken(lockDir), lock.token);
+    lock.release();
+    assert.equal(existsSync(lockDir), false);
+  });
+}

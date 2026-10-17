@@ -9,9 +9,9 @@
 //
 // These tests pin three things:
 //   1. the contention classifiers agree on the measured Windows codes,
-//   2. there is ONE implementation of the protocol, lib/dir-lock.mjs — and the
-//      files that could hold a second one are derived from the repo, not
-//      listed here. #2984 patched two files and declared the drift dead; there
+//   2. there is ONE implementation of the protocol, lib/dir-lock.mjs (plus the
+//      web's byte-identical copy of it) — and the files that could hold a
+//      second one are derived from the repo, not listed here. #2984 patched two files and declared the drift dead; there
 //      were four, and the other two carried all three faces of the bug for
 //      weeks,
 //   3. no bare rmSync of a lock artifact remains in the acquisition path.
@@ -28,15 +28,12 @@ console.log('\n🔒 lock artifacts: rm contention is contention, not death (#277
 const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
 
 const DEFINITION = 'lib/dir-lock.mjs';
-
-// Lock bodies the shared protocol has not reached yet, each with the reason.
-// The web bundle cannot import the core (its Turbopack root is pinned to web/),
-// so its lock moves onto a parity-tested mirror of lib/dir-lock.mjs in its own
-// change. Section 3 fails if an entry here stops carrying a lock body, so the
-// list can only shrink.
-const NOT_YET_PORTED = new Map([
-  ['web/src/lib/scheduled-jobs-store.mjs', 'web port tracked in #5358'],
-]);
+// The web bundle cannot import the core (web/next.config.mjs pins its Turbopack
+// root to web/), so it carries a copy. A copy is a second body only if it can
+// differ, so it is accepted on one condition, checked here as well as in its
+// own parity test (web/tests/lib/dir-lock.test.mjs): byte-for-byte identity.
+const MIRROR = 'web/src/lib/core/dir-lock.mjs';
+const PROTOCOL_FILES = [DEFINITION, MIRROR];
 
 // Every module git ships, minus the suites: test fixtures stamp owner.json by
 // hand on purpose, to stage the states the lock must survive.
@@ -96,32 +93,44 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
   // walk failed, not that the repository is clean.
   ok(shipped.length > 100, `scanned ${shipped.length} shipped .mjs files (the guard can see the tree)`);
 
+  // Two shapes of lock body. A mkdir paired with an owner.json stamp is this
+  // protocol's own shape, written again. An exclusive create ('wx') of a
+  // `.lock` file is the older shape: the web's chat store locked that way, with
+  // no stale recovery at all, and the mkdir rule could not see it (#5358).
   const lockBodies = shipped.filter((rel) => {
     const src = withoutComments(readFileSync(join(ROOT, rel), 'utf-8'));
-    return /\bmkdir(?:Sync)?\(/.test(src) && src.includes('owner.json');
+    const dirLock = /\bmkdir(?:Sync)?\(/.test(src) && src.includes('owner.json');
+    const fileLock = /\b(?:openSync|writeFileSync|open)\([^;]*\.lock[`'"][^;]*['"]wx\+?['"]/.test(src);
+    return dirLock || fileLock;
   });
   ok(lockBodies.includes(DEFINITION), `${DEFINITION} is found by the scan (it is the definition)`);
-  for (const rel of lockBodies.filter((f) => f !== DEFINITION)) {
-    ok(
-      NOT_YET_PORTED.has(rel),
-      NOT_YET_PORTED.has(rel)
-        ? `${rel} still carries its own lock body, exempt for now (${NOT_YET_PORTED.get(rel)})`
-        : `${rel} pairs mkdir with owner.json, so it carries an acquire loop of its own — use acquireDirLock from ${DEFINITION}`,
-    );
+  for (const rel of lockBodies.filter((f) => !PROTOCOL_FILES.includes(f))) {
+    fail(`${rel} carries a lock body of its own — use acquireDirLock or tryAcquireDirLockSync from ${DEFINITION} (the web: ${MIRROR})`);
   }
-  // The exemption list may only shrink. An entry whose file no longer carries
-  // a lock body is stale, and a stale exemption would wave through the next
-  // copy written at that path.
-  for (const [rel, why] of NOT_YET_PORTED) {
-    ok(lockBodies.includes(rel), `${rel}: its NOT_YET_PORTED exemption (${why}) is still needed — remove the entry once the file carries no lock body`);
+  if (lockBodies.every((f) => PROTOCOL_FILES.includes(f))) {
+    pass(`no shipped module outside ${PROTOCOL_FILES.join(' and ')} carries a lock body`);
   }
+
+  // The mirror is only exempt while it IS the definition.
+  const definitionBytes = readFileSync(join(ROOT, DEFINITION));
+  ok(
+    existsSync(join(ROOT, MIRROR)) && readFileSync(join(ROOT, MIRROR)).equals(definitionBytes),
+    `${MIRROR} is byte-for-byte ${DEFINITION} (copy the core file across after editing it)`,
+  );
+
+  // The scan has to be able to see the shape it exists to forbid. The chat
+  // store's own former lock line, which the mkdir rule missed:
+  ok(
+    /\b(?:openSync|writeFileSync|open)\([^;]*\.lock[`'"][^;]*['"]wx\+?['"]/.test("try { fd = openSync(`${file}.lock`, 'wx', 0o600); }"),
+    'the file-lock rule recognizes an O_EXCL .lock file',
+  );
 
   // The recover guard is the protocol's other signature: nothing else in this
   // repo takes a second atomic directory to serialize stale recovery.
   const guardImplementors = shipped.filter((rel) => readFileSync(join(ROOT, rel), 'utf-8').includes('recoverGuardDir'));
   ok(
-    guardImplementors.length === 1 && guardImplementors[0] === DEFINITION,
-    `only ${DEFINITION} implements the recover guard (found: ${guardImplementors.join(', ') || 'none'})`,
+    guardImplementors.length === PROTOCOL_FILES.length && PROTOCOL_FILES.every((f) => guardImplementors.includes(f)),
+    `only ${PROTOCOL_FILES.join(' and ')} implement the recover guard (found: ${guardImplementors.join(', ') || 'none'})`,
   );
 }
 
