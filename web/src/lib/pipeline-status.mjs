@@ -21,7 +21,8 @@ export function applySavedStatus(rows, saved) {
  * @param {string} current
  * @param {string} next
  * @param {typeof fetch} [request]
- * @returns {Promise<string | null>}
+ * @returns {Promise<{status: string, followupSeeded?: {seeded?: boolean, nextDate?: string | null, reason?: string}} | null>}
+ *   What the route sent, so its additive fields reach the caller.
  */
 export async function saveStatus(n, current, next, request = fetch) {
   if (next === current) return null;
@@ -38,7 +39,7 @@ export async function saveStatus(n, current, next, request = fetch) {
   if (result?.ok !== true || result.status !== next) {
     throw new Error("Could not confirm the saved status. Refresh before trying again.");
   }
-  return result.status;
+  return result;
 }
 
 /** One status for many rows. Saves run one at a time, because each save takes
