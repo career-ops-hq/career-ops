@@ -68,11 +68,11 @@ import {
   normalizeStatus,
 } from './followup-cadence.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
 const PACKAGE_JSON = join(CAREER_OPS, 'package.json');
 
 const DEFAULT_STALE_AFTER_DAYS = 365;

@@ -58,7 +58,7 @@ import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { parseDate } from './lib/parse-date.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -66,7 +66,7 @@ const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-i
   ? join(DATA_ROOT, 'data/active-interviews.md')
   : join(DATA_ROOT, 'active-interviews.md');
 export const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
 
 export const DEFAULT_COURTESY_DAYS = 30;
 

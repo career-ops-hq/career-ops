@@ -79,7 +79,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -102,7 +102,7 @@ const parseYaml = yaml.load;
 import { resolveTrackerPath } from './path-resolver.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
+const PROFILE_PATH = getProfilePath();
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
 // the checkout - already gets its own portals.yml and profile, but without these

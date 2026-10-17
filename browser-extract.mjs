@@ -47,7 +47,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { classifyLiveness } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
@@ -91,7 +91,7 @@ const NAV_LABEL_STOPWORDS = new Set([
  * @param {string} [profilePath]
  * @returns {'cli'|'mcp'}
  */
-export function resolveExtractorMode(profilePath = join(CAREER_OPS, 'config/profile.yml')) {
+export function resolveExtractorMode(profilePath = getProfilePath()) {
   try {
     if (!existsSync(profilePath)) return 'mcp';
     const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};

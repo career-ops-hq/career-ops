@@ -68,7 +68,7 @@
 import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, extractTrackerReportLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import * as yaml from 'js-yaml';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -1494,7 +1494,7 @@ function collectSources() {
 }
 
 function loadProfileDesired() {
-  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return null;
   try {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
@@ -1512,7 +1512,7 @@ function loadProfileDesired() {
 // throughout config/profile.example.yml; `location.city` is the fallback for
 // a profile that only fills in the structured `location:` block.
 function loadProfileLocation() {
-  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return null;
   try {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8'));

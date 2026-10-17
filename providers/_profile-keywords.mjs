@@ -17,6 +17,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import * as yaml from 'js-yaml';
+import { getProfilePath } from '../path-resolver.mjs';
 
 // Matches the CAREER_OPS_PROFILE override already honored by scan.mjs,
 // cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and
@@ -26,7 +27,7 @@ import * as yaml from 'js-yaml';
 // the variable held when the first provider loaded, so a test could not
 // isolate the fallback from a developer's own CAREER_OPS_PROFILE.
 function defaultProfilePath() {
-  return process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+  return getProfilePath();
 }
 
 function cleanKeywords(value) {

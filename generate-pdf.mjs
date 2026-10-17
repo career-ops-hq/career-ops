@@ -46,7 +46,7 @@ import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
@@ -64,6 +64,17 @@ const trackerPath = resolveTrackerPath(getCareerOpsRoot());
 // spelling the rest of the module compares against stays canonical as before.
 const workspaceRoot = resolveWorkspaceRootFor(getCareerOpsRoot());
 const PDF_PAGE_MARGIN = '0.6in';
+
+/**
+ * The profile a render reads. An explicit root is the workspace the caller
+ * named, so the environment does not redirect it. Otherwise CAREER_OPS_PROFILE
+ * names the file outright, and without it the profile sits in the workspace
+ * (which CAREER_OPS_TRACKER can move off the data root, #2471).
+ */
+function workspaceProfilePath(explicitRoot) {
+  if (explicitRoot) return getProfilePath(explicitRoot);
+  return hasProfileOverride() ? getProfilePath() : getProfilePath(workspaceRoot);
+}
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
 // /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
@@ -1267,7 +1278,7 @@ export function injectPrintPageCss(html, format, country) {
   // lib/page-format.mjs so a caller that passes nothing gets the user's
   // configured size instead of a fallback private to this file.
   const pageSize = PAGE_CSS_SIZE[resolvePageFormat(format, {
-    profilePath: resolve(workspaceRoot, 'config', 'profile.yml'),
+    profilePath: workspaceProfilePath(),
     country,
   })];
   // Read --page-margin (set by the template's own :root default, and overridden
@@ -1594,7 +1605,7 @@ async function generatePDF() {
   // The pre-resolution flag travels to the batch so an entry's own country can
   // still steer `auto`; the resolved size below would already have settled it.
   const flagFormat = format;
-  format = resolvePageFormat(format, { profilePath: resolve(workspaceRoot, 'config', 'profile.yml'), country });
+  format = resolvePageFormat(format, { profilePath: workspaceProfilePath(), country });
 
   // Batch mode (#2384): render every document in the manifest through one
   // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
@@ -1692,7 +1703,7 @@ async function generatePDF() {
   // __dirname anchor made CAREER_OPS_TRACKER split one logical profile across
   // two files — style from the workspace, section order from the checkout —
   // and validated the workspace's CV against the checkout's declared order.
-  html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
+  html = reorderCvSections(html, readCvSectionOrder(workspaceProfilePath()));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
   validateCvExperienceOrder(html, { allowNonChronological });
@@ -1717,7 +1728,7 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
-    styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
+    styleTokens: readStyleTokens(workspaceProfilePath()),
   });
 }
 
@@ -1790,7 +1801,7 @@ async function runBatchFromManifest(manifestPath, globals) {
   }
   // Read one workspace profile for the batch. The working directory must not
   // choose a different theme from the single-document render.
-  const profilePath = resolve(workspaceRoot, 'config', 'profile.yml');
+  const profilePath = workspaceProfilePath();
   const cvSectionOrder = readCvSectionOrder(profilePath);
   const styleTokens = readStyleTokens(profilePath);
 
@@ -2049,7 +2060,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  */
 async function renderInPage(browser, html, outputPath, opts = {}) {
   const outputRoot = opts.workspaceRoot || workspaceRoot;
-  const format = resolvePageFormat(opts.format, { profilePath: resolve(outputRoot, 'config', 'profile.yml'), country: opts.country });
+  const format = resolvePageFormat(opts.format, { profilePath: workspaceProfilePath(opts.workspaceRoot), country: opts.country });
   const requestedBaseDir = resolve(opts.baseDir || outputRoot);
   // Temporary HTML is an output too: never let an external input path or
   // caller-supplied baseDir choose an arbitrary directory. If the requested
@@ -2087,7 +2098,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // properties so the templates' var(--x, <default>) reads pick them up (#1837).
   // No `style:` block → no tokens → byte-identical output. Both the CV path and
   // the cover-letter path flow through here, so both are themed from one place.
-  const styleTokens = opts.styleTokens ?? readStyleTokens(resolve(outputRoot, 'config', 'profile.yml'));
+  const styleTokens = opts.styleTokens ?? readStyleTokens(workspaceProfilePath(opts.workspaceRoot));
   html = injectThemeStyle(html, styleTokens);
 
   html = injectPrintPageCss(html, format, opts.country);

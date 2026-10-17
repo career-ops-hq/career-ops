@@ -1987,11 +1987,12 @@ export function isUserConfiguredTemplateVariant(file, configuredVariants = {}) {
   if (!match) return false;
   const kind = TEMPLATE_VARIANT_KIND[match[1]];
   const name = match[2];
-  const configured = configuredVariants?.[kind];
+  // One name per kind, or a list of them when several profiles are in play.
+  const configured = [configuredVariants?.[kind]].flat();
   // "standard" resolves to the base template (without a named suffix), so
   // a leftover cv-template.standard.* / cover-letter-template.standard.* is
   // inactive and must remain eligible for stale-file pruning.
-  return Boolean(configured) && configured !== 'standard' && configured === name;
+  return configured.some((candidate) => Boolean(candidate) && candidate !== 'standard' && candidate === name);
 }
 
 /**
@@ -2176,20 +2177,48 @@ export function configuredTemplateVariantPathsToPreserve(
  * The callback keeps Git access in apply() while making the data-root read
  * directly testable without mutating the real repository.
  *
- * @param {{dataRoot?: string, remoteFiles?: string[], readRemoteContent?: (path: string) => string,
+ * `profilePath` names the profile outright (apply() passes the one
+ * CAREER_OPS_PROFILE selects); without it the profile is the one under `dataRoot`.
+ * An unparsable profile stops the update, unless `tolerateUnreadableProfile` says
+ * this one is not the profile in force: then it is skipped and reported in `warnings`.
+ *
+ * @param {{dataRoot?: string, profilePath?: string, tolerateUnreadableProfile?: boolean, remoteFiles?: string[], readRemoteContent?: (path: string) => string,
  *   readLocalContent?: (path: string) => string, localPathExists?: (path: string) => boolean}} options
- * @returns {Promise<{configuredVariants: object, localFiles: string[], localContents: object, remoteContents: object, preservedPaths: string[]}>}
+ * @returns {Promise<{configuredVariants: object, warnings: string[], localFiles: string[], localContents: object, remoteContents: object, preservedPaths: string[]}>}
  */
 export async function snapshotConfiguredTemplateVariants({
   dataRoot = ROOT,
+  profilePath,
+  tolerateUnreadableProfile = false,
   remoteFiles = [],
   readRemoteContent = () => null,
   readLocalContent = (path) => readFileSync(path, 'utf8'),
   localPathExists = existsSync,
 } = {}) {
-  const configuredVariants = await loadConfiguredTemplateVariants({
-    profilePath: join(dataRoot, 'config', 'profile.yml'),
-  });
+  let resolvedProfilePath = profilePath;
+  if (!resolvedProfilePath) {
+    try {
+      resolvedProfilePath = (await import('./path-resolver.mjs')).getProfilePath(dataRoot);
+    } catch {
+      // Same compatibility case as apply(): without path-resolver.mjs the
+      // profile falls through to cv-templates.mjs's own default.
+    }
+  }
+  let configuredVariants;
+  const warnings = [];
+  try {
+    configuredVariants = await loadConfiguredTemplateVariants({
+      profilePath: resolvedProfilePath,
+    });
+  } catch (err) {
+    if (!tolerateUnreadableProfile) throw err;
+    configuredVariants = {};
+    // The real reason, not "could not be parsed": a file-system error has a code
+    // (EACCES) and a YAML error has its line and column in the first message line.
+    const cause = err?.cause ?? err;
+    const reason = cause?.code || String(cause?.message ?? cause).split('\n')[0];
+    warnings.push(`The profile at ${resolvedProfilePath} could not be loaded (${reason}), so the template variants it names are not protected by this update.`);
+  }
   const configuredVariantPaths = [];
   for (const [kind, name] of Object.entries(configuredVariants)) {
     const prefix = kind === 'cv' ? 'cv-template' : 'cover-letter-template';
@@ -2236,6 +2265,7 @@ export async function snapshotConfiguredTemplateVariants({
   }
   return {
     configuredVariants,
+    warnings,
     localFiles,
     localContents,
     remoteContents,
@@ -2243,6 +2273,51 @@ export async function snapshotConfiguredTemplateVariants({
       localFiles, remoteFiles, configuredVariants, localContents, remoteContents,
     ),
   };
+}
+
+/**
+ * Environment for the self-reexec child. It runs with the checkout as its cwd, so
+ * a relative CAREER_OPS_PROFILE would name another file there than in the user's
+ * shell; the parent resolves it here and passes the absolute path.
+ *
+ * @returns {Promise<{CAREER_OPS_PROFILE?: string}>}
+ */
+export async function reexecProfileEnv() {
+  try {
+    const { hasProfileOverride, getProfilePath } = await import('./path-resolver.mjs');
+    return hasProfileOverride() ? { CAREER_OPS_PROFILE: getProfilePath() } : {};
+  } catch {
+    return {}; // a target without path-resolver.mjs has no override to resolve
+  }
+}
+
+/**
+ * snapshotConfiguredTemplateVariants() for every profile that can choose a
+ * variant. The templates directory belongs to the data root, but the profile in
+ * force may be one CAREER_OPS_PROFILE names elsewhere while the data root keeps
+ * its own, so a variant either of them selects has to survive the checkout.
+ *
+ * @param {{profilePaths: string[]}} options profile files to read, in order;
+ *   the first is the profile in force and must parse, a later one that does not
+ *   is skipped with a warning; the rest is snapshotConfiguredTemplateVariants()'s options
+ * @returns {Promise<{configuredVariants: {cv?: string[], cover?: string[]}, warnings: string[], localFiles: string[], localContents: object, remoteContents: object, preservedPaths: string[]}>}
+ */
+export async function snapshotConfiguredTemplateVariantsAcrossProfiles({ profilePaths = [], ...options } = {}) {
+  const merged = { configuredVariants: {}, warnings: [], localFiles: [], localContents: {}, remoteContents: {}, preservedPaths: [] };
+  // No paths (path-resolver.mjs absent in an old target): one pass, the historical default.
+  const distinct = [...new Set(profilePaths.length ? profilePaths : [undefined])];
+  for (const [index, profilePath] of distinct.entries()) {
+    const snapshot = await snapshotConfiguredTemplateVariants({ ...options, profilePath, tolerateUnreadableProfile: index > 0 });
+    merged.warnings.push(...snapshot.warnings);
+    for (const [kind, name] of Object.entries(snapshot.configuredVariants)) {
+      merged.configuredVariants[kind] = [...new Set([...(merged.configuredVariants[kind] ?? []), name])];
+    }
+    merged.localFiles = [...new Set([...merged.localFiles, ...snapshot.localFiles])];
+    Object.assign(merged.localContents, snapshot.localContents);
+    Object.assign(merged.remoteContents, snapshot.remoteContents);
+    merged.preservedPaths = [...new Set([...merged.preservedPaths, ...snapshot.preservedPaths])].sort();
+  }
+  return merged;
 }
 
 export function staleSystemFiles(localFiles, remoteFiles, systemPaths, userPaths = USER_PATHS, configuredVariants = {}) {
@@ -4550,6 +4625,7 @@ async function apply() {
           timeout,
           env: {
             ...process.env,
+            ...await reexecProfileEnv(),
             CAREER_OPS_UPDATE_REEXEC_MARKER: marker.path,
             CAREER_OPS_UPDATE_REEXEC_TOKEN: marker.token,
             // Compatibility for target updaters before the authenticated
@@ -4659,9 +4735,13 @@ async function apply() {
     // generic locallyModifiedSystemFiles() baseline check may no longer flag
     // it, but checkout would still overwrite the user's local content.
     let dataRoot = ROOT;
+    let profilePaths = [];
     try {
-      const { getCareerOpsRoot } = await import('./path-resolver.mjs');
+      const { getCareerOpsRoot, getProfilePath } = await import('./path-resolver.mjs');
       dataRoot = getCareerOpsRoot();
+      // The override's profile and the data root's own: the templates directory
+      // is the data root's, so a variant either one selects must survive.
+      profilePaths = [getProfilePath(), getProfilePath(dataRoot)];
     } catch {
       // Very old targets may not have path-resolver.mjs yet; ROOT is the
       // historical data root and remains the safe compatibility fallback.
@@ -4674,12 +4754,14 @@ async function apply() {
       // If the upstream tree cannot be read, the checkout below reports the
       // real failure; do not infer a preservation decision from an empty tree.
     }
-    const configuredSnapshot = await snapshotConfiguredTemplateVariants({
+    const configuredSnapshot = await snapshotConfiguredTemplateVariantsAcrossProfiles({
       dataRoot,
+      profilePaths,
       remoteFiles: configuredVariantRemoteFiles,
       readRemoteContent: (file) => gitShowRaw(`${targetCommit}:${file}`),
     });
     const { configuredVariants } = configuredSnapshot;
+    for (const warning of configuredSnapshot.warnings) console.log(`Warning: ${warning}`);
     const configuredReferencePaths = configuredSnapshot.localFiles;
     const configuredAtRisk = configuredSnapshot.preservedPaths;
     if (configuredAtRisk.length > 0) {

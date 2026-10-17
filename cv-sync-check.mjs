@@ -14,7 +14,7 @@ import { readFileSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -52,9 +52,11 @@ if (!existsSync(cvPath)) {
 }
 
 // 2. Check profile.yml exists
-const profilePath = join(DATA_ROOT, 'config', 'profile.yml');
+const profilePath = getProfilePath();
 if (!existsSync(profilePath)) {
-  errors.push('config/profile.yml not found. Copy from config/profile.example.yml and fill in your details.');
+  errors.push(hasProfileOverride()
+    ? `config/profile.yml not found: CAREER_OPS_PROFILE names ${profilePath}. Create that file, or unset the variable.`
+    : 'config/profile.yml not found. Copy from config/profile.example.yml and fill in your details.');
 } else {
   const profileContent = readFileSync(profilePath, 'utf-8');
   const requiredFields = ['full_name', 'email', 'location'];

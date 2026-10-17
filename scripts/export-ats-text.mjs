@@ -5,11 +5,12 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import * as yaml from 'js-yaml';
 import { isMainModule } from '../lib/is-main-module.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from '../path-resolver.mjs';
 import { validateFlags } from '../lib/cli-flags.mjs';
 
 /**
@@ -215,7 +216,7 @@ export function normalizeProfile(raw = {}, cvData = {}) {
  */
 export function loadProfile(customProfilePath = null, customCvPath = null) {
   let profileRaw = null;
-  const profileSource = customProfilePath || process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+  const profileSource = customProfilePath || getProfilePath();
 
   if (customProfilePath) {
     if (!existsSync(customProfilePath)) {
@@ -232,7 +233,8 @@ export function loadProfile(customProfilePath = null, customCvPath = null) {
     }
   } else {
     if (!existsSync(profileSource)) {
-      throw new Error('config/profile.yml not found: fill it in first');
+      const via = hasProfileOverride() ? ' (named by CAREER_OPS_PROFILE)' : '';
+      throw new Error(`Profile not found at ${profileSource}${via}: fill it in first`);
     }
     try {
       const content = readFileSync(profileSource, 'utf8');
@@ -246,7 +248,7 @@ export function loadProfile(customProfilePath = null, customCvPath = null) {
   }
 
   let cvData = {};
-  const cvSource = customCvPath || process.env.CAREER_OPS_CV || 'cv.md';
+  const cvSource = customCvPath || process.env.CAREER_OPS_CV || join(getCareerOpsRoot(), 'cv.md');
   if (customCvPath) {
     if (!existsSync(customCvPath)) {
       throw new Error(`CV file not found at: ${customCvPath}`);
@@ -377,8 +379,8 @@ Export profile and CV sections as plain text for ATS forms.
 Options:
   --section <name>  Export personal, summary, skills, experience or education only
   --out <path>      Write to a file instead of stdout
-  --profile <path>  Profile YAML (default: CAREER_OPS_PROFILE or config/profile.yml)
-  --cv <path>       CV Markdown (default: CAREER_OPS_CV or cv.md, when present)
+  --profile <path>  Profile YAML (default: CAREER_OPS_PROFILE, else config/profile.yml in the data root)
+  --cv <path>       CV Markdown (default: CAREER_OPS_CV, else cv.md in the data root, when present)
   --help, -h        Show help without reading the profile/CV or writing output
 `, { valueFlags: ['--section', '--out', '--profile', '--cv'], requireOperand: true });
 

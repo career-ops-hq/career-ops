@@ -31,13 +31,13 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
 import { rankSkipBlockers, parseRequirementImportance } from './skip-blockers.mjs';
 
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const CV_FILE = join(CAREER_OPS, 'cv.md');
-const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
 const STATES_FILE = join(ROOT, 'templates/states.yml');
 
 // Canonical reports-root containment. A tracker link resolves to a candidate

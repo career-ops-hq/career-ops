@@ -34,7 +34,7 @@ import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
 import { appendToPipeline, appendToScanHistory } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -193,6 +193,11 @@ const CODE_ROOT = __dirname;
 
 function readFile(relPath) {
   try { return fs.readFileSync(path.join(DATA_ROOT, relPath), 'utf-8'); }
+  catch { return null; }
+}
+
+function readProfile() {
+  try { return fs.readFileSync(getProfilePath(), 'utf-8'); }
   catch { return null; }
 }
 
@@ -397,7 +402,7 @@ export { callOpenRouter, rateLimitCounts, blacklistedModels };
 function loadContext() {
   return {
     cv:          readFile('cv.md')               ?? 'CV not found.',
-    profile:     readFile('config/profile.yml')  ?? '',
+    profile:     readProfile()                   ?? '',
     shared:      readSystemFile('modes/_shared.md') ?? '',
     profileMode: readFile('modes/_profile.md')   ?? '',
   };

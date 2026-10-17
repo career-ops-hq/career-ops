@@ -76,7 +76,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 
@@ -91,7 +91,7 @@ const PATHS = {
   evaluate:    join(CODE_ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
   cv:          join(DATA_ROOT, 'cv.md'),
   profile:     join(DATA_ROOT, 'modes', '_profile.md'),
-  profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
+  profileYml:  getProfilePath(),
   reports:     join(DATA_ROOT, 'reports'),
   tracker:     resolveTrackerPath(DATA_ROOT),
   trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),

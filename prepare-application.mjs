@@ -21,7 +21,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { basename, resolve, dirname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -130,7 +130,7 @@ function detectAts(url) {
 // ── Profile reader ────────────────────────────────────────────────────
 
 function readProfile() {
-  const profilePath = resolve(DATA_ROOT, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return {};
   const raw = readFileSync(profilePath, 'utf-8');
 

@@ -41,15 +41,13 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = getCareerOpsRoot();
 
 export const EXAMPLE_PATH = join(CODE_ROOT, 'config', 'profile.example.yml');
-export const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE
-  || join(DATA_ROOT, 'config', 'profile.yml');
+export const DEFAULT_PROFILE_PATH = getProfilePath();
 
 /**
  * Top-level keys the code reads that config/profile.example.yml does not show.
