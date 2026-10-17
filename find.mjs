@@ -32,7 +32,7 @@ import { resolvePdfIndexPath, resolveWorkspaceRootFor, pathIsInside, pathIsInsid
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-
+import { validateFlags } from './lib/cli-flags.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 
@@ -188,25 +188,18 @@ const USAGE = `Usage:
   node find.mjs <report# | tracker# | company/role fragment> [--json]
   node find.mjs --help                            # print this usage block and exit`;
 
+
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-
-  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
+  validateFlags(args, KNOWN_FLAGS, USAGE);
 
   const json = args.includes('--json');
   const query = args.filter(a => a !== '--json').join(' ').trim();
+
   return { json, query };
 }
+
 
 function main() {
   const { json, query } = parseArgs(process.argv);
