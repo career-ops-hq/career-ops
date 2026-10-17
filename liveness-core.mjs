@@ -164,7 +164,35 @@ const APPLY_PATTERNS = [
   // labels containing “投递” can be status/history controls rather than Apply.
   /^申请职位$/,
   /^投递$/,
+  // Vietnamese (CareerViet): "NỘP ĐƠN ỨNG TUYỂN". NFD leaves Đ/đ as is, so the
+  // first letter of "đơn" is matched explicitly. This label alone proves
+  // nothing: a closed CareerViet posting keeps its whole page and this button,
+  // which is why the deadline check in classifyLiveness runs before the apply
+  // control is read.
+  /\bnop [dđ]on ung tuyen\b/i,
 ];
+
+// CareerViet prints the application deadline in the posting's info block as
+// "Hết hạn nộp 30/11/2026" and shows nothing else once it has passed (#4832).
+// After normalizeForMatch: "het han nop 30/11/2026". Day first, in Vietnam's
+// calendar. Only the first occurrence counts: it is the posting's own block,
+// and a later one could belong to a related-jobs card.
+const DEADLINE_PATTERN = /\bhet han nop\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\b/i;
+const DEADLINE_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+
+// True when the posting's stated deadline is before today. The deadline day
+// itself is still open, and an impossible date (31/02) says nothing, so it is
+// not read as a closure: a false `expired` costs the posting every later scan.
+function deadlinePassed(bodyText, now) {
+  const match = DEADLINE_PATTERN.exec(bodyText);
+  if (!match) return null;
+  const [day, month, year] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const deadline = new Date(Date.UTC(year, month - 1, day));
+  if (deadline.getUTCFullYear() !== year || deadline.getUTCMonth() !== month - 1 || deadline.getUTCDate() !== day) return null;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: DEADLINE_TIME_ZONE }).format(now);
+  const isoDeadline = deadline.toISOString().slice(0, 10);
+  return isoDeadline < today ? match[0] : null;
+}
 
 const MIN_CONTENT_CHARS = 300;
 
@@ -221,7 +249,7 @@ function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
 
-export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [] } = {}) {
+export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText: rawBodyText = '', applyControls: rawApplyControls = [], now = new Date() } = {}) {
   const bodyLines = normalizeForMatch(rawBodyText, { keepLineBreaks: true });
   const bodyText = bodyLines.replace(/\n/g, ' ');
   const applyControls = (Array.isArray(rawApplyControls) ? rawApplyControls : []).map((control) => normalizeForMatch(control));
@@ -265,6 +293,14 @@ export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '',
   const expiredBody = firstStatedMatch(HARD_EXPIRED_PATTERNS, bodyLines);
   if (expiredBody) {
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
+  }
+
+  // A stated deadline in the past closes the posting even though the page and
+  // its Apply button are intact (CareerViet, #4832). Before the apply control
+  // is read, for the same reason the hard patterns are.
+  const pastDeadline = deadlinePassed(bodyText, now);
+  if (pastDeadline) {
+    return { result: 'expired', code: 'deadline_passed', reason: `application deadline passed: ${pastDeadline}` };
   }
 
   // A dead permalink that 301s to a generic search/listing page still shows

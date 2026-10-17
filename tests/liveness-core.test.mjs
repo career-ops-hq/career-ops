@@ -574,3 +574,82 @@ closureVerdict("You can't view this job because it's not available at this time.
 closureVerdict('Salary data is not available at this time. Apply now.', ['Apply now']).result === 'active'
   ? pass('an availability mention on a live posting stays active')
   : fail('the new pattern over-triggered on a live posting');
+
+console.log('\nliveness-core — CareerViet: Vietnamese Apply label, and the deadline that closes a posting (#4832)');
+
+// A CareerViet page as the browser reads it: the info block carries the
+// deadline, and the Apply button is there whether or not the posting is open.
+const careerviet = (deadline, applyControls = ['NỘP ĐƠN ỨNG TUYỂN'], finalUrl = 'https://careerviet.vn/vi/tim-viec-lam/brand-executive.35C50000.html') =>
+  classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://careerviet.vn/vi/tim-viec-lam/brand-executive.35C50000.html',
+    finalUrl,
+    bodyText: `Brand Executive\nCông ty ABC\nCấp bậc\nNhân viên\nHết hạn nộp\n${deadline}\nPhúc lợi\nLaptop\n${'Mô tả công việc. '.repeat(30)}`,
+    applyControls,
+    now: new Date('2026-10-17T05:00:00Z'),
+  });
+
+careerviet('30/11/2026').result === 'active'
+  ? pass('open CareerViet posting with NỘP ĐƠN ỨNG TUYỂN -> active (was: uncertain/no_apply_control)')
+  : fail(`open CareerViet posting not active: ${JSON.stringify(careerviet('30/11/2026'))}`);
+
+{
+  const v = careerviet('29/09/2025');
+  v.result === 'expired' && v.code === 'deadline_passed'
+    ? pass('past deadline wins over the intact Apply button -> expired')
+    : fail(`past deadline not expired: ${JSON.stringify(v)}`);
+}
+
+careerviet('17/10/2026').result === 'active'
+  ? pass('the deadline day itself is still open')
+  : fail('the deadline day was read as closed');
+
+careerviet('16/10/2026').result === 'expired'
+  ? pass('the day after the deadline is closed')
+  : fail('the day after the deadline was read as open');
+
+// Vietnam is UTC+7: 18:00 UTC on 17/10 is already 18/10 there.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C50000.html',
+  bodyText: `Hết hạn nộp 17/10/2026 ${'Mô tả công việc. '.repeat(30)}`,
+  applyControls: ['NỘP ĐƠN ỨNG TUYỂN'],
+  now: new Date('2026-10-17T18:00:00Z'),
+}).result === 'expired'
+  ? pass('the deadline is judged in Vietnam time (UTC+7)')
+  : fail('the deadline was judged in UTC');
+
+careerviet('31/02/2026').result === 'active'
+  ? pass('an impossible date is not read as a closure')
+  : fail('an impossible date closed the posting');
+
+// Only the first deadline counts: a related-jobs card must not close the posting.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C89ABA.html',
+  bodyText: `Hết hạn nộp\n30/11/2026\n${'Mô tả công việc. '.repeat(30)}\nViệc làm tương tự\nHết hạn nộp 01/01/2024`,
+  applyControls: ['NỘP ĐƠN ỨNG TUYỂN'],
+  now: new Date('2026-10-17T05:00:00Z'),
+}).result === 'active'
+  ? pass('a later deadline in a related-jobs card does not close the posting')
+  : fail('a related-jobs deadline closed the posting');
+
+// Without a deadline the Apply label alone still reads active, and the label
+// is not a loose match: "đơn" prose elsewhere does not count.
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C89ABA.html',
+  bodyText: 'Mô tả công việc. '.repeat(30),
+  applyControls: ['Nộp đơn ứng tuyển'],
+}).result === 'active'
+  ? pass('the label reads as an Apply control in mixed case too')
+  : fail('mixed-case label not recognised');
+
+classifyLiveness({
+  status: 200,
+  finalUrl: 'https://careerviet.vn/vi/tim-viec-lam/x.35C89ABA.html',
+  bodyText: 'Mô tả công việc. '.repeat(30),
+  applyControls: ['Xem đơn hàng'],
+}).result === 'uncertain'
+  ? pass('an unrelated "đơn" control is not an Apply control')
+  : fail('an unrelated control read as Apply');
