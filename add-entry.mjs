@@ -38,7 +38,8 @@
  * files so tests never touch a real user CV.
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, statSync, existsSync } from 'fs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -258,11 +259,13 @@ async function main() {
     const written = [];
     try {
       if (payload.cv && out.result.cv?.status === 'added') {
-        writeFileSync(CV_FILE, out.cv);
+        writeFileAtomic(CV_FILE, out.cv, { mode: statSync(CV_FILE).mode & 0o777 });
         written.push('cv.md');
       }
       if (payload.articleDigest && (out.result.articleDigest?.status === 'added' || out.result.articleDigest?.status === 'created')) {
-        writeFileSync(ARTICLE_DIGEST_FILE, out.articleDigest);
+        writeFileAtomic(ARTICLE_DIGEST_FILE, out.articleDigest, {
+          mode: existsSync(ARTICLE_DIGEST_FILE) ? statSync(ARTICLE_DIGEST_FILE).mode & 0o777 : undefined,
+        });
         written.push('article-digest.md');
       }
     } catch (e) {
