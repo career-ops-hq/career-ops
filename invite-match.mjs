@@ -692,7 +692,7 @@ export function matchInvite(signals, trackerRows) {
     // boost it above any name-only match (including another exact name
     // match without the req ID). Match the whole ID token, so JR1234 cannot
     // also boost a different requisition JR12345 or JR1234-A. Preserve the
-    // shared parser's explicit glued labels (req_JR1234), but require the
+    // shared parser's explicit glued labels (req_JR1234, reqJR1234), but require the
     // whole suffix. A bare JR1234 is an ID, not a label for numeric ID 1234;
     // after a separate label, REQ-1234 is itself the ID, not another label.
     // Compared case-insensitively: the invite
@@ -703,7 +703,7 @@ export function matchInvite(signals, trackerRows) {
       && row.notes.toLowerCase().split(/[^a-z0-9_-]+/)
         .filter(token => /[a-z0-9]/.test(token)).some((token, index, tokens) =>
         token === reqId || (!/^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?|jr|id)[_-]*|r_[_-]*)$/.test(tokens[index - 1] || '')
-          && /^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?)[_-]|r_)/.test(token)
+          && /^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?)[_-]?|r_)/.test(token)
           && token.endsWith(reqId) && extractReqNumber(token)?.toLowerCase() === reqId))) {
       confidence += 0.5;
     }
