@@ -60,6 +60,10 @@ export function decide({ status = 0, requestedUrl = '', finalUrl = '', bodyText 
 }
 
 function main() {
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log('Usage: node batch/prefilter-url.mjs <status> <requestedUrl> <finalUrl> <bodyTextFile>\nPrints: <proceed|skip-dead|skip-blocked|retry-later>\t<code>\t<reason>');
+    return;
+  }
   const [statusRaw, requestedUrl = '', finalUrl = '', bodyFile = ''] = process.argv.slice(2);
   const status = Number.parseInt(statusRaw, 10) || 0;
   let bodyText = '';

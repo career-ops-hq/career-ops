@@ -41,6 +41,7 @@ try {
   eq('CLI prints decision<TAB>code<TAB>reason', gone.stdout.split('\t')[0], 'skip-dead');
   eq('CLI output is one line', gone.stdout.trim().split('\n').length, 1);
   eq('CLI: a missing body file fails open', cli('200', posting, posting, join(dir, 'nope.txt')).stdout.split('\t')[0], 'proceed');
+  eq('CLI: --help prints usage and does not run the filter', /^Usage:/.test(cli('--help').stdout), true);
   eq('CLI: no arguments at all fail open', cli().stdout.split('\t')[0], 'proceed');
   eq('CLI: a non-numeric status is treated as no response', cli('abc', posting, posting, body).stdout.split('\t')[0], 'skip-dead');
 } finally {
