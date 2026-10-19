@@ -130,6 +130,7 @@ MAX_RETRIES=2
 MIN_SCORE=0
 SKIP_PDF=false
 MODE="full"
+PREFILTER=true      # zero-token dead-URL pre-filter (batch/prefilter-url.mjs)
 MODEL=""  # explicit override; otherwise resolved from the profile's spend_tier
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
@@ -179,10 +180,12 @@ Options:
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
   --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
-  --worker-timeout N   Stop a worker after N seconds and record it as failed
-                       (default: 1800; 0 = no limit)
   --mode MODE          Evaluation mode: full (default) or match (condensed single-pass CV match)
   --single-pass        Alias for --mode match
+  --no-prefilter       Disable the zero-token dead-URL pre-filter (spawn a worker
+                       even for a 404, a pulled posting or an anti-bot wall)
+  --worker-timeout N   Stop a worker after N seconds and record it as failed
+                       (default: 1800; 0 = no limit)
   --thin-action MODE   What to do when no usable JD text could be fetched (JS-rendered
                        page, empty shell): 'webfetch' (default) spawns the worker and
                        lets it try WebFetch; 'skip' records the offer as skipped with
@@ -270,6 +273,7 @@ while [[ $# -gt 0 ]]; do
       MODE="match"
       shift
       ;;
+    --no-prefilter) PREFILTER=false; shift ;;
     --rate-limit-sleep)
       [[ $# -ge 2 ]] || { echo "ERROR: --rate-limit-sleep requires an argument"; exit 1; }
       RATE_LIMIT_SLEEP="$2"
@@ -1268,6 +1272,8 @@ process_offer() {
   local jd_rescue_closed_note=""
   local jd_raw_file=""
   local curl_status=0
+  local jd_http_code=0 jd_final_url=""
+  local jd_prefilter_decision="proceed" jd_prefilter_code="" jd_prefilter_reason=""
   if command -v curl >/dev/null 2>&1; then
     # Reject loopback, link-local, private-network and cloud-metadata
     # destinations before curl connects, on every redirect hop.
@@ -1284,6 +1290,7 @@ process_offer() {
     local redirect_count=0
     local redirect_headers
     local redirect_location
+    local curl_meta
     while :; do
       if ! _egress_pin=$(node "$PROJECT_DIR/lib/egress-pin.mjs" "$current_url" 2>/dev/null); then
         echo "    ℹ️  JD prefetch: blocked — private/loopback destination ($current_url)"
@@ -1296,16 +1303,20 @@ process_offer() {
         # tests/batch-runner-jd-prefetch.test.mjs, where $jd_tmp_dir is not set).
         redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
         curl_status=0
-        curl --silent --show-error --location --max-redirs 0 \
+        curl_meta="$(curl --silent --show-error --location --max-redirs 0 \
           --max-time 20 --connect-timeout 5 \
           --fail --compressed \
           --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
           --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
           --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
           --dump-header "$redirect_headers" \
+          --write-out '%{http_code}\t%{url_effective}' \
           --output "$jd_file" \
           ${_egress_pin:+--resolve "$_egress_pin"} \
-          -- "$current_url" 2>/dev/null || curl_status=$?
+          -- "$current_url" 2>/dev/null)" || curl_status=$?
+        IFS=$'\t' read -r jd_http_code jd_final_url <<< "$curl_meta" 2>/dev/null || true
+        jd_http_code="${jd_http_code//[^0-9]/}"
+        jd_http_code="${jd_http_code:-0}"
         redirect_location=""
         if [[ "$curl_status" -eq 47 ]]; then
           redirect_location="$(awk 'tolower($0) ~ /^location:[[:space:]]*/ { value=$0; sub(/^[^:]*:[[:space:]]*/, "", value) } END { print value }' "$redirect_headers")"
@@ -1387,12 +1398,52 @@ process_offer() {
         fi
       fi
       rm -f "$jd_raw_file"
+      # Zero-token pre-filter. This runs BEFORE the thin-content truncation below:
+      # a pulled posting can answer HTTP 200 with a few words ("No job found"),
+      # under prefetch_min_words, so truncating first would erase the only
+      # evidence that the posting is gone. Only flagged here; the skip happens
+      # after this block (tests/batch-runner-jd-prefetch.test.mjs runs the block
+      # standalone, where `return` is illegal). Any failure to classify proceeds.
+      if [[ "${PREFILTER:-true}" == "true" && -f "${BATCH_DIR:-}/prefilter-url.mjs" ]]; then
+        _pf_line=$(node "$BATCH_DIR/prefilter-url.mjs" "$jd_http_code" "$url" "$jd_final_url" "$jd_file" 2>/dev/null) || _pf_line=""
+        IFS=$'\t' read -r jd_prefilter_decision jd_prefilter_code jd_prefilter_reason <<< "$_pf_line"
+        jd_prefilter_decision="${jd_prefilter_decision:-proceed}"
+      fi
       if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
         : > "$jd_file"
         echo "    ℹ️  JD prefetch: thin content (${jd_prefetch_words} words) — worker will WebFetch"
       else
         echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
       fi
+  fi
+
+  # Act on the pre-filter verdict. "skipped" is terminal (a 404 is still a 404
+  # next run); a transient 429/5xx is "failed" so --retry-failed picks it up. No
+  # worker is spawned, so the report number reserved above goes back.
+  if [[ "$jd_prefilter_decision" != "proceed" ]]; then
+    local pf_now
+    pf_now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    case "$jd_prefilter_decision" in
+      skip-dead)
+        echo "    🚫 Pre-filter: posting is gone ($jd_prefilter_code) — no worker spawned"
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$pf_now" "-" "-" "prefilter: expired ($jd_prefilter_code) — $jd_prefilter_reason" "$retries" || true
+        ;;
+      skip-blocked)
+        echo "    🚫 Pre-filter: unreadable in batch ($jd_prefilter_code) — needs a browser, no worker spawned"
+        update_state_retrying "$id" "$url" "skipped" "$started_at" "$pf_now" "-" "-" "prefilter: blocked ($jd_prefilter_code) — needs-playwright: $jd_prefilter_reason" "$retries" || true
+        ;;
+      retry-later)
+        echo "    ⏳ Pre-filter: transient ($jd_prefilter_code) — deferred, no worker spawned"
+        update_state_retrying "$id" "$url" "failed" "$started_at" "$pf_now" "-" "-" "prefilter: transient ($jd_prefilter_code) — $jd_prefilter_reason" "$retries" || true
+        ;;
+    esac
+    case "$jd_prefilter_decision" in
+      skip-dead|skip-blocked|retry-later)
+        release_report_num "$report_num"
+        rm -f "$jd_file"
+        return 0
+        ;;
+    esac
   fi
 
   # ATS API fallback (#4246). When the static fetch above left $jd_file empty
