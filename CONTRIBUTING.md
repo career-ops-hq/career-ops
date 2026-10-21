@@ -11,7 +11,7 @@ career-ops is a great place to make your **first open-source contribution** — 
 - **We answer fast.** Open an issue or PR and you'll hear back, usually within a day or two. No black holes.
 - **Tiny on-ramps.** Browse [`good first issue`](https://github.com/career-ops-hq/career-ops/contribute) — each is scoped small, with a time estimate, the pattern to copy, and a clear "done", so your first PR is a win, not a maze.
 - **Your human work gets a real review.** We read every PR. We don't drown contributors in bot noise, and we don't merge AI-slop — put thought in, get thought back.
-- **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (reviewer, then maintainer).
+- **A path forward.** Consistent, high-quality contributors get credited publicly and invited into bigger roles (see the [ladder](GOVERNANCE.md#contributor-ladder)).
 
 New to all this? That's the point. Claim a good-first-issue by commenting `/assign` on it, ask anything in [Discord](https://discord.gg/8pRpHETxa4), and we'll help you land it.
 
@@ -33,13 +33,13 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 
 ## Quick Start
 
-1. Open an issue to discuss your idea
+1. For a new feature, a new mode or command, or an architecture change, open an issue to discuss your idea (see [Before Submitting a PR](#before-submitting-a-pr))
 2. Fork the repo
 3. Create a branch (`git checkout -b feature/my-feature`)
 4. Make your changes
 5. Test with a fresh clone (see [docs/SETUP.md](docs/SETUP.md))
 6. Commit and push
-7. Open a Pull Request referencing the issue
+7. Open a Pull Request, referencing the issue if you opened one
 
 ## What to Contribute
 
@@ -66,14 +66,7 @@ Comment `/assign` on any [`good first issue`](https://github.com/career-ops-hq/c
 
 ## The contribution ladder
 
-There's a clear path here — we promote people who show up:
-
-1. **First-time contributor** — you landed a PR. Welcome aboard.
-2. **Trusted contributor** — a few solid merges; we fast-track your PRs and tag you on related work.
-3. **Reviewer** — you help triage and review others' PRs. We invite you.
-4. **Maintainer** — you help steer the project.
-
-We credit contributors publicly and invite high-signal folks up the ladder. Want to help more? Just say so in an issue.
+There's a clear path here, written down in one place: [GOVERNANCE.md](GOVERNANCE.md#contributor-ladder). We credit contributors publicly, and the [`help wanted`](https://github.com/career-ops-hq/career-ops/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22) board is open to everyone.
 
 ## Adopting an abandoned PR
 
@@ -95,7 +88,7 @@ The ladder above is for work that has been **abandoned**. An open PR with an aut
 
 If the conflict came from something **we** merged and resolving it is mechanical, the fix is ours: we rebase the author's own branch (that is what "Allow edits by maintainers" is for), run the suite, and leave their PR and their authorship untouched. If the two changes really collide, only the author can say how theirs should fit, so we ask them to rebase and help on the diff if they want it. Conflicts from anywhere else, the author rebases whenever they're ready. Nobody is on a clock for any of this.
 
-This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make. Automated agents may comment only on pull requests their operator authored; automated comments on other people's PRs are minimized as off-topic. Reviews you write yourself, under your own name, are welcome on any PR.
+This applies to automation as well. A bot opening replacement PRs on other people's branches is doing the same thing at higher volume, and automated triage posted into someone else's thread ("don't merge both", "treat #X as the primary") reads as a project decision to the person who has been waiting on one. Merge calls are the maintainers' to make. The `depends-on` check stays inside that line: it reports an order the PR author declared in their own body, and whether that dependency is still open. The ordering stays the author's, and the merge call stays the maintainers'. Automated agents may comment only on pull requests their operator authored; automated comments on other people's PRs are minimized as off-topic. Reviews you write yourself, under your own name, are welcome on any PR.
 
 **The project's own automation is the exception, and it is narrow.** Everything it writes in a thread comes from a bot account, so you can always tell it from a person, and it never decides anything about your PR. It may:
 
@@ -194,7 +187,17 @@ npm run serve:dashboard       # launch the TUI against the repo root
 node test-all.mjs             # Full suite — run before pushing/opening a PR
 node test-all.mjs --quick     # Full suite, skipping the dashboard build
 node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
+node test-all.mjs --quick --jobs 4           # Run at most 4 test files at a time
 ```
+
+**The test files under `tests/` run in parallel**, one process each, as many at
+a time as the machine has CPUs, and the inline sections of `test-all.mjs` run
+alongside them in one of those slots. `--jobs N` changes that for one run and
+`CAREER_OPS_TEST_JOBS=N` for a machine; `1` runs everything one after another
+in a single process. The log comes out in the same order either way. If a test
+passes alone and fails in a full run (or the reverse), rerun with `--jobs 1`
+and see "Parallel runs" in [`tests/README.md`](tests/README.md) for what a
+suite may not rely on.
 
 **Any new test belongs in its own file** under `tests/`, not as a numbered
 section inside `test-all.mjs`. Anything matching `tests/**/*.test.mjs` is
@@ -225,6 +228,24 @@ The naming is a convention, not a checked contract.
 section (syntax, scripts, dashboard, data contract, personal data, paths,
 etc.). A green `--only` run is **not** a green suite — always run the full
 `node test-all.mjs` before pushing.
+
+### Checking translated mode structure
+
+Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),
+or omit `--lang` to check every locale. `--json` emits machine-readable results;
+`--summary` prints language totals. The checker runs offline with Node alone and
+reports drift without failing.
+It checks existing mode files, including nested interview modes, and files
+promised in each locale's README. Languages shipping only the core subset are
+not penalized for modes they have not translated.
+
+Coverage compares Markdown heading levels and order, not translated words or
+prose. Fenced examples and comments are excluded. Missing structural slots are
+listed with canonical names and line numbers; when several alignments are
+possible, the report lists candidate locations instead of claiming which title
+is absent. **100% is structural coverage, not proof of translation completeness**:
+an unrelated section with the same shape can hide an omission. Translation
+review and the separate evaluation-template parity checks still apply.
 
 ## Brand and Trademark
 

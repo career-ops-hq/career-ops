@@ -149,7 +149,7 @@ Zapisz pełną ocenę w `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ### 2. Zapisz w trackerze
 
-**ZAWSZE** zapisz w `data/applications.md`:
+**ZAWSZE** zapisz w trackerze. Zapisz TSV (reguła 9 w `_shared.md`) i scal go przez `node merge-tracker.mjs`; nigdy nie dopisuj wiersza bezpośrednio do `data/applications.md`. Pola:
 - Następny kolejny numer
 - Dzisiejsza data
 - Firma

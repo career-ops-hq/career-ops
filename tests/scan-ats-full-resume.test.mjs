@@ -116,13 +116,59 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   else fail('null checkpoint accepted');
 }
 
+// Filter fingerprints: a portals.yml filter edited between a run and its
+// --resume would leave the swept boards judged by the old filter, so each one
+// is recorded in the checkpoint and a change is named on resume.
+{
+  const { filterFingerprints, changedFilterKeys } = mod;
+  const config = {
+    title_filter: { positive: ['backend'], negative: ['intern'] },
+    location_filter: { allow: ['remote'] },
+    content_filter: { exclude: ['clearance'] },
+    domain_filter: ['defi', 'crypto'],
+  };
+  const cp = { filters: filterFingerprints(config) };
+  const changed = (c) => changedFilterKeys(cp, filterFingerprints(c));
+
+  if (changed(structuredClone(config)).length === 0) pass('unchanged filters resume');
+  else fail(`unchanged filters reported: ${changed(config)}`);
+
+  const reordered = { domain_filter: config.domain_filter, content_filter: config.content_filter, location_filter: config.location_filter, title_filter: { negative: ['intern'], positive: ['backend'] } };
+  if (changed(reordered).length === 0) pass('reordered YAML mapping keys are not a change');
+  else fail(`key reorder reported as ${changed(reordered)}`);
+
+  for (const [key, edit] of [
+    ['title_filter', (c) => { c.title_filter.positive.push('platform'); }],
+    ['title_filter_overrides', (c) => { c.title_filter_overrides = { acme: { positive: ['sre'] } }; }],
+    ['location_filter', (c) => { c.location_filter.allow = ['berlin']; }],
+    ['content_filter', (c) => { delete c.content_filter; }],
+    ['domain_filter', (c) => { c.domain_filter.push('web3'); }],
+  ]) {
+    const c = structuredClone(config);
+    edit(c);
+    const got = changed(c);
+    if (JSON.stringify(got) === JSON.stringify([key])) pass(`${key} edit named on resume`);
+    else fail(`${key} edit reported as ${JSON.stringify(got)}`);
+  }
+
+  // title_filter_full replaces title_filter for this sweep, so adding it is a
+  // change even when title_filter itself is untouched.
+  const withFull = { ...structuredClone(config), title_filter_full: { positive: ['solidity'] } };
+  if (changed(withFull).includes('title_filter_full')) pass('adding title_filter_full is a change');
+  else fail(`title_filter_full addition reported as ${JSON.stringify(changed(withFull))}`);
+
+  // Checkpoints written before filters were recorded resume as before.
+  if (changedFilterKeys({ version: 1 }, filterFingerprints(config)).length === 0) pass('checkpoint without filters still resumes');
+  else fail('checkpoint without filters rejected');
+}
+
 // loadCheckpoint: garbage and wrong-version files → null, never a throw.
 {
-  const { writeFileSync, mkdirSync, rmSync } = await import('node:fs');
-  // Anchored to ROOT, not CWD: run from anywhere else and a relative path would
-  // create — and then rmSync — a directory outside the project.
-  const dir = join(ROOT, 'data/cache/.test-checkpoint');
-  mkdirSync(dir, { recursive: true });
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  // A temp directory of its own. This used to be data/cache/.test-checkpoint
+  // under ROOT, which is the developer's data directory (#5113).
+  const dir = mkdtempSync(join(tmpdir(), 'co-scan-checkpoint-'));
   const p = `${dir}/cp.json`;
   writeFileSync(p, 'not json', 'utf-8');
   if (loadCheckpoint(p) === null) pass('loadCheckpoint returns null on garbage JSON');
@@ -141,6 +187,8 @@ const { loadCheckpoint, checkpointCompatible } = mod;
     ['non-numeric resumeAt', { name: 'workday', resumeAt: 'x', datasetLen: 10 }],
     ['negative resumeAt', { name: 'workday', resumeAt: -1, datasetLen: 10 }],
     ['missing name', { resumeAt: 5, datasetLen: 10 }],
+    ['non-array deferred', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: 3 }],
+    ['non-integer deferred index', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: [1, 'x'] }],
   ]) {
     writeFileSync(p, JSON.stringify({ version: 1, current }), 'utf-8');
     if (loadCheckpoint(p) === null) pass(`loadCheckpoint rejects malformed current (${label})`);
@@ -150,6 +198,12 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884 } }), 'utf-8');
   if (loadCheckpoint(p)?.current?.resumeAt === 500) pass('loadCheckpoint accepts a well-formed current');
   else fail('well-formed current rejected');
+
+  // The domain gate's deferred boards ride along in `current`, so a resumed
+  // run can retry the ones below its offset (#3304).
+  writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884, deferred: [12, 480] } }), 'utf-8');
+  if (JSON.stringify(loadCheckpoint(p)?.current?.deferred) === '[12,480]') pass('loadCheckpoint keeps the deferred board indices');
+  else fail('deferred board indices lost or rejected');
 
   // current: null is the legitimate "source finished" marker, not malformed.
   writeFileSync(p, JSON.stringify({ version: 1, current: null }), 'utf-8');

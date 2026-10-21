@@ -22,9 +22,9 @@ import {
 
 console.log('\naggregator companies — skipped, and visibly skipped');
 
-const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company';
+const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\trequisition_id\tlanguage\tlisting_key';
 const row = (url, date, title, company) =>
-  [url, date, 'greenhouse', title, company, 'added', 'Remote', '', '', '', '', ''].join('\t');
+  [url, date, 'greenhouse', title, company, 'added', 'Remote', '', '', '', '', '', '', '', ''].join('\t');
 
 // One board, one title, two URLs, two scan dates a week apart: a cluster by
 // every rule the detector has — which is exactly why the flag has to be what

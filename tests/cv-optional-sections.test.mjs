@@ -39,15 +39,23 @@
 //     valid without the sentinel — cv-templates.mjs requires only
 //     NAME/EXPERIENCE/EDUCATION — so this case must degrade to the cosmetic
 //     bare-header bug, never to a truncated CV.
+//
+// The professional summary (#5019) is the one optional section held as text
+// rather than as a list of entries, so blank and whitespace-only text count as
+// empty. It is the first section in every shipped HTML template, so in a
+// template with no marker after it, a boundary that ran to end-of-input would
+// take the whole CV with it. Like Skills it stops only at a following marker,
+// and a template with none is left alone.
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { stripEmptySections, isEmptyRenderedSection, stripEmptyRenderedSections } from '../cv-sections-core.mjs';
+import { stripEmptySections, isEmptySection, isEmptyRenderedSection, stripEmptyRenderedSections } from '../cv-sections-core.mjs';
 
 console.log('\ncv-sections-core.mjs — optional sections leave no bare header');
 
-const EMPTY = { competencies: [], experience: [], projects: [], education: [], certifications: [], awards: [], interests: [], skills: [] };
+const EMPTY = { summary: '', competencies: [], experience: [], projects: [], education: [], certifications: [], awards: [], interests: [], skills: [] };
 const FULL = {
+  summary: 'Summary.',
   competencies: ['Tag'],
   experience: [{ company: 'E' }],
   projects: [{ name: 'P' }],
@@ -151,6 +159,12 @@ for (const { file, format, after, hasCertifications, hasCompetencies, hasInteres
   // *payload* key being empty, not about the template: cv-templates.mjs still
   // requires `{{EXPERIENCE}}` to exist in any custom template.
   check(`${name}: empty payload removes {{EXPERIENCE}} with its block`, stripped.includes('{{EXPERIENCE}}'), false);
+  const summaryMarker = '<!-- PROFESSIONAL SUMMARY -->'; // html-only; the LaTeX templates have no summary section
+  if (format === 'html') {
+    check(`${name}: empty payload removes the summary block`, stripped.includes(summaryMarker), false);
+    check(`${name}: empty payload removes the summary heading with its block`, stripped.includes('{{SECTION_SUMMARY}}'), false);
+    check(`${name}: empty payload removes {{SUMMARY_TEXT}} with its block`, stripped.includes('{{SUMMARY_TEXT}}'), false);
+  }
 
   // Populated payload must be a no-op — the strip only ever removes.
   check(`${name}: populated payload leaves the template unchanged`,
@@ -212,7 +226,39 @@ for (const { file, format, after, hasCertifications, hasCompetencies, hasInteres
       omittedInterests.trimEnd().endsWith(closingSkeleton), true);
   }
 
-  // Competencies empty on its own: it is first among the optional sections,
+  // Summary empty on its own (#5019). It sits first, between the header and
+  // Core Competencies, so a boundary slip here takes everything below it.
+  // Blank, whitespace-only and omitted all render no text, so all three go.
+  if (format === 'html') {
+    for (const [label, summary] of [['empty', ''], ['whitespace-only', ' \n\t '], ['omitted', undefined]]) {
+      const payload = { ...FULL, summary };
+      if (summary === undefined) delete payload.summary;
+      const onlySummary = stripEmptySections(template, payload, format);
+      check(`${name}: ${label} summary alone drops the summary block`, onlySummary.includes(summaryMarker), false);
+      check(`${name}: ${label} summary alone keeps the header`, onlySummary.includes('<!-- HEADER -->'), true);
+      check(`${name}: ${label} summary alone keeps competencies`, onlySummary.includes(competenciesMarker), true);
+      check(`${name}: ${label} summary alone keeps {{EXPERIENCE}}`, onlySummary.includes('{{EXPERIENCE}}'), true);
+      check(`${name}: ${label} summary alone keeps the closing document skeleton`,
+        onlySummary.trimEnd().endsWith(closingSkeleton), true);
+    }
+
+    // A number renders (escapeHtml prints scalars), so it is content.
+    check(`${name}: a numeric summary keeps the summary block`,
+      stripEmptySections(template, { ...FULL, summary: 2026 }, format).includes(summaryMarker), true);
+    check(`${name}: a summary of 0 keeps the summary block`,
+      stripEmptySections(template, { ...FULL, summary: 0 }, format).includes(summaryMarker), true);
+
+    // Summary and competencies both empty: two adjacent sections, and the
+    // competencies marker is where the summary's boundary stops. Both must go
+    // and Work Experience must survive.
+    const noOpening = stripEmptySections(template, { ...FULL, summary: '', competencies: [] }, format);
+    check(`${name}: empty summary+competencies drops the summary`, noOpening.includes(summaryMarker), false);
+    check(`${name}: empty summary+competencies drops competencies`, noOpening.includes(competenciesMarker), false);
+    check(`${name}: empty summary+competencies keeps the work-experience marker`, noOpening.includes(experienceMarker), true);
+    check(`${name}: empty summary+competencies keeps {{EXPERIENCE}}`, noOpening.includes('{{EXPERIENCE}}'), true);
+  }
+
+  // Competencies empty on its own: it is first among the list sections,
   // sitting between Professional Summary and Work Experience, so a boundary
   // slip here would swallow the entire experience section rather than a
   // trailing one.
@@ -411,6 +457,53 @@ check('tex: with no sentinel, \\end{document} survives', texWithout.includes('\\
 check('tex: with no sentinel, no half-eaten banner is left behind',
   texWithout.includes('Technical Skills'), true);
 
+// --- The summary stops only at a following marker ---------------------------
+// A hand-written template may mark its summary and nothing after it. An
+// end-of-input boundary would then strip an empty summary together with the
+// experience below it, so the strip must no-op and leave the bare header.
+const SUMMARY_NO_FOLLOWING_MARKER = [
+  '<html><body>',
+  '<!-- PROFESSIONAL SUMMARY -->',
+  '<div>{{SUMMARY_TEXT}}</div>',
+  '<div>{{EXPERIENCE}}</div>',
+  '</body></html>',
+].join('\n');
+check('html: an empty summary with no following marker leaves the template untouched (fail-safe)',
+  stripEmptySections(SUMMARY_NO_FOLLOWING_MARKER, { ...FULL, summary: '' }, 'html'), SUMMARY_NO_FOLLOWING_MARKER);
+// The same fixture with a marker after the summary does strip, so the no-op
+// above comes from the missing marker and not from a summary that never strips.
+check('html: the same summary with a following marker is stripped up to that marker',
+  stripEmptySections(
+    SUMMARY_NO_FOLLOWING_MARKER.replace('<div>{{EXPERIENCE}}', '<!-- WORK EXPERIENCE -->\n<div>{{EXPERIENCE}}'),
+    { ...FULL, summary: '' }, 'html'),
+  '<html><body>\n<!-- WORK EXPERIENCE -->\n<div>{{EXPERIENCE}}</div>\n</body></html>');
+
+// The `<!-- END -->` sentinel is a marker, but it is not a section: a template
+// can mark its summary, leave {{EXPERIENCE}} unmarked, and close with the
+// sentinel. Stopping at END would strip the experience block with the summary,
+// so the summary stops at a following section marker only.
+const SUMMARY_THEN_UNMARKED_EXPERIENCE = [
+  '<html><body>',
+  '<!-- PROFESSIONAL SUMMARY -->',
+  '<div>{{SUMMARY_TEXT}}</div>',
+  '<div>{{EXPERIENCE}}</div>',
+  '<!-- END -->',
+  '</body></html>',
+].join('\n');
+check('html: an empty summary does not run on to <!-- END --> and take an unmarked {{EXPERIENCE}} with it',
+  stripEmptySections(SUMMARY_THEN_UNMARKED_EXPERIENCE, { ...FULL, summary: '' }, 'html'), SUMMARY_THEN_UNMARKED_EXPERIENCE);
+check('html: the same template with a section marker before <!-- END --> still strips the summary',
+  stripEmptySections(
+    SUMMARY_THEN_UNMARKED_EXPERIENCE.replace('<div>{{EXPERIENCE}}', '<!-- WORK EXPERIENCE -->\n<div>{{EXPERIENCE}}'),
+    { ...FULL, summary: '' }, 'html'),
+  '<html><body>\n<!-- WORK EXPERIENCE -->\n<div>{{EXPERIENCE}}</div>\n<!-- END -->\n</body></html>');
+
+// --- A summary of 0 is a value, not an absent one -----------------------------
+// escapeHtml prints 0, so `0` must not read as empty (a truthiness check would).
+check('isEmptySection: a numeric 0 summary is content', isEmptySection({ summary: 0 }, 'summary'), false);
+check('isEmptySection: null, undefined, an object and blank text are empty',
+  [null, undefined, {}, '', '  \n'].every((summary) => isEmptySection({ summary }, 'summary')), true);
+
 // --- Skills is not always the last section ---------------------------------
 // A custom template may put Skills above Education. The Skills boundary must
 // then stop at the NEXT section's marker, not run all the way to the trailing
@@ -523,10 +616,21 @@ for (const section of ['projects', 'awards', 'interests']) {
   check(`isEmptyRenderedSection: an agent-emitted ${section} section with nothing under its header reads empty`,
     isEmptyRenderedSection(agentHtml, section), true);
 }
-for (const section of ['competencies', 'experience', 'education', 'certifications', 'skills']) {
+for (const section of ['summary', 'competencies', 'experience', 'education', 'certifications', 'skills']) {
   check(`isEmptyRenderedSection: a populated ${section} section does not read empty`,
     isEmptyRenderedSection(agentHtml, section), false);
 }
+
+// The same CV with nothing under its summary heading (#5019).
+const agentHtmlNoSummary = agentHtml.replace('<div class="summary-text">x</div>', '<div class="summary-text"></div>');
+check('fixture actually emptied the agent-emitted summary', agentHtmlNoSummary !== agentHtml, true);
+check('isEmptyRenderedSection: an agent-emitted summary with nothing under its header reads empty',
+  isEmptyRenderedSection(agentHtmlNoSummary, 'summary'), true);
+const strippedNoSummary = stripEmptyRenderedSections(agentHtmlNoSummary);
+check('stripEmptyRenderedSections: an empty summary is removed from an agent-emitted CV',
+  strippedNoSummary.includes('<!-- PROFESSIONAL SUMMARY -->'), false);
+check('stripEmptyRenderedSections: removing the summary keeps the header and competencies',
+  strippedNoSummary.includes('<!-- HEADER -->') && strippedNoSummary.includes('<!-- CORE COMPETENCIES -->'), true);
 
 // The section title is present either way, so counting it as content would
 // make every section look populated — the guard that fails first if the
@@ -550,7 +654,7 @@ for (const marker of ['<!-- PROJECTS -->', '<!-- AWARDS -->', '<!-- INTERESTS --
   check(`stripEmptyRenderedSections: ${marker} is removed from an agent-emitted CV`,
     strippedRendered.includes(marker), false);
 }
-for (const marker of ['<!-- CORE COMPETENCIES -->', '<!-- WORK EXPERIENCE -->', '<!-- EDUCATION -->', '<!-- CERTIFICATIONS -->', '<!-- SKILLS -->']) {
+for (const marker of ['<!-- PROFESSIONAL SUMMARY -->', '<!-- CORE COMPETENCIES -->', '<!-- WORK EXPERIENCE -->', '<!-- EDUCATION -->', '<!-- CERTIFICATIONS -->', '<!-- SKILLS -->']) {
   check(`stripEmptyRenderedSections: ${marker} survives with its content`,
     strippedRendered.includes(marker), true);
 }

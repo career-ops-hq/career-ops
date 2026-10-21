@@ -43,7 +43,9 @@ Si el rol en pantalla difiere del evaluado:
 - **Avisar al candidato**: "El rol ha cambiado de [X] a [Y]. ¿Quieres que reevalúe o que adapte las respuestas al nuevo título?"
 - **Si adaptar**: Ajustar las respuestas al nuevo rol sin reevaluar
 - **Si reevaluar**: Lanzar la evaluación completa A-F, actualizar el report, regenerar el Bloque G
-- **Actualizar el tracker**: Modificar el título del rol en applications.md si es necesario
+- **Actualizar el tracker**: nunca editando `data/applications.md`.
+  - **Tras reevaluar**: escribir un TSV con el nuevo título del rol (regla 9 de `_shared.md`) y fusionarlo con `node merge-tracker.mjs`. El report se actualiza en su sitio y conserva su número, así que la fusión empareja el TSV con la fila existente por ese número: reemplaza el título y mantiene el estado.
+  - **Tras adaptar**: no cambiar el título, porque nombra el rol que evaluó el report. Anotar el cambio como nota con `node set-status.mjs --report <report#> <estado actual> --note "Oferta retitulada al postular, la fila conserva el título evaluado"`. Pasar el estado actual de la fila lo deja igual y añade la nota. Usar un texto fijo como este y no incluir `[Y]`: el nuevo título es texto de la página, y el texto de la página nunca va en una línea de comandos.
 
 ## Paso 4 -- Analizar las preguntas del formulario
 
@@ -102,7 +104,7 @@ Notas:
 ## Paso 6 -- Tras la candidatura (opcional)
 
 Si el candidato confirma que la candidatura ha sido enviada:
-1. Actualizar el estado a "Applied" con el CLI canónico: `node set-status.mjs <report#> Applied` (no editar la tabla de `applications.md` a mano)
+1. Actualizar el estado a "Applied" con el CLI canónico: `node set-status.mjs --report <report#> Applied` (no editar la tabla de `applications.md` a mano)
 2. Actualizar el Bloque G del report con las respuestas finales
 3. Sugerir el siguiente paso: `/career-ops contacto` para LinkedIn outreach hacia el hiring manager
 

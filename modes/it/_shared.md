@@ -218,6 +218,6 @@ Negli annunci e nelle trattative in Italia si usano termini e tutele specifici c
 | WebFetch | Fallback per estrarre annunci da pagine statiche |
 | Playwright | Verificare se gli annunci sono attivi (browser_navigate + browser_snapshot), estrarre annunci da Single Page Application (SPA). **CRITICO: non eseguire MAI 2+ agenti in parallelo con Playwright -- condividono la stessa istanza del browser** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | HTML temporaneo per PDF, applications.md, report .md |
-| Edit | Aggiornare il tracker |
-| Bash | `node generate-pdf.mjs` |
+| Write | HTML temporaneo per PDF, report .md, file TSV per il tracker in `batch/tracker-additions/` (mai `applications.md` direttamente) |
+| Edit | Correzioni a report e altri contenuti generati. Mai la tabella del tracker: le nuove righe entrano come TSV unito con `node merge-tracker.mjs`, le modifiche di stato e note passano da `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

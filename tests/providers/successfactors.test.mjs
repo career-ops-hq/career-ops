@@ -76,6 +76,39 @@ try {
     fail(`resolveConfig jobs-endpoint-as-api wrong: base=${brandJobsEndpoint.base} jobsApi=${brandJobsEndpoint.jobsApi}`);
   }
 
+  // A /go/<Category>/<id>/ saved-search page copied from a careers site is not a
+  // brand prefix: it must resolve to the tenant root, where the tile endpoint
+  // answers, not to .../go/<Category>/<id>/tile-search-results/ (200, zero tiles).
+  const goRoot = 'https://jobs.canadalife.com';
+  for (const [label, url] of [
+    ['category page', `${goRoot}/go/All-Jobs/9170201/`],
+    ['category page with a locale query', `${goRoot}/go/All-Jobs/9170201/?locale=en_US`],
+    ['paginated category page', `${goRoot}/go/All-Jobs/9170201/25/`],
+    ['category page without a trailing slash', `${goRoot}/go/All-Jobs/9170201`],
+  ]) {
+    const go = resolveConfig({ name: 'Canada Life', careers_url: url });
+    if (go.base === goRoot && go.tileApi === `${goRoot}/tile-search-results/` && go.jobsApi === `${goRoot}/services/recruiting/v1/jobs`) {
+      pass(`resolveConfig: /go/<Category>/<id>/ ${label} resolves to the tenant root`);
+    } else {
+      fail(`resolveConfig /go/ ${label} wrong: base=${go.base} tileApi=${go.tileApi}`);
+    }
+  }
+  const brandGo = resolveConfig({ name: 'Bluebeam', careers_url: 'https://careers.nemetschek.com/Bluebeam/go/Sales/123/' });
+  if (brandGo.base === 'https://careers.nemetschek.com/Bluebeam' && brandGo.tileApi === 'https://careers.nemetschek.com/Bluebeam/tile-search-results/') {
+    pass('resolveConfig: a brand segment in front of /go/<Category>/<id>/ is kept');
+  } else {
+    fail(`resolveConfig brand + /go/ wrong: base=${brandGo.base} tileApi=${brandGo.tileApi}`);
+  }
+  // Only a /go/ page is stripped: a brand whose own name is "go", or a path that
+  // merely contains /go/, must be left alone.
+  const goBrand = resolveConfig({ name: 'X', careers_url: 'https://careers.example.com/go/' });
+  const goDeep = resolveConfig({ name: 'X', careers_url: 'https://careers.example.com/Brand/go/jobs/' });
+  if (goBrand.base === 'https://careers.example.com/go' && goDeep.base === 'https://careers.example.com/Brand/go/jobs') {
+    pass('resolveConfig: a path that is not /go/<Category>/<numeric id>/ is left alone');
+  } else {
+    fail(`resolveConfig over-stripped a non-category /go/ path: ${goBrand.base} | ${goDeep.base}`);
+  }
+
   // detect() — literal SF hosts auto-claim; branded RMK hosts (jobs.zf.com) do
   // NOT (they carry no "successfactors" string and rely on explicit provider:).
   if (sf.detect({ name: 'X', careers_url: 'https://acme.successfactors.eu/careers' })) {
@@ -180,6 +213,21 @@ try {
   if (extractLocales('<p>no locales here</p>').length === 0) pass('extractLocales returns [] when the page carries none');
   else fail('extractLocales should return [] for a page with no locale links');
 
+  // The date format follows the query locale: BMW's fr_FR and pt_BR pages send
+  // D/M/YYYY with slashes, and hu_HU sends "YYYY. MM. DD.".
+  {
+    const rec = (id, d) => ({ response: { id, unifiedStandardTitle: `Role ${id}`, unifiedStandardStart: d } });
+    const posted = (d, locale) => parseCsbJobs({ jobSearchResult: [rec('1', d)] }, { origin: 'https://jobs.example.com' }, locale)[0].postedAt;
+    const got = [
+      posted('05/10/2026', 'fr_FR'),
+      posted('13/10/2026', 'pt_BR'),
+      posted('2025. 07. 03.', 'hu_HU'),
+      posted('6/18/26', 'en_US'),
+    ];
+    const want = [Date.UTC(2026, 9, 5), Date.UTC(2026, 9, 13), Date.UTC(2025, 6, 3), Date.UTC(2026, 5, 18)];
+    if (JSON.stringify(got) === JSON.stringify(want)) pass('parseCsbJobs reads the posting date in the query locale order');
+    else fail(`parseCsbJobs locale dates wrong: ${JSON.stringify(got.map((t) => (t ? new Date(t).toISOString().slice(0, 10) : t)))}`);
+  }
   // parseCsbDate — locale-dependent short date; separator infers field order.
   if (parseCsbDate('6/18/26') === Date.UTC(2026, 5, 18)) pass('parseCsbDate reads US M/D/YY');
   else fail(`parseCsbDate US wrong: ${parseCsbDate('6/18/26')}`);
@@ -313,6 +361,37 @@ try {
     } else {
       fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)} after ${probeCalls} jobs-API calls`);
     }
+  }
+  // CSB paging against a server whose default sort reshuffles ties on every
+  // request (BMW's live behavior): every posting must still come back.
+  {
+    const ids = Array.from({ length: 25 }, (_, i) => String(1000 + i));
+    const rec = (id) => ({ response: { id, unifiedStandardTitle: `Role ${id}`, unifiedUrlTitle: `Role-${id}` } });
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    let dateCalls = 0;
+    const jobs = await sf.fetch(
+      { name: 'ShuffleCo', careers_url: 'https://jobs.shuffleco.example', sfVariant: 'csb' },
+      {
+        sleep: async () => {},
+        fetchText: async () => '<a href="/search/?locale=en_US">en</a>',
+        fetchJson: async (_url, opts) => {
+          const { pageNumber, sortBy } = JSON.parse(opts.body);
+          let order;
+          if (sortBy === 'date') {
+            dateCalls++;
+            order = [...ids];
+            if (dateCalls <= 3 && pageNumber === 1) order[10] = order[9];
+          } else {
+            order = [...ids].sort(() => rand() - 0.5);
+          }
+          return { totalJobs: ids.length, jobSearchResult: order.slice(pageNumber * 10, pageNumber * 10 + 10).map(rec) };
+        },
+      },
+    );
+    const got = new Set(jobs.map((j) => j.url.split('/').pop().split('-')[0]));
+    if (got.size === 25 && jobs.length === 25) pass('successfactors CSB returns every posting when the server reshuffles page order');
+    else fail(`successfactors CSB lost postings under unstable paging: ${got.size} of 25`);
   }
 } catch (err) {
   fail(`successfactors provider test threw: ${err.message}`);

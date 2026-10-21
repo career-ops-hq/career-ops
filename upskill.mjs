@@ -28,6 +28,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
+import { rankSkipBlockers, parseRequirementImportance } from './skip-blockers.mjs';
 
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
@@ -36,6 +38,7 @@ const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const CV_FILE = join(CAREER_OPS, 'cv.md');
 const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+const STATES_FILE = join(ROOT, 'templates/states.yml');
 
 // Canonical reports-root containment. A tracker link resolves to a candidate
 // path; accept it only if it stays inside the repo's reports/ directory. Two
@@ -284,6 +287,7 @@ export function parseReportGaps(content) {
   const gapDescriptions = [];
   let score = null;
   let hasMachineSummary = false;
+  let requirements = [];
 
   const summary = parseMachineSummary(content);
   if (summary) {
@@ -291,6 +295,7 @@ export function parseReportGaps(content) {
     if (typeof summary.score === 'number' && Number.isFinite(summary.score)) score = summary.score;
     gapDescriptions.push(...normalizeList(summary.hard_stops));
     gapDescriptions.push(...normalizeList(summary.soft_gaps));
+    requirements = parseRequirementImportance(summary.requirement_importance);
   }
 
   const plain = content.replace(/\*\*/g, '');
@@ -307,7 +312,7 @@ export function parseReportGaps(content) {
     }
   }
 
-  return { score, gapText: gapDescriptions.join('\n'), hasMachineSummary };
+  return { score, gapText: gapDescriptions.join('\n'), hasMachineSummary, requirements };
 }
 
 /**
@@ -440,6 +445,7 @@ function analyze(minReports) {
   const lines = readFileSync(APPS_FILE, 'utf-8').split('\n');
   const colmap = resolveColumns(lines);
   const rows = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
+  const states = loadCanonicalStates(STATES_FILE);
 
   let reportsLinked = 0;
   let reportsRead = 0;
@@ -470,13 +476,16 @@ function analyze(minReports) {
     }
     if (content === null) continue;
     reportsRead += 1;
-    const { score, gapText, hasMachineSummary } = parseReportGaps(content);
+    const { score, gapText, hasMachineSummary, requirements } = parseReportGaps(content);
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
     parsedReports.push({
       num: row.num,
       score: Number.isFinite(trackerScore) ? trackerScore : score,
       gapText,
+      date: row.date,
+      state: resolveCanonicalStateId(row.status, states),
+      requirements,
     });
   }
 
@@ -515,6 +524,7 @@ function analyze(minReports) {
     excludedAsKnown,
     excludedAsCompanyName,
     knownSkills: [...knownSkills].sort(),
+    skipBlockers: rankSkipBlockers(parsedReports),
   };
 }
 
@@ -524,16 +534,26 @@ function printSummary(result) {
     return;
   }
   const m = result.metadata;
+  const pad = (s, n) => String(s).padEnd(n);
   console.log(`UPSKILL GAP MAP (schema v${result.schema_version})`);
   console.log(`Reports: ${m.reportsRead}/${m.reportsLinked} read, ${m.reportsScored} scored, ${m.lowFitReports} low-fit (<${m.lowFitScoreThreshold}), ${m.reportsWithMachineSummary} with Machine Summary`);
   console.log('');
   if (result.gaps.length === 0) {
     console.log('No skill gaps detected across your evaluated reports.');
   } else {
-    const pad = (s, n) => String(s).padEnd(n);
     console.log(`${pad('TIER', 10)}${pad('SKILL', 22)}${pad('REPORTS', 9)}${pad('LOW-FIT', 9)}WEIGHTED`);
     for (const g of result.gaps) {
       console.log(`${pad(g.tier, 10)}${pad(g.skill, 22)}${pad(g.reports, 9)}${pad(`${g.lowFitReports}/${result.metadata.lowFitReports}`, 9)}${g.weightedScore}`);
+    }
+  }
+  const { skips, blockers } = result.skipBlockers;
+  if (blockers.length > 0) {
+    const next = { learn: 'learn it', evidence: 'add evidence if you have it' };
+    console.log('');
+    console.log(`BLOCKED YOUR LAST ${skips} SKIPS (critical or high requirement marked missing or partial)`);
+    console.log(`${pad('SKIPS', 7)}${pad('MISSING', 9)}${pad('PARTIAL', 9)}${pad('3.5+', 6)}${pad('NEXT', 29)}REQUIREMENT`);
+    for (const b of blockers) {
+      console.log(`${pad(b.skips, 7)}${pad(b.missing, 9)}${pad(b.partial, 9)}${pad(b.closeCalls, 6)}${pad(next[b.nudge], 29)}${b.label}`);
     }
   }
   if (result.excludedAsKnown.length > 0) {
@@ -548,13 +568,15 @@ function printSummary(result) {
   }
 }
 
-// --- Self-test (pure functions, no filesystem) ---
+// --- Self-test (pure helpers, plus a reports/ link probe that writes and unlinks temp files) ---
 function runSelfTest() {
   const failures = [];
 
   // The extractSkills canonicalization/boundary fixtures now live with the
-  // module in tests/skill-extract.test.mjs (#1896). upskill's self-test keeps
-  // the aggregation/suppression/targeted checks that are upskill's own logic.
+  // module in tests/skill-extract.test.mjs (#1896), and the known-skills comment
+  // handling lives in tests/upskill-known-skills.test.mjs (#5183). upskill's
+  // self-test keeps the aggregation/suppression/targeted checks that are
+  // upskill's own logic.
 
   // Over-suppression guard: cv "Java" must NOT swallow a "JavaScript" gap,
   // and cv "AWS" must not swallow GCP/Azure. This is the failure mode the
@@ -730,120 +752,12 @@ soft_gaps:
     }
   }
 
-  // --- known-skills text: comments must never register as known skills ---
-  // A comment recording that the user does NOT have something must not make it
-  // count as known and suppress it from the gap map.
-  {
-    const profile = [
-      'candidate:',
-      '  full_name: "Test User"',
-      '# We dropped Kubernetes last year and never picked up Terraform.',
-      'skills:',
-      '  - Python',
-    ].join('\n');
-    const cv = '# CV\n\n<!-- template note: list Snowflake if you have used it -->\n\n## Skills\nSQL, AWS\n';
-
-    const leaked = extractSkills([cv, profile].join('\n'));
-    if (!leaked.has('Kubernetes') || !leaked.has('Snowflake')) {
-      failures.push('known-skills: fixture no longer reproduces the raw-concat leak — rewrite it, not the fix');
-    }
-
-    const fixed = extractSkills(knownSkillsText(cv, profile));
-    for (const ghost of ['Kubernetes', 'Terraform', 'Snowflake']) {
-      if (fixed.has(ghost)) failures.push(`known-skills: "${ghost}" leaked from a comment`);
-    }
-    for (const real of ['Python', 'SQL', 'AWS']) {
-      if (!fixed.has(real)) failures.push(`known-skills: real skill "${real}" was dropped`);
-    }
-
-    // A skill in KEY position stays known — dropping keys would silently narrow
-    // what counts as known, a different behaviour change than removing comments.
-    if (!extractSkills(yamlValueText('skills:\n  Python: expert\n')).has('Python')) {
-      failures.push('known-skills: key-position skill dropped');
-    }
-
-    // Parsing beats regex-stripping: a '#' inside a quoted string is not a comment.
-    if (!extractSkills(yamlValueText('note: "uses C# daily"\n')).has('C#')) {
-      failures.push('known-skills: "#" inside a quoted string was treated as a comment');
-    }
-
-    // Unparseable YAML degrades to the raw text (previous behaviour). Returning
-    // nothing would empty the known-skills set and flood the map with false gaps.
-    if (!yamlValueText('key: [unclosed\n  bad: : :').includes('unclosed')) {
-      failures.push('known-skills: unparseable YAML should fall back to raw text');
-    }
-
-    // ...but that fallback re-exposes the bug, so it must not be silent. The
-    // caller has to be told, or a malformed profile quietly reinstates exactly
-    // the suppression this fix removes.
-    {
-      const badProfile = '# We dropped Kubernetes.\nkey: [unclosed\n  bad: : :';
-      let notified = 0;
-      const text = yamlValueText(badProfile, () => { notified++; });
-      if (notified !== 1) {
-        failures.push(`known-skills: unparseable YAML must notify the caller exactly once (got ${notified})`);
-      }
-      if (!text.includes('unclosed')) {
-        failures.push('known-skills: notifying must not change the raw-text fallback');
-      }
-      // The leak the warning exists to announce — assert it is real, so this
-      // test cannot pass because the fixture stopped being malformed.
-      if (!extractSkills(text).has('Kubernetes')) {
-        failures.push('known-skills: malformed-YAML fixture no longer leaks — rewrite it, not the warning');
-      }
-      // Valid YAML must stay quiet: a warning on every run is noise, and noise
-      // is how a real one gets ignored.
-      let spurious = 0;
-      yamlValueText('skills:\n  - Python\n', () => { spurious++; });
-      if (spurious !== 0) {
-        failures.push('known-skills: valid YAML must not emit a parse-failure warning');
-      }
-      // knownSkillsText must forward the callback — the CLI paths rely on it,
-      // and a dropped forward would silently disable both warnings at once.
-      let forwarded = 0;
-      knownSkillsText('# CV\n', badProfile, () => { forwarded++; });
-      if (forwarded !== 1) {
-        failures.push(`known-skills: knownSkillsText must forward the parse-failure callback (got ${forwarded})`);
-      }
-    }
-
-    if (stripMarkdownComments('a <!-- x --> b').includes('x')) {
-      failures.push('known-skills: markdown comment not stripped');
-    }
-
-    // A YAML alias can produce a genuinely cyclic object. Without a visited-set
-    // the walk recurses until the stack dies, taking the whole run with it —
-    // and the parse try/catch cannot help, because the throw is in the walk.
-    const cyclicYaml = 'root: &a\n  name: Python\n  self: *a\n';
-    // Load ONCE and compare within that graph — two separate loads produce two
-    // independent object trees, so a cross-load identity check never holds and
-    // would assert nothing.
-    const cyclicDoc = yamlLoad(cyclicYaml);
-    if (cyclicDoc?.root?.self !== cyclicDoc?.root) {
-      failures.push('known-skills: cyclic fixture no longer produces a cycle — rewrite it, not the guard');
-    }
-    try {
-      if (!extractSkills(yamlValueText(cyclicYaml)).has('Python')) {
-        failures.push('known-skills: cyclic YAML lost a real value');
-      }
-    } catch (e) {
-      failures.push(`known-skills: cyclic YAML alias threw (${e.constructor.name}) instead of terminating`);
-    }
-
-    // Optional files: missing, unreadable, and not-a-file must all read as ''.
-    if (readOptionalText(join(CAREER_OPS, 'no-such-file-xyz.md')) !== '') {
-      failures.push('readOptionalText: a missing file should read as empty');
-    }
-    if (readOptionalText(CAREER_OPS) !== '') {
-      failures.push('readOptionalText: a DIRECTORY should read as empty, not throw EISDIR');
-    }
-  }
 
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
   }
-  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing, known-skills comment handling)');
+  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing)');
   process.exit(0);
 }
 

@@ -33,13 +33,19 @@ try {
   }
 
   const source = readFileSync(join(root, 'update-system.mjs'), 'utf8');
-  const detectAt = source.indexOf("locallyModifiedSystemFiles(reexecFiles, 'FETCH_HEAD')");
+  // apply() pins FETCH_HEAD to an immutable SHA once per run and addresses that
+  // SHA everywhere afterwards (#3052), so this ordering check follows the pinned
+  // ref rather than the pseudo-ref it replaced.
+  const closureAt = source.indexOf('const reexecFiles = assertCanonicalManifestPaths(');
+  const coverageAt = source.indexOf('uncoveredReexecFiles.length > 0', closureAt);
+  const detectAt = source.indexOf('locallyModifiedSystemFiles(reexecFiles, targetCommit)', coverageAt);
   const backUpAt = source.indexOf('backupSystemFiles(bootstrapAtRisk)', detectAt);
-  const checkoutAt = source.indexOf("git('checkout', 'FETCH_HEAD', '--', ...reexecFiles)", detectAt);
-  if (detectAt !== -1 && backUpAt > detectAt && checkoutAt > backUpAt) {
-    pass('apply detects and backs up bootstrap edits before checkout');
+  const checkoutAt = source.indexOf("git('--literal-pathspecs', 'checkout', targetCommit, '--', ...reexecFiles)", detectAt);
+  if (closureAt !== -1 && coverageAt > closureAt && detectAt > coverageAt
+      && backUpAt > detectAt && checkoutAt > backUpAt) {
+    pass('apply validates, detects, and backs up bootstrap edits before literal checkout');
   } else {
-    fail('apply must preserve bootstrap edits before the destructive checkout');
+    fail('apply must validate and preserve bootstrap edits before the destructive checkout');
   }
 
   const recordAt = source.indexOf('generatedBackupPaths.add(result.backup)');

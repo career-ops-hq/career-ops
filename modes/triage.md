@@ -23,7 +23,7 @@ This is the entire point of triage mode. Full context is expensive and not neede
 to score a role for go/no-go. Read `_brief.md` once, then evaluate.
 
 `modes/_brief.md` is a user-layer file created from `modes/_brief.template.md`
-(auto-copied by `doctor.mjs` on first run). If it does not exist or has not been
+(copied during onboarding with `node doctor.mjs --json --init-templates`). If it does not exist or has not been
 filled in, triage cannot run — fall back to full evaluation.
 
 ## Steps

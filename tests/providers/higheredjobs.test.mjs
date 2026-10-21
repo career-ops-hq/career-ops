@@ -138,6 +138,41 @@ try {
   } else {
     fail(`higheredjobs.fetch() normalized row = ${JSON.stringify(fetched[0])}`);
   }
+
+  // #3637: behind the Incapsula wall the feed URL answers 200 with this shape of
+  // page (measured 2026-09-27, 212 bytes, text/html; resource token replaced).
+  // It parses to zero items, so it used to read as an empty board.
+  const challenge = '<html>\n<head>\n<META NAME="robots" CONTENT="noindex,nofollow">\n<script src="/_Incapsula_Resource?SWJIYLWA=x">\n</script>\n<body>\n</body></html>\n';
+  const fetchWith = (body) => higheredjobs.fetch(
+    { name: 'HEJ Board', provider: 'higheredjobs' },
+    { fetchText: async () => body },
+  );
+
+  try {
+    const walled = await fetchWith(challenge);
+    fail(`higheredjobs.fetch() returned ${walled.length} jobs for a challenge page instead of throwing`);
+  } catch (e) {
+    if (/challenge page, not a feed/.test(e.message)) {
+      pass('higheredjobs.fetch() names a challenge page as an error, not an empty board (#3637)');
+    } else {
+      fail(`higheredjobs.fetch() threw the wrong error for a challenge page: ${e.message}`);
+    }
+  }
+
+  try {
+    await fetchWith('');
+    fail('higheredjobs.fetch() returned a board for an empty body instead of throwing');
+  } catch (e) {
+    if (/answered no feed/.test(e.message)) pass('higheredjobs.fetch() names an empty body as an error');
+    else fail(`higheredjobs.fetch() threw the wrong error for an empty body: ${e.message}`);
+  }
+
+  const emptyFeed = await fetchWith('<?xml version="1.0"?>\n<rss version="2.0"><channel><title>HEJ</title></channel></rss>');
+  if (Array.isArray(emptyFeed) && emptyFeed.length === 0) {
+    pass('higheredjobs.fetch() keeps a real feed with no items as an empty board (no false error)');
+  } else {
+    fail(`higheredjobs.fetch() on a valid empty feed returned ${JSON.stringify(emptyFeed)}`);
+  }
 } catch (e) {
   fail(`higheredjobs provider tests crashed: ${e.message}`);
 }

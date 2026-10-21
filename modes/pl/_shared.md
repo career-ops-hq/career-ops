@@ -216,6 +216,6 @@ W polskich ofertach i negocjacjach pojawiają się terminy, które nie istnieją
 | WebFetch | Fallback do ekstrakcji ofert ze stron statycznych |
 | Playwright | Sprawdzenie, czy oferty są aktywne (browser_navigate + browser_snapshot), ekstrakcja ofert ze SPA. **KRYTYCZNE: NIGDY 2+ agentów równolegle z Playwright -- współdzielą tę samą instancję przeglądarki** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | Tymczasowy HTML dla PDF, applications.md, reporty .md |
-| Edit | Aktualizacja trackera |
-| Bash | `node generate-pdf.mjs` |
+| Write | Tymczasowy HTML dla PDF, reporty .md, pliki TSV z wpisami do trackera w `batch/tracker-additions/` (nigdy bezpośrednio `applications.md`) |
+| Edit | Poprawki w reportach i innych wygenerowanych treściach. Nigdy tabela trackera: nowe wiersze trafiają jako TSV scalany przez `node merge-tracker.mjs`, a zmiany statusu i notatek przez `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

@@ -272,6 +272,42 @@ try {
     pass('gem.fetch() folds location name + isRemote flag, " · "-joined');
   else fail(`gem.fetch() row 0 location = ${JSON.stringify(fetched[0]?.location)}`);
 
+  // isoCountry arrives as ISO alpha-3 on live boards ("USA", "GBR"); its name
+  // is folded into the location unless the name already says it. Expected
+  // names come from the shared helper, not literals — CLDR spellings can shift
+  // between Node versions.
+  const { countryNameFromIso } = await import(pathToFileURL(join(ROOT, 'providers/_country.mjs')).href);
+  const uk = countryNameFromIso('GBR');
+  const us = countryNameFromIso('USA');
+  let isoCall = 0;
+  const isoFetched = await gem.fetch(
+    { name: 'Retool', careers_url: 'https://jobs.gem.com/retool' },
+    {
+      fetchJson: async () => (++isoCall === 1 ? [{
+        data: {
+          oatsExternalJobPostings: {
+            jobPostings: [
+              {
+                extId: '2001',
+                title: 'Platform Engineer',
+                locations: [
+                  { name: 'London', city: 'London', isoCountry: 'GBR', isRemote: false },
+                  { name: 'Remote, US', isoCountry: 'USA', isRemote: true },
+                  { name: `Berlin, ${countryNameFromIso('DEU')}`, isoCountry: 'DEU', isRemote: false },
+                  { name: 'Somewhere', isoCountry: 'XXX', isRemote: false },
+                ],
+              },
+            ],
+          },
+        },
+      }] : []),
+    },
+  );
+  const expectedIso = [`London, ${uk}`, `Remote, US, ${us} · Remote`, `Berlin, ${countryNameFromIso('DEU')}`, 'Somewhere'].join(' · ');
+  if (uk && us && isoFetched[0]?.location === expectedIso)
+    pass('gem.fetch() appends the isoCountry name unless the location already names it; unknown codes add nothing');
+  else fail(`gem.fetch() isoCountry location = ${JSON.stringify(isoFetched[0]?.location)}, expected ${JSON.stringify(expectedIso)}`);
+
   if (fetched[0]?.postedAt === 1700000000 * 1000)
     pass('gem.fetch() converts firstPublishedTsSec (unix seconds) to postedAt (epoch ms)');
   else fail(`gem.fetch() row 0 postedAt = ${JSON.stringify(fetched[0]?.postedAt)} (expected ${1700000000 * 1000})`);

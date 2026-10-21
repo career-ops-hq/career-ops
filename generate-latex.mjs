@@ -10,15 +10,21 @@
  * Default: validates career-ops template structure (from templates/cv-template.tex).
  * --compile-only: skip template validation; compile any user-owned .tex (latex-tex mode).
  *
- * Requires: tectonic (preferred) or pdflatex on PATH.
+ * Requires: a repo-local tectonic (`node install-latex-engine.mjs`, see
+ * install-latex-engine.mjs), or tectonic / pdflatex on PATH.
  */
 
 import { readFile, writeFile, stat, copyFile, rm } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+
+const INSTALL_HINT = 'node install-latex-engine.mjs';
 
 const MIN_SECTIONS = 4;
 
@@ -45,17 +51,40 @@ const CJK_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script
 const CJK_PACKAGE_RE = /\\usepackage(?:\[[^\]]*\])?\{[^}]*\b(?:xeCJK|ctex)\b[^}]*\}|\\documentclass(?:\[[^\]]*\])?\{ctex(?:art|rep|book)?\}/;
 
 /**
- * Resolve the LaTeX engine available on PATH, preferring tectonic (XeTeX
- * backend, supports CJK via fontspec/xeCJK) over pdflatex (no CJK support).
+ * Where install-latex-engine.mjs puts tectonic: next to the scripts.
+ * @param {string} [root]
+ * @param {string} [platform]
+ * @returns {string}
+ */
+export function localTectonicPath(root = ROOT, platform = process.platform) {
+  return join(root, platform === 'win32' ? 'tectonic.exe' : 'tectonic');
+}
+
+// The binary resolveLatexEngine() last succeeded with, so the compile runs the
+// executable it probed (the repo-local path, not whatever is on PATH).
+let resolvedEngineBin = null;
+
+/**
+ * Resolve the LaTeX engine, preferring tectonic (XeTeX backend, supports CJK
+ * via fontspec/xeCJK) over pdflatex (no CJK support). A repo-local tectonic
+ * from install-latex-engine.mjs is tried before PATH.
  * @returns {string|null}
  */
 export function resolveLatexEngine() {
-  for (const candidate of ['tectonic', 'pdflatex']) {
+  const local = localTectonicPath();
+  const candidates = [
+    ...(existsSync(local) ? [{ name: 'tectonic', bin: local }] : []),
+    { name: 'tectonic', bin: 'tectonic' },
+    { name: 'pdflatex', bin: 'pdflatex' },
+  ];
+  for (const candidate of candidates) {
     try {
-      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
-      return candidate;
+      execFileSync(candidate.bin, ['--version'], { stdio: 'pipe' });
+      resolvedEngineBin = candidate.bin;
+      return candidate.name;
     } catch { /* not found */ }
   }
+  resolvedEngineBin = null;
   return null;
 }
 
@@ -98,7 +127,7 @@ export function validateLatexContent(content, compileOnly, engine = null) {
     } else if (engine === 'tectonic') {
       issues.push('CJK characters detected but no CJK package (xeCJK/ctex) is loaded. Generate from the CJK-aware template instead: `node build-cv-latex.mjs <input.json> <output.tex> --template=cjk` (templates/cv-template.cjk.tex), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
     } else {
-      issues.push('CJK characters detected. This CJK-aware LaTeX path needs a XeTeX-based engine (fontspec/xeCJK) — pdfLaTeX cannot compile it. Install tectonic (brew install tectonic) and regenerate from the CJK-aware template (`--template=cjk`), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
+      issues.push(`CJK characters detected. This CJK-aware LaTeX path needs a XeTeX-based engine (fontspec/xeCJK) — pdfLaTeX cannot compile it. Install tectonic (\`${INSTALL_HINT}\`, one-time download) and regenerate from the CJK-aware template (\`--template=cjk\`), or use \`pdf\` mode (HTML to PDF, which renders CJK) for these CVs.`);
     }
   }
 
@@ -173,7 +202,8 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
 
   if (!engine) {
     report.compiled = false;
-    report.compileError = 'No LaTeX engine found. Install tectonic (brew install tectonic) or pdflatex.';
+    report.compileError = `No LaTeX engine found. Run \`${INSTALL_HINT}\` (downloads tectonic once, ~10-22 MB) or install tectonic/pdflatex yourself.`;
+    report.installHint = INSTALL_HINT;
     return report;
   }
 
@@ -190,7 +220,7 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
 
   try {
     if (engine === 'tectonic') {
-      execFileSync('tectonic', ['--outdir', texDir, compilePath], {
+      execFileSync(resolvedEngineBin || 'tectonic', ['--outdir', texDir, compilePath], {
         cwd: texDir,
         stdio: 'pipe',
         timeout: 120_000,
@@ -263,7 +293,7 @@ const USAGE = `Usage:
   node generate-latex.mjs <input.tex> [output.pdf] --compile-only  # skip template validation; compile any user-owned .tex (latex-tex mode)
   node generate-latex.mjs --help|-h                                # print this usage block and exit
 
-Requires tectonic (preferred) or pdflatex on PATH.`;
+Requires a repo-local tectonic (${INSTALL_HINT}) or tectonic/pdflatex on PATH.`;
 
 async function main() {
   const rawArgs = process.argv.slice(2);

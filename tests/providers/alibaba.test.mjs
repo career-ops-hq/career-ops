@@ -1,7 +1,7 @@
 // tests/providers/alibaba.test.mjs — Alibaba Group careers provider
 // (talent.alibaba.com public JSON API). Added with the provider in the same
 // PR; follows the discovered-test layout from #1440.
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -182,11 +182,18 @@ try {
     success: true,
     content: { totalCount: 500, datas: Array.from({ length: 100 }, (_, i) => mkJob(5000 + i, `岗位E${i}`)) },
   }));
-  await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('alibaba.fetch() honors entry.max_pages');
   } else {
     fail(`alibaba.fetch() entry.max_pages=1 made ${capped.calls.length} requests`);
+  }
+
+  if (cappedErrors.some((line) => String(line).includes('truncated at 100 of 500 postings'))) {
+    pass('alibaba.fetch() warns when max_pages truncates the board instead of stopping silently');
+  } else {
+    fail(`alibaba.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
   }
 
   const probe = mkCtx(() => ({
@@ -194,11 +201,36 @@ try {
     content: { totalCount: 500, datas: Array.from({ length: 100 }, (_, i) => mkJob(6000 + i, `岗位F${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, probe.ctx);
+  const { result: probeJobs, errors: probeErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, probe.ctx));
   if (probe.calls.length === 1 && probe.calls[0].key === '' && probeJobs.length === 100) {
     pass('alibaba.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (empty keyword) query');
   } else {
     fail(`alibaba.fetch() ctx.maxPages=1: ${probe.calls.length} requests, key=${JSON.stringify(probe.calls[0] && probe.calls[0].key)}`);
+  }
+
+  if (probeErrors.length === 0) {
+    pass('alibaba.fetch() stays quiet when the ctx.maxPages probe, not max_pages, stops pagination');
+  } else {
+    fail(`alibaba.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
+  }
+
+  // A board whose reported total never runs out still stops at the
+  // DEFAULT_MAX_PAGES runaway guard, and says so.
+  const endless = mkCtx(({ pageIndex }) => ({
+    success: true,
+    content: {
+      totalCount: 1000000,
+      datas: Array.from({ length: 100 }, (_, i) => mkJob(100000 + pageIndex * 100 + i, `岗位H${pageIndex}-${i}`)),
+    },
+  }));
+  const { result: endlessJobs, errors: endlessErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL }, endless.ctx));
+  if (endless.calls.length === 100 && endlessJobs.length === 10000
+      && endlessErrors.some((line) => String(line).includes('truncated at 10000 of 1000000 postings'))) {
+    pass('alibaba.fetch() stops at the 100-page default when the reported total keeps going, and warns');
+  } else {
+    fail(`alibaba.fetch() default cap: ${endless.calls.length} requests, ${endlessJobs.length} jobs, warnings ${JSON.stringify(endlessErrors)}`);
   }
 
   const blip = mkCtx(({ key }) => {

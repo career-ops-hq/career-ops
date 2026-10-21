@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { detectColumns, isHeaderRow, parseTrackerRow, resolveColumns, resolveTsvColumns } from '../tracker-parse.mjs';
-import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync, isolatedBatchStatePath } from './helpers.mjs';
 
 function check(label, run) {
   try { run(); pass(label); } catch (error) { fail(`${label}: ${error.message}`); }
@@ -77,7 +77,7 @@ for (const [mode, date, company, role] of markets) {
       writeFileSync(join(additions, '041-acme.tsv'), `${fields.map(k => labels[k]).join('\t')}\n${fields.map(k => values[k]).join('\t')}\n`);
       const env = {
         ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_DATA_DIR: work,
-        CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additions,
+        CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additions, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(additions),
         CAREER_OPS_REPORTS: join(work, 'reports'), CAREER_OPS_TRACKER_DB: join(work, 'tracker.db'),
         CAREER_OPS_PDF_INDEX: join(work, 'data', 'pdf-index.tsv'),
         CAREER_OPS_TRACKER_LOCK: join(work, 'tracker.lock'),

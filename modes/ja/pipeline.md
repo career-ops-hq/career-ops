@@ -18,7 +18,7 @@ Per-URL loop の前に、zero-token liveness checker で pending URLs をまと�
 
 ## Workflow
 
-1. **Read** `data/pipeline.md` → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
+1. **Read** `data/pipeline.md` (`grep -n -m 20 '^- \[ \] ' data/pipeline.md` で検索し、各バッチの後にこの実行で Pending に残した items だけが出るまで検索を繰り返し、ファイル全体は読まない) → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
 2. **For each surviving pending URL**:
    a. `node reserve-report-num.mjs` を実行して次の `REPORT_NUM` を atomically claim する（report が書き込まれたら `node reserve-report-num.mjs --release <num>` で sentinel を release）
    b. **Extract JD** using Playwright（browser_navigate + browser_snapshot）→ WebFetch → WebSearch

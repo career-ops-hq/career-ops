@@ -63,7 +63,9 @@ Application answers を生成する前に、form が意図した active job を�
 - **Notify the candidate:** "The role has changed from [X] to [Y]. Do you want me to re-evaluate or adapt the responses to the new title?"
 - **If adapt:** Candidate が mismatch を明示的に accept した後に限り、re-evaluate せず新しい role に responses を adjust
 - **If re-evaluate:** Full A-F evaluation を実行し、report を update し、Section G を regenerate
-- **Update tracker:** 必要に応じて `applications.md` の role title を変更
+- **Update tracker:** `data/applications.md` は直接編集しない。
+  - **Re-evaluate した場合:** 新しい role title を入れた TSV を書き（`_shared.md` の rule 9）、`node merge-tracker.mjs` でマージする。Report は同じファイルを update するので番号は変わらず、merge はその番号で TSV を既存の行に対応づける：title は置き換わり、status は維持される。
+  - **Adapt した場合:** title は変更しない。Report が evaluate した role を示すものだから。変更があったことは note として記録する：`node set-status.mjs --report <report#> <現在の status> --note "Posting retitled at apply time, row keeps the evaluated title"`。行の現在の status を渡せば status は変わらず、note だけが追記される。Note はこのような固定の文言にし、`[Y]` は入れない。新しい title はページ由来のテキストであり、ページ由来のテキストは command line に渡さない。
 
 ## Step 6 -- Analyze form questions
 
@@ -134,7 +136,7 @@ Notes:
 ## Step 8 -- Post-apply (optional)
 
 候補者が application を submitted したと確認した場合：
-1. 正規 CLI で status を "Applied" に update: `node set-status.mjs <report#> Applied`（`applications.md` のテーブルを手動編集しない）
+1. 正規 CLI で status を "Applied" に update: `node set-status.mjs --report <report#> Applied`（`applications.md` のテーブルを手動編集しない）
 2. Report の Section G を final responses で update
 3. Next step として LinkedIn outreach 用の `/career-ops contacto` を提案
 

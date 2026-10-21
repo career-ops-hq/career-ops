@@ -29,6 +29,10 @@ Three independent pieces, smallest first. You can use any of them on their own.
 > local files. Evaluating a shortlisted role later (`/career-ops pipeline`) is the
 > only step that spends tokens.
 
+> Companion page: [Keeping portals.yml live](KEEPING_PORTALS_LIVE.md) covers the
+> house rule that keeps the scan list itself current (companies get auto-added as
+> they come up) and the zero-token commands to validate `portals.yml` afterwards.
+
 ---
 
 ## 1. Schedule the scan
@@ -99,6 +103,19 @@ replace the `StartCalendarInterval` block with an interval in seconds:
 ```
 
 ### Windows — Task Scheduler
+
+Automatic recurring scans from the Scheduled scans page are Windows-only. On
+macOS and Linux, saved scans run only through **Run now**.
+The web UI's Scheduled scans page supports multiple saved cadences. Install its
+local queue worker from the repository root with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1
+```
+
+The task checks for due jobs every 15 minutes and runs at most one queued scan per
+check in the current user's interactive session; you must be logged in. Use `web/scripts/uninstall-scan-schedule.ps1` to remove it. For a single fixed
+daily scan without the web UI, use the lower-level Task Scheduler recipe below.
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute "node.exe" -Argument "scan.mjs" -WorkingDirectory "C:\path\to\career-ops"
@@ -179,7 +196,11 @@ so this piece runs `claude -p` (or your CLI's headless equivalent, see
    every overdue/urgent entry, and **write the drafts to a dated file**
    (`output/followup-drafts-{date}.md`) instead of trying to act on them.
 3. Logs start/end to `data/followup-sweep.log` (gitignored).
-4. Fires a native notification (`osascript display notification` on macOS)
+4. Does nothing useful when follow-ups are turned off: with
+   `follow_ups.enabled: false` in `config/profile.yml` the cadence reports no
+   entries and the followup mode stops before drafting, so unload the launchd
+   job too if you turned follow-ups off for good.
+5. Fires a native notification (`osascript display notification` on macOS)
    so you know a fresh batch of drafts is waiting.
 
 **It never sends or submits anything.** The draft-only file is the entire

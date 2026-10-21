@@ -25,7 +25,7 @@ Prefer the manual route? `git clone` still works exactly as before — see the [
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22.13+
 - git
 
 ## License

@@ -220,6 +220,6 @@ Profile को **"Demonstrable practice वाले Technical Builder"** के
 | WebFetch | Static pages से offers extract करने के लिए fallback |
 | Playwright | Verify if offers are active (browser_navigate + browser_snapshot), SPAs से offers extract करें। **Critical: कभी 2+ agents Playwright के साथ parallel में नहीं — वे same browser instance share करते हैं** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | PDF के लिए temporary HTML, applications.md, reports .md |
-| Edit | Tracker update करें |
-| Bash | `node generate-pdf.mjs` |
+| Write | PDF के लिए temporary HTML, reports .md, `batch/tracker-additions/` में tracker की TSV files (`applications.md` को सीधे कभी नहीं) |
+| Edit | Reports और अन्य generated content में सुधार। Tracker table को सीधे कभी edit न करें: नई rows TSV के रूप में जोड़ें और `node merge-tracker.mjs` से merge करें, status और notes के बदलाव `node set-status.mjs` से करें |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

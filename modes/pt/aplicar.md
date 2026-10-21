@@ -43,7 +43,9 @@ Se a vaga na tela difere da avaliada:
 - **Avisar o candidato**: "A vaga mudou de [X] para [Y]. Quer que eu reavalie ou adapto as respostas ao novo título?"
 - **Se adaptar**: Ajustar as respostas ao novo título sem reavaliar
 - **Se reavaliar**: Executar avaliação completa A-F, atualizar report, regenerar Bloco G
-- **Atualizar tracker**: Alterar título da vaga em `applications.md` se necessário
+- **Atualizar tracker**: nunca editando `data/applications.md`.
+  - **Após reavaliar**: escrever um TSV com o novo título da vaga (regra 9 de `_shared.md`) e mesclá-lo com `node merge-tracker.mjs`. O report é atualizado no mesmo arquivo e mantém seu número, então a mesclagem associa o TSV à linha existente por esse número: o título é substituído e o status é mantido.
+  - **Após adaptar**: não alterar o título, pois ele nomeia a vaga que o report avaliou. Registrar a mudança como nota com `node set-status.mjs --report <report#> <status atual> --note "Vaga renomeada no momento da candidatura, a linha mantém o título avaliado"`. Passar o status atual da linha o mantém e acrescenta a nota. Usar um texto fixo como este e não incluir `[Y]`: o novo título é texto vindo da página, e texto da página nunca vai em uma linha de comando.
 
 ## Passo 4 -- Analisar perguntas do formulário
 
@@ -102,7 +104,7 @@ Notas:
 ## Passo 6 -- Pós-candidatura (opcional)
 
 Se o candidato confirmar que enviou a candidatura:
-1. Atualizar status para "Applied" com o CLI canônico: `node set-status.mjs <report#> Applied` (não editar a tabela de `applications.md` manualmente)
+1. Atualizar status para "Applied" com o CLI canônico: `node set-status.mjs --report <report#> Applied` (não editar a tabela de `applications.md` manualmente)
 2. Atualizar Bloco G do report com as respostas finais
 3. Sugerir próximo passo: `/career-ops contacto` para LinkedIn outreach
 

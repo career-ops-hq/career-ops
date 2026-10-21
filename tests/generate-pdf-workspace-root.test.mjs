@@ -7,7 +7,8 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail } from './helpers.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
 
 console.log('\ngenerate-pdf-workspace-root.test.mjs — the containment root is read at use time (#3162)');
 
@@ -25,8 +26,10 @@ try {
   if (original === undefined) delete process.env.CAREER_OPS_TRACKER;
   else process.env.CAREER_OPS_TRACKER = original;
 
-  // A path inside the real repo must be accepted now that the variable is back.
-  const repoPath = join(ROOT, 'output', 'workspace-root-probe.html');
+  // A path inside the real workspace must be accepted now that the variable is
+  // back. The workspace is the data root, which is the checkout only when
+  // nothing points it elsewhere — and the suite does (tests/helpers.mjs, #5113).
+  const repoPath = join(getCareerOpsRoot(), 'output', 'workspace-root-probe.html');
   try {
     const rel = mod.workspaceRelativeManifestPath(repoPath);
     if (typeof rel === 'string' && rel.length > 0 && !rel.startsWith('..')) {

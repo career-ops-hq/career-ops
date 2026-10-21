@@ -4,9 +4,9 @@
 // paths themselves. See plan/opencode-json-ignore.md for context.
 // Each scenario uses a fresh --target dir so no MCP config / .env / env
 // leaks across cases.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -21,6 +21,11 @@ function runDoctor(cwd, args, env) {
   // precedence scenarios below. Delete it so each scenario controls the CLI
   // explicitly (default → claude, or the --cli/env/.env value it supplies).
   delete baseEnv.CAREER_OPS_CLI;
+  // Same hermetic reasoning for the OpenCode runtime marker: a suite run from
+  // inside OpenCode exports OPENCODE=1, which resolveActiveCli now reads as
+  // source='auto' → opencode on the default path. Scenarios that WANT the
+  // marker pass it explicitly via env.
+  delete baseEnv.OPENCODE;
   try {
     const out = execFileSync(NODE, [DOCTOR, '--json', '--target', cwd, ...args], {
       cwd,

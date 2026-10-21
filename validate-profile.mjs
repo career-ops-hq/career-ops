@@ -62,14 +62,25 @@ export const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE
 export const UNDOCUMENTED_KEYS = {
   rejection_latency: 'rejection-latency.mjs (courtesy_days)',
   table_freshness: 'check-table-freshness.mjs (max_age_months)',
-  scan: 'browser-extract.mjs / doctor.mjs (extractor)',
 };
 
-/** Top-level keys from the shipped example — the documented schema. */
+/**
+ * Top-level keys from the shipped example — the documented schema.
+ *
+ * Optional sections ship commented out (`# style:`, `# page_format: letter`),
+ * so parsing alone misses them, and a profile that set one was told the setting
+ * had no effect while theme-style.mjs / lib/page-format.mjs were reading it.
+ * Each one is written `# key:` at column 0 with a single space. A key nested in
+ * such a block is indented past the `#`, and no prose line in the example opens
+ * with a bare lowercase word and a colon, so neither is taken for a top-level
+ * key: that would accept `margin:` at the top level, where nothing reads it.
+ */
 export function knownKeysFromExample(exampleText) {
-  const doc = yaml.load(String(exampleText ?? '')) || {};
+  const text = String(exampleText ?? '');
+  const doc = yaml.load(text) || {};
   if (typeof doc !== 'object' || Array.isArray(doc)) return [];
-  return Object.keys(doc);
+  const commented = [...text.matchAll(/^# ([a-z][a-z0-9_]*):(?=\s|$)/gm)].map((m) => m[1]);
+  return [...new Set([...Object.keys(doc), ...commented])];
 }
 
 /**
@@ -205,6 +216,13 @@ function runSelfTest() {
   // here with no edit to this file.
   const widened = validateProfile('brand_new_section:\n  x: 1\n', `${EXAMPLE}brand_new_section:\n  x: 0\n`);
   check(widened.findings.length === 0, 'a key added to the example is understood without editing this file');
+
+  // Optional sections ship commented out, and are still documented. A key
+  // nested in one, or a prose comment, is not a top-level key.
+  const COMMENTED = `${EXAMPLE}# Paper size: "letter" or "a4".\n# page_format: letter\n# style:\n#   accent_color: "#2563eb"\n`;
+  check(validateProfile('page_format: a4\nstyle:\n  accent_color: "#000"\n', COMMENTED).findings.length === 0, 'a key the example ships commented out is known');
+  check(knownKeysFromExample(COMMENTED).join() === 'candidate,language,spend_tier,cv,page_format,style', 'prose and nested commented keys are not top-level keys');
+  check(validateProfile('styel:\n  x: 1\n', COMMENTED).findings[0]?.suggestion === 'style', 'a typo of a commented key gets its suggestion');
 
   console.log(`\n  validate-profile self-test: ${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);

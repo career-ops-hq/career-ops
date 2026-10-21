@@ -90,6 +90,42 @@ test('a provider fetch to a name resolving to loopback is refused', async () => 
   } finally { srv.close(); }
 });
 
+test('a provider fetch to a LITERAL private address is refused, in every spelling', async () => {
+  // A numeric host never reaches dns.lookup, so the lookup-time guard cannot
+  // see it. These were all fetched on the direct path while `localhost` was
+  // refused (reported privately by Greg Tyree).
+  const srv = await localServer();
+  try {
+    for (const host of ['127.0.0.1', '[::ffff:127.0.0.1]', '[::1]', '2130706433', '0x7f000001', '0177.0.0.1', '127.1']) {
+      await assert.rejects(
+        () => fetchText(`http://${host}:${srv.port}/`, { timeoutMs: 4000 }),
+        (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
+        `http://${host}/ is loopback and was connected to anyway`,
+      );
+    }
+  } finally { srv.close(); }
+});
+
+test('a literal metadata or RFC1918 address is refused before any connection', async () => {
+  for (const host of ['169.254.169.254', '10.0.0.1', '192.168.1.1', '172.16.0.1', '[fe80::1]', '[fd00::1]']) {
+    const started = Date.now();
+    await assert.rejects(
+      () => fetchText(`http://${host}/latest/meta-data/`, { timeoutMs: 4000 }),
+      (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
+      `http://${host}/ was dialled`,
+    );
+    assert.ok(Date.now() - started < 1000, `${host}: refused by the guard, not by a connect timeout`);
+  }
+});
+
+test('a NON-provider fetch to a literal loopback address still works', async () => {
+  const srv = await localServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${srv.port}/`);
+    assert.equal(await res.text(), 'SECRET-LOCAL-DATA');
+  } finally { srv.close(); }
+});
+
 test('a NON-provider fetch to loopback still works', async () => {
   // The scoping guarantee. dns.lookup is patched process-wide, so an
   // unscoped check would break every local-server test in the repo — and

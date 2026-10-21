@@ -17,19 +17,20 @@ type Catalog struct {
 	LoadingPreview string
 
 	// Tabs & filters
-	TabAll       string
-	TabEvaluated string
-	TabApplied   string
-	TabInterview string
-	TabResponded string
-	TabTop       string
-	TabSkip      string
-	TabRejected  string
-	TabDiscarded string
+	TabAll        string
+	TabEvaluated  string
+	TabApplied    string
+	TabInterview  string
+	TabResponded  string
+	TabAssessment string
+	TabTop        string
+	TabSkip       string
+	TabRejected   string
+	TabDiscarded  string
 
 	// Table column headers
 	ColFit      string
-	ColApplied  string
+	ColDate     string
 	ColCompany  string
 	ColRole     string
 	ColStatus   string
@@ -100,15 +101,16 @@ type Catalog struct {
 	TimeDaysAgo   string
 
 	// Status display names
-	StatusEvaluated string
-	StatusApplied   string
-	StatusResponded string
-	StatusInterview string
-	StatusOffer     string
-	StatusRejected  string
-	StatusDiscarded string
-	StatusSkip      string
-	StatusHired     string
+	StatusEvaluated  string
+	StatusApplied    string
+	StatusResponded  string
+	StatusAssessment string
+	StatusInterview  string
+	StatusOffer      string
+	StatusRejected   string
+	StatusDiscarded  string
+	StatusSkip       string
+	StatusHired      string
 
 	// Additional UI strings
 	NoData        string
@@ -168,6 +170,7 @@ type Catalog struct {
 	SortLocation string
 	SortPay      string
 	SortLast     string
+	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
 }
@@ -189,6 +192,8 @@ func (c *Catalog) SortModeLabel(mode string) string {
 		return c.SortPay
 	case "last":
 		return c.SortLast
+	case "posted":
+		return c.SortPosted
 	default:
 		return mode
 	}
@@ -207,8 +212,8 @@ func (c *Catalog) ViewModeLabel(mode string) string {
 }
 
 // StatusLabel returns the localized display label for a canonical status ID
-// (interview, offer, hired, responded, applied, evaluated, skip, rejected,
-// discarded).
+// (interview, offer, hired, responded, assessment, applied, evaluated, skip,
+// rejected, discarded).
 func (c *Catalog) StatusLabel(norm string) string {
 	switch strings.ToLower(strings.TrimSpace(norm)) {
 	case "interview":
@@ -219,6 +224,8 @@ func (c *Catalog) StatusLabel(norm string) string {
 		return c.StatusHired
 	case "responded":
 		return c.StatusResponded
+	case "assessment":
+		return c.StatusAssessment
 	case "applied":
 		return c.StatusApplied
 	case "evaluated":
@@ -292,19 +299,20 @@ var En = Catalog{
 	LoadingPreview: "Loading preview...",
 
 	// Tabs & filters
-	TabAll:       "ALL",
-	TabEvaluated: "EVALUATED",
-	TabApplied:   "APPLIED",
-	TabInterview: "INTERVIEW",
-	TabResponded: "RESPONDED",
-	TabTop:       "TOP ≥4",
-	TabSkip:      "SKIP",
-	TabRejected:  "REJECTED",
-	TabDiscarded: "DISCARDED",
+	TabAll:        "ALL",
+	TabEvaluated:  "EVALUATED",
+	TabApplied:    "APPLIED",
+	TabInterview:  "INTERVIEW",
+	TabResponded:  "RESPONDED",
+	TabAssessment: "ASSESSMENT",
+	TabTop:        "TOP ≥4",
+	TabSkip:       "SKIP",
+	TabRejected:   "REJECTED",
+	TabDiscarded:  "DISCARDED",
 
 	// Table column headers
 	ColFit:      "FIT",
-	ColApplied:  "APPLIED",
+	ColDate:     "DATE",
 	ColCompany:  "COMPANY",
 	ColRole:     "ROLE",
 	ColStatus:   "STATUS",
@@ -375,15 +383,16 @@ var En = Catalog{
 	TimeDaysAgo:   "%dd ago",
 
 	// Status display names
-	StatusEvaluated: "Evaluated",
-	StatusApplied:   "Applied",
-	StatusResponded: "Responded",
-	StatusInterview: "Interview",
-	StatusOffer:     "Offer",
-	StatusRejected:  "Rejected",
-	StatusDiscarded: "Discarded",
-	StatusSkip:      "SKIP",
-	StatusHired:     "Hired",
+	StatusEvaluated:  "Evaluated",
+	StatusApplied:    "Applied",
+	StatusResponded:  "Responded",
+	StatusAssessment: "Assessment",
+	StatusInterview:  "Interview",
+	StatusOffer:      "Offer",
+	StatusRejected:   "Rejected",
+	StatusDiscarded:  "Discarded",
+	StatusSkip:       "SKIP",
+	StatusHired:      "Hired",
 
 	// Additional UI strings
 	NoData:        "No data",
@@ -443,6 +452,7 @@ var En = Catalog{
 	SortLocation: "location",
 	SortPay:      "pay",
 	SortLast:     "last",
+	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
 }
@@ -456,19 +466,20 @@ var Tr = Catalog{
 	LoadingPreview: "Önizleme yükleniyor...",
 
 	// Tabs & filters
-	TabAll:       "TÜMÜ",
-	TabEvaluated: "DEĞERLENDİRİLDİ",
-	TabApplied:   "BAŞVURULDU",
-	TabInterview: "MÜLAKAT",
-	TabResponded: "YANIT VERİLDİ",
-	TabTop:       "EN İYİ ≥4",
-	TabSkip:      "UYGUN DEĞİL",
-	TabRejected:  "REDDEDİLDİ",
-	TabDiscarded: "İPTAL",
+	TabAll:        "TÜMÜ",
+	TabEvaluated:  "DEĞERLENDİRİLDİ",
+	TabApplied:    "BAŞVURULDU",
+	TabInterview:  "MÜLAKAT",
+	TabResponded:  "YANIT VERİLDİ",
+	TabAssessment: "DEĞERLENDİRME",
+	TabTop:        "EN İYİ ≥4",
+	TabSkip:       "UYGUN DEĞİL",
+	TabRejected:   "REDDEDİLDİ",
+	TabDiscarded:  "İPTAL",
 
 	// Table column headers
 	ColFit:      "UYUM",
-	ColApplied:  "TARİH",
+	ColDate:     "TARİH",
 	ColCompany:  "ŞİRKET",
 	ColRole:     "POZİSYON",
 	ColStatus:   "DURUM",
@@ -539,15 +550,16 @@ var Tr = Catalog{
 	TimeDaysAgo:   "%d gün önce",
 
 	// Status display names
-	StatusEvaluated: "Değerlendirildi",
-	StatusApplied:   "Başvuruldu",
-	StatusResponded: "Yanıt Verildi",
-	StatusInterview: "Mülakat",
-	StatusOffer:     "Teklif",
-	StatusRejected:  "Reddedildi",
-	StatusDiscarded: "İptal Edildi",
-	StatusSkip:      "Uygun Değil",
-	StatusHired:     "İşe Alındı",
+	StatusEvaluated:  "Değerlendirildi",
+	StatusApplied:    "Başvuruldu",
+	StatusResponded:  "Yanıt Verildi",
+	StatusAssessment: "Değerlendirme",
+	StatusInterview:  "Mülakat",
+	StatusOffer:      "Teklif",
+	StatusRejected:   "Reddedildi",
+	StatusDiscarded:  "İptal Edildi",
+	StatusSkip:       "Uygun Değil",
+	StatusHired:      "İşe Alındı",
 
 	// Additional UI strings
 	NoData:        "Veri yok",
@@ -607,6 +619,7 @@ var Tr = Catalog{
 	SortLocation: "konum",
 	SortPay:      "ücret",
 	SortLast:     "son",
+	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
 }
@@ -620,19 +633,20 @@ var Es = Catalog{
 	LoadingPreview: "Cargando vista previa...",
 
 	// Tabs & filters
-	TabAll:       "TODAS",
-	TabEvaluated: "EVALUADAS",
-	TabApplied:   "APLICADAS",
-	TabInterview: "ENTREVISTA",
-	TabResponded: "RESPONDIDAS",
-	TabTop:       "TOP ≥4",
-	TabSkip:      "OMITIR",
-	TabRejected:  "RECHAZADAS",
-	TabDiscarded: "DESCARTADAS",
+	TabAll:        "TODAS",
+	TabEvaluated:  "EVALUADAS",
+	TabApplied:    "APLICADAS",
+	TabInterview:  "ENTREVISTA",
+	TabResponded:  "RESPONDIDAS",
+	TabAssessment: "PRUEBA",
+	TabTop:        "TOP ≥4",
+	TabSkip:       "OMITIR",
+	TabRejected:   "RECHAZADAS",
+	TabDiscarded:  "DESCARTADAS",
 
 	// Table column headers
 	ColFit:      "AJUSTE",
-	ColApplied:  "APLICADA",
+	ColDate:     "FECHA",
 	ColCompany:  "EMPRESA",
 	ColRole:     "PUESTO",
 	ColStatus:   "ESTADO",
@@ -703,15 +717,16 @@ var Es = Catalog{
 	TimeDaysAgo:   "hace %dd",
 
 	// Status display names
-	StatusEvaluated: "Evaluada",
-	StatusApplied:   "Aplicada",
-	StatusResponded: "Respondida",
-	StatusInterview: "Entrevista",
-	StatusOffer:     "Oferta",
-	StatusRejected:  "Rechazada",
-	StatusDiscarded: "Descartada",
-	StatusSkip:      "OMITIR",
-	StatusHired:     "Contratada",
+	StatusEvaluated:  "Evaluada",
+	StatusApplied:    "Aplicada",
+	StatusResponded:  "Respondida",
+	StatusAssessment: "Prueba",
+	StatusInterview:  "Entrevista",
+	StatusOffer:      "Oferta",
+	StatusRejected:   "Rechazada",
+	StatusDiscarded:  "Descartada",
+	StatusSkip:       "OMITIR",
+	StatusHired:      "Contratada",
 
 	// Additional UI strings
 	NoData:        "Sin datos",
@@ -771,6 +786,7 @@ var Es = Catalog{
 	SortLocation: "ubicación",
 	SortPay:      "salario",
 	SortLast:     "último",
+	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
 }
@@ -778,37 +794,63 @@ var Es = Catalog{
 // Current points to the active language catalog. Defaults to English (&En).
 var Current = &En
 
+// languages is the single source of truth for which languages exist, in the
+// order ToggleLang cycles them. SetLang, GetLang and ToggleLang all read it, so
+// adding a language is one entry here rather than three separate edits that can
+// drift — which is how ToggleLang came to be unable to reach Spanish.
+//
+// Order matters twice: it is the cycle order, and SetLang matches by prefix in
+// this order. "en" before "es" is harmless since neither is a prefix of the
+// other, but a future code that is a prefix of another must come after it.
+var languages = []struct {
+	code    string
+	catalog *Catalog
+}{
+	{"en", &En},
+	{"tr", &Tr},
+	{"es", &Es},
+}
+
 // SetLang sets the active catalog based on language code prefix
 // (e.g., "tr", "tr_TR" -> &Tr; "es", "es_ES" -> &Es; anything else -> &En).
 func SetLang(lang string) {
 	l := strings.ToLower(strings.TrimSpace(lang))
-	switch {
-	case strings.HasPrefix(l, "tr"):
-		Current = &Tr
-	case strings.HasPrefix(l, "es"):
-		Current = &Es
-	default:
-		Current = &En
+	for _, entry := range languages {
+		if strings.HasPrefix(l, entry.code) {
+			Current = entry.catalog
+			return
+		}
 	}
+	Current = &En
 }
 
-// ToggleLang switches Current between &En and &Tr.
+// ToggleLang advances Current to the next language in `languages`, wrapping.
+//
+// It used to flip between &En and &Tr, with every other catalog falling into
+// the else branch and landing on English. Spanish was added after that was
+// written, so a user who started the dashboard in Spanish pressed the key the
+// help bar advertises as "lang" and could not get back — the toggle could only
+// ever reach English and Turkish. Cycling makes every supported language
+// reachable from every other one.
 func ToggleLang() {
-	if Current == &En {
-		Current = &Tr
-	} else {
-		Current = &En
+	for i, entry := range languages {
+		if Current == entry.catalog {
+			Current = languages[(i+1)%len(languages)].catalog
+			return
+		}
 	}
+	// Current points at a catalog outside the list: land somewhere defined
+	// rather than leaving it unchanged, so the key always does something.
+	Current = &En
 }
 
-// GetLang returns the active language code ("tr" if Current == &Tr, "es" if
-// Current == &Es, else "en").
+// GetLang returns the active language code, or "en" when Current points at a
+// catalog that is not in `languages`.
 func GetLang() string {
-	if Current == &Tr {
-		return "tr"
-	}
-	if Current == &Es {
-		return "es"
+	for _, entry := range languages {
+		if Current == entry.catalog {
+			return entry.code
+		}
 	}
 	return "en"
 }

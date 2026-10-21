@@ -3,11 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { walkTree } from '../lib/walk-tree.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUCKETS = ['existing', 'supportedByResume', 'derivedUnverified', 'userCannotConfirm'];
@@ -35,25 +35,25 @@ function fixture(t) {
   }
   // Copy the actual dependency closure, without personal files or node_modules.
   mkdirSync(join(f.code.root, 'lib'));
-  for (const file of ['story-provenance-check.mjs', 'path-resolver.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs']) {
+  for (const file of ['story-provenance-check.mjs', 'path-resolver.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs', 'lib/story-bank.mjs']) {
     copyFileSync(join(ROOT, file), join(f.code.root, file));
   }
   return f;
 }
 
+// A no-write assertion over a temp fixture, so every guard that could hide a
+// write is off: a `.git`-marked or scratch-named directory the checker created
+// is recorded and descended (the recursion this replaced recorded one but did
+// not look inside), and any link fails loudly — the fixture is built without
+// links, so one appearing is a write.
 function snapshot(root) {
   const entries = {};
-  function visit(dir) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      entries[relative(root, path)] = entry.isDirectory() ? null : readFileSync(path, 'utf8');
-      if (entry.isDirectory()) {
-        if (isNestedCheckout(path)) continue;
-        visit(path);
-      }
-    }
-  }
-  visit(root);
+  walkTree(root, {
+    allowNestedCheckouts: true,
+    links: 'reject',
+    onDir: (path) => { entries[relative(root, path)] = null; },
+    onFile: (path) => { entries[relative(root, path)] = readFileSync(path, 'utf8'); },
+  });
   return entries;
 }
 
@@ -74,7 +74,7 @@ function run(f, args, env) {
 
 function check(f, { env = {}, args = [], source = f.data, storyPath = source.story, cvPath = source.cv, bucket = 'existing', missing = null } = {}) {
   const report = JSON.parse(run(f, args, env));
-  assert.deepEqual(Object.keys(report).sort(), [...BUCKETS, 'lowConfidence'].sort());
+  assert.deepEqual(Object.keys(report).sort(), [...BUCKETS, 'malformed', 'lowConfidence'].sort());
   const expected = Object.fromEntries(BUCKETS.map((key) => [key, []]));
   if (missing !== 'no-story-bank') {
     expected.userCannotConfirm.push({ story: `${source.name} uncertain costs`, claim: '40%', pattern: 'percent' });

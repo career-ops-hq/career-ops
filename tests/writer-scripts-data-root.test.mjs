@@ -25,7 +25,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, copyFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, copyFileSync } from 'node:fs';
+import { linkNodeModules } from './helpers.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -152,6 +153,13 @@ const CLOSURE = {
   'set-status.mjs': [
     'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
     'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs', 'templates/states.yml',
+    // session-activity.mjs (#4532): advisory in-progress claim taken before
+    // the write below.
+    'session-activity.mjs',
+    // check-jd-archive.mjs / jd-capture.mjs: the transition into Interview
+    // triggers a JD-archive check via these two (#4523), which in turn need
+    // their own two lib/ helpers.
+    'check-jd-archive.mjs', 'jd-capture.mjs', 'lib/cli-flags.mjs', 'lib/is-main-module.mjs',
     // Runtime assets, not imports: an import scan does not see these and each
     // one only announces itself by crashing the child.
     'tracker-aliases.json',
@@ -159,7 +167,7 @@ const CLOSURE = {
   'generate-pdf.mjs': [
     'generate-pdf.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs',
     'tracker-parse.mjs', 'theme-style.mjs', 'lib/page-format.mjs', 'lib/is-main-module.mjs',
-    'cv-sections-core.mjs',
+    'cv-sections-core.mjs', 'cv-experience-order.mjs',
     'tracker-aliases.json',
   ],
 };
@@ -173,9 +181,15 @@ function markerFixture(script) {
   mkdirSync(join(dataRoot, 'output'), { recursive: true });
 
   for (const file of CLOSURE[script]) copyFileSync(join(ROOT, file), join(codeRoot, file));
-  // generate-pdf.mjs imports playwright at module scope, so without this the
-  // child dies before it can print anything and the assertions say nothing.
-  try { symlinkSync(join(ROOT, 'node_modules'), join(codeRoot, 'node_modules'), 'dir'); } catch { /* already there */ }
+  // generate-pdf.mjs imports playwright at module scope and tracker-utils.mjs
+  // imports js-yaml, so without this the child dies before it can print anything
+  // and the assertions say nothing. linkNodeModules() rather than a raw
+  // symlinkSync: it uses a junction on Windows, where a 'dir' link needs a
+  // privilege a normal shell lacks, and it returns a reason instead of leaving a
+  // dangling link when the tree is absent. A swallowed EPERM here surfaced as
+  // ERR_MODULE_NOT_FOUND, which reads as a missing dependency rather than a
+  // failed link.
+  const depsReason = linkNodeModules(codeRoot, ROOT);
 
   // The marker: rule 3. No CAREER_OPS_* variable is set when this is used.
   writeFileSync(join(codeRoot, '.career-ops-data'), `${dataRoot}\n`);
@@ -195,7 +209,7 @@ function markerFixture(script) {
     + 'in high volume semiconductor manufacturing over more than a decade of practice.</p>'
     + '<h2>Education</h2><p>BS Chemical Engineering, 2014.</p>'
     + '<h2>Skills</h2><p>Python, MATLAB, SPC.</p></body></html>');
-  return { dir, codeRoot, dataRoot };
+  return { dir, codeRoot, dataRoot, depsReason };
 }
 
 function runFromCodeRoot(f, script, args) {
@@ -212,8 +226,11 @@ function runFromCodeRoot(f, script, args) {
 
 const markerCleanup = (f) => rmSync(f.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 
-test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', () => {
+test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', (t) => {
   const f = markerFixture('set-status.mjs');
+  // set-status reaches js-yaml through tracker-utils.mjs, so with no linked tree
+  // the child dies at module load and every assertion below passes vacuously.
+  if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
   try {
     const r = runFromCodeRoot(f, 'set-status.mjs', ['1', 'Interview', '--note', 'marker check']);
     // Positive first. Every assertion below is an ABSENCE, and a child that
@@ -227,8 +244,10 @@ test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', (
   } finally { markerCleanup(f); }
 });
 
-test('generate-pdf honours a .career-ops-data marker for its workspace boundary', () => {
+test('generate-pdf honours a .career-ops-data marker for its workspace boundary', (t) => {
   const f = markerFixture('generate-pdf.mjs');
+  // generate-pdf imports playwright at module scope, same vacuity.
+  if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
   try {
     const r = runFromCodeRoot(f, 'generate-pdf.mjs',
       [join(f.dataRoot, 'output', 'cv.html'), join(f.dataRoot, 'output', 'cv.pdf')]);
@@ -236,5 +255,47 @@ test('generate-pdf honours a .career-ops-data marker for its workspace boundary'
       `a path inside the marked data root was reported as an escape:\n${r.all.slice(0, 500)}`);
     assert.match(r.all, /\u{1F4C4} Input:/u,
       `validation never reported its input, so the assertion above proves nothing:\n${r.all.slice(0, 500)}`);
+  } finally { markerCleanup(f); }
+});
+
+// refreshRootCache() keys on the RESOLVED workspace root (#4314), not on the
+// environment: the marker is a file on disk and can change while every
+// CAREER_OPS_* variable stays the same. An env-only key kept serving the first
+// data root to every later call in the same process.
+test('generate-pdf follows a .career-ops-data marker that changes mid-process', (t) => {
+  const f = markerFixture('generate-pdf.mjs');
+  // Same vacuity as the two above, one step further in: the probe imports
+  // generate-pdf.mjs from the copied code root, so playwright at module scope
+  // kills it before it prints RESULT and the assertion reports a missing line
+  // rather than the absent dependency tree.
+  if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
+  const moved = join(f.dir, 'data-moved');
+  mkdirSync(join(moved, 'output'), { recursive: true });
+  try {
+    const probe = `
+      import { writeFileSync } from 'node:fs';
+      import { join } from 'node:path';
+      import { pathToFileURL } from 'node:url';
+      const [codeRoot, first, moved] = process.argv.slice(1);
+      const { isWorkspaceOutputPath } = await import(pathToFileURL(join(codeRoot, 'generate-pdf.mjs')).href);
+      const before = isWorkspaceOutputPath(join(first, 'output', 'cv.pdf'));
+      writeFileSync(join(codeRoot, '.career-ops-data'), moved + '\\n');
+      const after = isWorkspaceOutputPath(join(moved, 'output', 'cv.pdf'));
+      const stale = isWorkspaceOutputPath(join(first, 'output', 'cv.pdf'));
+      console.log('RESULT ' + JSON.stringify({ before, after, stale }));
+    `;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe, f.codeRoot, f.dataRoot, moved], {
+      cwd: f.dir,
+      encoding: 'utf-8',
+      timeout: 120_000,
+      // Every override blank on purpose: only the marker moves.
+      env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '' },
+    });
+    assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
+    const all = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    const line = (r.stdout ?? '').split('\n').find((l) => l.startsWith('RESULT '));
+    assert.ok(line, `the probe printed no result, so nothing was checked:\n${all.slice(0, 600)}`);
+    assert.deepEqual(JSON.parse(line.slice('RESULT '.length)), { before: true, after: true, stale: false },
+      'the workspace boundary did not follow the rewritten marker');
   } finally { markerCleanup(f); }
 });

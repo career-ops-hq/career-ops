@@ -652,7 +652,12 @@ export async function verifyCompanies(
     const name = typeof company.name === 'string' ? company.name : '(unnamed)';
     const match =
       parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
-    if (match) {
+    // An Ashby entry that opts into the embed source (`ashby: { embed: true }`)
+    // is one whose posting API is disabled. Tier 1 probes exactly that API, so
+    // it would report a live board as a wrong slug; the provider layer below
+    // reads the embed page instead.
+    const embedOnly = match?.ats === 'ashby' && /** @type {any} */ (company).ashby?.embed === true;
+    if (match && !embedOnly) {
       const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
       if (probe.status === 'live' || probe.status === 'empty') {
         results.push({ name, ...probe });
@@ -848,11 +853,10 @@ async function main() {
     return;
   }
 
-  // requireOperand above catches a bare `--file` (nothing follows) and
-  // `--file --anotherflag` (the next token looks like a flag), but not
-  // `--file=` — an explicit empty value after `=` is a single token
-  // (`--file=`) that never matches the bare `--file` requireOperand checks
-  // for, so it would otherwise reach resolve('') the same way.
+  // requireOperand above catches a bare `--file` (nothing follows),
+  // `--file --anotherflag` (the next token looks like a flag), and
+  // `--file=` (empty value in equals form, #5127). Keep this check as
+  // defense-in-depth so an empty path never reaches resolve('') the same way.
   const fileArg = flagValue(args, '--file');
   if (hasFlag(args, '--file') && !fileArg) {
     console.error('Error: --file requires a value');
@@ -873,7 +877,7 @@ async function main() {
   // plugin-free install (mergeProviderPlugins returns before config/plugins.yml
   // is read when it is absent).
   const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
-  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
+  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR), dataRoot: DATA_ROOT });
   const httpCtx = makeHttpCtx();
   const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
   if (!found) {

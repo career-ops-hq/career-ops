@@ -27,7 +27,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
      │                    Output Pipeline                      │
      │  ┌──────────┐  ┌────────────┐  ┌───────────────────┐  │
      │  │ Report.md│  │  PDF (HTML  │  │ Tracker TSV       │  │
-     │  │ (A-G eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
+     │  │ (A-H eval)│  │  → Playwright)│ │ (merge-tracker)  │  │
      │  └──────────┘  └────────────┘  └───────────────────┘  │
      └────────────────────────────────────────────────────────┘
                                │
@@ -42,7 +42,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
 1. **Input**: User pastes JD text or URL
 2. **Extract**: Playwright/WebFetch extracts JD from URL
 3. **Classify**: Detect archetype (1 of 6 types)
-4. **Evaluate**: 7 blocks (A-G):
+4. **Evaluate**: 8 blocks (A-H; H is conditional on scores ≥ 4.5):
    - A: Role summary
    - B: CV match (per-requirement importance + gaps + mitigation)
    - C: Level strategy
@@ -50,6 +50,7 @@ system/user data-contract layers live in [../ARCHITECTURE.md](../ARCHITECTURE.md
    - E: CV personalization plan
    - F: Interview prep (STAR stories)
    - G: Posting legitimacy (scam / ghost-job signals)
+   - H: Draft application answers (only when the score is 4.5 or above)
 5. **Score**: Weighted average across 5 dimensions (1-5)
 6. **Report**: Save as `reports/{num}-{company}-{date}.md`
 7. **PDF**: Generate ATS-optimized CV (`generate-pdf.mjs`)
@@ -102,6 +103,7 @@ Scripts maintain data consistency:
 | `verify-pipeline.mjs` | Health check: statuses, duplicates, links |
 | `dedup-tracker.mjs` | Removes duplicate entries by company+role |
 | `normalize-statuses.mjs` | Maps status aliases to canonical values |
+| `fix-report-links.mjs` | Rewrites Report cells that link to a missing file to `—` (previewable, backed up) |
 | `cv-sync-check.mjs` | Validates setup consistency |
 
 ## Dashboard TUI

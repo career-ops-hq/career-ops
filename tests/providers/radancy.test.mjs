@@ -156,6 +156,23 @@ try {
 </li>
 </ul></section>`;
 
+  // search.jobs.barclays — card layout: title in <strong> inside the anchor,
+  // location as a SIBLING <div class="job-location"> after it (not inside),
+  // plus a job-date block whose <span> must not be mistaken for the location.
+  const LEGACY_BARCLAYS = `
+<section id="search-results" data-total-results="797" data-total-pages="8" data-records-per-page="100">
+<div class="list-item list-item--card fs-column fs-top round-corners bg--pale-blue-light p-1 text--black">
+  <a href="/job/noida/fcs-senior-analyst/13015/101304506192" class="headline-3 job-title--link text--black" data-job-id="101304506192"><strong>FCS Senior Analyst</strong></a>
+  <div class="job-location"> Noida, India</div>
+  <div class="bg--white round-corners--small job-date"><img src="https://tbcdn.talentbrew.com/company/13015/v1_0/img/icons/icon-date--active-blue.svg" alt="" class="job-date--icon" /> <span>28 Sep</span></div>
+</div>
+<div class="list-item list-item--card fs-column fs-top round-corners bg--pale-blue-light p-1 text--black">
+  <a href="/job/hong-kong/vp-quant-analyst/13015/99719476320" class="headline-3 job-title--link text--black" data-job-id="99719476320"><strong>VP Global Markets Liquid Financing Quant Analyst</strong></a>
+  <div class="job-location"> Hong Kong, Hong Kong</div>
+  <div class="bg--white round-corners--small job-date"><span>27 Sep</span></div>
+</div>
+</section>`;
+
   // The modern parser must be untouched by the legacy addition.
   if (parseModernResults(html, 'https://careers.munichre.com').length === 2) pass('radancy.parseModernResults() still parses the search-results-list__item markup');
   else fail('radancy.parseModernResults() regressed on modern markup');
@@ -174,6 +191,31 @@ try {
   else fail(`radancy.parseLegacyResults() UHG url = ${JSON.stringify(uhgRows[0]?.url)}`);
   if (uhgRows[1]?.title === 'Principal Architect, Interoperability & Integration') pass('radancy.parseLegacyResults() decodes entities in legacy titles');
   else fail(`radancy.parseLegacyResults() UHG title[1] = ${JSON.stringify(uhgRows[1]?.title)}`);
+
+  // Barclays: the location element is a sibling <div>, not a <span> inside the anchor.
+  const bcRows = parseLegacyResults(LEGACY_BARCLAYS, 'https://search.jobs.barclays');
+  if (bcRows.length === 2 && bcRows[0]?.title === 'FCS Senior Analyst') pass('radancy.parseLegacyResults() parses the Barclays card layout (title from <strong>)');
+  else fail(`radancy.parseLegacyResults() Barclays rows = ${JSON.stringify(bcRows)}`);
+  if (bcRows[0]?.location === 'Noida, India' && bcRows[1]?.location === 'Hong Kong, Hong Kong') pass('radancy.parseLegacyResults() reads a sibling <div class="job-location"> that follows the anchor');
+  else fail(`radancy.parseLegacyResults() Barclays locations = ${JSON.stringify(bcRows.map(r => r.location))}`);
+  if (parseModernResults(LEGACY_BARCLAYS, 'https://x').length === 0) pass('radancy.parseModernResults() does not claim the Barclays card layout');
+  else fail('radancy.parseModernResults() wrongly matched Barclays markup');
+
+  // A <p class="job-location"> and a row with no location at all: the sibling
+  // fallback must read the former and must not invent a location for the latter
+  // (nor borrow the next row's).
+  const LEGACY_MIXED = `
+<ul>
+<li><a href="/job/london/analyst/13015/1" data-job-id="1"><strong>Analyst</strong></a><p class="job-location">London (United Kingdom)</p></li>
+<li><a href="/job/nowhere/unplaced/13015/2" data-job-id="2"><strong>Unplaced</strong></a></li>
+<li><a href="/job/pune/engineer/13015/3" data-job-id="3"><strong>Engineer</strong></a><div class="job-location">Pune (India)</div></li>
+</ul>`;
+  const mixed = parseLegacyResults(LEGACY_MIXED, 'https://search.jobs.barclays').map(r => r.location);
+  if (mixed.length === 3 && mixed[0] === 'London (United Kingdom)' && mixed[1] === '' && mixed[2] === 'Pune (India)') {
+    pass('radancy.parseLegacyResults() reads a <p class="job-location"> and leaves a location-less row empty instead of borrowing the next row\u2019s');
+  } else {
+    fail(`radancy.parseLegacyResults() mixed locations = ${JSON.stringify(mixed)}`);
+  }
 
   // Legacy: Kaiser variant.
   const kpRows = parseLegacyResults(LEGACY_KP, 'https://www.kaiserpermanentejobs.org');

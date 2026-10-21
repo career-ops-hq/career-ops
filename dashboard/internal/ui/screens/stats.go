@@ -357,7 +357,7 @@ func (m StatsModel) renderPieChart(title, legendHeading string, stats []model.La
 	var pieLines []string
 	for y := -radius; y <= radius; y++ {
 		var row strings.Builder
-		for x := -2 * radius; x <= 2 * radius; x++ {
+		for x := -2 * radius; x <= 2*radius; x++ {
 			nx := float64(x) / 2.0 // correct for 2:1 character aspect ratio
 			ny := float64(y)
 			dist := math.Sqrt(nx*nx + ny*ny)

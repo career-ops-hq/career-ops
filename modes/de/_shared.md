@@ -213,6 +213,6 @@ In deutschen Stellenanzeigen und Vertragsverhandlungen tauchen Begriffe auf, die
 | WebFetch | Fallback, um Stellenanzeigen aus statischen Seiten zu extrahieren |
 | Playwright | Prüfen, ob Stellenanzeigen noch aktiv sind (browser_navigate + browser_snapshot), Stellenanzeigen aus SPAs extrahieren. **KRITISCH: NIEMALS 2+ Agenten parallel mit Playwright starten — sie teilen sich eine Browser-Instanz** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | Temporäres HTML für PDF, applications.md, Reports .md |
-| Edit | Tracker aktualisieren |
-| Bash | `node generate-pdf.mjs` |
+| Write | Temporäres HTML für PDF, Reports .md, TSV-Dateien für den Tracker in `batch/tracker-additions/` (niemals `applications.md` direkt) |
+| Edit | Korrekturen an Reports und anderen generierten Inhalten. Nie die Tracker-Tabelle: neue Zeilen kommen als TSV hinzu und werden mit `node merge-tracker.mjs` zusammengeführt, Status- und Notizänderungen laufen über `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

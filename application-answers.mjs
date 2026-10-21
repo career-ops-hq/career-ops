@@ -3,10 +3,32 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
 const VALID_STATES = new Set(['filled', 'submitted']);
+// A level-1/2 Markdown heading closes this section, including tabs, up to
+// three leading spaces, and empty headings. Level-3 groups stay inside it.
+const ANSWERS_SECTION_END_RE = /^ {0,3}#{1,2}(?:[ \t]+|$)/;
+
+function nextAnswersSectionHeading(text) {
+  let fence = null;
+  for (const line of text.matchAll(/^.*$/gm)) {
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line[0]);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line[0]);
+    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+      fence = open[1];
+      continue;
+    }
+    if (ANSWERS_SECTION_END_RE.test(line[0])) return line;
+  }
+  return null;
+}
 
 function inline(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -42,7 +64,12 @@ function normalizeState(state) {
 }
 
 function normalizeDate(date) {
-  return inline(date || new Date().toISOString().slice(0, 10));
+  // The LOCAL calendar day when the caller supplies none. This date is written
+  // into the report's Application Answers section as the day the user answered
+  // the form, and it sits beside tracker rows dated with localToday() by
+  // set-status.mjs -- a UTC day put an evening answer a day ahead of the
+  // application it belongs to.
+  return inline(date || localToday());
 }
 
 function quoteBlock(value) {
@@ -288,7 +315,7 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const nextHeading = nextAnswersSectionHeading(report.slice(afterHeading));
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,
@@ -463,12 +490,13 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
 
   const start = heading.index;
   const afterHeading = start + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const nextHeading = nextAnswersSectionHeading(report.slice(afterHeading));
   const end = nextHeading ? afterHeading + nextHeading.index : report.length;
   const before = report.slice(0, start).trimEnd();
-  const after = report.slice(end).trimStart();
+  const after = report.slice(end);
 
-  return [before, section, after].filter(Boolean).join('\n\n') + '\n';
+  const updated = [before, section, after].filter(Boolean).join('\n\n');
+  return updated.endsWith('\n') ? updated : `${updated}\n`;
 }
 
 function parseArgs(argv) {

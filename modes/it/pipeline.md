@@ -4,7 +4,7 @@ Elabora gli URL degli annunci accumulati in `data/pipeline.md`. Il candidato agg
 
 ## Workflow
 
-1. **Leggere** `data/pipeline.md` -> trovare gli elementi contrassegnati come `- [ ]` nella sezione "In attesa" / "Pending" / "Pendientes" / "En attente"
+1. **Leggere** `data/pipeline.md` (cercare con `grep -n -m 20 '^- \[ \] ' data/pipeline.md` e ripetere la ricerca dopo ogni lotto finché mostra solo elementi lasciati in attesa in questo giro, non leggere tutto il file) -> trovare gli elementi contrassegnati come `- [ ]` nella sezione "In attesa" / "Pending" / "Pendientes" / "En attente"
 2. **Per ogni URL in attesa**:
    a. Riservare il prossimo `REPORT_NUM` sequenziale eseguendo `node reserve-report-num.mjs` (liberare la prenotazione con `node reserve-report-num.mjs --release <num>` una volta scritto il report)
    b. **Estrarre l'annuncio** con Playwright (`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch

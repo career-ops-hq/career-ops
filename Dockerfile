@@ -1,9 +1,9 @@
 # career-ops container
-# Base: Playwright image with Chromium preinstalled (matches playwright@1.63.0 in package.json).
+# Base: Playwright image with Chromium preinstalled (matches playwright@1.64.0 in package.json).
 # Host kernels that block Playwright's chromium installer (e.g. Ubuntu 26.04) work fine here
 # because the browser ships in the image and runs under the image's userland.
 
-FROM mcr.microsoft.com/playwright:v1.63.0-jammy
+FROM mcr.microsoft.com/playwright:v1.64.0-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=development \
@@ -13,7 +13,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Optional: Go toolchain for the dashboard TUI (./dashboard).
 # Small footprint, keeps full feature parity with the README setup.
-ARG GO_VERSION=1.23.4
+# Must be >= the `go` line in dashboard/go.mod (checked by tests/go-floor.test.mjs), or
+# `go build` fetches a newer toolchain over the network and fails offline.
+ARG GO_VERSION=1.27.2
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl git tini latexmk texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended texlive-xetex; \
@@ -35,7 +37,7 @@ WORKDIR /app
 # Pin playwright to the version that matches the base image's bundled chromium.
 COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund \
- && npm install --no-audit --no-fund --save-exact playwright@1.63.0
+ && npm install --no-audit --no-fund --save-exact playwright@1.64.0
 
 # The rest of the project is bind-mounted at runtime via docker compose,
 # so we don't COPY sources here — keeps the image generic and lets local

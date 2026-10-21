@@ -20,7 +20,9 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
     *(Replace `{candidate}`, `{company}`, `{YYYY-MM-DD}` with actual values.)*
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
-**Requires:** `tectonic` (preferred — `brew install tectonic`, auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live) on PATH.
+**Requires:** `tectonic` (preferred — auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live). `generate-latex.mjs` uses a repo-local tectonic first, then PATH.
+
+**No engine installed?** If the step 13 report carries `installHint`, or its CJK issue says to install tectonic (a pdflatex-only host), ask the user once, in their language (`language.output`), whether to download tectonic now. Whatever the wording, the question must state that it is a one-time download of ~10-22 MB from the official tectonic GitHub release, so the user consents knowing the size and the source. On yes run `node install-latex-engine.mjs`, then re-run step 13. On no, report the `.tex` path and stop; the file still compiles as-is on Overleaf. Never run the installer without asking.
 
 ## Language support
 

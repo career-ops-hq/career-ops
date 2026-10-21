@@ -149,7 +149,7 @@ Simpan evaluasi lengkap ke `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ### 2. Catat ke tracker
 
-**SELALU** catat ke `data/applications.md`:
+**SELALU** catat ke tracker. Tulis TSV (aturan 9 di `_shared.md`) dan gabungkan dengan `node merge-tracker.mjs`; jangan pernah menulis baris langsung ke `data/applications.md`. Field:
 - Nomor urut berikutnya
 - Tanggal hari ini
 - Perusahaan

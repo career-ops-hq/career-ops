@@ -79,9 +79,16 @@ function resolveOrigin(entry) {
 // null so the caller can still attempt the POST (it will 412, but that is a
 // cleaner signal than a silent skip — and it keeps the same observable
 // behaviour as the pre-fix code for boards that don't enforce CSRF).
-async function acquireCsrfHandshake(origin) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), HANDSHAKE_TIMEOUT_MS);
+//
+// The GET goes through ctx.fetchResponse, never bare fetch. resolveOrigin()
+// only vets the hostname as written; the address it resolves to is checked by
+// the provider DNS guard, and that guard applies only inside the ctx fetch
+// helpers (#3096). A bare fetch here left this one hop unvalidated while the
+// POST right after it was covered. A ctx without fetchResponse (an older
+// embedder, a test stub) degrades to null/null rather than falling back to an
+// unguarded request.
+async function acquireCsrfHandshake(origin, ctx) {
+  if (typeof ctx.fetchResponse !== 'function') return { cookie: null, csrfToken: null };
   try {
     // redirect:'error' blocks every redirect unconditionally. A redirect-to-
     // private-IP (169.254.169.254, ::1, …) would otherwise bypass the host
@@ -93,11 +100,13 @@ async function acquireCsrfHandshake(origin) {
     // only refuse it, so 'error' is the simpler choice — the resulting
     // TypeError is caught below as a degraded handshake (null/null), which is
     // correct.
-    const res = await fetch(`${origin}/jobs`, {
+    const res = await ctx.fetchResponse(`${origin}/jobs`, {
       headers: { 'user-agent': BROWSER_LIKE_USER_AGENT, accept: 'text/html,*/*' },
       redirect: 'error',
-      signal: controller.signal,
+      timeoutMs: HANDSHAKE_TIMEOUT_MS,
     });
+    // ctx.fetchResponse throws on a non-2xx, so this only fires for a ctx that
+    // hands one back anyway. Either way a refused GET must not be scraped.
     if (!res.ok) return { cookie: null, csrfToken: null };
     const html = await res.text();
 
@@ -122,8 +131,6 @@ async function acquireCsrfHandshake(origin) {
     return { cookie, csrfToken };
   } catch {
     return { cookie: null, csrfToken: null };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -157,7 +164,7 @@ export default {
     const { cookie, csrfToken } = await (
       typeof ctx._acquireHandshake === 'function'
         ? ctx._acquireHandshake(origin)
-        : acquireCsrfHandshake(origin)
+        : acquireCsrfHandshake(origin, ctx)
     );
 
     const csrfHeaders = {};

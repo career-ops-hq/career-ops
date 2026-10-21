@@ -29,6 +29,7 @@ import {
   renderPortalEntry,
   dedupeAgainstPortals,
   insertIntoTrackedCompanies,
+  splicedCorrectly,
   parseWorkdayHint,
   buildWorkdayCandidates,
   resolveCompany,
@@ -266,6 +267,37 @@ const commentDoc = '# top comment\ntracked_companies:\n  # inline comment\n  - n
 const commentInserted = insertIntoTrackedCompanies(commentDoc, [snip]);
 ok('preserves top comment', commentInserted.includes('# top comment'));
 ok('preserves inline comment', commentInserted.includes('# inline comment'));
+
+// Other legitimate ways to write the block. Each used to leave a portals.yml the
+// scanner cannot parse: a second `tracked_companies:` key (a duplicate mapping
+// key) or entries at two different indents.
+const namesAfter = (text) => { try { return yaml.load(text).tracked_companies.map(e => e.name); } catch { return null; } };
+
+const flowEmpty = insertIntoTrackedCompanies('title_filter:\n  positive: [a]\n\ntracked_companies: []\n\njob_boards: []\n', [snip]);
+eq('empty flow list `[]` → one block, the new entry', namesAfter(flowEmpty), ['New']);
+ok('empty flow list → no second tracked_companies key', flowEmpty.match(/^tracked_companies:/gm).length === 1);
+
+const trailingComment = insertIntoTrackedCompanies('tracked_companies:   # my companies\n  - name: Existing\n    careers_url: https://jobs.lever.co/existing\n\njob_boards: []\n', [snip]);
+eq('header with a trailing comment → entry added to the same block', namesAfter(trailingComment), ['Existing', 'New']);
+ok('header with a trailing comment → comment kept', trailingComment.includes('tracked_companies:   # my companies'));
+
+const flowEmptyComment = insertIntoTrackedCompanies('tracked_companies: []   # none yet\njob_boards: []\n', [snip]);
+eq('`[]` with a trailing comment → entry added, comment kept', namesAfter(flowEmptyComment), ['New']);
+ok('`[]` with a trailing comment → comment kept', flowEmptyComment.includes('tracked_companies:   # none yet'));
+
+// Entries written at column 0 (what PyYAML's default dump produces). The old
+// boundary test read the first `- name:` as the next top-level key and inserted
+// before it, at a different indent.
+const colZero = insertIntoTrackedCompanies('title_filter:\n  positive: [a]\n\ntracked_companies:\n- name: Existing\n  careers_url: https://jobs.lever.co/existing\n- name: Second\n  careers_url: https://jobs.lever.co/second\n\njob_boards: []\n', [snip]);
+eq('column-0 entries → new entry joins the list', namesAfter(colZero), ['Existing', 'Second', 'New']);
+ok('column-0 entries → new entry written at column 0 too', /^- name: New$/m.test(colZero));
+ok('column-0 entries → still before job_boards:', colZero.indexOf('- name: New') < colZero.indexOf('job_boards:'));
+
+// splicedCorrectly: the guard --write applies to its own output.
+ok('splicedCorrectly accepts the expected count', splicedCorrectly(inserted, 2));
+ok('splicedCorrectly rejects a wrong count', !splicedCorrectly(inserted, 3));
+ok('splicedCorrectly rejects a duplicated key', !splicedCorrectly('tracked_companies: [{name: A}]\ntracked_companies:\n  - name: B\n', 1));
+ok('splicedCorrectly rejects text without a list', !splicedCorrectly('title_filter: {}\n', 0));
 
 // ============================================================================
 // 6b. Workday coordinate parsing (pure, no network)

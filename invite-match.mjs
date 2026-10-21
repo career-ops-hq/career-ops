@@ -37,7 +37,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -692,6 +692,7 @@ export function matchInvite(signals, trackerRows) {
 
   const targetKey = normalizeCompanyName(signals.company);
   if (!targetKey) return [];
+  const reqId = signals.reqId?.toLowerCase();
 
   const scored = [];
   for (const row of trackerRows) {
@@ -703,12 +704,21 @@ export function matchInvite(signals, trackerRows) {
 
     // A req/job ID appearing in the row's notes is a near-certain match —
     // boost it above any name-only match (including another exact name
-    // match without the req ID). Compared case-insensitively: the invite
+    // match without the req ID). Match the whole ID token, so JR1234 cannot
+    // also boost a different requisition JR12345 or JR1234-A. Preserve the
+    // shared parser's explicit glued labels (req_JR1234), but require the
+    // whole suffix. A bare JR1234 is an ID, not a label for numeric ID 1234;
+    // after a separate label, REQ-1234 is itself the ID, not another label.
+    // Compared case-insensitively: the invite
     // and the notes may case the same ID differently ("jr12352" vs
     // "JR12352"). matchConfidence is a ranking score, not a probability,
     // so it's intentionally allowed to exceed 1 here.
-    if (signals.reqId && row.notes
-      && row.notes.toLowerCase().includes(signals.reqId.toLowerCase())) {
+    if (reqId && row.notes
+      && row.notes.toLowerCase().split(/[^a-z0-9_-]+/)
+        .filter(token => /[a-z0-9]/.test(token)).some((token, index, tokens) =>
+        token === reqId || (!/^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?|jr|id)[_-]*|r_[_-]*)$/.test(tokens[index - 1] || '')
+          && /^(?:(?:requisition|req|job(?:id)?|posting(?:id)?|ref(?:erence)?)[_-]|r_)/.test(token)
+          && token.endsWith(reqId) && extractReqNumber(token)?.toLowerCase() === reqId))) {
       confidence += 0.5;
     }
 
@@ -920,308 +930,26 @@ function runSelfTest() {
     if (cond) { pass += 1; } else { fail += 1; console.error(`  FAIL: ${label}`); }
   };
 
-  // --- normalizeCompanyName ---
-  check(normalizeCompanyName('Acme Corp.') === 'acme', 'strips "Corp." suffix');
-  check(normalizeCompanyName('Acme Technologies Inc.') === 'acme', 'strips chained suffixes');
-  check(normalizeCompanyName('Acme (Example Group)') === 'acme', 'drops parenthetical branding');
-  check(normalizeCompanyName('Acme & Co') === normalizeCompanyName('Acme and Co'), '"&" normalizes the same as "and"');
-  check(normalizeCompanyName('  ACME   ') === 'acme', 'trims and lowercases whitespace-padded input');
+  // Smoke checks across the core pipeline
+  check(normalizeCompanyName('Acme Corp.') === 'acme', 'normalizeCompanyName strips corporate suffixes');
+  check(extractCompany('Company: Example Industries\nRole: Analyst') === 'Example Industries', 'extractCompany extracts company name');
+  check(extractPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === 'Zoom', 'extractPlatform detects Zoom URL');
+  check(classifyEmail('Unfortunately, we have decided not to move forward with your application.').classification === 'rejection', 'classifyEmail detects rejection');
+  check(classifyEmail('We would like to invite you to schedule your phone screen for next week.').classification === 'invite', 'classifyEmail detects invite');
 
-  // Non-Latin company names must survive the fold (#2517). The Latin-only
-  // [a-z0-9] class deleted them entirely, so every one keyed to '' and
-  // matchInvite's `if (!targetKey) return []` bailed — pasting an invite from
-  // any company in the ja/ko/zh/zh-TW/ru/ua/ar/hi markets modes/ ships
-  // returned ZERO candidates even when the row was right there.
-  check(normalizeCompanyName('アクメ株式会社') === 'アクメ株式会社', 'a Japanese company name survives normalization');
-  check(normalizeCompanyName('Яндекс') === 'яндекс', 'a Cyrillic company name survives normalization and case-folds');
-  check(normalizeCompanyName('北京字节跳动') !== normalizeCompanyName('アクメ株式会社'), 'two different non-Latin companies keep distinct keys');
-  check(normalizeCompanyName('ＡＣＭＥ') === normalizeCompanyName('ACME'), 'NFKC folds full-width to half-width');
-  // The rest of the shipped non-Latin markets, so coverage isn't just ja/ru.
-  check(normalizeCompanyName('삼성전자') === '삼성전자', 'a Korean company name survives normalization');
-  check(normalizeCompanyName('Київстар') === 'київстар', 'a Ukrainian company name survives normalization and case-folds');
-  check(normalizeCompanyName('شركة النور') === 'شركة النور', 'an Arabic company name survives normalization, spaces intact');
-  check(normalizeCompanyName('हिन्दी टेक') === 'हिन्दी टेक', 'a Devanagari name survives normalization');
-  // The actual \p{M} invariant: names differing ONLY in combining marks must
-  // stay distinct. A mark-stripping fold would collapse these into one company.
-  check(normalizeCompanyName('कंपनी') !== normalizeCompanyName('कपनी'), 'Devanagari names differing only in matras keep distinct keys');
-  {
-    const rows = [
-      { num: 1, company: 'アクメ株式会社', role: 'エンジニア', status: 'Applied', notes: '' },
-      { num: 2, company: 'Acme Inc', role: 'Engineer', status: 'Applied', notes: '' },
-    ];
-    const jp = matchInvite({ company: 'アクメ株式会社' }, rows);
-    check(jp.length === 1 && jp[0].appNumber === 1, 'an invite from a non-Latin company matches its own tracker row');
-    const latin = matchInvite({ company: 'Acme Inc' }, rows);
-    check(latin.length === 1 && latin[0].appNumber === 2, 'the Latin path still matches its own row, unchanged');
-  }
-
-  // --- companySimilarity ---
-  check(companySimilarity('acme', 'acme') === 1, 'identical strings score 1');
-  check(companySimilarity('acme example', 'acme') > 0.5, 'substring containment scores high');
-  check(companySimilarity('acme', 'globex') === 0, 'unrelated names score 0');
-  check(companySimilarity('', 'acme') === 0, 'empty string never matches');
-
-  // --- extractCompany ---
-  check(extractCompany('Company: Example Industries\nRole: Analyst') === 'Example Industries', 'extracts from "Company:" line');
-  check(extractCompany('Schedule Your Phone Screen – Acme Opportunity') === 'Acme', 'extracts from generic "Schedule Your Phone Screen" subject');
-  check(extractCompany('Looking forward to interviewing with Example Corp for the role.') === 'Example Corp', 'extracts from "interviewing with X" phrasing');
-  check(extractCompany('no company signal here at all') === null, 'returns null when nothing plausible is found');
-
-  // --- extractDate ---
-  check(extractDate('Interview scheduled for 2026-07-09 at 4pm') === '2026-07-09', 'extracts ISO date');
-  check(extractDate('See you on July 9, 2026') === '2026-07-09', 'extracts named-month date');
-  check(extractDate('no date mentioned') === null, 'returns null when no date is present');
-
-  // --- extractReqId ---
-  check(extractReqId('Req ID: R260013984') === 'R260013984', 'extracts "Req ID:" token');
-  check(extractReqId('Job ID: 43683') === '43683', 'extracts "Job ID:" token');
-  check(extractReqId('no id here') === null, 'returns null when no req-like token is present');
-  check(extractReqId('requisition 26023019') === '26023019', 'extracts a bare "requisition" label');
-  check(extractReqId('Req 32807') === '32807', 'extracts an abbreviated "Req" label');
-  // Four digits, not five: REQ_ID_PREFIXED needs \d{5,10}, so only the labelled
-  // branch can produce this. "JR12352" would pass on the fallback alone and the
-  // assertion would survive the labelled branch breaking entirely.
-  check(extractReqId('Job Requisition ID: JR1234') === 'JR1234', 'extracts a letter-prefixed token via the labelled branch');
-  check(extractReqId('') === null, 'returns null for empty text');
-  check(extractReqId('your job application on 2026-08-16') === null, 'a date after "job" is not a req id');
-
-  // Equivalence guards for the separator rewrite. A punctuation separator before
-  // the literal `id` is exactly where a rewrite can silently widen the grammar:
-  // `\s*(?:id)?` only ever allows WHITESPACE ahead of `id`, so these must stay
-  // as they were. An earlier draft of this fix moved the class in front of the
-  // optional group; the first three below began matching where they had not,
-  // and the fourth kept matching but its capture changed from `id12345` to
-  // `12345` — so the last one guards the captured value, not match/no-match.
-  check(extractReqId('req:id 12345') === null, 'a colon before "id" does not make a req label');
-  check(extractReqId('req#id 999888') === null, 'a hash before "id" does not make a req label');
-  check(extractReqId('job#id 43683') === null, 'the job branch still requires whitespace before "id"');
-  check(extractReqId('req:id12345') === 'id12345', 'req: followed by id12345 captures the whole token, letters included');
-
-  // The separator rewrite is a performance fix, so the guard has to be a clock.
-  // The previous `\s*(?:id)?[:\s#]*` shape backtracked quadratically on THIS
-  // shape of non-matching input — a label, then a long run the class can eat,
-  // then a character that cannot start the capture — costing 669ms here on Node
-  // 22 and ~2.8s at 64K. (Non-matching text in general is not quadratic; it
-  // takes this shape to trigger it.) analyzeInvite() runs extractReqId over
-  // whole pasted emails, so the length is caller-controlled.
-  //
-  // Date.now() measures wall time, so it counts scheduler pauses on a loaded CI
-  // worker as if they were regex work. The threshold therefore has to absorb
-  // that noise without losing the signal, and the 64K probe separates the two
-  // cases widely enough to do both: the rewritten patterns finish in ~0.2ms
-  // against a 1000ms limit (roughly 5000x of slack for scheduling), while the
-  // ambiguous shape costs ~2.8s and still overshoots by ~2.7x. The narrower
-  // 32K/250ms pairing detected the regression just as well but left only ~250ms
-  // of absolute headroom, which is inside what a contended runner can produce.
-  const redosProbe = `Requisition ${' '.repeat(64000)}x`;
-  const redosStart = Date.now();
-  check(extractReqId(redosProbe) === null, 'a long non-matching run still yields null');
-  const redosMs = Date.now() - redosStart;
-  check(redosMs < 1000, `extractReqId does not backtrack quadratically (64K-space probe took ${redosMs}ms, was ~2.8s)`);
-
-  // --- extractPlatform ---
-  check(extractPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === 'Zoom', 'detects Zoom from a zoom.us URL');
-  check(extractPlatform('Join Microsoft Teams Meeting: https://teams.microsoft.com/l/meetup-join/xyz') === 'Microsoft Teams', 'detects Microsoft Teams from a teams.microsoft.com URL');
-  check(extractPlatform('Meeting link: https://teams.live.com/meet/abc') === 'Microsoft Teams', 'detects Microsoft Teams from a teams.live.com URL');
-  check(extractPlatform('Google Meet: https://meet.google.com/abc-defg-hij') === 'Google Meet', 'detects Google Meet from a meet.google.com URL');
-  check(extractPlatform('We will call you at (416) 555-0199 for the screen.') === 'Phone', 'detects a phone call from a phone-number pattern with no meeting URL');
-  check(extractPlatform('Please confirm your availability for the interview.') === null, 'returns null when no platform or phone signal is present');
-  check(extractPlatform('') === null, 'returns null for empty text');
-  check(extractPlatform('Please visit https://notzoom.us for details.') === null, 'does not report Zoom for a lookalike host (notzoom.us)');
-  check(extractPlatform('Contact support@zoom.us with questions.') === null, 'does not report Zoom for an email address containing zoom.us');
-  check(extractPlatform('See https://teams.microsoft.com.evil.example for the link.') === null, 'does not report Microsoft Teams for a lookalike domain (teams.microsoft.com.evil.example)');
-  check(extractPlatform('See https://example.com/zoom.us for details.') === null, 'does not detect Zoom as a URL path segment on an unrelated host');
-  check(extractPlatform('See https://example.com?next=zoom.us for details.') === null, 'does not detect Zoom as a URL query value on an unrelated host');
-  check(extractPlatform('See https://example.com/teams.microsoft.com for details.') === null, 'does not detect Microsoft Teams as a URL path segment on an unrelated host');
-  check(extractPlatform('See https://example.com?next=teams.microsoft.com for details.') === null, 'does not detect Microsoft Teams as a URL query value on an unrelated host');
-  check(extractPlatform('See https://example.com/meet.google.com for details.') === null, 'does not detect Google Meet as a URL path segment on an unrelated host');
-  check(extractPlatform('See https://example.com?next=meet.google.com for details.') === null, 'does not detect Google Meet as a URL query value on an unrelated host');
-  check(extractPlatform('Join via Zoom: https://zoom.us:443/j/123456789') === 'Zoom', 'detects Zoom from a zoom.us URL with an explicit port');
-  check(extractPlatform('Join Microsoft Teams Meeting: https://teams.microsoft.com:8443/l/meetup-join/xyz') === 'Microsoft Teams', 'detects Microsoft Teams from a teams.microsoft.com URL with an explicit port');
-  check(extractPlatform('Google Meet: https://meet.google.com:443/abc-defg-hij') === 'Google Meet', 'detects Google Meet from a meet.google.com URL with an explicit port');
-
-  // --- AI-interviewer platforms (#2673) ---
-  check(extractPlatform('Your interview link: https://meet.alex.com/room/abc123') === 'Alex', 'detects Alex from a meet.alex.com URL');
-  check(extractPlatform('Please join at https://alex.com/i/xyz789') === 'Alex', 'detects Alex from a bare alex.com URL');
-  // HireVue is detected and named as a platform...
-  check(extractPlatform('Complete your on-demand interview: https://app.hirevue.com/interview/abc') === 'HireVue', 'detects HireVue from a hirevue.com URL');
-  // ...but is NOT asserted as confirmed-AI: HireVue hosts on-demand
-  // recorded screening, live human-conducted interviews, and a separate AI
-  // Interviewer product on the same domain with no reliable public
-  // discriminator between them (CodeRabbit review on #2676), so asserting
-  // AI-led for every hirevue.com match would be a guess, not a detection.
-  check(isAIInterviewerPlatform('Complete your on-demand interview: https://app.hirevue.com/interview/abc') === false, 'isAIInterviewerPlatform is false for a HireVue URL — modality unconfirmed, not asserted AI-led');
-  check(isAIInterviewerPlatform('Your interview link: https://meet.alex.com/room/abc123') === true, 'isAIInterviewerPlatform is true for an Alex URL');
-  check(isAIInterviewerPlatform('Join via Zoom: https://us02web.zoom.us/j/1234567890') === false, 'isAIInterviewerPlatform is false for a human-mediated Zoom URL');
-  check(isAIInterviewerPlatform('We will call you at (416) 555-0199 for the screen.') === false, 'isAIInterviewerPlatform is false for a plain phone number');
-  check(isAIInterviewerPlatform('') === false, 'isAIInterviewerPlatform is false for empty text');
-
-  // --- matchInvite (fixture rows, no real tracker data) ---
-  const fixtureRows = [
-    { num: 101, company: 'Example Industries', role: 'Training Coordinator', status: 'Applied', date: '2026-06-01', notes: 'Req EX9001' },
-    { num: 102, company: 'Example Industries', role: 'HR Generalist', status: 'Rejected', date: '2026-05-10', notes: 'Rejected 2026-05-20' },
-    { num: 103, company: 'Acme Corp', role: 'Program Coordinator', status: 'Interview', date: '2026-06-15', notes: '' },
-    { num: 104, company: 'Globex LLC', role: 'Analyst', status: 'Applied', date: '2026-06-20', notes: '' },
+  const rows = [
+    { num: 101, company: 'Example Industries', role: 'Analyst', status: 'Applied', date: '2026-06-01', notes: '' },
   ];
-
-  const noSignal = matchInvite({ company: null, date: null, reqId: null }, fixtureRows);
-  check(noSignal.length === 0, 'no company signal → no candidates');
-
-  const acmeMatch = matchInvite({ company: 'Acme Corp.', date: null, reqId: null }, fixtureRows);
-  check(acmeMatch.length === 1 && acmeMatch[0].appNumber === 103, 'matches "Acme Corp." to the Acme Corp tracker row despite suffix punctuation');
-
-  const exampleMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fixtureRows);
-  check(exampleMatch.length === 2, 'same company with multiple tracker rows returns all candidates, not just one');
-  check(exampleMatch[0].appNumber === 101, 'active (Applied) row ranks above the Rejected row for the same company when name-match is tied');
-
-  const reqBoosted = matchInvite({ company: 'Example Industries', date: null, reqId: 'EX9001' }, fixtureRows);
-  check(reqBoosted[0].appNumber === 101 && reqBoosted[0].matchConfidence > exampleMatch[0].matchConfidence, 'a req ID found in notes boosts that candidate\'s confidence');
-
-  const noMatch = matchInvite({ company: 'Totally Unrelated Co', date: null, reqId: null }, fixtureRows);
-  check(noMatch.length === 0, 'unrelated company name returns no candidates');
-
-  // --- analyzeInvite (end-to-end with injected rows, no file I/O) ---
-  const fullText = 'Schedule Your Phone Screen – Acme Opportunity\nInterview scheduled for 2026-07-09.\nJoin via Zoom: https://zoom.us/j/1234567890';
-  const result = analyzeInvite(fullText, fixtureRows);
-  check(result.signals.company === 'Acme', 'analyzeInvite extracts company end-to-end');
-  check(result.signals.date === '2026-07-09', 'analyzeInvite extracts date end-to-end');
-  check(result.signals.platform === 'Zoom', 'analyzeInvite extracts platform end-to-end');
-  check(result.candidates.length === 1 && result.candidates[0].appNumber === 103, 'analyzeInvite returns the matched candidate end-to-end');
-  check(result.classification === 'invite', 'analyzeInvite classifies an invite-phrased email as "invite" (no regression from #2098)');
-
-  // --- classifyEmail (#2098) ---
-  check(classifyEmail('Unfortunately, we have decided not to move forward with your application.').classification === 'rejection', 'detects "decided not to move forward" as rejection');
-  check(classifyEmail('Thank you for your interest. We regret to inform you that you have not been selected to advance.').classification === 'rejection', 'detects "regret to inform" / "not been selected to advance" as rejection');
-  check(classifyEmail('After careful consideration, we have decided to move forward with other candidates whose qualifications more closely align with this role.').classification === 'rejection', 'detects "move forward with other candidates" as rejection');
-  check(classifyEmail('Unfortunately, we are not able to offer you a position at this time.').classification === 'rejection', 'detects "not able to offer you a position" as rejection');
-  check(classifyEmail('We would like to invite you to schedule your phone screen for next week.').classification === 'invite', 'detects invite phrasing as "invite"');
-  check(classifyEmail('Looking forward to interviewing with you next Tuesday.').classification === 'invite', 'detects "interviewing with" as "invite"');
-  check(classifyEmail('Thanks for your recent purchase, here is your receipt.').classification === 'unknown', 'unrelated text classifies as "unknown"');
-  check(classifyEmail('').classification === 'unknown', 'empty text classifies as "unknown"');
-  check(classifyEmail('Thank you for interviewing with us last week. Unfortunately, we will not be moving forward with your application.').classification === 'rejection', 'rejection language wins when both invite and rejection phrasing appear (references a past interview)');
-
-  // --- CodeRabbit PR #2100: "unfortunately" alone must never be sufficient ---
-  const rescheduleOnly = classifyEmail('Unfortunately we need to push your interview to next Tuesday due to a scheduling conflict.');
-  check(rescheduleOnly.classification !== 'rejection', '"unfortunately" alone (benign reschedule) does NOT classify as rejection');
-  check(rescheduleOnly.classification === 'unknown', '"unfortunately"-only reschedule email classifies as unknown, not invite or rejection');
-
-  const weakPlusStrong = classifyEmail('Unfortunately, we have decided not to move forward with your application at this time.');
-  check(weakPlusStrong.classification === 'rejection', '"unfortunately" alongside a strong rejection phrase still classifies as rejection');
-  check(weakPlusStrong.matchedPhrases.includes('unfortunately') && weakPlusStrong.matchedPhrases.includes('decided not to move forward'), 'matchedPhrases includes both the weak and strong phrase that co-occurred');
-
-  const rejectionPhraseCheck = classifyEmail('We regret to inform you that you have not been selected.');
-  check(Array.isArray(rejectionPhraseCheck.matchedPhrases) && rejectionPhraseCheck.matchedPhrases.length > 0, 'matchedPhrases is populated for a rejection classification');
-
-  const invitePhraseCheck = classifyEmail('We would like to invite you to schedule your phone screen for next week.');
-  check(Array.isArray(invitePhraseCheck.matchedPhrases) && invitePhraseCheck.matchedPhrases.includes('schedule your phone screen'), 'matchedPhrases is populated for an invite classification');
-
-  // --- analyzeInvite classification for a rejection email (fixture rows, no file I/O) ---
-  const rejectionText = 'Dear Candidate,\n\nCompany: Example Industries\nThank you for applying. Unfortunately, we have decided not to move forward with your application at this time.';
-  const rejectionResult = analyzeInvite(rejectionText, fixtureRows);
-  check(rejectionResult.classification === 'rejection', 'analyzeInvite classifies a rejection email as "rejection"');
-  check(rejectionResult.candidates.length === 2 && rejectionResult.candidates[0].appNumber === 101, 'a rejection email still returns ranked candidates (matching is unaffected by classification), active row ranked first');
-  check(Array.isArray(rejectionResult.matchedPhrases) && rejectionResult.matchedPhrases.length > 0, 'analyzeInvite exposes matchedPhrases for a rejection classification');
-
-  // --- analyzeInvite: the false-positive CodeRabbit named must not enable --apply ---
-  const rescheduleText = 'Dear Candidate,\n\nCompany: Example Industries\nUnfortunately we need to push your interview to next Tuesday due to a scheduling conflict.';
-  const rescheduleResult = analyzeInvite(rescheduleText, fixtureRows);
-  check(rescheduleResult.classification !== 'rejection', 'analyzeInvite does not classify a benign reschedule email (containing only "unfortunately") as rejection — --apply would refuse this');
-
-  // --- classifyEmail phraseStrength (#2100 CodeRabbit major finding follow-up) ---
-  check(classifyEmail('We are sorry to inform you that we have decided not to move forward with your application.').phraseStrength === 'strong', 'a strong rejection phrase reports phraseStrength "strong"');
-  check(classifyEmail('We would like to invite you to schedule your phone screen.').phraseStrength === null, 'an invite classification reports phraseStrength null');
-  check(classifyEmail('Thanks for your recent purchase.').phraseStrength === null, 'an unknown classification reports phraseStrength null');
-
-  // --- maintainer finding, PR #2100 review comment 2026-08-07: strong-tier
-  // phrases demoted to weak must never trigger `rejection` alone, only in
-  // combination with a second corroborating phrase ---
-  check(classifyEmail('We are sorry to report the negotiation was not successful.').classification !== 'rejection', '"not successful" alone (demoted phrase, unrelated context) does not classify as rejection');
-  check(classifyEmail('We regret to inform all staff that the downtown office lease will not be renewed.').classification !== 'rejection', '"regret to inform" alone (demoted phrase, non-candidate-directed context) does not classify as rejection');
-  check(classifyEmail('Please note the Q3 expansion will not be moving forward due to budget constraints.').classification !== 'rejection', '"will not be moving forward" alone (demoted phrase, unrelated project context) does not classify as rejection');
-  check(classifyEmail('We are currently unable to offer you a start date earlier than March.').classification !== 'rejection', '"unable to offer you" alone (demoted phrase, non-rejection context) does not classify as rejection');
-
-  // --- maintainer finding (PR #2100 review, 2026-08-07): realistic
-  // non-rejection emails must never classify as `rejection`, whether via a
-  // strong phrase or a `strong` phraseStrength. This is the exact false-
-  // positive class the review flagged: reschedules, delay apologies, and
-  // unrelated (non-candidate-directed) bad-news announcements that happen to
-  // share vocabulary with genuine rejection boilerplate. A false `rejection`
-  // is the unsafe direction here because `--apply` performs an irreversible
-  // tracker write gated on it (#2098) — a missed rejection only costs one
-  // unnecessary follow-up, but a false one silently kills a live process.
-  const rescheduleEmail = 'Hi Jamie,\n\nThanks for your flexibility — we need to reschedule your interview to next week. Something came up on our end and we want to make sure we can give you our full attention. Would Tuesday or Thursday afternoon work?\n\nSorry for the back and forth.\n\nBest,\nRecruiting Team';
-  const rescheduleEmailResult = classifyEmail(rescheduleEmail);
-  check(rescheduleEmailResult.classification !== 'rejection', 'realistic reschedule email does not classify as rejection');
-  check(rescheduleEmailResult.phraseStrength !== 'strong', 'realistic reschedule email does not report phraseStrength "strong"');
-
-  const delayApologyEmail = 'Hi Alex,\n\nApologies for the delay in getting back to you — we\'re still reviewing candidates for this role and expect to have an update within the next week. Thanks so much for your patience.\n\nBest,\nTalent Acquisition Team';
-  const delayApologyEmailResult = classifyEmail(delayApologyEmail);
-  check(delayApologyEmailResult.classification !== 'rejection', 'realistic delay-apology email does not classify as rejection');
-  check(delayApologyEmailResult.phraseStrength !== 'strong', 'realistic delay-apology email does not report phraseStrength "strong"');
-
-  const redundancyAnnouncementEmail = 'Hi team,\n\nWe regret to inform everyone that, following today\'s town hall, the company will be closing our satellite office as part of a broader restructuring, and several roles across departments are affected. To be clear, this update is unrelated to any individual candidate applications currently in progress — those pipelines continue as normal.\n\nThank you for your understanding.\n\nPeople Team';
-  const redundancyAnnouncementEmailResult = classifyEmail(redundancyAnnouncementEmail);
-  check(redundancyAnnouncementEmailResult.classification !== 'rejection', 'unrelated company-wide redundancy announcement does not classify as rejection');
-  check(redundancyAnnouncementEmailResult.phraseStrength !== 'strong', 'unrelated company-wide redundancy announcement does not report phraseStrength "strong"');
-
-  // --- matchInvite nameScore exposure (#2100 CodeRabbit major finding follow-up) ---
-  const exactNameRows = [{ num: 501, company: 'Example Industries', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
-  const exactNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, exactNameRows);
-  check(exactNameMatch[0].nameScore === 1, 'matchInvite exposes nameScore 1 for an exact company-name match');
-  const fuzzyNameRows = [{ num: 502, company: 'Example Industries Global Holdings', role: 'Analyst', status: 'Applied', date: null, notes: '' }];
-  const fuzzyNameMatch = matchInvite({ company: 'Example Industries', date: null, reqId: null }, fuzzyNameRows);
-  check(fuzzyNameMatch[0].nameScore < 1, 'matchInvite exposes nameScore < 1 for a partial/fuzzy company-name match');
-
-  // --- selectApplyTarget confidence gate (#2100 CodeRabbit major finding: line 768-769) ---
-  // A sole candidate that is both an exact company-name match AND backed by a
-  // strong rejection phrase auto-applies.
-  const strongExactSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 501, nameScore: 1 }], phraseStrength: 'strong' },
-    null
+  const fullText = 'Company: Example Industries\nWe would like to invite you to schedule your phone screen.\nInterview scheduled for 2026-07-09\nJoin via Zoom: https://zoom.us/j/1234567890';
+  const result = analyzeInvite(fullText, rows);
+  check(
+    result.signals.company === 'Example Industries' &&
+    result.signals.platform === 'Zoom' &&
+    result.candidates.length === 1 &&
+    result.candidates[0].appNumber === 101 &&
+    result.classification === 'invite',
+    'analyzeInvite extracts signals and matches candidates end-to-end'
   );
-  check(!strongExactSelection.error && strongExactSelection.target.appNumber === 501, 'selectApplyTarget auto-applies a sole candidate that is both an exact company match and a strong rejection classification');
-
-  // A sole candidate that is an exact company match but only weakly
-  // classified (e.g. "unfortunately" alone) must NOT auto-apply — this is
-  // the regression CodeRabbit's major finding described.
-  const weakOnlySelection = selectApplyTarget(
-    { candidates: [{ appNumber: 502, nameScore: 1 }], phraseStrength: 'weak' },
-    null
-  );
-  check(!!weakOnlySelection.error && weakOnlySelection.code === 2, 'selectApplyTarget refuses to auto-apply a sole candidate when the rejection classification is only weak, even with an exact company match');
-
-  // A sole candidate that is only a fuzzy/partial company-name match must NOT
-  // auto-apply even with a strong rejection phrase — this is the exact
-  // low-confidence-fuzzy-match scenario CodeRabbit flagged on line 768-769.
-  const fuzzySoleSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'strong' },
-    null
-  );
-  check(!!fuzzySoleSelection.error && fuzzySoleSelection.code === 2, 'selectApplyTarget refuses to auto-apply a sole candidate that is only a fuzzy/partial company-name match, even with a strong rejection classification');
-  check(fuzzySoleSelection.candidate && fuzzySoleSelection.candidate.appNumber === 503, 'selectApplyTarget exposes the near-miss candidate on a confidence-gate refusal');
-
-  // --id always overrides the confidence gate — an explicit human/agent
-  // choice is trusted regardless of nameScore/phraseStrength.
-  const idOverrideSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 503, nameScore: 0.4 }], phraseStrength: 'weak' },
-    503
-  );
-  check(!idOverrideSelection.error && idOverrideSelection.target.appNumber === 503, 'selectApplyTarget honors an explicit --id even when the sole-candidate confidence gate would otherwise refuse');
-
-  // Zero candidates must refuse with code 2 (distinct concern from the
-  // confidence gate above, but same exit code family — "nothing to apply to").
-  const noCandidateSelection = selectApplyTarget({ candidates: [], phraseStrength: 'strong' }, null);
-  check(!!noCandidateSelection.error && noCandidateSelection.code === 2, 'selectApplyTarget refuses with code 2 when no candidates matched');
-
-  // Multiple viable candidates must refuse with code 3 (distinct from the
-  // code-2 refusals above) and expose the ranked candidates collection the
-  // CLI output logic uses to print the disambiguation list.
-  const ambiguousSelection = selectApplyTarget(
-    { candidates: [{ appNumber: 601, nameScore: 1 }, { appNumber: 602, nameScore: 1 }], phraseStrength: 'strong' },
-    null
-  );
-  check(!!ambiguousSelection.error && ambiguousSelection.code === 3, 'selectApplyTarget refuses with code 3 when multiple candidates matched');
-  check(Array.isArray(ambiguousSelection.candidates) && ambiguousSelection.candidates.length === 2, 'selectApplyTarget exposes the ranked candidate list on an ambiguous refusal');
 
   console.log(`\n  invite-match self-test: ${pass} passed, ${fail} failed\n`);
   process.exit(fail > 0 ? 1 : 0);

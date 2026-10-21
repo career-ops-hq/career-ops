@@ -2,7 +2,10 @@ package data
 
 import (
 	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +39,7 @@ func TestTrackerLockDirMatchesNodeProtocol(t *testing.T) {
 func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
 	tempDir, trackerPath := writeTracker(t, insertedColumnTracker)
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -72,7 +75,16 @@ func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 		lock.release()
 		t.Fatalf("simulate concurrent tracker update: %v", err)
 	}
-	lock.release()
+	// CHECKED, not discarded. release() can return an error without removing
+	// the directory and without marking itself released — os.RemoveAll on a
+	// lock dir whose owner.json still has an open handle fails on Windows where
+	// it succeeds on POSIX. Ignoring it left the lock in place, so the waiter
+	// below blocked for its whole timeout and the test reported "did not resume
+	// after lock release": the message blamed the resume, and the actual cause
+	// had been thrown away.
+	if err := lock.release(); err != nil {
+		t.Fatalf("release first lock: %v", err)
+	}
 
 	select {
 	case err := <-done:
@@ -80,7 +92,11 @@ func TestUpdateApplicationStatusWaitsForSharedLock(t *testing.T) {
 			t.Fatalf("update after lock release: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("dashboard update did not resume after lock release")
+		// 10s against a 75ms production retry interval is a 133x margin, so
+		// exhausting it means the waiter never re-acquired — i.e. the lock is
+		// still there. Say whether it is, because that is the difference between
+		// "slow" and "stuck" and the log could not tell them apart.
+		t.Fatalf("dashboard update did not resume after lock release; %s", describeTrackerLock(lock.dir))
 	}
 
 	content, err := os.ReadFile(trackerPath)
@@ -116,7 +132,7 @@ func TestUpdateApplicationStatusOnlyRewritesStatusColumn(t *testing.T) {
 		t.Fatalf("failed to write tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 parsed application, got %d", len(apps))
 	}
@@ -141,7 +157,7 @@ func TestUpdateApplicationStatusOnlyRewritesStatusColumn(t *testing.T) {
 		t.Errorf("status word was replaced inside the Company cell, file now:\n%s", out)
 	}
 
-	reparsed := ParseApplications(tempDir)
+	reparsed := mustParseApplications(t, tempDir)
 	if reparsed[0].Company != "Applied Materials" {
 		t.Errorf("company = %q, want \"Applied Materials\"", reparsed[0].Company)
 	}
@@ -170,7 +186,7 @@ func TestParseApplicationsUsesTrackerNumberColumn(t *testing.T) {
 		t.Fatalf("failed to write applications tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 2 {
 		t.Fatalf("expected 2 parsed applications, got %d", len(apps))
 	}
@@ -217,7 +233,7 @@ func TestParseApplicationsResolvesTrackerRelativeReportLinks(t *testing.T) {
 		}
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 2 {
 		t.Fatalf("expected 2 parsed applications, got %d", len(apps))
 	}
@@ -270,7 +286,7 @@ const insertedColumnTracker = `# Applications Tracker
 func TestParseApplicationsMapsColumnsByHeader(t *testing.T) {
 	tempDir, _ := writeTracker(t, insertedColumnTracker)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -292,6 +308,25 @@ func TestParseApplicationsMapsColumnsByHeader(t *testing.T) {
 	}
 	if a.ReportNumber != "1" {
 		t.Errorf("ReportNumber = %q, want \"1\"", a.ReportNumber)
+	}
+}
+
+// An explicit tracker Location column is shown as-is, even for a town no
+// built-in city list knows and with nothing location-like in Notes.
+func TestParseApplicationsReadsLocationColumn(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|----------|-------|--------|-----|--------|-------|
+| 1 | 2026-06-01 | Acme | Engineer | Cardiff, UK | 4.0/5 | Applied | | | |
+`)
+
+	apps := mustParseApplications(t, tempDir)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 application, got %d", len(apps))
+	}
+	if apps[0].Location != "Cardiff, UK" {
+		t.Errorf("Location = %q, want \"Cardiff, UK\"", apps[0].Location)
 	}
 }
 
@@ -324,7 +359,7 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 		t.Fatalf("write legacy report: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 3 {
 		t.Fatalf("expected 3 applications, got %d", len(apps))
 	}
@@ -344,7 +379,7 @@ func TestParseApplicationsUsesTrackerURLBeforeLegacyEnrichment(t *testing.T) {
 func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {
 	tempDir, path := writeTracker(t, insertedColumnTracker)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 application, got %d", len(apps))
 	}
@@ -369,7 +404,7 @@ func TestUpdateApplicationStatusInsertedColumn(t *testing.T) {
 		}
 	}
 
-	reparsed := ParseApplications(tempDir)
+	reparsed := mustParseApplications(t, tempDir)
 	if reparsed[0].Status != "Interview" {
 		t.Errorf("reparsed Status = %q, want \"Interview\"", reparsed[0].Status)
 	}
@@ -415,7 +450,7 @@ func TestParseApplicationsRespectsCareerOpsTracker(t *testing.T) {
 
 	t.Setenv("CAREER_OPS_TRACKER", customTrackerPath)
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 parsed application, got %d", len(apps))
 	}
@@ -502,6 +537,14 @@ func TestNormalizeStatus(t *testing.T) {
 		{"Evaluated", "evaluated"},
 		{"Applied", "applied"},
 		{"Responded", "responded"},
+		{"Assessment", "assessment"},
+		{"online screening", "assessment"},
+		{"screening", "assessment"},
+		{"online assessment", "assessment"},
+		{"online_assessment", "assessment"},
+		{"phone screening", "phone screening"},
+		{"Interview - phone screening", "interview"},
+		{"Assessment prep", "assessment prep"},
 		{"Interview", "interview"},
 		{"Offer", "offer"},
 		{"Rejected", "rejected"},
@@ -543,7 +586,7 @@ func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
 		t.Fatalf("write tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 app, got %d", len(apps))
 	}
@@ -591,7 +634,7 @@ func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
 		t.Fatalf("write tracker: %v", err)
 	}
 
-	apps := ParseApplications(tempDir)
+	apps := mustParseApplications(t, tempDir)
 	if len(apps) != 1 {
 		t.Fatalf("expected 1 app, got %d", len(apps))
 	}
@@ -610,4 +653,151 @@ func TestUpdateApplicationStatusRefusesUnrecognizableCell(t *testing.T) {
 	if !strings.Contains(string(out), "| ??? |") {
 		t.Errorf("file was modified despite refusal, now:\n%s", string(out))
 	}
+}
+
+// The URL cell is written as a markdown link with a short label (#3516), while
+// trackers written before that — and any row no merge has rewritten since —
+// still carry the bare URL. Tier 0 of the JobURL chain must read the same href
+// out of both, because failing to read one does not error: it looks exactly
+// like a row with no URL and falls through to the report / scan-history tiers,
+// which resolve a different posting.
+func TestExtractCellURLReadsBothWrittenForms(t *testing.T) {
+	cases := []struct {
+		name string
+		cell string
+		want string
+	}{
+		{"bare (pre-#3516 tracker)", "https://jobs.ashbyhq.com/temporal/8a65908d", "https://jobs.ashbyhq.com/temporal/8a65908d"},
+		{"linked with an ATS label", "[ashby](https://jobs.ashbyhq.com/temporal/8a65908d)", "https://jobs.ashbyhq.com/temporal/8a65908d"},
+		{"linked with a host label", "[careers.snowflake.com](https://careers.snowflake.com/us/en/job/4735b223/Director)", "https://careers.snowflake.com/us/en/job/4735b223/Director"},
+		{"href with balanced parens is not truncated", "[example.com](https://example.com/jobs/eng(remote))", "https://example.com/jobs/eng(remote)"},
+		{"angle-bracketed destination", "[example.com](<https://example.com/jobs/1>)", "https://example.com/jobs/1"},
+		{"query string survives", "[greenhouse](https://boards.greenhouse.io/acme/jobs/9?gh_jid=123)", "https://boards.greenhouse.io/acme/jobs/9?gh_jid=123"},
+		{"empty cell", "", ""},
+		{"placeholder is passed through, not invented into a URL", "—", "—"},
+		{"non-http link is not mistaken for a posting URL", "[jd](local:jds/acme.md)", "[jd](local:jds/acme.md)"},
+	}
+	for _, tc := range cases {
+		if got := extractCellURL(tc.cell); got != tc.want {
+			t.Errorf("%s: extractCellURL(%q) = %q, want %q", tc.name, tc.cell, got, tc.want)
+		}
+	}
+}
+
+// The same property end to end: a linked cell and a bare cell must produce the
+// same JobURL, and the linked one must still beat the report-header tier.
+func TestParseApplicationsReadsLinkedURLCells(t *testing.T) {
+	tempDir, _ := writeTracker(t, `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |
+|---|------|---------|------|-------|--------|-----|--------|-------|-----|
+| 1 | 2026-08-28 | Acme | Triage Engineer | 4.0/5 | Evaluated | — | — | linked | [jobs.example.com](https://jobs.example.com/triage) |
+| 2 | 2026-08-28 | Globex | Platform Engineer | 4.2/5 | Evaluated | — | [2](../reports/002-globex.md) | linked, has report | [jobs.example.com](https://jobs.example.com/tracker) |
+`)
+
+	reportsDir := filepath.Join(tempDir, "reports")
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
+		t.Fatalf("mkdir reports: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(reportsDir, "002-globex.md"),
+		[]byte("**URL:** https://jobs.example.com/report\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write report: %v", err)
+	}
+
+	apps := mustParseApplications(t, tempDir)
+	if len(apps) != 2 {
+		t.Fatalf("expected 2 applications, got %d", len(apps))
+	}
+	if got := apps[0].JobURL; got != "https://jobs.example.com/triage" {
+		t.Errorf("linked JobURL = %q, want the href", got)
+	}
+	if got := apps[1].JobURL; got != "https://jobs.example.com/tracker" {
+		t.Errorf("linked JobURL = %q, want the tracker href to beat the report header", got)
+	}
+}
+
+// The writer only links a href that survives a markdown destination byte for
+// byte (merge-tracker.mjs isLinkableDestination); everything else is written
+// bare. Both forms must read back whole HERE too — the Node parser and this
+// regex disagreeing about a row's URL is the drift the shared extractor exists
+// to prevent. TestExtractCellURLMatchesNodeReader pins the full parity table.
+func TestExtractCellURLAgreesWithTheWriterOnUnlinkableHrefs(t *testing.T) {
+	cases := []struct {
+		name string
+		cell string
+		want string
+	}{
+		// Written bare by the writer, so they must read back verbatim.
+		{"unmatched close paren, bare", "https://example.com/jobs/a)b", "https://example.com/jobs/a)b"},
+		{"unmatched open paren, bare", "https://example.com/jobs/a(b", "https://example.com/jobs/a(b"},
+		{"backslash, bare", `https://example.com/jobs/a\b`, `https://example.com/jobs/a\b`},
+		// Written linked, because balanced parens round-trip.
+		{"balanced parens, linked", "[example.com](https://example.com/jobs/eng(remote))", "https://example.com/jobs/eng(remote)"},
+		// Whitespace is percent-encoded by the writer rather than left raw.
+		{"encoded space, linked", "[example.com](https://example.com/jobs/a%20b)", "https://example.com/jobs/a%20b"},
+	}
+	for _, tc := range cases {
+		if got := extractCellURL(tc.cell); got != tc.want {
+			t.Errorf("%s: extractCellURL(%q) = %q, want %q", tc.name, tc.cell, got, tc.want)
+		}
+	}
+}
+
+// One table, two readers: test-fixtures/url-cell-parity.json is asserted here
+// against extractCellURL and in tracker-columns-tests.mjs against Node's
+// extractCellUrl. Its expectations were generated from the Node reader, so this
+// test failing means the Go port has drifted from the parser merge-tracker keys
+// on — and a hand-edited cell would show the dashboard one posting while dedup
+// matched another. The table includes every cell the earlier regex-based reader
+// got wrong (#3854 review). Same shape as tracker_aliases_test.go.
+func TestExtractCellURLMatchesNodeReader(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "..", "test-fixtures", "url-cell-parity.json"))
+	if err != nil {
+		t.Fatalf("read shared URL-cell parity fixture: %v", err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name string `json:"name"`
+			Cell string `json:"cell"`
+			Href string `json:"href"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(content, &fixture); err != nil {
+		t.Fatalf("parse shared URL-cell parity fixture: %v", err)
+	}
+	if len(fixture.Cases) == 0 {
+		t.Fatal("shared URL-cell parity fixture has no cases")
+	}
+	for _, tc := range fixture.Cases {
+		if got := extractCellURL(tc.Cell); got != tc.Href {
+			t.Errorf("%s: extractCellURL(%q) = %q, Node reader gives %q", tc.Name, tc.Cell, got, tc.Href)
+		}
+	}
+}
+
+// describeTrackerLock reports whether a lock directory is still present, and
+// who owns it if so.
+//
+// Exists because "did not resume after lock release" is the same message
+// whether the lock was released and the waiter is merely slow, or the release
+// failed and the waiter is stuck forever. Those need different fixes, and on a
+// runner nobody can attach to, the test output is the only place that
+// distinction can live.
+func describeTrackerLock(dir string) string {
+	info, err := os.Stat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Sprintf("lock dir %s is gone, so the release worked and the waiter did not re-acquire within the budget", dir)
+	}
+	if err != nil {
+		return fmt.Sprintf("lock dir %s could not be examined: %v", dir, err)
+	}
+	owner, ownerErr := readTrackerLockOwner(dir)
+	if ownerErr != nil {
+		return fmt.Sprintf("lock dir %s STILL EXISTS (mode %v); owner unreadable: %v", dir, info.Mode(), ownerErr)
+	}
+	return fmt.Sprintf("lock dir %s STILL EXISTS, held by pid %d token %s since %s — the release did not remove it",
+		dir, owner.PID, owner.Token, owner.StartedAt)
 }

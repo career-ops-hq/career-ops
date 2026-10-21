@@ -70,8 +70,8 @@ test('Chinese Minimal applies profile typography and colors without changing its
     assert.equal(defaults.colors['.job-role'], 'rgb(23, 74, 126)');
     assert.equal(defaults.colors['.edu-org'], 'rgb(23, 74, 126)');
     assert.equal(defaults.colors['.award-org'], 'rgb(115, 34, 195)');
-    assert.match(defaults.fonts.body, /^"Liberation Sans"/);
-    assert.match(defaults.fonts.body, /"PingFang SC"/);
+    // One font run for mixed Chinese/Latin lines keeps PDF extraction order (#2202).
+    assert.match(defaults.fonts.body, /^"PingFang SC"/);
 
     for (const [lang, fallback] of [
       ['en', 'PingFang SC'], ['zh', 'PingFang SC'], ['zh-CN', 'PingFang SC'],

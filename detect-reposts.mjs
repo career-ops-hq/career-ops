@@ -69,6 +69,8 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseDate } from './lib/parse-date.mjs';
+import { parseScanHistoryLine, scanHistoryLineHasColumn } from './lib/scan-history-columns.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
@@ -117,24 +119,15 @@ const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
 
 // --- Date helpers ---
-function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 function daysBetween(d1, d2) {
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 // --- Parse scan-history.tsv ---
-// Format: url, first_seen, portal, title, company, status, location, ...,
-//         normalized_company (trailing col 12, additive — see scan.mjs).
-// The normalized_company column is preferred as the clustering key when
-// present; rows written before it existed (fewer columns) simply lack it and
-// carry `normCompany: ''`, so a consumer normalizes the raw company on the fly.
+// Columns as declared in lib/scan-history-columns.mjs. The normalized_company
+// column is preferred as the clustering key when present; rows written before
+// it existed simply lack it and carry `normCompany: ''`, so a consumer
+// normalizes the raw company on the fly.
 export function parseScanHistory(content) {
   const lines = content.split('\n').filter(line => line.trim());
   if (lines.length === 0) return [];
@@ -144,24 +137,23 @@ export function parseScanHistory(content) {
   // don't have a header row, and slice(1) would silently lose row 0.
   const hasHeader = /^\s*url\s*\t/i.test(lines[0]);
   for (const line of lines.slice(hasHeader ? 1 : 0)) {
-    const cols = line.split('\t');
-    if (cols.length < 5) continue;
-    const [url, firstSeen, portal = '', title = '', company = '', status = 'added', location = ''] = cols;
-    const date = parseDate(firstSeen);
-    if (!url || !date) continue;
+    if (!scanHistoryLineHasColumn(line, 'company')) continue;
+    const row = parseScanHistoryLine(line);
+    const date = parseDate(row.first_seen);
+    if (!row.url || !date) continue;
     rows.push({
-      url: url.trim(),
+      url: row.url.trim(),
       date,
-      dateStr: firstSeen.trim(),
-      portal: portal.trim(),
-      title: title.trim(),
-      company: company.trim(),
-      status: (status || 'added').trim(),
-      location: (location || '').trim(),
-      // Trailing normalized-company key (col 12, 0-indexed 11). '' for older
-      // rows that predate the column — companyKey() falls back to normalizing
-      // the raw name so old and new rows still cluster on the same key.
-      normCompany: (cols[11] || '').trim(),
+      dateStr: row.first_seen.trim(),
+      portal: row.portal.trim(),
+      title: row.title.trim(),
+      company: row.company.trim(),
+      status: (row.status || 'added').trim(),
+      location: row.location.trim(),
+      // '' for older rows that predate the normalized_company column —
+      // companyKey() falls back to normalizing the raw name so old and new
+      // rows still cluster on the same key.
+      normCompany: row.normalized_company.trim(),
     });
   }
   return rows;

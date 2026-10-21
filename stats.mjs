@@ -23,10 +23,14 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
+import { localToday } from './lib/local-today.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus, analyzeFromContent } from './followup-cadence.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
+export { parseStatusLogStages } from './funnel-stages.mjs';
+import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -34,22 +38,21 @@ const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 const SCAN_HISTORY_FILE = join(DATA_ROOT, 'data', 'scan-history.tsv');
 const FOLLOWUPS_FILE = join(DATA_ROOT, 'data', 'follow-ups.md');
 const SCAN_RUNS_FILE = join(DATA_ROOT, 'data', 'scan-runs.tsv');
-const STATUS_LOG_FILE = join(DATA_ROOT, 'data', 'status-log.tsv');
 const PORTALS_FILE = join(DATA_ROOT, 'portals.yml');
 const PORTAL_HEALTH_FILE = join(DATA_ROOT, 'data', 'portal-health.tsv');
 
-const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
+const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
-// In-flight applications. Deliberately NARROWER than the dashboard's
-// ActiveApps (which also counts Evaluated): an evaluated-but-never-sent row is
-// a candidate, not an application in flight. Hired is a terminal success, not
+// In-flight applications, shared with the web Analytics and Go dashboard
+// ActiveApps: an evaluated-but-never-sent row is a candidate, not an
+// application in flight. Hired is a terminal success, not
 // in flight, so it is intentionally excluded here (but see PURSUED/funnel).
-const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer']);
+const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer']);
 
 // Rows that count toward avgScoreApplied — jobs the user actually pursued.
 // Plain avgScore mixes in SKIP/Discarded and understates real fit. Hired is
 // the fullest pursuit of all, so it belongs here.
-const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+const PURSUED_STATUSES = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected']);
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const pct = (part, total) => (total > 0 ? round1((part / total) * 100) : 0);
@@ -146,7 +149,7 @@ export function computeColdAppNums(trackerContent, followupsContent) {
 /**
  * Cumulative funnel: everX = "reached stage X or beyond, ever". The math
  * mirrors the dashboard's ComputeProgressMetrics (career.go): Rejected counts
- * into everApplied (a rejection proves a submission), Hired counts into every
+ * into everApplied and everResponded (a rejection is a reply), Hired counts into every
  * stage through everOffer (a landed job proves the offer and everything before
  * it), and each later stage sums itself plus everything beyond it. Rates are
  * relative to everApplied.
@@ -155,9 +158,8 @@ export function computeColdAppNums(trackerContent, followupsContent) {
  * "currently in Applied" while `everApplied` is "ever applied"; the same word
  * for two different numbers would read as a bug.
  *
- * Known limitation: statuses are snapshots, so a Rejected row that never got a
- * response is indistinguishable from one rejected after interviews — middle
- * stages are lower bounds until status-transition logging exists (#1428).
+ * Snapshot interview/offer counts are lower bounds; use ledger history to
+ * recover stages reached before a rejection or withdrawal (#3273).
  *
  * This is the canonical funnel definition for career-ops going forward;
  * dashboard/web consuming this JSON instead of keeping independent copies is
@@ -165,8 +167,8 @@ export function computeColdAppNums(trackerContent, followupsContent) {
  */
 export function computeFunnel(byStatus) {
   const n = (k) => byStatus[k] || 0;
-  const everApplied = n('Applied') + n('Responded') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
-  const everResponded = n('Responded') + n('Interview') + n('Offer') + n('Hired');
+  const everApplied = n('Applied') + n('Responded') + n('Assessment') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
+  const everResponded = n('Responded') + n('Assessment') + n('Interview') + n('Offer') + n('Hired') + n('Rejected');
   const everInterview = n('Interview') + n('Offer') + n('Hired');
   const everOffer = n('Offer') + n('Hired');
   return {
@@ -181,32 +183,6 @@ export function computeFunnel(byStatus) {
   };
 }
 
-// Canonical pipeline depth per stage, for "ever reached" math. Terminal and
-// pre-pipeline states (Rejected/Discarded/Evaluated/SKIP/Unknown) are absent →
-// depth 0; the ledger's from/to history is what proves the stages a row passed
-// through before it landed on a terminal snapshot.
-const STAGE_RANK = { Applied: 1, Responded: 2, Interview: 3, Offer: 4, Hired: 5 };
-
-/**
- * Parse data/status-log.tsv into per-row transition observations. Columns are
- * {num}\t{date}\t{from}\t{to}\t{source}\t{note}; only num/from/to are read here.
- * Torn or non-numeric-num rows are skipped — this is a display aid, never throws.
- * @returns {Array<{num:number, from:string, to:string}>}
- */
-export function parseStatusLogStages(content) {
-  const out = [];
-  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
-    if (!line.trim()) continue;
-    const c = line.split('\t');
-    const rawNum = String(c[0] || '').trim();
-    const date = String(c[1] || '').trim();
-    const from = String(c[2] || '').trim();
-    const to = String(c[3] || '').trim();
-    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
-    out.push({ num: Number(rawNum), from, to });
-  }
-  return out;
-}
 
 /**
  * Ledger-aware funnel: everX counts DISTINCT tracker rows that ever reached
@@ -216,7 +192,7 @@ export function parseStatusLogStages(content) {
  * Interview counts into everInterview. This resolves the snapshot limitation
  * computeFunnel() documents (#1428) for every row the ledger covers; a row with
  * no ledger history falls back to its current status alone, so pre-ledger middle
- * stages stay lower bounds. A current Rejected still proves everApplied (rank 1)
+ * stages stay lower bounds. A current Rejected proves a response (rank 2)
  * with no ledger, matching the snapshot math. Same shape as computeFunnel() plus
  * `basis:'ledger'`.
  *
@@ -224,22 +200,13 @@ export function parseStatusLogStages(content) {
  * @param {Array<{num:number,from:string,to:string}>} ledger - parseStatusLogStages output.
  */
 export function computeFunnelWithHistory(statusByNum, ledger) {
-  const reached = new Map(); // num → highest stage rank ever held (distinct rows)
-  const bump = (num, rank) => { if (rank > (reached.get(num) || 0)) reached.set(num, rank); };
-  for (const [num, status] of statusByNum) {
-    bump(num, STAGE_RANK[status] || (status === 'Rejected' ? 1 : 0));
-  }
-  for (const { num, from, to } of ledger) {
-    if (!statusByNum.has(num)) continue; // ledger row whose tracker row is gone
-    bump(num, STAGE_RANK[from] || 0);
-    bump(num, STAGE_RANK[to] || 0);
-  }
+  const reached = recoverFunnelStages(statusByNum, ledger);
   let everApplied = 0, everResponded = 0, everInterview = 0, everOffer = 0;
   for (const rank of reached.values()) {
     if (rank >= 1) everApplied++;
     if (rank >= 2) everResponded++;
-    if (rank >= 3) everInterview++;
-    if (rank >= 4) everOffer++;
+    if (rank >= 4) everInterview++;
+    if (rank >= 5) everOffer++;
   }
   return {
     everApplied,
@@ -283,11 +250,10 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
   const weekCounts = new Map();
   let totalRecorded = 0, added = 0, firstSeen = null, lastSeen = null;
   for (const line of lines) {
-    const cols = line.split('\t');
-    if (cols[0] === 'url') continue; // header
-    if (!/^https?:\/\//.test(cols[0])) continue; // torn/malformed row
+    const { url, first_seen: date, portal, company, status: statusRaw } = parseScanHistoryLine(line);
+    if (url === 'url') continue; // header
+    if (!/^https?:\/\//.test(url)) continue; // torn/malformed row
     totalRecorded++;
-    const [, date, portal, , company, statusRaw] = cols;
     const status = (statusRaw || 'added').trim() || 'added';
     byStatus[status] = (byStatus[status] || 0) + 1;
     if (portal) byPortal[portal] = (byPortal[portal] || 0) + 1;
@@ -313,9 +279,9 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
 export function scanCompanyNames(content) {
   const names = new Set();
   for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
-    const cols = line.split('\t');
-    if (!/^https?:\/\//.test(cols[0] || '')) continue;
-    const company = (cols[4] || '').trim();
+    const row = parseScanHistoryLine(line);
+    if (!/^https?:\/\//.test(row.url)) continue;
+    const company = row.company.trim();
     if (company) names.add(company.toLowerCase());
   }
   return [...names];
@@ -652,7 +618,7 @@ export function computeAllStats({
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
-  statusLogFile = STATUS_LOG_FILE,
+  statusLogFile = join(dirname(appsFile), 'status-log.tsv'),
   prune = false,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
@@ -692,7 +658,7 @@ export function computeAllStats({
 
   return {
     metadata: {
-      generatedAt: new Date().toISOString().slice(0, 10),
+      generatedAt: localToday(),
       sources: {
         tracker: !!apps,
         scanHistory: !!scanHist,

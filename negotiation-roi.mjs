@@ -58,17 +58,22 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
-import { parseStories } from './match-star.mjs';
+import { parseStories } from './lib/story-bank.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STORY_BANK_PATH = join(CAREER_OPS, 'interview-prep', 'story-bank.md');
 const DATA_ROOT = getCareerOpsRoot();
+// BOTH from the data root, because the v1 safety gate compares them: a claim
+// survives only if its number also appears verbatim in cv.md. Resolving the
+// story bank from the CODE root and cv.md from the DATA root pointed the two
+// halves of one comparison at two different installs — so for any configured
+// data root the gate read a story bank that is not there, found no claims, and
+// produced an empty draft that looks like "you have no quantified stories".
+const STORY_BANK_PATH = join(DATA_ROOT, 'interview-prep', 'story-bank.md');
 const CV_PATH = join(DATA_ROOT, 'cv.md');
 
 // ── Frequency vocabulary ─────────────────────────────────────────────
@@ -702,6 +707,25 @@ function main() {
   }
 }
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node negotiation-roi.mjs [--summary] [--wage <n>] [--frequency <unit>] [--occurrences <n>] [--self-test]
+
+  --summary             human-readable output instead of JSON
+  --wage <n>            wage used for the annualized estimate
+  --frequency <unit>    daily|weekly|biweekly|monthly|quarterly|annually|yearly
+  --occurrences <n>     occurrences per year, instead of --frequency
+  --self-test           run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   main();
 }

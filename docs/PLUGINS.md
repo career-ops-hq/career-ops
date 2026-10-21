@@ -33,6 +33,16 @@ keys must be in your `.env`. `node doctor.mjs` shows what's missing.
 
 If a plugin's files change without a version bump, career-ops **blocks it** and
 asks you to review + `node plugins.mjs trust <id>` to re-pin (tamper detection).
+The warning counts the modified, removed and added files. It names changed files
+at the plugin root and groups the rest by top-level directory, naming the file
+when a directory has only one. You can tell an edit to your code from new files
+beside it.
+
+The files under a plugin's directory count toward its hash, except inside
+directories named `node_modules` or `.git`, which are skipped. That includes git
+worktrees and tool logs kept there. If you link a plugin checkout into
+`plugins.local/`, keep worktrees and logs outside the plugin's own directory, for
+example `git worktree add ../my-plugin-worktrees/fix-1`.
 
 ## Writing a plugin
 
@@ -50,11 +60,25 @@ non-secret settings via `ctx.settings`. To deduplicate the postings you return �
 or to compare a posting against one you have already seen — use
 `ctx.normalizePostingUrl(url)`, which is the same key the tracker and scanner
 build. It returns `''` when there is nothing to key on, and `''` means *no key*:
-never match one `''` against another.
+never match one `''` against another. For a posting on a multi-employer
+aggregator (LinkedIn, Indeed), `ctx.aggregatorPostingId(url)` returns
+`{ domain, id }` — the requisition id that a tracking link and the canonical view
+share — or `null` when it does not know. Compare two ids only when their
+`domain` matches, and never read `null` as a match. If your plugin keeps a file
+of its own (a cursor, a saved posting), build its path from `ctx.dataRoot`, the
+absolute path of the user's data root; a bare relative path lands in whichever
+directory the command was run from.
 
 See `plugins/README.md` for the full contract + the honest trust model (plain
 ESM has no hard sandbox — bundled plugins are code-reviewed; your own are your
 trust).
+
+For human-confirmed tracker transitions, #3333 proposes a separate local
+drop-file bridge read by `reply-watch.mjs`: see the draft
+[reply proposal contract](REPLY_PROPOSALS.md). It adds no hook kind and grants
+no tracker-write permission to plugins. The directory and row format are
+accepted as a v1 draft: they may change until a real producer writes to the
+directory.
 
 ## Publishing + getting approved
 

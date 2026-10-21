@@ -77,6 +77,12 @@ node plugins.mjs run notion export [--dry-run]   # export
   hardcoded host, documented in its code).
 - `env` (frozen, scoped to your declared keys), `settings` (your non-secret
   `config/plugins.yml` block), `log` (redacts your declared secrets), `dryRun`.
+- `dataRoot` — the absolute path of the user's data root. If your plugin keeps a
+  file of its own (a cursor, a cache, a saved posting), build its path from
+  here: `join(ctx.dataRoot, 'data', 'my-plugin-state.json')`. A bare relative
+  path resolves against the working directory, which is not the data root when
+  the user keeps their data outside the checkout or runs the command from
+  another directory.
 
 ## Your own plugins → `plugins.local/`
 

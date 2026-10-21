@@ -35,6 +35,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { buildCompanyCanonicalizer } from './scan.mjs';
+import { parseScanHistoryLine, scanHistoryLineHasColumn } from './lib/scan-history-columns.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || join(DATA_ROOT, 'data', 'scan-history.tsv');
@@ -118,16 +119,10 @@ for (const entry of portalsRaw.tracked_companies || []) {
 // appendToScanHistory in scan.mjs), so detect the header instead of assuming
 // row 0 is one — the same guard parseScanHistory (detect-reposts.mjs) uses.
 // An unconditional skip would silently drop the first company in a headerless
-// file; when there is no header the column lookups fall back to legacy positions.
+// file. Columns are read by name through lib/scan-history-columns.mjs, whose
+// order is fixed whatever header (if any) the file carries.
 const rows = readFileSync(HISTORY_PATH, 'utf-8').split('\n');
 const hasHeader = /^\s*url\s*\t/i.test(rows[0] ?? '');
-const header = hasHeader ? rows[0].split('\t') : [];
-const col = (n) => header.indexOf(n);
-const iCompany = col('company') === -1 ? 4 : col('company');
-const iFirstSeen = col('first_seen') === -1 ? 1 : col('first_seen');
-const iStatus = col('status') === -1 ? 5 : col('status');
-const iTitle = col('title') === -1 ? 3 : col('title');
-const iUrl = col('url') === -1 ? 0 : col('url');
 
 const cutoffMs = SINCE_DAYS > 0 ? Date.now() - SINCE_DAYS * 86_400_000 : null;
 
@@ -135,13 +130,13 @@ const cutoffMs = SINCE_DAYS > 0 ? Date.now() - SINCE_DAYS * 86_400_000 : null;
 const found = new Map();
 
 for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
-  const cells = rows[i].split('\t');
-  if (cells.length < 6) continue;
+  if (!scanHistoryLineHasColumn(rows[i], 'status')) continue;
+  const row = parseScanHistoryLine(rows[i]);
 
-  const rawName = (cells[iCompany] || '').trim();
+  const rawName = row.company.trim();
   if (!rawName) continue;
 
-  const seen = (cells[iFirstSeen] || '').trim();
+  const seen = row.first_seen.trim();
   if (cutoffMs != null) {
     const t = Date.parse(seen);
     // Undated rows pass — same "don't penalize missing data" rule the scanners use.
@@ -156,11 +151,11 @@ for (let i = hasHeader ? 1 : 0; i < rows.length; i++) {
   }
   const rec = found.get(key);
   rec.rows++;
-  if ((cells[iStatus] || '').trim() === 'added') rec.added++;
+  if (row.status.trim() === 'added') rec.added++;
   if (seen > rec.lastSeen) rec.lastSeen = seen;
-  const title = (cells[iTitle] || '').trim();
+  const title = row.title.trim();
   if (title && rec.titles.size < 3) rec.titles.add(title);
-  try { rec.hosts.add(new URL(cells[iUrl]).hostname); } catch { /* malformed URL — skip host hint */ }
+  try { rec.hosts.add(new URL(row.url).hostname); } catch { /* malformed URL — skip host hint */ }
 }
 
 // ── Rank and cut ────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
 
 ## Workflow
 
-1. **읽기** `data/pipeline.md` -> "대기" / "Pending" / "Pendientes" 섹션의 `- [ ]` item 찾기
+1. **읽기** `data/pipeline.md` (`grep -n -m 20 '^- \[ \] ' data/pipeline.md`로 검색하고, 각 batch 후 이번 실행에서 Pending에 남겨 둔 item만 나올 때까지 다시 검색하며, 파일 전체를 읽지 않기) -> "대기" / "Pending" / "Pendientes" 섹션의 `- [ ]` item 찾기
 2. **각 대기 URL에 대해**:
    a. `node reserve-report-num.mjs`를 실행해 다음 sequential `REPORT_NUM`을 atomic하게 예약합니다(report 작성 후 `node reserve-report-num.mjs --release <num>`으로 sentinel 해제).
    b. **공고 추출**: Playwright(`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch

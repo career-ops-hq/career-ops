@@ -21,7 +21,27 @@ function payload(photo = '', photo_style = 'rounded') {
   };
 }
 
-function render(inputPayload, { preview = false } = {}) {
+// A local photo path is honoured only when config/profile.yml names it (#5094).
+function writeProfile(root, photo) {
+  mkdirSync(join(root, 'config'), { recursive: true });
+  writeFileSync(join(root, 'config', 'profile.yml'), `candidate:\n  photo: ${JSON.stringify(photo)}\n`);
+}
+
+function buildWith(inputPayload, profilePhoto) {
+  const dir = mkdtempSync(join(tmpdir(), 'photo-guard-'));
+  const root = join(dir, 'data-root');
+  mkdirSync(join(root, 'output'), { recursive: true });
+  if (profilePhoto !== undefined) writeProfile(root, profilePhoto);
+  const input = join(dir, 'input.json');
+  const output = join(dir, 'output.html');
+  writeFileSync(input, JSON.stringify(inputPayload));
+  const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], {
+    cwd: ROOT, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root },
+  });
+  return { result, output };
+}
+
+function render(inputPayload, { preview = false, profilePhoto } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'photo-cv-'));
   const input = join(dir, 'input.json');
   const output = join(dir, 'output.html');
@@ -41,11 +61,12 @@ function render(inputPayload, { preview = false } = {}) {
   // is read back from there, and nothing outside the sandbox is touched.
   const env = { ...process.env };
   let previewRoot;
-  if (preview) {
+  if (preview || profilePhoto !== undefined) {
     previewRoot = join(dir, 'data-root');
     mkdirSync(join(previewRoot, 'output'), { recursive: true });
     env.CAREER_OPS_ROOT = previewRoot;
   }
+  if (profilePhoto !== undefined) writeProfile(previewRoot, profilePhoto);
 
   const stdout = execFileSync(process.execPath, args, { cwd: ROOT, encoding: 'utf8', env });
   return { html: readFileSync(preview ? join(previewRoot, 'output', 'cv-preview.html') : output, 'utf8'), stdout, output };
@@ -60,13 +81,13 @@ test('absolute local image is validated and inlined', () => {
   const dir = mkdtempSync(join(tmpdir(), 'photo-source-'));
   const photo = join(dir, 'headshot.png');
   writeFileSync(photo, ONE_PIXEL_PNG);
-  const { html } = render(payload(photo, 'circle'));
+  const { html } = render(payload(photo, 'circle'), { profilePhoto: photo });
   assert.match(html, /class="cv-photo cv-photo--circle"/);
   assert.match(html, /src="data:image\/png;base64,/);
 });
 
 test('project-relative image is validated and inlined', () => {
-  const { html } = render(payload('docs/logo.png', 'square'));
+  const { html } = render(payload('docs/logo.png', 'square'), { profilePhoto: 'docs/logo.png' });
   assert.match(html, /class="cv-photo cv-photo--square"/);
   assert.match(html, /src="data:image\/png;base64,/);
 });
@@ -75,11 +96,43 @@ test('single-letter Windows drive paths reach local file handling', () => {
   const dir = mkdtempSync(join(tmpdir(), 'photo-windows-path-'));
   const input = join(dir, 'input.json');
   const output = join(dir, 'output.html');
-  writeFileSync(input, JSON.stringify(payload('Z:\\does-not-exist\\candidate\\headshot.png')));
-  const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8' });
+  const winPath = 'Z:\\does-not-exist\\candidate\\headshot.png';
+  writeFileSync(input, JSON.stringify(payload(winPath)));
+  const root = mkdtempSync(join(tmpdir(), 'photo-windows-root-'));
+  writeProfile(root, winPath);
+  const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root } });
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.stderr, /Unsupported profile photo URL scheme/);
   assert.match(result.stderr, /not found or unreadable/);
+});
+
+test('a payload photo path that config/profile.yml does not name is refused (#5094)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'photo-secret-'));
+  const secret = join(dir, 'private.png');
+  writeFileSync(secret, ONE_PIXEL_PNG);
+  const cases = [
+    ['profile has no photo', undefined],
+    ['profile names a different photo', 'docs/logo.png'],
+  ];
+  for (const [label, profilePhoto] of cases) {
+    const { result, output } = buildWith(payload(secret), profilePhoto);
+    assert.notEqual(result.status, 0, label);
+    assert.match(result.stderr, /does not match candidate\.photo in config\/profile\.yml/, label);
+    assert.equal(existsSync(output), false, label);
+  }
+});
+
+test('a relative path that climbs out of the project is refused unless the profile names it (#5094)', () => {
+  const { result, output } = buildWith(payload('../../../../etc/hosts.png'), 'docs/logo.png');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /does not match candidate\.photo in config\/profile\.yml/);
+  assert.equal(existsSync(output), false);
+});
+
+test('http(s) photo URLs do not need the profile (#5094)', () => {
+  const { result, output } = buildWith(payload('https://example.com/me.png'), undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(output), true);
 });
 
 test('square photo styles enforce equal dimensions in both templates', () => {
@@ -107,7 +160,9 @@ test('missing, unsupported, and invalid-style photos fail clearly', () => {
     const input = join(dir, 'input.json');
     const output = join(dir, 'output.html');
     writeFileSync(input, JSON.stringify(value));
-    const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8' });
+    const root = mkdtempSync(join(tmpdir(), 'photo-fail-root-'));
+    writeProfile(root, value.candidate.photo);
+    const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root } });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, expected);
     assert.equal(existsSync(output), false);

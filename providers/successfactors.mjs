@@ -60,6 +60,12 @@ const MAX_JOBS = 1000; // cap total postings pulled per site (both strategies)
 const CSB_PAGE_SIZE = 10; // fixed by the /services/recruiting/v1/jobs API
 const CSB_MAX_PAGES_PER_LOCALE = 100; // safety cap per locale (100*10 = 1000 postings)
 const CSB_MAX_LOCALES = 16; // guard against a tenant advertising an absurd locale list
+// The API's own default sort ("recent", which the site itself sends) is not a
+// stable order: each page request reshuffles ties, so offset paging returned
+// only ~400 distinct ids of BMW's 521 per pass. "date" is nearly stable; a
+// second sweep picks up the few same-day ties it still shuffles across pages.
+const CSB_SORT = 'date';
+const CSB_SWEEPS = 2;
 // Locales tried when /search/ discovery yields nothing (fetch failed / markup
 // changed). de_DE + en_US cover the DACH targets this provider is aimed at.
 const CSB_DEFAULT_LOCALES = ['de_DE', 'en_US'];
@@ -89,7 +95,16 @@ export function resolveConfig(entry) {
   // slash, so all of those collapse to the same brand-scoped base instead of
   // doubling the endpoint segment onto itself. Single-domain tenants (the
   // common case) have an empty pathname, so base === origin unchanged.
+  //
+  // A saved-search "category" page, /go/<Category-Name>/<numericId>/ (with an
+  // optional /<offset>/ once it is paginated, /go/All-Jobs/9170201/25/), is the
+  // URL people copy from a careers page. It is not a brand prefix: tacked in
+  // front of /tile-search-results/ it answers 200 with a full page and zero
+  // tiles, which reads as a healthy empty board. Strip it so the tile endpoint
+  // resolves to the tenant root; a brand segment in FRONT of /go/ survives
+  // (/Bluebeam/go/X/123/ -> /Bluebeam).
   const path = u.pathname
+    .replace(/\/go\/[^/]+\/\d+(?:\/\d+)?\/?$/i, '')
     .replace(/\/(?:search|tile-search-results|services\/recruiting\/v1\/jobs)\/?$/i, '')
     .replace(/\/+$/, '');
   const base = u.origin + path;
@@ -206,34 +221,39 @@ export function extractLocales(html) {
   return all.slice(0, CSB_MAX_LOCALES);
 }
 
-// CSB posting dates are rendered in the query locale's short format: US tenants
-// send M/D/YY with slashes ("6/18/26"), European (de_DE) tenants send D.M.YY
-// with dots ("20.11.23"). Infer the field order from the separator, treat a
-// 2-digit year as 20YY, and return epoch ms. Anything unexpected yields
-// undefined so a consumer sees "unknown date" rather than a bogus timestamp.
-/** @param {unknown} raw */
-export function parseCsbDate(raw) {
+// CSB posting dates are rendered in the query locale's short format: en_US
+// sends M/D/YY ("6/18/26"), de_DE D.M.YY ("20.11.23"), fr_FR and pt_BR
+// D/M/YYYY ("05/10/2026"), hu_HU "2025. 07. 03.". Slashes are month-first only
+// for the US locales; with no locale they stay month-first as before. A 2-digit
+// year is 20YY. Anything unexpected yields undefined so a consumer sees
+// "unknown date" rather than a bogus timestamp.
+const CSB_MONTH_FIRST_LOCALES = new Set(['en_US', 'es_US']);
+
+/** @param {unknown} raw @param {string} [locale] */
+export function parseCsbDate(raw, locale) {
   if (typeof raw !== 'string') return undefined;
   const s = raw.trim();
-  let a, b, year;
-  let slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-  let dot = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  let month, day, year;
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const dot = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  const yearFirst = s.match(/^(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})\.?$/);
   if (slash) {
-    // M/D/Y
-    [, a, b, year] = slash;
+    [, month, day, year] = slash;
+    if (locale && !CSB_MONTH_FIRST_LOCALES.has(locale)) [month, day] = [day, month];
   } else if (dot) {
-    // D.M.Y — swap to month/day
-    [, b, a, year] = dot;
+    [, day, month, year] = dot;
+  } else if (yearFirst) {
+    [, year, month, day] = yearFirst;
   } else {
     return undefined;
   }
-  const month = Number(a);
-  const day = Number(b);
+  const m = Number(month);
+  const d = Number(day);
   let y = Number(year);
   if (y < 100) y += 2000;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
-  const ms = Date.UTC(y, month - 1, day);
-  return Number.isFinite(ms) ? ms : undefined;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return undefined;
+  const ms = Date.UTC(y, m - 1, d);
+  return new Date(ms).getUTCDate() === d ? ms : undefined;
 }
 
 // jobLocationShort is an array of strings like "Karlovy Vary, CZE, 36004<br/>"
@@ -279,7 +299,7 @@ export function parseCsbJobs(json, cfg, locale) {
       title,
       url,
       location: cleanCsbLocation(r.jobLocationShort),
-      postedAt: parseCsbDate(r.unifiedStandardStart),
+      postedAt: parseCsbDate(r.unifiedStandardStart, locale),
     });
   }
   return out;
@@ -324,43 +344,50 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
     let total = null;
-    for (let page = 0; page < maxPages; page++) {
-      let json;
-      try {
-        json = await ctx.fetchJson(cfg.jobsApi, {
-          method: 'POST',
-          redirect: 'error',
-          headers: { 'content-type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: 'recent' }),
-        });
-      } catch (err) {
-        firstErr ??= err;
-        break; // this locale failed (e.g. 307 legacy redirect) — try the next
-      }
-      succeededOnce = true;
-      if (total === null) {
-        total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
-      }
-      // Page-fullness checks below use the raw response count, not rows.length:
-      // parseCsbJobs drops id/title-less records, and a full API page with a
-      // few dropped records would otherwise look "short" and stop pagination
-      // before reaching later pages that still hold valid jobs.
-      const rawCount = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult.length : 0;
-      if (rawCount === 0) break;
-      const rows = parseCsbJobs(json, cfg, locale);
+    let failed = false;
+    const localeIds = new Set();
+    for (let sweep = 0; sweep < CSB_SWEEPS; sweep++) {
+      for (let page = 0; page < maxPages; page++) {
+        let json;
+        try {
+          json = await ctx.fetchJson(cfg.jobsApi, {
+            method: 'POST',
+            redirect: 'error',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: CSB_SORT }),
+          });
+        } catch (err) {
+          firstErr ??= err;
+          failed = true;
+          break; // this locale failed (e.g. 307 legacy redirect) — try the next
+        }
+        succeededOnce = true;
+        if (total === null) {
+          total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
+        }
+        // Page-fullness checks below use the raw response count, not rows.length:
+        // parseCsbJobs drops id/title-less records, and a full API page with a
+        // few dropped records would otherwise look "short" and stop pagination
+        // before reaching later pages that still hold valid jobs.
+        const rawCount = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult.length : 0;
+        if (rawCount === 0) break;
+        const rows = parseCsbJobs(json, cfg, locale);
 
-      for (const row of rows) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-        const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
-        if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
-        jobs.push(job);
+        for (const row of rows) {
+          localeIds.add(row.id);
+          if (seen.has(row.id)) continue;
+          seen.add(row.id);
+          const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
+          if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
+          jobs.push(job);
+          if (jobs.length >= MAX_JOBS) break;
+        }
         if (jobs.length >= MAX_JOBS) break;
+        // Stop once we've covered the reported total, or on a short page.
+        if (total !== null && (page + 1) * CSB_PAGE_SIZE >= total) break;
+        if (rawCount < CSB_PAGE_SIZE) break;
       }
-      if (jobs.length >= MAX_JOBS) break;
-      // Stop once we've covered the reported total, or on a short page.
-      if (total !== null && (page + 1) * CSB_PAGE_SIZE >= total) break;
-      if (rawCount < CSB_PAGE_SIZE) break;
+      if (failed || total === null || localeIds.size >= total || jobs.length >= MAX_JOBS) break;
     }
   }
   if (!probe && !succeededOnce && firstErr) throw firstErr;

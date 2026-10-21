@@ -17,7 +17,7 @@ When interview sessions are available, it also reads *what the candidate actuall
 
 ## Minimum Threshold
 
-Before running analysis, check: does `data/applications.md` have at least 5 entries that were actually sent (Applied, Responded, Interview, Offer, Hired, Rejected)? SKIP and Discarded rows are not submissions and do not count toward the floor.
+Before running analysis, check: does `data/applications.md` have at least 5 entries that were actually sent (Applied, Responded, Assessment, Interview, Offer, Hired, Rejected)? SKIP and Discarded rows are not submissions and do not count toward the floor.
 
 If not, tell the user:
 > "Not enough data yet -- {N}/5 applications have progressed beyond evaluation. Keep applying and come back when you have more outcomes to analyze."
@@ -60,7 +60,7 @@ If the script returns `error`, display the error message and exit.
 each report's `**URL:**` (community ATS with clean fingerprints only: Greenhouse,
 Lever, Ashby, Workday — white-labeled ATS are not URL-detectable and fall into an
 unreported `unknown` bucket). `advanceRate` = share that reached
-`Responded`/`Interview`/`Offer` (a bare `Applied` does **not** count).
+`Responded`/`Assessment`/`Interview`/`Offer` (a bare `Applied` does **not** count).
 
 Motivation: *Algorithmic Monocultures in Hiring* (Bommasani et al., FAccT 2026,
 [arXiv:2605.27371](https://arxiv.org/abs/2605.27371)) — rejections through a shared
@@ -118,7 +118,7 @@ Then present the cards, sorted silent-first (the script already orders them this
 If the tracker has Applied-or-beyond rows, run `node funnel-velocity.mjs --summary` as an additional lens: the candidate's funnel rates vs candidate-side market benchmark ranges, in-flight applications past the typical first-response window, and (once `data/status-log.tsv` has accrued transitions) median days per stage hop. Zero tokens — never recompute these numbers manually. Presentation rules (these are hard MUSTs, not style suggestions):
 
 - **Above-range rates**: encouragement is wanted — this lens exists to counter silence-anxiety — but MUST keep the script's selection-bias note (targeted applications are expected to beat mass-platform averages). Confirmed filter quality, not market ease.
-- **Below-range rates**: calibration plus exactly one concrete action (follow-up compliance via followup mode, or score-threshold review via patterns Step 2). Never verdicts about the candidate.
+- **Below-range rates**: calibration plus exactly one concrete action (follow-up compliance via followup mode, or score-threshold review via patterns Step 2; skip the follow-up option when `follow_ups.enabled` is `false` in `config/profile.yml`). Never verdicts about the candidate.
 - **Every benchmark mention** carries its year and "directional" — the shipped baselines are recruiter-industry aggregates, not peer-reviewed statistics.
 - **No comparative multiplier claims below n=20 applied.** The script already suppresses them; do not reconstruct them manually from the raw numbers.
 - **Velocity medians**: always repeat the censored count the script prints ("n still waiting, excluded") — a median over answered applications only is survivorship-biased without it.

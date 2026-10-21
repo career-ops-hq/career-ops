@@ -58,7 +58,7 @@ latex:
 8. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --compile-only`
 9. Report: family, slot count, patched count, `.tex` path, `.pdf` path (or compile error)
 
-**Requires:** `tectonic` or `pdflatex` on PATH (same as `latex` mode).
+**Requires:** `tectonic` or `pdflatex` (same as `latex` mode). If step 8's report carries `installHint`, follow the "No engine installed?" step in `modes/latex.md` — ask first, then `node install-latex-engine.mjs` and retry.
 
 ## Ethical rules (mandatory)
 

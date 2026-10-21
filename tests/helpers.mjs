@@ -2,16 +2,193 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync as _rmSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { basename, join, dirname, resolve, sep } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
+import { localToday } from '../lib/local-today.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
 export const QUICK = process.argv.includes('--quick');
 export const NODE = process.execPath;
+
+// The suite must never follow a developer's own tracker override into their
+// real data. CAREER_OPS_TRACKER outranks the CAREER_OPS_ROOT that fixtures pin,
+// so with it set in the shell a test that runs normalize-statuses.mjs against
+// its fixture root rewrote the developer's tracker instead (and left a .bak
+// beside it), and a dozen checks failed on rows that were not theirs.
+//
+// Blanked here because test-all.mjs imports this module before it runs
+// anything, so the runner and each child it spawns start without the override;
+// a suite that imports these helpers is covered when run on its own as well.
+// Blanked rather than deleted: every reader trims the value and treats an empty
+// one as unset, which is also how the Go tests neutralise it
+// (`t.Setenv("CAREER_OPS_TRACKER", "")`), and a variable that is set is not
+// overwritten by a later .env load (#4707 did the same for one test and
+// CAREER_OPS_PIPELINE). A test that needs the override sets its own.
+process.env.CAREER_OPS_TRACKER = '';
+
+// The same rule for the data root itself, which is where everything else a
+// script reads and writes is resolved from (#5113). Left alone, the suite ran
+// against whatever the shell pointed at: with CAREER_OPS_ROOT exported the way
+// the README suggests, the script smoke tests appended a fixture row to the
+// developer's real data/assessments.tsv on every run, and with nothing
+// exported, three suites overwrote live files in the checkout's own data/ and
+// restored them from memory — so an interrupted run left a three-row fixture
+// where the tracker had been, in a directory git does not track.
+//
+// So the suite gets a data root of its own. Pinned through CAREER_OPS_ROOT
+// because that outranks both CAREER_OPS_DATA_DIR and the `.career-ops-data`
+// marker (path-resolver.mjs), and set here for the reason the tracker override
+// is cleared here: the runner and every child it spawns inherit it, and a suite
+// run on its own is covered as well. A test that needs a particular root pins
+// its own, in its child's env or around its own import.
+//
+// One directory per run, not per process. The process that creates it exports
+// it as CAREER_OPS_TEST_DATA_ROOT; a child that loads these helpers finds that
+// and joins the run's root rather than making another, and only the creator
+// removes it.
+const SANDBOX_ENV = 'CAREER_OPS_TEST_DATA_ROOT';
+const SANDBOX_PREFIX = 'career-ops-test-data-';
+
+// The variable is inherited, so it is only as trustworthy as the shell it came
+// from: a stale export naming a real directory would make this process a
+// guest in it — fixtures written there, no snapshot, no drift check. Join only
+// what these helpers could have made: a directory of that name, directly under
+// the OS temp directory.
+function isRunSandbox(path) {
+  try {
+    const real = realpathSync(path);
+    return statSync(real).isDirectory()
+      && dirname(real) === realpathSync(tmpdir())
+      && basename(real).startsWith(SANDBOX_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+const inheritedSandbox = process.env[SANDBOX_ENV]?.trim();
+const ownsSandbox = !(inheritedSandbox && isRunSandbox(inheritedSandbox));
+
+/**
+ * The data root the developer's own commands resolve to, read before it is
+ * overridden below. Null in a child of the run: the process that owns the
+ * sandbox is the one that answers for the real root.
+ */
+export const REAL_DATA_ROOT = ownsSandbox ? getCareerOpsRoot() : null;
+const realRootBefore = ownsSandbox ? snapshotDataRoot(REAL_DATA_ROOT, ROOT) : null;
+
+/** The scratch data root every script resolves to while the suite runs. */
+export const SANDBOX_DATA_ROOT = ownsSandbox
+  ? realpathSync(mkdtempSync(join(tmpdir(), SANDBOX_PREFIX)))
+  : realpathSync(inheritedSandbox);
+
+/**
+ * Point the data root back at the suite's sandbox.
+ *
+ * Called when these helpers load, and again by any test that had to move or
+ * unset the variable in-process: `delete process.env.CAREER_OPS_ROOT` in a
+ * `finally` does not restore anything, it hands every later suite in the same
+ * process the developer's real root.
+ *
+ * @returns {void}
+ */
+export function pinSandboxDataRoot() {
+  process.env[SANDBOX_ENV] = SANDBOX_DATA_ROOT;
+  process.env.CAREER_OPS_ROOT = SANDBOX_DATA_ROOT;
+  // Blanked, not deleted, for the same reasons as CAREER_OPS_TRACKER above.
+  process.env.CAREER_OPS_DATA_DIR = '';
+}
+pinSandboxDataRoot();
+
+/**
+ * Environment for a child that runs a COPY of the scripts as its own checkout.
+ *
+ * Many fixtures copy a script and path-resolver.mjs into a temp directory and
+ * expect the copy to treat that directory as its data root, which is what the
+ * resolver does when nothing overrides it. Something does now — the pin above —
+ * and a developer's exported CAREER_OPS_ROOT always did, so the expectation is
+ * stated in the child's env instead of assumed from the shell's.
+ *
+ * @param {Record<string, string>} [extra] - Further variables for the child.
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function ownRootEnv(extra = {}) {
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...extra };
+}
+
+let realRootChecked = false;
+
+/**
+ * Compare the real data root with how the run found it.
+ *
+ * Answers once: finish() reports through the counters, and the exit hook
+ * below must not report the same paths a second time.
+ *
+ * @returns {string[]|null} Lines describing what changed, or null when nothing
+ *   did, the check already ran, or this process does not own the sandbox.
+ */
+export function realDataRootDrift() {
+  if (!ownsSandbox || realRootChecked) return null;
+  realRootChecked = true;
+  const drift = diffSnapshots(realRootBefore, snapshotDataRoot(REAL_DATA_ROOT, ROOT));
+  return drift.length > 0 ? describeDrift(REAL_DATA_ROOT, drift) : null;
+}
+
+/**
+ * Make SIGINT and SIGTERM end the process through process.exit().
+ *
+ * Node's default for both is to die where it stands, which skips the 'exit'
+ * hook below — so the run most likely to have left something behind in the
+ * developer's data was the one run that never looked. Exiting through
+ * process.exit() runs the hook, and removes the scratch data root on the way.
+ *
+ * Opt-in, for the long-lived runner: a handler only runs between two turns of
+ * the event loop, so the caller has to be a process that yields.
+ *
+ * @returns {void}
+ */
+export function exitOnInterrupt() {
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.on(signal, () => {
+      console.log(`\n  ⛔ interrupted (${signal}) — this is not a test result`);
+      process.exit(code);
+    });
+  }
+}
+
+if (ownsSandbox) {
+  // 'exit' also fires for process.exit(), so this covers a suite run on its
+  // own, which never reaches finish(), and a run ended by exitOnInterrupt().
+  process.on('exit', () => {
+    const drift = realDataRootDrift();
+    if (drift) {
+      console.log(`\n  ❌ ${drift.join('\n     ')}\n`);
+      // Keep a signal's own exit status; anything else becomes a failure.
+      if (!process.exitCode) process.exitCode = 1;
+    }
+    try {
+      _rmSync(SANDBOX_DATA_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Under the OS temp directory, which is reclaimed without us.
+    }
+  });
+}
+
+/**
+ * A merge-tracker fixture must not consult the install's batch history.
+ * Keep the default state path beside the fixture additions directory; tests
+ * that exercise explicit batch-state behavior should pass their own path.
+ * @param {string} additionsDir - Fixture additions directory.
+ * @returns {string} Fixture-local batch-state path.
+ */
+export function isolatedBatchStatePath(additionsDir) {
+  return join(dirname(additionsDir), 'batch-state.tsv');
+}
 
 // Windows keeps a handle open on a just-exited child's files for a short
 // window (antivirus widens it), so a cleanup rmSync can fail with EPERM even
@@ -77,6 +254,77 @@ export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 export function results() { return { passed, failed, warnings }; }
 
 /**
+ * Add another process's counters to this one's.
+ *
+ * `test-all.mjs --jobs N` runs each discovered suite in a child process. The
+ * child counts its own pass()/fail()/warn() calls and has already printed their
+ * lines; the parent only needs the totals, so the summary line and the exit
+ * code cover every suite exactly as they do when suites run in-process.
+ *
+ * @param {{passed?: number, failed?: number, warnings?: number}} counts - A results() snapshot from a child.
+ * @returns {void}
+ */
+export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } = {}) {
+  passed += p;
+  failed += f;
+  warnings += w;
+}
+
+/**
+ * Import one discovered pass/fail-style suite, containing a throw.
+ *
+ * Shared by the two places a suite is imported: test-all.mjs's in-process loop
+ * (`--jobs 1`) and tests/run-discovered-child.mjs (one suite per process), so a
+ * crashing suite reads the same whichever way the run was started.
+ *
+ * An uncaught THROW from a suite ends the run just as completely as a
+ * process.exit() would, and rather more quietly: node unwinds straight out of
+ * test-all, finish() never prints its summary, and every suite sorting after
+ * this one silently never runs. That does not read as a broken suite — it reads
+ * as a finished one, so the screen of green above the cut looks like a pass.
+ * (Measured on a Windows box with no symlink privilege: tests/intake.test.mjs
+ * threw at import and took 2067 of 3693 checks with it, with no verdict line at
+ * all — #2828.) A discovered suite is a guest, not a co-host: its crash is one
+ * failure, not the end of the run.
+ *
+ * How much "one failure" actually cost is reported as `ran`, the exact number
+ * of assertions made before the throw; the reported totals only ever include
+ * those, and nothing else says the rest never happened (#3976). An earlier
+ * version also estimated how many assertions never ran, from a static count of
+ * pass()/fail() call sites in the file. artemtrofymenko (the issue's author)
+ * measured that estimate against real suites and found it wrong in both
+ * directions badly enough to make the diagnostic worse than none: a suite
+ * asserting through a local wrapper has far more real assertions than call
+ * sites (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the estimate
+ * goes negative and the line silently does not print, for 38 of 278 in-process
+ * suites), and a suite writing `if (cond) pass(...); else fail(...)` pairs has
+ * roughly twice as many call sites as real assertions, so the estimate invents
+ * lost assertions that never existed. A signal present for some suites and
+ * silently absent for others turns its own absence into a false reassurance.
+ * `ran` alone does not have that failure mode, so it is printed
+ * unconditionally.
+ *
+ * @param {string} file - Absolute path of the suite.
+ * @param {string} rel - The name to report it under (repo-relative path).
+ * @returns {Promise<void>} Resolves when the import has; never rejects.
+ */
+export async function importSuiteContained(file, rel) {
+  const before = results();
+  try {
+    await import(pathToFileURL(file).href);
+  } catch (err) {
+    const ran = (results().passed - before.passed) + (results().failed - before.failed);
+    fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+    console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
+    // The throw site, not just the message: a suite that dies mid-import
+    // leaves no other clue how far it got.
+    for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+      if (line.trim()) console.log(`      ${line.trim()}`);
+    }
+  }
+}
+
+/**
  * Print the summary line and exit with the suite's exit code.
  * Moved verbatim from the tail of test-all.mjs — output must stay byte-identical.
  */
@@ -96,6 +344,10 @@ export function finish() {
   // stay authoritative for inline assertions; this only adds a failure source
   // that was already being computed and thrown away.
   const runnerFailed = Boolean(process.exitCode);
+  // Before the summary, so a run that wrote to the developer's data cannot
+  // print "All tests passed" above the line that says it did (#5113).
+  const drift = realDataRootDrift();
+  if (drift) fail(drift.join('\n     '));
   console.log('\n' + '='.repeat(50));
   console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
     + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
@@ -199,6 +451,11 @@ export function run(cmd, args = [], opts = {}) {
   // executable is still allowlisted and the arguments are still an argv vector.
   lastFailure = null;
   const exe = resolveAllowedExecutable(cmd);
+  const env = opts.env ?? process.env;
+  const isolatedOpts = args.includes('merge-tracker.mjs') && env.CAREER_OPS_ADDITIONS
+    ? { ...opts, env: { ...env, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.CAREER_OPS_ADDITIONS) } }
+    : opts;
+  opts = isolatedOpts;
   try {
     return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
@@ -304,6 +561,27 @@ export function runAcrossUtcDay(cmd, args = [], opts = {}) {
 }
 
 /**
+ * Like {@link runAcrossUtcDay}, for a child that dates its output with the LOCAL
+ * calendar day (lib/local-today.mjs) instead of the UTC one.
+ *
+ * Same midnight hazard, different midnight: a single capture taken before the
+ * call fails a run that crosses the child's LOCAL midnight (#3816 is the UTC
+ * version of exactly this). Reusing daysSpanned() is safe -- it is date
+ * arithmetic over two YYYY-MM-DD strings and does not care which clock produced
+ * them.
+ *
+ * @param {string} cmd - Executable to run.
+ * @param {string[]} [args] - Arguments.
+ * @param {object} [opts] - Passed through to run().
+ * @returns {{out: string|null, days: string[]}} Output, and the local day(s) the call spanned.
+ */
+export function runAcrossLocalDay(cmd, args = [], opts = {}) {
+  const before = localToday();
+  const out = run(cmd, args, opts);
+  return { out, days: daysSpanned(before, localToday()) };
+}
+
+/**
  * The last failure rendered for interpolation into a failure message, or an
  * empty string when nothing has failed, so a caller can append it
  * unconditionally without changing its message on the success path.
@@ -315,7 +593,7 @@ export function runAcrossUtcDay(cmd, args = [], opts = {}) {
  * later a case was added, the more certain it is to be truncated away, which
  * is exactly backwards for something read only when a run goes red.
  *
- * That is not hypothetical: `agent-inbox-tests.mjs` grew past this cap, and a
+ * That is not hypothetical: `tests/agent-inbox.test.mjs` grew past this cap, and a
  * windows-latest failure of its §7 cut off mid-word one assertion short of §8's
  * verdict — the assertion added specifically to attribute that failure (#3035).
  *
@@ -370,40 +648,146 @@ export function formatRunFailure(maxChars = 2000) {
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
 
 /**
- * Recursively collect files under `dir` whose basename matches `match`.
+ * Every TRACKED file under `dir` whose basename matches `match`.
  *
- * Deterministic by construction: entries are sorted lexicographically at every
- * level, so the result is identical on every run and every OS — the same
- * property test-all.mjs's own `tests/` discovery relies on (#1440).
+ * Enumerated through lib/mjs-files.mjs (#3890), not a private walk. This used
+ * to recurse the working tree with a skip-list its one caller passed in
+ * (`node_modules`, `.next`, `.git`, `out`, `dist`, `coverage`) — the same
+ * hand-maintained shape #3419 removed from the syntax gate, and the same silent
+ * narrowing: a suite added under a directory somebody forgot to un-skip never
+ * enters the guard, and the run is exactly as green as one that read it. Git
+ * already knows which of those trees is repository content, so the skip-list
+ * parameter is gone rather than reproduced here.
+ *
+ * That also retires the `isNestedCheckout` guard this walk used to need, and
+ * retires it rather than losing it: a name-matching skip-list never fired on a
+ * linked worktree, which marks itself with a `.git` FILE, so the walk descended
+ * into a whole second checkout of this repository (#3499, #3762). Nothing in
+ * that second checkout is tracked HERE, so the index cannot name it — the
+ * hazard is gone by construction instead of by a rule each walker remembers.
+ *
+ * Deterministic by construction (sorted), which is the property test-all.mjs's
+ * own `tests/` discovery relies on (#1440).
  *
  * A missing `dir` yields `[]` rather than throwing, so the caller reports its
- * own contract failure (e.g. "discovery is empty") instead of the run dying
- * mid-traversal with an ENOENT that says nothing about what was expected.
+ * own contract failure (e.g. "discovery is empty") instead of the run dying on
+ * an ENOENT that says nothing about what was expected. A `dir` that EXISTS but
+ * that git can see nothing in is a different thing entirely — that is a scan
+ * that could not look, and trackedFiles throws rather than let it read as a
+ * clean sweep.
  *
- * @param {string} dir - Absolute directory to walk.
- * @param {RegExp} match - Tested against each entry's basename.
- * @param {Set<string>} [skipDirs] - Directory names never descended into.
- * @returns {string[]} Absolute paths, parents before children.
+ * @param {string} dir - Absolute directory inside a git working tree.
+ * @param {RegExp} match - Tested against each tracked file's basename.
+ * @returns {string[]} Absolute paths, lexicographically sorted.
  */
-export function walkFiles(dir, match, skipDirs = new Set()) {
+export function walkFiles(dir, match) {
   if (!existsSync(dir)) return [];
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true })
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
-      // which matches by NAME — never fires on one, and the walk descends into a
-      // whole second checkout of this repository (#3499, #3762). The caller's
-      // own set stays authoritative for everything else.
-      if (isNestedCheckout(full)) continue;
-      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
-    } else if (match.test(entry.name)) {
-      out.push(full);
+  return trackedFiles(dir, (rel) => match.test(basename(rel)));
+}
+
+/**
+ * Directory of the installation of `pkgName` that Node's bare-specifier lookup
+ * would find from `fromDir`, or null when there is none.
+ *
+ * Walks the same way Node does: `<dir>/node_modules/<pkgName>` for `fromDir`
+ * and then each ancestor up to the filesystem root, nearest first, skipping any
+ * `<dir>` that is itself named `node_modules` (Node never looks for
+ * `node_modules/node_modules`). A candidate counts only if it holds a
+ * package.json, so an empty or half-removed directory is not mistaken for an
+ * installation. Walked by hand rather than through
+ * `require.resolve('<pkg>/package.json')`, which a package's `exports` map is
+ * allowed to refuse.
+ *
+ * @param {string} pkgName - Package name, scoped names included (`@scope/name`).
+ * @param {string} [fromDir=ROOT] - Directory the lookup starts from.
+ * @returns {string|null} The package directory, or null if not installed.
+ */
+export function findInstalledPackage(pkgName, fromDir = ROOT) {
+  let dir = resolve(fromDir);
+  for (;;) {
+    if (basename(dir) !== 'node_modules') {
+      const candidate = join(dir, 'node_modules', pkgName);
+      if (existsSync(join(candidate, 'package.json'))) return candidate;
     }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
   }
-  return out;
+}
+
+/**
+ * Copy an installed package into `dest` together with the packages it depends
+ * on, so the copy can load them from where it now sits.
+ *
+ * A LINKED package needs none of this: Node resolves a module's imports from
+ * its real location, so everything installed beside the original is still in
+ * reach. A COPY has only its own directory. Copying js-yaml alone leaves it
+ * unable to find argparse; the sandbox then dies with ERR_MODULE_NOT_FOUND,
+ * which reads as a failure of whatever the suite was testing.
+ *
+ * Each dependency is resolved the way Node would resolve it for the original
+ * (findInstalledPackage from the package's real path) and placed in the copy's
+ * own `node_modules`, the first place Node looks from there, so two packages
+ * that need different versions of a third cannot collide. One that is installed
+ * nowhere is skipped: the original could not load it either (an optional
+ * dependency for another platform). One already inside the package came along
+ * with the copy. `chain` stops a dependency cycle from recursing forever; the
+ * member it skips is an ancestor directory of the copy, where Node finds it.
+ *
+ * @param {string} source - The installed package directory.
+ * @param {string} dest - Where the copy goes.
+ * @param {Set<string>} [chain] - Real paths of the packages being copied above this one.
+ * @returns {void}
+ */
+function copyPackageWithDependencies(source, dest, chain = new Set()) {
+  // The real directory, not a link to it: a package manager may install a
+  // package as a symlink, and copying that would recreate the link this
+  // fallback exists because we could not make.
+  const real = realpathSync(source);
+  cpSync(real, dest, { recursive: true });
+  const within = new Set(chain).add(real);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(real, 'package.json'), 'utf-8'));
+  } catch {
+    return;
+  }
+  // Peers too. A package imports its peer like any other dependency, and npm
+  // installs the peer beside it, so the original resolves it from its own
+  // location and a copy that left it behind does not.
+  for (const name of Object.keys({ ...manifest.peerDependencies, ...manifest.optionalDependencies, ...manifest.dependencies })) {
+    const installed = findInstalledPackage(name, real);
+    if (installed === null) continue;
+    const depReal = realpathSync(installed);
+    if (depReal.startsWith(real + sep) || within.has(depReal)) continue;
+    copyPackageWithDependencies(depReal, join(dest, 'node_modules', name), within);
+  }
+}
+
+/**
+ * Put one installed package at `<nodeModulesDir>/<pkgName>`: a link when the
+ * platform allows one, otherwise a copy that carries its dependencies.
+ *
+ * 'junction' is ignored on POSIX, and on Windows it is the one link type
+ * granted without Developer Mode or elevation -- the privilege whose absence
+ * aborted a whole suite in #2828. The copy is the last resort.
+ *
+ * @param {string} nodeModulesDir - The sandbox's `node_modules` (created if absent).
+ * @param {string} pkgName - Package name, scoped names included.
+ * @param {string} source - The installed package directory.
+ * @param {(target: string, path: string, type: string) => void} [link] - Link
+ *   primitive; a test passes one that throws to exercise the copy.
+ * @returns {string} Path to the package inside the sandbox.
+ */
+function placePackage(nodeModulesDir, pkgName, source, link = symlinkSync) {
+  const dest = join(nodeModulesDir, pkgName);
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    link(source, dest, 'junction');
+  } catch {
+    copyPackageWithDependencies(source, dest);
+  }
+  return dest;
 }
 
 /**
@@ -428,27 +812,357 @@ export function walkFiles(dir, match, skipDirs = new Set()) {
  * beside the `playwright` stub each sandbox already writes there -- makes the
  * sandbox self-sufficient wherever it physically lives.
  *
+ * The package is taken from wherever Node would resolve it for the repo, not
+ * from `ROOT/node_modules` specifically. A git worktree (for example one under
+ * `.claude/worktrees/<name>`) usually has no `node_modules` of its own: the
+ * scripts under test import fine there because Node walks up into the main
+ * checkout's `node_modules`, so insisting on `ROOT/node_modules` failed every
+ * suite that links a package while the code it tests resolved without trouble.
+ *
  * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
- * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
+ * @param {string} pkgName - Package name, as it would be imported from the repo root.
  * @returns {string} Path to the package as seen from inside the sandbox.
  */
 export function linkRepoPackage(sandboxDir, pkgName) {
-  const source = join(ROOT, 'node_modules', pkgName);
   const dest = join(sandboxDir, 'node_modules', pkgName);
   if (existsSync(dest)) return dest;
-  if (!existsSync(source)) {
-    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
+  const source = findInstalledPackage(pkgName);
+  if (source === null) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed in any node_modules from ${ROOT} upward -- run npm install`);
   }
-  mkdirSync(dirname(dest), { recursive: true });
+  return placePackage(join(sandboxDir, 'node_modules'), pkgName, source);
+}
+
+/**
+ * Source with its comments blanked, for a structural check that greps a file
+ * for a call or a guard it has to contain.
+ *
+ * A regex cannot tell code from a comment that mentions it, so a suite that
+ * only documents the construct -- or a revert that comments one out instead of
+ * deleting it -- satisfies a raw grep and the check goes vacuous. Shared, so
+ * every suite that pins a caller structurally strips the same way.
+ *
+ * The line-comment pass cannot see strings, so `"a//b"` loses everything after
+ * the `//`, including any real call later on that line. Use this only where
+ * losing the rest of such a line is acceptable. A scan that must keep code next
+ * to a string holding comment-like text should use `codeMask` and `isCodeRange`.
+ *
+ * @param {string} source - JavaScript source text.
+ * @returns {string} The same source without block and line comments.
+ */
+export function stripJsComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+/**
+ * Whether the `/` at `i` opens a regex literal rather than being division.
+ *
+ * The classic heuristic — look at the last significant token before it. A regex
+ * can only appear where a VALUE is expected, so an operator, an opening
+ * bracket, a comma, a semicolon or a value-position keyword before it means
+ * regex; an identifier, a number or a closing paren/bracket means division.
+ * `}` is genuinely ambiguous (block end vs object literal end) and is read as
+ * regex, the usual choice: over-reading here masks a few characters, while
+ * under-reading lets a regex's contents open a phantom string frame, which is
+ * the failure that hides code.
+ */
+export function startsRegex(src, i) {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(src[j])) j--;
+  if (j < 0) return true;
+  const prev = src[j];
+  if ('=(,:[!&|?{};+-*%~^<>'.includes(prev)) return true;
+  // A `)` normally ends an expression, so `/` after it is division — except
+  // when it closes a CONTROL condition, where a statement (and so a regex) may
+  // follow: `if (enabled) /"/.test(value);`. Walk back to the matching `(` and
+  // look at the keyword in front of it.
+  if (prev === ')') {
+    let depth = 0;
+    let k = j;
+    for (; k >= 0; k--) {
+      if (src[k] === ')') depth++;
+      else if (src[k] === '(' && --depth === 0) break;
+    }
+    if (k < 0) return false;
+    let w = k - 1;
+    while (w >= 0 && /\s/.test(src[w])) w--;
+    let e = w;
+    while (w >= 0 && /[A-Za-z0-9_$]/.test(src[w])) w--;
+    return ['if', 'while', 'for', 'switch', 'catch', 'with'].includes(src.slice(w + 1, e + 1));
+  }
+  if (/[A-Za-z0-9_$]/.test(prev)) {
+    let k = j;
+    while (k >= 0 && /[A-Za-z0-9_$]/.test(src[k])) k--;
+    const word = src.slice(k + 1, j + 1);
+    // Every name below is also a legal PROPERTY name, and `obj.return / 7` is
+    // division. Read as a regex, it runs to the next `/` and masks whatever
+    // follows -- and this scan's failure direction is a silent pass, so masked
+    // code reads as a clean repo. A preceding `.` (or `?.`) settles it.
+    if (k >= 0 && src[k] === '.') return false;
+    // `throw` and `default` were absent until this function became shared. Both
+    // take an operand, so `throw /x/` and `export default /x/` are regexes; read
+    // as division, a quote inside one opens a phantom string that masks the
+    // lines after it. That is the exact failure the docblock above calls the
+    // unsafe direction, and the raw-link scan's failure direction is a silent
+    // pass, so a masked line reads as a clean repo.
+    return ['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+      'case', 'do', 'else', 'yield', 'await', 'throw', 'default'].includes(word);
+  }
+  return false;
+}
+
+/**
+ * A per-character map of which positions in `src` are CODE — string and
+ * template TEXT and comments are not, but a template's `${...}` substitution
+ * is, recursively.
+ *
+ * Not a JavaScript lexer, and deliberately not one: `test-all.mjs` states the
+ * suite runs "on a fresh clone with only Node", so there is no parser
+ * dependency available to a test here. This covers the constructs a
+ * scan-history call is actually written with — the status string argument
+ * (`'added'`, `'skipped_title'`), a commented-out call, and the template-string
+ * child snippet the repo already uses to drive these writers
+ * (web/src/lib/core/pipeline.ts builds one).
+ *
+ * Regex literals are NOT distinguished from division. A `/.../ ` argument to
+ * appendToScanHistory would make the gate fail LOUDLY, which is the safe
+ * direction for a sentinel and a signal to revisit this — never a silent pass.
+ *
+ * @param {string} src
+ * @returns {boolean[]} isCode[i] for every index in src.
+ */
+export function codeMask(src) {
+  const mask = new Array(src.length).fill(true);
+  // Bottom frame is the file itself. A `${` pushes a code frame whose parent is
+  // the template it interpolates into; `braces` tracks object/block nesting so
+  // the `}` that CLOSES the substitution is told apart from an inner one.
+  const stack = [{ template: false, braces: 0 }];
+  let i = 0;
+
+  while (i < src.length) {
+    const top = stack[stack.length - 1];
+    const c = src[i];
+    const n = src[i + 1];
+
+    if (top.template) {
+      if (c === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+      if (c === '`') { mask[i++] = false; stack.pop(); continue; }
+      if (c === '$' && n === '{') {
+        mask[i++] = false;
+        mask[i++] = false;
+        stack.push({ template: false, braces: 0 });
+        continue;
+      }
+      mask[i++] = false;
+      continue;
+    }
+
+    if (c === '/' && n === '/') {
+      while (i < src.length && src[i] !== '\n') mask[i++] = false;
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      const close = src.indexOf('*/', i + 2);
+      const stop = close === -1 ? src.length : close + 2;
+      while (i < stop) mask[i++] = false;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      mask[i++] = false;                                  // opening quote
+      while (i < src.length) {
+        if (src[i] === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+        const closing = src[i] === c;
+        mask[i++] = false;
+        if (closing) break;
+      }
+      continue;
+    }
+    if (c === '`') { mask[i++] = false; stack.push({ template: true }); continue; }
+    if (c === '/' && startsRegex(src, i)) {
+      // A regex literal's contents are DATA. Not masking them let a quote or a
+      // backtick inside one open a phantom string or template frame that then
+      // swallowed real code — scan-hn.mjs carries `/```yaml|```/g`, six
+      // backticks, which is that hazard live in a writer file today.
+      mask[i++] = false;                                  // opening slash
+      let inClass = false;
+      while (i < src.length) {
+        const ch = src[i];
+        if (ch === '\\') { mask[i++] = false; if (i < src.length) mask[i++] = false; continue; }
+        if (ch === '\n') break;                            // unterminated; stop rather than run away
+        if (ch === '[') inClass = true;
+        else if (ch === ']') inClass = false;
+        else if (ch === '/' && !inClass) { mask[i++] = false; break; }
+        mask[i++] = false;
+      }
+      while (i < src.length && /[a-z]/.test(src[i])) mask[i++] = false;   // flags
+      continue;
+    }
+    if (c === '{') { top.braces++; i++; continue; }
+    if (c === '}') {
+      const closesSubstitution = top.braces === 0 && stack.length > 1 && stack[stack.length - 2].template;
+      if (closesSubstitution) { mask[i++] = false; stack.pop(); continue; }
+      if (top.braces > 0) top.braces--;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return mask;
+}
+
+/** Whether every character of `src.slice(from, to)` is code. */
+export const isCodeRange = (isCode, from, to) => isCode.slice(from, to).every(Boolean);
+
+/**
+ * Give a sandbox the packages a checkout with no `node_modules` of its own
+ * actually runs on, one link per package.
+ *
+ * A git worktree (for example one under `.claude/worktrees/<name>`) usually has
+ * no `node_modules`: its scripts import fine because Node walks up into the
+ * main checkout's tree. Each package `<root>/package.json` declares is resolved
+ * the way those scripts resolve it (findInstalledPackage, nearest first) and
+ * linked into the sandbox's own `node_modules` from wherever it was found.
+ *
+ * Per package, not one link to "the" inherited tree, because there may be more
+ * than one: Node resolves each specifier separately, so js-yaml can come from a
+ * nearer ancestor and undici from a farther one. A single link to the nearer
+ * tree left the sandbox unable to load the second package while the worktree
+ * loaded both, which is the false failure this fallback exists to remove.
+ *
+ * Keyed on the declared dependencies rather than on whatever `node_modules`
+ * sits on the way up, because an unrelated one is easy to have there (a stray
+ * `~/node_modules` above a fresh clone). Nothing declared, or none of it
+ * installed anywhere above, is therefore "not installed". A package.json that
+ * is there and cannot be read is a different fault with a different remedy, and
+ * is reported as itself: `npm ci` does not fix a manifest that does not parse.
+ *
+ * @param {string} destDir - Sandbox directory to receive `node_modules/`.
+ * @param {string} root - Checkout whose own `node_modules` is absent.
+ * @param {Function} [link] - Link primitive, passed through to placePackage.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+function linkInheritedDependencies(destDir, root, link) {
+  const manifestPath = join(root, 'package.json');
+  let names = [];
+  let text = null;
   try {
-    // 'junction' is ignored on POSIX, and on Windows it is the one link type
-    // granted without Developer Mode or elevation -- the privilege whose absence
-    // aborted a whole suite in #2828. The copy below is the last resort.
-    symlinkSync(source, dest, 'junction');
-  } catch {
-    cpSync(source, dest, { recursive: true });
+    text = readFileSync(manifestPath, 'utf-8');
+  } catch (err) {
+    // Absent is the ordinary case (a fixture directory, a bare clone of
+    // something else) and means "declares nothing". Anything else is a manifest
+    // that exists and could not be read.
+    if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') {
+      return `package.json at ${manifestPath} is unreadable (${err.code})`;
+    }
   }
-  return dest;
+  if (text !== null) {
+    try {
+      const declared = JSON.parse(text)?.dependencies;
+      if (declared && typeof declared === 'object' && !Array.isArray(declared)) names = Object.keys(declared);
+    } catch (err) {
+      return `package.json at ${manifestPath} is not valid JSON (${err.message})`;
+    }
+  }
+  const found = names
+    .map((name) => [name, findInstalledPackage(name, root)])
+    .filter(([, dir]) => dir !== null);
+  if (found.length === 0) {
+    return `node_modules is not installed at ${root} or in a parent directory -- run \`npm ci\` there`;
+  }
+  const nodeModules = join(destDir, 'node_modules');
+  for (const [name, dir] of found) placePackage(nodeModules, name, dir, link);
+  return null;
+}
+
+/**
+ * Link the repository's whole installed dependency tree into a sandbox
+ * directory, so a script copied out of the repo can still resolve its package
+ * imports.
+ *
+ * Checking and linking are one operation on purpose. symlinkSync succeeds
+ * against a target that does not exist, so a separate check is one a call site
+ * can forget. The link is then created dangling, the sandboxed script dies with
+ * ERR_MODULE_NOT_FOUND, and the section's own catch reports that as a crash of
+ * whatever it was testing. The suite is designed to run on a fresh clone with
+ * only Node (see the file header), where an absent tree is the expected state,
+ * so the caller is handed a reason to report and skip on instead of a broken
+ * sandbox.
+ *
+ * A git worktree is not that state, though it looks like it: `join(root,
+ * 'node_modules')` does not exist there either, while test-all.mjs and every
+ * script under test resolve their packages through the parent checkout's tree
+ * by Node's upward walk. Reporting "not installed" there skipped (or, where the
+ * caller throws on the reason, failed) suites whose dependencies were one
+ * directory up. So when `root` has no tree of its own, the packages it
+ * inherits are linked instead, one by one (linkInheritedDependencies), the
+ * same position linkRepoPackage takes for a single package. The sandbox's
+ * `node_modules` is then a real directory holding those links, not one link.
+ *
+ * 'junction' on Windows, because a directory symlink needs
+ * SeCreateSymbolicLinkPrivilege, which a normal shell lacks unless Developer
+ * Mode is on. Junctions need no privilege, and the two constraints they add are
+ * already met: the target is absolute and is a directory on a local volume. The
+ * type argument is ignored off Windows.
+ *
+ * @param {string} destDir - Sandbox directory to receive the node_modules link.
+ * @param {string} [root=ROOT] - Repository root whose installed tree is linked:
+ *   its own `node_modules`, or the packages it inherits from parent directories.
+ * @param {{link?: Function}} [options] - `link` replaces the link primitive for
+ *   the inherited packages; a test passes one that throws to exercise the copy.
+ * @returns {string|null} null once linked; otherwise why it could not be.
+ */
+export function linkNodeModules(destDir, root = ROOT, { link } = {}) {
+  const target = join(root, 'node_modules');
+  try {
+    let stats;
+    try {
+      stats = statSync(target);
+    } catch (err) {
+      // Only an ABSENT own tree falls back to the inherited packages. Anything
+      // that is there and cannot be used (a loop, no permission) is still
+      // reported as itself below, never papered over with a parent's tree.
+      if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') throw err;
+      return linkInheritedDependencies(destDir, root, link);
+    }
+    // isDirectory, because statSync succeeds on a regular FILE standing where the
+    // tree belongs. Without this an executable one links cleanly and the sandbox
+    // gets a symlink to a file, which is the broken sandbox this function exists
+    // to refuse. The message says what it is rather than calling it unreadable.
+    if (!stats.isDirectory()) {
+      return `node_modules at ${target} is not a directory`;
+    }
+    // Traverse permission, not read permission, is what resolution needs, and
+    // statSync alone proves neither: it succeeds on a directory the caller
+    // cannot enter. Measured here on 4 modes of a node_modules holding one
+    // package, importing it through a link:
+    //
+    //   mode  import  statSync  readdirSync  accessSync X_OK
+    //   0755  works   ok        ok           ok
+    //   0111  works   ok        EACCES       ok
+    //   0444  EACCES  ok        ok           EACCES
+    //   0000  EACCES  ok        EACCES       EACCES
+    //
+    // Node resolves a bare specifier by stat'ing paths under the directory
+    // rather than listing it, so `x` alone is enough and `r` alone is not.
+    // X_OK is the only probe that agrees with the import on all 4 rows;
+    // readdirSync disagrees on both of the interesting ones, skipping a tree
+    // that works and passing one that does not.
+    accessSync(target, constants.X_OK);
+  } catch (err) {
+    // statSync, because existsSync collapses EACCES and ELOOP into the same
+    // false an absent tree produces, and `npm ci` is the wrong advice for a
+    // tree that is there and unreadable. Both cases still skip: throwing here
+    // lands in the call site's catch, which is where the misattribution this
+    // function exists to prevent came from.
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+      return `node_modules is not installed at ${root} or in a parent directory -- run \`npm ci\` there`;
+    }
+    return `node_modules at ${target} is unreadable (${err.code})`;
+  }
+  symlinkSync(target, join(destDir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  return null;
 }
 
 let bashCache = null;
@@ -601,24 +1315,26 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that drive git
- * through the `gitIn` seam (`updater-add-paths`, `updater-is-tracked`). Only
- * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
- * and then asks about index membership, which is a different question.
+ * Build a throwaway git repository for the updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`, and
+ * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
+ * the second writes its own .gitignore and asks about index membership; the
+ * third builds real backup/target commits and invokes the rollback CLI.
  *
  * The pins below are the reason this is shared rather than copied, but they are
- * not all load-bearing for both callers, and this docstring should not imply
+ * not all load-bearing for every caller, and this docstring should not imply
  * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
  * exists to neutralise:
  *
  *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
  *     inherited from the environment breaks every commit the fixtures make.
- *     Dropping either reddens BOTH suites.
+ *     Dropping either reddens all three suites.
  *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
  *     what is measured (the failure mode reported in #2269). Dropping it reddens
  *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
- *     then reads index membership, which a global rule does not move. Kept for
- *     both as a defensive pin, proven by one.
+ *     then reads index membership, while updater-rollback-target-manifest stages
+ *     snapshots with `git add -A`, so a global rule could drop a fixture file;
+ *     it stayed green in the mutation run only because no such rule was set.
  *
  * Point `core.excludesFile` at an empty file rather than /dev/null: git on
  * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
@@ -636,11 +1352,16 @@ export async function captureConsoleErrors(fn) {
  * pins nothing. They are different fixtures that share a name, not copies of
  * this one.
  *
- * `gitIn` is injected rather than imported so this module keeps depending on
- * nothing but Node builtins — 57 of the 62 suites import it, and none of them
- * should pull in update-system.mjs as a side effect of asking for `pass`/`fail`.
+ * The pins above are the FILE layer. They do not hold against the runtime layer:
+ * an ambient GIT_CONFIG_COUNT pair is applied after every config file, so a
+ * `core.excludesFile` injected that way overrode the one pinned here, the seed
+ * file was never staged, and the base commit died before the first assertion
+ * (#3801). So the fixture runs git through `hermeticGitRunner` rather than
+ * through the updater's own `gitIn`, which inherits the environment as a real
+ * install must. That also keeps this module on Node builtins alone: most suites
+ * import it, and none of them should pull in update-system.mjs as a side effect
+ * of asking for `pass`/`fail`.
  *
- * @param {(dir: string, ...args: string[]) => any} gitIn - Updater's git runner.
  * @param {object} [options]
  * @param {string} [options.prefix='co-updater-'] - mkdtemp prefix, so a leftover
  *   temp dir names the suite that made it.
@@ -650,10 +1371,11 @@ export async function captureConsoleErrors(fn) {
  *   fixture. `isTracked` never reads it.
  * @returns {{dir: string, g: Function, ctx: {git: Function, root?: string}}}
  */
-export function makeUpdaterRepo(gitIn, { prefix = 'co-updater-', includeRoot = false } = {}) {
+export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  const g = (...args) => gitIn(dir, ...args);
+  const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
+  g('config', 'core.autocrlf', 'false');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
@@ -709,6 +1431,53 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG_PARAMETERS;
   delete env.GIT_CONFIG;
   return env;
+}
+
+const REPO_LOCATION_ENV = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_IMPLICIT_WORK_TREE', 'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_GRAFT_FILE', 'GIT_SHALLOW_FILE', 'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+];
+
+/**
+ * A git runner bound to one fixture repository and to `hermeticGitEnv`.
+ *
+ * Same shape as the updater's `gitIn(dir, ...args)` with the directory already
+ * applied: trimmed stdout, a throw on a non-zero exit. It can stand in for it
+ * wherever a function under test takes its runner as `{ git }`. The difference
+ * is the environment. `gitIn` passes none, so it inherits the contributor's,
+ * and a fixture built with it is only as isolated as their shell (#3801).
+ *
+ * The environment is built once, here, and held for the life of the runner: a
+ * fixture hands its `g` back to the suite, which keeps calling it long after
+ * the fixture was built, so sealing only the setup calls would leave the rest
+ * exposed. The config path does not have to exist; a missing global file is
+ * simply an empty one.
+ *
+ * Config is not the only way in. A runner is bound to ONE directory, so every
+ * variable that tells git where a repository is has to go as well: with an
+ * ambient GIT_DIR, `cwd` stops deciding which repository a command touches.
+ * Measured before this was closed: the fixture's `git config user.name Test`
+ * rewrote the user.name of the repository GIT_DIR pointed at. A git hook is
+ * the ordinary way to inherit one. The list is git's own, the rest of
+ * `git rev-parse --local-env-vars` after the three hermeticGitEnv handles.
+ *
+ * `stdio` is for the calls whose git failure is the expected outcome. The
+ * default inherits stderr, so those print git's own `fatal:` line into an
+ * otherwise passing suite; pass `['pipe', 'pipe', 'pipe']` for a runner that
+ * keeps it. A suite that needs a quiet runner must get it from here rather than
+ * from a bare execFileSync, which would be sealed against nothing.
+ *
+ * @param {string} dir - The fixture repository.
+ * @param {{stdio?: import('child_process').StdioOptions}} [options]
+ * @returns {(...args: string[]) => string}
+ */
+export function hermeticGitRunner(dir, { stdio } = {}) {
+  const env = hermeticGitEnv(join(dir, '.git', 'co-hermetic-gitconfig'));
+  for (const name of REPO_LOCATION_ENV) delete env[name];
+  const options = { cwd: dir, encoding: 'utf-8', env, ...(stdio ? { stdio } : {}) };
+  return (...args) => execFileSync('git', args, options).trim();
 }
 
 /**
@@ -769,4 +1538,30 @@ export function directoryDenyBinds() {
       try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
     }
   }
+}
+
+/**
+ * Point provider requests for a public-looking origin at a local test server.
+ *
+ * providers/_http.mjs refuses a loopback destination, by name (`localhost`,
+ * at lookup time) and as a literal (`127.0.0.1`, before dialling), so a test
+ * can no longer hand it a local URL. Address the request to `publicOrigin`
+ * instead and run it inside this wrapper: the guard sees the public name, and
+ * the transport is redirected to `localOrigin` here, at the fetch boundary.
+ * The local server still receives a real socket, so timeouts and headers are
+ * exercised for real. Restores the original fetch when `fn` settles.
+ *
+ * @template T
+ * @param {string} publicOrigin - e.g. 'http://stalls.example.test'
+ * @param {string} localOrigin  - e.g. `http://127.0.0.1:${port}`
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (input, init) => {
+    const url = String(input);
+    return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
+  };
+  try { return await fn(); } finally { globalThis.fetch = realFetch; }
 }

@@ -12,12 +12,15 @@
       - any-glob-to-any-file:
           - modes/*.md
           - modes/**/*.md
+          # The router every CLI skill directory below symlinks to. A PR that
+          # edits it changes only this path, never the symlinks.
+          - .agents/skills/**
           - .claude/skills/**
-          - .cursor/skills/**
           - .opencode/skills/**
           - .qwen/skills/**
           - .antigravitycli/skills/**
           - .grok/skills/**
+          - .kimi/skills/**
 
 "🔧 scripts":
   - changed-files:

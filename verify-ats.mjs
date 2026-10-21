@@ -336,6 +336,70 @@ function extractInlineStyles(html) {
 }
 
 /**
+ * Split an inline style into its declarations the way a browser reads them. A
+ * `;` ends a declaration only outside a quoted string, a comment, and any open
+ * parentheses, brackets or braces. A backslash escapes the next character (CRLF
+ * counts as one), a comment counts as whitespace, and a raw newline ends a
+ * string early, as CSS does with a bad string. The body of an unquoted `url(` is
+ * raw text up to the first unescaped `)`, so a quote inside it opens nothing.
+ * One forward pass, so it stays linear on any input, including an unterminated
+ * string, comment, block or url.
+ * @param {string} style
+ * @returns {string[]}
+ */
+function cssDeclarations(style) {
+  const declarations = [];
+  const closers = [];
+  const isCssSpace = ch => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f';
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < style.length; i++) {
+    const c = style[i];
+    if (c === '\\' && i + 1 < style.length) {
+      const escaped = style[i + 1] === '\r' && style[i + 2] === '\n' ? '\r\n' : style[i + 1];
+      current += c + escaped;
+      i += escaped.length;
+      continue;
+    }
+    if (quote) {
+      current += c;
+      if (c === quote || c === '\n' || c === '\r' || c === '\f') quote = null;
+      continue;
+    }
+    if (c === '/' && style[i + 1] === '*') {
+      const end = style.indexOf('*/', i + 2);
+      i = end === -1 ? style.length : end + 1;
+      current += ' ';
+      continue;
+    }
+    if (c === ';' && closers.length === 0) {
+      declarations.push(current);
+      current = '';
+      continue;
+    }
+    if (c === '(' && /(?:^|[^\w\u0080-\uffff-])url$/i.test(style.slice(Math.max(0, i - 4), i))) {
+      let bodyStart = i + 1;
+      while (bodyStart < style.length && isCssSpace(style[bodyStart])) bodyStart++;
+      if (style[bodyStart] !== '"' && style[bodyStart] !== "'") {
+        let end = i + 1;
+        while (end < style.length && style[end] !== ')') end += style[end] === '\\' ? 2 : 1;
+        current += style.slice(i, end + 1);
+        i = Math.min(end, style.length - 1);
+        continue;
+      }
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === '(') closers.push(')');
+    else if (c === '[') closers.push(']');
+    else if (c === '{') closers.push('}');
+    else if (c === closers[closers.length - 1]) closers.pop();
+    current += c;
+  }
+  declarations.push(current);
+  return declarations;
+}
+
+/**
  * Candidate section headings: the template's `.section-title` divs plus any
  * generic <h1>–<h6>. Lowercased so downstream matching is case-insensitive.
  * @param {string} html
@@ -612,7 +676,20 @@ function auditAts(html, opts = {}) {
   // headers, the header gradient), so scanning stylesheets for it would flag
   // normal templates. Inline `style="color:#fff"` on a text span is the classic
   // white-on-white stuffing trick and is the reliable signal.
-  if (inlineStyles.some(s => /color\s*:\s*(?:#fff(?:fff)?\b|white\b|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\))/i.test(s))) {
+  // The property must start its declaration, so `background-color:#fff` (a
+  // visible badge) is not read as `color:#fff`. `-webkit-text-fill-color` paints
+  // the glyph fill and overrides `color`, so it counts. A regex over the raw
+  // style cannot tell a real declaration from text inside a string or comment,
+  // so cssDeclarations splits the style first and each piece is tested alone.
+  // Whitespace is CSS's five characters, not `\s`: U+00A0 is whitespace to
+  // JavaScript and an ordinary character to CSS, so `\u00A0color:#fff` names a
+  // property a browser drops.
+  const ws = '[ \\t\\n\\f\\r]*';
+  const whiteDeclaration = new RegExp(
+    `^${ws}(?:-webkit-text-fill-)?color${ws}:${ws}(?:#fff(?:fff)?\\b|white\\b|rgb\\(${ws}255${ws},${ws}255${ws},${ws}255${ws}\\))`,
+    'i',
+  );
+  if (inlineStyles.some(s => cssDeclarations(s).some(d => whiteDeclaration.test(d)))) {
     hiddenSignals.push('white-on-white text');
   }
   if (hiddenSignals.length === 0) {
@@ -906,6 +983,180 @@ function runSelfTest() {
   // Single-quoted inline styles must not bypass hidden-text detection.
   const hiddenSingleQuote = auditAts(buildCleanHtml({ extraBody: "<span style='color:#ffffff'>python rust golang aws terraform</span>" }));
   check('single-quoted white text is flagged', hasIssue(hiddenSingleQuote.issues, 'hidden text'));
+
+  // A white VALUE on a property that merely ends in `color` is visible text
+  // (a badge, a bordered callout), not white-on-white stuffing. `color:#fff`
+  // is a substring of `background-color:#fff`, so the signal is anchored on
+  // the start of a declaration. This mirrors atsLint in cv-templates.mjs.
+  for (const [label, style] of [
+    ['white background-color with dark text', 'background-color:#fff; color:#111'],
+    ['named white background-color with dark text', 'background-color:white;color:#222'],
+    ['white border-color with dark text', 'border-color:#fff; color:#000'],
+  ]) {
+    const visible = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`${label} is not flagged as hidden text`, !hasIssue(visible.issues, 'hidden text'));
+  }
+  // U+00A0 is whitespace to JavaScript's \s but an ordinary character to CSS, so
+  // a non-breaking space in a declaration makes a browser drop it. Chromium
+  // paints none of these white; the form-feed and space-padded controls it does.
+  for (const [label, style] of [
+    ['a no-break space before the property', '\u00A0color:#fff'],
+    ['a no-break space after the colon', 'color:\u00A0#fff'],
+    ['a no-break space before the colon', 'color\u00A0:#fff'],
+    ['a no-break space inside rgb()', 'color:rgb(255,\u00A0255,255)'],
+  ]) {
+    const inert = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`${label} is not flagged as hidden text`, !hasIssue(inert.issues, 'hidden text'));
+  }
+  for (const [label, style] of [
+    ['a form feed before the property', '\fcolor:#fff'],
+    ['spaces around the colon', 'color : #fff'],
+    ['spaces inside rgb()', 'color:rgb( 255 , 255 , 255 )'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} still flags as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
+  // The anchor must not disable the detector: genuine white text still flags,
+  // including after another declaration and when no declaration precedes it.
+  for (const [label, style] of [
+    ['bare color:#fff', 'color:#fff'],
+    ['color:#ffffff after another declaration', 'font-weight:bold;color:#ffffff'],
+    ['color:white after a space', 'font-weight:bold; color:white'],
+    ['color:rgb(255,255,255)', 'color:rgb(255, 255, 255)'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} is still flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
+  // -webkit-text-fill-color paints the glyph fill and overrides `color`, so a
+  // white fill is white text. A CSS comment is whitespace to a browser, so a
+  // declaration behind one is still a declaration.
+  for (const [label, style] of [
+    ['-webkit-text-fill-color:#fff over dark color', '-webkit-text-fill-color:#fff;color:#111'],
+    ['-webkit-text-fill-color:white after another declaration', 'font-weight:bold;-webkit-text-fill-color:white;color:#111'],
+    ['color:#fff after a comment following a declaration', 'background:red;/**/color:#fff'],
+    ['color:#fff after a leading comment', '/**/color:#fff'],
+  ]) {
+    const stuffed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`${label} is flagged as hidden text`, hasIssue(stuffed.issues, 'hidden text'));
+  }
+  // A comment inside a non-color declaration must not create a false positive.
+  const commentedBackground = auditAts(buildCleanHtml({ extraBody: '<span style="background-color:/**/#fff;color:#111">Senior engineer</span>' }));
+  check('white background-color with an inner comment is not flagged as hidden text', !hasIssue(commentedBackground.issues, 'hidden text'));
+  // A comment splits a CSS identifier in two, so `col/**/or` is not `color`. A
+  // browser drops that declaration, so it must not read as white text.
+  const splitIdent = auditAts(buildCleanHtml({ extraBody: '<span style="col/**/or:#fff">Senior engineer</span>' }));
+  check('a comment splitting the property name is not flagged as hidden text', !hasIssue(splitIdent.issues, 'hidden text'));
+  // Comment markers inside a quoted value belong to the string, not a comment.
+  // Reading them as one would delete the real declaration that sits between.
+  const quotedMarkers = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'/*';color:#fff;font-family:'*/'">python kubernetes aws rust golang</span>` }));
+  check('comment markers inside quoted values do not hide a real white declaration', hasIssue(quotedMarkers.issues, 'hidden text'));
+  // A quoted value can hold text that looks like a declaration. Here the real
+  // color is #111; the white one is inside a string, and the browser ignores it.
+  const quotedFake = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:';color/**/:#fff';color:#111">Senior engineer</span>` }));
+  check('a white declaration inside a quoted value is not flagged as hidden text', !hasIssue(quotedFake.issues, 'hidden text'));
+  // The comment pattern must not match across a `*/`. If it could, a run of
+  // comments splits exponentially many ways, and a style that fails to match
+  // at its end backtracks through every one of them.
+  const manyComments = `<span style=";${'/**/'.repeat(30)}colour:#fff">Senior engineer</span>`;
+  const auditStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: manyComments }));
+  check('a long run of comments does not backtrack catastrophically', performance.now() - auditStarted < 1000);
+  // Looking back for `url` on every open paren must not flatten the text built
+  // so far each time: that made a long run of `(` quadratic, seconds at 400k.
+  const manyParens = `<span style="${'('.repeat(400000)}">Senior engineer</span>`;
+  const parensStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: manyParens }));
+  check('a long run of open parentheses stays linear', performance.now() - parensStarted < 1000);
+  // An unterminated comment must not be rescanned from every semicolon. That
+  // made a long `;/*;/*` run quadratic: seconds at 100k characters.
+  const unterminated = `<span style="${';/*'.repeat(33334)}colour:#fff">Senior engineer</span>`;
+  const unterminatedStarted = performance.now();
+  auditAts(buildCleanHtml({ extraBody: unterminated }));
+  check('a long run of unterminated comments stays linear', performance.now() - unterminatedStarted < 1000);
+  // A semicolon inside a string or a comment does not end a declaration, so
+  // white text written inside either one is never applied by the browser.
+  for (const [label, style] of [
+    ['inside a quoted value', `--x:'/*;color:#fff';color:#111`],
+    ['inside a comment', 'color:#111;/*;color:#fff*/'],
+  ]) {
+    const inert = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(inert.issues, 'hidden text'));
+  }
+  // An unterminated string runs to the end, and an escaped `;` is part of a
+  // value. Either way the white declaration after it is never applied.
+  for (const [label, style] of [
+    ['after an unterminated string', `font-family:'abc;color:#fff`],
+    ['after an escaped semicolon', 'a:b\\;color:#fff'],
+  ]) {
+    const swallowed = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(swallowed.issues, 'hidden text'));
+  }
+  // A raw newline ends a quoted string early: CSS reads it as a bad string, so
+  // the declaration after it is real. Every CSS newline form counts.
+  for (const [label, nl] of [['LF', '\n'], ['CR', '\r'], ['FF', '\f'], ['CRLF', '\r\n']]) {
+    const broken = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x${nl};color:white">python kubernetes aws rust golang</span>` }));
+    check(`white text after a string broken by ${label} is flagged as hidden text`, hasIssue(broken.issues, 'hidden text'));
+  }
+  // An escaped newline inside a string is a continuation, and CRLF is one
+  // newline, so the backslash takes both characters. Taking only the CR left
+  // the LF to end the string early, and the quote after it opened a new one
+  // that swallowed the real declaration behind it.
+  for (const [label, nl] of [['LF', '\n'], ['CR', '\r'], ['FF', '\f'], ['CRLF', '\r\n']]) {
+    const continued = auditAts(buildCleanHtml({ extraBody: `<span style="font-family:'x\\${nl}';color:white">python kubernetes aws rust golang</span>` }));
+    check(`white text after a string continued over an escaped ${label} is flagged as hidden text`, hasIssue(continued.issues, 'hidden text'));
+  }
+  // A style holding a double quote has to sit in a single-quoted attribute,
+  // or the attribute ends at that quote and the CSS under test is never seen.
+  const attrQuote = style => (style.includes('"') ? "'" : '"');
+  // The body of an unquoted url() is raw text up to the first `)`, so a quote
+  // inside it does not open a string. A browser treats that as a bad url and
+  // resumes after the `)`; reading the quote as a string swallowed everything
+  // after it, white declaration included.
+  for (const [label, style] of [
+    ['a double quote in an unquoted url()', 'background:url(foo";x);color:white'],
+    ['a single quote in an unquoted url()', "background:url(foo';x);color:white"],
+    ['an uppercase URL() with a quote in it', 'background:URL(foo";x);color:white'],
+    ['an escaped paren inside an unquoted url()', 'background:url(a\\);b";x);color:white'],
+    ['a stray open paren in an unquoted url()', 'background:url(a(b";x);color:white'],
+  ]) {
+    const badUrl = auditAts(buildCleanHtml({ extraBody: `<span style=${attrQuote(style)}${style}${attrQuote(style)}>python kubernetes aws rust golang</span>` }));
+    check(`white text after ${label} is flagged as hidden text`, hasIssue(badUrl.issues, 'hidden text'));
+  }
+  // The same raw-text rule must not release a `;` that really is inside the
+  // url, nor treat a quoted url() argument or a lookalike name as unquoted.
+  for (const [label, style] of [
+    ['inside an unquoted url()', 'background:url(data:x;color:white)'],
+    ['inside a quoted url()', `background:url("data:x;color:white")`],
+    ['inside an unterminated unquoted url()', 'background:url(foo;color:white'],
+    ['after a function whose name only ends in url', 'background:myurl(foo";x);color:white'],
+  ]) {
+    const inertUrl = auditAts(buildCleanHtml({ extraBody: `<span style=${attrQuote(style)}${style}${attrQuote(style)}>Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(inertUrl.issues, 'hidden text'));
+  }
+  // url() with whitespace and a quote after the paren is a normal function
+  // with a string argument, not an unquoted url. The `)` inside the string is
+  // what tells the two readings apart: read as raw text, the url would end at
+  // that `)` and the rest of the string would open a new one.
+  const spacedQuoted = auditAts(buildCleanHtml({ extraBody: `<span style="background:url(  'a)b'  );color:white">python kubernetes aws rust golang</span>` }));
+  check('white text after a quoted url() argument with leading space is flagged as hidden text', hasIssue(spacedQuoted.issues, 'hidden text'));
+  // A `;` inside parentheses or brackets belongs to that value, not to the
+  // declaration list, so it cannot start a new declaration.
+  for (const [label, style] of [
+    ['inside url()', 'background:url(data:x;color:white)'],
+    ['inside a function', 'background:foo(abc;color:white)'],
+    ['inside brackets', 'grid-template-areas:[a;color:white]'],
+  ]) {
+    const nested = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">Senior engineer</span>` }));
+    check(`white text ${label} is not flagged as hidden text`, !hasIssue(nested.issues, 'hidden text'));
+  }
+  // A comment may sit on either side of the colon, and the declaration applies.
+  for (const [label, style] of [
+    ['a comment before the colon', 'color/**/:#fff'],
+    ['a comment after the colon', 'color:/**/#fff'],
+  ]) {
+    const commented = auditAts(buildCleanHtml({ extraBody: `<span style="${style}">python kubernetes aws rust golang</span>` }));
+    check(`white text with ${label} is still flagged as hidden text`, hasIssue(commented.issues, 'hidden text'));
+  }
 
   // Inline font-family is scored the same as a stylesheet font-family.
   const inlineFont = auditAts(buildCleanHtml({ extraBody: '<p style="font-family:\'Comic Sans MS\'">extra line</p>' }));

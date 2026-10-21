@@ -56,12 +56,25 @@
  * @property {Readonly<Object<string,unknown>>} settings  Frozen non-secret settings block for this plugin from config/plugins.yml (e.g. { label, days_back, actor }). Secrets never live here — they go in .env via requiredEnv.
  * @property {(...args: unknown[]) => void} log  Console logger that redacts declared env values from output (accidental-leak hygiene, not an exfiltration control).
  * @property {boolean} dryRun  True when invoked with --dry-run; side-effecting hooks must honor it.
+ * @property {string} dataRoot  Absolute path of the user's data root (the
+ *   directory that holds `data/`, `jds/`, `reports/`). A plugin that keeps a
+ *   file of its own resolves it from here, never from a bare relative path:
+ *   that resolves against the working directory, which is a different place
+ *   whenever the data root is overridden or the command runs from elsewhere.
+ *   Additive to the v1 contract: plugins that never read it are unaffected.
  * @property {(raw: string) => string} normalizePostingUrl  The canonical
  *   posting-URL key the tracker and scanner key on, so a plugin can deduplicate
  *   its own results the same way core does. Returns '' when there is nothing to
  *   key on; '' means NO KEY and must never be matched against another ''.
  *   Stable across the v1 plugin contract: its behaviour changes only with a
  *   documented note here, and existing plugins that never call it are unaffected.
+ * @property {(raw: string) => ({ domain: string, id: string } | null)} aggregatorPostingId
+ *   The requisition id an aggregator URL carries — LinkedIn's job id (path or
+ *   ?currentJobId=), Indeed's `jk`/`vjk` — keyed on the registrable domain, so
+ *   a tracking link and the canonical view of one posting resolve to the same
+ *   id. null means UNKNOWN (not an aggregator, no extractor, or no id), never
+ *   "the same posting"; ids are comparable only when `domain` matches. Same
+ *   stability promise as normalizePostingUrl.
  */
 
 /**

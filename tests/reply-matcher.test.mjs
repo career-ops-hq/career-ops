@@ -487,6 +487,131 @@ test('matchCandidates - ambiguous matches', () => {
   assert.ok(results[0].signals.includes('ambiguous-match'));
 });
 
+test('matchCandidates - role-less rejection returns every date-eligible row at one company (#4825)', () => {
+  const apps = [
+    { num: 40, date: '2026-08-01', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 41, date: '2026-08-02', company: 'Acme Air', role: 'Product Designer', status: 'Evaluated', notes: '' },
+    { num: 42, date: '2026-08-03', company: 'Acme Air', role: 'Finance Analyst', status: 'Applied', notes: '' },
+  ];
+  const [result] = matchCandidates([{
+    message_id: 'company-wide-1',
+    received_at: '2026-08-20T12:00:00Z',
+    from: 'careers@acmeair.com',
+    subject: 'Thank you for your interest in Acme Air',
+    body_snippet: 'Unfortunately, we will not be moving forward with your application.',
+    signal: 'rejection',
+  }], apps, []);
+
+  assert.deepEqual(result.application_nums, [40, 41, 42]);
+  assert.equal(result.application_num, null);
+  assert.equal(result.confidence, 'medium');
+  assert.deepEqual(result.signals, ['company-wide-rejection']);
+});
+
+test('matchCandidates - company-wide rejection excludes future and non-eligible lifecycle rows', () => {
+  const apps = [
+    { num: 43, date: '2026-08-01', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 44, date: '2026-08-21', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+    { num: 45, date: '2026-08-02', company: 'Acme Air', role: 'Finance Analyst', status: 'Interview', notes: '' },
+    { num: 46, date: '2026-08-03', company: 'Acme Air', role: 'Program Manager', status: 'Rejected', notes: '' },
+  ];
+  const [result] = matchCandidates([{
+    message_id: 'company-wide-2', received_at: '2026-08-20', from: 'careers@acmeair.com',
+    subject: 'Acme Air application update', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, []);
+
+  assert.deepEqual(result.application_nums, [43]);
+});
+
+test('matchCandidates - a named tracked role preserves the existing single-row match', () => {
+  const apps = [
+    { num: 47, date: '2026-08-01', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 48, date: '2026-08-02', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+  ];
+  const [result] = matchCandidates([{
+    message_id: 'company-wide-3', received_at: '2026-08-20', from: 'careers@acmeair.com',
+    subject: 'Acme Air — Backend Engineer', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, []);
+
+  assert.equal(result.application_num, 47);
+  assert.equal(result.application_nums, undefined);
+  assert.ok(result.signals.includes('role-title'));
+});
+
+test('matchCandidates - role-less rejection without a reliable received date stays ambiguous', () => {
+  const apps = [
+    { num: 49, date: '2026-08-01', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 50, date: '2026-08-02', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+  ];
+  const [result] = matchCandidates([{
+    message_id: 'company-wide-4', from: 'careers@acmeair.com',
+    subject: 'Acme Air application update', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, []);
+
+  assert.equal(result.application_num, null);
+  assert.equal(result.application_nums, undefined);
+  assert.deepEqual(result.signals, ['ambiguous-match']);
+});
+
+test('matchCandidates - impossible calendar dates fail closed', () => {
+  const apps = [
+    { num: 55, date: '2026-02-30', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 56, date: '2026-02-01', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+  ];
+  const [result] = matchCandidates([{
+    message_id: 'company-wide-invalid-date', received_at: '2026-03-01', from: 'careers@acmeair.com',
+    subject: 'Acme Air application update', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, []);
+
+  assert.deepEqual(result.application_nums, [56]);
+});
+
+test('matchCandidates - ISO date-times require an explicit timezone', () => {
+  const apps = [
+    { num: 57, date: '2026-08-20', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 58, date: '2026-08-19', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+  ];
+  const run = (received_at) => matchCandidates([{
+    message_id: `company-wide-zone-${received_at}`, received_at, from: 'careers@acmeair.com',
+    subject: 'Acme Air application update', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, [])[0];
+
+  assert.deepEqual(run('2026-08-20T00:30:00').signals, ['ambiguous-match']);
+  assert.deepEqual(run('2026-08-20T00:30:00Z').application_nums, [57, 58]);
+  assert.deepEqual(run('2026-08-20T00:30:00+00:00').application_nums, [57, 58]);
+  assert.deepEqual(run('2026-02-30T00:00:00Z').signals, ['ambiguous-match']);
+  assert.deepEqual(run('2026-02-30T00:00:00+00:00').signals, ['ambiguous-match']);
+});
+
+test('matchCandidates - approximate tracker dates are conservative and never crash', () => {
+  const apps = [
+    { num: 51, date: '~2026-05', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 52, date: '~2026-06', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+  ];
+  const run = (received_at) => matchCandidates([{
+    message_id: `company-wide-${received_at}`, received_at, from: 'careers@acmeair.com',
+    subject: 'Acme Air application update', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, [])[0];
+
+  assert.doesNotThrow(() => run('2026-06-15'));
+  assert.deepEqual(run('2026-06-15').application_nums, [51], 'same-month approximate date is not definitely before the email');
+  assert.deepEqual(run('2026-07-01').application_nums, [51, 52]);
+});
+
+test('matchCandidates - unknown company remains no-match', () => {
+  const apps = [
+    { num: 53, date: '2026-08-01', company: 'Acme Air', role: 'Backend Engineer', status: 'Applied', notes: '' },
+    { num: 54, date: '2026-08-02', company: 'Acme Air', role: 'Product Designer', status: 'Applied', notes: '' },
+  ];
+  const [result] = matchCandidates([{
+    message_id: 'company-wide-5', received_at: '2026-08-20', from: 'no-reply@unknown.example',
+    subject: 'Application update', body_snippet: 'We will not be moving forward.', signal: 'rejection',
+  }], apps, []);
+
+  assert.deepEqual(result.signals, ['no-match']);
+  assert.equal(result.application_num, null);
+});
+
 test('matchCandidates - no match', () => {
   const apps = [
     { num: 6, company: 'SmallCo', role: 'Dev', notes: '' }

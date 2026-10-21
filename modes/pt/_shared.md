@@ -56,7 +56,7 @@ A avaliação usa 6 blocos (A-F) com uma nota global de 1-5:
 **Interpretação da nota:**
 - 4.5+ → Match forte, recomendado aplicar imediatamente
 - 4.0-4.4 → Bom match, vale a pena aplicar
-- 3.5-3.9 → Razoável mas não ideal, aplicar apenas se houver motivo específico
+- 3.5-3.9 → Razoável mas não ideal, recomendar não aplicar, a menos que o usuário dê um motivo específico (o Ethical Use do AGENTS.md põe o limite em 4.0)
 - Abaixo de 3.5 → Recomendado não aplicar (veja Ethical Use no AGENTS.md)
 
 ## North Star -- Vagas-Alvo
@@ -231,5 +231,5 @@ Em vagas e negociações brasileiras, existem termos e práticas que não aparec
 | Playwright | Verificar se vagas ainda estão ativas (browser_navigate + browser_snapshot), extrair descrições de SPAs. **CRÍTICO: NUNCA iniciar 2+ agentes com Playwright em paralelo — eles compartilham a mesma instância do navegador** |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
 | Write | HTML temporário para PDF, reports .md, TSV em `batch/tracker-additions/` |
-| Edit | Ajustes de conteúdo (não usar para criar novos registros no tracker) |
-| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs` |
+| Edit | Ajustes de conteúdo em reports. Nunca a tabela do tracker: novos registros entram como TSV mesclado por `node merge-tracker.mjs`, mudanças de status e de notas passam por `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

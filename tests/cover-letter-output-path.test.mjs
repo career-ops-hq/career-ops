@@ -12,10 +12,13 @@
 import { resolve, join, relative, isAbsolute } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { safeOutputPath } from '../generate-cover-letter.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
 
 console.log('\nCover letter --out preserves output/ subdirectories (#2940)');
 
-const OUTPUT_ROOT = resolve(ROOT, 'output');
+// output/ belongs to the data root, which is the checkout only when nothing
+// points it elsewhere — and the suite does (tests/helpers.mjs, #5113).
+const OUTPUT_ROOT = resolve(getCareerOpsRoot(), 'output');
 
 function underOutput(absPath) {
   const rel = relative(OUTPUT_ROOT, absPath);

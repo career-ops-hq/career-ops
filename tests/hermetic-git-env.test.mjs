@@ -20,11 +20,12 @@
 // deletes them after git has already been handed the environment. What matters
 // is what git saw.
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, hermeticGitEnv } from './helpers.mjs';
+import { fileURLToPath } from 'url';
+import { pass, fail, hermeticGitEnv, hermeticGitRunner } from './helpers.mjs';
 
 console.log('\nhermetic git env — ambient GIT_CONFIG* must not reach a fixture');
 
@@ -86,4 +87,154 @@ try {
   }
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+// The helper being sound is not the same as the fixtures using it.
+// makeUpdaterRepo pinned core.excludesFile with `git config` and ran git through
+// the updater's own runner, which inherits the environment. An ambient
+// GIT_CONFIG_COUNT pair overrode the pin, the seed file was never staged, and
+// the base commit died before any assertion ran (#3801).
+//
+// Run in a child, because the fixture reads the environment of the process it
+// is built in, and that is the thing under test: the injection is a
+// contributor's shell, not an argument. Asserted, again, on what git saw.
+console.log('\nhermetic git env — makeUpdaterRepo builds and runs under an ambient injection');
+
+const ambientRoot = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-fixture-'));
+let fixtureDir = '';
+try {
+  const excludes = join(ambientRoot, 'ambient-excludes');
+  writeFileSync(excludes, '*.txt\n');
+  const ambientConfig = join(ambientRoot, 'ambient-config');
+  const ambientBefore = '[user]\n\tname = ambient-leak\n';
+  writeFileSync(ambientConfig, ambientBefore);
+
+  // A fourth channel that is not config at all: GIT_DIR and its companions say
+  // WHERE the repository is, so with one inherited the fixture's git commands
+  // stop being about the fixture. `bystander` stands in for the contributor's
+  // real checkout; it must come out of this exactly as it went in.
+  const bystander = join(ambientRoot, 'bystander');
+  mkdirSync(bystander, { recursive: true });
+  const bystanderGit = hermeticGitRunner(bystander);
+  bystanderGit('init', '-q', '-b', 'main', '.');
+  bystanderGit('config', 'user.name', 'Bystander');
+  const bystanderConfig = join(bystander, '.git', 'config');
+  const bystanderBefore = readFileSync(bystanderConfig, 'utf-8');
+
+  const script = [
+    "import { writeFileSync } from 'node:fs';",
+    "import { join } from 'node:path';",
+    `import { makeUpdaterRepo } from ${JSON.stringify(new URL('./helpers.mjs', import.meta.url).href)};`,
+    "const { dir, g } = makeUpdaterRepo({ prefix: 'co-hermetic-fixture-' });",
+    "console.log('FIXTURE_DIR=' + dir);",
+    "writeFileSync(join(dir, 'seed.txt'), 'seed');",
+    "g('add', '-A');",
+    "g('commit', '-qm', 'base');",
+    "console.log('RESULT=' + JSON.stringify({ tracked: g('ls-files'), author: g('log', '-1', '--format=%an') }));",
+  ].join('\n');
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf-8',
+    timeout: 60000,
+    env: {
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.excludesFile',
+      GIT_CONFIG_VALUE_0: excludes,
+      GIT_CONFIG_PARAMETERS: "'user.name=parameters-leak'",
+      GIT_CONFIG: ambientConfig,
+      GIT_DIR: join(bystander, '.git'),
+      GIT_WORK_TREE: bystander,
+      GIT_INDEX_FILE: join(bystander, '.git', 'index'),
+    },
+  });
+  fixtureDir = (child.stdout || '').match(/^FIXTURE_DIR=(.+)$/m)?.[1]?.trim() ?? '';
+  const resultLine = (child.stdout || '').match(/^RESULT=(.+)$/m)?.[1];
+
+  if (child.status === 0 && resultLine) {
+    const seen = JSON.parse(resultLine);
+    if (seen.tracked === 'seed.txt') {
+      pass('makeUpdaterRepo stages and commits its seed file under an ambient core.excludesFile');
+    } else {
+      fail(`ambient core.excludesFile reached the fixture: tracked = ${JSON.stringify(seen.tracked)}`);
+    }
+    if (seen.author === 'Test') {
+      pass('the fixture commit takes its author from the fixture, not from GIT_CONFIG_PARAMETERS');
+    } else {
+      fail(`ambient GIT_CONFIG_PARAMETERS reached the fixture: author = ${seen.author}`);
+    }
+  } else {
+    const why = (child.stderr || '').split('\n').find((line) => /nothing to commit|fatal:|Error: /.test(line)) || 'no output';
+    fail(`makeUpdaterRepo could not build under an ambient injection (exit ${child.status}): ${why.trim()}`);
+  }
+
+  const ambientAfter = readFileSync(ambientConfig, 'utf-8');
+  if (ambientAfter === ambientBefore) {
+    pass("the fixture's own `git config` writes did not land in the ambient GIT_CONFIG file");
+  } else {
+    fail(`the fixture wrote into the ambient GIT_CONFIG file: ${JSON.stringify(ambientAfter)}`);
+  }
+
+  const bystanderAfter = readFileSync(bystanderConfig, 'utf-8');
+  if (bystanderAfter === bystanderBefore) {
+    pass('an ambient GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE does not point the fixture at another repository');
+  } else {
+    fail(`the fixture reconfigured the repository an ambient GIT_DIR pointed at: ${JSON.stringify(bystanderAfter)}`);
+  }
+} finally {
+  rmSync(ambientRoot, { recursive: true, force: true });
+  if (fixtureDir) rmSync(fixtureDir, { recursive: true, force: true });
+}
+
+// Signing is the same leak through a different key. With `tag.gpgSign = true`
+// in a contributor's ~/.gitconfig, `git tag <name>` stops making a lightweight
+// tag: git tries to make a signed, annotated one, has no message for it, and
+// dies with "no tag message?". The #3052 suite builds a release fixture with
+// exactly that command through a runner that inherited the environment, so on
+// such a machine it threw at the tag and none of the assertions after it ran.
+// `commit.gpgSign` is the quieter half: it signs every fixture commit with the
+// contributor's own key, and fails outright where no key is reachable.
+//
+// The real suite is run here, in a child, under a global config that turns both
+// on and points signing at a program that does not exist. A fixture that still
+// reads the contributor's config cannot commit or tag at all under it, so this
+// passes only if the suite's repositories are sealed. GIT_CONFIG_GLOBAL stands
+// in for ~/.gitconfig (it replaces it), which keeps the test off the real one.
+console.log('\nhermetic git env — the #3052 release fixture builds under ambient signing config');
+
+const signingRoot = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-signing-'));
+try {
+  const signingConfig = join(signingRoot, 'gitconfig');
+  writeFileSync(signingConfig, [
+    '[tag]', '\tgpgSign = true', '\tforceSignAnnotated = true',
+    '[commit]', '\tgpgSign = true',
+    '[gpg]', `\tprogram = ${join(signingRoot, 'no-such-signing-program')}`,
+    '',
+  ].join('\n'));
+  const suite = fileURLToPath(new URL('./updater-apply-target-verification.test.mjs', import.meta.url));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: signingConfig };
+  // Nothing else may override the file this test injects.
+  for (const name of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG']) delete env[name];
+  const child = spawnSync(process.execPath, [suite], { encoding: 'utf-8', timeout: 120000, env });
+  const out = child.stdout || '';
+  const failures = out.split('\n').filter((line) => line.includes('❌'));
+  const passes = out.split('\n').filter((line) => line.includes('✅')).length;
+
+  if (child.status === 0 && failures.length === 0 && passes > 0) {
+    pass(`the #3052 suite runs to the end under ambient tag.gpgSign / commit.gpgSign (${passes} assertions)`);
+  } else {
+    const why = failures[0]?.trim()
+      || (child.stderr || '').split('\n').find((line) => /fatal:|error:|Error: /.test(line))?.trim()
+      || 'no output';
+    fail(`the #3052 suite does not survive ambient signing config (exit ${child.status}, ${passes} assertions ran): ${why}`);
+  }
+  // Both tag kinds the fixture makes must still be what it asked for. Proven by
+  // the suite's own assertions on the lightweight and the annotated release tag,
+  // which sit after the tag commands and so only run when those succeed.
+  if (/a release target that IS the tag commit is accepted/.test(out)) {
+    pass('the release fixture got past its lightweight and annotated tags');
+  } else {
+    fail('the release fixture never reached the assertions after its `git tag` commands');
+  }
+} finally {
+  rmSync(signingRoot, { recursive: true, force: true });
 }

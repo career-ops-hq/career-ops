@@ -44,8 +44,8 @@ const NAMED = [
 // strippable, which makes the canary stronger rather than obsolete — the
 // all-empty case (experience included) is covered against all nine shipped
 // templates in tests/cv-optional-sections.test.mjs.
-const EMPTY = { competencies: [], experience: [{ company: 'Canary' }], projects: [], education: [], certifications: [], awards: [], skills: [] };
-const MARKERS = ['CORE COMPETENCIES', 'PROJECTS', 'EDUCATION', 'CERTIFICATIONS', 'AWARDS', 'SKILLS'];
+const EMPTY = { summary: '', competencies: [], experience: [{ company: 'Canary' }], projects: [], education: [], certifications: [], awards: [], skills: [] };
+const MARKERS = ['PROFESSIONAL SUMMARY', 'CORE COMPETENCIES', 'PROJECTS', 'EDUCATION', 'CERTIFICATIONS', 'AWARDS', 'SKILLS'];
 
 const PAYLOAD = {
   lang: 'en',
@@ -109,7 +109,7 @@ for (const { name, displayName } of NAMED) {
   else fail(`${name}: closing skeleton was swallowed — check the <!-- END --> sentinel`);
 
   if (stripEmptySections(html, {
-    competencies: ['x'], experience: [{ company: 'e' }], projects: [{ name: 'p' }],
+    summary: 's', competencies: ['x'], experience: [{ company: 'e' }], projects: [{ name: 'p' }],
     education: [{ degree: 'd' }], certifications: [{ title: 'c' }],
     awards: [{ title: 'a' }], skills: [{ category: 's', items: 'x' }],
   }, 'html') === html) pass(`${name}: a fully populated payload strips nothing`);

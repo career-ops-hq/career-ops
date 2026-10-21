@@ -40,7 +40,7 @@
  *   - Tracker row resolves to a TERMINAL state (Rejected, Discarded, SKIP,
  *     Hired): no finding at all, not even a warning. The application is
  *     done; a dead JD carries no further risk.
- *   - Tracker row resolves to a LIVE state (Evaluated, Applied, Responded,
+ *   - Tracker row resolves to a LIVE state (Evaluated, Applied, Responded, Assessment,
  *     Interview, Offer), OR the join can't resolve the row (no match,
  *     ambiguous match, or an unreadable/unparseable tracker) — a soft
  *     `jd-archive-review-due` finding, same severity shape as
@@ -180,7 +180,9 @@ const UNFILLED_TEMPLATE_PLACEHOLDER =
 // round 4) — an earlier version of this check treated ANY jds/*.md
 // reference anywhere in the section as pointer-only, which wrongly rejected
 // real archived text alongside an incidental path mention.
-const JDS_PATH_RE = /jds\/[^\s()]+\.md/;
+// Tracker links also name PDF captures from archive-posting and plain text
+// captures; the embedded pointer convention below remains Markdown-only.
+const JDS_PATH_RE = /jds\/[^\s()<>]+?\.(?:pdf|txt|md)(?=$|[\s)\]`>]|[.,;:!?](?=\s|$))/i;
 const POSTED_LINE_RE = /^Posted:.*$/im;
 const POINTER_SENTENCE_RE =
   /^See\s+jds\/[^\s()]+\.md\s+for the full archive(?:\s*\(archive-posting\.mjs\s+--report=\d+\))?\.?$/i;
@@ -230,6 +232,17 @@ const NON_CONTENT_MARKERS = [
     category: 'js-required',
     reason: 'looks like a "please enable JavaScript" shell, not a posting',
     re: /(please enable javascript|this site requires javascript|<noscript)/i,
+  },
+  {
+    category: 'bot-challenge',
+    // Matched on established challenge PHRASES, deliberately not the bare
+    // word "captcha" — a real posting can legitimately mention CAPTCHA as a
+    // technology (a security-engineering role's requirements, say), and that
+    // single word alone is not distinctive enough to tell the two apart.
+    // These phrases are how the actual interstitial page renders, not a
+    // topic a JD would describe.
+    reason: 'looks like a bot-verification/challenge page, not a posting',
+    re: /(checking your browser before accessing|verify(?:ing)? (?:that )?you are (?:a )?human|please stand by,? while we (?:are )?check(?:ing)? your browser|cloudflare ray id|captcha verification required to continue)/i,
   },
 ];
 
@@ -393,6 +406,7 @@ export function mapTrackerCaptureLinks(trackerPath, jdsDir) {
     const cell = `${row.report ?? ''} ${row.notes ?? ''}`;
     const match = cell.match(JDS_PATH_RE);
     if (!match) continue;
+    if (match[0].split(/[\\/]/).includes('..')) continue;
     // The link is written root-relative (`jds/foo.md`), but the captures
     // directory is overridable with --jds-dir, so the literal `jds/` segment is
     // not guaranteed to be where they live. Try the root-relative path first,

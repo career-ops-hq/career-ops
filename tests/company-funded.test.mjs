@@ -357,9 +357,11 @@ try {
       sources: ['techcrunch'],
       months: 3,
       limit: 5,
+      now: new Date('2026-07-20T00:00:00Z'),
     });
     if (
       result.companies[0]?.company === 'Acme' &&
+      result.generated_at === '2026-07-20' &&
       seenFetchOptions.every((call) => call.options?.redirect === 'manual') &&
       String(seenFetchOptions[0]?.url) === 'https://techcrunch.com/feed/' &&
       seenFetchOptions.some((call) => String(call.url) === 'https://techcrunch.com/final-feed/')
@@ -429,23 +431,27 @@ try {
     globalThis.fetch = originalFetch;
   }
 
-  const recentAcme = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-  const recentBeta = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString();
+  // A fixed `now`: the Hacker News query cutoff and the candidate window are
+  // both measured back from it.
+  const hnNow = new Date('2026-07-20T00:00:00Z');
+  const hnCutoff = Math.floor(hnNow.getTime() / 1000) - 3 * 31 * 24 * 60 * 60;
+  const hnRequestUrls = [];
   globalThis.fetch = async (url, options) => {
+    hnRequestUrls.push(String(url));
     const res = new Response(JSON.stringify({
       hits: [
         {
           title: 'Acme raises $25M Series A',
           url: '',
           objectID: '123',
-          created_at: recentAcme,
+          created_at: '2026-07-18T10:00:00.000Z',
           story_text: 'Acme raises funding.',
         },
         {
           title: 'Beta raises $30M Series B',
           url: 'https://techcrunch.com/beta',
           objectID: '124',
-          created_at: recentBeta,
+          created_at: '2026-07-19T10:00:00.000Z',
           story_text: 'Beta raises funding.',
         },
       ],
@@ -462,7 +468,13 @@ try {
       sources: ['hn'],
       months: 3,
       limit: 5,
+      now: hnNow,
     });
+    if (hnRequestUrls.length > 0 && hnRequestUrls.every((url) => url.includes(`numericFilters=created_at_i>${hnCutoff}`))) {
+      pass('discoverFundedCompanies measures the Hacker News created_at_i cutoff from opts.now');
+    } else {
+      fail(`Hacker News cutoff not taken from opts.now (expected ${hnCutoff}): ${JSON.stringify(hnRequestUrls)}`);
+    }
     const acme = result.companies.find((c) => c.company === 'Acme');
     const beta = result.companies.find((c) => c.company === 'Beta');
     const acmeEvidence = acme?.funding.sources[0];

@@ -45,6 +45,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { SCAN_RUNS_HEADER, atomicWriteFile } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 /** Current column order, taken from scan.mjs so this can never drift from the writer. */
 export const CURRENT_COLUMNS = SCAN_RUNS_HEADER.trim().split('\t');
@@ -175,15 +176,30 @@ export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
 
 if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
+  const fileArg = flagValue(argv, '--file');
+  if (fileArg !== undefined && !fileArg.trim()) {
+    console.error('Error: --file requires a non-empty value');
+    process.exit(1);
+  }
+  validateFlags(argv, ['--apply', '--file', '--json', '--help', '-h'], `Usage: node migrate-scan-runs.mjs [options]
+
+Preview migration of scan-runs.tsv to the current schema. Writes nothing by default.
+
+Options:
+  --apply        Apply the migration after saving the original as <file>.bak
+  --file <path>  Target a file other than the data root's data/scan-runs.tsv
+  --json         Print a machine-readable summary
+  --help, -h     Show help without reading or modifying scan history
+`, { valueFlags: ['--file'], requireOperand: true });
+
   const apply = argv.includes('--apply');
   const asJson = argv.includes('--json');
-  const fileArg = argv.indexOf('--file');
   // getCareerOpsRoot, not CAREER_OPS_ROOT directly: the data root also honours
   // CAREER_OPS_DATA_DIR and a .career-ops-data marker file, and falls back to
   // the REPO root rather than the cwd. Resolving it by hand here would miss the
   // marker and would target the wrong file when run from a subdirectory.
-  const target = fileArg !== -1 && argv[fileArg + 1]
-    ? path.resolve(argv[fileArg + 1])
+  const target = fileArg
+    ? path.resolve(fileArg)
     : path.join(getCareerOpsRoot(), 'data/scan-runs.tsv');
 
   if (!existsSync(target)) {

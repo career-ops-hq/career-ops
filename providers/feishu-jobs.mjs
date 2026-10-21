@@ -51,6 +51,10 @@ const DEFAULT_MAX_PAGES = 200;
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday/alibaba).
 const INTER_PAGE_DELAY_MS = 300;
+// Pages fetched in parallel after the first one. Checked live 2026-10: 8
+// concurrent requests on jobs.bytedance.com and three rounds of 4 on the
+// vrfi1sk8a0.jobs.feishu.cn tenant all returned code 0.
+const PAGE_CONCURRENCY = 4;
 // Sent unconditionally: a no-op on tenants without ByteDance's own domain's
 // UA-sniffing rule, required on jobs.bytedance.com itself (see header).
 // NOT the shared Windows BROWSER_LIKE_USER_AGENT from _http.mjs — that one is a
@@ -149,48 +153,68 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
+    const companyName = entry.name || origin;
+    const fetchPage = async (keyword, page) => {
+      const offset = (page - 1) * PAGE_SIZE;
+      const json = /** @type {any} */ (await ctx.fetchJson(api, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'user-agent': MACOS_BROWSER_LIKE_USER_AGENT,
+          'referer': `${origin}/`,
+        },
+        body: JSON.stringify(keyword ? { limit: PAGE_SIZE, offset, keyword } : { limit: PAGE_SIZE, offset }),
+        redirect: 'error',
+      }));
+      if (json?.code !== 0) {
+        throw new Error(`API error: code=${json?.code}`);
+      }
+      return json;
+    };
     let firstRequest = true;
 
     for (const keyword of keywords) {
-      for (let page = 1; page <= maxPages; page++) {
+      // Page 1 tells us the inventory size; the rest of the keyword's pages are
+      // then fetched PAGE_CONCURRENCY at a time. Each request takes ~3s server
+      // side, so a 5000-post board was ~150s sequential.
+      let page = 1;
+      let lastPage = 1;
+      let total = 0;
+      while (page <= lastPage) {
+        const batch = page === 1
+          ? [1]
+          : Array.from({ length: Math.min(PAGE_CONCURRENCY, lastPage - page + 1) }, (_, i) => page + i);
         if (firstRequest) firstRequest = false;
         else await sleep(INTER_PAGE_DELAY_MS, ctx);
-        const offset = (page - 1) * PAGE_SIZE;
-        let json;
-        try {
-          json = /** @type {any} */ (await ctx.fetchJson(api, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'accept': 'application/json',
-              'user-agent': MACOS_BROWSER_LIKE_USER_AGENT,
-              'referer': `${origin}/`,
-            },
-            body: JSON.stringify(keyword ? { limit: PAGE_SIZE, offset, keyword } : { limit: PAGE_SIZE, offset }),
-            redirect: 'error',
-          }));
-          if (json?.code !== 0) {
-            throw new Error(`API error: code=${json?.code}`);
+        const results = await Promise.allSettled(batch.map((p) => fetchPage(keyword, p)));
+        let exhausted = false;
+        for (let i = 0; i < batch.length; i++) {
+          const result = results[i];
+          if (result.status === 'rejected') {
+            const err = result.reason;
+            if (seen.size === 0) throw err;
+            console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
+            return [...seen.values()];
           }
-        } catch (err) {
-          if (seen.size === 0) throw err;
-          console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          const json = result.value;
+          const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
+          const parsed = parseFeishuJobsResponse(json, companyName, origin);
+          if (sourcePage.length === 0) { exhausted = true; break; }
+          for (const job of parsed.jobs) {
+            if (!seen.has(job.url)) seen.set(job.url, job);
+          }
+          if (batch[i] === 1) {
+            total = parsed.total;
+            lastPage = Math.min(maxPages, Math.ceil(total / PAGE_SIZE));
+          }
         }
-        const companyName = entry.name || origin;
-        const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
-        const { jobs, total } = parseFeishuJobsResponse(json, companyName, origin);
-        if (sourcePage.length === 0) break;
-
-        for (const job of jobs) {
-          if (!seen.has(job.url)) seen.set(job.url, job);
-        }
-
-        const covered = Math.min(offset + PAGE_SIZE, total);
-        if (covered >= total) break;
-        if (page === maxPages && probeMaxPages > entryMaxPages) {
-          console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
-        }
+        if (exhausted) break;
+        page = batch[batch.length - 1] + 1;
+      }
+      const covered = Math.min(lastPage * PAGE_SIZE, total);
+      if (covered < total && lastPage === maxPages && probeMaxPages > entryMaxPages) {
+        console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
       }
     }
 

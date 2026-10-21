@@ -153,7 +153,7 @@ Offer की requirements पर mapped 6-10 STAR+R stories (STAR + **Reflection
 
 ### 2. Tracker में Record करें
 
-**हमेशा** `data/applications.md` में record करें:
+**हमेशा** tracker में record करें। एक TSV लिखें (`_shared.md` का rule 9) और उसे `node merge-tracker.mjs` से merge करें; `data/applications.md` में सीधे row कभी न लिखें। Fields:
 - अगला sequential number
 - आज की date
 - Company

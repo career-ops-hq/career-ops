@@ -32,7 +32,7 @@ import { randomUUID } from 'crypto';
 // followup-seed.mjs were still carrying all three faces of #2777. The
 // classifiers live in pipeline-lock.mjs so the next finding lands once.
 import {
-  isMkdirContention, rmLockArtifactSync, createLockWaitPolicy,
+  isMkdirContention, rmLockArtifactSync, createLockWaitPolicy, sameLockDirectory,
   lockRecoveryVerdict, RECOVER_STALE,
 } from './pipeline-lock.mjs';
 
@@ -78,13 +78,6 @@ function readLockOwner(lockDir) {
   } catch {
     return null;
   }
-}
-
-// Identity of a directory, so a lock that was removed and recreated by another
-// process is never mistaken for the one this caller created.
-function sameLockDirectory(left, right) {
-  return left.dev === right.dev && left.ino === right.ino
-    && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
 }
 
 // The recovery judgment comes from pipeline-lock rather than a fourth copy of

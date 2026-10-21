@@ -3,8 +3,8 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
- * Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Together, Groq, DeepSeek, Zhipu GLM,
+ * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
  * Reads evaluation logic from modes/oferta.md + modes/_shared.md, reads the
@@ -63,6 +63,7 @@ const PATHS = {
   oferta:  join(ROOT, 'modes', 'oferta.md'),
   cv:        join(DATA_ROOT, 'cv.md'),
   profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
+  profile:    join(DATA_ROOT, 'modes', '_profile.md'),
   reports:    join(DATA_ROOT, 'reports'),
   // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
   // regardless would drop the addition somewhere the merge it instructs never
@@ -108,6 +109,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
     Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
+    Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
+    API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
@@ -248,6 +251,7 @@ const sharedContext = readFile(PATHS.shared,     'modes/_shared.md');
 const ofertaLogic   = readFile(PATHS.oferta,     'modes/oferta.md');
 const cvContent     = readFile(PATHS.cv,         'cv.md');
 const profileYml    = readFile(PATHS.profileYml, 'config/profile.yml');
+const profileContent = readFile(PATHS.profile,   'modes/_profile.md');
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
@@ -258,9 +262,10 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   ofertaContent: ofertaLogic,
   cvContent,
   profileYml,
+  profileContent,
   jdText,
   noCompress,
-  maxTokens: 128_000, // gpt-4o-mini context window
+  modelName,
 });
 
 // Log token budget info

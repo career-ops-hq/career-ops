@@ -14,6 +14,8 @@
  *   node reserve-report-num.mjs --release 035
  *   node reserve-report-num.mjs --release 042-049
  *   node reserve-report-num.mjs --gc
+ *
+ * Unrecognized arguments are rejected (exit 1, nothing reserved).
  */
 
 import {
@@ -37,6 +39,15 @@ const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 const MAX_RETRIES = 50;
 const MAX_COUNT = 50;
 const RESERVATION_TOKEN = Symbol('career-ops-report-reservation-token');
+const USAGE_LINES = [
+  'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
+  '',
+  '  (no flags)                Reserve 1 report number (default)',
+  `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
+  '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
+  '  --gc                      Garbage-collect stale reservation sentinels',
+  '',
+];
 
 /** Format a report ID with a minimum width of three digits. */
 export function formatReportNumber(num) {
@@ -330,20 +341,24 @@ export async function gcStaleReportReservations(options = {}) {
 }
 
 async function runCli() {
-  const [,, cmd, arg] = process.argv;
+  const args = process.argv.slice(2);
+  const [cmd, arg] = args;
   const options = {};
 
   if (cmd === '--help' || cmd === '-h') {
-    process.stdout.write([
-      'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
-      '',
-      '  (no flags)                Reserve 1 report number (default)',
-      `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
-      '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
-      '  --gc                      Garbage-collect stale reservation sentinels',
-      '',
-    ].join('\n'));
+    process.stdout.write(USAGE_LINES.join('\n'));
     return 0;
+  }
+
+  // Each command takes a fixed number of arguments. Anything else (an unknown
+  // word, `--count=3`, a stray extra argument) would fall through to the
+  // reserve-1 path and claim a number the caller did not ask for.
+  const argCounts = new Map([['--count', 2], ['--release', 2], ['--gc', 1]]);
+  const allowed = cmd === undefined ? 0 : argCounts.get(cmd);
+  const offending = allowed === undefined ? cmd : args[allowed];
+  if (offending !== undefined) {
+    process.stderr.write(`reserve-report-num: unrecognized argument: ${offending}\n${USAGE_LINES.join('\n')}`);
+    return 1;
   }
 
   if (cmd === '--release') {

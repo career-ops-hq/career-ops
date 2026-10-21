@@ -22,7 +22,12 @@ import * as yaml from 'js-yaml';
 // cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and
 // test-all.mjs — without this, a user with that env var set would get
 // silently different fallback behavior here than everywhere else.
-const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+// Read at call time, not at import: a module-level constant froze whatever
+// the variable held when the first provider loaded, so a test could not
+// isolate the fallback from a developer's own CAREER_OPS_PROFILE.
+function defaultProfilePath() {
+  return process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+}
 
 function cleanKeywords(value) {
   const arr = Array.isArray(value) ? value : [];
@@ -56,7 +61,7 @@ export function profileTargetKeywords(profile) {
  * @param {string} [profilePath]
  * @returns {string[]}
  */
-export function resolveProfileKeywords(profilePath = DEFAULT_PROFILE_PATH) {
+export function resolveProfileKeywords(profilePath = defaultProfilePath()) {
   if (!existsSync(profilePath)) return [];
   try {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8')) || {};

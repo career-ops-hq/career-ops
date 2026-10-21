@@ -1,0 +1,39 @@
+<!-- Redacted/synthetic PeopleSoft Fluid job-detail page — two description
+     sections, plus a deliberate script/event-handler injection attempt in
+     the second section's body to exercise sanitizeHtml()'s safety.
+     Field-id shape (the `$N` grid-instance suffix, and an UNQUOTED id
+     attribute on the description body span) matches what was actually
+     observed live against a real tenant (2026-09) — the source GitHub issue
+     described a bare-index suffix with no `$`, which turned out not to
+     match real markup. -->
+<!DOCTYPE html>
+<html>
+<head><title>Job Posting</title></head>
+<body>
+<div id="ptifrmtgtframe">
+<span id='HRS_SCH_WRK2_HRS_JOB_OPENING_ID'>JR00012345</span>
+<span id='HRS_SCH_WRK2_POSTING_TITLE'>Instructional Designer</span>
+<span id='HRS_SCH_WRK_HRS_DESCRLONG'>London, ON, Canada</span>
+<span id='HRS_SCH_WRK_HRS_FULL_PART_TIME'>Full-Time</span>
+
+<div id='win0divHRS_SCH_PSTDSC_row$0'>
+  <span class='ps-text' id='HRS_SCH_WRK_DESCR100$0lbl'>Description</span>
+  <span class='ps_box-value' id=HRS_SCH_PSTDSC_DESCRLONG$0 >
+    <p>We are looking for an <strong>Instructional Designer</strong> to join our team &amp; help build engaging courses.</p>
+    <ul><li>Design blended learning experiences</li><li>Partner with faculty</li></ul>
+  </span>
+</div>
+
+<div id='win0divHRS_SCH_PSTDSC_row$1'>
+  <span class='ps-text' id='HRS_SCH_WRK_DESCR100$1lbl'>Qualifications</span>
+  <span class='ps_box-value' id='HRS_SCH_PSTDSC_DESCRLONG$1'>
+    <p onclick="alert('xss')">Master's degree in Education or related field required.</p>
+    <script>alert('should never survive sanitizeHtml');</script>
+    <img src="x" onerror="alert('xss2')">
+    <a href="javascript:alert('xss3')">click me</a>
+    <a href="https://example.com/apply">Apply here</a>
+  </span>
+</div>
+</div>
+</body>
+</html>

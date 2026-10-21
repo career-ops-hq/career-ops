@@ -76,7 +76,7 @@ const MIN_THRESHOLD = Number.isFinite(rawMinThreshold) && rawMinThreshold >= 0 ?
 // aggregateProcessQuality — the header wording comes from a candidate-edited
 // markdown file, so "Notes" vs "notes" vs " Notes " must all resolve the
 // same way. Centralized here so both call sites can never drift apart.
-function findColumn(row, name) {
+export function findColumn(row, name) {
   const key = Object.keys(row || {}).find(k => k.trim().toLowerCase() === name);
   return key ? String(row[key] ?? '') : '';
 }

@@ -149,7 +149,7 @@ Sauvegarder l'evaluation complete dans `reports/{###}-{company-slug}-{YYYY-MM-DD
 
 ### 2. Enregistrer dans le tracker
 
-**TOUJOURS** enregistrer dans `data/applications.md` :
+**TOUJOURS** enregistrer dans le tracker. Ecrire un TSV (regle 9 de `_shared.md`) et le fusionner avec `node merge-tracker.mjs` ; ne jamais ecrire une ligne directement dans `data/applications.md`. Champs :
 - Prochain numero sequentiel
 - Date du jour
 - Entreprise

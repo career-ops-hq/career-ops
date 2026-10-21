@@ -215,6 +215,6 @@ En las ofertas y negociaciones en español, ciertos términos no existen en los 
 | WebFetch | Fallback para extraer ofertas desde páginas estáticas |
 | Playwright | Verificar si las ofertas están activas (browser_navigate + browser_snapshot), extraer ofertas desde SPAs. **CRÍTICO: NUNCA 2+ agentes en paralelo con Playwright — comparten la misma instancia del navegador** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | HTML temporal para PDF, applications.md, reports .md |
-| Edit | Actualizar el tracker |
-| Bash | `node generate-pdf.mjs` |
+| Write | HTML temporal para PDF, reports .md, TSV de nuevas entradas del tracker en `batch/tracker-additions/` (nunca `applications.md` directamente) |
+| Edit | Correcciones en reports y otro contenido generado. Nunca la tabla del tracker: las filas nuevas entran como TSV y se fusionan con `node merge-tracker.mjs`; los cambios de estado y de notas pasan por `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

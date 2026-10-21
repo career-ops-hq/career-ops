@@ -40,20 +40,44 @@ check('empty lists are known-none; absent, null and malformed prediction data re
 });
 
 check('forecasts survive every later outcome, including positive and unanswered applications', () => {
-  const result = buildPredictedDiscardReasonSignals(OUTCOME_BUCKETS.map(outcome => entry(['forecast'], outcome)));
+  const result = buildPredictedDiscardReasonSignals(OUTCOME_BUCKETS.map(outcome => entry(['geo_restriction'], outcome)));
   assert.equal(result.predictedDiscardReasonBase, OUTCOME_BUCKETS.length);
-  assert.deepEqual(result.predictedDiscardReasonStats, [{ reason: 'forecast', frequency: OUTCOME_BUCKETS.length, percentage: 100 }]);
+  assert.deepEqual(result.predictedDiscardReasonStats, [{ reason: 'geo_restriction', frequency: OUTCOME_BUCKETS.length, percentage: 100 }]);
 });
 
-check('labels deduplicate within each entry without guessing synonyms or dropping unknown labels', () => {
-  const input = [entry([' Visa ', 'VISA', 'visa_unconfirmed', 'Équipe trop petite', '']), entry([]), entry('visa')];
+check('canonical ids match by spelling only and deduplicate within each entry', () => {
+  const input = [entry([' Salary too low ', 'SALARY-TOO-LOW', 'salary_too_low', '']), entry([]), entry('Geo restriction')];
   const before = JSON.stringify(input);
   const result = buildPredictedDiscardReasonSignals(input);
   assert.equal(result.predictedDiscardReasonBase, 3);
-  assert.deepEqual(result.predictedDiscardReasonStats.find(row => row.reason === 'visa'), { reason: 'visa', frequency: 2, percentage: 67 });
-  assert.equal(result.predictedDiscardReasonStats.find(row => row.reason === 'visa_unconfirmed').frequency, 1);
-  assert.equal(result.predictedDiscardReasonStats.find(row => row.reason === 'équipe trop petite').frequency, 1);
+  assert.deepEqual(result.predictedDiscardReasonStats, [
+    { reason: 'geo_restriction', frequency: 1, percentage: 33 },
+    { reason: 'salary_too_low', frequency: 1, percentage: 33 },
+  ]);
+  assert.deepEqual(result.predictedDiscardReasonOther, { vocabularyLoaded: true, entries: 0, percentage: 0, reasons: [] });
   assert.equal(JSON.stringify(input), before);
+});
+
+check('labels outside the vocabulary are listed as other with their spelling and never enter the shares', () => {
+  const input = [entry([' Visa ', 'VISA', 'visa_unconfirmed', 'Équipe trop petite', 'salary_too_low']), entry([]), entry('visa'), entry(['salary_too_low_unconfirmed'])];
+  const result = buildPredictedDiscardReasonSignals(input);
+  assert.equal(result.predictedDiscardReasonBase, 4);
+  assert.deepEqual(result.predictedDiscardReasonStats, [{ reason: 'salary_too_low', frequency: 1, percentage: 25 }]);
+  const other = result.predictedDiscardReasonOther;
+  assert.equal(other.entries, 3);
+  assert.equal(other.percentage, 75);
+  assert.deepEqual(other.reasons.find(row => row.reason === 'visa'), { reason: 'visa', frequency: 2 });
+  assert.equal(other.reasons.find(row => row.reason === 'visa_unconfirmed').frequency, 1);
+  assert.equal(other.reasons.find(row => row.reason === 'équipe trop petite').frequency, 1);
+  // No synonym guessing: a near-miss of a canonical id stays other.
+  assert.equal(other.reasons.find(row => row.reason === 'salary_too_low_unconfirmed').frequency, 1);
+});
+
+check('an unreadable vocabulary reports every label as other instead of guessing one', () => {
+  const result = buildPredictedDiscardReasonSignals([entry(['salary_too_low', 'visa'])], null);
+  assert.deepEqual(result.predictedDiscardReasonStats, []);
+  assert.equal(result.predictedDiscardReasonOther.vocabularyLoaded, false);
+  assert.deepEqual(result.predictedDiscardReasonOther.reasons.map(row => row.reason).sort(), ['salary_too_low', 'visa']);
 });
 
 check('recorded-reason coverage honors the existing outcome eligibility and counts explicit empty forecasts', () => {
@@ -120,10 +144,13 @@ try {
 
   check('CLI JSON publishes prediction shares over explicit data, counting entries that share a report', () => {
     assert.equal(result.predictedDiscardReasonBase, 6);
-    assert.deepEqual(result.predictedDiscardReasonStats.find(row => row.reason === 'salary_too_low'), { reason: 'salary_too_low', frequency: 2, percentage: 33 });
-    assert.deepEqual(result.predictedDiscardReasonStats.find(row => row.reason === 'remote_mismatch'), { reason: 'remote_mismatch', frequency: 2, percentage: 33 });
-    assert.equal(result.predictedDiscardReasonStats.find(row => row.reason === 'visa').percentage, 17);
-    assert.ok(!result.predictedDiscardReasonStats.some(row => row.reason.includes('object')));
+    assert.deepEqual(result.predictedDiscardReasonStats, [{ reason: 'salary_too_low', frequency: 2, percentage: 33 }]);
+    const other = result.predictedDiscardReasonOther;
+    assert.equal(other.entries, 5);
+    assert.equal(other.percentage, 83);
+    assert.deepEqual(other.reasons.find(row => row.reason === 'remote_mismatch'), { reason: 'remote_mismatch', frequency: 2 });
+    assert.equal(other.reasons.find(row => row.reason === 'visa').frequency, 1);
+    assert.ok(![...result.predictedDiscardReasonStats, ...other.reasons].some(row => row.reason.includes('object')));
   });
   check('CLI coverage exposes missing reports, missing predictions and missing recorded reasons separately', () => {
     assert.deepEqual(result.discardReasonCoverage, {
@@ -144,7 +171,8 @@ try {
     assert.match(summary, /Recorded reasons: 4\/5 eligible entries; 2 entries have both sources/);
     assert.match(summary, /Forecasts cover all statuses; recorded reasons cover skipped, discarded, and rejected entries/);
     assert.match(summary, /Predictions are not outcomes\. Missing data is unknown/);
-    assert.match(summary, /labels are grouped by spelling, not meaning/);
+    assert.match(summary, /canonical ids are matched by spelling, not meaning/);
+    assert.match(summary, /other \(outside the vocabulary, not counted above\): 5 entries \(83%\)/);
     assert.doesNotMatch(summary, /disagreement|accuracy|false positive/i);
   });
   check('analysis and summary leave every tracker and report byte unchanged', () => {
@@ -159,8 +187,8 @@ try {
   }
   const withoutPredictions = JSON.parse(run());
   check('changing predictions cannot change any pre-existing analysis field or recommendation', () => {
-    const { predictedDiscardReasonStats, predictedDiscardReasonBase, discardReasonCoverage, ...before } = result;
-    const { predictedDiscardReasonStats: stats, predictedDiscardReasonBase: base, discardReasonCoverage: coverage, ...after } = withoutPredictions;
+    const { predictedDiscardReasonStats, predictedDiscardReasonOther, predictedDiscardReasonBase, discardReasonCoverage, ...before } = result;
+    const { predictedDiscardReasonStats: stats, predictedDiscardReasonOther: other, predictedDiscardReasonBase: base, discardReasonCoverage: coverage, ...after } = withoutPredictions;
     assert.deepEqual(after, before);
     assert.equal(base, 0);
   });

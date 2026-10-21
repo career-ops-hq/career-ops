@@ -217,6 +217,6 @@ Dalam lowongan dan negosiasi di Indonesia, beberapa istilah tidak ada di pasar E
 | WebFetch | Fallback untuk mengekstrak lowongan dari halaman statis |
 | Playwright | Verifikasi apakah lowongan masih aktif (browser_navigate + browser_snapshot), ekstrak lowongan dari SPA. **KRITIS: JANGAN PERNAH menjalankan 2+ agen paralel dengan Playwright -- mereka berbagi instance browser yang sama** |
 | Read | cv.md, article-digest.md, cv-template.html |
-| Write | HTML sementara untuk PDF, applications.md, report .md |
-| Edit | Memperbarui tracker |
-| Bash | `node generate-pdf.mjs` |
+| Write | HTML sementara untuk PDF, report .md, file TSV tambahan tracker di `batch/tracker-additions/` (jangan pernah `applications.md` secara langsung) |
+| Edit | Perbaikan pada report dan konten hasil generate lainnya. Jangan pernah mengedit tabel tracker: baris baru masuk sebagai TSV yang digabung dengan `node merge-tracker.mjs`, perubahan status dan catatan melalui `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |

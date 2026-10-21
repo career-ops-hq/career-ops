@@ -185,4 +185,4 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 
 Потім виконати `node merge-tracker.mjs` для злиття в `data/applications.md`.
 
-Для **існуючого** запису допустиме пряме оновлення в `data/applications.md` (статус, PDF, посилання на звіт).
+Для **існуючого** запису не правити `data/applications.md` вручну: статус і нотатки оновлювати через `node set-status.mjs`, позначку PDF — через `node mark-pdf-ready.mjs <номер звіту>`.

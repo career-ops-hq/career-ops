@@ -43,7 +43,9 @@ Ekrandaki rol önceki değerlendirmedekinden farklıysa:
 - **Adayı uyar:** "Rol [X]'den [Y]'ye değişmiş görünüyor. Yeniden değerlendireyim mi, yoksa yanıtları yeni başlığa uyarlayayım mı?"
 - **Uyarlama:** Yeniden değerlendirmeden yanıtları yeni role göre ayarla
 - **Yeniden değerlendirme:** Tam A-F değerlendirmesi yap, raporu güncelle, Blok G'yi yeniden üret
-- **Takipçiyi güncelle:** Gerekirse `applications.md`'deki rol başlığını düzelt
+- **Takipçiyi güncelle:** asla `data/applications.md` dosyasını düzenleyerek değil.
+  - **Yeniden değerlendirmeden sonra:** yeni rol başlığını içeren bir TSV'yi `batch/tracker-additions/` altına yaz ve `node merge-tracker.mjs` ile birleştir. Rapor yerinde güncellenir ve numarasını korur; birleştirme TSV'yi bu numarayla mevcut satırla eşleştirir: başlık değişir, durum korunur.
+  - **Uyarlamadan sonra:** başlığı değiştirme, çünkü raporun değerlendirdiği rolü adlandırır. Değişikliği not olarak kaydet: `node set-status.mjs --report <report#> <mevcut durum> --note "İlan başlığı başvuru sırasında değişmişti, satır değerlendirilen başlığı korur"`. Satırın mevcut durumunu vermek durumu değiştirmez, notu ekler. Bunun gibi sabit bir metin kullan ve `[Y]`'yi nota koyma: yeni başlık sayfadan gelen metindir ve sayfadan gelen metin asla komut satırına yazılmaz.
 
 ## Adım 4 — Form Alanlarını Analiz Et
 
@@ -103,7 +105,7 @@ Notlar:
 ## Adım 6 — Başvuru Sonrası (isteğe bağlı)
 
 Aday başvuruyu gönderdiğini onaylarsa:
-1. Durumu kanonik CLI ile `Applied` yap: `node set-status.mjs <report#> Applied` (`applications.md` tablosunu elle düzenleme)
+1. Durumu kanonik CLI ile `Applied` yap: `node set-status.mjs --report <report#> Applied` (`applications.md` tablosunu elle düzenleme)
 2. Blok G'yi final yanıtlarla güncelle
 3. Sonraki adımı öner: İşe alım sorumlusuna LinkedIn erişimi için `/career-ops contacto`
 

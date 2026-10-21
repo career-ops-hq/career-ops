@@ -26,7 +26,6 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { resolveOllamaBaseUrl, probeOllama, assertLoopbackOrAllowed } from './ollama-client.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
@@ -114,8 +113,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 let jdText    = '';
 let postingUrl = '';
 let modelName = process.env.OLLAMA_MODEL || 'llama3.3';
-let baseUrl   = null; // resolved below: --url flag wins outright; otherwise OLLAMA_BASE_URL / OLLAMA_SERVER_URL / local failover
-let explicitUrlFlag = false;
+let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
 // Context window for the request AND the prompt budget. Defaults to the previous hardcoded
 // 32768, so behaviour is unchanged unless OLLAMA_NUM_CTX is set. Raise it for a model with a
 // bigger window; `ollama show` reports each model's ceiling (qwen2.5 caps at 32768).
@@ -144,7 +142,6 @@ for (let i = 0; i < args.length; i++) {
     modelName = args[++i];
   } else if (args[i] === '--url' && args[i + 1]) {
     baseUrl = args[++i].replace(/\/$/, '');
-    explicitUrlFlag = true;
   } else if (args[i] === '--posting-url' && args[i + 1]) {
     postingUrl = args[++i];
   } else if (args[i] === '--no-save') {
@@ -189,59 +186,48 @@ function readFile(path, label) {
 }
 
 // ---------------------------------------------------------------------------
-// Resolve the endpoint. --url is an explicit, strongest-precedence override
-// (cv.md + full JD are sent to it, so it still needs the loopback guard and a
-// simple reachability check). Otherwise defer to the shared resolver, which
-// handles OLLAMA_BASE_URL (explicit, same guard) -> OLLAMA_SERVER_URL (probed
-// first, home/office server) -> local failover.
+// Loopback guard — cv.md + full JD are sent to this endpoint.
+// A remote URL would silently exfiltrate private data.
 // ---------------------------------------------------------------------------
-if (explicitUrlFlag) {
+{
+  let hostname;
   try {
-    assertLoopbackOrAllowed(baseUrl);
-  } catch (err) {
+    hostname = new URL(baseUrl).hostname;
+  } catch {
+    console.error(`❌  Invalid OLLAMA_BASE_URL: "${baseUrl}"`);
+    process.exit(1);
+  }
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  if (!isLoopback && process.env.OLLAMA_ALLOW_REMOTE !== '1') {
     console.error(`
-❌  ${err.message}
+❌  Remote Ollama endpoint detected: ${baseUrl}
 
    Your CV and job description would be sent to a remote server.
-   If you intentionally want a remote endpoint (e.g. tunnelled Ollama on a
-   home server), set OLLAMA_ALLOW_REMOTE=1, or use OLLAMA_SERVER_URL instead
-   of --url to get automatic failover to local Ollama.
+   This tool is designed for local use only.
+
+   If you intentionally want to use a remote endpoint (e.g. tunnelled
+   Ollama on a home server), set:
+     OLLAMA_ALLOW_REMOTE=1 node ollama-eval.mjs ...
 `);
     process.exit(1);
   }
-  const probe = await probeOllama(baseUrl, { timeoutMs: 5_000 });
-  if (!probe.ok) {
-    console.error(`
-❌  Ollama not reachable at ${baseUrl} (${probe.reason})
+}
+
+// ---------------------------------------------------------------------------
+// Check Ollama is reachable before burning time on prompt assembly
+// ---------------------------------------------------------------------------
+try {
+  const probe = await fetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+  if (!probe.ok) throw new Error(`HTTP ${probe.status}`);
+} catch (err) {
+  console.error(`
+❌  Ollama not reachable at ${baseUrl}
 
    1. Install Ollama: https://ollama.com
    2. Start server:   ollama serve
    3. Pull a model:   ollama pull ${modelName}
 `);
-    process.exit(1);
-  }
-} else {
-  // The server may run a different (often larger) model than local, so the
-  // resolver checks model presence per candidate and reports which one won.
-  try {
-    const resolved = await resolveOllamaBaseUrl({
-      timeoutMs: 5_000,
-      model: modelName,
-      log: (m) => console.error(`ℹ️   ${m}`),
-    });
-    baseUrl = resolved.baseUrl;
-    if (resolved.model && resolved.model !== modelName) modelName = resolved.model;
-    if (resolved.source === 'server') console.error(`ℹ️   Using server Ollama at ${baseUrl} (model: ${modelName})`);
-  } catch (err) {
-    console.error(`
-❌  ${err.message}
-
-   1. Install Ollama: https://ollama.com
-   2. Start server:   ollama serve
-   3. Pull a model:   ollama pull ${modelName}
-`);
-    process.exit(1);
-  }
+  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------

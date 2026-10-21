@@ -56,6 +56,7 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
@@ -105,14 +106,6 @@ export function parsePositiveInt(value) {
 }
 
 // --- Date helpers (UTC-midnight calendar math — no time-of-day drift) ---
-export function parseDate(dateStr) {
-  const iso = String(dateStr ?? '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 const isoDay = (date) => date.toISOString().slice(0, 10);
 
 // Shift a UTC-midnight date by whole calendar months, clamping the day to the

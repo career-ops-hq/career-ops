@@ -133,10 +133,9 @@ test('--file=<path> (the = form) is honored the same as the space-separated form
 
 // --file's operand is a value-taking flag with no dedicated value validation
 // of its own, so a missing/swallowed operand must be caught by
-// validateFlags()'s shared requireOperand mechanism (or, for the --file=
-// empty-string case that requireOperand's bare-token check can't see, an
-// explicit fallback check) rather than reaching resolve('') — the current
-// directory — and crashing readFileSync() with a raw EISDIR (CodeRabbit,
+// validateFlags()'s shared requireOperand mechanism (which also catches the
+// --file= empty-string case, #5127) rather than reaching resolve('') — the
+// current directory — and crashing readFileSync() with a raw EISDIR (CodeRabbit,
 // #4254 review).
 test('a bare --file with nothing after it is rejected, not read as the current directory', () => {
   const r = runVerify('--file');

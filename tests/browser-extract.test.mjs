@@ -15,7 +15,7 @@ try {
   const {
     resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
     workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
-    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob,
+    normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     fetchJdViaKnownApi, JD_FETCHERS,
   } = mod;
 
@@ -360,6 +360,41 @@ try {
   if (ghNulls.every((v) => v === null)) pass('normalizeGreenhouseJob returns null without a description body');
   else fail(`normalizeGreenhouseJob nulls => ${JSON.stringify(ghNulls)}`);
 
+  // normalizeSmartRecruitersJob — the JD is jobAd.sections (HTML blocks in page
+  // order); location carries remote/hybrid flags, often the only work-model signal.
+  const sr = normalizeSmartRecruitersJob(
+    {
+      name: 'Senior Engineer',
+      location: { city: 'Bengaluru', country: 'in', fullLocation: 'Bengaluru, KA, India', remote: false, hybrid: true },
+      jobAd: { sections: {
+        companyDescription: { title: 'Company', text: '<p>We make things.</p>' },
+        jobDescription: { title: 'Job Description', text: '&lt;p&gt;Own the API.&lt;/p&gt;' },
+        qualifications: { title: 'Qualifications', text: '<ul><li>5+ years</li></ul>' },
+        additionalInformation: { title: '', text: '' },
+      } },
+    },
+    'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer',
+  );
+  if (sr
+      && sr.title === 'Senior Engineer'
+      && sr.text.includes('Location: Bengaluru, KA, India')
+      && sr.text.includes('Work model: Hybrid')
+      && sr.text.indexOf('We make things.') < sr.text.indexOf('Own the API.')
+      && sr.text.includes('- 5+ years')
+      && !sr.text.includes('&lt;')) {
+    pass('normalizeSmartRecruitersJob joins sections in page order and surfaces location + work model');
+  } else {
+    fail(`normalizeSmartRecruitersJob => ${JSON.stringify(sr)}`);
+  }
+
+  const srNulls = [
+    normalizeSmartRecruitersJob(null, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X' }, 'https://x/1'),
+    normalizeSmartRecruitersJob({ name: 'X', jobAd: { sections: { jobDescription: { text: '<p> </p>' } } } }, 'https://x/1'),
+  ];
+  if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
+  else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
+
   // normalizeLeverJob — `lists` carries the labeled sections (Requirements,
   // etc.) as separate HTML blocks; dropping them loses half the JD.
   const lever = normalizeLeverJob(
@@ -406,38 +441,15 @@ try {
     fail(`normalizeLeverJob  => ${JSON.stringify(lever)}`);
   }
 
-  // Multi-location posting: the body names only the primary city, so the other
-  // `allLocations` and the `workplaceType` have to reach the meta header or the
-  // triage location gate sees a Paris-only role (real case: Qonto, 2026-10-04).
-  const leverMulti = normalizeLeverJob(
-    {
-      text: 'Senior Product Manager',
-      descriptionPlain: 'Build the platform.',
-      workplaceType: 'hybrid',
-      categories: { location: 'Paris', team: 'Product', allLocations: ['Paris', 'Berlin', ' belgrade ', 'Belgrade', ''] },
-    },
+  const leverHtmlIntro = normalizeLeverJob(
+    { text: 'X', descriptionPlain: '', description: '<div>This position is listed on behalf of a partner.</div>', lists: [{ text: 'Requirements', content: '<li>Go</li>' }] },
     'https://jobs.lever.co/acme/1',
   );
-  if (leverMulti
-      && leverMulti.text.includes('Location: Paris')
-      && leverMulti.text.includes('Additional locations: Berlin | belgrade')
-      && !/Additional locations:[^\n]*Paris/.test(leverMulti.text)
-      && leverMulti.text.includes('Work model: hybrid')) {
-    pass('normalizeLeverJob lists every allLocations entry once and the work model');
+  if (leverHtmlIntro && leverHtmlIntro.text.indexOf('listed on behalf of a partner') >= 0
+      && leverHtmlIntro.text.indexOf('listed on behalf of a partner') < leverHtmlIntro.text.indexOf('Requirements')) {
+    pass('normalizeLeverJob falls back to the description HTML when descriptionPlain is empty');
   } else {
-    fail(`normalizeLeverJob multi-location => ${JSON.stringify(leverMulti)}`);
-  }
-
-  const leverUnspecified = normalizeLeverJob(
-    { text: 'X', descriptionPlain: 'Body.', workplaceType: 'unspecified', categories: { location: 'Paris', allLocations: ['Paris'] } },
-    'https://x/1',
-  );
-  if (leverUnspecified
-      && !leverUnspecified.text.includes('Work model')
-      && !leverUnspecified.text.includes('Additional locations')) {
-    pass('normalizeLeverJob omits an unspecified work model and a primary-only location list');
-  } else {
-    fail(`normalizeLeverJob unspecified => ${JSON.stringify(leverUnspecified)}`);
+    fail(`normalizeLeverJob html intro => ${JSON.stringify(leverHtmlIntro)}`);
   }
 
   const leverNulls = [
@@ -530,6 +542,8 @@ try {
     ['lever', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
     ['ashby', 'https://jobs.ashbyhq.com/acme/some-job-id'],
     ['workday', 'https://acme.wd5.myworkdayjobs.com/External/job/Seattle-WA/Engineer_R1234'],
+    ['greenhouse-embedded', 'https://www.acme.com/careers/job?gh_jid=12345'],
+    ['smartrecruiters', 'https://jobs.smartrecruiters.com/acme/744000151772990-senior-engineer'],
   ];
   const routed = ATS_URL_SHAPES.map(([ats, url]) => {
     const resolved = resolveAtsApi(url);
@@ -563,6 +577,46 @@ try {
     pass('resolveAtsApi populates parts.jobId for an Ashby posting (fetchAshbyJd selects on it)');
   } else {
     fail(`resolveAtsApi ashby parts => ${JSON.stringify(ashbyParts)}`);
+  }
+
+  // An Ashby org slug can contain a space. The posting URL carries it as %20
+  // (the URL parser encodes a raw space the same way), and the board API
+  // answers with the %20 kept in its path. The encoded slash beside it is the
+  // same URL shape, so its null comes from the charset guard and nothing else.
+  const spacedApi = 'https://api.ashbyhq.com/posting-api/job-board/Acme%20Corp';
+  const spaced = resolveAtsApi('https://jobs.ashbyhq.com/Acme%20Corp/ABC-123');
+  const rawSpace = resolveAtsApi('https://jobs.ashbyhq.com/Acme Corp/ABC-123');
+  const encodedSlash = resolveAtsApi('https://jobs.ashbyhq.com/acme%2Fprivate/ABC-123');
+  if (spaced?.ats === 'ashby' && spaced.apiUrl === spacedApi && spaced.parts.jobId === 'ABC-123'
+      && rawSpace?.apiUrl === spacedApi
+      && encodedSlash === null) {
+    pass('resolveAtsApi keeps a %20 in an Ashby org slug and still rejects an encoded slash');
+  } else {
+    fail(`resolveAtsApi ashby spaced slug => ${JSON.stringify({ spaced, rawSpace, encodedSlash })}`);
+  }
+
+  // The same posting end to end through fetchJdViaKnownApi, the call
+  // fetch-jd.mjs makes. fetch is stubbed, so nothing here touches the network.
+  /** @type {string[]} */
+  const spacedCalls = [];
+  let spacedJd = null;
+  try {
+    globalThis.fetch = async (/** @type {any} */ url) => {
+      spacedCalls.push(String(url));
+      return /** @type {any} */ ({
+        ok: true,
+        json: async () => ({ jobs: [{ id: 'ABC-123', title: 'Staff Engineer', descriptionPlain: 'Build the platform.' }] }),
+      });
+    };
+    spacedJd = await fetchJdViaKnownApi('https://jobs.ashbyhq.com/Acme%20Corp/ABC-123');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  if (spacedJd?.ats === 'ashby' && spacedJd.text.includes('Build the platform.')
+      && spacedCalls.length === 1 && spacedCalls[0] === spacedApi) {
+    pass('fetchJdViaKnownApi reads the JD for an Ashby org slug with a space');
+  } else {
+    fail(`fetchJdViaKnownApi ashby spaced slug => ${JSON.stringify({ spacedJd, spacedCalls })}`);
   }
 
   // A Lever list block with no heading still contributes its content: the

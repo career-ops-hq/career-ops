@@ -773,9 +773,9 @@ function hnQueries() {
   ];
 }
 
-async function fetchHnDiscovery({ months = DEFAULT_MONTHS, diagnostics = [] } = {}) {
+async function fetchHnDiscovery({ months = DEFAULT_MONTHS, now = new Date(), diagnostics = [] } = {}) {
   const diag = diagnostics.find((d) => d.source === 'hn') || diagnostic('hn');
-  const cutoff = Math.floor(Date.now() / 1000) - months * 31 * 24 * 60 * 60;
+  const cutoff = Math.floor(now.getTime() / 1000) - months * 31 * 24 * 60 * 60;
   const out = [];
   for (const query of hnQueries()) {
     const url =
@@ -823,7 +823,7 @@ async function collectDiscoveryItems(opts, diagnostics) {
     if (requested.has(source)) hits.push(...await fetchRssDiscovery(source, diagnostics));
   }
   if (requested.has('hn')) {
-    hits.push(...await fetchHnDiscovery({ months: opts.months, diagnostics }));
+    hits.push(...await fetchHnDiscovery({ months: opts.months, now: opts.now, diagnostics }));
   }
   return hits;
 }
@@ -934,20 +934,24 @@ function printHuman(result) {
 
 export async function discoverFundedCompanies(opts = {}) {
   const months = opts.months || DEFAULT_MONTHS;
+  // The moment the window is measured back from; one value for the whole run,
+  // copied so a caller changing its own Date cannot move it mid-run.
+  const now = opts.now instanceof Date ? new Date(opts.now.getTime()) : new Date();
   const sources = (opts.sources || DEFAULT_SOURCES).map(normalizeSourceName);
   const diagnostics = [...new Set(sources)].map(diagnostic);
   const hits = Array.isArray(opts.discoveryItems)
     ? opts.discoveryItems
-    : await collectDiscoveryItems({ ...opts, months, sources }, diagnostics);
+    : await collectDiscoveryItems({ ...opts, months, sources, now }, diagnostics);
   const companies = buildCandidates(hits, {
     months,
     sort: opts.sort || DEFAULT_SORT,
     limit: opts.limit || DEFAULT_LIMIT,
+    now,
     diagnostics,
   });
 
   return {
-    generated_at: isoDate(),
+    generated_at: isoDate(now),
     window_months: months,
     sort: opts.sort || DEFAULT_SORT,
     dry_run: Boolean(opts.dryRun),

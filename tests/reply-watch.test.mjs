@@ -140,3 +140,41 @@ test('reply-watch.mjs skips Noise candidates from status recommendations', () =>
 
   rmSync(tmp, { recursive: true, force: true });
 });
+
+test('reply-watch.mjs renders and applies one confirmed update per company-wide rejection row', () => {
+  const { tmp, dataDir, trackerFile } = setupWorkspace();
+  writeFileSync(trackerFile, [
+    '# Applications', '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|---|---|---|---|---|---|---|---|',
+    '| 1 | 2026-06-01 | Acme Air | Backend Engineer | 4.0/5 | Applied | ❌ | - | |',
+    '| 2 | 2026-06-02 | Acme Air | Product Designer | 4.0/5 | Evaluated | ❌ | - | |',
+    '| 3 | 2026-07-01 | Acme Air | Finance Analyst | 4.0/5 | Interview | ❌ | - | |',
+    '',
+  ].join('\n'));
+  const candFile = join(tmp, 'company-wide.json');
+  writeFileSync(candFile, JSON.stringify([{
+    message_id: 'company-wide',
+    received_at: '2026-06-20T12:00:00Z',
+    from: 'careers@acmeair.com',
+    subject: 'Thank you for your interest in Acme Air',
+    body_snippet: 'Unfortunately, we will not be moving forward with your application.',
+    signal: 'rejection',
+  }]));
+
+  const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /company-wide rejection \(2 applications\)/);
+  assert.match(res.stdout, /#1 Acme Air \(Backend Engineer\): Applied → Rejected/);
+  assert.match(res.stdout, /#2 Acme Air \(Product Designer\): Evaluated → Rejected/);
+  assert.doesNotMatch(res.stdout, /#3 Acme Air \(Finance Analyst\).*→ Rejected/);
+
+  const tracker = readFileSync(trackerFile, 'utf-8');
+  assert.match(tracker, /\| 1 \|.+?\| Rejected \|/);
+  assert.match(tracker, /\| 2 \|.+?\| Rejected \|/);
+  assert.match(tracker, /\| 3 \|.+?\| Interview \|/);
+  const log = readFileSync(join(dataDir, 'status-log.tsv'), 'utf-8').trim().split('\n');
+  assert.equal(log.length, 2);
+
+  rmSync(tmp, { recursive: true, force: true });
+});

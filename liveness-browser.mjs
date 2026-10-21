@@ -9,11 +9,57 @@ import { classifyLiveness } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
-const HYDRATION_WAIT_MS = 2_000;
-// Upper bound on the extra wait for a same-origin child frame to populate, and
-// the poll interval inside it. Only spent when such a frame exists at all.
+// Single-page-app ATS render the posting after domcontentloaded, so the page
+// is read repeatedly until the verdict stops being a "not rendered yet" code;
+// a single early read would call a live posting insufficient_content.
+// Measured over 386 loads of 188 posting URLs: the first decisive verdict
+// arrived at p50 1785ms, p95 3071ms and at most 3308ms outside iCIMS (whose
+// frames have their own poll below); 17 reads 250ms apart cover 4000ms. Bounded by a count rather than a clock so a
+// page double whose waitForTimeout returns at once still terminates.
+// Once a read is decisive no later read flipped a live posting to closed, so
+// stopping at the first decisive read is safe. Stopping when the text stops
+// changing is NOT: a spinner holds the text constant on live pages.
+const HYDRATION_POLL_MS = 250;
+const HYDRATION_MAX_POLLS = 16;
+const HYDRATING_CODES = new Set(['insufficient_content', 'no_apply_control']);
+// Upper bound on the extra wait for same-origin child frames to populate, and
+// the poll interval inside it. Only spent when the page poll ends undecided
+// while such a frame is present.
 const FRAME_CONTENT_TIMEOUT_MS = 6_000;
 const FRAME_CONTENT_POLL_MS = 500;
+// A failed navigation is not over when page.goto rejects: Chromium commits its
+// error page (chrome-error://chromewebdata/) just after, 1-69 ms later over 36
+// failed loads (a host with no address, four kinds of TLS failure). Playwright
+// reports a goto that is still waiting when that commit lands as "interrupted
+// by another navigation" (microsoft/playwright#35944), and Chromium goes on
+// loading the URL that goto asked for, whose late commit then interrupts the
+// goto after it. On the one page that check-liveness and scan --verify share,
+// one such failure turned the checks after it into navigation_errors. So a
+// check whose navigation failed waits for that commit before it returns, up to
+// this long. A goto that timed out has nothing to wait for: no error page
+// commits, and the next goto cancels it.
+const FAILED_NAVIGATION_COMMIT_MS = 2_000;
+
+// BambooHR's client bundle can throw during first paint — a failed
+// /globals/locale request followed by an uncaught TypeError reading
+// `hasPasskey` on null — which halts the SPA on its bare loading spinner for
+// the whole hydration poll, so a live posting reads as insufficient_content. The
+// posting itself is untouched; a reload clears it. This is a shared
+// front-end bug across every *.bamboohr.com tenant (not one company's
+// board) and common enough to matter: rerun checkUrlLiveness in a loop
+// against any live *.bamboohr.com posting URL with this branch disabled to
+// see the current failure rate.
+//
+// Scoped to this one host on purpose, not a generic "flaky ATS" mechanism: no
+// other provider has shown this failure signature, and retrying every
+// insufficient-content verdict on every host would pay an extra page load on
+// every genuinely dead posting for no evidence of benefit elsewhere. If a
+// second ATS turns up the same symptom, generalize then.
+const BAMBOOHR_HOSTS = [/(^|\.)bamboohr\.com$/];
+
+function isBambooHrHost(hostname) {
+  return BAMBOOHR_HOSTS.some((pattern) => pattern.test(hostname));
+}
 
 /**
  * Same-origin test used to decide whether a child frame is part of the posting
@@ -77,6 +123,9 @@ export function jitteredDelayMs(baseMs) {
 //      also be matched against the IPv4 block list.
 // `0.0.0.0` and the all-zeros IPv6 `::` both reach loopback on Linux and need
 // explicit entries; the original list omitted them.
+//
+// IPv6 ULA is fc00::/7 (RFC 4193): both fc00::/8 and fd00::/8. IPv6
+// link-local is fe80::/10 (RFC 4291): fe80–febf, not only the fe80: prefix.
 const PRIVATE_HOST_PATTERNS = [
   /^localhost$/,
   /^localhost\.localdomain$/,
@@ -88,8 +137,8 @@ const PRIVATE_HOST_PATTERNS = [
   /^169\.254\./,
   /^::1$/,
   /^::$/,
-  /^fc[0-9a-f]{2}:/,
-  /^fe80:/,
+  /^f[cd][0-9a-f]{2}:/,
+  /^fe[89ab][0-9a-f]:/,
 ];
 
 // Lowercase, strip IPv6 brackets, strip FQDN trailing dot. The `hostname`
@@ -147,6 +196,10 @@ export function rejectPrivateOrInvalid(url) {
 }
 
 const dnsCache = new Map();
+// Hold failures for 30 s, the same TTL as providers/_dns-cache.mjs, so an outage
+// is not pinned for the whole process. Unlike that cache, this includes NXDOMAIN:
+// resolveViaDns turns all lookup failures into an empty answer.
+const DNS_NEGATIVE_TTL_MS = 30_000;
 
 // Real DNS: resolve4 + resolve6 + lookup, each tolerant of its own failure, so a
 // host that only answers on one of the three still yields an address list.
@@ -195,8 +248,9 @@ export function setHostResolver(resolver) {
 async function resolveDnsCached(hostname) {
   if (dnsCache.has(hostname)) {
     const cached = dnsCache.get(hostname);
-    if (cached instanceof Error) throw cached;
-    return cached;
+    if (Array.isArray(cached)) return cached;
+    if (Date.now() < cached.expiresAt) throw cached.error;
+    dnsCache.delete(hostname);
   }
   try {
     const addresses = await hostResolver(hostname);
@@ -212,10 +266,20 @@ async function resolveDnsCached(hostname) {
     dnsCache.set(hostname, addresses);
     return addresses;
   } catch (err) {
-    dnsCache.set(hostname, err);
+    if (!Array.isArray(dnsCache.get(hostname))) {
+      dnsCache.set(hostname, { error: err, expiresAt: Date.now() + DNS_NEGATIVE_TTL_MS });
+    }
     throw err;
   }
 }
+
+// What a DNS filter answers for a name it blocks: 0.0.0.0 and ::. That is
+// Pi-hole's default, and what AdGuard DNS and Control D answered for the
+// trackers they blocked on 2026-10-11; hosts-file blocklists map names to
+// 0.0.0.0 too. No site is published at either address, so an answer whose only
+// private addresses are these is the user's own filter at work, not a host
+// resolving into private space. The request is blocked all the same.
+const SINKHOLE_ADDRESSES = new Set(['0.0.0.0', '::']);
 
 // Second layer of the egress guard: `rejectPrivateOrInvalid` only sees the
 // literal host, so a public hostname that *resolves* to private space still
@@ -227,26 +291,26 @@ export async function validateUrlSecurity(urlString) {
   const hostname = url.hostname;
   const host = normalizeHost(hostname);
   const addresses = await resolveDnsCached(host);
+  // Every private address, not only the first: whether a DNS filter gave the
+  // answer depends on all of them.
+  const blocked = [];
   for (const ip of addresses) {
     const norm = normalizeHost(ip);
     const mapped = extractMappedIPv4(norm);
     const candidates = mapped ? [norm, mapped] : [norm];
-    for (const candidate of candidates) {
-      if (PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate))) {
-        throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
-      }
-    }
+    const hit = candidates.find((candidate) => PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate)));
+    if (hit) blocked.push({ ip, hit });
+  }
+  if (blocked.length > 0) {
+    const denied = new Error(`Access denied: Egress guard blocked private target IP ${blocked[0].ip}`);
+    if (blocked.every(({ hit }) => SINKHOLE_ADDRESSES.has(hit))) denied.livenessCode = 'dns_sinkhole';
+    throw denied;
   }
 }
 
-export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
-  const guardError = rejectPrivateOrInvalid(url);
-  if (guardError) {
-    return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
-  }
-  if (page) {
-    page._blockedByGuard = null;
-  }
+// Rediscovery can navigate a newly created page before its first liveness
+// check. Install the same URL/DNS guards before that search as well.
+export async function installLivenessRouteGuard(page) {
   if (page && typeof page.route === 'function' && !page._routeInterceptorRegistered) {
     page._routeInterceptorRegistered = true;
     await page.route('**/*', async (route) => {
@@ -271,10 +335,26 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         // opened by hand to confirm: 11,178 characters of live posting and a
         // working apply control, called uncertain because of a dead tracker.
         //
+        // A tracker the user's own DNS filter blocks says nothing about the
+        // posting either. validateUrlSecurity tags that answer `dns_sinkhole`.
+        // Measured 2026-10-11 over 35 postings on 19 boards, with Control D
+        // as the resolver: 20 read blocked_host because of Google Analytics,
+        // DoubleClick, Cloudflare Insights, LinkedIn's scripts and the like, and
+        // 11 of the 20 had a visible apply control. AdGuard DNS: 12 blocked_host.
+        //
         // The request is still aborted either way, so the egress guard loses
         // nothing. Only the VERDICT stops being poisoned, and only for a
-        // subresource: if the main document itself cannot resolve, that is a
+        // subresource: if the main document itself has no usable address, that is a
         // real finding about the posting and still counts.
+        //
+        // It counts as `uncertain` under its DNS tag, though, not as `blocked_host`.
+        // That code says the URL points into private space, and `scan --verify`
+        // records it as skipped_blocked_host, for good. No usable address can just
+        // as well be a DNS outage or the user's own filter, which say nothing lasting
+        // about the URL. The catch in checkUrlLiveness treats a DNS failure as
+        // transient for the same reason, and `--verify` keeps this verdict as it
+        // keeps a navigation_error.
+        //
         // Whether this was the main document or a subresource can only be asked
         // of a real Playwright request. Callers may pass a lighter route double
         // (the test suite does, with request() returning just a url()), and for
@@ -289,27 +369,71 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         const isMainDocument = canTell
           ? request.isNavigationRequest() && request.frame() === page.mainFrame()
           : true;
-        if (err?.livenessCode !== 'dns_no_addresses' || isMainDocument) {
+        const noUsableAddress = err?.livenessCode === 'dns_no_addresses' || err?.livenessCode === 'dns_sinkhole';
+        if (!noUsableAddress) {
           page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        } else if (isMainDocument) {
+          page._blockedByGuard = { code: err.livenessCode, reason: err.message };
         }
         return route.abort('blockedbyclient');
       }
     });
   }
+}
+
+// One navigation of the page (a goto or a reload). If it fails, wait for the
+// main frame to commit Chromium's error page, so the page is settled for
+// whatever navigates it next (see FAILED_NAVIGATION_COMMIT_MS). No other
+// navigation ends the wait: a child frame's, or the old page changing its own
+// URL (a fragment or history change fires framenavigated too), would let the
+// next goto start before the error page commits and interrupts it. A lighter
+// page double without waitForEvent skips the wait.
+async function navigateSettled(page, navigate) {
   try {
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
+    return await navigate();
+  } catch (err) {
+    const canWait = typeof page.waitForEvent === 'function' && typeof page.mainFrame === 'function';
+    if (canWait && err?.name !== 'TimeoutError') {
+      await page
+        .waitForEvent('framenavigated', {
+          predicate: (frame) => frame === page.mainFrame() && frame.url().startsWith('chrome-error:'),
+          timeout: FAILED_NAVIGATION_COMMIT_MS,
+        })
+        .catch(() => {});
+    }
+    throw err;
+  }
+}
+
+export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
+  const guardError = rejectPrivateOrInvalid(url);
+  if (guardError) {
+    return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
+  }
+  if (page) {
+    page._blockedByGuard = null;
+  }
+  await installLivenessRouteGuard(page);
+  try {
+    const response = await navigateSettled(page, () =>
+      page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS }));
     const status = response?.status() ?? 0;
 
-    // Give SPAs (Ashby, Lever, Workday) time to hydrate. extraSettleMs adds slack
-    // for the headed retry, where a JS anti-bot interstitial needs a moment to clear.
-    await page.waitForTimeout(HYDRATION_WAIT_MS + extraSettleMs);
+    // extraSettleMs is slack for the headed retry, where a JS anti-bot
+    // interstitial needs a moment to clear before the first read.
+    if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
 
-    const finalUrl = page.url();
-    const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
     const extractApplyControls = () => {
+      // A design-system button is a custom element: UKG Pro (UltiPro) renders
+      // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
+      // native <button> inside its shadow root has no text of its own (the
+      // label is slotted in), so the element itself is the control to read.
+      // No selector matches a tag-name suffix, hence the filter.
+      const customButtons = Array.from(document.querySelectorAll('*'))
+        .filter((element) => element.localName.endsWith('-button'));
       const candidates = Array.from(
         document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
-      );
+      ).concat(customButtons);
 
       return candidates
         .filter((element) => {
@@ -339,8 +463,77 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         .filter(Boolean);
     };
 
-    let applyControls = await page.evaluate(extractApplyControls);
-    let frameText = '';
+    // Frame aggregation is an enhancement, never a requirement. Callers may pass
+    // a lightweight page object that only implements goto/url/evaluate — the
+    // test doubles in test-all.mjs do — and such a caller must keep getting the
+    // top-level verdict rather than a navigation_error.
+    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
+
+    const childFrames = (topUrl) =>
+      !supportsFrames
+        ? []
+        : page.frames().filter((frame) => {
+            if (frame === page.mainFrame()) return false;
+            try {
+              return sameOrigin(frame.url() || '', topUrl); // excludes about:blank, ads, tag managers
+            } catch {
+              return false;
+            }
+          });
+
+    // One reading of the page: the top-level document plus every same-origin
+    // child frame, so a posting rendered inside a frame and one rendered inline
+    // are judged the same way. A top-level read that throws propagates; a frame
+    // that detaches or turns cross-origin mid-read is skipped.
+    const readPage = async () => {
+      const finalUrl = page.url();
+      let bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+      let applyControls = await page.evaluate(extractApplyControls);
+      for (const frame of childFrames(finalUrl)) {
+        try {
+          const text = await frame.evaluate(() => document.body?.innerText ?? '');
+          if (text && text.trim()) bodyText += '\n' + text;
+          applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
+        } catch {
+          // detached or cross-origin mid-read; the rest of the reading still stands
+        }
+      }
+      return { finalUrl, bodyText, applyControls };
+    };
+
+    // Read the page until the verdict is decisive, the request guard has
+    // already decided it, or HYDRATION_MAX_POLLS waits have passed. A frame
+    // appearing does not end the poll: it may be a sign-in, chat or consent
+    // widget rather than the posting, and the posting can still render on the
+    // top level. A read that throws (the SPA rebuilding its DOM) is retried. If
+    // the poll ends on a failed read while the last good reading still looked
+    // unrendered, that reading is stale evidence, so the error propagates and
+    // becomes a navigation_error instead of an expired verdict; the same
+    // happens when no read succeeded at all.
+    const pollPage = async (pageStatus) => {
+      let reading = null;
+      let hydrating = true;
+      let lastError = null;
+      for (let poll = 0; ; poll += 1) {
+        try {
+          reading = await readPage();
+          lastError = null;
+          const { code } = classifyLiveness({ status: pageStatus, requestedUrl: url, ...reading });
+          hydrating = HYDRATING_CODES.has(code);
+          if (!hydrating) break;
+        } catch (err) {
+          lastError = err;
+        }
+        if (page._blockedByGuard || poll >= HYDRATION_MAX_POLLS) break;
+        await page.waitForTimeout(HYDRATION_POLL_MS);
+      }
+      if (lastError && hydrating) throw lastError;
+      if (hydrating && childFrames(reading.finalUrl).length > 0) {
+        await waitForFramesToFill(reading.finalUrl);
+        reading = await readPage();
+      }
+      return reading;
+    };
 
     // Some ATS render the whole posting inside a same-origin iframe and leave the
     // top-level document as an empty shell. iCIMS is the reference case: measured
@@ -356,43 +549,17 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
     // before any content check, and its error frame carries zero apply controls.
     // The frame ATTACHES fast but FILLS late. Measured on iCIMS 2026-08-14: the
     // same-origin child frame is present at 2000ms with 0 characters and only
-    // populates between 3000 and 4000ms, so reading it at HYDRATION_WAIT_MS gets
-    // an empty document and changes nothing. Poll until it has content, bounded.
-    // The cost is only paid on pages that actually have a same-origin child
-    // frame, so the ATS that render inline are unaffected.
-    // Frame aggregation is an enhancement, never a requirement. Callers may pass
-    // a lightweight page object that only implements goto/url/evaluate — the
-    // test doubles in test-all.mjs do — and such a caller must keep getting the
-    // top-level verdict rather than a navigation_error.
-    const supportsFrames = typeof page?.frames === 'function' && typeof page?.mainFrame === 'function';
-
-    const childFrames = () =>
-      !supportsFrames
-        ? []
-        : page.frames().filter((frame) => {
-            if (frame === page.mainFrame()) return false;
-            try {
-              return sameOrigin(frame.url() || '', finalUrl); // excludes about:blank, ads, tag managers
-            } catch {
-              return false;
-            }
-          });
-
-    // A 404/410 is decided by the status line alone, so no amount of frame
-    // content can change it. Without this, a dead posting whose error page also
-    // renders into an iframe pays the poll while that error page fills, purely
-    // to be told what the status already said. Measured on two dead iCIMS
-    // postings: 5822ms and 3314ms end to end, the spread being poll iterations.
+    // populates between 3000 and 4000ms, so reading it as soon as it attaches
+    // gets an empty document and changes nothing. The page poll reads the frame
+    // on every pass, so a frame that fills within the poll is caught there; a
+    // poll that ends still undecided with a same-origin frame present waits for
+    // the frames to fill, bounded, then takes one fresh reading. The cost is
+    // only paid on pages that actually have a same-origin child frame, so the
+    // ATS that render inline are unaffected.
     //
-    // The status rule is NOT restated here. classifyLiveness owns it, so this
-    // asks it and keys off the code it returns; a duplicated `status === 410`
-    // would be a second copy of that rule waiting to drift.
-    const topLevelVerdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
-    if (topLevelVerdict.code === 'http_gone') {
-      return topLevelVerdict;
-    }
-
-    if (childFrames().length > 0) {
+    // A 404/410 is decided on the first read: classifyLiveness checks the status
+    // before any content, so the poll stops there and no frame wait is paid.
+    const waitForFramesToFill = async (topUrl) => {
       const deadline = Date.now() + FRAME_CONTENT_TIMEOUT_MS;
       // Wait for EVERY qualifying frame, not merely the first one to fill: with
       // two same-origin frames the posting could otherwise be read while still
@@ -400,7 +567,7 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
       // qualifying frame per page, so in practice this is the same loop.
       for (;;) {
         let anyEmpty = false;
-        for (const frame of childFrames()) {
+        for (const frame of childFrames(topUrl)) {
           try {
             const probe = await frame.evaluate(() => document.body?.innerText ?? '');
             if (!probe.trim()) anyEmpty = true;
@@ -411,29 +578,65 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
         if (!anyEmpty || Date.now() >= deadline) break;
         await page.waitForTimeout(FRAME_CONTENT_POLL_MS);
       }
+    };
+
+    const reading = await pollPage(status);
+    const { finalUrl } = reading;
+    let verdict = classifyLiveness({ status, requestedUrl: url, ...reading });
+
+    // See BAMBOOHR_HOSTS above. Only fires on the specific verdict this
+    // render race produces (a short/empty body, not an explicit closure
+    // banner or a 404/410, both of which are trusted as-is).
+    if (verdict.code === 'insufficient_content' && typeof page.reload === 'function') {
+      let host = '';
+      try { host = new URL(finalUrl || url).hostname; } catch { /* leave empty, retry test below just fails closed */ }
+      if (isBambooHrHost(host)) {
+        try {
+          const reloadResponse = await navigateSettled(page, () =>
+            page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS }));
+          const reloadStatus = reloadResponse?.status() ?? status;
+          const reloaded = await pollPage(reloadStatus);
+          const reloadVerdict = classifyLiveness({ status: reloadStatus, requestedUrl: url, ...reloaded });
+          const stillNotFound = reloadVerdict.code === 'insufficient_content' || reloadVerdict.code === 'listing_page';
+          verdict = !stillNotFound
+            ? { ...reloadVerdict, reason: `${reloadVerdict.reason} (after BambooHR reload retry)` }
+            : {
+                result: 'uncertain',
+                code: 'bamboohr_render_retry_failed',
+                reason: 'BambooHR page did not render content even after a reload retry — not trusted as evidence of removal',
+              };
+        } catch (err) {
+          // Reload itself failed — still never let this surface as `expired`.
+          verdict = {
+            result: 'uncertain',
+            code: 'bamboohr_render_retry_failed',
+            reason: `BambooHR reload retry failed: ${err.message.split('\n')[0]}`,
+          };
+        }
+      }
     }
 
-    for (const frame of childFrames()) {
-      try {
-        const text = await frame.evaluate(() => document.body?.innerText ?? '');
-        if (text && text.trim()) frameText += '\n' + text;
-        applyControls = applyControls.concat(await frame.evaluate(extractApplyControls));
-      } catch {
-        // detached or cross-origin mid-read; the top-level reading still stands
-      }
+    // A page still empty when the poll gives up (after the frame wait, if a
+    // same-origin frame is present) has shown nothing: no posting, no closure
+    // notice, no error page. AGENTS.md calls a loading placeholder unconfirmed,
+    // not closed, and a false `expired` is the expensive direction (see the
+    // iCIMS note above). Measured over 218 loads on 17 ATS: 18 were still empty
+    // when the poll ended, 16 of them live postings. Only a body with no text at
+    // all qualifies: a short page ("Page not found", a header and footer) keeps
+    // insufficient_content.
+    if (verdict.code === 'insufficient_content' && !reading.bodyText.trim()) {
+      verdict = {
+        result: 'uncertain',
+        code: 'empty_page',
+        reason: 'page still empty when the poll ended — not trusted as evidence of removal',
+      };
     }
 
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
     }
 
-    return classifyLiveness({
-      status,
-      requestedUrl: url,
-      finalUrl,
-      bodyText: bodyText + frameText,
-      applyControls,
-    });
+    return verdict;
   } catch (err) {
     if (page && page._blockedByGuard) {
       return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };

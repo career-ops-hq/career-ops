@@ -57,6 +57,11 @@ const cases = [
   ['N/A',                 'N/A'],
   ['n/a',                 'N/A'],
   ['unknown',             'N/A'],
+  // A decimal comma, as the nl, de and fr modes write numbers. Reading only the
+  // integer part recorded 4,2 as a genuine 4/5.
+  ['4,2/5',               '4.2/5'],
+  ['3,75',                '3.75/5'],
+  ['4,2/10',              'N/A'],
 ];
 
 const problems = [];

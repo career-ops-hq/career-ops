@@ -186,7 +186,7 @@
 7. Быть прямым и конкретным — без воды
 8. Для русскоязычных вакансий: технический русский, короткие предложения, глаголы действия.
 8b. URL-ы кейсов в Professional Summary PDF (рекрутер может прочитать только это).
-9. **Добавления в трекер как TSV** — не добавлять НОВЫЕ записи в `data/applications.md` напрямую; для новых записей писать TSV в `batch/tracker-additions/` и делать merge. Прямое редактирование существующих строк допустимо для обновления `status`/`notes`. Писать сначала строку **названий колонок**, под ней — ровно одну строку данных (см. AGENTS.md, раздел «TSV Format for Tracker Additions»). Именно строка названий позволяет `merge-tracker.mjs` сопоставлять поля по ИМЕНИ, а не угадывать, какая колонка — score, а какая — status.
+9. **Добавления в трекер как TSV** — не добавлять НОВЫЕ записи в `data/applications.md` напрямую; для новых записей писать TSV в `batch/tracker-additions/` и делать merge. Существующие строки тоже не править вручную: `status` и `notes` обновлять через `node set-status.mjs`. Писать сначала строку **названий колонок**, под ней — ровно одну строку данных (см. AGENTS.md, раздел «TSV Format for Tracker Additions»). Именно строка названий позволяет `merge-tracker.mjs` сопоставлять поля по ИМЕНИ, а не угадывать, какая колонка — score, а какая — status.
 10. **Включать `**URL:**` в заголовок каждого отчёта.**
 
 ### Инструменты
@@ -197,9 +197,9 @@
 | WebFetch | Fallback для извлечения JD со статических страниц |
 | Playwright | Верификация вакансий (browser_navigate + browser_snapshot). **НИКОГДА 2+ агентов с Playwright параллельно.** |
 | Read | cv.md, _profile.md, article-digest.md, cv-template.html |
-| Write | Временный HTML для PDF, data/applications.md, отчёты .md |
-| Edit | Обновление трекера |
-| Bash | `node generate-pdf.mjs` |
+| Write | Временный HTML для PDF, отчёты .md, TSV-файлы для трекера в `batch/tracker-additions/` (никогда не `data/applications.md` напрямую) |
+| Edit | Правки в отчётах и другом сгенерированном контенте. Таблицу трекера напрямую не редактировать: новые строки добавляются через TSV и объединяются командой `node merge-tracker.mjs`, изменения статуса и заметок выполняются через `node set-status.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |
 
 ### Приоритет скорости
 - Рабочее демо + метрики > перфекционизм

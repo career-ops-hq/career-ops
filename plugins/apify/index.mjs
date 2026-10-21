@@ -115,21 +115,22 @@ export function htmlToText(s) {
     .trim();
 }
 
-// Write jds/{slug}-{hash}.md and return its relative path. The URL-derived hash
-// keeps two distinct postings sharing a company+title from colliding. Atomic
-// (flag:'wx') against the 10-worker TOCTOU race; any FS failure returns null so
-// the caller falls back to the remote URL.
-function saveJd(normalized, descriptionBody, sourceLabel) {
+// Write jds/{slug}-{hash}.md under `root` and return its root-relative path. The
+// URL-derived hash keeps two distinct postings sharing a company+title from
+// colliding. Atomic (flag:'wx') against the 10-worker TOCTOU race; any FS
+// failure returns null so the caller falls back to the remote URL.
+function saveJd(normalized, descriptionBody, sourceLabel, root) {
   let relPath = null;
   try {
-    mkdirSync(JDS_DIR, { recursive: true });
+    const jdsDir = join(root, JDS_DIR);
+    mkdirSync(jdsDir, { recursive: true });
     const baseSlug = slugify(`${normalized.company}-${normalized.title}`);
     const urlHash = createHash('sha1')
       .update(String(normalized.url || `${normalized.company}-${normalized.title}`))
       .digest('hex')
       .slice(0, 10);
     const filename = `${baseSlug}-${urlHash}.md`;
-    const filepath = join(JDS_DIR, filename);
+    const filepath = join(jdsDir, filename);
     relPath = `${JDS_DIR}/${filename}`;
     if (existsSync(filepath)) return relPath;
     const today = new Date().toISOString().slice(0, 10);
@@ -203,6 +204,11 @@ export default {
       const items = await runActor(entry.actor, entry.input || {}, opts);
 
       const useLocalJd = entry.field_map.description != null;
+      // `local:jds/…` is read back against the data root, so the capture is
+      // written there (ctx.dataRoot) and not in the working directory. A ctx
+      // that carries no dataRoot comes from an engine older than the
+      // capability, and keeps the working directory that engine's plugins used.
+      const root = ctx?.dataRoot || process.cwd();
       const sourceLabel = String(entry.actor || 'apify').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 
       return items
@@ -216,7 +222,7 @@ export default {
             return normalized;
           }
           const remoteUrl = normalized.url;
-          const jdPath = saveJd(normalized, descriptionBody, sourceLabel);
+          const jdPath = saveJd(normalized, descriptionBody, sourceLabel, root);
           if (jdPath === null) return normalized;
           normalized.url = `local:${jdPath}`;
           normalized._remote_url = remoteUrl;

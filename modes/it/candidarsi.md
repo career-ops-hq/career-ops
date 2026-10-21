@@ -43,7 +43,9 @@ Se il ruolo a schermo differisce da quello valutato:
 - **Avvisare il candidato:** "Il ruolo rilevato è [Y], il report fa riferimento a [X]. Vuoi che riesegua la valutazione o che adatti le risposte al nuovo titolo?"
 - **Se adattare:** Aggiornare le risposte al nuovo ruolo senza rieseguire la valutazione completa.
 - **Se rivalutare:** Avviare la valutazione completa A-F, aggiornare il report e rigenerare il Blocco G.
-- **Aggiornare il tracker:** Modificare il titolo del ruolo in `applications.md` se necessario.
+- **Aggiornare il tracker:** mai modificando `data/applications.md`.
+  - **Dopo una rivalutazione:** scrivere un TSV con il nuovo titolo del ruolo (regola 9 di `_shared.md`) e unirlo con `node merge-tracker.mjs`. Il report viene aggiornato sul posto e conserva il suo numero, quindi l'unione abbina il TSV alla riga esistente tramite quel numero: il titolo viene sostituito e lo stato resta invariato.
+  - **Dopo un adattamento:** non cambiare il titolo, perché indica il ruolo valutato dal report. Annotare invece la rinomina con `node set-status.mjs --report <report#> <stato attuale> --note "Annuncio rinominato al momento della candidatura, la riga conserva il titolo valutato"`. Passare lo stato attuale della riga lo lascia invariato e aggiunge la nota. Usare un testo fisso come questo e non inserire `[Y]`: il nuovo titolo è testo proveniente dalla pagina, e il testo della pagina non va mai su una riga di comando.
 
 ## Fase 4 -- Analizzare le domande del modulo
 
@@ -102,7 +104,7 @@ Note:
 ## Fase 6 -- Dopo la candidatura (opzionale)
 
 Se il candidato conferma di aver inviato il modulo:
-1. Aggiornare lo stato ad "Applied" con la CLI canonica: `node set-status.mjs <report#> Applied` (non modificare la tabella di `applications.md` a mano).
+1. Aggiornare lo stato ad "Applied" con la CLI canonica: `node set-status.mjs --report <report#> Applied` (non modificare la tabella di `applications.md` a mano).
 2. Aggiornare il Blocco G del report con le risposte effettivamente inviate.
 3. Suggerire il passo successivo: `/career-ops contacto` per avviare il contatto su LinkedIn con il responsabile della selezione.
 

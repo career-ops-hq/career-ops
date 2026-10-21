@@ -43,7 +43,9 @@
 - **후보자에게 알림**: "역할이 [X]에서 [Y]로 바뀐 것 같습니다. 새 역할로 다시 평가할까요, 아니면 새 title에 맞춰 답변만 조정할까요?"
 - **조정 선택 시**: 재평가 없이 새 역할에 맞춰 답변을 조정합니다.
 - **재평가 선택 시**: 전체 A-F 평가를 실행하고, report를 업데이트하고, 블록 G를 다시 생성합니다.
-- **tracker 업데이트**: 필요한 경우 `applications.md`의 역할명을 수정합니다.
+- **tracker 업데이트**: `data/applications.md`를 직접 수정하지 않습니다.
+  - **재평가한 경우**: 새 역할명을 담은 TSV를 `batch/tracker-additions/`에 쓰고 `node merge-tracker.mjs`로 병합합니다. report는 같은 파일에서 업데이트되어 번호가 유지되므로, 병합은 그 번호로 TSV를 기존 row와 매칭합니다: 역할명은 교체되고 status는 유지됩니다.
+  - **조정한 경우**: 역할명을 바꾸지 않습니다. 역할명은 report가 평가한 역할을 가리키기 때문입니다. 변경 사실은 note로 기록합니다: `node set-status.mjs --report <report#> <현재 status> --note "지원 시점에 공고 제목이 변경됨, row는 평가한 역할명을 유지"`. row의 현재 status를 그대로 전달하면 status는 바뀌지 않고 note만 추가됩니다. note는 이처럼 고정된 문구로 쓰고 `[Y]`는 넣지 않습니다. 새 역할명은 페이지에서 온 텍스트이며, 페이지의 텍스트는 command line에 넣지 않습니다.
 
 ## Step 4 -- 지원서 질문 분석
 
@@ -103,7 +105,7 @@ Notes:
 ## Step 6 -- 지원 후 처리 (선택)
 
 후보자가 지원서를 제출했다고 확인하면:
-1. tracker status 변경은 `data/applications.md`를 직접 수정하지 않습니다. `batch/tracker-additions/`에 `Applied` 상태의 TSV update를 쓰고 `node merge-tracker.mjs`로 병합합니다.
+1. 정식 CLI로 status를 `Applied`로 변경합니다: `node set-status.mjs --report <report#> Applied` (`data/applications.md` 표를 직접 수정하지 않습니다). TSV 병합은 기존 row의 status를 바꾸지 않습니다.
 2. 최종 답변을 report의 블록 G에 업데이트합니다.
 3. 다음 단계로 `/career-ops contacto`를 제안해 hiring manager 또는 recruiter에게 LinkedIn outreach를 할 수 있게 합니다.
 

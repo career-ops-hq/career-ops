@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { rmSync } from './helpers.mjs';
 import { applicationArtifactPaths, ensureApplicationArtifactDirs, slugifySegment, writeReuseDecision } from '../application-artifacts.mjs';
 import { repoRelativeManifestPath, workspaceRelativeManifestPath } from '../generate-pdf.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
 
 function expectError(label, action, pattern) {
   try {
@@ -63,7 +64,10 @@ try {
   if (slugifySegment('!!!') === 'application') console.log('  ✅ punctuation-only slugs use the application fallback');
   else throw new Error('punctuation-only slug did not use the application fallback');
 
-  const repoPaths = applicationArtifactPaths({ reportNum: 7, company: 'Acme AI', role: 'Senior AI Engineer', version: 2, root: join(process.cwd(), 'output') });
+  // Manifest paths are relative to the workspace, which is the data root, not
+  // the working directory: the two differ whenever the data root is pointed
+  // elsewhere, as the suite points it (tests/helpers.mjs, #5113).
+  const repoPaths = applicationArtifactPaths({ reportNum: 7, company: 'Acme AI', role: 'Senior AI Engineer', version: 2, root: join(getCareerOpsRoot(), 'output') });
   if (workspaceRelativeManifestPath(repoPaths.cv.tailored.html) === 'output/007-acme-ai-senior-ai-engineer/cv/tailored/v002/cv.html'
       && workspaceRelativeManifestPath(repoPaths.cv.tailored.pdf) === 'output/007-acme-ai-senior-ai-engineer/cv/tailored/v002/cv.pdf'
       && repoRelativeManifestPath(repoPaths.cv.tailored.pdf) === workspaceRelativeManifestPath(repoPaths.cv.tailored.pdf)) {

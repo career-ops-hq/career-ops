@@ -74,6 +74,31 @@ export default {
 };
 
 /**
+ * Whole-word, case-insensitive containment (same check as recruitee's
+ * containsWholeWord), so "Niger, Sokoto, NG" is seen to already name "NG".
+ * @param {string} text
+ * @param {string} word
+ */
+function containsWholeWord(text, word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
+/**
+ * Append `country` to a ready-made location name that doesn't already name it.
+ * Breezy's `location.name` is often just "Seattle, WA" while `country.name`
+ * carries the country — reading only the name hid it from location_filter, so
+ * a US-only posting slipped past a "United States" block entry (the reverse
+ * face of the Ashby primary-location bug fixed in providers/ashby.mjs).
+ * @param {string} name
+ * @param {unknown} country
+ */
+function withCountry(name, country) {
+  const c = typeof country === 'string' ? country.trim() : '';
+  return c && !containsWholeWord(name, c) ? `${name}, ${c}` : name;
+}
+
+/**
  * Parse a Breezy `<tenant>.breezy.hr/json` response. Exported for unit tests.
  *
  * Breezy returns a top-level array of positions:
@@ -85,8 +110,9 @@ export default {
  *   key. The per-offer URL is display-only (recorded in the pipeline/history,
  *   never server-fetched here), so it is not host-locked — only a well-formed
  *   `https:` URL is required; rows without one are dropped.
- * - location: prefer the ready-made `location.name`; else assemble from
- *   city / state / country.name, appending "Remote" when `is_remote` is truthy.
+ * - location: prefer the ready-made `location.name` (with `country.name`
+ *   appended when the name doesn't already contain it); else assemble from
+ *   city / state / country.name. "Remote" is appended when `is_remote` is truthy.
  * - postedAt: parsed from the ISO `published_date` when present and valid — Breezy
  *   gives it for free in the list payload, so recency consumers can use it.
  *
@@ -115,7 +141,9 @@ export function parseBreezyResponse(json, companyName) {
     const loc = j.location || {};
     const remote = loc.is_remote ? 'Remote' : '';
     const assembled = [loc.city, loc.state, loc.country?.name].filter(Boolean).join(', ');
-    const base = (typeof loc.name === 'string' && loc.name.trim()) ? loc.name.trim() : assembled;
+    const base = (typeof loc.name === 'string' && loc.name.trim())
+      ? withCountry(loc.name.trim(), loc.country?.name)
+      : assembled;
     const location = remote && !/remote/i.test(base)
       ? [base, remote].filter(Boolean).join(', ')
       : base;

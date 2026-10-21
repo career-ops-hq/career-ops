@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import * as yaml from 'js-yaml';
 import { isMainModule } from '../lib/is-main-module.mjs';
+import { validateFlags } from '../lib/cli-flags.mjs';
 
 /**
  * Sanitizes plain text for ATS forms (converting bullets, dashes, quotes, and stripping emojis/non-breaking spaces).
@@ -369,6 +370,18 @@ export function formatAtsText(profile = {}, options = {}) {
 
 // Main CLI execution guard (repo convention: lib/is-main-module.mjs, #3170)
 if (isMainModule(import.meta.url)) {
+  validateFlags(process.argv.slice(2), ['--section', '--out', '--profile', '--cv', '--help', '-h'], `Usage: node scripts/export-ats-text.mjs [options]
+
+Export profile and CV sections as plain text for ATS forms.
+
+Options:
+  --section <name>  Export personal, summary, skills, experience or education only
+  --out <path>      Write to a file instead of stdout
+  --profile <path>  Profile YAML (default: CAREER_OPS_PROFILE or config/profile.yml)
+  --cv <path>       CV Markdown (default: CAREER_OPS_CV or cv.md, when present)
+  --help, -h        Show help without reading the profile/CV or writing output
+`, { valueFlags: ['--section', '--out', '--profile', '--cv'], requireOperand: true });
+
   const { values } = parseArgs({
     options: {
       section: { type: 'string' },

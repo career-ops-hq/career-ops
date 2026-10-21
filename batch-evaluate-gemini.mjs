@@ -18,8 +18,9 @@ import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
-import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
+import { rejectPrivateOrInvalid, checkUrlLiveness, LIVENESS_CONTEXT_OPTIONS } from './liveness-browser.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import {
@@ -238,7 +239,16 @@ async function evaluateWithRetry(jdText, retries = 5) {
   }
 }
 
-export async function processOffer(browser, line, idx, _evaluate = evaluateWithRetry) {
+async function verifyPostingLiveness(browser, url) {
+  const page = await browser.newPage(LIVENESS_CONTEXT_OPTIONS);
+  try {
+    return await checkUrlLiveness(page, url);
+  } finally {
+    await page.close();
+  }
+}
+
+export async function processOffer(browser, line, idx, _evaluate = evaluateWithRetry, _checkLiveness = verifyPostingLiveness) {
   const match = line.match(/- \[\s*\]\s+(https?:\/\/\S+)(?:\s*\|\s*([^|]+)\s*\|\s*(.+))?/);
   if (!match) return { line, processed: false };
 
@@ -250,16 +260,38 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
   console.log(`🔄 Processing [${idx}]: ${companyHint} - ${titleHint}`);
   console.log(`🔗 URL: ${url}`);
 
+  async function resolveDeadPosting() {
+    // Neither model output nor a failed scrape proves closure. Verify the URL
+    // independently; active/uncertain results preserve pending work.
+    const liveness = await _checkLiveness(browser, url);
+    if (liveness?.result !== 'expired' || liveness?.code === 'insufficient_content') {
+      return { line, processed: false, outcome: 'unconfirmed-dead-posting' };
+    }
+    const label = match[2] ? `${companyHint} | ${titleHint}` : url;
+    const newLine = `- [x] ~~${label}~~ — oferta nieaktywna`;
+    console.log(`⏭️ Closed posting: ${companyHint} - ${titleHint}`);
+    return { line: newLine, processed: true, outcome: 'dead-posting' };
+  }
+
   try {
-    const jdText = await scrapeUrl(browser, url);
+    let jdText;
+    try {
+      jdText = await scrapeUrl(browser, url);
+    } catch {
+      return await resolveDeadPosting();
+    }
     if (!jdText || jdText.length < 100) {
-      throw new Error('Extracted text too short (likely blocked or empty)');
+      return await resolveDeadPosting();
     }
 
     console.log(`🧠 Calling Gemini (${modelName})...`);
     const evaluationText = await _evaluate(`URL: ${url}\n\n${jdText}`);
 
     // Parse output
+    if (/^---DEAD_POSTING---\s*$/m.test(evaluationText)) {
+      return await resolveDeadPosting();
+    }
+
     const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
     if (!summaryMatch) {
       console.error('Missing SCORE_SUMMARY block from model output:\n' + evaluationText.slice(0, 500));
@@ -333,6 +365,40 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
   }
 }
 
+// Applies the processed results to the CURRENT text of pipeline.md. A run takes
+// minutes and scan.mjs, plugins.mjs or agent-inbox.mjs may append to the file
+// meanwhile, so each result replaces the first line that still equals the
+// pending line it came from (`originals` is the start-of-run snapshot, indexed
+// like `results`). Every other line is kept as it is; a pending line that was
+// edited or removed during the run is reported in `unmatched`, not rewritten.
+export function mergeProcessedLines(currentText, originals, results) {
+  const lines = currentText.split('\n');
+  const unmatched = [];
+  for (const [lineIdx, res] of results.entries()) {
+    if (!res.processed) continue;
+    const at = lines.indexOf(originals[lineIdx]);
+    if (at === -1) {
+      unmatched.push(originals[lineIdx].match(/https?:\/\/\S+/)?.[0] ?? originals[lineIdx].trim());
+      continue;
+    }
+    lines[at] = res.line;
+  }
+  return { text: lines.join('\n'), unmatched };
+}
+
+// Reads, merges and writes pipeline.md under pipeline-lock.mjs, the lock every
+// other writer of the file takes. Writing back the start-of-run snapshot erased
+// anything appended during the run, and scan-history.tsv already counted it as seen.
+export async function finishPipelineBatch(pipelinePath, originals, results) {
+  await withPipelineLock(pipelinePath, () => {
+    const { text, unmatched } = mergeProcessedLines(readFileSync(pipelinePath, 'utf-8'), originals, results);
+    for (const url of unmatched) {
+      console.error(`⚠️ pipeline.md changed during the run; left ${url} as it is`);
+    }
+    writeFileSync(pipelinePath, text, 'utf-8');
+  });
+}
+
 async function main() {
   setupEnvironment();
   loadContext();
@@ -371,12 +437,7 @@ async function main() {
   await browser.close();
 
   // Rewrite pipeline.md inline
-  for (const [lineIdx, res] of results.entries()) {
-    if (res.processed) {
-      pipelineLines[lineIdx] = res.line;
-    }
-  }
-  writeFileSync(PATHS.pipeline, pipelineLines.join('\n'), 'utf-8');
+  await finishPipelineBatch(PATHS.pipeline, pipelineLines, results);
 
   console.log(`\n🎉 Batch processing complete! Merging tracker additions...`);
   try {

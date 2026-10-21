@@ -457,40 +457,6 @@ async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
 }
 
 /**
- * Fetch one Greenhouse posting reached through a company careers page that
- * exposes only `?gh_jid=` (no board in the URL). The embed endpoint's redirect
- * names the board — the same `followEmbed` step checkLivenessViaApi uses — and
- * the per-job API then serves the body exactly as for a plain Greenhouse URL.
- * Null on any inconclusive outcome, same contract as the other fetchers.
- *
- * @param {object} resolved - `resolveAtsApi(url)` for a greenhouse-embedded URL
- * @param {string} postingUrl
- * @param {number} textCap
- * @param {number} timeoutMs - budget for the embed lookup; the job fetch gets its own
- */
-async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutMs) {
-  if (typeof resolved.followEmbed !== 'function') return null;
-  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let jobApiUrl;
-  try {
-    const res = await fetch(resolved.apiUrl, {
-      headers: { 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'manual',
-      signal: controller.signal,
-    });
-    jobApiUrl = await resolved.followEmbed(res, resolved.parts);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-  if (!jobApiUrl) return null;
-  return fetchGreenhouseJd(jobApiUrl, postingUrl, textCap, timeoutMs);
-}
-
-/**
  * Shape one Lever posting into a jd-mode result. Pure, same contract as the
  * other normalizers.
  *
@@ -531,29 +497,13 @@ export function normalizeLeverJob(json, postingUrl, textCap = JD_TEXT_CAP) {
         .filter(Boolean)
         .join('\n\n')
     : '';
-  const body = [str(json.descriptionPlain), lists, str(json.additionalPlain)].filter(Boolean).join('\n\n');
+  // Lever can leave descriptionPlain empty while description holds the HTML.
+  const intro = str(json.descriptionPlain) || jdHtmlToText(json.description);
+  const body = [intro, lists, str(json.additionalPlain)].filter(Boolean).join('\n\n');
   if (!body) return null;
 
   const meta = [];
-  const primary = str(json?.categories?.location);
-  if (primary) meta.push(`Location: ${primary}`);
-  // `location` is a single primary city; a multi-location posting lists the
-  // rest only in `allLocations`, and the description body usually repeats just
-  // the primary one. Dropping them made a Paris+Belgrade req read Paris-only
-  // and fail the triage location gate. Same merge as providers/lever.mjs's
-  // resolveLocation(), same line shape as normalizeAshbyJob's secondaryLocations.
-  if (Array.isArray(json?.categories?.allLocations)) {
-    const seen = new Set(primary ? [primary.toLowerCase()] : []);
-    const extra = [];
-    for (const l of json.categories.allLocations.map(str)) {
-      if (l && !seen.has(l.toLowerCase())) { seen.add(l.toLowerCase()); extra.push(l); }
-    }
-    if (extra.length) meta.push(`Additional locations: ${extra.join(' | ')}`);
-  }
-  // `workplaceType` is one of onsite / hybrid / remote / unspecified; the last
-  // carries no signal, so it is left out rather than printed.
-  const workplaceType = str(json.workplaceType);
-  if (workplaceType && workplaceType.toLowerCase() !== 'unspecified') meta.push(`Work model: ${workplaceType}`);
+  if (str(json?.categories?.location)) meta.push(`Location: ${str(json.categories.location)}`);
   if (str(json?.categories?.team)) meta.push(`Team: ${str(json.categories.team)}`);
 
   return {
@@ -598,6 +548,90 @@ async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
 }
 
 /**
+ * Greenhouse posting reached through a company careers page (`?gh_jid=` only,
+ * no board in the URL). The embed redirect names the board — the same
+ * `followEmbed` hop liveness uses, which also pins the redirect target to
+ * greenhouse.io — and the per-job boards-api endpoint then ships the JD.
+ */
+async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let jobApiUrl;
+  try {
+    const res = await fetch(resolved.apiUrl, {
+      headers: { 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    jobApiUrl = await resolved.followEmbed(res, resolved.parts);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+  return jobApiUrl ? fetchGreenhouseJd(jobApiUrl, postingUrl, textCap, timeoutMs) : null;
+}
+
+/**
+ * Shape one SmartRecruiters posting into a jd-mode result. Pure, same contract
+ * as the other normalizers. The body is `jobAd.sections`, HTML blocks appended
+ * in the order the rendered page shows them; the location object also carries
+ * remote/hybrid flags, surfaced because they are often the only work-model
+ * signal the posting has.
+ *
+ * @param {any} json - parsed postings-API response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const sections = json?.jobAd?.sections;
+  if (!sections || typeof sections !== 'object') return null;
+
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const blocks = ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']
+    .map((key) => {
+      const body = jdHtmlToText(sections[key]?.text);
+      return body ? [str(sections[key]?.title), body].filter(Boolean).join('\n') : '';
+    })
+    .filter(Boolean);
+  if (!blocks.length) return null;
+
+  const loc = json?.location || {};
+  const meta = [];
+  const where = str(loc.fullLocation) || [str(loc.city), str(loc.country)].filter(Boolean).join(', ');
+  if (where) meta.push(`Location: ${where}`);
+  if (loc.remote === true) meta.push('Work model: Remote');
+  else if (loc.hybrid === true) meta.push('Work model: Hybrid');
+
+  return {
+    url: postingUrl,
+    title: compactText(str(json?.name), 300),
+    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return normalizeSmartRecruitersJob(json, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * ats id → fetcher. THE routing table `fetchJdViaKnownApi` dispatches through,
  * exported so the owned test can assert its key set IS `JD_TEXT_API_ATS`.
  *
@@ -617,10 +651,12 @@ export const JD_FETCHERS = {
     fetchAshbyJd(resolved.apiUrl, resolved.parts.jobId, url, textCap, timeoutMs),
   greenhouse: (resolved, url, textCap, timeoutMs) =>
     fetchGreenhouseJd(resolved.apiUrl, url, textCap, timeoutMs),
-  'greenhouse-embedded': (resolved, url, textCap, timeoutMs) =>
-    fetchGreenhouseEmbeddedJd(resolved, url, textCap, timeoutMs),
   lever: (resolved, url, textCap, timeoutMs) =>
     fetchLeverJd(resolved.apiUrl, url, textCap, timeoutMs),
+  'greenhouse-embedded': (resolved, url, textCap, timeoutMs) =>
+    fetchGreenhouseEmbeddedJd(resolved, url, textCap, timeoutMs),
+  smartrecruiters: (resolved, url, textCap, timeoutMs) =>
+    fetchSmartRecruitersJd(resolved.apiUrl, url, textCap, timeoutMs),
 };
 
 /**
@@ -780,19 +816,41 @@ export function parseArgs(argv) {
 
 // Read the raw DOM inside the page: title, main visible text, and visible
 // anchors. Runs in the browser context; returns plain data only.
-async function readDom(page) {
+export async function readDom(page) {
   return page.evaluate(() => {
     const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
 
     // Main text: prefer <main>/[role=main]/<article>, else body; strip nav chrome.
-    const root =
-      document.querySelector('main, [role="main"], article') || document.body;
+    // Keep the candidate with the most text left after stripping, not the first
+    // match: a board can lead with a short <article> (a share widget) ahead of
+    // the one holding the posting, and a <main> that is mostly menu would
+    // otherwise outrank it.
+    // Read innerText from the live element: on a detached clone it degrades to
+    // textContent, so CSS-hidden text would count and could outrank the posting.
+    // The chrome is hidden only for the read and its style attribute restored.
+    // script/style/noscript are never rendered, so innerText already skips them.
+    const strippedText = (el) => {
+      if (el.getClientRects().length === 0 && getComputedStyle(el).display !== 'contents') return '';
+      const chrome = Array.from(el.querySelectorAll('nav, header, footer'));
+      const saved = chrome.map((n) => n.getAttribute('style'));
+      // Attribute writes only: setting a property through n.style leaves style=""
+      // behind after removeAttribute. The prefix is the browser's serialized
+      // cssText, not the raw attribute, so an unterminated token in the original
+      // (an open /* comment) cannot swallow the appended display:none.
+      chrome.forEach((n) => n.setAttribute('style', `${n.style.cssText} display: none !important;`));
+      try {
+        return el.innerText || '';
+      } finally {
+        chrome.forEach((n, i) => (saved[i] == null ? n.removeAttribute('style') : n.setAttribute('style', saved[i])));
+      }
+    };
+    const candidates = Array.from(document.querySelectorAll('main, [role="main"], article'));
     let text = '';
-    if (root) {
-      const clone = root.cloneNode(true);
-      clone.querySelectorAll('script, style, nav, header, footer, noscript').forEach((el) => el.remove());
-      text = clone.innerText || '';
+    for (const el of candidates) {
+      const t = strippedText(el);
+      if (t.length > text.length) text = t;
     }
+    if (candidates.length === 0 && document.body) text = strippedText(document.body);
 
     const anchors = Array.from(document.querySelectorAll('a[href]'))
       .filter((el) => {

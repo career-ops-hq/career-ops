@@ -33,7 +33,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -53,7 +53,8 @@ const RANK_LABEL = '| rank: ';
 const REASON_MAX = 140;
 
 // Headless invocations exactly as AGENTS.md documents them — this table applies
-// that reference, it does not invent commands.
+// that reference, it does not invent commands. Hermes stays out: rank prompts
+// contain untrusted posting text and Hermes has no verified child-permission boundary.
 export const CLI_CANDIDATES = [
   { bin: 'claude', args: p => ['-p', p] },
   { bin: 'opencode', args: p => ['run', p] },
@@ -62,6 +63,7 @@ export const CLI_CANDIDATES = [
   { bin: 'qwen', args: p => ['-p', p] },
   { bin: 'agy', args: p => ['-p', p] },
   { bin: 'grok', args: p => ['-p', p] },
+  { bin: 'pi', args: p => ['-p', p] },
 ];
 
 const USAGE = `
@@ -70,12 +72,21 @@ const USAGE = `
   node rank-pipeline.mjs [--limit N] [--cli <name>] [--model <name>] [--dry-run]
 
     --limit N     max entries to rank this run (default ${DEFAULT_LIMIT}, ceiling ${LIMIT_CEILING})
-    --cli <name>  force a CLI instead of auto-detecting
+    --cli <name>  force a CLI instead of $CAREER_OPS_CLI or auto-detection
     --model <n>   passed through to the CLI when it accepts one
     --dry-run     print the annotations, write nothing
     --self-test   run the in-memory suite (no subprocess, no network)
 `;
-
+const KNOWN_FLAGS = [
+  '--limit',
+  '--cli',
+  '--model',
+  '--dry-run',
+  '--self-test',
+  '--help',
+  '-h',
+];
+const VALUE_FLAGS = ['--limit', '--cli', '--model'];
 /**
  * Clamp to [0,5] at one decimal, and sanitize the reason so a model-generated
  * string can never break the row's pipe-delimited grammar or forge a new row.
@@ -134,21 +145,42 @@ export function appendRankAnnotation(rawLine, score, reason) {
  *
  * pipeline.md does not enforce line uniqueness, so two byte-identical pending
  * rows are two separate entries that were scored separately. Matching by row
- * text alone would give both the same segment and silently drop one score;
- * consuming in file order gives each row its own.
+ * text alone cannot distinguish their scores. Indexed annotations retain the
+ * original occurrence even if the model returns results out of order or omits
+ * one. A changed occurrence count makes identity ambiguous, so skip that group.
  *
  * @param {string} text - current pipeline.md contents.
- * @param {{raw: string, segment: string}[]} pending - annotations, in order.
+ * @param {{raw: string, segment: string, index?: number}[]} pending - annotations.
+ * @param {string} originalText - snapshot whose line indices were scored.
  * @returns {{text: string, written: number}}
  */
-export function applyAnnotations(text, pending) {
+export function applyAnnotations(text, pending, originalText = text) {
   const queue = pending.map(a => ({ ...a, used: false }));
+  const lines = String(text ?? '').split('\n');
+  const occurrences = source => {
+    const groups = new Map();
+    String(source ?? '').split('\n').forEach((line, index) => {
+      // Count already-ranked and processed occurrences without overwriting them.
+      const raw = line.split(` ${RANK_LABEL}`)[0].replace(/^- \[x\] /, '- [ ] ');
+      if (!groups.has(raw)) groups.set(raw, []);
+      groups.get(raw).push(index);
+    });
+    return groups;
+  };
+  const original = occurrences(originalText);
+  const current = occurrences(text);
   let written = 0;
-  const out = String(text ?? '')
-    .split('\n')
-    .map(line => {
+  const out = lines
+    .map((line, index) => {
       if (line.includes(RANK_LABEL)) return line;
-      const hit = queue.find(a => !a.used && a.raw === line);
+      const hit = queue.find(a => {
+        if (a.used || a.raw !== line) return false;
+        if (a.index === undefined) return true;
+        const before = original.get(a.raw) ?? [];
+        const now = current.get(a.raw) ?? [];
+        return before.length === now.length
+          && before.indexOf(a.index) === now.indexOf(index);
+      });
       if (!hit) return line;
       hit.used = true;
       written += 1;
@@ -234,23 +266,36 @@ export function buildPrompt(entries, cvExcerpt) {
 
 function callCli(cli, prompt, model) {
   const args = cli.args(prompt);
-  if (model && cli.bin !== 'codex' && cli.bin !== 'opencode') args.push('--model', model);
+  if (model) args.push('--model', model);
   // Explicit maxBuffer: a verbose response otherwise throws
   // ERR_CHILD_PROCESS_STDIO_MAXBUFFER and fails the batch for no good reason.
   return execFileSync(cli.bin, args, {
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
     timeout: 120_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+}
+
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+/**
+ * One line saying why a CLI call failed. err.message from execFileSync starts
+ * with "Command failed: <bin> <args>", and the args are the whole prompt (CV
+ * excerpt plus postings), so it is never shown.
+ */
+export function describeCliFailure(err, bin) {
+  if (err?.code === 'ETIMEDOUT') return `${bin} timed out`;
+  if (err?.code === 'ENOENT') return `${bin} not found`;
+  const lines = String(err?.stderr ?? '').replace(ANSI, '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const detail = lines.find(l => /error/i.test(l)) ?? lines.at(-1);
+  const exit = err?.status != null ? `${bin} exited with code ${err.status}` : `${bin} failed`;
+  return detail ? `${exit}: ${detail.slice(0, 200)}` : exit;
 }
 
 async function main(args) {
   if (hasFlag(args, '--help') || hasFlag(args, '-h')) {
     console.log(USAGE);
-    return 0;
-  }
-  if (!existsSync(PIPELINE_PATH)) {
-    console.log('No data/pipeline.md yet — run a scan first. Nothing to rank.');
     return 0;
   }
 
@@ -259,16 +304,28 @@ async function main(args) {
   const model = flagValue(args, '--model');
   const forced = flagValue(args, '--cli') ?? process.env.CAREER_OPS_RANK_CLI;
 
+  if (forced === 'hermes') {
+    console.error('Hermes is not supported for batch ranking.');
+    return 1;
+  }
+
+  if (!existsSync(PIPELINE_PATH)) {
+    console.log('No data/pipeline.md yet — run a scan first. Nothing to rank.');
+    return 0;
+  }
+
+  const active = CLI_CANDIDATES.find(c => c.bin === process.env.CAREER_OPS_CLI);
   const cli = forced
     ? CLI_CANDIDATES.find(c => c.bin === forced) ?? { bin: forced, args: p => ['-p', p] }
-    : detectCli();
+    : detectCli(active ? [active, ...CLI_CANDIDATES] : CLI_CANDIDATES);
   if (!cli) {
     console.error('No supported agent CLI found (tried: %s).', CLI_CANDIDATES.map(c => c.bin).join(', '));
     console.error('Install one, or pass --cli <name>. See the Headless / Batch Mode table in AGENTS.md.');
     return 1;
   }
 
-  const pending = parsePendingEntries(readFileSync(PIPELINE_PATH, 'utf-8'));
+  const original = readFileSync(PIPELINE_PATH, 'utf-8');
+  const pending = parsePendingEntries(original);
   if (!pending.length) {
     console.log('No unranked pending entries. Nothing to do.');
     return 0;
@@ -280,13 +337,14 @@ async function main(args) {
   // A LIST, not a Map keyed by the row text. pipeline.md does not enforce line
   // uniqueness, and two byte-identical pending rows are scored as two separate
   // entries — keying by raw text would collapse them, discarding one score and
-  // applying the other twice. Each annotation is consumed once, in file order.
+  // applying the other twice. Original indices bind each score to its occurrence.
   const annotations = [];
   // Counts calls ATTEMPTED, not just ones that returned successfully — a call
   // that throws or times out still spends tokens, so it must still show up in
   // the final summary.
   let attemptedCalls = 0;
   let skippedBatches = 0;
+  let failedCalls = 0;
 
   for (let i = 0; i < selected.length; i += BATCH_SIZE) {
     const batch = selected.slice(i, i + BATCH_SIZE);
@@ -295,8 +353,9 @@ async function main(args) {
     try {
       response = callCli(cli, buildPrompt(batch, cvExcerpt), model);
     } catch (err) {
-      console.error(`  batch ${i / BATCH_SIZE + 1}: CLI call failed (${err.code ?? err.message}) — entries left un-annotated`);
+      console.error(`  batch ${i / BATCH_SIZE + 1}: CLI call failed (${describeCliFailure(err, cli.bin)}), entries left un-annotated`);
       skippedBatches += 1;
+      failedCalls += 1;
       continue;
     }
     const results = parseBatchResponse(response);
@@ -305,11 +364,15 @@ async function main(args) {
       skippedBatches += 1;
       continue;
     }
+    const seen = new Set();
     for (const r of results) {
       const entry = batch[r.id];
-      if (!entry) continue;
+      if (!entry || seen.has(r.id)) continue;
       const segment = formatRankSegment(r.score, r.reason);
-      if (segment) annotations.push({ raw: entry.raw, segment, used: false });
+      if (segment) {
+        seen.add(r.id);
+        annotations.push({ raw: entry.raw, index: entry.index, segment });
+      }
     }
   }
 
@@ -325,11 +388,10 @@ async function main(args) {
   if (annotations.length) {
     // Re-read inside the lock: scan.mjs, scan-ats-full.mjs and a concurrent run of
     // this script all write data/pipeline.md, so the file may have moved since the
-    // read above. Matching on the original raw line makes a stale target a no-op
-    // rather than a corrupted row.
+    // read above. Match original row occurrences; skip ambiguous duplicate groups.
     await withPipelineLock(PIPELINE_PATH, () => {
       const current = readFileSync(PIPELINE_PATH, 'utf-8');
-      const result = applyAnnotations(current, annotations);
+      const result = applyAnnotations(current, annotations, original);
       written = result.written;
       if (written) writeFileSync(PIPELINE_PATH, result.text);
     });
@@ -342,6 +404,10 @@ async function main(args) {
   }
   console.log(`  Elapsed: ${elapsed}s`);
   console.log(`  Cost: not reported by \`${cli.bin}\` in headless mode — check your CLI's own usage view.`);
+  if (failedCalls === attemptedCalls) {
+    console.error(`\n  Every call to ${cli.bin} failed. Check that \`${cli.bin}\` works on its own, or pick another CLI with --cli <name>.`);
+    return 1;
+  }
   return 0;
 }
 
@@ -413,6 +479,7 @@ function selfTest() {
 
   const probe = bin => bin === 'codex';
   check('detect picks the installed CLI', detectCli(CLI_CANDIDATES, probe).bin === 'codex');
+  check('Hermes is excluded from batch candidates', !CLI_CANDIDATES.some(c => c.bin === 'hermes'));
   check('detect returns null when none installed', detectCli(CLI_CANDIDATES, () => false) === null);
   check('detect respects priority order', detectCli(CLI_CANDIDATES, () => true).bin === 'claude');
 
@@ -466,6 +533,10 @@ function selfTest() {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
   if (args.includes('--self-test')) {
     process.exit(selfTest());
   } else {

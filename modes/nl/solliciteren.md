@@ -105,7 +105,7 @@ Opmerkingen:
 ## Stap 6 -- Na de aanvraag (optioneel)
 
 Als de kandidaat bevestigt dat de sollicitatie is verzonden:
-1. Update de status naar "Applied" via de canonieke CLI: `node set-status.mjs <report#> Applied` (bewerk de tabel `applications.md` niet met de hand)
+1. Update de status naar "Applied" via de canonieke CLI: `node set-status.mjs --report <report#> Applied` (bewerk de tabel `applications.md` niet met de hand)
 2. Update blok G van het rapport met de definitieve antwoorden alleen als bedrijf en rol nog exact overeenkomen met de rapportmetadata. Na een eenmalige aanpassing aan een andere rol moet eerst een afzonderlijk rapport voor die rol worden gemaakt of de volledige herbeoordeling worden uitgevoerd; overschrijf nooit het rapport van de oorspronkelijke rol
 3. Stel de volgende stap voor: `/career-ops contacto` voor LinkedIn-contact met de rekruteringsmanager
 

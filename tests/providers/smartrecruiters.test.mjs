@@ -450,6 +450,70 @@ try {
     }
   }
 
+  // ── Requisition id + posting language ──
+  // `refNumber` is the employer's requisition id: shared by every language
+  // version of one requisition and kept across re-releases, while the posting
+  // id changes. `language.code` is the posting text's language code.
+  {
+    const twins = parseSmartRecruitersResponse({
+      content: [
+        { id: '1001', name: 'Senior QA Manager', refNumber: 'ID2608-00427A', language: { code: 'de', label: 'German' } },
+        { id: '1002', name: 'Senior QA Manager', refNumber: 'ID2608-00427A', language: { code: 'en-GB' } },
+      ],
+    }, 'Acme');
+    if (twins[0]?.requisitionId === 'ID2608-00427A' && twins[0]?.language === 'de'
+        && twins[1]?.requisitionId === 'ID2608-00427A' && twins[1]?.language === 'en-GB') {
+      pass('parseSmartRecruitersResponse maps refNumber → requisitionId and language.code → language');
+    } else {
+      fail(`twins = ${JSON.stringify(twins)}`);
+    }
+  }
+
+  {
+    const odd = parseSmartRecruitersResponse({
+      content: [
+        { id: 'A', name: 'Spaced', refNumber: '  JREQ 12757  ', language: { code: ' en ' } },
+        { id: 'B', name: 'Numeric', refNumber: 4647 },
+        { id: 'C', name: 'Blank', refNumber: '   ', language: { code: '' } },
+        { id: 'D', name: 'Object', refNumber: { value: 'R1' }, language: 'de' },
+        { id: 'E', name: 'Absent' },
+      ],
+    }, 'Acme');
+    const [spaced, numeric, blank, object, absent] = odd;
+    if (spaced?.requisitionId === 'JREQ 12757' && spaced?.language === 'en') {
+      pass('parseSmartRecruitersResponse trims both values and keeps an inner space in the requisition id');
+    } else {
+      fail(`spaced = ${JSON.stringify(spaced)}`);
+    }
+    if (numeric?.requisitionId === '4647' && !('language' in numeric)) {
+      pass('parseSmartRecruitersResponse stringifies a numeric refNumber');
+    } else {
+      fail(`numeric = ${JSON.stringify(numeric)}`);
+    }
+    if ([blank, object, absent].every((j) => j && !('requisitionId' in j) && !('language' in j))) {
+      pass('parseSmartRecruitersResponse omits both keys for blank, non-scalar or missing values');
+    } else {
+      fail(`blank/object/absent = ${JSON.stringify([blank, object, absent])}`);
+    }
+  }
+
+  // fetch() strips the internal posting id but keeps both new fields.
+  {
+    const rows = await sr.fetch(
+      { name: 'KeepCo', careers_url: 'https://careers.smartrecruiters.com/keepco' },
+      {
+        fetchJson: async () => ({
+          content: [{ id: '77', name: 'Role', refNumber: 'REF7515N', language: { code: 'pt' } }],
+        }),
+      },
+    );
+    if (rows[0]?.requisitionId === 'REF7515N' && rows[0]?.language === 'pt' && !('id' in rows[0])) {
+      pass('fetch() returns requisitionId and language and still strips the internal id');
+    } else {
+      fail(`fetch row = ${JSON.stringify(rows[0])}`);
+    }
+  }
+
 } catch (e) {
   fail(`smartrecruiters provider tests crashed: ${e.message}`);
 }

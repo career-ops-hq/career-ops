@@ -97,7 +97,8 @@ console.log('\n--- 3. compressSharedContext — P2 removal ---');
 const p2Result = compressSharedContext(SHARED_STUB, 9999);
 ok('P2 removed: Voice DNA', p2Result.removed.includes('Voice DNA (writing guardrail)'));
 ok('P2 removed: Writing Style Calibration', p2Result.removed.includes('Writing Style Calibration'));
-ok('P2 removed: Sources of Truth', p2Result.removed.includes('Sources of Truth (EXCLUSIVE)'));
+ok('Sources of Truth preserved under exhaustive compression', p2Result.compressed.includes('## Sources of Truth (EXCLUSIVE)'));
+ok('Sources of Truth never listed as removed', !p2Result.removed.includes('Sources of Truth (EXCLUSIVE)'));
 
 // ============================================================================
 // 4. compressSharedContext — priority ordering (P2 before P1)
@@ -266,6 +267,11 @@ if (!existsSync(sharedPath)) {
   console.log('  SKIP: modes/_shared.md not found (expected in CI without checkout)');
 } else {
   const sharedRaw = readFileSync(sharedPath, 'utf-8');
+  const truthSection = sharedRaw.match(/^## Sources of Truth[^\n]*\n[\s\S]*?(?=^## |$(?![\s\S]))/m)?.[0];
+  const exhausted = compressSharedContext(sharedRaw, Number.MAX_SAFE_INTEGER);
+  ok('real source-of-truth rules survive exhausted budget verbatim', Boolean(truthSection) && exhausted.compressed.includes(truthSection));
+  const constrained = buildBudgetedPrompt({ sharedContent: sharedRaw, cvContent: 'Synthetic CV', jdText: 'Synthetic JD', maxTokens: 1, safetyMargin: 0 });
+  ok('assembled evaluator retains source-of-truth rules when still over budget', Boolean(truthSection) && constrained.contextBody.includes(truthSection) && constrained.budgetReport.overBudget);
   // Extract all ## Heading names from the file
   const headingRe = /^## (.+)$/gm;
   const fileHeadings = new Set();
