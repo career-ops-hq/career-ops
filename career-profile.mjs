@@ -15,6 +15,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { validateProfile, loadValidatedProfile } from './lib/career-profile.mjs';
 import { prepareCvSelection, verifyCvSelection } from './lib/profile-cv-selection.mjs';
+import { generateProfileCv } from './lib/profile-cv-generation.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const root = getCareerOpsRoot();
@@ -35,6 +36,12 @@ const HELP = `Master Career Profile
     Recheck against the current profile and original inputs. Both commands
     accept --profile profile.yml; all paths resolve from the Data Root.
     Neither command renders a CV or replaces the existing CV fact gates.
+
+  node career-profile.mjs generate-cv --payload base.json --selection selection.json --prepared prepared.json --html output/cv-v1.html --pdf output/cv-v1.pdf
+    Verify, run title/structure checks, rebuild HTML, and generate a fact-checked
+    PDF. Requires non-empty cv.md and new output paths inside the Data Root's
+    tracker workspace. Optional: --profile profile.yml, --template template.html,
+    --report 123. Page format/country come from the prepared payload.
 `;
 
 function normalizeKey(value) {
@@ -315,8 +322,9 @@ function doValidate(args) {
   else process.stdout.write(`Valid Master Career Profile: ${file}\n`);
 }
 
-function doCvSelection(command, args) {
-  const flags = ['--payload', '--selection', '--profile', ...(command === 'verify-cv' ? ['--prepared'] : [])];
+async function doCvSelection(command, args) {
+  const flags = ['--payload', '--selection', '--profile', ...(command !== 'prepare-cv' ? ['--prepared'] : []),
+    ...(command === 'generate-cv' ? ['--html', '--pdf', '--template', '--report'] : [])];
   validateFlags(args, [...flags, '--help', '-h'], HELP, { valueFlags: flags, requireOperand: true });
   // Refuse ambiguous duplicate flags or stray positional arguments.
   const seen = new Set();
@@ -326,10 +334,19 @@ function doCvSelection(command, args) {
     seen.add(flag);
     if (!args[i].includes('=')) i++;
   }
-  const required = ['--payload', '--selection', ...(command === 'verify-cv' ? ['--prepared'] : [])];
+  const required = ['--payload', '--selection', ...(command !== 'prepare-cv' ? ['--prepared'] : []),
+    ...(command === 'generate-cv' ? ['--html', '--pdf'] : [])];
   for (const flag of required) if (!seen.has(flag)) throw new Error(`${flag} is required`);
   const fileFor = flag => resolve(root, flagValue(args, flag));
   const readJson = flag => JSON.parse(readFileSync(fileFor(flag), 'utf8'));
+  if (command === 'generate-cv') {
+    await generateProfileCv({ dataRoot: root, basePayload: readJson('--payload'), selection: readJson('--selection'),
+      prepared: readJson('--prepared'), htmlPath: fileFor('--html'), pdfPath: fileFor('--pdf'),
+      ...(seen.has('--profile') ? { profileFile: fileFor('--profile') } : {}),
+      ...(seen.has('--template') ? { templatePath: fileFor('--template') } : {}),
+      ...(seen.has('--report') ? { reportNum: flagValue(args, '--report') } : {}) });
+    return;
+  }
   const profile = loadValidatedProfile({ dataRoot: root, ...(seen.has('--profile') ? { file: fileFor('--profile') } : {}) });
   const inputs = { profile, basePayload: readJson('--payload'), selection: readJson('--selection') };
   if (command === 'prepare-cv') process.stdout.write(`${JSON.stringify(prepareCvSelection(inputs), null, 2)}\n`);
@@ -344,7 +361,7 @@ try {
   if (!command || command === '--help' || command === '-h') process.stdout.write(HELP);
   else if (command === 'import') await doImport(args);
   else if (command === 'validate') doValidate(args);
-  else if (command === 'prepare-cv' || command === 'verify-cv') doCvSelection(command, args);
+  else if (['prepare-cv', 'verify-cv', 'generate-cv'].includes(command)) await doCvSelection(command, args);
   else throw new Error(`Unknown command: ${command}\n\n${HELP}`);
 } catch (error) {
   const context = ['profile_entry_id', 'fact_id', 'experience_index']

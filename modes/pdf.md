@@ -8,6 +8,10 @@ Optional passes:
 
 **Locked Sections:** If `cv.locked_sections` is defined in `profile.yml`, NEVER remove, shorten, or paraphrase those sections during CV generation or tailoring. They must appear verbatim.
 
+For a user-requested CV built from explicitly selected Master Career Profile
+facts, use **Selected Profile generation (opt-in)** below for the rendering
+branch. The sourcing, JD review and user decisions in this pipeline still apply.
+
 ## Application-scoped artifacts
 
 When a CV is reused or lightly tailored for an existing application, initialize a bundle with `npm run application:init -- --report {report-number} --company "{company}" --role "{role}" --version 1`. Keep the current JD at `jd/current.md`, the comparison JD at `jd/previous.md`, the source CV at `cv/source/original.html`, the tailored CV at `cv/tailored/v001/cv.html`, the PDF at `cv/tailored/v001/cv.pdf`, the change notes at `cv/tailored/v001/changes.md`, and the reuse decision at `decision/reuse.json` under the printed bundle root. Resolve the application/report first with `node find.mjs {report-or-tracker-number}` so the bundle uses the report number, not an ambiguous tracker row.
@@ -91,6 +95,79 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
     - No PDF by default: the user copies the text out of the HTML. If they want an uploadable file too, run `node generate-pdf.mjs output/cv-{candidate}[-{report}]-{company}-ats.html output/cv-{candidate}[-{report}]-{company}-ats-{YYYY-MM-DD}.pdf --format={letter|a4}` **without** `--report`. Under `page_format: auto`, use `--country={code}` in place of `--format`. With `--report`, the ATS PDF would be indexed against the report and replace the styled pair the dashboard opens and regenerates.
 22. Verify ATS keyword coverage of the **tailored** CV against the role's evaluation report (when one exists): `node keyword-match.mjs "reports/{###}-{company-slug}-{YYYY-MM-DD}.md" --cv "{html-path}"`. Pass the report's full filename (e.g. `reports/008-acme-2026-09-28.md`), not the bare NNN that Step 21's `--report` takes, and keep both paths quoted. This text-extracts the HTML you just built and reports coverage %, present, thin, and missing keywords — the diagnostic for the document being sent. Surface any missing/thin keywords to the user (reformulate from real experience, never fabricate). If the report has no keyword section, the command prints a `⚠️` line on stderr and scores the skills it finds in the report's archived JD instead. That is a defect in the report, not a pass: tell the user, and add the keyword section to the report. If it exits 1, coverage did not run. Say so in Step 23 rather than leaving the number out.
 23. Report: PDF path, number of pages, keyword coverage % and whether its keywords came from the report or the archived JD (when Step 22 ran), the ATS variant's HTML path and any lint findings the user left open (when Step 21a ran), and any skill gaps from Step 4 still unaddressed
+
+## Selected Profile generation (opt-in)
+
+Use this branch only when the user requests selected Profile facts. Follow
+`modes/master-profile.md` to keep the original HTML payload, obtain explicit
+experience bindings and ordered fact IDs, and create the `selection.json` and
+`prepared.json` bundle. Never choose a binding by a company/role label alone.
+Selected bullets are verbatim `fact.text`; do not inject keywords, translate
+or rewrite them after selection. The Profile remains a reviewed selection
+index, not an additional primary source, and the mapping covers only selected
+bullets.
+
+Before final generation, review `prepared.payload` under Steps 17a/17b, using
+a temporary JSON copy for those CLIs, and handle warnings by the policy above.
+Both checks remain warning-only; their successful exit does not resolve a
+title mismatch or an `UNVERIFIED` result on the user's behalf. If the user
+chooses a change, change the original source-backed payload or selection and
+prepare again; original-payload edits require new selection anchors. Do not
+edit `prepared.payload`, its mapping or the rendered HTML directly.
+
+Resolve the template as usual, then run:
+
+```bash
+node career-profile.mjs generate-cv --payload base.json --selection selection.json --prepared prepared.json --html output/cv-v1.html --pdf output/cv-v1.pdf --template /absolute/path/to/resolved-template.html --report 123
+```
+
+All CLI paths resolve from the Data Root; absolute paths work too. Omit
+`--report` only when no report exists, and use the resolved report number
+otherwise. The default Profile is `data/career-profile.yml`; `--profile`
+selects another reviewed Profile file. The resolved template must contain
+`{{EXPERIENCE}}` outside comments, and its sibling `sections/experience.html`
+partial, if any, must contain `{{BULLETS}}` directly in its `ENTRY` block.
+These token checks do not prove rendered visibility or factual truth. Omit
+`--template` to use the configured `cv.template` or its base-template fallback.
+
+This command owns Steps 17a, 17b, 18, 19 and 21 for the final artifact: it
+re-reads the current Profile, verifies the entire payload and mapping against
+the originals, then passes a private snapshot to the existing checks and HTML
+builder before invoking the existing PDF generator. It requires a non-empty
+`cv.md` and aligned Data Root/tracker workspaces. The HTML and PDF destinations
+must be new `.html`/`.pdf` paths inside that workspace; existing files,
+directories and symlinks are rejected. Use a new versioned pair for retries.
+The command resolves the payload's page format/country once for the PDF sheet
+to match the HTML body; do not add separate format flags. It exposes no
+fact-check skip or reordering override. Existing title/structure warnings,
+section and experience order checks, locked sections and fact checking retain
+their policies. The fact check's existing language coverage is unchanged.
+
+If a fact gate fails, return to the source-backed inputs and prepare again.
+Never add Profile text or its evidence metadata as a new primary source to
+force a pass. A retained HTML draft after a failure is not a successful PDF.
+After success, continue with Steps 22/23 and the normal post-generation flow.
+
+Optional passes must preserve this preparation boundary:
+
+- **Hiring-manager audit:** before final generation, verify the bundle and
+  build an audit preview from a temporary JSON copy of `prepared.payload` using
+  the resolved template. Run Step 19's fact gate on that preview before the
+  audit, and supply that JSON explicitly as the tailored artifact. Any accepted
+  edit returns to the original payload/selection and preparation. The final
+  PDF still comes from `generate-cv`, which verifies and builds fresh HTML;
+  the preview, including any edited copy, is never its input.
+- **ATS copy:** apply Step 21a's payload transform to a separate original-base
+  copy, then create matching selection anchors and prepare a separate bundle.
+  Keep the user's selected fact IDs/order. For HTML-only output, verify that
+  bundle immediately before building its `prepared.payload` with the ATS
+  template, then run the fact gate as in Step 21a. If a PDF is requested, use
+  `generate-cv` with the ATS template and new paths, without `--report`, to
+  preserve the styled pair's report linkage. Never patch either HTML file or
+  reuse the styled bundle's mapping for a transformed payload.
+
+Without this opt-in request, use the normal pipeline above; its default
+generation behavior and source files are unchanged.
 
 ## ATS Rules (clean parsing)
 
