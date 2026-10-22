@@ -137,11 +137,20 @@ builder before invoking the existing PDF generator. It requires a non-empty
 `cv.md` and aligned Data Root/tracker workspaces. The HTML and PDF destinations
 must be new `.html`/`.pdf` paths inside that workspace; existing files,
 directories and symlinks are rejected. Use a new versioned pair for retries.
+Both subprocesses use `--no-clobber`: the HTML write is exclusive (`wx`), and
+the PDF is published by atomically linking a same-directory temporary file to
+the final path without replacement. Workspace ancestors remain trusted: Node
+has no portable `openat` API, so this is not full isolation from a same-UID
+process actively replacing them. The default overwrite policy is unchanged.
 The command resolves the payload's page format/country once for the PDF sheet
 to match the HTML body; do not add separate format flags. It exposes no
 fact-check skip or reordering override. Existing title/structure warnings,
 section and experience order checks, locked sections and fact checking retain
 their policies. The fact check's existing language coverage is unchanged.
+Its mandatory `--require-cv-source` makes the actual fact gate require a
+readable, non-empty `cv.md`; that requirement and claim extraction use one
+read rather than trusting only the earlier preflight. The flag conflicts with
+`--skip-fact-check` and is supported only for single-file PDF generation.
 
 If a fact gate fails, return to the source-backed inputs and prepare again.
 Never add Profile text or its evidence metadata as a new primary source to

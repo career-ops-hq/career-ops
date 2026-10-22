@@ -139,6 +139,14 @@ same candidate's files. Output paths must be inside that workspace, end in
 Choose a new versioned pair for each attempt. Inputs and source files are not
 rewritten.
 
+The entry point also passes `--no-clobber` to the HTML builder and PDF generator: HTML is created
+with exclusive `wx`, and PDF publication uses a same-directory temporary file
+linked atomically to the destination without replacing an existing path.
+This protects destination creation, while assuming trusted workspace ancestors.
+Node has no portable `openat` API; these guards do not fully isolate the run
+from a same-UID process actively replacing those ancestors. Default generation
+retains its existing overwrite behavior.
+
 The command gives a private JSON snapshot of the verified payload to the real
 title check, structure check and HTML builder, then invokes the existing PDF
 generator. Title and structure findings keep their warning-only behavior;
@@ -148,6 +156,12 @@ stop generation. Section order, chronological experience order, locked sections
 and the fact gate remain enforced by the existing generator, with no skip or
 reordering override on this entry point. Page format and country come from the
 payload and are resolved to the same paper size for HTML and PDF.
+
+The PDF invocation requires `--require-cv-source`: at the actual fact gate,
+`cv.md` must be readable and non-empty. The required-source check and claim
+extraction share a single read, so an earlier successful preflight cannot
+silently substitute for the source being available at the gate. This opt-in
+cannot be combined with `--skip-fact-check` and is not a batch option.
 
 If a gate fails, correct the source-backed payload or the user's reviewed
 selection, then prepare again. Changes to the original payload also need a new

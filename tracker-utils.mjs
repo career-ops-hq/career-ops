@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, linkSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, fchmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -683,14 +683,38 @@ export function renameSyncWithRetry(tmpPath, path, rename = renameSync) {
  * temporary file before the rename, so the destination is never observable with
  * wider permissions than it had.
  *
+ * `noReplace` publishes the completed temporary file with an exclusive hard
+ * link instead: an existing destination, including a symlink, is never replaced.
+ * This protects the final directory entry, not against an adversary changing
+ * ancestor directories; callers still own their workspace containment checks.
+ *
  * @param {string} path - Final file path to replace.
  * @param {string} content - Complete file content to write.
- * @param {{mode?: number}} [options] - `mode`: permission bits for the replacement.
+ * @param {{mode?: number, noReplace?: boolean}} [options] - `mode`: permission bits;
+ *   `noReplace`: refuse an existing destination (defaults to false).
  * @returns {void}
  */
-export function writeFileAtomic(path, content, { mode } = {}) {
+export function writeFileAtomic(path, content, { mode, noReplace = false } = {}) {
   const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+  let ownsTemporary = !noReplace;
   try {
+    if (noReplace) {
+      // Open exclusively before claiming ownership: a failed open must not
+      // clean up a pre-existing entry, even at this random temporary name.
+      const fd = openSync(tmpPath, 'wx', mode ?? 0o666);
+      ownsTemporary = true;
+      try {
+        writeFileSync(fd, content, { flush: true });
+        if (mode !== undefined) fchmodSync(fd, mode);
+      } finally {
+        closeSync(fd);
+      }
+      // link is atomic and fails with EEXIST if another writer won the name.
+      // Never unlink the destination on failure: it belongs to that writer.
+      linkSync(tmpPath, path);
+      rmSync(tmpPath, { force: true });
+      return;
+    }
     // flush: fsync before the rename, so a write error that surfaces only at
     // sync time (ENOSPC on some filesystems), or a crash, cannot leave the
     // rename durable and the data not.
@@ -704,7 +728,7 @@ export function writeFileAtomic(path, content, { mode } = {}) {
     }
     renameSyncWithRetry(tmpPath, path);
   } catch (err) {
-    rmSync(tmpPath, { force: true });
+    if (ownsTemporary) rmSync(tmpPath, { force: true });
     throw err;
   }
 }

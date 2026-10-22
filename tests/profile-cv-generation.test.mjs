@@ -55,7 +55,14 @@ function withFixture(run) {
         NODE_OPTIONS: `--import=${pathToFileURL(join(root, 'offline-browser.mjs')).href}`,
         PROFILE_TEST_ROOT: root, ...overrides },
     });
-    assert.deepEqual(snapshot(), before, 'generation must preserve its sources and selection inputs');
+    const after = snapshot();
+    if (overrides.PROFILE_TEST_DELETE_CV === '1') {
+      // One regression deliberately deletes this source in the PDF child's
+      // preload. Every other input must still remain byte-for-byte identical.
+      assert.equal(after[0], null, 'the PDF-child fixture must remove cv.md');
+      before[0] = null;
+    }
+    assert.deepEqual(after, before, 'generation must preserve its sources and selection inputs');
     assert.equal(existsSync(paths.network), false, 'no network/model request is permitted');
     return result;
   }
@@ -79,10 +86,32 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
+import { isMainModule } from ${JSON.stringify(pathToFileURL(join(ROOT, 'lib/is-main-module.mjs')).href)};
 const root = process.env.PROFILE_TEST_ROOT;
+const args = process.argv.slice(2);
+const builder = isMainModule(${JSON.stringify(pathToFileURL(join(ROOT, 'build-cv-html.mjs')).href)});
+if (builder && process.env.PROFILE_TEST_RACE_HTML) {
+  if (process.env.PROFILE_TEST_RACE_HTML === 'file') writeFileSync(args[1], 'competing HTML', { flag: 'wx' });
+  else {
+    writeFileSync(root + '/race-target.html', 'competing HTML target');
+    symlinkSync(root + '/race-target.html', args[1]);
+  }
+  writeFileSync(root + '/html-race-created', 'yes');
+}
+if (builder && process.env.PROFILE_TEST_RACE_PARENT) {
+  renameSync(root + '/output', root + '/output-original');
+  symlinkSync(process.env.PROFILE_TEST_RACE_PARENT, root + '/output', process.platform === 'win32' ? 'junction' : 'dir');
+  writeFileSync(root + '/output-parent-swapped', 'yes');
+}
+// generate-cv and its title/structure/builder children lack this PDF-only
+// flag. Delete after their checks, before generate-pdf's module evaluates.
+if (process.env.PROFILE_TEST_DELETE_CV === '1' && args.includes('--require-cv-source')) {
+  rmSync(root + '/cv.md');
+  writeFileSync(root + '/primary-source-deleted', 'yes');
+}
 const blocked = () => { writeFileSync(root + '/network-attempt', 'blocked'); throw new Error('Unexpected network access'); };
 globalThis.fetch = blocked;
 http.request = http.get = https.request = https.get = net.connect = net.createConnection = tls.connect = blocked;
@@ -92,7 +121,13 @@ chromium.launch = async () => {
   writeFileSync(root + '/browser-launched', 'yes');
   return { async newPage() { return {
     async goto(url) { writeFileSync(root + '/rendered.html', readFileSync(fileURLToPath(url))); },
-    async evaluate() {}, async pdf() { return Buffer.from(${JSON.stringify(PDF)}); }
+    async evaluate() {}, async pdf() {
+      if (process.env.PROFILE_TEST_RACE_PDF === '1') {
+        writeFileSync(root + '/output/cv-v1.pdf', 'competing PDF', { flag: 'wx' });
+        writeFileSync(root + '/pdf-race-created', 'yes');
+      }
+      return Buffer.from(${JSON.stringify(PDF)});
+    }
   }; }, async close() {} };
 };
 `);
@@ -129,6 +164,9 @@ check('a symlinked Data Root preserves its path spelling through all generation 
   try {
     symlinkSync(f.root, alias, process.platform === 'win32' ? 'junction' : 'dir');
     assert.equal(realpathSync(alias), f.root);
+    // An existing tracker is canonicalized by resolveTrackerPath; the
+    // downstream output guards must still accept the Data Root's alias.
+    writeFileSync(join(f.root, 'data/applications.md'), '');
     const result = f.cli(['--report', '456'], { CAREER_OPS_ROOT: alias });
     assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(readFileSync(f.paths.pdf, 'utf8'), PDF);
@@ -137,6 +175,21 @@ check('a symlinked Data Root preserves its path spelling through all generation 
       .find(line => line.startsWith('456\t'));
     assert.ok(row, 'the aliased generation must publish its manifest row');
     assert.deepEqual(row.split('\t').slice(0, 4), ['456', 'output/cv-v1.pdf', 'output/cv-v1.html', 'a4']);
+    assert.equal(readFileSync(join(f.root, 'data/applications.md'), 'utf8'), '');
+  } finally { rmSync(aliases, { recursive: true, force: true }); }
+}));
+
+check('a Data Root alias and canonical tracker share the required primary source', () => withFixture(f => {
+  const aliases = realpathSync(mkdtempSync(join(tmpdir(), 'profile tracker aliases ')));
+  try {
+    const alias = join(aliases, 'candidate data');
+    symlinkSync(f.root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const tracker = join(f.root, 'data/applications.md');
+    writeFileSync(tracker, '');
+    const result = f.cli([], { CAREER_OPS_ROOT: alias, CAREER_OPS_TRACKER: tracker }, f.paths);
+    assert.equal(result.status, 0, describeSpawn(result));
+    assert.equal(readFileSync(f.paths.pdf, 'utf8'), PDF);
+    assert.equal(readFileSync(tracker, 'utf8'), '');
   } finally { rmSync(aliases, { recursive: true, force: true }); }
 }));
 
@@ -169,6 +222,32 @@ check('verified Profile claims unsupported by primary sources fail the actual PD
   f.prepare(); // Current mapping is valid: review status is not source truth.
   f.rejects([], {}, /Fact check failed[\s\S]*999 people/);
 }));
+
+check('a primary CV removed after preparation cannot make the PDF child skip its fact gate', () => withFixture(f => {
+  f.rejects([], { PROFILE_TEST_DELETE_CV: '1' }, /(?:require[^\n]*cv\.md|cv\.md[^\n]*(?:require|missing|source))/i);
+  assert.equal(readFileSync(join(f.root, 'primary-source-deleted'), 'utf8'), 'yes');
+  assert.equal(existsSync(f.paths.html), true, 'the HTML draft precedes the PDF-child source deletion');
+  assert.equal(existsSync(join(f.root, 'data/pdf-index.tsv')), false);
+}));
+
+check('PDF source enforcement rejects fact-check bypass and unsupported batch combinations', () => {
+  for (const [args, message] of [
+    [['--require-cv-source', '--skip-fact-check'], /require-cv-source cannot be combined with --skip-fact-check/],
+    [['--batch=absent.json', '--require-cv-source'], /supported only for single-file generation/],
+    [['--batch=absent.json', '--no-clobber'], /supported only for single-file generation/],
+  ]) withFixture(f => {
+    const result = spawnSync(NODE, [join(ROOT, 'generate-pdf.mjs'), ...args], {
+      cwd: f.root, encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, CAREER_OPS_ROOT: f.root, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '', CAREER_OPS_PROFILE: '',
+        NODE_OPTIONS: `--import=${pathToFileURL(join(f.root, 'offline-browser.mjs')).href}`, PROFILE_TEST_ROOT: f.root },
+    });
+    assert.equal(result.status, 1, describeSpawn(result));
+    assert.match(result.stderr + result.stdout, message);
+    assert.equal(existsSync(f.paths.pdf), false);
+    assert.equal(existsSync(f.paths.launch), false);
+    assert.equal(existsSync(f.paths.network), false);
+  });
+});
 
 check('title drift and descriptor loss still warn while allowing completed comparisons', () => withFixture(f => {
   f.state.basePayload.experience[0].role = 'Principal Software Engineer';
@@ -225,6 +304,42 @@ check('an existing PDF, dangling symlink or hard link is never overwritten', () 
     }
   });
 });
+
+check('an HTML file or symlink created after wrapper preflight survives the builder write', () => {
+  for (const kind of ['file', 'symlink']) withFixture(f => {
+    f.rejects([], { PROFILE_TEST_RACE_HTML: kind }, /EEXIST|already exists/i);
+    assert.equal(readFileSync(join(f.root, 'html-race-created'), 'utf8'), 'yes');
+    if (kind === 'file') assert.equal(readFileSync(f.paths.html, 'utf8'), 'competing HTML');
+    else {
+      assert.equal(lstatSync(f.paths.html).isSymbolicLink(), true);
+      assert.equal(readFileSync(join(f.root, 'race-target.html'), 'utf8'), 'competing HTML target');
+    }
+    assert.equal(existsSync(join(f.root, 'data/pdf-index.tsv')), false);
+  });
+});
+
+check('a PDF created during browser rendering survives publication and leaves the manifest unchanged', () => withFixture(f => {
+  const manifest = '# existing manifest\n42\toutput/earlier.pdf\toutput/earlier.html\ta4\t2026-01-01\tcv\n';
+  writeFileSync(join(f.root, 'data/pdf-index.tsv'), manifest);
+  const result = f.cli(['--report', '123'], { PROFILE_TEST_RACE_PDF: '1' });
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(result.stderr + result.stdout, /EEXIST|already exists/i);
+  assert.equal(existsSync(f.paths.launch), true, 'the race happens after Chromium starts');
+  assert.equal(readFileSync(join(f.root, 'pdf-race-created'), 'utf8'), 'yes');
+  assert.equal(readFileSync(f.paths.pdf, 'utf8'), 'competing PDF');
+  assert.equal(readFileSync(join(f.root, 'data/pdf-index.tsv'), 'utf8'), manifest);
+}));
+
+check('an output parent swapped after wrapper preflight is rechecked before the HTML write', () => withFixture(f => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'profile late output escape ')));
+  try {
+    f.rejects([], { PROFILE_TEST_RACE_PARENT: outside }, /outside|inside.*workspace|escape/i);
+    assert.equal(readFileSync(join(f.root, 'output-parent-swapped'), 'utf8'), 'yes');
+    assert.equal(lstatSync(join(f.root, 'output')).isSymbolicLink(), true);
+    assert.equal(existsSync(join(outside, 'cv-v1.html')), false);
+    assert.equal(existsSync(join(outside, 'cv-v1.pdf')), false);
+  } finally { rmSync(outside, { recursive: true, force: true }); }
+}));
 
 check('a custom template cannot silently drop the selected experience section', () => withFixture(f => {
   writeFileSync(join(f.root, 'empty.html'), '<!doctype html><html><body>No experience placeholder</body></html>');

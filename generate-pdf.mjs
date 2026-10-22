@@ -1524,14 +1524,15 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
  * was the path with no gate at all.
  *
  * Callers pass the normalized HTML and skip the call when --skip-fact-check is
- * set or the workspace has no cv.md to check against.
+ * set or the workspace has no cv.md to check against, except when the single
+ * render explicitly requires a non-empty primary source at the fact gate.
  *
  * @param {string} html - Normalized HTML, as it will be printed.
  * @param {string} label - Document name for the error and warning lines.
  * @returns {Promise<void>} Resolves when the document passes or only warns.
  * @throws {Error} When a metric, fact or forbidden phrase blocks the document.
  */
-async function runFactGate(html, label) {
+async function runFactGate(html, label, { requireCvSource = false } = {}) {
   // Imported lazily, by the callers' guard. A static import is resolved at module
   // load whether or not the gate runs, and the page-budget/batch suites copy
   // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
@@ -1541,7 +1542,11 @@ async function runFactGate(html, label) {
   // module is genuinely missing in a real workspace this throws and the render
   // fails, which is the correct direction to fail for a fact gate.
   const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
-  const factCheck = assertFacts(html, { label });
+  const factCheck = assertFacts(html, { label,
+    ...(requireCvSource ? {
+      sourcePaths: [resolve(workspaceRoot, 'cv.md'), resolve(workspaceRoot, 'article-digest.md')],
+      requiredSourcePaths: [resolve(workspaceRoot, 'cv.md')],
+    } : {}) });
   // Ahead of the verdict, because it qualifies it: with no config the phrase
   // lists are empty, so a "passed" below covers metrics and facts only.
   if (factCheck.configMissing) {
@@ -1564,6 +1569,7 @@ async function runFactGate(html, label) {
 async function generatePDF() {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
+  let requireCvSource = false, noClobber = false;
 
   // Parse arguments
   // Empty, not 'cv': an omitted --kind must fall through to inference from the
@@ -1619,6 +1625,10 @@ async function generatePDF() {
       strictPages = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
+    } else if (arg === '--require-cv-source') {
+      requireCvSource = true;
+    } else if (arg === '--no-clobber') {
+      noClobber = true;
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -1634,6 +1644,9 @@ async function generatePDF() {
   // empty value cannot be caught by its return, and the CLI has to reject it
   // here: the caller typed the flag, and silently inferring instead is the
   // substitution the flag exists to prevent.
+  if (requireCvSource && skipFactCheck) throw new Error('--require-cv-source cannot be combined with --skip-fact-check.');
+  if (batchManifestPath && (requireCvSource || noClobber)) throw new Error('--require-cv-source and --no-clobber are supported only for single-file generation.');
+
   if (reportSupplied && !reportNum) {
     console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
     process.exit(1);
@@ -1704,7 +1717,7 @@ async function generatePDF() {
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check | --require-cv-source] [--no-clobber]');
     console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
@@ -1757,6 +1770,7 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  if (requireCvSource && !cvMarkdown.trim()) throw new Error(`Required primary CV source is missing or empty: ${resolve(workspaceRoot, 'cv.md')}`);
   // Drop the optional sections that came in as a bare header — a title with
   // nothing under it (#3986). The builders already strip these from the payload
   // side, but neither builder is on every path here: the web pdf flow has the
@@ -1789,7 +1803,7 @@ async function generatePDF() {
   }
 
   // Fact gate, on the normalized HTML: the document that actually prints.
-  if (!skipFactCheck && cvMarkdown) await runFactGate(html, basename(inputPath));
+  if (requireCvSource || (!skipFactCheck && cvMarkdown)) await runFactGate(html, basename(inputPath), { requireCvSource });
 
   return renderHtmlToPdf(html, outputPath, {
     format,
@@ -1799,6 +1813,7 @@ async function generatePDF() {
     inputPath,
     maxPages,
     strictPages,
+    noClobber,
     styleTokens: readStyleTokens(workspaceProfilePath()),
   });
 }
@@ -2086,6 +2101,7 @@ export async function inlineLocalFonts(html) {
  *   workspaceRoot?: string,
  *   maxPages?: number,
  *   strictPages?: boolean,
+ *   noClobber?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
  * }} [opts]
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
@@ -2234,7 +2250,10 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     // Write PDF only after rendering has completed. Renderer cleanup still runs
     // if an injected browser fails before producing a buffer. The atomic write
     // keeps the previous PDF intact if this write fails partway.
-    writeFileAtomic(outputPath, pdfBuffer);
+    if (opts.noClobber && !isWorkspaceOutputPath(outputPath, outputRoot)) {
+      throw new Error(`Refusing to write the PDF outside the tracker workspace: ${outputPath}`);
+    }
+    writeFileAtomic(outputPath, pdfBuffer, opts.noClobber ? { noReplace: true } : undefined);
 
     // Read the root page-tree count so page-like text in streams is ignored.
     const pageCount = countRenderedPdfPages(pdfBuffer);
