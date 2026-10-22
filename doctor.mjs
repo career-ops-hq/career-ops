@@ -16,7 +16,7 @@ import { AGENT_CLIS } from './lib/agent-cli.mjs';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
-import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy } from './path-resolver.mjs';
 import { validateProfile, EXAMPLE_PATH } from './validate-profile.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
@@ -201,8 +201,25 @@ function checkDependencies() {
   return {
     pass: false,
     label: `Dependencies missing: ${missing.join(', ')}`,
-    fix: 'Run: npm install',
+    fix: isPluginInstallCopy(codeRoot)
+      ? 'Start a new Claude Code session: the plugin\'s SessionStart hook installs them and reports any npm error'
+      : 'Run: npm install',
   };
+}
+
+// A Claude Code plugin install runs from a copy under ~/.claude/plugins/ that
+// Claude Code replaces on every plugin update, so the data root must live
+// outside it. Null for a checkout, which is not a copy.
+function checkPluginInstall(root) {
+  if (explicitTarget || !isPluginInstallCopy(codeRoot)) return null;
+  if (isPluginInstallCopy(root)) {
+    return {
+      pass: false,
+      label: `Data root ${root} is inside the Claude Code plugin install, which is replaced on every plugin update`,
+      fix: 'Set CAREER_OPS_ROOT to an absolute path outside ~/.claude/plugins, or unset it to use ~/career-ops-data',
+    };
+  }
+  return { pass: true, label: `Claude Code plugin install: your files live in ${root}` };
 }
 
 // The web UI is optional, so missing web/ dependencies are a warning: only
@@ -1080,6 +1097,7 @@ async function main() {
     geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
+    checkPluginInstall(projectRoot),
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
@@ -1367,8 +1385,10 @@ function onboardingState(root) {
   const skillCheck = checkSkillEntrypoints(codeRoot);
   const cvShape = checkCvShape(root);
   const envFileProfile = checkEnvFileProfile(root);
+  const pluginInstall = checkPluginInstall(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
+    ...(pluginInstall && !pluginInstall.pass ? [`${pluginInstall.label}\n→ ${pluginInstall.fix}`] : []),
     ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
     ...(bakCheck.warn ? [`${bakCheck.label}\n→ ${[].concat(bakCheck.fix || []).join('\n  ')}`] : []),
     ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
