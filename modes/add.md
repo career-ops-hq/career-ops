@@ -57,10 +57,10 @@ If no source was given, ask the user for one.
 7. **Confirm gate.** Ask the user to approve, edit, or cancel. Do **not** proceed
    without an explicit yes.
 8. **Write via the helper.** Build the payload (schema below), write it to
-   `/tmp/add-<slug>.json`, then run:
+   `tmp/add-<slug>.json`, then run:
 
    ```bash
-   node add-entry.mjs /tmp/add-<slug>.json
+   node add-entry.mjs tmp/add-<slug>.json
    ```
 
    (Add `--dry-run` first if the user wants to see the file-level change without

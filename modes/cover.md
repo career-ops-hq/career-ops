@@ -350,7 +350,7 @@ Assemble the JSON payload:
 
 Each `achievements[].lead` must be a bare phrase with no trailing comma or other punctuation — `generate-cover-letter.mjs` appends the comma when rendering (see Step 7).
 
-Write payload to `/tmp/cover-payload-{company-slug}.json`.
+Write payload to `tmp/cover-payload-{company-slug}.json`.
 
 Leave `output_path` out of the payload. The script names the file itself: with a report it is `output/{NNN}-{company-slug}-cover-{candidate-slug}-{YYYY-MM-DD}.pdf` (the one standard in `lib/output-names.mjs`), so the cover letter sorts next to the CV for the same application.
 
@@ -358,7 +358,7 @@ Cover drafts, coverage reports and other agent working files are not deliverable
 
 Run, passing the report number when an evaluation report exists for this role (slug mode, or any role already in the tracker):
 ```bash
-node generate-cover-letter.mjs --payload /tmp/cover-payload-{company-slug}.json --report {NNN}
+node generate-cover-letter.mjs --payload tmp/cover-payload-{company-slug}.json --report {NNN}
 ```
 
 With no report, omit `--report`; the file falls back to `output/{company}-{role}-cover.pdf`.
