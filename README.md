@@ -280,6 +280,29 @@ This installs the `career-ops` binary globally so you can run it directly instea
 - `npx @santifer/career-ops init`: best for first use; creates a dedicated project folder.
 - `npm i -g @santifer/career-ops`: best once you have a project folder and want to run career-ops commands directly.
 
+### Install as a Claude plugin (Claude desktop app)
+
+Install career-ops once and use it from any folder in the Claude desktop app's **Code** tab. You don't need to clone anything or open a career-ops folder.
+
+1. In the Claude desktop app, open **Customize → Plugins**.
+2. Select **Add → Add marketplace** and enter `career-ops-hq/career-ops`.
+3. Open **Discover**, find **career-ops**, and select **Add**.
+4. To get new versions without doing anything, open the marketplace you added and turn on **Sync automatically**. **Check for updates** pulls them right away. A new version means a new `version` in `.claude-plugin/plugin.json`. Pushes that leave it unchanged don't reach installs (see [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md#updating)).
+5. Start a new session in the **Code** tab. The first start takes a few extra seconds while career-ops installs its Node packages. Then type `/career-ops:career-ops`, or paste a job URL. On first use it walks you through setup.
+
+Your CV, profile, tracker and reports are saved in `~/career-ops-data`, never inside the plugin, so plugin updates never touch them.
+
+From the Claude Code CLI, the same install is two commands:
+
+```text
+/plugin marketplace add career-ops-hq/career-ops
+/plugin install career-ops@career-ops
+```
+
+> **Code tab and Claude Code only.** A plugin added in Customize also shows up in Chat and Cowork, but career-ops can't run there as a plugin: Chat has no access to your files, and Cowork can't install the plugin's packages. To use career-ops in Cowork, open a career-ops folder instead ([docs/COWORK.md](docs/COWORK.md)).
+
+Where everything lives, how updates work and how to pick another data folder: [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
 See [docs/SETUP.md](docs/SETUP.md) for the full setup guide, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models (and [docs/FREE_TIER.md](docs/FREE_TIER.md) for running it at zero cost on Antigravity CLI's free tier), [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/KEEPING_PORTALS_LIVE.md](docs/KEEPING_PORTALS_LIVE.md) for keeping your company list current, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) for cross-referencing a LinkedIn connections export against the companies in your funnel, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions, including [how story provenance prevents invented numbers](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Design principles live in [ARCHITECTURE.md](ARCHITECTURE.md); runtime flows in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
