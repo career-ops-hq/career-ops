@@ -27,6 +27,10 @@
 import { readFileSync } from 'node:fs';
 import { classifyLiveness, isUnreadableVerdict } from '../liveness-core.mjs';
 
+// Strong expiry signals only. The soft and listing heuristics depend on an
+// apply-control check that this curl-only path cannot run.
+const DEAD_CODES = new Set(['http_gone', 'expired_url', 'expired_body', 'deadline_passed']);
+
 /**
  * @param {{status?: number, requestedUrl?: string, finalUrl?: string, bodyText?: string}} input
  * @returns {{decision: 'proceed'|'skip-dead'|'skip-blocked'|'retry-later', code: string, reason: string}}
@@ -36,10 +40,7 @@ export function decide({ status = 0, requestedUrl = '', finalUrl = '', bodyText 
   const { result, code, reason } = verdict;
   let decision;
   if (result === 'expired') {
-    // "insufficient content" is the one expired verdict this filter must NOT act
-    // on: a JS-rendered board serves curl an empty app shell for a perfectly live
-    // posting, and the runner's thin-page fallbacks exist for exactly that case.
-    decision = isUnreadableVerdict(verdict) ? 'proceed' : 'skip-dead';
+    decision = !isUnreadableVerdict(verdict) && DEAD_CODES.has(code) ? 'skip-dead' : 'proceed';
   } else if (code === 'redirected_off_posting') {
     // The requested URL carried a job id and the final URL does not: what curl
     // downloaded is a board listing, not this posting. A worker handed that file

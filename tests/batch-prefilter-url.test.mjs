@@ -18,6 +18,8 @@ const d = (input) => decide({ requestedUrl: posting, finalUrl: posting, ...input
 eq('HTTP 404 is a dead posting', d({ status: 404 }), 'skip-dead');
 eq('HTTP 410 is a dead posting', d({ status: 410 }), 'skip-dead');
 eq('a 200 page that says the job is gone is dead', d({ status: 200, bodyText: `Sorry, this job is no longer available. ${long}` }), 'skip-dead');
+eq('a weak JOB EXPIRED banner on a long page proceeds', d({ status: 200, bodyText: `JOB EXPIRED. ${long}` }), 'proceed');
+eq('a listing-page phrase on a long page proceeds', d({ status: 200, bodyText: `12 jobs found. ${long}` }), 'proceed');
 eq('a live JD proceeds', d({ status: 200, bodyText: long }), 'proceed');
 eq('an empty app shell proceeds: a JS-rendered board is not a dead one', d({ status: 200, bodyText: '' }), 'proceed');
 eq('a few nav words proceed for the same reason', d({ status: 200, bodyText: 'Home Careers Sign in' }), 'proceed');

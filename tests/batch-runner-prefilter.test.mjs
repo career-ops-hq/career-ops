@@ -19,6 +19,15 @@ const act = SRC.match(/  if \[\[ "\$jd_prefilter_decision" != "proceed" \]\]; th
 if (detect && act) pass('batch-runner.sh has the pre-filter detection and action blocks');
 else fail('the pre-filter blocks are missing from batch-runner.sh');
 
+const rescueAt = SRC.indexOf('jd_prefilter_decision" == "skip-blocked"');
+const actionAt = SRC.indexOf('if [[ "$jd_prefilter_decision" != "proceed" ]]');
+const rescueBlock = rescueAt >= 0 && actionAt > rescueAt ? SRC.slice(rescueAt, actionAt) : '';
+if (rescueBlock.includes('fetch-jd.mjs') && rescueBlock.includes('prefetch_min_words')) {
+  pass('blocked/transient prefilter verdicts get an ATS API rescue before terminal action');
+} else {
+  fail('blocked/transient prefilter verdicts must try fetch-jd.mjs before being recorded');
+}
+
 // ── contract ───────────────────────────────────────────────────────────────
 const writeOutAt = SRC.indexOf("--write-out '%{http_code}\\t%{url_effective}'");
 const stripAt = SRC.indexOf('jd_prefetch_words=$(node -e');
@@ -66,7 +75,7 @@ if (!bash || !detect || !act) {
         `jd_file=${JSON.stringify(jd)}`,
         `BATCH_DIR=${JSON.stringify(withStub ? batchDir : join(work, 'none'))}`,
         `PREFILTER=${prefilter}`,
-        'url="https://jobs.example.com/acme/1"; id=7; started_at=T0; retries=0; report_num=042',
+        'url="https://jobs.example.com/acme/1"; id=7; started_at=T0; retries=0; report_num=042; MAX_RETRIES=3',
         'jd_http_code=404; jd_final_url="$url"',
         'jd_prefilter_decision=proceed; jd_prefilter_code=""; jd_prefilter_reason=""',
         `update_state_retrying() { printf 'STATE %s\\n' "$*" >> ${JSON.stringify(trace)}; }`,
@@ -93,7 +102,7 @@ if (!bash || !detect || !act) {
     } else fail(`skip-blocked handled wrong: ${JSON.stringify(blocked)}`);
 
     const later = run({ mode: 'retry-later' });
-    if (!/CONTINUED/.test(later.out) && /STATE 7 \S+ failed T0 \S+ - - prefilter: transient/.test(later.trace) && /RELEASE 042/.test(later.trace)) {
+    if (!/CONTINUED/.test(later.out) && /STATE 7 \S+ failed T0 \S+ - - prefilter: transient/.test(later.trace) && /STATE 7 .* 1\n/.test(later.trace) && /RELEASE 042/.test(later.trace)) {
       pass('retry-later: recorded failed so --retry-failed picks it up, number released, no worker');
     } else fail(`retry-later handled wrong: ${JSON.stringify(later)}`);
 

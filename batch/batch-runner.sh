@@ -1417,6 +1417,28 @@ process_offer() {
       fi
   fi
 
+  # A blocked or transient HTML response can still have a readable JD in the
+  # ATS's public API. Rescue it before recording the pre-filter outcome; dead
+  # postings remain terminal and never make this extra request.
+  if [[ "$jd_prefilter_decision" == "skip-blocked" || "$jd_prefilter_decision" == "retry-later" ]]; then
+    : > "$jd_file"
+    local jd_prefilter_api_tmp jd_prefilter_api_words=0
+    if [[ -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
+      jd_prefilter_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-prefilter-api.XXXXXX")"
+      if node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_prefilter_api_tmp" 2>/dev/null; then
+        jd_prefilter_api_words=$(wc -w < "$jd_prefilter_api_tmp" 2>/dev/null) || jd_prefilter_api_words=0
+        jd_prefilter_api_words="${jd_prefilter_api_words//[^0-9]/}"
+        jd_prefilter_api_words="${jd_prefilter_api_words:-0}"
+        if [[ "$jd_prefilter_api_words" -ge "$prefetch_min_words" ]]; then
+          cat "$jd_prefilter_api_tmp" > "$jd_file"
+          jd_prefilter_decision=proceed
+          echo "    ℹ️  JD prefilter rescue: ${jd_prefilter_api_words} words from the ATS API (fetch-jd.mjs)"
+        fi
+      fi
+      rm -f "$jd_prefilter_api_tmp"
+    fi
+  fi
+
   # Act on the pre-filter verdict. "skipped" is terminal (a 404 is still a 404
   # next run); a transient 429/5xx is "failed" so --retry-failed picks it up. No
   # worker is spawned, so the report number reserved above goes back.
@@ -1434,7 +1456,9 @@ process_offer() {
         ;;
       retry-later)
         echo "    ⏳ Pre-filter: transient ($jd_prefilter_code) — deferred, no worker spawned"
-        update_state_retrying "$id" "$url" "failed" "$started_at" "$pf_now" "-" "-" "prefilter: transient ($jd_prefilter_code) — $jd_prefilter_reason" "$retries" || true
+        local pf_retries="$retries"
+        (( pf_retries < MAX_RETRIES )) && pf_retries=$((retries + 1))
+        update_state_retrying "$id" "$url" "failed" "$started_at" "$pf_now" "-" "-" "prefilter: transient ($jd_prefilter_code) — $jd_prefilter_reason" "$pf_retries" || true
         ;;
     esac
     case "$jd_prefilter_decision" in
