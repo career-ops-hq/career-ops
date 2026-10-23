@@ -39,9 +39,15 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer, this covers anything the script hands to fetch directly.
+installPiiInterceptor();
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -343,21 +349,25 @@ if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
 let evaluationText;
 try {
+  // Privacy gate: inspect the complete serialized request before it leaves the
+  // machine. Shared boundary so openai-eval and openai-tailor cannot diverge.
+  const requestBody = JSON.stringify({
+    model:    modelName,
+    messages: [
+      buildSystemMessage(systemPrompt, endpointHost),
+      { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
+    ],
+    stream:      true,
+    temperature: 0.4,
+  });
+  assertLlmRequestAllowed(endpoint, requestBody);
   // Streaming (SSE): llama.cpp/Unsloth brauchen bei langen Generationen den
   // sofortigen Header; Non-Streaming läuft in Node/undici in den 5-Minuten-
   // Header-Timeout, bevor die erste Zeile ankommt (8 t/s × 22k-Prefill).
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model:    modelName,
-      messages: [
-        buildSystemMessage(systemPrompt, endpointHost),
-        { role: 'user', content: `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}` },
-      ],
-      stream:      true,
-      temperature: 0.4,
-    }),
+    body: requestBody,
     signal: AbortSignal.timeout(timeoutMs),
   });
 

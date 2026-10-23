@@ -79,6 +79,13 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getCareerOpsRoot, getProfilePath, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import { assertGoogleRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+
+// The Google Generative AI SDK calls global fetch directly, so this ambient
+// install is what covers its requests with no SDK-specific code. The explicit
+// gate at the generateContent() call site is the primary layer.
+installPiiInterceptor();
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -460,7 +467,17 @@ const model = genAI.getGenerativeModel({
 
 let evaluationText;
 try {
-  const result = await model.generateContent(`JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`);
+  // Privacy gate. `assertGoogleRequestAllowed` builds the request body from the
+  // same systemInstruction and user turn the SDK receives, so the inspected
+  // payload and the transmitted one are the same request. The SDK issues its own
+  // global fetch, so the ambient interceptor is the backstop for anything this
+  // reconstruction misses.
+  const userTurn = `JOB DESCRIPTION TO EVALUATE:\n\n${jdText}`;
+  assertGoogleRequestAllowed({
+    systemInstruction: systemPrompt,
+    turns: [userTurn],
+  });
+  const result = await model.generateContent(userTurn);
   evaluationText = result.response.text();
   const usage = {
     prompt_tokens: result.response.usageMetadata?.promptTokenCount ?? 0,
