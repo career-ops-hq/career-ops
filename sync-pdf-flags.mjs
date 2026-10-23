@@ -24,6 +24,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, resolveWorkspaceRoot, pathIsInsideCanonical } from './tracker-utils.mjs';
+import { acquirePipelineLock } from './pipeline-lock.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parsePdfIndex, livePdfIndex } from './find.mjs';
@@ -82,102 +83,107 @@ export async function syncTrackerPdfFlags(options = {}) {
   // #3887 introduces kind-awareness; this half is scoped to the manifest only.
   // ---------------------------------------------------------------------------
   if (flags.prune) {
-    if (!existsSync(PDF_MANIFEST)) {
-      const result = { pruned: 0, kept: 0, dryRun: !flags.write };
-      if (flags.json) console.log(JSON.stringify(result));
-      else console.log('\n📊 Summary: manifest does not exist — nothing to prune');
-      return 0;
-    }
-
-    let rawContent;
+    const manifestLock = flags.write ? await acquirePipelineLock(PDF_MANIFEST, options.lock) : null;
     try {
-      rawContent = readFileSync(PDF_MANIFEST, 'utf-8');
-    } catch (err) {
-      if (flags.json) {
-        console.log(JSON.stringify({ error: `Cannot read PDF manifest: ${err.message}`, code: 'manifest-read-error' }));
-      } else {
-        console.error(`❌ Cannot read PDF manifest: ${err.message}`);
-      }
-      return 2;
-    }
-
-    // The workspace root is needed to resolve the workspace-relative pdf paths
-    // stored in the manifest (e.g. "output/042-acme-cv.pdf").
-    const workspaceRoot = resolveWorkspaceRoot(APPS_FILE);
-    const outputDir = resolve(workspaceRoot, 'output');
-
-    const inputLines = rawContent.split('\n');
-    const keptLines = [];
-    const prunedRows = [];
-
-    for (const line of inputLines) {
-      // Preserve comment lines and blank lines verbatim.
-      if (!line.trim() || line.startsWith('#')) {
-        keptLines.push(line);
-        continue;
+      if (!existsSync(PDF_MANIFEST)) {
+        const result = { pruned: 0, kept: 0, dryRun: !flags.write };
+        if (flags.json) console.log(JSON.stringify(result));
+        else console.log('\n📊 Summary: manifest does not exist — nothing to prune');
+        return 0;
       }
 
-      const parts = line.split('\t');
-      const relPdf = parts[1]?.trim();
-
-      if (!relPdf) {
-        // Malformed row (no pdf column) — keep it; not our business to remove it.
-        keptLines.push(line);
-        continue;
-      }
-
-      const absPath = resolve(workspaceRoot, relPdf);
-      if (!pathIsInsideCanonical(absPath, outputDir)) {
-        prunedRows.push({ line, relPdf, report: parts[0]?.trim() || '' });
-        if (!flags.json) {
-          const marker = flags.write ? '🗑️ ' : '🔎';
-          const action = flags.write ? 'pruned' : 'would prune';
-          console.log(`${marker} ${action}: ${relPdf} (report ${parts[0]?.trim() || '?'}) — outside output directory`);
-        }
-        continue;
-      }
-
-      if (existsSync(absPath)) {
-        keptLines.push(line);
-      } else {
-        prunedRows.push({ line, relPdf, report: parts[0]?.trim() || '' });
-        if (!flags.json) {
-          const marker = flags.write ? '🗑️ ' : '🔎';
-          const action = flags.write ? 'pruned' : 'would prune';
-          console.log(`${marker} ${action}: ${relPdf} (report ${parts[0]?.trim() || '?'}) — file not found`);
-        }
-      }
-    }
-
-    const pruned = prunedRows.length;
-    const kept = inputLines.filter(l => l.trim() && !l.startsWith('#')).length - pruned;
-
-    if (pruned > 0 && flags.write) {
-      // Trim trailing blank lines added during the split, then restore exactly one.
-      const content = keptLines.join('\n').replace(/\n+$/, '') + '\n';
+      let rawContent;
       try {
-        writeFileAtomic(PDF_MANIFEST, content);
+        rawContent = readFileSync(PDF_MANIFEST, 'utf-8');
       } catch (err) {
         if (flags.json) {
-          console.log(JSON.stringify({ error: `Cannot write manifest: ${err.message}`, code: 'write-failure' }));
+          console.log(JSON.stringify({ error: `Cannot read PDF manifest: ${err.message}`, code: 'manifest-read-error' }));
         } else {
-          console.error(`❌ Cannot write manifest: ${err.message}`);
+          console.error(`❌ Cannot read PDF manifest: ${err.message}`);
         }
-        return 1;
+        return 2;
       }
-    }
 
-    const result = { pruned, kept, dryRun: !flags.write };
-    if (flags.json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      const verb = flags.write ? 'pruned' : 'would prune (dry run — pass --write to commit)';
-      console.log(`\n📊 Summary: ${pruned} row(s) ${verb}, ${kept} kept`);
-      if (pruned > 0 && !flags.write) {
-        console.log('ℹ️  Re-run with --write to remove stale rows, then run sync-pdf-flags.mjs to reconcile tracker flags.');
+      // The workspace root is needed to resolve the workspace-relative pdf paths
+      // stored in the manifest (e.g. "output/042-acme-cv.pdf").
+      const workspaceRoot = resolveWorkspaceRoot(APPS_FILE);
+      const outputDir = resolve(workspaceRoot, 'output');
+
+      const inputLines = rawContent.split('\n');
+      const keptLines = [];
+      const prunedRows = [];
+
+      for (const line of inputLines) {
+        // Preserve comment lines and blank lines verbatim.
+        if (!line.trim() || line.startsWith('#')) {
+          keptLines.push(line);
+          continue;
+        }
+
+        const parts = line.split('\t');
+        const relPdf = parts[1]?.trim();
+
+        if (!relPdf) {
+          // Malformed row (no pdf column) — keep it; not our business to remove it.
+          keptLines.push(line);
+          continue;
+        }
+
+        const absPath = resolve(workspaceRoot, relPdf);
+        if (!pathIsInsideCanonical(absPath, outputDir)) {
+          prunedRows.push({ line, relPdf, report: parts[0]?.trim() || '' });
+          if (!flags.json) {
+            const marker = flags.write ? '🗑️ ' : '🔎';
+            const action = flags.write ? 'pruned' : 'would prune';
+            console.log(`${marker} ${action}: ${relPdf} (report ${parts[0]?.trim() || '?'}) — outside output directory`);
+          }
+          continue;
+        }
+
+        if (existsSync(absPath)) {
+          keptLines.push(line);
+        } else {
+          prunedRows.push({ line, relPdf, report: parts[0]?.trim() || '' });
+          if (!flags.json) {
+            const marker = flags.write ? '🗑️ ' : '🔎';
+            const action = flags.write ? 'pruned' : 'would prune';
+            console.log(`${marker} ${action}: ${relPdf} (report ${parts[0]?.trim() || '?'}) — file not found`);
+          }
+        }
       }
+
+      const pruned = prunedRows.length;
+      const kept = inputLines.filter(l => l.trim() && !l.startsWith('#')).length - pruned;
+
+      if (pruned > 0 && flags.write) {
+        // Trim trailing blank lines added during the split, then restore exactly one.
+        const content = keptLines.join('\n').replace(/\n+$/, '') + '\n';
+        try {
+          writeFileAtomic(PDF_MANIFEST, content);
+        } catch (err) {
+          if (flags.json) {
+            console.log(JSON.stringify({ error: `Cannot write manifest: ${err.message}`, code: 'write-failure' }));
+          } else {
+            console.error(`❌ Cannot write manifest: ${err.message}`);
+          }
+          return 1;
+        }
+      }
+
+      const result = { pruned, kept, dryRun: !flags.write };
+      if (flags.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const verb = flags.write ? 'pruned' : 'would prune (dry run — pass --write to commit)';
+        console.log(`\n📊 Summary: ${pruned} row(s) ${verb}, ${kept} kept`);
+        if (pruned > 0 && !flags.write) {
+          console.log('ℹ️  Re-run with --write to remove stale rows, then run sync-pdf-flags.mjs to reconcile tracker flags.');
+        }
+      }
+      return 0;
+    } finally {
+      manifestLock?.release();
     }
-    return 0;
   }
 
   // ---------------------------------------------------------------------------
