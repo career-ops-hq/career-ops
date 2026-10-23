@@ -133,6 +133,7 @@ RATE_LIMIT_SLEEP=300
 WORKER_TIMEOUT=1800
 THIN_ACTION=webfetch   # webfetch | skip | browser-extract: what to do when the JD is still empty after the prefetch and the ATS API fallback
 BATCH_PAUSED=false
+EVIDENCE_FRESHNESS_JSON=""   # set once per run by check_evidence_freshness
 STATUS_ONLY=false
 STATUS_FULL=true
 WATCH_MODE=false
@@ -1425,6 +1426,17 @@ process_offer() {
     fi
   done
 
+  # The run-wide evidence freshness result (Step 1.7). The same text for every
+  # offer, so it keeps the resolved prompt byte-identical across the run.
+  if [[ -n "$EVIDENCE_FRESHNESS_JSON" ]]; then
+    {
+      printf '\n\n---\n\n'
+      printf '## Runtime: GitHub evidence freshness\n\n'
+      printf 'The runner ran `node evidence-freshness.mjs` once for this batch run. Its JSON output:\n\n'
+      printf '%s\n' "$EVIDENCE_FRESHNESS_JSON" | sed 's/^/    /'
+    } >> "$resolved_prompt"
+  fi
+
   # Build the launch command for the configured CLI.
   # For claude the model is resolved once per run from spend_tier unless --model
   # was passed; other CLIs take --model verbatim. Building claude's command in an
@@ -1780,6 +1792,26 @@ process_offer() {
 }
 
 # Merge tracker additions into applications.md
+# GitHub evidence freshness (#5674): one check for the whole run, not one per
+# worker. The check makes a `gh search prs` call and its answer is the same for
+# every offer, so the runner makes it once and every worker reads the result
+# from its prompt. It is opt-in: with evidence_freshness.enabled not true it
+# reports status "disabled" without any network call, and workers get nothing.
+check_evidence_freshness() {
+  [[ -f "$PROJECT_DIR/evidence-freshness.mjs" ]] || return 0
+  local out status
+  out=$(node "$PROJECT_DIR/evidence-freshness.mjs" 2>/dev/null) || return 0
+  status=$(printf '%s\n' "$out" | sed -n 's/^  "status": "\(.*\)",$/\1/p')
+  [[ -z "$status" || "$status" == "disabled" ]] && return 0
+  EVIDENCE_FRESHNESS_JSON="$out"
+  if printf '%s\n' "$out" | grep -q '^  "stale": true,$'; then
+    echo "GitHub evidence: stale (checked once for this run; see each report header)"
+  else
+    echo "GitHub evidence: $status (checked once for this run)"
+  fi
+  echo ""
+}
+
 merge_tracker() {
   echo ""
   echo "=== Merging tracker additions ==="
@@ -2149,6 +2181,8 @@ main() {
     echo "Would process $pending_count offers"
     exit 0
   fi
+
+  check_evidence_freshness
 
   # Process offers
   BATCH_START=$SECONDS

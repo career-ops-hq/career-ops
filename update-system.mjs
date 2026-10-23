@@ -388,6 +388,7 @@ const SYSTEM_PATHS = [
   'precheck-duplicate.mjs',
   'add-entry.mjs',
   'github-evidence.mjs',
+  'evidence-freshness.mjs',
   'role-matcher.mjs',
   'tracker-utils.mjs',
   'tracker-parse.mjs',
