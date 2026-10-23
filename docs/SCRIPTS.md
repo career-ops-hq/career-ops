@@ -548,9 +548,9 @@ tracker row, so a contact cannot be attached across companies.
 
 Optional GitHub evidence step of the `expand` mode (#5295). Reads the pull
 requests you authored through your existing `gh auth` (no new token) and checks
-what `cv.md` claims against them. Read-only, metadata only (PR title, state,
-repository, stars, visibility); it never reads source code and never writes
-`cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
+what `cv.md` claims against them. Read-only: PR title, state, repository,
+stars, visibility, and the README of each allowlisted repo; it never reads
+source code and never writes `cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
 `add-entry.mjs`.
 
 ```bash
@@ -564,6 +564,12 @@ node github-evidence.mjs --json   # same, and prints the JSON on stdout
   `github_evidence.private_allowlist: ["owner/repo"]` (empty by default). Any
   other private repo, or one whose visibility could not be read, appears by
   name and count only, never with PR titles.
+- `readmes`: the README of each allowlisted repo, your own private repos
+  included, read with `gh api repos/<owner>/<repo>/readme` (raw), control
+  characters dropped and capped at 6000 characters (`truncated` says when).
+  A fork, or a repo whose visibility could not be read, is skipped; a repo
+  without a README is skipped too. `own` marks your own repos. The text is in
+  the JSON only; the Markdown report lists which READMEs were read.
 - `claimCheck.mergedNotNamed`: third-party repos with merged PRs that `cv.md`
   does not name. `claimCheck.namedNoMerge`: repos `cv.md` names where you have
   no merged PR. Matching is literal and case-insensitive (`owner/repo`, then
