@@ -825,7 +825,7 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
     throw new Error(`Refusing to write HTML outside the tracker workspace: ${absOutput}`);
   }
   const outDir = dirname(absOutput);
-  if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+  if (!noClobber && !existsSync(outDir)) await mkdir(outDir, { recursive: true });
 
   const lockedKeys = readLockedSections(PROFILE_PATH, sectionKey);
   const cvPath = resolve(workspaceRoot, 'cv.md');
@@ -835,9 +835,13 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
   if (noClobber && !pathIsInsideCanonical(absOutput, resolveWorkspaceRootFor(DATA_ROOT))) {
     throw new Error(`Refusing to write HTML outside the tracker workspace: ${absOutput}`);
   }
-  await writeFile(absOutput, html, { encoding: 'utf-8', flag: noClobber ? 'wx' : 'w' });
+  if (noClobber) {
+    const { publishWorkspaceFile } = await import('./lib/workspace-output.mjs');
+    publishWorkspaceFile(absOutput, html, resolveWorkspaceRootFor(DATA_ROOT));
+  }
+  else await writeFile(absOutput, html, 'utf-8');
 
-  const fileInfo = await stat(absOutput);
+  const fileInfo = noClobber ? { size: Buffer.byteLength(html) } : await stat(absOutput);
   const report = {
     ...rest,
     file: basename(absOutput),

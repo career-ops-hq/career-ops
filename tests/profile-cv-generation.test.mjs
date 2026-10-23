@@ -1,7 +1,7 @@
 /** #5494: exercise the opt-in CLI, actual HTML builder and existing CV gates. */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,11 +13,34 @@ const fixture = JSON.parse(readFileSync(join(ROOT, 'tests/fixtures/profile-cv-se
 const sourceFiles = ['cv.md', 'data/career-profile.yml', 'base.json', 'selection.json', 'prepared.json', 'config/cv-facts.json', 'config/profile.yml'];
 const PDF = '%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
   + '2 0 obj\n<< /Type /Pages /Count 1 >>\nendobj\n%%EOF';
+const pdfManifestRace = String.raw`
+import os, runpy, sys
+original_link = os.link
+def racing_link(source, target, *, src_dir_fd=None, dst_dir_fd=None, follow_symlinks=True):
+    root = os.environ['PROFILE_TEST_ROOT']
+    os.rename(root + '/data', root + '/data-original')
+    os.symlink(os.environ['PROFILE_TEST_PUBLICATION_OUTSIDE'], root + '/data')
+    with open(root + '/pdf-data-parent-swapped', 'w') as marker:
+        marker.write('yes')
+    return original_link(source, target, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd, follow_symlinks=follow_symlinks)
+os.supports_dir_fd.add(racing_link)
+os.supports_follow_symlinks.add(racing_link)
+os.link = racing_link
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name='__main__')
+`;
 
-function check(name, run) {
+function check(name, run, requiresPosix = true) {
+  if (requiresPosix && process.platform === 'win32') return;
   try { run(); pass(`profile generation: ${name}`); }
   catch (error) { fail(`profile generation: ${name}: ${error.stack}`); }
 }
+
+if (process.platform === 'win32') check('unsupported platforms stop before creating either artifact', () => withFixture(f => {
+  f.rejects([], {}, /POSIX|support/i);
+  assert.equal(existsSync(f.paths.html), false);
+  assert.equal(existsSync(join(f.root, 'data/pdf-index.tsv')), false);
+}), false);
 
 function withFixture(run) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'profile generation data ')));
@@ -41,8 +64,8 @@ function withFixture(run) {
     save('selection.json', state.selection);
     save('prepared.json', state.prepared);
   }
-  const snapshot = () => sourceFiles.map(file => {
-    const path = join(root, file);
+  const snapshot = (dataDirectory = 'data') => sourceFiles.map(file => {
+    const path = join(root, file.replace(/^data\//, `${dataDirectory}/`));
     return existsSync(path) ? readFileSync(path) : null;
   });
   function cli(extra = [], overrides = {}, destinations = {}) {
@@ -55,7 +78,7 @@ function withFixture(run) {
         NODE_OPTIONS: `--import=${pathToFileURL(join(root, 'offline-browser.mjs')).href}`,
         PROFILE_TEST_ROOT: root, ...overrides },
     });
-    const after = snapshot();
+    const after = snapshot(overrides.PROFILE_TEST_RACE_PDF_MANIFEST === '1' ? 'data-original' : 'data');
     if (overrides.PROFILE_TEST_DELETE_CV === '1') {
       // One regression deliberately deletes this source in the PDF child's
       // preload. Every other input must still remain byte-for-byte identical.
@@ -86,6 +109,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
+import childProcess from 'node:child_process';
 import { readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
@@ -93,6 +117,24 @@ import { isMainModule } from ${JSON.stringify(pathToFileURL(join(ROOT, 'lib/is-m
 const root = process.env.PROFILE_TEST_ROOT;
 const args = process.argv.slice(2);
 const builder = isMainModule(${JSON.stringify(pathToFileURL(join(ROOT, 'build-cv-html.mjs')).href)});
+const publish = childProcess.execFileSync;
+childProcess.execFileSync = function(command, childArgs, options) {
+  // Inject only at publication, after every JavaScript path check. The Python
+  // writer must still refuse a newly substituted ancestor at its actual open.
+  const target = process.env.PROFILE_TEST_RACE_PUBLICATION;
+  const helperIndex = childArgs.findIndex(arg => String(arg).endsWith('/workspace-output.py'));
+  if (process.env.PROFILE_TEST_RACE_PDF_MANIFEST === '1' && args.includes('--require-cv-source')
+    && helperIndex >= 0 && !childArgs.includes('--check') && !childArgs.includes('--manifest')) {
+    return publish.call(this, command, ['-I', '-B', '-c', ${JSON.stringify(pdfManifestRace)}, ...childArgs.slice(helperIndex)], options);
+  }
+  if (target && ((target === 'html' && builder) || (target === 'pdf' && args.includes('--require-cv-source')))
+    && childArgs.some(arg => String(arg).endsWith('/workspace-output.py')) && !childArgs.includes('--check')) {
+    renameSync(root + '/output', root + '/output-original');
+    symlinkSync(process.env.PROFILE_TEST_PUBLICATION_OUTSIDE, root + '/output', 'dir');
+    writeFileSync(root + '/' + target + '-publication-parent-swapped', 'yes');
+  }
+  return publish.call(this, command, childArgs, options);
+};
 if (builder && process.env.PROFILE_TEST_RACE_HTML) {
   if (process.env.PROFILE_TEST_RACE_HTML === 'file') writeFileSync(args[1], 'competing HTML', { flag: 'wx' });
   else {
@@ -121,7 +163,7 @@ chromium.launch = async () => {
   writeFileSync(root + '/browser-launched', 'yes');
   return { async newPage() { return {
     async goto(url) { writeFileSync(root + '/rendered.html', readFileSync(fileURLToPath(url))); },
-    async evaluate() {}, async pdf() {
+    async evaluate(_callback, value) { if (value?.html) return value.html; }, async pdf() {
       if (process.env.PROFILE_TEST_RACE_PDF === '1') {
         writeFileSync(root + '/output/cv-v1.pdf', 'competing PDF', { flag: 'wx' });
         writeFileSync(root + '/pdf-race-created', 'yes');
@@ -156,6 +198,12 @@ check('real offline flow preserves literal ordered facts, distinct experiences a
   const fields = rows[0].split('\t');
   assert.deepEqual(fields.slice(0, 4), ['123', 'output/cv-v1.pdf', 'output/cv-v1.html', 'a4']);
   assert.equal(fields[5], 'cv');
+}));
+
+check('missing Python support stops before creating either artifact', () => withFixture(f => {
+  f.rejects([], { PATH: '' }, /Python 3/);
+  assert.equal(existsSync(f.paths.html), false);
+  assert.equal(existsSync(join(f.root, 'data/pdf-index.tsv')), false);
 }));
 
 check('a symlinked Data Root preserves its path spelling through all generation CLIs', () => withFixture(f => {
@@ -338,6 +386,47 @@ check('an output parent swapped after wrapper preflight is rechecked before the 
     assert.equal(lstatSync(join(f.root, 'output')).isSymbolicLink(), true);
     assert.equal(existsSync(join(outside, 'cv-v1.html')), false);
     assert.equal(existsSync(join(outside, 'cv-v1.pdf')), false);
+  } finally { rmSync(outside, { recursive: true, force: true }); }
+}));
+
+for (const target of ['html', 'pdf']) check(`${target.toUpperCase()} ancestors swapped at publication cannot receive any bytes outside the workspace`, () => withFixture(f => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'profile publication escape ')));
+  const manifest = '# existing manifest\n42\toutput/earlier.pdf\toutput/earlier.html\ta4\t2026-01-01\tcv\n';
+  try {
+    writeFileSync(join(outside, 'keep.txt'), 'outside content');
+    writeFileSync(join(f.root, 'data/pdf-index.tsv'), manifest);
+    const result = f.cli(['--report', '123'], {
+      PROFILE_TEST_RACE_PUBLICATION: target, PROFILE_TEST_PUBLICATION_OUTSIDE: outside,
+    });
+    assert.equal(result.status, 1, describeSpawn(result));
+    assert.equal(readFileSync(join(f.root, `${target}-publication-parent-swapped`), 'utf8'), 'yes');
+    assert.equal(lstatSync(join(f.root, 'output')).isSymbolicLink(), true);
+    assert.deepEqual(readdirSync(outside), ['keep.txt'], 'neither a temporary nor a destination may appear outside');
+    assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'outside content');
+    assert.equal(existsSync(join(f.root, 'output-original/cv-v1.pdf')), false);
+    assert.deepEqual(readdirSync(join(f.root, 'output-original')), target === 'html' ? [] : ['cv-v1.html']);
+    assert.equal(existsSync(f.paths.launch), target === 'pdf', 'the PDF race happens after browser rendering');
+    assert.equal(readFileSync(join(f.root, 'data/pdf-index.tsv'), 'utf8'), manifest);
+  } finally { rmSync(outside, { recursive: true, force: true }); }
+}));
+
+check('a PDF published under a swapped data ancestor cannot redirect its later manifest update', () => withFixture(f => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'profile manifest escape ')));
+  const manifest = '# existing manifest\n42\toutput/earlier.pdf\toutput/earlier.html\ta4\t2026-01-01\tcv\n';
+  try {
+    writeFileSync(join(outside, 'keep.txt'), 'outside content');
+    writeFileSync(join(f.root, 'data/pdf-index.tsv'), manifest);
+    const result = f.cli(['--report', '123'], {
+      PROFILE_TEST_RACE_PDF_MANIFEST: '1', PROFILE_TEST_PUBLICATION_OUTSIDE: outside,
+    }, { pdf: 'data/cv-v1.pdf' });
+    assert.equal(result.status, 0, describeSpawn(result));
+    assert.match(result.stderr + result.stdout, /Manifest update failed/);
+    assert.equal(readFileSync(join(f.root, 'pdf-data-parent-swapped'), 'utf8'), 'yes');
+    assert.equal(readFileSync(join(f.root, 'data-original/cv-v1.pdf'), 'utf8'), PDF);
+    assert.equal(readFileSync(join(f.root, 'data-original/pdf-index.tsv'), 'utf8'), manifest);
+    assert.deepEqual(readdirSync(join(f.root, 'data-original')).sort(), ['career-profile.yml', 'cv-v1.pdf', 'pdf-index.tsv']);
+    assert.deepEqual(readdirSync(outside), ['keep.txt'], 'manifest and lock files must not follow the swapped ancestor');
+    assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'outside content');
   } finally { rmSync(outside, { recursive: true, force: true }); }
 }));
 

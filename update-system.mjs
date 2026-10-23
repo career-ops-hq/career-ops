@@ -337,6 +337,8 @@ const SYSTEM_PATHS = [
   'lib/career-profile.mjs',
   'lib/profile-cv-selection.mjs',
   'lib/profile-cv-generation.mjs',
+  'lib/workspace-output.mjs',
+  'lib/workspace-output.py',
   'lib/cv-markdown.mjs',
   'lib/page-format.mjs',
   'lib/template-manifest.mjs',

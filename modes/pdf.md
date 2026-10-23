@@ -137,11 +137,24 @@ builder before invoking the existing PDF generator. It requires a non-empty
 `cv.md` and aligned Data Root/tracker workspaces. The HTML and PDF destinations
 must be new `.html`/`.pdf` paths inside that workspace; existing files,
 directories and symlinks are rejected. Use a new versioned pair for retries.
-Both subprocesses use `--no-clobber`: the HTML write is exclusive (`wx`), and
-the PDF is published by atomically linking a same-directory temporary file to
-the final path without replacement. Workspace ancestors remain trusted: Node
-has no portable `openat` API, so this is not full isolation from a same-UID
-process actively replacing them. The default overwrite policy is unchanged.
+Both subprocesses use `--no-clobber` and inherit the validated workspace's open
+directory descriptor. A Python 3 standard-library helper walks output directories
+relative to that descriptor with `O_DIRECTORY | O_NOFOLLOW`, creates temporary
+files exclusively, and publishes HTML/PDF with a descriptor-relative atomic
+hard link that refuses an existing destination. Replacing an ancestor with a
+symlink cannot redirect these writes. Symlinks below the workspace root are
+rejected, including links to other directories inside it; root aliases work.
+Renderer scratch HTML uses a private OS temporary directory, with relative
+resources still resolved from the input HTML's directory.
+PDF index updates also use the workspace descriptor and the existing manifest
+lock convention. A symlinked index directory or an external `CAREER_OPS_PDF_INDEX`
+is refused with the usual manifest warning, leaving the generated PDF intact.
+The protected writer waits for existing locks and never reclaims a stale lock.
+
+`generate-cv` and standalone `--no-clobber` require `python3` on PATH and POSIX
+descriptor-relative filesystem APIs (Linux/macOS; WSL on Windows). They stop if
+these are unavailable, without falling back to pathname writes. The default
+PDF workflow keeps its existing runtime requirements and overwrite policy.
 The command resolves the payload's page format/country once for the PDF sheet
 to match the HTML body; do not add separate format flags. It exposes no
 fact-check skip or reordering override. Existing title/structure warnings,

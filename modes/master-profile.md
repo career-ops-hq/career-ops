@@ -139,13 +139,26 @@ same candidate's files. Output paths must be inside that workspace, end in
 Choose a new versioned pair for each attempt. Inputs and source files are not
 rewritten.
 
-The entry point also passes `--no-clobber` to the HTML builder and PDF generator: HTML is created
-with exclusive `wx`, and PDF publication uses a same-directory temporary file
-linked atomically to the destination without replacing an existing path.
-This protects destination creation, while assuming trusted workspace ancestors.
-Node has no portable `openat` API; these guards do not fully isolate the run
-from a same-UID process actively replacing those ancestors. Default generation
-retains its existing overwrite behavior.
+The entry point holds an open descriptor for the validated workspace and passes
+it to the HTML builder and PDF generator with `--no-clobber`. A Python 3
+standard-library helper traverses each output directory relative to that
+descriptor with `O_DIRECTORY | O_NOFOLLOW`, including newly created directories.
+It writes a temporary file exclusively, then atomically links it to the final
+name without replacing any existing file or link. Swapping an ancestor for a
+symlink cannot redirect publication; a directory already opened remains pinned.
+Symlinks below the workspace root are rejected even if they point inside it;
+a symlink used to name the workspace root itself is supported.
+PDF index registration uses the same directory anchor and the existing manifest
+lock convention. A redirected or external index path is refused with a warning;
+the already generated PDF remains available. The protected writer waits for an
+existing lock but does not reclaim stale locks.
+
+This opt-in command and standalone `--no-clobber` require `python3` on PATH with
+POSIX descriptor-relative filesystem APIs (Linux/macOS; use WSL on Windows).
+Missing Python or unsupported APIs stop generation; there is no pathname-based
+fallback. Renderer scratch HTML lives in a private OS temporary directory.
+Default generation retains its existing runtime requirements and overwrite
+behavior.
 
 The command gives a private JSON snapshot of the verified payload to the real
 title check, structure check and HTML builder, then invokes the existing PDF
