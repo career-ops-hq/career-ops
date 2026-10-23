@@ -141,8 +141,10 @@ Both subprocesses use `--no-clobber` and inherit the validated workspace's open
 directory descriptor. A Python 3 standard-library helper walks output directories
 relative to that descriptor with `O_DIRECTORY | O_NOFOLLOW`, creates temporary
 files exclusively, and publishes HTML/PDF with a descriptor-relative atomic
-hard link that refuses an existing destination. Replacing an ancestor with a
-symlink cannot redirect these writes. Symlinks below the workspace root are
+hard link that refuses an existing destination. After the workspace descriptor
+opens, replacing an ancestor with a symlink cannot redirect these writes.
+Ancestors above the workspace remain trusted during the initial path checks
+and descriptor open. Symlinks below the workspace root are
 rejected, including links to other directories inside it; root aliases work.
 Renderer scratch HTML uses a private OS temporary directory, with relative
 resources still resolved from the input HTML's directory.

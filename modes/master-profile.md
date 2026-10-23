@@ -144,8 +144,10 @@ it to the HTML builder and PDF generator with `--no-clobber`. A Python 3
 standard-library helper traverses each output directory relative to that
 descriptor with `O_DIRECTORY | O_NOFOLLOW`, including newly created directories.
 It writes a temporary file exclusively, then atomically links it to the final
-name without replacing any existing file or link. Swapping an ancestor for a
-symlink cannot redirect publication; a directory already opened remains pinned.
+name without replacing any existing file or link. After the workspace descriptor
+opens, swapping an ancestor for a symlink cannot redirect publication; a
+directory already opened remains pinned. Ancestors above the workspace remain
+trusted during the initial path checks and descriptor open.
 Symlinks below the workspace root are rejected even if they point inside it;
 a symlink used to name the workspace root itself is supported.
 PDF index registration uses the same directory anchor and the existing manifest

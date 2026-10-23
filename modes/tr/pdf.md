@@ -23,6 +23,119 @@
 17. Yürüt (Execute): Sanitize edilmiş her iki dosya adı parçasını kullanarak çalıştır: `node generate-pdf.mjs output/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --format={letter|a4} --report={report number}` — buradaki `{report number}`, takipçi (tracker) tablosundaki `#` sütunu DEĞİL, rapor dosya adı/bağlantısındaki NNN'dir (örn. `reports/008-acme-….md` için `008`). Başvurunun bir raporu varsa (veya olacaksa) bunu aktar; kontrol panelinin doğrudan aynı PDF'i açıp yeniden oluşturabilmesi için PDF↔rapor bağlantısını `data/pdf-index.tsv` içine kaydeder. Yalnızca takipçi girişi olmayan tek seferlik (one-off) CV'ler için bu argümanı dahil etme.
 18. Report: PDF dosya yolu, sayfa sayısı, anahtar kelime kapsama (coverage) yüzdesi.
 
+## Seçilmiş Profil bilgileriyle üretim (isteğe bağlı)
+
+Bu akışı yalnızca kullanıcı seçilmiş Profil bilgilerini istediğinde kullan.
+Özgün HTML yükünü korumak, açık deneyim eşleştirmelerini ve sıralı bilgi
+kimliklerini almak, `selection.json` ile `prepared.json` paketini oluşturmak
+için `modes/master-profile.md` yönergelerini izle. Bir eşleştirmeyi asla
+yalnızca şirket/rol etiketine göre seçme. Seçilen maddeler, `fact.text`
+değerinin birebir kopyasıdır; seçimden sonra anahtar kelime ekleme, çevirme
+veya yeniden yazma. Profil, gözden geçirilmiş bir seçim dizini olarak kalır;
+ek bir birincil kaynak değildir ve eşleme yalnızca seçilmiş maddeleri kapsar.
+
+Bu bölümdeki tüm adım numaraları, İngilizce `modes/pdf.md` dosyasındaki
+kanonik iş akışına aittir. Son üretimden önce `prepared.payload` içeriğini
+17a/17b adımlarına göre incele; bu CLI'lar için geçici bir JSON kopyası kullan
+ve uyarıları o adımlardaki ilkelere göre ele al. Her iki kontrol de yalnızca
+uyarı verir; başarılı çıkışları, başlık uyuşmazlığını veya `UNVERIFIED`
+sonucunu kullanıcı adına çözmez. Kullanıcı değişiklik yapmayı seçerse,
+kaynaklara dayalı özgün yükü veya seçimi değiştir ve yeniden hazırla; özgün
+yükteki düzenlemeler yeni seçim çapaları gerektirir. `prepared.payload`
+içeriğini, eşlemesini veya oluşturulan HTML'i doğrudan düzenleme.
+
+Şablonu her zamanki gibi çözümle, ardından çalıştır:
+
+```bash
+node career-profile.mjs generate-cv --payload base.json --selection selection.json --prepared prepared.json --html output/cv-v1.html --pdf output/cv-v1.pdf --template /absolute/path/to/resolved-template.html --report 123
+```
+
+Tüm CLI yolları Veri Kökü'ne (Data Root) göre çözümlenir; mutlak yollar da
+kullanılabilir. `--report` seçeneğini yalnızca rapor yoksa çıkar; diğer
+durumlarda çözümlenen rapor numarasını kullan. Varsayılan Profil dosyası
+`data/career-profile.yml` konumundadır; `--profile`, gözden geçirilmiş başka
+bir Profil dosyasını seçer. Çözümlenen şablon, yorumların dışında
+`{{EXPERIENCE}}` içermeli; varsa yanındaki `sections/experience.html`
+parçası da `{{BULLETS}}` yer tutucusunu doğrudan `ENTRY` bloğunda
+barındırmalıdır. Bu yer tutucu kontrolleri, oluşturulan içeriğin görünür
+olduğunu veya bilgilerin doğru olduğunu kanıtlamaz. Yapılandırılmış
+`cv.template` değerini veya onun temel şablon yedeğini kullanmak için
+`--template` seçeneğini çıkar.
+
+Bu komut, nihai çıktı için 17a, 17b, 18, 19 ve 21. adımları yürütür: güncel
+Profili yeniden okur, yükün ve eşlemenin tamamını özgün girdilere göre
+doğrular, ardından mevcut PDF üreticisini çağırmadan önce özel bir anlık
+görüntüyü mevcut kontrollere ve HTML oluşturucusuna iletir. Boş olmayan bir
+`cv.md` dosyası ve birbiriyle uyumlu Veri Kökü/takipçi çalışma alanları
+gerektirir. HTML ve PDF hedefleri bu çalışma alanı içinde yeni `.html`/`.pdf`
+yolları olmalıdır; mevcut dosyalar, dizinler ve sembolik bağlantılar
+reddedilir. Yeniden denemelerde yeni, sürümlenmiş bir dosya çifti kullan.
+Her iki alt süreç de `--no-clobber` kullanır ve doğrulanmış çalışma alanının
+açık dizin tanımlayıcısını devralır. Python 3 standart kitaplığıyla çalışan
+bir yardımcı, çıktı dizinlerini bu tanımlayıcıya göre
+`O_DIRECTORY | O_NOFOLLOW` ile dolaşır, geçici dosyaları yalnızca yeni dosya
+olarak oluşturur ve HTML/PDF dosyalarını, mevcut hedefleri reddeden,
+tanımlayıcıya göre atomik bir sabit bağlantıyla yayımlar. Çalışma alanının
+dizin tanımlayıcısı açıldıktan sonra, bir üst dizinin sembolik bağlantıyla
+değiştirilmesi bu yazmaları başka yere yönlendiremez. İlk yol denetimi ve
+açma işlemi sırasında çalışma alanının üstündeki dizinlerin güvenilir olduğu
+varsayılır. Çalışma alanı kökünün altındaki sembolik bağlantılar, aynı çalışma
+alanı içindeki başka dizinlere yönelseler bile reddedilir; kök dizinin
+alternatif yolları kullanılabilir. Oluşturucunun geçici HTML'i, işletim
+sisteminin özel bir geçici dizinini kullanır; göreli kaynaklar yine girdi
+HTML'inin dizinine göre çözümlenir.
+PDF indeksi güncellemeleri de çalışma alanı tanımlayıcısını ve mevcut manifest
+kilitleme kuralını kullanır. Sembolik bağlantı olan bir indeks dizini veya
+çalışma alanı dışındaki bir `CAREER_OPS_PDF_INDEX`, olağan manifest uyarısıyla
+reddedilir; oluşturulan PDF olduğu gibi kalır. Korumalı yazıcı mevcut
+kilitleri bekler ve eski bir kilidi hiçbir zaman devralmaz.
+
+`generate-cv` ve bağımsız `--no-clobber` kullanımı, PATH üzerinde `python3`
+ve tanımlayıcıya göre çalışan POSIX dosya sistemi API'leri gerektirir
+(Linux/macOS; Windows'ta WSL). Bunlar yoksa yol adına dayalı yazmaya geri
+dönmeden dururlar. Varsayılan PDF iş akışının mevcut çalışma zamanı
+gereksinimleri ve üzerine yazma ilkesi korunur. Komut, PDF kağıdı HTML
+gövdesiyle eşleşsin diye yükteki sayfa biçimini/ülkeyi bir kez çözümler;
+ayrı biçim seçenekleri ekleme. Bilgi doğrulamasını atlama veya sıralamayı
+geçersiz kılma seçeneği sunmaz. Mevcut başlık/yapı uyarıları, bölüm ve
+deneyim sırası kontrolleri, kilitli bölümler ve bilgi doğrulaması kendi
+ilkelerini korur. Bilgi kontrolünün mevcut dil kapsamı değişmez. Zorunlu
+`--require-cv-source` seçeneği, asıl bilgi doğrulama kapısının okunabilir ve
+boş olmayan bir `cv.md` istemesini sağlar; bu gerekliliğin denetimi ve
+iddiaların çıkarımı, yalnızca önceki ön denetime güvenmek yerine dosyanın
+tek bir okumasıyla yapılır. Bu seçenek, `--skip-fact-check` ile çakışır ve
+yalnızca tek dosyalı PDF üretiminde desteklenir.
+
+Bilgi doğrulama kapısı başarısız olursa kaynaklara dayalı girdilere dön ve
+yeniden hazırla. Kontrolü geçirmek için Profil metnini veya kanıt meta
+verilerini asla yeni bir birincil kaynak olarak ekleme. Başarısızlık sonrası
+saklanan HTML taslağı, başarılı bir PDF anlamına gelmez. Başarıdan sonra
+22/23. adımlarla ve normal üretim sonrası akışla devam et.
+
+İsteğe bağlı ek işlemler bu hazırlık sınırını korumalıdır:
+
+- **İşe alım yöneticisi denetimi:** son üretimden önce paketi doğrula ve
+  çözümlenen şablonla `prepared.payload` içeriğinin geçici bir JSON
+  kopyasından denetim önizlemesi oluştur. Denetimden önce bu önizlemede
+  19. adımın bilgi doğrulama kapısını çalıştır ve uyarlanmış çıktı olarak
+  açıkça bu JSON'u sağla. Kabul edilen her düzenleme, özgün yüke/seçime ve
+  hazırlığa dönmeyi gerektirir. Son PDF yine doğrulama yapıp yeni HTML
+  oluşturan `generate-cv` komutundan gelir; düzenlenmiş kopyalar dahil
+  önizleme hiçbir zaman bu komutun girdisi olmaz.
+- **ATS kopyası:** 21a adımındaki yük dönüşümünü özgün temel yükün ayrı bir
+  kopyasına uygula, ardından eşleşen seçim çapalarını oluştur ve ayrı bir
+  paket hazırla. Kullanıcının seçtiği bilgi kimliklerini/sırasını koru.
+  Yalnızca HTML çıktısı için, `prepared.payload` içeriğinden ATS şablonuyla
+  HTML oluşturmadan hemen önce paketi doğrula, ardından 21a adımındaki gibi
+  bilgi doğrulama kapısını çalıştır. PDF isteniyorsa, biçimlendirilmiş dosya
+  çiftinin rapor bağlantısını korumak için `generate-cv` komutunu ATS şablonu
+  ve yeni yollarla, `--report` olmadan kullan. HTML dosyalarını doğrudan
+  düzeltme veya dönüşmüş bir yük için biçimlendirilmiş paketin eşlemesini
+  yeniden kullanma.
+
+Bu isteğe bağlı akış açıkça talep edilmediyse yukarıdaki normal ardışık
+düzeni kullan; varsayılan üretim davranışı ve kaynak dosyaları değişmez.
+
 ## ATS Kuralları (temiz ayrıştırma)
 
 - Tek sütunlu (single-column) düzen (kenar çubuğu yok, paralel sütun yok)
