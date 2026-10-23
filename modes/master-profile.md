@@ -24,9 +24,9 @@ The parser is intentionally conservative and heading-based. Tell the user
 that unusual CV layouts may need manual additions/edits after import. Do not
 discard or rewrite `cv.md`.
 
-## Prepare selected experience bullets (opt-in)
+## Select experience bullets (opt-in)
 
-Use this only when the user explicitly asks to prepare a CV from selected
+Use this only when the user explicitly asks to prepare or generate a CV from selected
 Profile facts. Start with a valid **HTML** CV JSON payload and let the user
 choose the experience bindings and ordered fact IDs. Do not infer a binding
 from company/role labels: two entries may share the same label. The target is
@@ -37,11 +37,12 @@ content digest. Keep the original payload and selection for later verification.
 flowchart LR
   A[Reviewed Profile + original HTML payload] --> B[Explicit bindings and ordered fact IDs]
   B --> C[prepare-cv: payload + mapping]
-  C --> D[verify-cv against current Profile and originals]
-  D -. Future integration .-> E[Existing CV checks and PDF workflow]
+  C --> D[generate-cv: re-read Profile and verify originals]
+  D --> E[Title and structure checks on the same payload]
+  E --> F[Fresh HTML and existing PDF fact gate]
 ```
 
-The shared APIs live in `lib/career-profile.mjs` and
+The selection APIs live in `lib/career-profile.mjs` and
 `lib/profile-cv-selection.mjs`. A caller constructs a manifest like this
 (the IDs and target slot below are illustrative; use the user's choices):
 
@@ -112,22 +113,94 @@ edits also require a new manifest). Evidence line-only moves, Profile entry/fact
 reordering and unrelated edits stay valid if the whole Profile remains valid.
 The mapping intentionally excludes evidence line numbers from identity.
 
+## Generate the selected CV
+
+Once the user has reviewed the selection and the prepared payload, use the
+opt-in generation entry point:
+
+```bash
+node career-profile.mjs generate-cv --payload base.json --selection selection.json --prepared prepared.json --html output/cv-v1.html --pdf output/cv-v1.pdf
+```
+
+It accepts `--profile other.yml`, `--template resolved-template.html` and
+`--report 123`. Resolve the template using `node cv-templates.mjs resolve cv`
+(or the user's named template) as in `modes/pdf.md`, then pass its path with
+`--template`; omission resolves `cv.template` from `config/profile.yml`,
+falling back to the base template. The main template must contain
+`{{EXPERIENCE}}` outside comments; a sibling `sections/experience.html` partial,
+when present, must contain `{{BULLETS}}` directly in its `ENTRY` block. This
+token check does not prove rendered visibility or factual truth.
+
+`generate-cv` re-reads the current Profile and reconstructs the expected payload
+and mapping before writing output. It requires a non-empty Data Root `cv.md`
+and aligned Data Root/tracker workspaces, so the builder and checks use the
+same candidate's files. Output paths must be inside that workspace, end in
+`.html` and `.pdf`, and not already exist, including directories or symlinks.
+Choose a new versioned pair for each attempt. Inputs and source files are not
+rewritten.
+
+The entry point holds an open descriptor for the validated workspace and passes
+it to the HTML builder and PDF generator with `--no-clobber`. A Python 3
+standard-library helper traverses each output directory relative to that
+descriptor with `O_DIRECTORY | O_NOFOLLOW`, including newly created directories.
+It writes a temporary file exclusively, then atomically links it to the final
+name without replacing any existing file or link. After the workspace descriptor
+opens, swapping an ancestor for a symlink cannot redirect publication; a
+directory already opened remains pinned. Ancestors above the workspace remain
+trusted during the initial path checks and descriptor open.
+Symlinks below the workspace root are rejected even if they point inside it;
+a symlink used to name the workspace root itself is supported.
+PDF index registration uses the same directory anchor and the existing manifest
+lock convention. A redirected or external index path is refused with a warning;
+the already generated PDF remains available. The protected writer waits for an
+existing lock but does not reclaim stale locks.
+
+This opt-in command and standalone `--no-clobber` require `python3` on PATH with
+POSIX descriptor-relative filesystem APIs (Linux/macOS; use WSL on Windows).
+Missing Python or unsupported APIs stop generation; there is no pathname-based
+fallback. Renderer scratch HTML lives in a private OS temporary directory.
+Default generation retains its existing runtime requirements and overwrite
+behavior.
+
+The command gives a private JSON snapshot of the verified payload to the real
+title check, structure check and HTML builder, then invokes the existing PDF
+generator. Title and structure findings keep their warning-only behavior;
+apply the review policy in PDF Steps 17a/17b before invoking generation, and
+surface any remaining warnings before delivering the result. CLI/input errors
+stop generation. Section order, chronological experience order, locked sections
+and the fact gate remain enforced by the existing generator, with no skip or
+reordering override on this entry point. Page format and country come from the
+payload and are resolved to the same paper size for HTML and PDF.
+
+The PDF invocation requires `--require-cv-source`: at the actual fact gate,
+`cv.md` must be readable and non-empty. The required-source check and claim
+extraction share a single read, so an earlier successful preflight cannot
+silently substitute for the source being available at the gate. This opt-in
+cannot be combined with `--skip-fact-check` and is not a batch option.
+
+If a gate fails, correct the source-backed payload or the user's reviewed
+selection, then prepare again. Changes to the original payload also need a new
+selection manifest. Never fix the prepared bundle or rendered HTML by hand.
+A failed run can leave an HTML draft; it is not a successful PDF result.
+For hiring-manager audits and ATS copies, follow the opt-in branch in
+`modes/pdf.md` so any accepted edits are prepared and checked again.
+
 ## Scope boundary
 
-Preparation is not PDF generation. There is no automatic JD fact selection,
-rewriting, translation, new evidence ingestion or CV re-analysis loop. The
-existing PDF workflow continues to use its existing inputs; these commands do
-not automatically connect the prepared bundle to it. Full opt-in generation
-integration remains follow-up work in #5494.
+`prepare-cv` and `verify-cv` only read inputs and print results; `generate-cv`
+explicitly renders the selected result. There is no automatic JD fact
+selection, rewriting, translation, new evidence ingestion or CV re-analysis
+loop. The default PDF workflow and its inputs remain unchanged.
 
 Treat the Profile as a reviewed selection index, not an additional primary
 source. `verified` and the consistency hashes prove neither factual truth nor
 human consent, and do not replace existing title, structure or fact checks.
 Do not pass Profile text/evidence as a new source to make a failing fact gate
 pass. Evidence paths are metadata here and are never opened by the adapter.
-The mapping covers a JSON payload, not arbitrary edited HTML. A future rendering
-integration must verify and render the same payload, retain the existing gates,
-and reject missing primary sources for the new opt-in path.
+The mapping covers a JSON payload, not arbitrary edited HTML. `generate-cv`
+verifies and renders that same payload and requires primary CV evidence; it
+does not accept an existing HTML file as its input. Existing fact-checking
+coverage is unchanged, including its language-specific limits.
 
 ## Schema v1
 

@@ -43,7 +43,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
 import { readLockedSections } from './theme-style.mjs';
 import { hasRequiredFields, validatePayload } from './lib/cv-payload-schema.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { pathIsInsideCanonical, resolveTrackerPath, resolveWorkspaceRoot, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { PAGE_WIDTHS, resolvePageFormat } from './lib/page-format.mjs';
 import { PARTIAL_SECTIONS, declaredSections, parseMeta } from './lib/template-manifest.mjs';
 
@@ -820,18 +820,28 @@ function countBullets(payload) {
 }
 
 async function writeAndReport(html, absOutput, payload, extra = {}) {
-  const { warnings = [], ...rest } = extra;
+  const { warnings = [], noClobber = false, ...rest } = extra;
+  if (noClobber && !pathIsInsideCanonical(absOutput, resolveWorkspaceRootFor(DATA_ROOT))) {
+    throw new Error(`Refusing to write HTML outside the tracker workspace: ${absOutput}`);
+  }
   const outDir = dirname(absOutput);
-  if (!existsSync(outDir)) await mkdir(outDir, { recursive: true });
+  if (!noClobber && !existsSync(outDir)) await mkdir(outDir, { recursive: true });
 
   const lockedKeys = readLockedSections(PROFILE_PATH, sectionKey);
   const cvPath = resolve(workspaceRoot, 'cv.md');
   const cvMarkdown = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
   validateLockedSections(html, cvMarkdown, lockedKeys);
 
-  await writeFile(absOutput, html, 'utf-8');
+  if (noClobber && !pathIsInsideCanonical(absOutput, resolveWorkspaceRootFor(DATA_ROOT))) {
+    throw new Error(`Refusing to write HTML outside the tracker workspace: ${absOutput}`);
+  }
+  if (noClobber) {
+    const { publishWorkspaceFile } = await import('./lib/workspace-output.mjs');
+    publishWorkspaceFile(absOutput, html, resolveWorkspaceRootFor(DATA_ROOT));
+  }
+  else await writeFile(absOutput, html, 'utf-8');
 
-  const fileInfo = await stat(absOutput);
+  const fileInfo = noClobber ? { size: Buffer.byteLength(html) } : await stat(absOutput);
   const report = {
     ...rest,
     file: basename(absOutput),
@@ -1020,7 +1030,7 @@ async function main() {
 
   if (args.length === 0 || args.includes('--help')) {
     console.error('Usage:');
-    console.error('  node build-cv-html.mjs <input.json> <output.html> [template.html]');
+    console.error('  node build-cv-html.mjs <input.json> <output.html> [template.html] [--no-clobber]');
     console.error('  node build-cv-html.mjs --preview <input.json> [template.html]');
     console.error('  node build-cv-html.mjs <input.json> --markdown <output.md> [template.html]');
     console.error('  node build-cv-html.mjs --test');
@@ -1042,19 +1052,23 @@ async function main() {
   }
 
   if (args.includes('--test')) {
+    if (args.includes('--no-clobber')) throw new Error('--no-clobber requires HTML generation.');
     await runSelfTest();
     return;
   }
 
   if (args.includes('--markdown')) {
+    if (args.includes('--no-clobber')) throw new Error('--no-clobber requires HTML generation.');
     await runMarkdown(args);
     return;
   }
 
-  const preview = args[0] === '--preview';
+  const noClobber = args.includes('--no-clobber');
+  const paths = args.filter(arg => arg !== '--no-clobber');
+  const preview = paths[0] === '--preview';
   const [inputPath, outputPath, templateArg] = preview
-    ? [args[1], resolve(DATA_ROOT, 'output', 'cv-preview.html'), args[2]]
-    : args;
+    ? [paths[1], resolve(DATA_ROOT, 'output', 'cv-preview.html'), paths[2]]
+    : paths;
   if (!inputPath || !outputPath) {
     console.error('Usage: node build-cv-html.mjs <input.json> <output.html> [template.html]');
     process.exit(1);
@@ -1101,7 +1115,7 @@ async function main() {
     process.exit(1);
   }
 
-  await writeAndReport(html, absOutput, payload, preview ? { status: 'preview-ready', warnings } : { warnings });
+  await writeAndReport(html, absOutput, payload, { warnings, noClobber, ...(preview ? { status: 'preview-ready' } : {}) });
   process.exit(0);
 }
 
