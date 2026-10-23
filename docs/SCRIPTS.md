@@ -549,7 +549,8 @@ tracker row, so a contact cannot be attached across companies.
 Optional GitHub evidence step of the `expand` mode (#5295). Reads the pull
 requests you authored through your existing `gh auth` (no new token) and checks
 what `cv.md` claims against them. Read-only, metadata only (PR title, state,
-repository, stars, visibility); it never reads source code and never writes
+repository, stars, visibility, document file names); it never reads source
+code or file contents and never writes
 `cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
 `add-entry.mjs`.
 
@@ -580,6 +581,27 @@ counts as not logged in: a login check that fails any other way (no stderr,
 `gh` crashed or was killed) is a `2` naming the exit status. On exit `2` or
 `3`, `expand` continues with its zero-key behaviour; on exit `1` it asks the
 user to fix `candidate.github` (its Input steps 2–4).
+
+**Document names (`documents`, #5728).** PRDs, requirement-change notes, data
+contracts and acceptance baselines kept under `docs/` are invisible to a README
+read and to PR evidence. The report therefore also lists document file names on
+the default branch of your own non-fork repos (the 30 most recently pushed, via
+one GraphQL query) and of each allowlisted repo that is not a fork: one
+`repos/<owner>/<repo>/git/trees/<branch>?recursive=1` call per repo, plus one
+metadata call per allowlisted repo the own-repo query did not return. A document
+is a file under `docs/`, `doc/` or `documentation/` (`.md`, `.mdx`, `.rst`,
+`.adoc`, `.txt`, `.docx`, `.pdf`, `.pptx`, `.xlsx` and similar), or a top-level
+document other than README, CHANGELOG, LICENSE, CONTRIBUTING and the like.
+Names matching a product or requirement keyword in English or Chinese (`prd`,
+`requirement`, `spec`, `acceptance`, `contract`, `design`, 需求, 契约, 口径,
+验收, …) carry them in `keywords`, and flagged names are listed first, at most
+40 per repo (`filesCapped`). Names only: no file is opened and no source code is
+read. Names are listed for public repos and allowlisted private ones; any other
+private repo shows counts only (`namesShown: false`). A truncated tree sets
+`treeTruncated`. A failed call is a gap in `documents.gaps` (`status` `partial`
+or `failed`) and changes neither the rest of the report nor the exit code. The
+Markdown report adds the same list as its last section. `expand` asks you which
+of these documents are your own work before reading any of them.
 
 ---
 

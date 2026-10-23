@@ -157,10 +157,14 @@ language:
 # Optional. Private repos the `expand` mode's GitHub evidence step
 # (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
 # Empty by default: a private repo appears only by name and PR count, never with
-# PR titles, until you add it here yourself as "owner/repo". Only PR metadata is
-# read, never source code, and nothing reaches cv.md without your confirmation.
+# PR titles, until you add it here yourself as "owner/repo". Only PR metadata and
+# document file names are read, never source code or file contents, and nothing
+# reaches cv.md without your confirmation.
 # github_evidence:
 #   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
+# The same step lists document file names (docs/ and top-level documents) for
+# your public repos and allowlisted ones; your other private repos show document
+# counts only.
 
 # Controls which model tier evaluates your offers. Valid values:
 #   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
