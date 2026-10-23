@@ -156,9 +156,10 @@ language:
 
 # Optional. Private repos the `expand` mode's GitHub evidence step
 # (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
-# Empty by default: a private repo appears only by name and PR count, never with
-# PR titles, until you add it here yourself as "owner/repo". Only PR metadata is
-# read, never source code, and nothing reaches cv.md without your confirmation.
+# Empty by default: a private repo appears only by name and PR and commit counts,
+# never with PR titles or commit dates, until you add it here yourself as
+# "owner/repo". Only PR and commit metadata is read, never source code or commit
+# messages, and nothing reaches cv.md without your confirmation.
 # github_evidence:
 #   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
 

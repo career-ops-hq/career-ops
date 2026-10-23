@@ -21,7 +21,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
-| `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
+| `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md, or append one update bullet under an existing article-digest.md entry (`articleDigestUpdate`) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
@@ -556,10 +556,11 @@ repository, stars, visibility); it never reads source code and never writes
 ```bash
 node github-evidence.mjs          # writes output/github-evidence-{date}.{md,json}
 node github-evidence.mjs --json   # same, and prints the JSON on stdout
+node github-evidence.mjs --since 2026-10-01   # new activity on named repos since that day
 ```
 
-- Only PRs you authored count. Your own repos (owning is not authorship) and
-  forks are listed by name and count only, never as evidence.
+- Only PRs and commits you authored count. Your own repos (owning is not
+  authorship) and forks are listed by name and counts only, never as evidence.
 - A private repo is evidence only when listed in `config/profile.yml`:
   `github_evidence.private_allowlist: ["owner/repo"]` (empty by default). Any
   other private repo, or one whose visibility could not be read, appears by
@@ -568,8 +569,47 @@ node github-evidence.mjs --json   # same, and prints the JSON on stdout
   does not name. `claimCheck.namedNoMerge`: repos `cv.md` names where you have
   no merged PR. Matching is literal and case-insensitive (`owner/repo`, then
   the repo name, then the owner), and each row says which one matched.
+- Commits you authored on each repo's default branch (the commit author is your
+  GitHub account) are counted too, so a repo you push to directly, with no PR,
+  still shows up. Each row carries `commits`: `count`, `first` and `last` date,
+  and `exact`. They sit apart from the PR counts and are never added to them,
+  since a squash-merged PR is also an authored commit. Dates appear only where
+  PR titles would (public and allowlisted repos); other private repos and forks
+  show the count only. Commit messages and diffs are never read.
+  `claimCheck.commitsNotNamed`: third-party repos with commits, no merged PR,
+  and no mention in `cv.md`.
+- Commits are found with one commit search (`search/commits?q=author:<you>`,
+  newest first, 100 per page, pages one second apart, since GitHub rate-limits
+  commit search harder than the rest of the API). It covers every repo your
+  token can read, private and organization repos included. Your own repos and
+  the allowlisted ones are then counted from the repo itself
+  (`repos/<owner>/<repo>/commits?author=<you>&per_page=1`: the `Link` header's
+  last page is the count, and that page holds the oldest commit). Calls on top
+  of the PR step: one search page per 100 authored commits (at most 10); one
+  count call per own or allowlisted repo that is not a fork, plus one for its
+  oldest date when it has more than one commit and its dates are shown; one
+  metadata call per allowlisted repo neither search returned. A repo only the
+  commit search found takes its visibility and fork flag from that result, so
+  its stars read `?`.
 - GitHub search returns at most 1000 results per query; the `truncated` flags
-  say when a list may be incomplete.
+  say when a list may be incomplete, and a commit count with `exact: false` is
+  then a lower bound with `first: null` (the search reads newest first). A failed or partial commit search does not change the
+  exit code: the report is written as usual, and `commitSearch.status` (`ok`,
+  `partial`, `failed`) and `commitSearch.detail` say what happened.
+- `claimCheck.namedWithNewActivity`: repos that `cv.md` or `article-digest.md`
+  already names (`matchedOn`, and `digestEntries` for the entries that name
+  it) with new activity since a baseline: `newMerged` with up to 8
+  `recentNewMerged` titles, and `newCommits` (`count`, and `lowerBound` when the commit
+  search stopped early; `null` when it failed), never added together. The baseline is in
+  `since`: the newest `output/github-evidence-{date}.json` dated before today,
+  timed by its `scannedAt` (a report without one counts from the start of its
+  day), or the start of the day given by `--since YYYY-MM-DD`. With neither,
+  `since.status` is `none` and the list is empty. A PR is new when it merged
+  at or after the baseline, and a commit when it was applied (committer time)
+  at or after it. The evidence rules above apply unchanged, so forks, your own
+  repos and non-allowlisted private repos are never listed. `expand` turns a
+  row into a dated bullet under the existing `article-digest.md` entry
+  (`add-entry.mjs` → `articleDigestUpdate`), after your confirmation.
 
 **Exit codes:** `0` report written, `1` usage error or `candidate.github`
 missing/malformed (normalized as in `expand`'s Input step, so a repo link such
