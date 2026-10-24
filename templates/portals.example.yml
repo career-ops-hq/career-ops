@@ -3341,6 +3341,28 @@ job_boards:
     enabled: false
     notes: "Polish tech job board — newest public postings"
 
+  # ── Jobs.cz / Prace.cz (Czech job portals) ─────────────────────────────────
+  # Keyword search; keywords default to config/profile.yml target_roles.
+  # Czech-titled ads need Czech terms ("vývojář", "programátor") in keywords
+  # AND in title_filter.positive. Both portals give city-only locations, so
+  # allow Czech cities (Praha, Brno, …) in location_filter.
+
+  - name: Jobs.cz
+    provider: jobscz
+    enabled: false
+    # jobscz:
+    #   keywords: ["backend developer", "vývojář"]   # optional
+    #   location: praha                               # optional site slug
+    # max_pages: 10
+
+  - name: Prace.cz
+    provider: pracecz
+    enabled: false
+    # pracecz:
+    #   keywords: ["backend developer", "vývojář"]   # optional
+    #   location: brno                                # optional site slug
+    # max_pages: 10
+
   # -- Indonesia job boards (provider: jobstreet / glints / kalibrr / techinasia) --
 
   - name: Jobstreet Indonesia
