@@ -23,6 +23,7 @@ import { StatusConfirmationCard, type StatusConfirmationPart } from "@/component
 import { StatusWriteError, writeAssistantStatus } from "@/lib/assistant-status-write.mjs";
 import { postAssistantWrite } from "@/lib/assistant-file-write.mjs";
 import { cn } from "@/lib/cn";
+import { CONFIG_UPDATED_EVENT } from "@/lib/saved-cli";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -276,9 +277,8 @@ export function AssistantConsole() {
       const usable = trigger?.isConnected && trigger.getClientRects().length > 0 && !trigger.matches(":disabled, [inert], [inert] *");
       (usable ? trigger : openerRef.current)?.focus();
     }
-  }, [open]);
-
-  // selected CLI from Config (reacts to changes in other tabs)
+}, [open]);
+// selected CLI from Config (reacts to changes in other tabs and the same tab)
   useEffect(() => {
     function read() {
       try {
@@ -288,10 +288,18 @@ export function AssistantConsole() {
         setCliId(null);
       }
     }
+
     read();
+
     window.addEventListener("storage", read);
-    return () => window.removeEventListener("storage", read);
+    window.addEventListener(CONFIG_UPDATED_EVENT, read);
+
+    return () => {
+      window.removeEventListener("storage", read);
+      window.removeEventListener(CONFIG_UPDATED_EVENT, read);
+    };
   }, []);
+
 
   async function chatRequest(url: string, init?: RequestInit) {
     const response = await fetch(url, init);

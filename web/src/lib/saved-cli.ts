@@ -1,6 +1,14 @@
+
 import { keepIfInstalled, pickSoleInstalled } from "./cli-pick.mjs";
 
 export const CONFIG_KEY = "career-ops:config";
+export const CONFIG_UPDATED_EVENT = "career-ops:config-updated";
+
+export function notifyConfigUpdated() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(CONFIG_UPDATED_EVENT));
+  }
+}
 
 export function readSavedCliId(): string | null {
   try {
@@ -20,6 +28,7 @@ export function persistCliId(cliId: string) {
       CONFIG_KEY,
       JSON.stringify({ ...prev, mode: prev.mode || "cli", cliId }),
     );
+    notifyConfigUpdated();
   } catch {
     /* quota / private mode */
   }
@@ -34,8 +43,15 @@ export { pickDefaultInstalled, pickSoleInstalled } from "./cli-pick.mjs";
 // with it, so fall through to the same "can't check" path as a network error.
 function isCliEntry(c: unknown): c is { id: string; installed?: boolean } {
   if (typeof c !== "object" || c === null) return false;
-  const { id, installed } = c as { id?: unknown; installed?: unknown };
-  return typeof id === "string" && id !== "" && (installed === undefined || typeof installed === "boolean");
+  const { id, installed } = c as {
+    id?: unknown;
+    installed?: unknown;
+  };
+  return (
+    typeof id === "string" &&
+    id !== "" &&
+    (installed === undefined || typeof installed === "boolean")
+  );
 }
 
 /**
@@ -63,26 +79,38 @@ export async function resolveCliId(
   const saved = readSavedCliId();
   let clis: { id: string; installed?: boolean }[] | undefined;
   let remembered: string | null = null;
+
   try {
     // Bounded: every job start awaits this, so a stalled request would leave
     // the job at "Starting…" instead of reaching the saved-id fallback below.
-    const r = await fetch("/api/clis", { signal: AbortSignal.timeout(CLIS_TIMEOUT_MS) });
+    const r = await fetch("/api/clis", {
+      signal: AbortSignal.timeout(CLIS_TIMEOUT_MS),
+    });
+
     if (r.ok) {
-      const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[]; remembered?: unknown };
+      const d = (await r.json()) as {
+        clis?: { id: string; installed?: boolean }[];
+        remembered?: unknown;
+      };
       clis = d.clis;
       if (typeof d.remembered === "string") remembered = d.remembered;
     }
   } catch {
     // network error or timeout — fall through to the not-an-array guard below
   }
+
   if (!Array.isArray(clis) || !clis.every(isCliEntry)) {
     // /api/clis unreachable, errored, or malformed — can't check. Trust the
     // saved id rather than stranding a working setup on a transient failure.
     return saved;
   }
+
   if (keepIfInstalled(saved, clis)) return saved;
+
   const fallback = keepIfInstalled(remembered, clis) || pickSoleInstalled(clis);
+
   if (fallback) persistCliId(fallback);
   if (saved) onStale?.(saved, fallback);
+
   return fallback;
 }
