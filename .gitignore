@@ -49,6 +49,7 @@ batch/*
 !batch/batch-runner.sh
 !batch/company-scope.mjs
 !batch/jd-rescue.mjs
+!batch/prefilter-url.mjs
 # No trailing slash, so git descends into the two keeper directories. A slashed
 # pattern matches only a real directory and would miss a symlink.
 !batch/logs
