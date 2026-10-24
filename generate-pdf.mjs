@@ -766,6 +766,74 @@ function displayTitle(raw) {
   return `${kept.join('')}…`;
 }
 
+// Application portals reported to reject longer values (#5629). Advisory only.
+const PORTAL_LENGTH_LIMIT = 64;
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', ndash: '–', mdash: '—' };
+
+// Plain text of the first <div> whose class list holds the whole token
+// `header-title`, in any attribute order. Tags inside it are skipped by a
+// character scan and entities are decoded in one pass, so no text is rebuilt
+// by repeated pattern replacement.
+function headlineText(html) {
+  for (const m of html.matchAll(/<div\b([^>]*)>/gi)) {
+    const cls = /(?:^|\s)class\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[1]);
+    const tokens = (cls?.[1] ?? cls?.[2] ?? '').split(/\s+/);
+    if (!tokens.includes('header-title')) continue;
+    const start = m.index + m[0].length;
+    // The matching </div>: count nested <div> opens and closes from here.
+    let depth = 1;
+    let end = html.length;
+    for (const t of html.slice(start).matchAll(/<(\/?)div\b[^>]*>/gi)) {
+      depth += t[1] ? -1 : 1;
+      if (depth === 0) { end = start + t.index; break; }
+    }
+    const inner = html.slice(start, end);
+    let text = '';
+    let inTag = false;
+    for (const ch of inner) {
+      if (ch === '<') inTag = true;
+      else if (ch === '>' && inTag) inTag = false;
+      else if (!inTag) text += ch;
+    }
+    return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, ref) => {
+      if (ref[0] === '#') {
+        const code = ref[1].toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      }
+      return NAMED_ENTITIES[ref.toLowerCase()] ?? whole;
+    }).trim();
+  }
+  return '';
+}
+
+/**
+ * Warn, never fail, when the CV headline or the output PDF filename is longer
+ * than some application portals accept (#5629). Reads the headline from the
+ * rendered header-title element, so it judges what actually prints.
+ *
+ * @param {string} html - The CV HTML about to be rendered.
+ * @param {string} outputPath - Destination PDF path (only the basename counts).
+ * @param {number} [limit] - Length above which a warning is printed.
+ * @returns {string[]} The warning messages printed (empty when none).
+ */
+export function warnLongPortalFields(html, outputPath, limit = PORTAL_LENGTH_LIMIT) {
+  const warnings = [];
+  const plain = headlineText(html);
+  if (plain) {
+    const len = [...plain].length;
+    if (len > limit) {
+      warnings.push(`CV headline is ${len} characters (limit ${limit}): "${displayTitle(plain)}". Some application portals reject longer values; aim for a job title plus two or three keywords.`);
+    }
+  }
+  const name = basename(outputPath || '');
+  const nameLen = [...name].length;
+  if (nameLen > limit) {
+    warnings.push(`Output filename is ${nameLen} characters (limit ${limit}): "${displayTitle(name)}". Some application portals reject longer file names; use a shorter name.`);
+  }
+  for (const w of warnings) console.warn(`⚠️  ${w}`);
+  return warnings;
+}
+
 /**
  * The text of the first real section title in html[start, end), skipping any
  * that sits in raw text (a heading quoted inside a script names nothing).
@@ -1795,6 +1863,8 @@ async function generatePDF() {
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
+  // After normalization, so the length is that of the text that prints.
+  warnLongPortalFields(html, outputPath);
   const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
   if (totalReplacements > 0) {
     const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
@@ -1954,6 +2024,7 @@ async function runBatchFromManifest(manifestPath, globals) {
       validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       validateLockedSections(html, cvMarkdown, lockedKeys);
       html = normalizeTextForATS(html).html;
+      warnLongPortalFields(html, entryOutput);
       // Same gate, same guard and same place as the single render. A blocked
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
