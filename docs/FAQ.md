@@ -14,7 +14,7 @@ Windows does not create symlinks by default, so Git checks out the CLI skill ent
 
 ## 3. How do I avoid hitting token or rate limits during a batch run?
 
-Pass `--limit <N>` to `batch-runner.sh` to cap the number of offers processed in a single run (e.g. `./batch/batch-runner.sh --limit 5`) — this lets you inspect output quality before committing to a larger run. If a run is interrupted mid-way by a rate limit or network error, do not restart from scratch; use `./batch/batch-runner.sh --resume-paused` to skip already-completed jobs and pick up where you left off, avoiding wasted tokens on work that finished successfully.
+Pass `--limit <N>` to `batch-runner.sh` to cap the number of offers processed in a single run (e.g. `./batch/batch-runner.sh --limit 5`) — this lets you inspect output quality before committing to a larger run. If a run stops part-way, do not start over. Run the same command again: the runner keeps each offer's state in `batch/batch-state.tsv`, skips offers that already completed, and picks up the rest, retrying a failed offer up to `--max-retries` (default 2). A run that hit a Claude session or usage limit is different: it marks the offer that hit the limit `paused_rate_limit` and stops scheduling new ones. After the limit resets, `./batch/batch-runner.sh --resume-paused` re-runs only those paused offers, so follow it with a plain run for the offers that had not started yet.
 
 ## 4. Can I run career-ops on a cheaper or local model?
 
