@@ -254,7 +254,18 @@ async function doImport(args) {
       for (const item of approved[key]) {
         if (!('facts' in item)) continue;
         const identity = entityEvidenceKey(item);
-        const prior = existingItems.find((candidate) => !migratedIds.has(candidate.id) && 'facts' in candidate && entityEvidenceKey(candidate) === identity);
+        const sameHeading = existingItems.filter((candidate) => 'facts' in candidate && evidenceKey(candidate) === evidenceKey(item));
+        const exact = sameHeading.find((candidate) => entityEvidenceKey(candidate) === identity);
+        const factEvidence = new Set(item.facts.map(evidenceKey));
+        const overlapping = sameHeading.filter((candidate) => candidate.facts.some((fact) => factEvidence.has(evidenceKey(fact))));
+        // Content-derived IDs can move between same-heading jobs when facts
+        // are added. Match their evidence before allowing an ID to be reused.
+        const prior = exact ?? (overlapping.length === 1 ? overlapping[0] : undefined);
+        const duplicateHeading = sameHeading.length > 1 || approved[key].filter((candidate) => evidenceKey(candidate) === evidenceKey(item)).length > 1;
+        if ((!exact && overlapping.length > 1) || (prior && migratedIds.has(prior.id))
+            || (!prior && duplicateHeading && existingItems.some((candidate) => candidate.id === item.id))) {
+          throw new Error(`Import rejected: ambiguous ${key} identity for "${item.label}"; existing profile was not changed.`);
+        }
         if (!prior) continue;
         reidentified.set(item.id, prior);
         migratedIds.add(prior.id);
