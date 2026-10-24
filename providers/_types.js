@@ -208,6 +208,13 @@
  *                              versions selectively also returns the ranked ones, after
  *                              each posting's default version; scan.mjs then keeps the
  *                              best-ranked version where it keeps one per posting.
+ * @property {{get: (key: string) => any, set: (key: string, value: any) => void, delete: (key: string) => void}} [idCache]
+ *                              This provider's slice of the store in provider-id-cache.mjs:
+ *                              values it resolved on an earlier scan (a board id that only
+ *                              a careers-page request reveals), kept between runs. Present
+ *                              in scan.mjs and scan-ats-full.mjs runs, absent elsewhere
+ *                              (verify-portals, tests), so a provider must work without it.
+ *                              Values are stored as JSON.
  */
 
 /**

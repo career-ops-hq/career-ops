@@ -3,7 +3,6 @@
 
 import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
-import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // join.com provider — single-company ATS adapter for `tracked_companies:`.
 // Auto-detects from careers_url matching join.com/companies/<slug>.
@@ -19,6 +18,17 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 //      job list embedded in the HTML is not used: Cloudflare serves the page
 //      from a cache that can be days old, `?page=N` can return a cached copy of
 //      another page, and each page holds only 5 jobs.
+//
+// The company id is assumed not to change, so step 1 is skipped where the id
+// is already known: `entry.company_id` when a directory supplies it, else
+// `ctx.idCache` (see provider-id-cache.mjs) from an earlier scan. A cached id
+// is checked against the careers page again after COMPANY_RECHECK_MS, which
+// is also how a deleted company — one whose old id still answers with an
+// empty job list — surfaces as a dead board, and how a changed id would be
+// picked up.
+//
+// `parseCompanySitemap` reads join.com's own company directory,
+// https://join.com/companies/sitemap.xml, for scan-ats-full.mjs.
 
 const GRAPHQL_URL = 'https://join.com/candidate-api/graphql';
 
@@ -110,6 +120,9 @@ function toEpochMs(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+// How long a cached company id is trusted before the careers page is read again.
+const COMPANY_RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
+
 /** Resolve the page cap: a positive integer `max_pages` on the entry, capped. */
 function resolveMaxPages(entry) {
   const v = entry?.max_pages;
@@ -145,6 +158,71 @@ export function extractCompany(nextData) {
 }
 
 /**
+ * Company slugs from join.com's company sitemap, in document order, each once.
+ * Only `<loc>https://join.com/companies/<slug></loc>` entries count; a deeper
+ * path or another host is skipped. An empty `<urlset>` is an empty directory;
+ * `<url>` or `<loc>` entries of which none yields a company page mean the
+ * format changed, and throw, so the caller keeps its last good list.
+ * @param {unknown} xml
+ * @returns {string[]}
+ */
+export function parseCompanySitemap(xml) {
+  if (typeof xml !== 'string') throw new Error('join: company sitemap is not text');
+  if (!/<urlset\b/.test(xml)) throw new Error('join: company sitemap has no <urlset>');
+  const slugs = new Set();
+  let locs = 0;
+  for (const [, loc] of xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/g)) {
+    locs++;
+    const slug = extractSlug(loc);
+    if (slug && new URL(loc).pathname.replace(/\/$/, '') === `/companies/${slug}`) slugs.add(slug);
+  }
+  const urls = [...xml.matchAll(/<url\b/g)].length;
+  if ((urls > 0 || locs > 0) && slugs.size === 0) {
+    throw new Error(`join: company sitemap has ${urls} <url> and ${locs} <loc> entries but no company page among them`);
+  }
+  return [...slugs];
+}
+
+/**
+ * The company id for a board: from the entry, from the cache, or from the
+ * careers page, in that order.
+ * @param {any} entry
+ * @param {string} slug
+ * @param {any} ctx
+ * @returns {Promise<number>}
+ */
+async function resolveCompanyId(entry, slug, ctx) {
+  if (Number.isInteger(entry?.company_id) && entry.company_id > 0) return entry.company_id;
+
+  const cache = ctx?.idCache;
+  const cached = cache?.get(slug);
+  const cachedId = Number.isInteger(cached?.id) ? cached.id : null;
+  const checkedAt = Date.parse(cached?.checkedAt ?? '');
+  if (cachedId && Number.isFinite(checkedAt) && Date.now() - checkedAt < COMPANY_RECHECK_MS) return cachedId;
+
+  try {
+    // redirect:'error' prevents SSRF via server-side redirects; the URL is a
+    // fixed https://join.com/... string, so the host is pinned regardless of
+    // the original careers_url.
+    const html = await fetchTextWithRetry(ctx, `https://join.com/companies/${slug}`, { redirect: 'error' });
+    const company = extractCompany(extractNextData(html));
+    if (!company) throw new Error('join: __NEXT_DATA__ not found or has no company id');
+    cache?.set(slug, { id: company.id, checkedAt: new Date().toISOString() });
+    return company.id;
+  } catch (err) {
+    // A company that is gone takes its cache entry with it. Any other failure
+    // of a recheck, a page in an unexpected shape included, keeps using the id
+    // already known.
+    if (err?.status === 404 || err?.status === 410) {
+      cache?.delete(slug);
+      throw err;
+    }
+    if (cachedId) return cachedId;
+    throw err;
+  }
+}
+
+/**
  * A ctx whose fetchJson throws a 429-shaped error when the GraphQL endpoint
  * answers with its rate-limit error, so fetchJsonWithRetry backs off on it.
  * @param {any} ctx
@@ -176,12 +254,7 @@ export default {
     const slug = extractSlug(entry.careers_url);
     if (!slug) throw new Error('join: cannot extract slug from careers_url');
 
-    // redirect:'error' prevents SSRF via server-side redirects; both URLs are
-    // fixed https://join.com/... strings, so the host is pinned regardless of
-    // the original careers_url.
-    const html = await fetchTextWithRetry(ctx, `https://join.com/companies/${slug}`, { redirect: 'error' });
-    const company = extractCompany(extractNextData(html));
-    if (!company) throw new Error('join: __NEXT_DATA__ not found or has no company id');
+    const companyId = await resolveCompanyId(entry, slug, ctx);
 
     // Honor a context page cap — verify-portals' liveness probe sets
     // `ctx.maxPages: 1` so it only needs to know a board is live, not its
@@ -208,7 +281,7 @@ export default {
         body: JSON.stringify({
           operationName: 'PublicJobsList',
           query: PUBLIC_JOBS_QUERY,
-          variables: { input: { companyId: company.id, paginationPage: { page, pageSize: PAGE_SIZE }, filters: {} } },
+          variables: { input: { companyId, paginationPage: { page, pageSize: PAGE_SIZE }, filters: {} } },
         }),
         redirect: 'error',
       }, RETRY_POLICY));
@@ -241,8 +314,10 @@ export default {
     // same for the posting's whole life, so it works as the scan's dedup key.
     // The path the site itself links to is `<idParam>` (`<number>-<title>`),
     // whose number changes whenever the posting is republished; join.com
-    // redirects `/companies/<domain>/<id>` to the current `<idParam>` page.
-    const companySlug = (typeof company.domain === 'string' && safeEncodeURIComponent(company.domain)) || slug;
+    // redirects `/companies/<slug>/<id>` to the current `<idParam>` page. The
+    // slug is the company's own: the careers page answers only at it (any
+    // other spelling is a redirect, which fetch refuses), so it is the same
+    // whether the id came from the page or from the cache.
     // postedAt is `createdAt`, the day the posting was first created. A
     // republished posting keeps it, so a role left open for a year reads as a
     // year old. The list payload carries each posting's full body, so the
@@ -261,7 +336,7 @@ export default {
         const language = typeof j.language?.iso6391 === 'string' ? j.language.iso6391.trim() : '';
         return {
           title: j.title.trim(),
-          url: `https://join.com/companies/${companySlug}/${j.id}`,
+          url: `https://join.com/companies/${slug}/${j.id}`,
           company: entry.name,
           location: formatLocation(j),
           ...(postedAt ? { postedAt } : {}),

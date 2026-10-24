@@ -7,7 +7,7 @@ console.log('\nProvider — join (join.com __NEXT_DATA__ company id + publicJobs
 try {
   const joinModule = await import(pathToFileURL(joinPath(ROOT, 'providers/join.mjs')).href);
   const joinProvider = joinModule.default;
-  const { extractSlug, extractNextData, extractCompany, formatLocation } = joinModule;
+  const { extractSlug, extractNextData, extractCompany, formatLocation, parseCompanySitemap } = joinModule;
 
   if (joinProvider.id === 'join') pass('join.id is "join"');
   else fail(`join.id is ${JSON.stringify(joinProvider.id)}`);
@@ -132,7 +132,7 @@ try {
     singleJobs[0].company === 'Acme' &&
     singleJobs[0].location === 'Remote'
   ) {
-    pass('join.fetch() maps items to the normalized job shape with a stable /companies/<domain>/<id> URL');
+    pass('join.fetch() maps items to the normalized job shape with a stable /companies/<slug>/<id> URL');
   } else {
     fail(`join.fetch() job shape wrong: ${JSON.stringify(singleJobs)}`);
   }
@@ -174,8 +174,8 @@ try {
   // fetch() — the URL uses the company's own domain from the page, not the careers_url slug.
   const renamedCtx = makeCtx(() => gqlPage([job(1)]), { html: pageHtml({ id: 4242, domain: 'acme-renamed' }) });
   const renamedJobs = await joinProvider.fetch(entry, renamedCtx);
-  if (renamedJobs[0]?.url === 'https://join.com/companies/acme-renamed/1') pass('join.fetch() builds the job URL from company.domain');
-  else fail(`join.fetch() should use company.domain in the job URL, got ${renamedJobs[0]?.url}`);
+  if (renamedJobs[0]?.url === 'https://join.com/companies/acme-corp/1') pass('join.fetch() builds the job URL from the careers_url slug, whatever the page reports as domain');
+  else fail(`join.fetch() should use the slug in the job URL, got ${renamedJobs[0]?.url}`);
 
   // fetch() — an item without an integer id is dropped, not turned into a broken URL.
   const noIdJobs = await joinProvider.fetch(entry, makeCtx(() => gqlPage([job(1), { title: 'No id', city: {} }, job('2')])));
@@ -386,6 +386,131 @@ try {
     joinProvider.fetch(entry, makeCtx(({ paginationPage }) => (paginationPage.page === 1
       ? gqlPage([job(1)], 2)
       : gqlPage([job(2)], 1)))));
+
+  // ctx.idCache — the company id is read from the cache instead of the careers page.
+  const memCache = (initial = {}) => {
+    const values = new Map(Object.entries(initial));
+    return { values, get: (k) => values.get(k), set: (k, v) => values.set(k, v), delete: (k) => values.delete(k) };
+  };
+  const recent = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+
+  const freshCache = memCache({ 'acme-corp': { id: 777, checkedAt: recent } });
+  const freshCtx = makeCtx(() => gqlPage([job(1)]), { idCache: freshCache });
+  const freshJobs = await joinProvider.fetch(entry, freshCtx);
+  if (freshCtx.textCalls.length === 0 && freshCtx.jsonCalls[0].body.variables.input.companyId === 777 && freshJobs[0].url === 'https://join.com/companies/acme-corp/1') {
+    pass('join.fetch() uses a cached company id without reading the careers page');
+  } else {
+    fail(`join.fetch() cache hit wrong: textCalls=${freshCtx.textCalls.length}, companyId=${freshCtx.jsonCalls[0]?.body.variables.input.companyId}, url=${freshJobs[0]?.url}`);
+  }
+
+  const emptyCache = memCache();
+  const missCtx = makeCtx(() => gqlPage([job(1)]), { idCache: emptyCache });
+  await joinProvider.fetch(entry, missCtx);
+  const stored = emptyCache.values.get('acme-corp');
+  if (missCtx.textCalls.length === 1 && stored?.id === 4242 && !('domain' in stored) && Date.now() - Date.parse(stored.checkedAt) < 60_000) {
+    pass('join.fetch() reads the careers page on a cache miss and stores { id, checkedAt }');
+  } else {
+    fail(`join.fetch() cache miss wrong: textCalls=${missCtx.textCalls.length}, stored=${JSON.stringify(stored)}`);
+  }
+
+  const staleCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
+  const staleCtx = makeCtx(() => gqlPage([job(1)]), { idCache: staleCache });
+  await joinProvider.fetch(entry, staleCtx);
+  if (staleCtx.textCalls.length === 1 && staleCtx.jsonCalls[0].body.variables.input.companyId === 4242 && staleCache.values.get('acme-corp').id === 4242) {
+    pass('join.fetch() checks a cached id older than 30 days against the careers page and stores the result');
+  } else {
+    fail(`join.fetch() stale cache wrong: textCalls=${staleCtx.textCalls.length}, cached=${JSON.stringify(staleCache.values.get('acme-corp'))}`);
+  }
+
+  const flakyCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
+  const flakyCtx = makeCtx(() => gqlPage([job(1)]), {
+    idCache: flakyCache,
+    fetchText: async () => { throw Object.assign(new Error('HTTP 503'), { status: 503 }); },
+  });
+  const flakyJobs = await joinProvider.fetch(entry, flakyCtx);
+  if (flakyJobs.length === 1 && flakyCtx.jsonCalls[0].body.variables.input.companyId === 777) {
+    pass('join.fetch() keeps using the cached id when the 30-day recheck fails with a transient error');
+  } else {
+    fail(`join.fetch() failed recheck wrong: jobs=${flakyJobs.length}, companyId=${flakyCtx.jsonCalls[0]?.body.variables.input.companyId}`);
+  }
+
+  const reshapedCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
+  const reshapedCtx = makeCtx(() => gqlPage([job(1)]), {
+    idCache: reshapedCache,
+    fetchText: async () => '<html><body>no next data</body></html>',
+  });
+  const reshapedJobs = await joinProvider.fetch(entry, reshapedCtx);
+  if (reshapedJobs.length === 1 && reshapedCtx.jsonCalls[0].body.variables.input.companyId === 777 && reshapedCache.values.get('acme-corp').checkedAt === old) {
+    pass('join.fetch() keeps using the cached id when the 30-day recheck returns a page without a company id');
+  } else {
+    fail(`join.fetch() reshaped recheck wrong: jobs=${reshapedJobs.length}, companyId=${reshapedCtx.jsonCalls[0]?.body.variables.input.companyId}, cached=${JSON.stringify(reshapedCache.values.get('acme-corp'))}`);
+  }
+
+  const goneCache = memCache({ 'acme-corp': { id: 777, domain: 'acme-corp', checkedAt: old } });
+  const goneCtx = makeCtx(() => gqlPage([job(1)]), {
+    idCache: goneCache,
+    fetchText: async () => { throw Object.assign(new Error('HTTP 410 Gone'), { status: 410 }); },
+  });
+  let goneError = null;
+  try {
+    await joinProvider.fetch(entry, goneCtx);
+  } catch (err) {
+    goneError = err;
+  }
+  if (goneError?.status === 410 && !goneCache.values.has('acme-corp') && goneCtx.jsonCalls.length === 0) {
+    pass('join.fetch() drops the cache entry and fails the board when the company page is gone');
+  } else {
+    fail(`join.fetch() gone company wrong: error=${goneError?.status}, cached=${goneCache.values.has('acme-corp')}, jsonCalls=${goneCtx.jsonCalls.length}`);
+  }
+
+  // entry.company_id — a directory that supplies the id skips the careers page and the cache.
+  const idEntryCtx = makeCtx(() => gqlPage([job(1)]), { idCache: memCache() });
+  const idEntryJobs = await joinProvider.fetch({ ...entry, company_id: 99 }, idEntryCtx);
+  if (idEntryCtx.textCalls.length === 0 && idEntryCtx.jsonCalls[0].body.variables.input.companyId === 99 && idEntryJobs[0].url === 'https://join.com/companies/acme-corp/1') {
+    pass('join.fetch() uses entry.company_id without a careers-page request');
+  } else {
+    fail(`join.fetch() entry.company_id wrong: textCalls=${idEntryCtx.textCalls.length}, url=${idEntryJobs[0]?.url}`);
+  }
+
+  // parseCompanySitemap — the company directory scan-ats-full.mjs sweeps.
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://join.com/companies/acme-corp</loc><lastmod>2023-11-09T20:43:22.959Z</lastmod></url>
+    <url><loc> https://join.com/companies/bigco/ </loc></url>
+    <url><loc>https://join.com/companies/acme-corp</loc></url>
+    <url><loc>https://join.com/companies/acme-corp/16854145-engineer</loc></url>
+    <url><loc>https://example.com/companies/exampleco</loc></url>
+  </urlset>`;
+  const slugs = parseCompanySitemap(sitemap);
+  if (JSON.stringify(slugs) === '["acme-corp","bigco"]') pass('join.parseCompanySitemap() returns each company slug once, skipping job paths and other hosts');
+  else fail(`join.parseCompanySitemap() wrong: ${JSON.stringify(slugs)}`);
+  let sitemapError = null;
+  try {
+    parseCompanySitemap('<html>Attention Required</html>');
+  } catch (err) {
+    sitemapError = err;
+  }
+  if (sitemapError && /urlset/.test(sitemapError.message)) pass('join.parseCompanySitemap() throws on a page that is not a sitemap');
+  else fail('join.parseCompanySitemap() should throw when there is no <urlset>');
+  const emptySlugs = parseCompanySitemap('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>');
+  if (Array.isArray(emptySlugs) && emptySlugs.length === 0) pass('join.parseCompanySitemap() returns [] for an empty <urlset>');
+  else fail(`join.parseCompanySitemap() empty urlset wrong: ${JSON.stringify(emptySlugs)}`);
+  let noCompanyError = null;
+  try {
+    parseCompanySitemap('<urlset><url><loc>https://join.com/companies/acme-corp/16854145-engineer</loc></url><url><loc>https://example.com/companies/exampleco</loc></url></urlset>');
+  } catch (err) {
+    noCompanyError = err;
+  }
+  if (noCompanyError && /no company page/.test(noCompanyError.message)) pass('join.parseCompanySitemap() throws when <loc> entries hold no company page');
+  else fail('join.parseCompanySitemap() should throw when no <loc> is a company page');
+  let noLocError = null;
+  try {
+    parseCompanySitemap('<urlset><url><sm:loc>https://join.com/companies/acme-corp</sm:loc></url></urlset>');
+  } catch (err) {
+    noLocError = err;
+  }
+  if (noLocError && /no company page/.test(noLocError.message)) pass('join.parseCompanySitemap() throws when <url> entries hold no <loc> it can read');
+  else fail('join.parseCompanySitemap() should throw when <url> entries hold no readable <loc>');
 
   // fetch() — a careers_url that fails extractSlug() throws before any request.
   const noRequestCtx = makeCtx(() => { throw new Error('should not be called'); }, {

@@ -103,8 +103,13 @@ export default {
   `preferred_languages`: a provider that returns language versions
   selectively also returns the ranked ones, after each posting's default
   version, so the scan can keep the preferred one; references
-  `providers/personio.mjs` and `providers/recruitee.mjs`). Returns a
-  normalized `Job[]`.
+  `providers/personio.mjs` and `providers/recruitee.mjs`) and
+  `ctx.idCache` (`get` / `set` / `delete` on this provider's slice of
+  `provider-id-cache.mjs`: a value resolved on one scan, such as a board id
+  only a careers page shows, kept for the next ones; absent in
+  `verify-portals` and tests, so the provider must work without it;
+  reference `providers/join.mjs`). A provider never reads or writes files
+  itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
   When the payload has a dedicated field for them, also set `requisitionId`
@@ -172,10 +177,11 @@ judge.
 `scan-ats-full.mjs` reaches a provider in one of two ways, and both call
 `enrichDate`:
 
-- **The dataset sweep.** A **fixed** `SOURCES` table of seven directly
-  imported modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`,
-  `bamboohr`, `paylocity`), each paired with a public company dataset. No
-  registry lookup; joining it means adding an import and a `SOURCES` entry.
+- **The dataset sweep.** A **fixed** `SOURCES` table of 8 directly imported
+  modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`, `bamboohr`,
+  `paylocity`, `join`), each paired with a public company directory (a
+  dataset, or for `join` the ATS's own sitemap). No registry lookup;
+  joining it means adding an import and a `SOURCES` entry.
 - **The `--history-seeds` pass.** Boards derived from the user's tracker and
   scan history (`history-ats-seeds.mjs`). This one does load the registry,
   but it only reaches a provider whose `id` equals a vendor label from
