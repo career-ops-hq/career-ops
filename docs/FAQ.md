@@ -93,6 +93,10 @@ No. `templates/` has `cv-template.html`, `cv-template.tex` (LaTeX/Overleaf), `cv
 
 Chromium only launches with `--verify`. A normal scan reads public ATS APIs and needs no browser; `--verify` checks a posting is genuinely still live, which needs a real page load. If it fails, the error asks you to run `npx playwright install chromium`.
 
+## Why does every company in a scan fail with `fetch failed`, or every posting come back `uncertain`?
+
+Usually a DNS filter. Sandboxed agent environments, and some corporate or home DNS filters, answer `0.0.0.0` or `::` for any host outside their allowlist. career-ops refuses to connect to a non-public address, so a scan lists each filtered company under `Network errors` as `fetch failed`, and with `--verify` a posting whose own host is filtered reads `uncertain` (`dns_sinkhole`) and is kept (see [liveness](SCRIPTS.md#liveness)). To check, resolve a board host: if `node -e "require('dns').lookup('boards-api.greenhouse.io', console.log)"` prints `0.0.0.0` or `::`, the lookup is being filtered. Run the scan from a normal shell, or allow the board hosts in your sandbox or filter.
+
 ## Can I run career-ops in Docker / self-hosted?
 
 Yes: there's a `Dockerfile` and `docker-compose.yml` in the repo root. Note that career-ops is local-first and human-in-the-loop, so Docker packages the environment: it does not turn career-ops into a service that runs on its own or applies to jobs for you.
