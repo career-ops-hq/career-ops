@@ -74,8 +74,9 @@ writeFileSync(join(sandbox, 'cv.md'), '# Jordan Example\n\n- Led a team of 4 eng
 writeFileSync(join(sandbox, 'honest.html'), cvDoc('Led a team of 4 engineers and cut p95 latency by 30%.'), 'utf-8');
 writeFileSync(join(sandbox, 'inflated.html'), cvDoc('Led a team of 40 engineers and cut p95 latency by 30%.'), 'utf-8');
 writeFileSync(join(sandbox, 'honest-too.html'), cvDoc('Cut p95 latency by 30%.'), 'utf-8');
-// Counts the English-only extractor cannot read: the gate warns, and says why.
-writeFileSync(join(sandbox, 'french.html'), cvDoc('Dirigé 45 techniciens de maintenance sur 3 chantiers.'), 'utf-8');
+// Counts the extractor cannot read (its lexicon covers English, German and
+// French, not Spanish): the gate warns, and says why.
+writeFileSync(join(sandbox, 'spanish.html'), cvDoc('Dirigió 45 técnicos de mantenimiento en 3 obras.'), 'utf-8');
 
 function run(args) {
   const result = spawnSync(NODE, [script, ...args], {
@@ -148,14 +149,14 @@ try {
   // The warning carries its reason (#5348). runFactGate printed the header and
   // the advisory phrases but never the coverage note, so a document the gate
   // could not read showed "CV fact check warning" with nothing under it.
-  const french = run(['french.html', 'single/french.pdf']);
-  if (french.status === 0
-      && /CV fact check warning: french\.html/.test(french.output)
-      && /not checked: 2 count-like claims/.test(french.output)
-      && /45 techniciens/.test(french.output)) {
+  const spanish = run(['spanish.html', 'single/spanish.pdf']);
+  if (spanish.status === 0
+      && /CV fact check warning: spanish\.html/.test(spanish.output)
+      && /not checked: 2 count-like claims/.test(spanish.output)
+      && /45 técnicos/.test(spanish.output)) {
     pass('a warning prints what the gate could not check, not just the header');
   } else {
-    fail(`single-file coverage warning: status=${french.status}\n${french.output.trim()}`);
+    fail(`single-file coverage warning: status=${spanish.status}\n${spanish.output.trim()}`);
   }
 
   const singleSkipped = run(['inflated.html', 'single/inflated-skipped.pdf', '--skip-fact-check']);
