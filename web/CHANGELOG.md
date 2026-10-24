@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.16.0...web-v0.17.0) (2026-10-24)
+
+
+### Features
+
+* **web:** undo a Skip or Applied from the Today decision cards ([#5769](https://github.com/career-ops-hq/career-ops/issues/5769)) ([47f236f](https://github.com/career-ops-hq/career-ops/commit/47f236f2fdfcdc2582ae3d7cccdf2ecd18471ddd))
+
+
+### Bug Fixes
+
+* **rank:** run npm-installed agent CLIs on Windows ([#5787](https://github.com/career-ops-hq/career-ops/issues/5787)) ([1a03532](https://github.com/career-ops-hq/career-ops/commit/1a03532c65adea6f563fb9f8ebb0c3470aa29108))
+* **web/explore:** preserve posting dates when adding to pipeline ([#5690](https://github.com/career-ops-hq/career-ops/issues/5690)) ([b326f22](https://github.com/career-ops-hq/career-ops/commit/b326f22baa7ffce740a425e076df164137713c31))
+* **web:** resolve the A-H evaluation modes of modes/sg and modes/vi ([#5707](https://github.com/career-ops-hq/career-ops/issues/5707)) ([0f8f93a](https://github.com/career-ops-hq/career-ops/commit/0f8f93a1a20eda9f0d42abcc5e22cfe754dffc4c))
+
 ## [0.16.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.15.0...web-v0.16.0) (2026-10-23)
 
 
