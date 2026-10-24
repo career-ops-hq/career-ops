@@ -412,12 +412,41 @@ function loadContext() {
   };
 }
 
+// The mode files are written for Claude Code, which has Playwright, WebFetch,
+// Bash and file reads. This runner sends no `tools`, so a model that follows
+// them answers with tool calls and no evaluation (#5809). Say so before them,
+// and drop the parts that tell the model to use tools.
+const NO_TOOLS_NOTE = [
+  'RUNNER NOTE: you have no tools in this run.',
+  'The job text is in the user message and the CV is below. Do not navigate, fetch, read files or run commands, and ignore any instruction below to do so.',
+].join('\n');
+
+// Matched by heading, not line number, so edits to modes/ don't move them. A
+// section runs to the next heading of the same or a higher level. A heading
+// that is gone leaves the text as it was.
+const TOOL_SECTIONS = ['## Liveness gate (URL inputs)', '### Tools'];
+const READ_CV_RULE = '**RULE: NEVER hardcode metrics from proof points.**';
+
+export function stripToolInstructions(text) {
+  let lines = text.split('\n');
+  for (const heading of TOOL_SECTIONS) {
+    const start = lines.findIndex(l => l.trimEnd() === heading);
+    if (start === -1) continue;
+    const level = heading.match(/^#+/)[0].length;
+    const next = lines.findIndex((l, i) => i > start && new RegExp(`^#{1,${level}} `).test(l));
+    lines.splice(start, (next === -1 ? lines.length : next) - start);
+  }
+  lines = lines.map(l => (l.startsWith(READ_CV_RULE) ? `${READ_CV_RULE} Take them from the CV below.` : l));
+  return lines.join('\n');
+}
+
 export function buildSystemPrompt(modeContent, ctx) {
   const languageInstruction = outputLanguageInstruction(parseOutputLanguage(ctx.profile));
   return [
-    ctx.shared,
+    NO_TOOLS_NOTE,
+    stripToolInstructions(ctx.shared),
     ctx.profileMode,
-    modeContent,
+    stripToolInstructions(modeContent),
     '---',
     'CANDIDATE PROFILE (YAML):',
     ctx.profile,

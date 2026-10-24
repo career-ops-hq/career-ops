@@ -126,6 +126,10 @@ function sentSystemPrompt(base, dataRoot, args) {
 }
 
 const systemMode = (name) => readFileSync(join(ROOT, 'modes', name), 'utf8');
+// The runner drops the tool sections from the mode text it sends (#5809), so
+// compare against the checkout's file as the runner sends it.
+const { stripToolInstructions } = await import(pathToFileURL(join(ROOT, 'openrouter-runner.mjs')).href);
+const sentMode = (name) => stripToolInstructions(systemMode(name));
 
 test('openrouter-runner evaluate: system modes come from the checkout, user files from the data root', () => {
   const base = mkdtempSync(join(tmpdir(), 'split-root-or-eval-'));
@@ -137,8 +141,8 @@ test('openrouter-runner evaluate: system modes come from the checkout, user file
 
     const prompt = sentSystemPrompt(base, dataRoot, ['evaluate', 'Acme Corp is hiring a Senior Platform Engineer in Berlin.']);
 
-    assert.ok(prompt.includes(systemMode('_shared.md')), 'the system prompt is missing the checkout\'s modes/_shared.md');
-    assert.ok(prompt.includes(systemMode('oferta.md')), 'the system prompt is missing the checkout\'s modes/oferta.md');
+    assert.ok(prompt.includes(sentMode('_shared.md')), 'the system prompt is missing the checkout\'s modes/_shared.md');
+    assert.ok(prompt.includes(sentMode('oferta.md')), 'the system prompt is missing the checkout\'s modes/oferta.md');
     assert.ok(prompt.includes('DATA-ROOT-PROFILE-MARKER'), 'the system prompt is missing the data root\'s modes/_profile.md');
     assert.ok(prompt.includes('DATA-ROOT-CV-MARKER'), 'the system prompt is missing the data root\'s cv.md');
     assert.ok(prompt.includes('Data Root Candidate'), 'the system prompt is missing the data root\'s config/profile.yml');
@@ -157,8 +161,8 @@ test('openrouter-runner apply: modes/apply.md comes from the checkout', () => {
     const dataRoot = makeDataRoot(base);
     const prompt = sentSystemPrompt(base, dataRoot, ['apply', '1']);
 
-    assert.ok(prompt.includes(systemMode('_shared.md')), 'the system prompt is missing the checkout\'s modes/_shared.md');
-    assert.ok(prompt.includes(systemMode('apply.md')), 'the system prompt is missing the checkout\'s modes/apply.md');
+    assert.ok(prompt.includes(sentMode('_shared.md')), 'the system prompt is missing the checkout\'s modes/_shared.md');
+    assert.ok(prompt.includes(sentMode('apply.md')), 'the system prompt is missing the checkout\'s modes/apply.md');
     assert.ok(prompt.includes('DATA-ROOT-PROFILE-MARKER'), 'the system prompt is missing the data root\'s modes/_profile.md');
   } finally {
     rmSync(base, { recursive: true, force: true });
