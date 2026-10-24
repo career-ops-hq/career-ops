@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile, stat } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, realpathSync } from 'fs';
 import { resolve, dirname, basename, join } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
@@ -171,6 +171,13 @@ async function main() {
 
   if (!existsSync(absInput)) {
     console.error(`Input file not found: ${absInput}`);
+    process.exit(1);
+  }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync(absOutput) === realpathSync(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
     process.exit(1);
   }
 

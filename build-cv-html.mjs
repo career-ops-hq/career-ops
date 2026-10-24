@@ -985,7 +985,10 @@ async function runMarkdown(args) {
   }
   // Never overwrite the source payload with its own rendering (a swapped or
   // repeated argument). realpath also catches a symlink or a ./-relative alias.
-  if (absOutput === absInput || (existsSync(absOutput) && realpathSync(absOutput) === realpathSync(absInput))) {
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync(absOutput) === realpathSync(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
     console.error(`Output path is the input file: ${absOutput}`);
     process.exit(1);
   }
@@ -1066,6 +1069,13 @@ async function main() {
 
   if (!existsSync(absInput)) {
     console.error(`Input file not found: ${absInput}`);
+    process.exit(1);
+  }
+  const inputStat = await stat(absInput, { bigint: true });
+  const outputStat = existsSync(absOutput) ? await stat(absOutput, { bigint: true }) : null;
+  if (outputStat && (realpathSync(absOutput) === realpathSync(absInput)
+    || (inputStat.ino !== 0n && inputStat.dev === outputStat.dev && inputStat.ino === outputStat.ino))) {
+    console.error(`Output path is the input file: ${absOutput}`);
     process.exit(1);
   }
   if (!existsSync(templatePath)) {
