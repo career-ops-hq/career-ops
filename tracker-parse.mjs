@@ -790,11 +790,31 @@ export function normalizeTextKey(value, separator = '') {
  * `**URL:**` token. Punctuation first: `<https://…/job>,` must become the bare
  * URL, not `https://…/job>` (angle-first leaves the `>` when a comma follows).
  *
+ * A trailing `)` is stripped only while the token has more `)` than `(`. One
+ * that closes a `(` inside the URL is part of it: `…/eng-(remote)` must not
+ * become `…/eng-(remote`, which keys differently from the same posting's URL
+ * carried verbatim in a TSV and splits one posting into two tracker rows. The
+ * `)` of a wrapping `(see https://…/job)` has no partner and is still dropped.
+ *
  * @param {string} token
  * @returns {string}
  */
 export function unwrapReportUrlToken(token) {
-  return String(token).replace(/[),.;]+$/, '').replace(/^<|>$/g, '');
+  let url = String(token);
+  let depth = 0;
+  for (const ch of url) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+  }
+  for (;;) {
+    const last = url.at(-1);
+    if (last === ',' || last === '.' || last === ';') url = url.slice(0, -1);
+    else if (last === ')' && depth < 0) {
+      url = url.slice(0, -1);
+      depth++;
+    } else break;
+  }
+  return url.replace(/^<|>$/g, '');
 }
 
 /**
