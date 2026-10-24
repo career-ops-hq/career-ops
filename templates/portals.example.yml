@@ -1191,6 +1191,7 @@ search_queries:
 #   prevueaps       <tenant>.prevueaps.ca  (or api: field; domainId resolved from the tenant's /jobs/ page)
 #   rippling        ats.rippling.com/<slug>/jobs
 #   dover           app.dover.com/<Company>/careers/<board-uuid>
+#   notion          <workspace>.notion.site/<Title>-<page-id>  (the page id must be in the URL; ?v=<view-id> picks a database view)
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   jobvite         jobs.jobvite.com/<slug>  (add company_eid: to skip the board lookup — see the stanza below)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
@@ -1311,6 +1312,12 @@ search_queries:
 #   max_pages: 10          # optional page cap (up to 1000 jobs/page, default 10, max 50) —
 #                          # raise it for a tenant with 10,000+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Notion Co
+#   careers_url: https://exampleco.notion.site/Careers-00000000000040008000000000000000
+#                          # a public careers page or database; the page id is the last
+#                          # 32-hex segment, and an optional ?v=<view-id> picks the view
 #   enabled: true
 #
 # - name: Example Dover Co

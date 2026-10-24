@@ -111,6 +111,23 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/g-1'),
   );
 
+  // notion.parseCollectionRows — for…of over blockIds; the row's page id builds
+  // the posting URL. Ids are checked against a uuid regex instead of encoded.
+  const { parseCollectionRows } = await load('notion.mjs');
+  const notionRow = (id, title) => ({ value: { id, type: 'page', properties: { title: [[title]] } } });
+  const goodId = '00000000-0000-4000-8000-000000000001';
+  check(
+    'notion.parseCollectionRows',
+    () => parseCollectionRows(
+      {
+        result: { reducerResults: { collection_group_results: { blockIds: [`${LONE}bad`, goodId] } } },
+        recordMap: { block: { [`${LONE}bad`]: notionRow(`${LONE}bad`, 'Bad'), [goodId]: notionRow(goodId, 'Good') } },
+      },
+      { collectionId: 'c', origin: 'https://acme.notion.site', companyName: 'Acme' },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/00000000000040008000000000000001'),
+  );
+
   // phenom.parseRefineSearch — for…of over refineSearch.data.jobs; jobId is the dedup key.
   const { parseRefineSearch } = await load('phenom.mjs');
   check(
