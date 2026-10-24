@@ -431,7 +431,7 @@ async function main() {
     ? { verdict: factCheck.verdict, configMissing: factCheck.result.configMissing }
     : { verdict: factCheck.verdict, reason: factCheck.reason };
   console.log(JSON.stringify(report, null, 2));
-  process.exit(report.compiled ? 0 : (report.valid ? 1 : 1));
+  process.exit(report.compiled && !report.postCompileError ? 0 : 1);
 }
 
 if (isMainModule(import.meta.url)) {
