@@ -147,9 +147,9 @@ export function computeDelta(state, sources) {
   return sources.map((s) => {
     if (!s.hash) return { ...s, status: s.status || 'error' };
     const prev = recorded.get(s.path);
-    if (!prev) return { ...s, status: 'new' };
-    if (prev.hash !== s.hash) return { ...s, status: 'changed' };
-    return { ...s, status: 'ingested' };
+    if (!prev) return { ...s, status: 'new', previousHash: null };
+    if (prev.hash !== s.hash) return { ...s, status: 'changed', previousHash: prev.hash };
+    return { ...s, status: 'ingested', previousHash: prev.hash };
   });
 }
 
@@ -370,7 +370,10 @@ async function commitState(result, only = []) {
     state.ingested = state.ingested || {};
     const now = new Date().toISOString();
     let count = 0;
-    for (const s of computeDelta(state, result.sources.filter(source => source.status !== 'ingested'))) {
+    const candidates = result.sources
+      .filter(source => source.status !== 'ingested')
+      .filter(source => (state.ingested[source.path]?.hash ?? null) === source.previousHash);
+    for (const s of computeDelta(state, candidates)) {
       if (!s.hash || s.status === 'ingested') continue;
       if (!all && !only.includes(s.path)) continue;
       state.ingested[s.path] = { hash: s.hash, ingestedAt: now };
