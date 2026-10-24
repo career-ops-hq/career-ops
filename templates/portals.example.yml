@@ -1240,6 +1240,7 @@ search_queries:
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
 #   zoho-recruit    <tenant>.zohorecruit.com  (any path; the board is always read from /jobs/Careers)
+#   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
@@ -1284,6 +1285,11 @@ search_queries:
 #
 # - name: Example BambooHR Co
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
+#   enabled: true
+#
+# - name: Example Homerun Co
+#   careers_url: https://exampleco.homerun.co            # any <slug>.homerun.co host
+#   # Branded careers domain: api: https://feed.homerun.co/exampleco (the feed the careers page links)
 #   enabled: true
 #
 # - name: Example Paylocity Co
