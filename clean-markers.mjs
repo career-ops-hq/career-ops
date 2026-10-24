@@ -15,7 +15,8 @@
  * Exit code 1 if any file FAILS audit — usable as a pre-send gate. Dependency-free: text only,
  * no package installs, no PDF metadata editing.
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, realpathSync, statSync, chmodSync, renameSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { validateFlags } from './lib/cli-flags.mjs';
 
@@ -66,7 +67,17 @@ function processFile(file, mode, opts){
       let cleaned;
       if(isHtml){ const { masked, masks } = maskCode(t); cleaned = restoreCode(cleanText(masked, opts.ascii), masks); }
       else { cleaned = cleanText(t, opts.ascii); }
-      writeFileSync(file, cleaned);
+      // Follow a file symlink, and publish only after the entire replacement is written.
+      const target = realpathSync(file);
+      const mode = statSync(target).mode & 0o777;
+      const temporary = `${target}.${randomUUID()}.tmp`;
+      try {
+        writeFileSync(temporary, cleaned, { flag: 'wx', mode });
+        chmodSync(temporary, mode);
+        renameSync(temporary, target);
+      } finally {
+        rmSync(temporary, { force: true });
+      }
       const after = readFileSync(file,'utf8');
       const re = scanText(isHtml ? maskCode(after).masked : after);
       const ok = Object.keys(re).length===0;
