@@ -167,7 +167,7 @@ export async function appendContact(contact, contactsPath = CONTACTS_PATH) {
     const key = (name, company) => `${identityPart(name)}\0${identityPart(company)}`;
     const storedKey = (name, company) => `${identityPart(name, true)}\0${identityPart(company, true)}`;
     const incomingKey = key(contact.name, contact.company);
-    const existingIndex = lines.findIndex((line) => {
+    const existingIndex = lines.findLastIndex((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
       const cells = line.split('\t');
