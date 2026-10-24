@@ -381,7 +381,14 @@ export function trackerRowIdentity(row) {
 // `Ref R2857957`. The label is required so we don't grab an unrelated number
 // (a salary figure, a date fragment) — only text explicitly tagged as a
 // req/job/posting/reference id counts.
-export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+//
+// One id-parameter name may sit between the label and the id (`job id gh_jid
+// 1234567`, where `gh_jid` is the Greenhouse parameter the id came from). The id
+// must contain a digit, so without this skip the parameter name ended the match
+// and the row lost its req id. Only named id parameters are skipped, never any
+// snake_case word: `job posted_at 2026-10-01` must not read the date as an id,
+// since two rows with different dates would then block a legitimate merge.
+export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)(?:[\s:#-]+(?:gh_jid|(?:job|req|requisition|posting)_id)(?=[\s:#-]))?[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
 
 /**
  * Extract a req/job/posting number from a tracker Notes cell, if present.
