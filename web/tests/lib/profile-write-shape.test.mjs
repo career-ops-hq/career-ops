@@ -114,3 +114,32 @@ for (const route of routes) {
     });
   });
 }
+
+// #5662: a save edits only its own lines, so the profile keeps its comments,
+// including the commented-out opt-in keys profile.example.yml documents.
+const shippedTemplate = readFileSync(new URL("../../../config/profile.example.yml", import.meta.url), "utf8");
+const commentLines = (text) => text.split("\n").filter((line) => /^\s*#/.test(line));
+
+for (const route of routes) {
+  test(`${route.name} keeps every comment of a profile copied from the shipped template`, async () => {
+    await withFixture(shippedTemplate, async ({ file }) => {
+      const response = await route.post(request(route));
+      assert.equal(response.status, 200);
+      const written = readFileSync(file, "utf8");
+      assert.ok(commentLines(shippedTemplate).length > 100);
+      assert.deepEqual(commentLines(written), commentLines(shippedTemplate));
+      const expected = yaml.load(shippedTemplate);
+      if (route.name === "profile") expected.candidate.full_name = route.patch.name;
+      else expected.followup_cadence = route.patch;
+      assert.deepEqual(yaml.load(written), expected);
+    });
+  });
+}
+
+test("a flow-style section still saves, through the yaml.dump fallback", async () => {
+  await withFixture("candidate: { full_name: Fixture Candidate }\n", async ({ file }) => {
+    const response = await updateProfile(request(routes[0]));
+    assert.equal(response.status, 200);
+    assert.deepEqual(yaml.load(readFileSync(file, "utf8")), { candidate: { full_name: routes[0].patch.name } });
+  });
+});

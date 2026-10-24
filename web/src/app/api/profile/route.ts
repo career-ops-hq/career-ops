@@ -6,6 +6,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
+import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,21 +74,25 @@ export async function POST(req: Request) {
   const root = careerOpsRoot();
   const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
+  let source = "";
   let seeded = false;
   // DATA-LOSS GUARD (maintainer, bug-class #649/#704/#920/#958): distinguish
   // "no profile yet" (safe to seed from the example) from "profile EXISTS but is
   // malformed" (NEVER overwrite — that would silently destroy the user's data).
   if (!fs.existsSync(file)) {
     try {
-      base = (yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8")) as Record<string, unknown>) || {};
+      source = fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8");
+      base = (yaml.load(source) as Record<string, unknown>) || {};
       seeded = Object.keys(base).length > 0;
     } catch {
+      source = "";
       base = {};
     }
   } else {
     let parsed: unknown;
     try {
-      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      source = fs.readFileSync(file, "utf8");
+      parsed = yaml.load(source);
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }
@@ -101,9 +106,13 @@ export async function POST(req: Request) {
 
   const merged = deepMerge(base, proposed);
   try {
-    // Back up the prior profile before the first normalized write (yaml.dump
-    // reformats — comments are not preserved; the .bak is the safety net).
-    atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
+    // Edit only the proposed keys' lines so the profile keeps its comments
+    // (#5662). A shape the line edit cannot place falls back to yaml.dump,
+    // which drops comments; the backup holds the prior bytes either way.
+    const text =
+      patchProfileText(source, proposed as Parameters<typeof patchProfileText>[1], merged) ??
+      yaml.dump(merged, { lineWidth: 100, noRefs: true });
+    atomicWriteWithBackup(file, text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }

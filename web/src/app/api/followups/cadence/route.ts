@@ -6,6 +6,7 @@ import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
+import { patchProfileText } from "@/lib/profile-yaml-edit.mjs";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 import { readJsonObject } from "@/lib/json-body";
 import { followupsEnabledFromProfile } from "@/lib/followups-setting.mjs";
@@ -124,12 +125,15 @@ export async function POST(req: Request) {
   const root = careerOpsRoot();
   const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
+  let source = "";
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
-      const seeded = yaml.load(fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8"));
+      source = fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8");
+      const seeded = yaml.load(source);
       base = isObj(seeded) ? seeded : {};
     } catch {
+      source = "";
       base = {};
     }
   } else {
@@ -137,7 +141,8 @@ export async function POST(req: Request) {
     // read/parsed must never be overwritten with a cadence-only file.
     let parsed: unknown;
     try {
-      parsed = yaml.load(fs.readFileSync(file, "utf8"));
+      source = fs.readFileSync(file, "utf8");
+      parsed = yaml.load(source);
     } catch {
       return Response.json({ error: "config/profile.yml exists but could not be read as YAML — refusing to overwrite it." }, { status: 409 });
     }
@@ -150,14 +155,21 @@ export async function POST(req: Request) {
   }
 
   const merged: Record<string, unknown> = { ...base };
+  const patch: Parameters<typeof patchProfileText>[1] = {};
   if (Object.keys(cadence).length > 0) {
     merged.followup_cadence = { ...(isObj(base.followup_cadence) ? base.followup_cadence : {}), ...cadence };
+    patch.followup_cadence = cadence;
   }
   if (enabled !== undefined) {
     merged.follow_ups = { ...(isObj(base.follow_ups) ? base.follow_ups : {}), enabled };
+    patch.follow_ups = { enabled };
   }
   try {
-    atomicWriteWithBackup(file, yaml.dump(merged, { lineWidth: 100, noRefs: true }));
+    // Edit only the cadence lines so the rest of the profile, comments
+    // included, stays as the user wrote it (#5662). A shape the line edit
+    // cannot place falls back to yaml.dump; the backup holds the prior bytes.
+    const text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
+    atomicWriteWithBackup(file, text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }
