@@ -38,6 +38,7 @@
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
+import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
@@ -491,6 +492,40 @@ const ATS_PROVIDERS = [
       return classifyAlibabaPosition(json, id);
     },
   },
+  {
+    id: 'vdab',
+    // www.vdab.be/vindeenjob/vacatures/{id}, the URL providers/vdab.mjs writes;
+    // older links add a title slug after the id.
+    //
+    // A closed vacancy keeps its page and its "Solliciteer nu" button, and only
+    // a banner says it is closed, "Deze vacature is niet meer gepubliceerd"
+    // (#5244). The browser reads the page while it renders: on 2026-10-22 it
+    // read 13 of 87 loads of unpublished vacancies active (the button rendered
+    // before the banner) and 5 no_apply_control, as it did 2 of 40 loads of
+    // published ones. The detail endpoint the page itself calls has no render
+    // to wait for.
+    match(u) {
+      if (u.hostname !== 'www.vdab.be' && u.hostname !== 'vdab.be') return null;
+      const m = u.pathname.match(/^\/vindeenjob\/vacatures\/(\d+)(?:\/[^/]+)?\/?$/);
+      return m ? { id: m[1] } : null;
+    },
+    api: ({ id }) => `https://www.vdab.be/rest/vindeenjob/v4/vacatures/${id}?preview=false`,
+    // Without the key the endpoint answers 403, which falls back to the browser,
+    // so a rotated key costs this rung, not the check.
+    headers: { 'vej-key-monitor': VEJ_KEY_MONITOR },
+    // Measured 2026-10-22: a published vacancy answers 200 with gepubliceerd
+    // true, an unpublished one 200 with gepubliceerd false and a status, and an
+    // id VDAB never had 404 {"code":"NOT_FOUND"}. The 404 body is read too, so
+    // a 404 saying anything else falls back to the browser instead of closing
+    // the vacancy for good, and so does a 410, which VDAB never answered.
+    interpretStatuses: [200, 404],
+    api404Authoritative: false,
+    async interpret(res, { id }) {
+      let json;
+      try { json = await res.json(); } catch { return null; }
+      return classifyVdabVacancy(json, id, res.status);
+    },
+  },
 ];
 
 // LinkedIn renders a closed posting with an explicit banner
@@ -766,6 +801,48 @@ export function classifyAlibabaPosition(json, id) {
     reason: json.success === true
       ? 'Alibaba answers success true without this position id; not a verdict this rung can make'
       : `Alibaba answers success ${String(json.success)}, errorCode ${String(json.errorCode)}; not a verdict this rung can make`,
+  };
+}
+
+/**
+ * Decide liveness for one VDAB vacancy from its detail answer (HTTP 200 or 404).
+ * Pure + deterministic (no I/O), mirroring classifyNoFluffJobsPosting.
+ *
+ * `gepubliceerd` is what the page's closed banner reports ("Deze vacature is
+ * niet meer gepubliceerd"): true is live. An unpublished vacancy's `status`
+ * says why. PASSIEF is closed. HANGEND (pending) also covers vacancies VDAB has
+ * not published yet, so it stays uncertain: an expired verdict is one
+ * scan --verify records for good. An unpublished status this rung has not seen
+ * stays uncertain too. On a 404, only NOT_FOUND says the id is gone. A record
+ * for another vacancy, or one without the flag, returns null so the browser
+ * rung decides.
+ *
+ * @param {any} json - the parsed detail response
+ * @param {string} id - the vacancy id from the posting URL
+ * @param {number} [httpStatus=200] - the response's HTTP status (200 or 404)
+ * @returns {{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null}
+ */
+export function classifyVdabVacancy(json, id, httpStatus = 200) {
+  if (!json || typeof json !== 'object') return null;
+  if (httpStatus === 404) {
+    return json.code === 'NOT_FOUND'
+      ? { result: 'expired', code: 'vdab_api_gone', reason: 'VDAB has no vacancy under this id (404 NOT_FOUND)' }
+      : null;
+  }
+  if (!isSameId(json.referentie?.id, id) || typeof json.gepubliceerd !== 'boolean') return null;
+  if (json.gepubliceerd) {
+    return { result: 'active', code: 'vdab_api_published', reason: 'VDAB reports the vacancy published (live)' };
+  }
+  if (json.status === 'PASSIEF') {
+    return { result: 'expired', code: 'vdab_api_closed', reason: 'VDAB reports the vacancy no longer published (PASSIEF)' };
+  }
+  if (json.status === 'HANGEND') {
+    return { result: 'uncertain', code: 'vdab_api_pending', reason: 'VDAB reports the vacancy pending (HANGEND): not published, and not closed' };
+  }
+  return {
+    result: 'uncertain',
+    code: 'vdab_status_unrecognised',
+    reason: `VDAB reports the vacancy unpublished with status ${String(json.status)}; not a verdict this rung can make`,
   };
 }
 
