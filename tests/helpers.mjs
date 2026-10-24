@@ -473,6 +473,9 @@ export function run(cmd, args = [], opts = {}) {
     lastFailure = {
       status: e?.status ?? null,
       signal: e?.signal ?? null,
+      // 'ETIMEDOUT' when the timeout killed the child. A killed child has no
+      // exit status, so this is the only field that says it ran out of time.
+      code: e?.code ?? null,
       stdout: e?.stdout == null ? '' : String(e.stdout),
       stderr: e?.stderr == null ? '' : String(e.stderr),
     };
@@ -490,7 +493,7 @@ let lastFailure = null;
  * Cleared by a successful run so a stale record is never attributed to a later
  * command. The suite is sequential, so "most recent" is unambiguous.
  *
- * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ * @returns {{status: number|null, signal: string|null, code: string|null, stdout: string, stderr: string}|null}
  */
 // describeSpawn lives in helpers/describe-spawn.mjs and is re-exported here so
 // the 410 tests that already import from this file can reach it. It is a

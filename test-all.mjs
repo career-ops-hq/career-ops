@@ -317,7 +317,13 @@ async function runDiscovered(filter = null) {
     }
     if (kind === 'node-test') {
       const out = run(NODE, ['--test', f]);
-      reportNodeTestSuite(rel, out !== null, out ?? '', lastRunFailure(), `exit ${lastRunFailure()?.status ?? '?'}`);
+      const failure = lastRunFailure();
+      // run()'s timeout is DEFAULT_SCRIPT_TIMEOUT_MS. Said the way the parallel
+      // loop says it, since a killed suite has no exit status to print.
+      const how = failure?.code === 'ETIMEDOUT'
+        ? `killed after ${DEFAULT_SCRIPT_TIMEOUT_MS / 1000}s`
+        : `exit ${failure?.status ?? '?'}`;
+      reportNodeTestSuite(rel, out !== null, out ?? '', failure, how);
       continue;
     }
     await importSuiteContained(f, rel);
