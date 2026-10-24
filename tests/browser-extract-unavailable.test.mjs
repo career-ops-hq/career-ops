@@ -2,9 +2,10 @@
 // a page that did not render. Both leave the cleaned `text` empty; only the first
 // is terminal. The verdict comes from liveness-core's classifyLiveness, so the
 // phrase list lives in one place. The readDom() cases need headless Chromium and
-// are skipped with a warning when it cannot launch (CI installs with
-// --ignore-scripts).
-import { pass, fail, warn, ROOT } from './helpers.mjs';
+// are skipped with a warning when it cannot launch (the test job installs with
+// --ignore-scripts), and fail under `test-all.mjs --needs browser`, which the
+// tool-suites CI job runs.
+import { pass, fail, toolUnavailable, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -43,7 +44,7 @@ try {
   try {
     browser = await chromium.launch({ headless: true });
   } catch (e) {
-    warn(`readDom unavailable-page tests skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
+    toolUnavailable('browser', `readDom unavailable-page tests skipped: Chromium cannot launch (${e.message.split('\n')[0]})`);
   }
   if (browser) {
     const page = await browser.newPage();

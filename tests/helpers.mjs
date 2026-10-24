@@ -10,6 +10,7 @@ import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -249,6 +250,22 @@ export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
  * @returns {void}
  */
 export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
+
+/**
+ * Report that a tool this suite needs is missing (see tests/required-tools.mjs).
+ *
+ * A warning on a machine that simply lacks the tool, and a failure in a run
+ * that must have it (`test-all.mjs --needs <tool>`, or its variable set to 1),
+ * where a skip would turn the check green without running it.
+ *
+ * @param {'browser'|'latex'} tool
+ * @param {string} msg - What was skipped and why.
+ * @returns {void}
+ */
+export function toolUnavailable(tool, msg) {
+  if (toolRequired(tool)) fail(`${msg} — ${REQUIRED_TOOL_ENV[tool]}=1, so a missing ${tool} is a failure in this run`);
+  else warn(msg);
+}
 
 /** Current counter snapshot. */
 export function results() { return { passed, failed, warnings }; }

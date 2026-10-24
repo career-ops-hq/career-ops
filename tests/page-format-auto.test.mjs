@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ROOT, NODE } from './helpers.mjs';
+import { toolRequired } from './required-tools.mjs';
 import {
   LETTER_COUNTRIES,
   PAGE_FORMATS,
@@ -236,14 +237,16 @@ test('renderHtmlToPdf: auto records the sheet the country calls for', () => {
 });
 
 // The batch CLI cannot take a stub browser, so these need a real Chromium and
-// skip where none is installed. The sheet is the PDF's MediaBox: 595x842pt is
-// A4, 612x792pt is Letter.
+// skip where none is installed, except where the browser is required
+// (`test-all.mjs --needs browser`). The sheet is the PDF's MediaBox: 595x842pt
+// is A4, 612x792pt is Letter.
 const chromiumReady = (() => {
   const res = spawnSync(NODE, ['-e',
     "import('playwright').then(async ({chromium})=>{const b=await chromium.launch();await b.close();console.log('READY')}).catch(()=>{})",
   ], { cwd: ROOT, encoding: 'utf-8' });
   return res.stdout.includes('READY');
 })();
+const browserSkip = !toolRequired('browser') && !chromiumReady && 'no Chromium';
 
 function mediaBox(pdfPath) {
   const m = readFileSync(pdfPath, 'latin1').match(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/);
@@ -270,7 +273,7 @@ function entry(dir, name, extra = {}) {
   return { input: join(dir, `${name}.html`), output: join(dir, 'output', `${name}.pdf`), kind: 'cover', ...extra };
 }
 
-test('generate-pdf --batch: each entry takes its own country under auto', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-pdf --batch: each entry takes its own country under auto', { skip: browserSkip }, () => {
   const dir = workspace('auto');
   const res = runBatch(dir, [entry(dir, 'de', { country: 'DE' }), entry(dir, 'us', { country: 'US' }), entry(dir, 'none')]);
   assert.equal(res.status, 0, res.stderr + res.stdout);
@@ -279,7 +282,7 @@ test('generate-pdf --batch: each entry takes its own country under auto', { skip
   assert.equal(mediaBox(join(dir, 'output', 'none.pdf')), '612x792');
 });
 
-test('generate-pdf --batch: a malformed entry country fails that entry only', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-pdf --batch: a malformed entry country fails that entry only', { skip: browserSkip }, () => {
   const dir = workspace('auto');
   const res = runBatch(dir, [entry(dir, 'a', { country: 'Germany' }), entry(dir, 'b', { country: 'DE' })]);
   assert.ok(exitedNonZero(res), describeSpawn(res, 'expected a non-zero exit'));
@@ -287,7 +290,7 @@ test('generate-pdf --batch: a malformed entry country fails that entry only', { 
   assert.equal(mediaBox(join(dir, 'output', 'b.pdf')), '595x842');
 });
 
-test('generate-cover-letter: the payload country steers auto, and --country outranks it', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-cover-letter: the payload country steers auto, and --country outranks it', { skip: browserSkip }, () => {
   const letter = {
     role_title: 'Head of Marketing', opening: 'Opening line.', profile_intro: 'Profile intro.',
     company: 'Example Corp', city: 'Berlin', date: 'September 8, 2026',
@@ -346,7 +349,7 @@ test('generate-cover-letter: --format takes only a4 or letter, never auto', () =
   }
 });
 
-test('generate-pdf --batch: a global --country covers an entry with none, and an entry format still wins', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-pdf --batch: a global --country covers an entry with none, and an entry format still wins', { skip: browserSkip }, () => {
   const dir = workspace('auto');
   const res = runBatchWithFlags(dir, [
     entry(dir, 'bare'),

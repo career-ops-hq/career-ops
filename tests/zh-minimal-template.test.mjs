@@ -7,12 +7,15 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listTemplates, resolveTemplate, validateTemplate } from '../cv-templates.mjs';
 import { chromium } from 'playwright';
+import { toolRequired } from './required-tools.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = join(ROOT, 'templates', 'cv-template.zh-minimal.html');
 const HAS_PDFTOTEXT = spawnSync('pdftotext', ['-v'], { stdio: 'ignore' }).status === 0;
 // Probe the launch the extraction test makes: chromium.executablePath() names the
 // headed binary, while a headless launch may use chrome-headless-shell instead.
+// Where the browser is required (`test-all.mjs --needs browser`) nothing skips:
+// a missing Chromium or pdftotext fails the test that needs it.
 const CAN_EXTRACT_PDF = HAS_PDFTOTEXT && await chromium.launch({ headless: true })
   .then((browser) => browser.close().then(() => true), () => false);
 
@@ -66,7 +69,7 @@ test('Chinese Minimal renders a complete mixed-language payload', () => {
 });
 
 test('Chinese Minimal preserves mixed-language and job order in PDF text extraction', {
-  skip: !CAN_EXTRACT_PDF && 'Chromium cannot launch or pdftotext is not installed',
+  skip: !toolRequired('browser') && !CAN_EXTRACT_PDF && 'Chromium cannot launch or pdftotext is not installed',
 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-extraction-'));
   const input = join(dir, 'cv.json');
@@ -123,7 +126,7 @@ test('Chinese Minimal preserves mixed-language and job order in PDF text extract
 });
 
 test('Chinese Minimal keeps long mixed-language contacts inside the A4 page', {
-  skip: !existsSync(chromium.executablePath()) && 'Chromium is not installed',
+  skip: !toolRequired('browser') && !existsSync(chromium.executablePath()) && 'Chromium is not installed',
 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-layout-'));
   const input = join(dir, 'cv.json');
