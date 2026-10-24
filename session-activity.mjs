@@ -46,6 +46,7 @@ import { createHash, randomUUID } from 'crypto';
 import { join, resolve } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { tryAcquireDirLockSync, releaseOrWarn } from './lib/dir-lock.mjs';
 
 const ROOT = getCareerOpsRoot();
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
@@ -103,6 +104,16 @@ function isStale(entry, path, ttlMs) {
   return false;
 }
 
+// Claims and GC stay non-blocking; release briefly retries a busy guard.
+function acquireActivityGuard(path, attempts = 1) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const guard = tryAcquireDirLockSync(`${path}.recover`, { staleMs: DEFAULT_TTL_MS });
+    if (guard) return () => releaseOrWarn(guard);
+    if (attempt + 1 < attempts) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+  return null;
+}
+
 /**
  * Report whether `key` currently has a live claim, without taking one.
  *
@@ -131,33 +142,39 @@ export function claimActivity(key, options = {}) {
   const path = sentinelPath(activityDir, key);
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
 
-  const existing = readSentinel(path);
-  if (existing && !isStale(existing, path, ttlMs)) {
-    return { claimed: false, owner: existing, token: null };
-  }
-  if (existing) {
-    // Stale (dead pid or past TTL) — safe to reclaim.
-    try { unlinkSync(path); } catch (err) { if (err?.code !== 'ENOENT') throw err; }
-  }
-
-  const token = randomUUID();
-  const entry = {
-    key: String(key),
-    token,
-    pid: process.pid,
-    process_bound: options.processBound === true,
-    label: options.label || null,
-    claimed_at: new Date().toISOString(),
-  };
-  try {
-    writeFileSync(path, JSON.stringify(entry), { flag: 'wx' });
-    return { claimed: true, owner: entry, token };
-  } catch (err) {
-    if (err?.code !== 'EEXIST') throw err;
-    // Lost the race to another session claiming the same key at the same
-    // instant — report their claim rather than erroring.
+  const releaseGuard = acquireActivityGuard(path);
+  if (!releaseGuard) {
     return { claimed: false, owner: readSentinel(path), token: null };
   }
+  try {
+    const existing = readSentinel(path);
+    if (existing && !isStale(existing, path, ttlMs)) {
+      return { claimed: false, owner: existing, token: null };
+    }
+    if (existing) {
+      // Stale (dead pid or past TTL) — safe to reclaim under the guard.
+      try { unlinkSync(path); } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+    }
+
+    const token = randomUUID();
+    const entry = {
+      key: String(key),
+      token,
+      pid: process.pid,
+      process_bound: options.processBound === true,
+      label: options.label || null,
+      claimed_at: new Date().toISOString(),
+    };
+    try {
+      writeFileSync(path, JSON.stringify(entry), { flag: 'wx' });
+      return { claimed: true, owner: entry, token };
+    } catch (err) {
+      if (err?.code !== 'EEXIST') throw err;
+      // Report an existing claim rather than erroring (including older callers
+      // that still claim with exclusive creation without this guard).
+      return { claimed: false, owner: readSentinel(path), token: null };
+    }
+  } finally { releaseGuard(); }
 }
 
 /** Release a claim this caller owns (matched by token, unless force: true). */
@@ -166,6 +183,8 @@ export function releaseActivity(key, options = {}) {
   const path = sentinelPath(activityDir, key);
   const force = options.force === true;
   if (!force && !options.token) throw new Error('Claim ownership token is required for release');
+  const releaseGuard = acquireActivityGuard(path, 25);
+  if (!releaseGuard) return false;
   try {
     const entry = readSentinel(path);
     if (!force && entry?.token !== options.token) return false;
@@ -174,7 +193,7 @@ export function releaseActivity(key, options = {}) {
   } catch (err) {
     if (err?.code === 'ENOENT') return false;
     throw err;
-  }
+  } finally { releaseGuard(); }
 }
 
 /** Remove sentinels past their TTL or process-bound claims whose PID is dead. */
@@ -187,7 +206,13 @@ export function gcStaleActivity(options = {}) {
     const path = join(activityDir, name);
     const entry = readSentinel(path);
     if (isStale(entry, path, ttlMs)) {
-      try { unlinkSync(path); removed++; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+      const releaseGuard = acquireActivityGuard(path);
+      if (!releaseGuard) continue;
+      try {
+        if (isStale(readSentinel(path), path, ttlMs)) {
+          try { unlinkSync(path); removed++; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+        }
+      } finally { releaseGuard(); }
     }
   }
   return removed;
