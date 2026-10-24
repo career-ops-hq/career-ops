@@ -16,8 +16,8 @@
  * Input format (IMPORTANT — why this and not HTML or the rendered PDF):
  * `modes/pdf.md` Step 17 already builds a compact JSON payload before any HTML
  * or PDF exists — `{ experience: [{ company, role, dates, ... }] }` — and
- * writes it to `/tmp/cv-{candidate}-{company}.json`. That payload is the
- * earliest point in the pipeline with company/title/dates as clean structured
+ * writes it to `tmp/cv-{candidate}-{company}.json` (checkout-root `tmp/`,
+ * gitignored). That payload is the earliest point in the pipeline with company/title/dates as clean structured
  * fields, straight from the tailoring step, before `build-cv-html.mjs` ever
  * touches markup. Checking there means: no HTML/PDF text-scraping regressions
  * to maintain, and the check runs (and can stop bad output) BEFORE the fact
@@ -49,8 +49,8 @@
  * plus --self-test failures.
  *
  * Usage:
- *   node cv-title-check.mjs /tmp/cv-jane-doe-acme.json
- *   node cv-title-check.mjs /tmp/cv-jane-doe-acme.json --summary
+ *   node cv-title-check.mjs tmp/cv-jane-doe-acme.json
+ *   node cv-title-check.mjs tmp/cv-jane-doe-acme.json --summary
  *   node cv-title-check.mjs --self-test
  */
 

@@ -68,8 +68,12 @@ function runDocumentedStep(payload, report = '', dirPrefix = 'pdf-ats-variant-')
   const dataRoot = join(dir, 'root');
   mkdirSync(join(dataRoot, 'config'), { recursive: true });
   mkdirSync(join(dir, 'output'), { recursive: true });
+  // Step 21a documents payloads under checkout-root tmp/ (see modes/pdf.md);
+  // the fixture stands in for the checkout, so it needs the same directory.
+  mkdirSync(join(dir, 'tmp'), { recursive: true });
   writeFileSync(join(dataRoot, 'cv.md'), CV_MD);
-  const styledJson = join(dir, `cv-jane-smith${seg}-acme.json`);
+  // The styled payload lives under tmp/ too — Step 17 writes it there.
+  const styledJson = join(dir, 'tmp', `cv-jane-smith${seg}-acme.json`);
   writeFileSync(styledJson, JSON.stringify(payload, null, 2));
   const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
 
@@ -81,6 +85,9 @@ function runDocumentedStep(payload, report = '', dirPrefix = 'pdf-ats-variant-')
     .replaceAll('{candidate}', 'jane-smith')
     .replaceAll('{company}', 'acme')
     .replaceAll('/tmp/', `${dir}/`)
+    // modes/pdf.md documents payloads under checkout-root tmp/; the fixture
+    // stands in for the checkout, so a leading tmp/ lands in the fixture too.
+    .replace(/^tmp\//, `${dir}/tmp/`)
     .replace(/^output\//, `${dir}/output/`)
     .replaceAll('{ats-template}', atsTemplate ?? '{ats-template}');
 
@@ -147,8 +154,8 @@ test('with a report number, every path carries it before the company', () => {
     for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}\n${s.stderr}`);
     assert.ok(existsSync(join(dir, 'output', 'cv-jane-smith-042-acme-ats.html')),
       'output/cv-{candidate}-{report}-{company}-ats.html must be written');
-    assert.ok(existsSync(join(dir, 'cv-jane-smith-042-acme-ats.json')),
-      '/tmp/cv-{candidate}-{report}-{company}-ats.json must be written');
+    assert.ok(existsSync(join(dir, 'tmp', 'cv-jane-smith-042-acme-ats.json')),
+      'tmp/cv-{candidate}-{report}-{company}-ats.json must be written');
   } finally {
     cleanup();
   }

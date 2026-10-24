@@ -349,11 +349,11 @@ Assemble the JSON payload:
 
 Each `achievements[].lead` must be a bare phrase with no trailing comma or other punctuation — `generate-cover-letter.mjs` appends the comma when rendering (see Step 7).
 
-Write payload to `/tmp/cover-payload-{company-slug}.json`.
+Write payload to `tmp/cover-payload-{company-slug}.json`.
 
 Run:
 ```bash
-node generate-cover-letter.mjs --payload /tmp/cover-payload-{company-slug}.json
+node generate-cover-letter.mjs --payload tmp/cover-payload-{company-slug}.json
 ```
 
 Report the output path and file size.

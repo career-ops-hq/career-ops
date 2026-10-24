@@ -74,6 +74,12 @@ batch/tracker-additions/**/*.tsv
 # Worker scratch: prefetched JD text plus whatever compile cache the worker CLI
 # drops here. Fetched postings are user data — never stage them.
 batch/tmp/
+# Transient mode payloads (CV JSON, cover payloads, discover lists): written by
+# modes/pdf.md, cover.md, add.md, discover.md, latex*.md. Same rule as batch/tmp/
+# above — agent harnesses with directory-scoped approval cannot reach OS temp,
+# so these live in the checkout. Never stage them (tmp/.gitkeep excepted).
+tmp/*
+!tmp/.gitkeep
 /jds
 !/jds/
 jds/*

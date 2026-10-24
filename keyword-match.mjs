@@ -398,7 +398,7 @@ export function archivedJdText(reportText, root) {
 
 /**
  * Strip HTML to plain text (zero-dependency) so a tailored CV emitted as HTML
- * (e.g. /tmp/cv-{candidate}-{company}.html from pdf mode) can be scanned as the
+ * (e.g. tmp/cv-{candidate}-{company}.html from pdf mode) can be scanned as the
  * final, sent document. Removes script/style blocks, drops tags, and decodes
  * the handful of entities that appear in CV templates.
  *

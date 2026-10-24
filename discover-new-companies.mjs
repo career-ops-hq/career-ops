@@ -78,9 +78,9 @@ Options:
   --help            This message
 
 Typical loop:
-  node discover-new-companies.mjs --out /tmp/new.yml
-  node discover-ats.mjs --in /tmp/new.yml --summary     # preview, writes nothing
-  node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
+  node discover-new-companies.mjs --out tmp/new.yml
+  node discover-ats.mjs --in tmp/new.yml --summary     # preview, writes nothing
+  node discover-ats.mjs --in tmp/new.yml --write       # only after you review
 `);
   process.exit(0);
 }
@@ -228,8 +228,8 @@ if (has('--summary')) {
     if (c.titles.size) console.log(`    e.g. ${[...c.titles][0]}`);
   }
   if (!candidates.length) console.log('  (nothing new — every scanned company is already tracked)');
-  console.log('\nNext: node discover-new-companies.mjs --out /tmp/new.yml');
-  console.log('      node discover-ats.mjs --in /tmp/new.yml --summary');
+  console.log('\nNext: node discover-new-companies.mjs --out tmp/new.yml');
+  console.log('      node discover-ats.mjs --in tmp/new.yml --summary');
 } else if (has('--json')) {
   console.log(JSON.stringify({
     metadata: { candidates: totalBeforeLimit, emitted: candidates.length, blacklistedSkipped: blacklisted.size, sinceDays: SINCE_DAYS, minRows: MIN_ROWS, addedOnly: ADDED_ONLY },

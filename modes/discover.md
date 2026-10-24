@@ -52,9 +52,9 @@ already tracked, and emits the remainder in exactly the `companies: [{name}]`
 shape this mode consumes:
 
 ```bash
-node discover-new-companies.mjs --out /tmp/new.yml   # candidate list, writes nothing else
-node discover-ats.mjs --in /tmp/new.yml --summary     # preview boards, writes nothing
-node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
+node discover-new-companies.mjs --out tmp/new.yml   # candidate list, writes nothing else
+node discover-ats.mjs --in tmp/new.yml --summary     # preview boards, writes nothing
+node discover-ats.mjs --in tmp/new.yml --write       # only after you review
 ```
 
 Companies on `data/blacklist.md` (by name, or a domain-scope host on any of
