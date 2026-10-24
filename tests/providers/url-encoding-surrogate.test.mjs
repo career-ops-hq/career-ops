@@ -214,6 +214,21 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
   );
 
+  // apple.parseSearchPage — for…of over the SSR hydration blob's searchResults;
+  // id, slug and team code are all host-supplied URL segments.
+  const { parseSearchPage: appleParse } = await load('apple.mjs');
+  const applePage = (searchResults) => `<script>window.__staticRouterHydrationData = JSON.parse(${JSON.stringify(JSON.stringify({ loaderData: { search: { searchResults, totalRecords: searchResults.length } } }))});</script>`;
+  check(
+    'apple.parseSearchPage',
+    () => appleParse(applePage([
+      { id: `${LONE}bad`, postingTitle: 'Bad Id', transformedPostingTitle: 'bad-id' },
+      { id: '200000001', postingTitle: 'Bad Slug', transformedPostingTitle: `${LONE}bad` },
+      { id: '200000002', postingTitle: 'Bad Team', transformedPostingTitle: 'bad-team', team: { teamCode: `${LONE}x` } },
+      { id: '200000003', postingTitle: 'Good', transformedPostingTitle: 'good' },
+    ]), 'https://jobs.apple.com/en-us/search?page=1', 'Apple').jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.apple.com/en-us/details/200000003/good',
+  );
+
   // platsbanken.postingUrl — the ad id is the only segment of the permalink, and
   // the helper's null (rather than a throw) is what lets one bad row drop.
   const { postingUrl: platsbankenPostingUrl } = await load('platsbanken.mjs');
@@ -274,7 +289,7 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
+    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
     'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
