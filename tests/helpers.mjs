@@ -504,6 +504,39 @@ export function lastRunFailure() {
   return lastFailure;
 }
 
+// A V8 stack frame as Node prints it for an uncaught exception:
+// `    at fn (/path/file.mjs:12:5)`, `    at /path/file.mjs:12:5`.
+const STACK_FRAME_RE = /^ {4}at \S.*:\d+:\d+\)?$/m;
+
+/**
+ * Run a command that is expected to refuse its input, and report whether it
+ * refused it the intended way.
+ *
+ * `run(...) === null` is not that check. run() returns null for every failure:
+ * the intended rejection, but also an uncaught TypeError (Node exits 1 for that
+ * too), a signal, and the 30 s timeout. A script that crashed on the bad input
+ * therefore read as "correctly rejected". This requires the expected exit
+ * status, no signal, the expected message on stderr, and no stack trace there,
+ * so a crash whose text happens to contain the message still fails.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} args - Argument vector.
+ * @param {{stderr: string|RegExp, status?: number|null}} expected - The rejection:
+ *   a substring (or pattern) stderr must contain, and the exit status (default 1).
+ *   A signal-killed child has status null; it still never passes, since any
+ *   signal is refused.
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {boolean} True only for the intended rejection. On false,
+ *   formatRunFailure() describes what the child actually did.
+ */
+export function runRejects(cmd, args, { stderr, status = 1 }, opts = {}) {
+  if (run(cmd, args, opts) !== null) return false;
+  const f = lastFailure;
+  if (!f || f.signal !== null || f.status !== status) return false;
+  if (STACK_FRAME_RE.test(f.stderr)) return false;
+  return typeof stderr === 'string' ? f.stderr.includes(stderr) : stderr.test(f.stderr);
+}
+
 /**
  * Today as `YYYY-MM-DD` in UTC — the form the scripts under test emit from
  * their own `today()`.
