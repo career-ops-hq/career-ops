@@ -108,7 +108,7 @@ jobs:
     # Skipped in the merge queue for cv-visual's reason above.
     if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
-    # About 2 minutes. Limited for the test job's reason.
+    # About 3 minutes. Limited for the test job's reason.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -133,3 +133,7 @@ jobs:
         run: node upgrade-tests.mjs --user-layer-refusal
       - name: Failed npm install is reported, rollback reinstalls
         run: node upgrade-tests.mjs --failed-install
+      - name: A locally edited system file is kept, and replaced only with --force (#2337)
+        run: node upgrade-tests.mjs --local-edit
+      - name: Local-edit canary (an inverted --force branch must go red)
+        run: node upgrade-tests.mjs --local-edit-canary

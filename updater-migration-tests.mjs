@@ -571,10 +571,11 @@ const twoPassManifestChecks = [
     // earlier self-bootstrap overwrite (#3207); pin the normal call site here.
     pattern: /backupSystemFiles\(atRisk\)/,
   },
-  {
-    name: 'overwriting a locally edited system file requires --force (#2337)',
-    pattern: /updateForce[\s\S]{0,400}?preservedPaths\.push\(\.\.\.atRisk\)/,
-  },
+  // "Overwriting a locally edited system file requires --force" (#2337) is not
+  // pinned here. A regex over the source matched the inverted branch just as
+  // well; `upgrade-tests.mjs --local-edit` runs a real apply, with and without
+  // --force, against a committed local edit, and `--local-edit-canary` proves
+  // that leg goes red on the inverted branch (#5759).
   {
     // Excluded paths must stay out of the scoped commit too, or the
     // "auto-update" commit records the very edit the user kept (#2337).
