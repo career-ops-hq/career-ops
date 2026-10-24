@@ -218,9 +218,13 @@ const MIN_CONTENT_CHARS = 300;
 // A job-detail URL almost always carries the posting's identity: a numeric req id
 // (Greenhouse, Workday pid, Microsoft) or a UUID (Lever, Ashby). If the requested
 // URL had one and the final URL lost it, the browser landed somewhere else.
+// liveness-browser.mjs reads the same id to tell the posting's own Apply link
+// from the site's links in the page chrome.
 const JOB_ID_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{5,}/gi;
+// Its source, for the control walk, which runs in the page and cannot import it.
+export const JOB_ID_PATTERN = JOB_ID_TOKEN.source;
 
-function jobIdToken(url = '') {
+export function jobIdToken(url = '') {
   const matches = url.match(JOB_ID_TOKEN);
   return matches ? matches[matches.length - 1].toLowerCase() : null;
 }
