@@ -38,7 +38,7 @@ function textProblem(name, value) {
 /**
  * @param {string} root
  * @param {object} payload
- * @param {Pick<typeof fs, "mkdirSync"|"existsSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
+ * @param {Pick<typeof fs, "mkdirSync"|"openSync"|"closeSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
  * @returns {{ok: true} | {ok: false, error: string}}
  */
 export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
@@ -105,15 +105,18 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
 }
 
 function writeNew(fsImpl, filePath, content, attempted) {
-  const existed = fsImpl.existsSync(filePath);
-  attempted.push({ filePath, existed });
-  fsImpl.writeFileSync(filePath, content, "utf8");
+  const fd = fsImpl.openSync(filePath, "wx");
+  attempted.push(filePath);
+  try {
+    fsImpl.writeFileSync(fd, content, "utf8");
+  } finally {
+    fsImpl.closeSync(fd);
+  }
 }
 
 function cleanupNew(fsImpl, attempted) {
   const problems = [];
-  for (const { filePath, existed } of attempted) {
-    if (existed) continue;
+  for (const filePath of attempted) {
     try {
       fsImpl.unlinkSync(filePath);
     } catch (err) {
