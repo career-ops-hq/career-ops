@@ -18,6 +18,7 @@ import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -118,6 +119,36 @@ function parseArgs(argv) {
     selfTest: false,
     help: false,
   };
+
+    validateFlags(
+      argv,
+      [
+        '--dry-run',
+        '--json',
+        '--self-test',
+        '--help',
+        '-h',
+        '--limit',
+        '--months',
+        '--sort',
+        '--sources',
+      ],
+      `Usage:
+    node company-funded.mjs --dry-run
+    node company-funded.mjs --limit 25 --months 6 --sort date
+    node company-funded.mjs --sources techcrunch,prnewswire,guardian,hn --dry-run
+
+  Options:
+    --limit <n>             Max companies in the review list. Default: 20.
+    --months <n>            Recent-funding window. Default: 3.
+    --sort <date|score>     Candidate ordering. Default: date.
+    --sources <csv>         Sources. Default: techcrunch,prnewswire,guardian,hn.
+    --dry-run               Print only; do not write report/JSON files.
+    --json                  Print machine-readable JSON.
+    --self-test             Run offline self-test.`,
+      { valueFlags: ['--limit', '--months', '--sort', '--sources'] }
+    );
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run') opts.dryRun = true;

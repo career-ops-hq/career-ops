@@ -11,6 +11,7 @@
 
 import { readFileSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import {validateFlags} from './lib/cli-flags.mjs';
 
 const STOP_WORDS = new Set([
   'and', 'the', 'for', 'with', 'from', 'that', 'this', 'have', 'will', 'you',
@@ -145,17 +146,8 @@ const USAGE = `Usage:
 
 function parseArgs(argv) {
   const args = argv.slice(2);
+  validateFlags(args, KNOWN_FLAGS, USAGE);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
   const [newJdPath, previousPath] = args;
   if (args.length !== 2 || !newJdPath || !previousPath) {
     console.error('Error: expected two file paths.');

@@ -28,7 +28,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
-
+import { validateFlags } from './lib/cli-flags.mjs';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const GOLDEN_DIR = join(ROOT, 'evals', 'golden');
 
@@ -52,19 +52,36 @@ const COST_PER_RUN_USD = {};
 // ---------------------------------------------------------------------------
 // CLI args
 // ---------------------------------------------------------------------------
-const args = process.argv.slice(2);
-if (args.includes('--help') || args.includes('-h')) {
-  console.log(`eval-golden.mjs — golden-set eval harness (#1354)
 
-  --replay         Replay recorded fixtures (default; offline, $0, deterministic)
-  --live           Call the model live via openai-eval.mjs (needs key + cv.md)
-  --model <id>     Candidate model id to evaluate (default: cheap-stub)
-  --golden <dir>   Golden-set directory (default: evals/golden)
+const args = process.argv.slice(2);
+
+const KNOWN_FLAGS = [
+  '--replay',
+  '--live',
+  '--model',
+  '--golden',
+  '--fixtures',
+  '--help',
+  '-h',
+];
+
+const VALUE_FLAGS = ['--model', '--golden', '--fixtures'];
+
+const USAGE = `eval-golden.mjs — golden-set eval harness (#1354)
+
+  --replay       Replay recorded fixtures (default; offline, $0, deterministic)
+  --live         Call the model live via openai-eval.mjs (needs key + cv.md)
+  --model <id>   Candidate model id to evaluate (default: cheap-stub)
+  --golden <dir> Golden-set directory (default: evals/golden)
   --fixtures <dir> Replay fixtures directory (default: sibling of --golden)
-  --help           Show this help
-`);
-  process.exit(0);
-}
+  --help         Show this help
+`;
+
+validateFlags(args, KNOWN_FLAGS, USAGE, {
+  valueFlags: VALUE_FLAGS,
+  requireOperand: true,
+});
+
 
 const mode  = args.includes('--live') ? 'live' : 'replay';
 const model = argValue('--model') || 'cheap-stub';
@@ -79,10 +96,21 @@ const fixtureDir = argValue('--fixtures') || join(dirname(goldenDir), 'fixtures'
  * @param {string} flag - The flag whose following value to return.
  * @returns {string|undefined} The value, or undefined if the flag is absent/last.
  */
+
 function argValue(flag) {
+  const equalsArg = args.find((arg) => arg.startsWith(`${flag}=`));
+
+  if (equalsArg !== undefined) {
+    return equalsArg.slice(flag.length + 1);
+  }
+
   const i = args.indexOf(flag);
-  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
+
+  return i >= 0 && i + 1 < args.length
+    ? args[i + 1]
+    : undefined;
 }
+
 
 /**
  * Flatten a model id into a filesystem-safe fixture token.
