@@ -256,7 +256,7 @@ console.log('6. first add on the default path self-heals .gitignore (idempotent)
   const repo = tmp('inbox-repo-');
   writeFileSync(join(repo, '.gitignore'), 'node_modules\noutput/*\n');
   const addOnce = () => execFileSync(NODE, [CLI, 'add', 'queue a scan'], {
-    cwd: repo, env: { ...process.env, CAREER_OPS_INBOX: '' }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: repo, env: { ...process.env, CAREER_OPS_ROOT: repo, CAREER_OPS_DATA_DIR: '', CAREER_OPS_INBOX: '' }, stdio: ['pipe', 'pipe', 'pipe'],
   });
   addOnce(); addOnce();
   const gi = readFileSync(join(repo, '.gitignore'), 'utf8');
