@@ -110,6 +110,7 @@ try {
   check('priority order is respected', detectCli(CLI_CANDIDATES, () => true).bin === 'claude');
   check('no CLI installed returns null', detectCli(CLI_CANDIDATES, () => false) === null);
   check('a Pi-only shell is detected', detectCli(CLI_CANDIDATES, b => b === 'pi')?.bin === 'pi');
+  check('an OMP-only shell is detected', detectCli(CLI_CANDIDATES, b => b === 'omp')?.bin === 'omp');
 
   // ── applying annotations: row text is not a unique identity ──
   // pipeline.md does not enforce line uniqueness, so two byte-identical pending

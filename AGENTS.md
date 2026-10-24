@@ -91,7 +91,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Oh My Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
 
 ### Codex invocation
 
@@ -106,6 +106,14 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
 - **Headless:** `pi -p "prompt"` for one-shot workers; `pi --mode json -p "prompt"` when the caller parses events.
 - **Examples:** `pi -p "Run career-ops tracker mode"`, `pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+
+### Oh My Pi (omp) invocation
+
+- **Project context:** `.omp/AGENTS.md` imports `AGENTS.md` (`@../AGENTS.md`) so OMP's `native` provider loads the root contract without being shadowed by `.github/copilot-instructions.md`.
+- **Skill:** OMP discovers the shared router at `.agents/skills/career-ops/SKILL.md` automatically via its `agents` discovery provider, exposed as `/skill:career-ops`.
+- **Interactive:** run `omp` in the repo root, then `/skill:career-ops <mode>`.
+- **Headless:** `omp -p "prompt"` for one-shot workers.
+- **Examples:** `omp -p "Run career-ops tracker mode"`, `omp -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
 
 
 ### Main Files

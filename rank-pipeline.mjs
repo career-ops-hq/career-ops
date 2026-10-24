@@ -99,6 +99,7 @@ export const CLI_CANDIDATES = [
   { bin: 'agy', id: 'antigravity', args: p => ['-p', p] },
   { bin: 'grok', args: p => ['-p', p, '--disable-web-search', '--disallowed-tools', GROK_DENIED_TOOLS] },
   { bin: 'pi', args: p => ['--no-tools', '-p', p] },
+  { bin: 'omp', args: p => ['--no-tools', '-p', p] },
 ];
 
 const USAGE = `

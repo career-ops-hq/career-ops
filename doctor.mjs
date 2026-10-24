@@ -508,6 +508,7 @@ const MCP_CONFIGS = [
   // there, and JSON.parse throwing on them used to read as "no MCP server
   // configured" (#2252).
   { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'], userFiles: () => opencodeUserConfigFiles() },
+  { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package,
@@ -779,7 +780,9 @@ function checkPlaywrightMcp(root, activeCli) {
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (project; see opencode.example.json) or to the global ~/.config/opencode/opencode.json[c] (or $OPENCODE_CONFIG), or pass --cli <name> if you actually run a different CLI.'
-        : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
+        : activeCli === 'omp'
+          ? 'Add the Playwright MCP server to .omp/mcp.json, or pass --cli <name> if you actually run a different CLI.'
+          : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
     ],
   };
 }
