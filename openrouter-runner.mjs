@@ -138,7 +138,13 @@ async function loadFreeModels() {
         const p = m.pricing ?? {};
         return String(p.prompt) === '0' && String(p.completion) === '0';
       })
-      .map(m => m.id);
+      .map(m => m.id)
+      // Only current MiniMax text models enter automatic rotation. Explicit
+      // CAREER_OPS_MODEL requests bypass this catalog, including legacy IDs.
+      .filter(id => !id.startsWith('minimax/') || [
+        'minimax/minimax-m3.1-flash:free',
+        'minimax/minimax-m3',
+      ].includes(id));
 
     if (list.length === 0) throw new Error('No free models found in API response');
 
@@ -151,7 +157,13 @@ async function loadFreeModels() {
 
     freeModels = list.sort((a, b) => {
       const diff = priorityOf(a) - priorityOf(b);
-      return diff !== 0 ? diff : a.localeCompare(b);
+      if (diff !== 0) return diff;
+      if (providerOf(a) === 'minimax' && providerOf(b) === 'minimax') {
+        const flash = 'minimax/minimax-m3.1-flash:free';
+        if (a === flash) return b === flash ? 0 : -1;
+        if (b === flash) return 1;
+      }
+      return a.localeCompare(b);
     });
 
     console.log(`[models] ${freeModels.length} free models loaded from OpenRouter API.`);
