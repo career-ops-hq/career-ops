@@ -40,6 +40,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
+import { classifyLiveness } from './liveness-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -450,6 +451,24 @@ function assertSafeRemoteUrl(url) {
   return u;
 }
 
+// Verdicts from the liveness check that mean the page is not an open posting
+// that can be read: besides any `expired` one (404, nav/footer text only, a
+// closed or listing page), a bot wall or a redirect away from the posting.
+const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting']);
+
+// Why a fetched page holds no job description to evaluate, or null when it
+// does. The runner used to send any page to the model, so a 404, a bot wall or
+// a Workday page that had not rendered yet came back as a report and a done
+// pipeline row for a posting nobody read (#5809).
+export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = '', text = '' } = {}) {
+  if (status >= 400) return `HTTP ${status}`;
+  const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText: text });
+  if (verdict.result === 'expired' || UNREADABLE_PAGE_CODES.has(verdict.code)) {
+    return `${verdict.code}: ${verdict.reason}`;
+  }
+  return null;
+}
+
 async function fetchJobPage(url) {
   assertSafeRemoteUrl(url);
   let chromium;
@@ -461,21 +480,25 @@ async function fetchJobPage(url) {
 
   if (chromium) {
     let browser;
+    let unreadable = null;
     try {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForTimeout(2000); // wait for SPA render
       const text = await page.evaluate(() => {
         document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
       });
-      return text.slice(0, 16_000);
+      unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
+      if (!unreadable) return text.slice(0, 16_000);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
+    // The browser read the page; a plain fetch would only see less of it.
+    if (unreadable) throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
   }
 
   // Plain HTTP fallback
@@ -485,7 +508,10 @@ async function fetchJobPage(url) {
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 16_000);
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
+    if (unreadable) throw new Error(`no job description (${unreadable})`);
+    return text.slice(0, 16_000);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }
@@ -722,6 +748,14 @@ async function cmdEvaluate(input, ctx) {
   }
   tracker.record('evaluation', resultObj.usage);
   const result = resultObj.content;
+
+  // A model that says it could not evaluate the posting has not evaluated it:
+  // save nothing, so the pipeline leaves the row pending (#5809).
+  const notEvaluated = result.match(/^---DEAD_POSTING---\s*$|^\s*(?:status:\s*)?needs_confirmation\b.*$/m);
+  if (notEvaluated) {
+    console.error(`Not evaluated, nothing saved. The model replied: ${notEvaluated[0].trim()}`);
+    return null;
+  }
 
   let reservedNumbers;
   try {
