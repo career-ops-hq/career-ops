@@ -7,6 +7,7 @@
 
 import { classifyLiveness } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
+import { SINKHOLE_ADDRESSES } from './providers/_ip-guard.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
 // Single-page-app ATS render the posting after domcontentloaded, so the page
@@ -299,14 +300,6 @@ async function resolveDnsCached(hostname) {
     throw err;
   }
 }
-
-// What a DNS filter answers for a name it blocks: 0.0.0.0 and ::. That is
-// Pi-hole's default, and what AdGuard DNS and Control D answered for the
-// trackers they blocked on 2026-10-11; hosts-file blocklists map names to
-// 0.0.0.0 too. No site is published at either address, so an answer whose only
-// private addresses are these is the user's own filter at work, not a host
-// resolving into private space. The request is blocked all the same.
-const SINKHOLE_ADDRESSES = new Set(['0.0.0.0', '::']);
 
 // Second layer of the egress guard: `rejectPrivateOrInvalid` only sees the
 // literal host, so a public hostname that *resolves* to private space still
