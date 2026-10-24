@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
+import { CONFIG_KEY as STORAGE_KEY, writeConfig } from "@/lib/config-events.mjs";
 
 type Cli = {
   id: string;
@@ -33,7 +34,6 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter" },
 ] as const;
 
-const STORAGE_KEY = "career-ops:config";
 
 export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
@@ -93,7 +93,7 @@ export function ConfigForm() {
     // The API key is deliberately NOT persisted: nothing reads it yet (the
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    writeConfig(localStorage, window, { mode, cliId, provider, logos });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }

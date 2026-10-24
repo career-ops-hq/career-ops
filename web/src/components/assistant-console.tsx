@@ -23,6 +23,7 @@ import { StatusConfirmationCard, type StatusConfirmationPart } from "@/component
 import { StatusWriteError, writeAssistantStatus } from "@/lib/assistant-status-write.mjs";
 import { postAssistantWrite } from "@/lib/assistant-file-write.mjs";
 import { cn } from "@/lib/cn";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -36,7 +37,6 @@ type Part =
 type Msg = { role: "user" | "assistant"; parts: Part[] };
 type RequestFeedback = { id: number; phase: "working" | "ready" | "error"; announce: boolean };
 
-const CONFIG_KEY = "career-ops:config";
 const CHAT_KEY = "career-ops:chat";
 const SIZE_KEY = "career-ops:assistant-size";
 
@@ -278,7 +278,7 @@ export function AssistantConsole() {
     }
   }, [open]);
 
-  // selected CLI from Config (reacts to changes in other tabs)
+  // Selected CLI from Config, including saves in this tab.
   useEffect(() => {
     function read() {
       try {
@@ -289,8 +289,7 @@ export function AssistantConsole() {
       }
     }
     read();
-    window.addEventListener("storage", read);
-    return () => window.removeEventListener("storage", read);
+    return subscribeConfig(window, read);
   }, []);
 
   async function chatRequest(url: string, init?: RequestInit) {

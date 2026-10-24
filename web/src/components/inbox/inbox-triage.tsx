@@ -14,10 +14,10 @@ import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { createInboxSkipActions, queueInboxSkip } from "@/lib/inbox-skip-client.mjs";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
-const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
 type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; error?: string };
 
@@ -62,13 +62,23 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         const pending = new Set(inbox.map((j) => j.url));
         setHidden(urls.filter((u) => pending.has(u)));
       }
-      const c = localStorage.getItem(CONFIG_KEY);
-      setHasCli(!!(c && JSON.parse(c).cliId));
     } catch {
       /* ignore */
     }
     setLoaded(true);
     // First SSR inbox only — later refreshes prune via the inbox effect below.
+  }, []);
+  useEffect(() => {
+    function read() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        setHasCli(!!(raw && JSON.parse(raw).cliId));
+      } catch {
+        setHasCli(false);
+      }
+    }
+    read();
+    return subscribeConfig(window, read);
   }, []);
   useEffect(() => {
     if (loaded) try { localStorage.setItem(SHORTLIST_KEY, JSON.stringify(shortlist)); } catch { /* quota */ }
