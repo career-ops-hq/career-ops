@@ -271,6 +271,8 @@ const LIST_SEPARATOR_RE = /[,、，،]|\s·\s/;
 // Sentence-final punctuation a keyword may carry. The ASCII period was already
 // stripped; these are the marks the CJK and Devanagari lists close a phrase with.
 const TRAILING_PUNCT_RE = /[.。．।]+$/;
+const TRAILING_BACKTICKS_RE = /`+$/;
+const STARTING_BACKTICKS_RE = /^`+/;
 
 // The line a fence opened at `start` closes on, or -1 when it never closes.
 // A closer carries the same character, is AT LEAST as long as the opener, and
@@ -339,7 +341,16 @@ export function extractKeywords(reportText) {
     if (THEMATIC_BREAK_RE.test(line)) return;
     const body = line.replace(BULLET_RE, '').replace(CJK_MARKER_RE, '');
     for (const part of body.split(LIST_SEPARATOR_RE)) {
-      const kw = part.trim().replace(TRAILING_PUNCT_RE, '').trim();
+      let kw = part.trim();
+      let previous;
+      do {
+        previous = kw;
+        kw = kw
+          .replace(STARTING_BACKTICKS_RE, '')
+          .replace(TRAILING_BACKTICKS_RE, '')
+          .replace(TRAILING_PUNCT_RE, '')
+          .trim();
+      } while (kw !== previous);
       if (kw) out.push(kw);
     }
   };
@@ -359,9 +370,14 @@ export function extractKeywords(reportText) {
     // is an indented code block, whose closer is indented as well.
     const marker = FENCE_RE.exec(line);
     if (marker) {
+      if (/^`{3,}.+`{3,}$/.test(line)) {
+        collect(line);
+        continue;
+      }
+
       // The closer is looked up rather than tracked forward, so a fence the
       // report never closes cannot swallow every section after it: with no
-      // closer the opener stays an ordinary line and the section still ends at
+      // closer the opener is skipped and the section still ends at
       // the next heading, as it did before.
       const close = indexOfFenceClose(lines, i, marker[1], !FENCE_RE.test(lines[i]));
       if (close > i) {
@@ -369,6 +385,7 @@ export function extractKeywords(reportText) {
         i = close;
         continue;
       }
+      continue;
     }
 
     collect(line);
