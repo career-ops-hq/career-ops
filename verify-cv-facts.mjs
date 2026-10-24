@@ -1978,7 +1978,9 @@ function looksEnglish(text) {
   // Addresses are not prose. "com" is Portuguese for "with", so the contact
   // line of a short CV (jane@example.com, github.com/jane) counted as two or
   // three Portuguese words and outvoted its English (#5348).
-  const prose = text.replace(/\S+@\S+|\S+:\/\/\S+|[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\S*/gu, ' ');
+  // Start each address at a token boundary instead of retrying every suffix
+  // of a long non-address token (quadratic time for pasted text/OCR).
+  const prose = text.replace(/(?<!\S)(?:\S+@\S+|\S+:\/\/\S+)|(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\S*/gu, ' ');
   for (const [word] of prose.matchAll(/[\p{L}]+/gu)) {
     if (word.length > 1 && word === word.toUpperCase()) continue;
     const lower = word.toLowerCase();
