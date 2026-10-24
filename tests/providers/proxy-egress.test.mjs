@@ -190,3 +190,31 @@ test('proxy path does not use globalThis.fetch', async () => {
     });
   } finally { globalThis.fetch = realFetch; proxy.close(); }
 });
+
+test('credential-bearing HTTP proxies on loopback are allowed under CAREER_OPS_TRUST_PROXY_EGRESS=1', async () => {
+  const destinations = [];
+  const proxy = http.createServer();
+  proxy.on('connect', (req, socket) => {
+    destinations.push(req.url);
+    socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nPROXIED!'));
+  });
+  const proxyUrl = await listening(proxy);
+  const { port } = new URL(proxyUrl);
+  try {
+    for (const host of ['localhost', '127.0.0.1']) {
+      const loopbackProxy = `http://user:secret@${host}:${port}`;
+      await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTP_PROXY: loopbackProxy, NO_PROXY: '' }, async () => {
+        assert.equal(await fetchText('http://unresolvable.invalid/job', { redirect: 'error' }), 'PROXIED!');
+      });
+    }
+    const loopbackHttpsProxy = `http://user:secret@localhost:${port}`;
+    await withProxyEnv({ CAREER_OPS_TRUST_PROXY_EGRESS: '1', HTTPS_PROXY: loopbackHttpsProxy, NO_PROXY: '' }, async () => {
+      await assert.rejects(fetchText('https://unresolvable.invalid/job', { timeoutMs: 1000 }), (err) => {
+        assert.doesNotMatch(err.message, /credentials must use HTTPS/);
+        return true;
+      });
+    });
+  } finally { proxy.close(); }
+});
+

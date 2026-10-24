@@ -73,7 +73,9 @@ async function proxyFor(url) {
   for (const configuredProxy of [httpProxy, httpsProxy]) {
     if (!configuredProxy) continue;
     const parsed = new URL(configuredProxy);
-    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:') {
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const isLoopback = host === 'localhost' || host === 'localhost.localdomain' || host === '::1' || /^127\./.test(host);
+    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:' && !isLoopback) {
       throw new Error('Proxy URLs containing credentials must use HTTPS to protect proxy authentication.');
     }
   }
