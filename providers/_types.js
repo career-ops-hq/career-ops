@@ -163,7 +163,9 @@
  */
 
 /**
- * Options forwarded to the underlying `fetch` call.
+ * Options forwarded to the underlying `fetch` call, plus the body ceiling the
+ * capped readers consume themselves (never reaching fetch — undici ignores
+ * unknown init keys either way).
  *
  * @typedef {object} FetchOptions
  * @property {number}                [timeoutMs]
@@ -171,6 +173,7 @@
  * @property {string}                [method]
  * @property {(string|null)}         [body]
  * @property {('error'|'follow'|'manual')} [redirect]
+ * @property {number}                [maxBytes] Response-body ceiling for fetchJson/fetchText; defaults to _http.mjs DEFAULT_MAX_BODY_BYTES. Over-cap throws `code: 'response_too_large'`.
  */
 
 /**

@@ -199,7 +199,12 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       && res.status >= 300
       && res.status < 400;
     if (!res.ok && !isInspectableManualRedirect) {
-      const responseText = await res.text().catch(() => '');
+      // The error body is diagnostic text, so it is read UNDER A CAP instead of
+      // being buffered whole: a broken or hostile endpoint can serve a huge
+      // (or endless) error page, and the abort timer limits the DURATION of
+      // that read, not the number of bytes it buffers. Truncated at the cap,
+      // never thrown over: the HTTP error is the one the caller must see.
+      const responseText = await readBodyCapped(res, MAX_ERROR_BODY_BYTES, { truncate: true }).catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
       // text — HTML markup or a generic interstitial message, not worth
       // parsing or displaying. The status code and its standard reason
@@ -230,15 +235,157 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
 }
 
 /**
+ * Default ceiling for a full response body, applied by fetchJson/fetchText.
+ *
+ * Real board JSON is legitimately megabyte-sized (a 500-job Greenhouse board
+ * runs into single-digit MBs), so the default is generous; the point is that
+ * one hostile or broken endpoint can no longer pin the scanner's memory with
+ * a single endless response. Per-call override: `opts.maxBytes`. The head
+ * reader below keeps its own small default — it never wanted the whole body.
+ */
+export const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Ceiling for the body attached to a non-2xx error.
+ *
+ * An error body is diagnostic text — a WAF interstitial, a maintenance page,
+ * an API error payload — never the data the caller asked for. It is capped
+ * well below the default body ceiling so a sweep that meets a dozen failing
+ * boards cannot turn their error pages into a memory problem. Every consumer
+ * of `err.body` in this repo treats it as a snippet: providers/glints.mjs
+ * parses it and falls back to its first 200 characters, providers/workday.mjs
+ * looks for a marker inside it.
+ */
+export const MAX_ERROR_BODY_BYTES = 256 * 1024;
+
+function bodyTooLarge(size, maxBytes) {
+  const err = new Error(`HTTP body exceeded maxBytes of ${maxBytes}${size != null ? ` (content-length ${size})` : ''}`);
+  err.code = 'response_too_large';
+  err.maxBytes = maxBytes;
+  return err;
+}
+
+/**
+ * Resolve the body ceiling for one call.
+ *
+ * An explicit `maxBytes` must be a positive finite number. A NaN, a
+ * negative value or a non-numeric string would silently DISABLE the cap
+ * (`total > NaN` is never true), which is exactly the hole the cap exists to
+ * close — so a bad value is refused rather than ignored.
+ *
+ * @param {number|undefined|null} value - The caller's ceiling, if any.
+ * @returns {number} The ceiling in bytes.
+ */
+function resolveMaxBytes(value) {
+  if (value === undefined || value === null) return DEFAULT_MAX_BODY_BYTES;
+  const bytes = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(bytes)) {
+    throw new TypeError(`maxBytes must be a positive finite number, got ${JSON.stringify(value)}`);
+  }
+  // The floor is the value that actually applies, so THAT is what has to be
+  // positive: 0.5 would floor to a zero-byte cap, and every non-empty body
+  // would then be refused with a size error nobody asked for.
+  const floored = Math.floor(bytes);
+  if (floored <= 0) {
+    throw new TypeError(`maxBytes must be a positive finite number, got ${JSON.stringify(value)}`);
+  }
+  return floored;
+}
+
+/**
+ * Read a response body as text, refusing to buffer more than `maxBytes`.
+ *
+ * Same streaming shape as fetchTextHead's cap (read, count, cancel), but this
+ * THROWS instead of truncating: a cut-off JSON document or half-rendered HTML
+ * must never masquerade as the board's answer. A declared content-length over
+ * the cap is refused before a single body byte is read. Stays inside the
+ * caller's timer window, like every other body consumption here.
+ *
+ * `truncate` flips that one decision for the error path, where the HTTP
+ * status is the answer the caller needs and the body is only a snippet: the
+ * read stops at the cap and returns what it has instead of throwing. The body
+ * is cancelled either way, so the connection is released.
+ *
+ * @param {Response} res
+ * @param {number} maxBytes
+ * @param {{truncate?: boolean}} [opts]
+ * @returns {Promise<string>} The body, decoded as UTF-8.
+ */
+async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
+  const declared = Number(res.headers.get('content-length'));
+  if (!truncate && Number.isFinite(declared) && declared > maxBytes) {
+    // Cancel before refusing: an unread body keeps its socket alive, and a
+    // provider sweep holds many of them at once. The size error is the one
+    // that matters, so a failed cancel must not replace it.
+    try {
+      await res.body?.cancel?.();
+    } catch {
+      /* preserve the size error when cancellation fails */
+    }
+    throw bodyTooLarge(declared, maxBytes);
+  }
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    // No stream to count (a mocked or exotic response): the whole body is
+    // already in memory here, so the cap can only shorten what is kept.
+    const text = await res.text();
+    const bytes = Buffer.byteLength(text, 'utf8');
+    if (bytes > maxBytes) {
+      if (!truncate) throw bodyTooLarge(bytes, maxBytes);
+      return Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8');
+    }
+    return text;
+  }
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > maxBytes) {
+        if (!truncate) throw bodyTooLarge(null, maxBytes);
+        // Keep the part of this chunk that still fits: a diagnostic marker
+        // (providers/workday.mjs looks for one) can sit right at the ceiling,
+        // and dropping the whole chunk would throw it away.
+        const keep = maxBytes - (total - value.length);
+        if (keep > 0) chunks.push(Buffer.from(value).subarray(0, keep));
+        break; // the finally cancels the body
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* body already closed */
+    }
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
  * Fetch and parse a JSON response, with the shared timeout and non-2xx guard.
+ *
+ * The body is read through the capped reader (see DEFAULT_MAX_BODY_BYTES); JSON
+ * here is board data, always UTF-8, so a text decode + parse is equivalent to
+ * res.json() for every board this repo talks to.
  *
  * @param {string} url
  * @param {FetchOptions} [opts]
  * @returns {Promise<any>} Parsed JSON.
  * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchJson(url, opts = {}) {
-  return fetchWithTimeout(url, opts, (res) => res.json());
+  const maxBytes = resolveMaxBytes(opts.maxBytes);
+  return fetchWithTimeout(url, opts, async (res) => {
+    // res.json() stripped a leading UTF-8 BOM (the spec's UTF-8 decode does);
+    // decoding the body as text and parsing it by hand does not, so a
+    // BOM-prefixed board answer would stop parsing here.
+    const text = await readBodyCapped(res, maxBytes);
+    return JSON.parse(text.replace(/^\uFEFF/, ''));
+  });
 }
 
 /**
@@ -283,13 +430,17 @@ export async function fetchTextHead(url, opts = {}) {
 /**
  * Fetch a response body as text, with the shared timeout and non-2xx guard.
  *
+ * The body is read through the capped reader (see DEFAULT_MAX_BODY_BYTES).
+ *
  * @param {string} url
  * @param {FetchOptions} [opts]
  * @returns {Promise<string>}
  * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchText(url, opts = {}) {
-  return fetchWithTimeout(url, opts, (res) => res.text());
+  const maxBytes = resolveMaxBytes(opts.maxBytes);
+  return fetchWithTimeout(url, opts, async (res) => readBodyCapped(res, maxBytes));
 }
 
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
@@ -322,8 +473,22 @@ const NULL_BODY_STATUSES = new Set([204, 205, 304]);
  * @throws {HttpError} On a non-2xx response.
  */
 export async function fetchResponse(url, opts = {}) {
+  const maxBytes = resolveMaxBytes(opts.maxBytes);
   return await fetchWithTimeout(url, opts, async (res) => {
-    const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.text();
+    // Read under the same ceiling as the other fetchers: this is the last
+    // unbounded body read in the transport, and a provider that only wanted a
+    // header should not be handed a whole hostile page.
+    let body;
+    try {
+      body = NULL_BODY_STATUSES.has(res.status) ? null : await readBodyCapped(res, maxBytes);
+    } catch (err) {
+      // The headers are the point of this call — csod.mjs reads Set-Cookie,
+      // peoplesoft.mjs reads Set-Cookie and Location — so a body that was too
+      // big must not take them away with it. They travel on the error, and the
+      // caller can still read them.
+      if (err?.code === 'response_too_large') err.headers = res.headers;
+      throw err;
+    }
     return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
   }, true);
 }
@@ -449,6 +614,11 @@ export function isRetryableError(err) {
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
   if (isRefusedRedirectError(err)) return false;
+  // A body over the cap is not a transient failure: the same response would be
+  // refused again, so retrying only downloads the oversize body a second and
+  // third time. The size error carries no status, so without this it would
+  // fall through to the network-error case below.
+  if (err?.code === 'response_too_large') return false;
   return status === undefined; // network error / timeout / abort — no status set
 }
 
