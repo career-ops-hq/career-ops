@@ -20,6 +20,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { postingKey } from '../../url-key.mjs';
 import {
   extractUrls, isCleanUrl, isAuthenticEmail, parseRoleAtCompany,
   getMessageBody, companyFromUrl,
@@ -37,6 +38,24 @@ const statePath = (ctx) => join(ctx?.dataRoot || process.cwd(), STATE_FILE);
 // Where the cursor was kept before: relative to the working directory, which is
 // the data root only when the two happen to coincide.
 const legacyStatePath = () => resolve(STATE_FILE);
+
+// The hook returns before the engine writes its jobs. A message is acknowledged
+// on the next ingest, once its admitted leads can be read back from the pipeline.
+// An absent/unreadable pipeline must leave the message retryable.
+function queuedPostingKeys(ctx) {
+  const path = process.env.CAREER_OPS_PIPELINE || join(ctx?.dataRoot || process.cwd(), 'data', 'pipeline.md');
+  let text;
+  try { text = readFileSync(path, 'utf-8'); } catch { return new Set(); }
+  const keys = new Set();
+  for (const line of text.split('\n')) {
+    const entry = line.match(/^\s*- \[[ xX]\]\s+(.+)$/);
+    if (!entry) continue;
+    const body = entry[1].startsWith('~~') ? entry[1].slice(2).split('~~')[0] : entry[1];
+    const url = body.match(/https?:\/\/[^\s|]+/)?.[0];
+    if (url) keys.add(postingKey(url));
+  }
+  return keys;
+}
 
 /** Exchange the long-lived refresh token for a short-lived access token. */
 async function getAccessToken({ clientId, clientSecret, refreshToken }, fetchFn = globalThis.fetch) {
@@ -123,6 +142,7 @@ export default {
     } while (pageToken);
 
     const processedIds = loadProcessedIds(ctx);
+    const queuedKeys = queuedPostingKeys(ctx);
     const seenUrls = new Set();
     const jobs = [];
 
@@ -148,17 +168,22 @@ export default {
 
       const seed = parseRoleAtCompany(subject);
       const cleanUrls = extractUrls(getMessageBody(msg.payload)).filter(isCleanUrl);
-      for (const url of cleanUrls) {
-        if (seenUrls.has(url)) continue;
-        seenUrls.add(url);
-        jobs.push({
-          title: seed?.role || 'Job lead (email)',
-          url,
-          company: companyFromUrl(url) || seed?.company || '',
-          location: '',
-        });
+      const candidates = cleanUrls.map(url => ({
+        title: seed?.role || 'Job lead (email)',
+        url,
+        company: companyFromUrl(url) || seed?.company || '',
+        location: '',
+      }));
+      // The CLI deliberately drops known/filtered leads. Only admitted leads
+      // need a durable pipeline entry; older hosts retry every clean URL.
+      const admitted = ctx.admitJobs ? ctx.admitJobs(candidates) : candidates;
+      const pending = admitted.filter(job => !queuedKeys.has(postingKey(job.url)));
+      for (const job of pending) {
+        if (seenUrls.has(job.url)) continue;
+        seenUrls.add(job.url);
+        jobs.push(job);
       }
-      processedIds.add(m.id);
+      if (pending.length === 0) processedIds.add(m.id);
     }
 
     if (!ctx?.dryRun) saveProcessedIds(processedIds, ctx);

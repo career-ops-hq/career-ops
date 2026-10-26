@@ -250,14 +250,18 @@ async function cmdRun(args) {
   if (hook === 'ingest' || hook === 'search') {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
-    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
-    const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
-    const { jobs, counts } = admitPluginJobs(found, {
+    const admissionOptions = {
       id,
       jobPostings: manifest.jobPostings,
       pipelineUrls: existingPipelineUrls(),
       config: manifest.jobPostings ? loadPortalsConfig() : {},
-    });
+    };
+    const results = filterResultsForId(await runHook(hook, payload, {
+      root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id,
+      admitJobs: jobs => admitPluginJobs(jobs, admissionOptions).jobs,
+    }), id);
+    const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
+    const { jobs, counts } = admitPluginJobs(found, admissionOptions);
     const skipped = formatSkipCounts(counts);
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new${skipped ? ` (skipped: ${skipped})` : ''}.`);
     if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
