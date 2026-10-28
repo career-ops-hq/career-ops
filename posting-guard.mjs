@@ -147,7 +147,7 @@ const SCRIPT_RANGES = {
 function mixedScriptWords(text) {
   const found = [];
   const seen = new Set();
-  for (const wordMatcher of text.matchAll(/[^\s\u200B\u200C\u200D<>|:;,()"'`]+/g)) {
+  for (const wordMatcher of text.matchAll(/[^\s\u200B\u200C\u200D<>|:;,()"'\x60]+/g)) {
     const word = wordMatcher[0];
     if (word.length < 2 || seen.has(word)) continue;
     if (!SCRIPT_RANGES.latin.test(word)) continue;
