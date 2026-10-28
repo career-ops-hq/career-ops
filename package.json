@@ -36,6 +36,7 @@
     "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
     "extract": "node browser-extract.mjs",
+    "posting-guard": "node posting-guard.mjs",
     "scan:hn": "node scan-hn.mjs",
     "scan": "node scan.mjs",
     "scan:full": "node scan-ats-full.mjs",
