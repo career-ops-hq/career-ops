@@ -46,7 +46,7 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // ---------------------------------------------------------------------------
 // Unicode inventories
@@ -393,6 +393,6 @@ export function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   process.exit(main());
 }
