@@ -111,8 +111,8 @@ test('a URL that exists only in hidden content is listed; a visible one is not',
     '<div style="display:none">https://verify.example.net/harvest</div>',
   ].join('\n');
   const { findings } = guard(html);
-  assert.ok(findings.visible_urls.includes('https://jobs.example.com/123'));
-  assert.ok(findings.hidden_urls.includes('https://verify.example.net/harvest'));
+  assert.ok(findings.visible_urls.some((u) => u === 'https://jobs.example.com/123'));
+  assert.ok(findings.hidden_urls.some((u) => u === 'https://verify.example.net/harvest'));
 });
 
 test('script/style content is removed and never listed as a hidden block', () => {
