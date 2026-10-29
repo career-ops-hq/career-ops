@@ -4,7 +4,7 @@
  * Formats profile and experience data for seamless copy-pasting into ATS forms.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -399,6 +399,22 @@ Options:
     const text = formatAtsText(profileData, { section: values.section });
 
     if (values.out) {
+      // A section export is not a replacement for either source-of-truth file.
+      if (existsSync(values.out)) {
+        const output = statSync(values.out);
+        const inputs = [
+          values.profile || getProfilePath(),
+          values.cv || process.env.CAREER_OPS_CV || join(getCareerOpsRoot(), 'cv.md'),
+        ];
+        for (const input of inputs) {
+          if (!existsSync(input)) continue;
+          const source = statSync(input);
+          if (realpathSync.native(values.out) === realpathSync.native(input)
+            || (output.ino !== 0 && source.ino !== 0 && output.dev === source.dev && output.ino === source.ino)) {
+            throw new Error('Refusing to overwrite the source profile or CV with an ATS export');
+          }
+        }
+      }
       const outDir = dirname(resolve(values.out));
       if (!existsSync(outDir)) {
         mkdirSync(outDir, { recursive: true });
