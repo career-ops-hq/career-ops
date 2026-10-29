@@ -59,6 +59,7 @@ export function PipelineView({
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [viewError, setViewError] = useState("");
+  const [removalWarning, setRemovalWarning] = useState("");
   const storageRejected = useRef(false);
   const omittedWhileRejected = useRef(new Set<string>());
   const pendingWhileRejected = useRef(new Set<string>());
@@ -131,6 +132,7 @@ export function PipelineView({
       omittedWhileRejected.current.clear();
       pendingWhileRejected.current.clear();
       setViewError("");
+      setRemovalWarning("");
       return true;
     } catch {
       storageRejected.current = true;
@@ -185,6 +187,7 @@ export function PipelineView({
       omittedWhileRejected.current.add(name);
       pendingWhileRejected.current.delete(name);
       setViews((current) => current.filter((view) => view.name !== name));
+      setRemovalWarning("This removal is not saved yet. Reloading brings the view back.");
       return;
     }
     setViews(next);
@@ -356,6 +359,7 @@ export function PipelineView({
           </button>
         )}
         {viewError && <span role="alert" className="text-xs text-red-500">{viewError}</span>}
+        {removalWarning && <span role="alert" className="text-xs text-red-500">{removalWarning}</span>}
       </div>
 
       {/* tabs */}
