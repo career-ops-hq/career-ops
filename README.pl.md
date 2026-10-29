@@ -277,7 +277,7 @@ Zobacz [docs/SETUP.md](docs/SETUP.md) po pełny przewodnik konfiguracji, [docs/R
 
 ## Użycie
 
-Wklej adres URL lub opis oferty do swojego CLI z AI. career-ops sprawdza, czy oferta z linkiem jest nadal aktualna (wklejony tekst nie ma linku do sprawdzenia), ocenia ją względem Twojego CV, pisze raport, dopasowuje PDF i dodaje wiersz do trackera. To pokrywa większość dni. Wszystko inne to tryb, o który prosisz po nazwie.
+Wklej adres URL lub opis oferty do swojego CLI z AI. career-ops sprawdza, czy oferta z linkiem jest nadal aktualna (wklejony tekst nie ma linku do sprawdzenia), ocenia ją względem Twojego CV, pisze raport, dopasowuje Twoje CV (domyślnie jako PDF) i dodaje wiersz do trackera. To pokrywa większość dni. Wszystko inne to tryb, o który prosisz po nazwie.
 
 ### Jak poprosić o tryb
 
@@ -295,7 +295,7 @@ Wszystkie korzystają z jednego routera, `.agents/skills/career-ops/SKILL.md`, i
 
 | Komenda | Co robi |
 | --- | --- |
-| *wklej URL lub opis oferty* | Pełny pipeline: sprawdzenie, czy oferta jest aktualna (tylko URL-e), ocena A-H, raport, dopasowany PDF, wiersz w trackerze |
+| *wklej URL lub opis oferty* | Pełny pipeline: sprawdzenie, czy oferta jest aktualna (tylko URL-e), ocena A-H, raport, dopasowane CV (domyślnie PDF), wiersz w trackerze |
 | `scan` | Skanuje Twoje portale w poszukiwaniu nowych ofert i dodaje je do skrzynki (`data/pipeline.md`) |
 | `pipeline` | Ocenia każdy URL czekający w skrzynce |
 | `apply` | Wypełnia z Tobą formularz aplikacyjny, pole po polu. Zatrzymuje się przed wysłaniem |
