@@ -368,3 +368,48 @@ test('the Step 3 yaml example is what the writer writes for a US-only answer', (
     assert.equal(c.max_posting_age_days, example.max_posting_age_days);
   } finally { cleanup(dir); }
 });
+
+test('years of experience is optional and leaves experience_filter off', () => {
+  const { dir, res, read } = run(ANSWERS);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    assert.equal(yaml.load(read('config/profile.yml')).candidate.years_of_experience, undefined);
+    assert.equal(yaml.load(read('portals.yml')).experience_filter, undefined);
+  } finally { cleanup(dir); }
+});
+
+test('years of experience and experience_filter are written when given', () => {
+  const answers = {
+    ...ANSWERS,
+    candidate: { ...ANSWERS.candidate, years_of_experience: 4 },
+    portals: { ...ANSWERS.portals, experience_filter: { stretch_years: 0, action: 'drop' } },
+  };
+  const { dir, res, read } = run(answers);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    assert.equal(yaml.load(read('config/profile.yml')).candidate.years_of_experience, 4);
+    assert.deepEqual(yaml.load(read('portals.yml')).experience_filter, { enabled: true, stretch_years: 0, action: 'drop' });
+  } finally { cleanup(dir); }
+});
+
+test('experience_filter with no action is written as label', () => {
+  const answers = {
+    ...ANSWERS,
+    candidate: { ...ANSWERS.candidate, years_of_experience: 4 },
+    portals: { ...ANSWERS.portals, experience_filter: {} },
+  };
+  const { dir, res, read } = run(answers);
+  try {
+    assert.equal(res.status, 0, describeSpawn(res));
+    assert.deepEqual(yaml.load(read('portals.yml')).experience_filter, { enabled: true, stretch_years: 1, action: 'label' });
+  } finally { cleanup(dir); }
+});
+
+test('experience_filter without years of experience exits 1 and writes nothing', () => {
+  const { dir, res } = run({ ...ANSWERS, portals: { ...ANSWERS.portals, experience_filter: {} } });
+  try {
+    assert.equal(res.status, 1, describeSpawn(res));
+    assert.match(res.stderr, /years_of_experience/);
+    assert.equal(existsSync(join(dir, 'portals.yml')), false);
+  } finally { cleanup(dir); }
+});
