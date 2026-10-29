@@ -43,6 +43,7 @@ import { fileURLToPath } from 'url';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
 import { getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -217,14 +218,28 @@ function runSelfTest() {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
+  // Before anything else, --self-test included: an unknown flag (`--jsno`) used
+  // to be ignored, and `--profile=path` fell through to the default profile
+  // because indexOf() cannot see the `=` spelling. requireOperand: `--profile`
+  // with nothing after it is a usage error, not a quiet fallback.
+  validateFlags(
+    args,
+    ['--profile', '--json', '--self-test', '--help', '-h'],
+    'Usage: node validate-profile.mjs [--profile <path>] [--json] [--self-test]',
+    { valueFlags: ['--profile'], requireOperand: true },
+  );
   if (args.includes('--self-test')) runSelfTest();
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: node validate-profile.mjs [--profile <path>] [--json] [--self-test]');
-    process.exit(0);
-  }
-  const pi = args.indexOf('--profile');
-  const profilePath = pi !== -1 && args[pi + 1] ? args[pi + 1] : DEFAULT_PROFILE_PATH;
+  const explicitProfile = flagValue(args, '--profile');
+  const profilePath = explicitProfile || DEFAULT_PROFILE_PATH;
   if (!existsSync(profilePath)) {
+    // A path the user typed that is not there is a usage error (exit 1, as the
+    // header says); "nothing to validate" at exit 0 would read as a clean bill
+    // of health for a typo. Only the default path may be absent: that is a
+    // fresh install.
+    if (explicitProfile) {
+      console.error(`validate-profile: no profile at ${profilePath}`);
+      process.exit(1);
+    }
     console.log(`No profile at ${profilePath} — nothing to validate.`);
     process.exit(0);
   }
