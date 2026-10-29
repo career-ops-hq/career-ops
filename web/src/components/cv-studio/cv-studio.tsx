@@ -6,7 +6,7 @@ import { ArrowLeft, Check, FileText, Loader2, RotateCcw, Undo2 } from "lucide-re
 import { cn } from "@/lib/cn";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
 import { applyRecordedEdit, emptyEdits, isStudioUndoKey, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
-import { editSaveStatus, inflightEdits, postWroteEdits, shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
+import { editSaveStatus, inflightEdits, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
 import { SectionCard } from "./section-card";
 import { CvPreview } from "./cv-preview";
 import { CoverageMeter } from "./coverage-meter";
@@ -200,11 +200,11 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
       const r = await send("POST", { op: "save", edits: sent, tab: tabRef.current, rev: revRef.current });
       const body = (await r.json()) as { pdf?: string; indexed?: boolean; warnings?: string[]; error?: string; superseded?: boolean };
       const wrote = postWroteEdits(r.status, body.superseded === true);
+      // Drop the in-flight Save for apply before the follow-up PUT. Otherwise
+      // the same payload looks like it is already on the wire and is skipped.
       if (postingJsonRef.current === serialized) postingJsonRef.current = null;
-      if (wrote) {
-        savedJsonRef.current = serialized;
-        if (JSON.stringify(editsRef.current) !== serialized) putEdits(editsRef.current, false);
-      }
+      if (wrote) savedJsonRef.current = serialized;
+      if (shouldPutAfterPost(wrote, serialized, JSON.stringify(editsRef.current))) putEdits(editsRef.current, false);
       if (body.superseded) {
         setSave({ kind: "failed", error: "A newer edit was saved while this one was sending. Save again to export the latest." });
         return;

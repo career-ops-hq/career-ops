@@ -63,6 +63,21 @@ export function postWroteEdits(status, superseded) {
 }
 
 /**
+ * Whether to PUT the screen after Save for apply answers.
+ * A stored payload that still matches the screen needs nothing. A response
+ * that stored nothing still needs the screen, because the autosave timer
+ * already elapsed while that request was open.
+ *
+ * @param {boolean} wrote
+ * @param {string} sent
+ * @param {string} current
+ */
+export function shouldPutAfterPost(wrote, sent, current) {
+  if (wrote === true) return current !== sent;
+  return true;
+}
+
+/**
  * @param {string} saved
  * @param {string} current
  * @param {string | null} saving

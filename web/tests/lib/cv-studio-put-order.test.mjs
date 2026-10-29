@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPutOrder, editSaveStatus, inflightEdits, postWroteEdits, shouldSendEdits } from "../../src/lib/cv-studio/put-order.mjs";
+import { createPutOrder, editSaveStatus, inflightEdits, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "../../src/lib/cv-studio/put-order.mjs";
 
 test("an older PUT from the same tab is dropped once a newer one was written", () => {
   const order = createPutOrder();
@@ -43,6 +43,13 @@ test("a Save for apply that already wrote is corrected when the screen has moved
   assert.equal(editSaveStatus("restored", "restored", null, null), "Saved");
   assert.equal(editSaveStatus("saved", "hidden", null, null), "Unsaved");
   assert.equal(editSaveStatus("saved", "hidden", "hidden", null), "Saving");
+});
+
+test("a Save for apply that stored nothing still sends the screen", () => {
+  assert.equal(shouldPutAfterPost(true, "sent", "sent"), false);
+  assert.equal(shouldPutAfterPost(true, "sent", "moved"), true);
+  assert.equal(shouldPutAfterPost(false, "sent", "sent"), true);
+  assert.equal(shouldPutAfterPost(false, "sent", "moved"), true);
 });
 
 test("a lost save still sends restored edits while the sent payload is in flight", () => {
