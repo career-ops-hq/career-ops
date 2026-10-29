@@ -211,6 +211,29 @@ test("a newer edit keeps the in-flight text as a draft base", () => {
   assert.equal(landed.content, "C");
 });
 
+test("an imported CV replaces the box, and a late save result does not bring the old draft back", () => {
+  let state = editorReducer(ready("Jane Doe\n"), { type: "edit", content: "Jane Doe\n\nTuesday review." });
+  state = editorReducer(state, { type: "save-start", content: state.content });
+  state = editorReducer(state, { type: "imported", content: "# Imported\n" });
+  assert.equal(state.content, "# Imported\n");
+  assert.equal(state.saved, "# Imported\n");
+  assert.equal(state.inflight, null);
+  assert.equal(state.conflict, false);
+  assert.equal(editorStatus(state).label, "Saved");
+  assert.equal(draftToStore(state), null);
+  const lateFail = editorReducer(state, {
+    type: "save-failed",
+    content: "Jane Doe\n\nTuesday review.",
+    error: "write failed",
+    conflict: true,
+  });
+  assert.equal(lateFail.content, "# Imported\n");
+  assert.equal(lateFail.conflict, false);
+  const lateOk = editorReducer(state, { type: "save-ok", content: "Jane Doe\n\nTuesday review." });
+  assert.equal(lateOk.saved, "# Imported\n");
+  assert.equal(editorReducer(initialEditor(), { type: "imported", content: "# Imported\n" }).phase, "loading");
+});
+
 test("a failed load cannot be saved, so an empty page cannot replace the file", () => {
   const state = editorReducer(initialEditor(), { type: "load-failed", error: "The CV could not be loaded." });
   assert.equal(editorStatus(state).canSave, false);

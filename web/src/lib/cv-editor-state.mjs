@@ -37,7 +37,8 @@ export function initialEditor() {
  *   | { type: 'edit', content: string }
  *   | { type: 'save-start', content: string }
  *   | { type: 'save-ok', content: string }
- *   | { type: 'save-failed', content: string, error: string, conflict?: boolean }} action
+ *   | { type: 'save-failed', content: string, error: string, conflict?: boolean }
+ *   | { type: 'imported', content: string }} action
  * @returns {EditorState}
  */
 export function editorReducer(state, action) {
@@ -82,6 +83,20 @@ export function editorReducer(state, action) {
     case "save-ok":
       if (action.content !== state.inflight) return state;
       return { ...state, inflight: null, saved: action.content, exists: true, error: null, snapshotPrior: false, conflict: false };
+    case "imported": {
+      if (state.phase !== "ready") return state;
+      const content = typeof action.content === "string" ? action.content : "";
+      return {
+        phase: "ready",
+        content,
+        saved: content,
+        inflight: null,
+        error: null,
+        exists: true,
+        snapshotPrior: true,
+        conflict: false,
+      };
+    }
     case "save-failed":
       if (action.content !== state.inflight) return state;
       // A conflict means the file on disk is not the text this edit started

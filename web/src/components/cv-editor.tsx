@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { SkillGaps } from "@/components/skill-gaps";
 import remarkGfm from "remark-gfm";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { CvIngest } from "@/components/cv/cv-ingest";
 import {
   draftChange,
   draftFromStore,
@@ -32,6 +33,8 @@ function readDraft() {
 
 export function CvEditor() {
   const [state, dispatch] = useReducer(editorReducer, initialEditor());
+  const [importing, setImporting] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;
   const snapshotPriorRef = useRef(true);
@@ -148,16 +151,16 @@ export function CvEditor() {
   }, [startSave]);
 
   useEffect(() => {
-    if (!shouldSave(state)) return;
+    if (importing || !shouldSave(state)) return;
     const timer = setTimeout(() => startSave(false), AUTOSAVE_MS);
     return () => clearTimeout(timer);
-  }, [state, startSave]);
+  }, [state, startSave, importing]);
 
   const status = editorStatus(state);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">CV editor</h1>
           <p className="mt-1 text-sm text-muted">
@@ -167,17 +170,27 @@ export function CvEditor() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={state.phase !== "ready" || importSaving || state.inflight !== null}
+            aria-expanded={importing}
+            aria-controls="cv-import"
+            onClick={() => setImporting(!importing)}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand-text disabled:opacity-50 max-sm:min-h-[44px]"
+          >
+            <Upload className="size-4" /> {importing ? "Close upload" : "Upload PDF / TeX"}
+          </button>
           <p role="status" className="text-sm text-muted">
             {status.label}
           </p>
           <button
             type="button"
             onClick={() => startSave(false)}
-            disabled={!status.canSave}
+            disabled={!status.canSave || importing}
             className={cn(
               "inline-flex items-center justify-center gap-2 rounded-full px-5 py-2 text-sm font-medium transition-colors max-sm:min-h-[44px]",
-              status.canSave
+              status.canSave && !importing
                 ? "bg-brand text-brand-foreground hover:bg-brand-200"
                 : "border border-border bg-surface text-muted",
             )}
@@ -194,11 +207,31 @@ export function CvEditor() {
         </p>
       )}
 
+      {importing && state.phase === "ready" && (
+        <section id="cv-import" aria-label="Import CV" className="mt-6">
+          <p className="mb-3 text-sm text-muted">
+            Upload your CV, review the conversion, then update cv.md.
+            {state.content !== state.saved && " Your unsaved edits stay in the editor until you update."}
+          </p>
+          <CvIngest
+            variant="editor"
+            onSavingChange={setImportSaving}
+            onSaved={(markdown) => {
+              dispatch({ type: "imported", content: markdown });
+              setImporting(false);
+              setImportSaving(false);
+            }}
+          />
+        </section>
+      )}
+
       {state.phase === "loading" ? (
         <div className="mt-6 text-sm text-muted">Loading…</div>
       ) : state.phase === "load-error" ? null : (
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
           <textarea
+            aria-label="CV Markdown"
+            disabled={importing}
             value={state.content}
             onChange={(e) => dispatch({ type: "edit", content: e.target.value })}
             spellCheck={false}
