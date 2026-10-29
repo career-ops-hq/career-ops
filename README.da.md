@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Skabt af <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Skabt af <a href="https://github.com/santifer"><strong>@santifer</strong></a>, med&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.da.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.da.md#builders">700+ bidragydere</a></p>
 
 <p align="center">
 <strong>Måneder med at sende CV'er ud i&nbsp;stilheden.</strong><br>
@@ -123,6 +123,8 @@ Stilheden, efter du trykker send, handler ikke om dig. Nok mennesker så det sam
 <br>
 
 Rekruttering reparerer ikke sig selv. Det kan de, der går igennem den, og de er allerede i rummet, hvor de sammenligner noter og fikser hinandens opsætninger.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=da" alt="Animeret væg med bidragydernes GitHub-avatarer, der fyldes op i den rækkefølge, de kom til siden april 2026, med det næste felt holdt åbent." width="100%"></a></p>
 

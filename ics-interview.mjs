@@ -201,12 +201,17 @@ function offsetMs(ms, zone) {
   return asUtc - Math.floor(ms / 1000) * 1000;
 }
 
-/** Wall-clock time in `zone` -> epoch ms (gap/overlap times resolve to the earlier offset). */
+/** Wall-clock time -> epoch ms, using RFC 5545's overlap and gap rules. */
 export function wallToInstant(d, zone) {
   const guess = Date.UTC(d.y, d.mo - 1, d.d, d.h, d.mi, d.s);
-  let ms = guess - offsetMs(guess, zone);
-  ms = guess - offsetMs(ms, zone);
-  return ms;
+  // Sample both sides of a transition instead of letting the UTC guess choose
+  // an arbitrary side. Offsets need not differ by a whole hour.
+  const offsets = new Set([-86400000, 0, 86400000].map(delta => offsetMs(guess + delta, zone)));
+  const candidates = [...offsets].map(offset => guess - offset);
+  const matches = candidates.filter(ms => ms + offsetMs(ms, zone) === guess);
+  // An overlap means two matches: use the first occurrence. A gap has none:
+  // applying the pre-gap offset gives the later instant (RFC 5545 3.3.5).
+  return matches.length ? Math.min(...matches) : Math.max(...candidates);
 }
 
 /** Instant formatted in a zone: { date: 'YYYY-MM-DD', time: 'HH:MM', abbr, zone }. */

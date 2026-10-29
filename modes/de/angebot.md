@@ -246,7 +246,7 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 (Liste mit 15-20 Keywords aus der Stellenanzeige für ATS-Optimierung)
 
 ## Keyword Coverage
-(von `node keyword-match.mjs <report>` erzeugt — Abdeckung in %, present, thin, missing)
+(von `keyword-match.mjs` (1b) erzeugt — Abdeckung in %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (der vollständige Text der Stellenanzeige, wortgleich eingefügt — siehe Anforderung unten)
@@ -256,11 +256,44 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 
 **Machine Summary (Pflicht):** YAML-Block direkt nach dem Kopf, mit Schema, exakten Feldnamen und Regeln aus `batch/batch-prompt.md` (die Quelle; hier nicht duplizieren). Enthält `advertised_comp` (die Gehaltszahl der Anzeige wortgleich, oder `null`), `risk_summary` und `requirement_importance` (Block B Zeile für Zeile; die `inferred`-Grenze gilt auch hier).
 
-**Archivierung der Stellenanzeige (Pflicht, #2789):** Jeder Report MUSS einen Abschnitt `## Job Description (archived verbatim)` mit dem vollständigen Text der Anzeige enthalten, nie zusammengefasst oder umformuliert. Die Überschrift bleibt auf Englisch: `check-jd-archive.mjs` sucht sie über den Namen. Die erste Zeile ist das sichtbare Veröffentlichungsdatum (`Posted: {Datum oder relativer Text}`, oder `Posted: not visible in source`), nie das Dateidatum des Reports. Ist die Anzeige zu lang oder nicht vollständig zitierbar, mit `archive-posting.mjs <url> --company={company-slug} --report={num}` sichern und in den Abschnitt **genau** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` schreiben, ohne weiteren Text. Ist keine maschinelle Sicherung möglich (etwa ein langer eingefügter Text ohne URL), den Abschnitt in `## Job Description (not archived)` umbenennen und den Grund nennen. Nie eine Paraphrase an seiner Stelle; die vollständige Regel steht in `modes/oferta.md` (**JD archival**).
+**Archivierung der Stellenanzeige (Pflicht, #2789):** Jeder Report MUSS einen Abschnitt `## Job Description (archived verbatim)` mit dem vollständigen Text der Anzeige enthalten, nie zusammengefasst oder umformuliert. Die Überschrift bleibt auf Englisch: `check-jd-archive.mjs` sucht sie über den Namen. Die erste Zeile ist das sichtbare Veröffentlichungsdatum (`Posted: {Datum oder relativer Text}`, oder `Posted: not visible in source`), nie das Dateidatum des Reports. Ist die Anzeige zu lang oder nicht vollständig zitierbar, mit `archive-posting.mjs` (Befehl unten) sichern und in den Abschnitt **genau** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` schreiben, ohne weiteren Text. Ist keine maschinelle Sicherung möglich (etwa ein langer eingefügter Text ohne URL), den Abschnitt in `## Job Description (not archived)` umbenennen und den Grund nennen. Nie eine Paraphrase an seiner Stelle; die vollständige Regel steht in `modes/oferta.md` (**JD archival**).
+
+**Befehlsargumente (#5853):** Die URL der Anzeige, den Firmen-Slug oder den Report-Pfad nie in eine Befehlszeile schreiben, auch nicht in Anführungszeichen. Die Werte mit dem Datei-Tool in eine JSON-Datei schreiben (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) und den Befehl unten ausführen: Er prüft jeden Wert (der Slug muss `^[a-z0-9-]+$` entsprechen) und übergibt jeden als eigenes Argument an das Skript, ohne Shell. Ein Wert, der die Prüfung nicht besteht, bricht den Lauf ab: den Wert korrigieren, nie die Prüfung. Die vollständige Regel steht in `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. ATS-Keyword-Abdeckung einfügen
 
-Nach dem Speichern `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` ausführen und den Block `## Keyword Coverage` unter die extrahierten Keywords einfügen. Nur zur Diagnose: ein Keyword nur ergänzen, wenn es echter Erfahrung entspricht.
+Nach dem Speichern `keyword-match.mjs` (Befehl unten) ausführen und den Block `## Keyword Coverage` unter die extrahierten Keywords einfügen. Nur zur Diagnose: ein Keyword nur ergänzen, wenn es echter Erfahrung entspricht.
+
+Dafür `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` in eine JSON-Datei schreiben (siehe **Befehlsargumente** oben) und ausführen:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Im Tracker eintragen
 
