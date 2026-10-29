@@ -251,7 +251,7 @@ Header के field names (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `P
 (ATS optimization के लिए offer के 15-20 keywords की list)
 
 ## Keyword Coverage
-(`node keyword-match.mjs <report>` से generated -- coverage %, present, thin, missing)
+(`keyword-match.mjs` (1b) से generated -- coverage %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (offer का पूरा text, word-for-word paste किया हुआ -- नीचे requirement देखें)
@@ -261,11 +261,44 @@ Header के field names (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `P
 
 **Machine Summary (अनिवार्य):** header के ठीक बाद YAML block, `batch/batch-prompt.md` के schema, exact field names और rules के साथ (वही source है; यहाँ duplicate न करें)। इसमें `advertised_comp` (offer का salary figure word-for-word, या `null`), `risk_summary` और `requirement_importance` (Block B row by row; `inferred` की limit यहाँ भी लागू) शामिल हैं।
 
-**JD archival (अनिवार्य, #2789):** हर report में `## Job Description (archived verbatim)` section होना चाहिए जिसमें offer का पूरा text हो, कभी summarized या paraphrased नहीं। Heading English में रहती है: `check-jd-archive.mjs` उसे नाम से ढूँढता है। पहली line दिखाई देने वाली posting date है (`Posted: {date या relative text}`, या `Posted: not visible in source`), कभी report file की date नहीं। यदि offer बहुत लंबा हो या पूरा quote न हो सके, तो उसे `archive-posting.mjs <url> --company={company-slug} --report={num}` से capture करें और section में **ठीक यही** लिखें: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, बिना किसी और text के। यदि machine capture संभव न हो (जैसे बिना URL के paste किया गया लंबा text), तो section का नाम `## Job Description (not archived)` कर दें और कारण बताएँ। इसकी जगह कभी paraphrase नहीं; पूरा rule `modes/oferta.md` (**JD archival**) में है।
+**JD archival (अनिवार्य, #2789):** हर report में `## Job Description (archived verbatim)` section होना चाहिए जिसमें offer का पूरा text हो, कभी summarized या paraphrased नहीं। Heading English में रहती है: `check-jd-archive.mjs` उसे नाम से ढूँढता है। पहली line दिखाई देने वाली posting date है (`Posted: {date या relative text}`, या `Posted: not visible in source`), कभी report file की date नहीं। यदि offer बहुत लंबा हो या पूरा quote न हो सके, तो उसे `archive-posting.mjs` (नीचे वाला command) से capture करें और section में **ठीक यही** लिखें: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, बिना किसी और text के। यदि machine capture संभव न हो (जैसे बिना URL के paste किया गया लंबा text), तो section का नाम `## Job Description (not archived)` कर दें और कारण बताएँ। इसकी जगह कभी paraphrase नहीं; पूरा rule `modes/oferta.md` (**JD archival**) में है।
+
+**Command arguments (#5853):** posting का URL, company slug या report path कभी command line में न लिखें, quotes में भी नहीं। Values को अपने file tool से एक JSON file में लिखें (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) और नीचे वाला command चलाएँ: यह हर value check करता है (slug को `^[a-z0-9-]+$` से match करना चाहिए) और हर value को script को अलग argument के रूप में देता है, बिना shell के। जो value check में fail हो, वह run रोक देती है: value ठीक करें, check कभी नहीं। पूरा नियम `modes/oferta.md` (**Command arguments**) में है।
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. ATS keyword coverage जोड़ें
 
-Save करने के बाद `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` चलाएँ और `## Keyword Coverage` block को निकाले गए keywords के नीचे paste करें। केवल diagnostic: keyword तभी जोड़ें जब वह असली experience से मेल खाता हो।
+Save करने के बाद `keyword-match.mjs` (नीचे वाला command) चलाएँ और `## Keyword Coverage` block को निकाले गए keywords के नीचे paste करें। केवल diagnostic: keyword तभी जोड़ें जब वह असली experience से मेल खाता हो।
+
+इसके लिए `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` को एक JSON file में लिखें (ऊपर **Command arguments** देखें) और चलाएँ:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Tracker में Record करें
 
