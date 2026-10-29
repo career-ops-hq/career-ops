@@ -57,6 +57,7 @@ const SUITES = {
   "dialog-focus": { url: "DIALOG_FOCUS_TEST_URL", fixture: "pipeline-status" },
   "employer-preset": { url: "EXPLORE_EMPLOYER_TEST_URL", fixture: "blank" },
   "evaluation-options": { url: "EVALUATION_OPTIONS_TEST_URL", fixture: "inbox-undo" },
+  "followups-loading": { url: "FOLLOWUPS_LOADING_TEST_URL", root: "FOLLOWUPS_LOADING_TEST_ROOT", fixture: "pipeline-status" },
   "inbox-undo": { url: "INBOX_UNDO_TEST_URL", root: "INBOX_UNDO_TEST_ROOT", fixture: "inbox-undo" },
   "loading-transition": { url: "LOADING_TRANSITION_TEST_URL", root: "LOADING_TRANSITION_TEST_ROOT", fixture: "pipeline-status" },
   "mobile-nav-drawer": { url: "MOBILE_NAV_TEST_URL", fixture: "blank" },
