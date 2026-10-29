@@ -279,17 +279,17 @@ Consulta [docs/SETUP.md](docs/SETUP.md) para la guía de instalación completa, 
 
 ## Uso
 
-Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre.
+Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto.
 
 ### Cómo pedir un modo
 
 | CLI | Cómo pides `scan` |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Cursor o cualquier otro CLI | Lenguaje natural: «Run the career-ops scan mode» |
+| Codex, Qwen, Cursor o cualquier otro CLI | Lenguaje natural: «Run the career-ops scan mode» |
 
-`/career-ops` sin nada detrás muestra el menú de comandos. El lenguaje natural funciona en todos los CLIs.
+`/career-ops` sin nada detrás muestra el menú de comandos. El lenguaje natural funciona en todos los CLIs. Como plugin de Claude Code, el comando es `/career-ops:career-ops`.
 
 Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los mismos archivos `modes/*.md`, así que un modo se comporta igual sea cual sea el CLI que lo ejecute. Los comandos de barra no están garantizados en Codex: pide en lenguaje natural, o lanza un prompt en modo headless con `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cómo ejecutarlo en cada CLI compatible, los comandos headless cuando un CLI los tiene y las notas de configuración de cada CLI, como el `/trust` de Pi, están en [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
@@ -297,7 +297,7 @@ Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los
 
 | Comando | Qué hace |
 | --- | --- |
-| *pega una URL o una descripción de oferta* | Pipeline completo: comprobación de que la oferta sigue abierta (solo URLs), evaluación A-H, informe, CV adaptado (PDF por defecto), fila en el tracker |
+| *pega una URL o una descripción de oferta* | Pipeline completo: comprobación de que la oferta sigue abierta (solo URLs), evaluación A-G, informe, CV adaptado (PDF por defecto), fila en el tracker |
 | `scan` | Escanea tus portales en busca de ofertas nuevas y las añade a la bandeja (`data/pipeline.md`) |
 | `pipeline` | Evalúa cada URL que espera en la bandeja |
 | `apply` | Rellena un formulario de candidatura contigo, campo por campo. Se detiene antes de Enviar |
@@ -324,8 +324,8 @@ Todos comparten un único enrutador, `.agents/skills/career-ops/SKILL.md`, y los
 
 | Comando | Qué hace |
 | --- | --- |
-| *pega una URL o una descripción de oferta* | [Auto-pipeline](modes/auto-pipeline.md): evaluación + informe + PDF + entrada en el tracker |
-| [`oferta`](modes/oferta.md) | Solo evaluación, bloques A a H (sin PDF) |
+| *pega una URL o una descripción de oferta* | [Auto-pipeline](modes/auto-pipeline.md): evaluación + informe + CV adaptado (PDF por defecto) + entrada en el tracker |
+| [`oferta`](modes/oferta.md) | Solo evaluación, bloques A a G (sin PDF) |
 | [`ofertas`](modes/ofertas.md) | Compara y ordena varias ofertas |
 | [`deep`](modes/deep.md) | Prompt de investigación en profundidad sobre la empresa |
 | [`eu-swe`](modes/regional/eu-swe.md) | Calibra una candidatura europea de ingeniería de software antes del CV, la solicitud o la entrevista |
