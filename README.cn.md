@@ -279,17 +279,17 @@ npm i -g @santifer/career-ops
 
 ## 用法
 
-把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。
+把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。如果无法读取某个职位，流水线会停下并请你粘贴文本。
 
 ### 如何调用模式
 
 | CLI | 如何调用 `scan` |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex、Cursor 或任何其他 CLI | 自然语言：“Run the career-ops scan mode” |
+| Codex、Qwen、Cursor 或任何其他 CLI | 自然语言：“Run the career-ops scan mode” |
 
-单独输入 `/career-ops` 会显示命令菜单。自然语言在所有 CLI 中都能用。
+单独输入 `/career-ops` 会显示命令菜单。自然语言在所有 CLI 中都能用。作为 Claude Code 插件使用时，命令是 `/career-ops:career-ops`。
 
 它们共用同一个路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 文件，所以无论由哪个 CLI 运行，模式的行为都一样。Codex 不保证支持斜杠命令：请用自然语言提出请求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以无头方式运行一条提示词（[docs/CODEX.md](docs/CODEX.md)）。如何在每个受支持的 CLI 中运行、带有无头命令的 CLI 的对应命令，以及 Pi 的 `/trust` 这类各 CLI 的设置说明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
 
@@ -297,7 +297,7 @@ npm i -g @santifer/career-ops
 
 | 命令 | 作用 |
 | --- | --- |
-| *粘贴链接或职位描述* | 完整流水线：职位是否仍在招的检查（仅限链接）、A-H 评估、报告、定制简历（默认 PDF）、追踪表新增一行 |
+| *粘贴链接或职位描述* | 完整流水线：职位是否仍在招的检查（仅限链接）、A-G 评估、报告、定制简历（默认 PDF）、追踪表新增一行 |
 | `scan` | 扫描你的招聘平台以发现新职位，并加入收件箱（`data/pipeline.md`） |
 | `pipeline` | 评估收件箱中等待处理的每个链接 |
 | `apply` | 与你一起逐个字段填写申请表。提交前会停下 |
@@ -324,8 +324,8 @@ npm i -g @santifer/career-ops
 
 | 命令 | 作用 |
 | --- | --- |
-| *粘贴链接或职位描述* | [Auto-pipeline](modes/auto-pipeline.md)：评估 + 报告 + PDF + 追踪表条目 |
-| [`oferta`](modes/oferta.md) | 仅评估，区块 A 到 H（不生成 PDF） |
+| *粘贴链接或职位描述* | [Auto-pipeline](modes/auto-pipeline.md)：评估 + 报告 + 定制简历（默认 PDF） + 追踪表条目 |
+| [`oferta`](modes/oferta.md) | 仅评估，区块 A 到 G（不生成 PDF） |
 | [`ofertas`](modes/ofertas.md) | 比较并排序多个职位 |
 | [`deep`](modes/deep.md) | 针对公司的深度调研提示词 |
 | [`eu-swe`](modes/regional/eu-swe.md) | 在准备简历、申请或面试之前，校准一份欧洲软件工程岗位的申请 |
