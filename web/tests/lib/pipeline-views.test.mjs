@@ -10,6 +10,13 @@ test("a saved view restores the tab, search, score floor, and sort", () => {
   assert.deepEqual(viewUpdates(view), { tab: "EVALUATED", q: "Staff", min: 4, sort: "score", dir: -1 });
 });
 
+test("a saved view keeps a search longer than 200 characters", () => {
+  const q = "role ".repeat(50);
+  const view = normalizeView({ name: "Long", tab: "ALL", q });
+  assert.equal(view.q, q);
+  assert.equal(viewUpdates(view).q, q);
+});
+
 test("the inbox tab clears the tab query and a blank search clears q", () => {
   const view = normalizeView({ name: "Inbox", tab: "INBOX", q: "", min: null, sort: "date", dir: 1 });
   assert.deepEqual(viewUpdates(view), { tab: null, q: null, min: null, sort: "date", dir: 1 });

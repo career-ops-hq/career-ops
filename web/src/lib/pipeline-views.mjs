@@ -22,7 +22,7 @@ export function normalizeView(input) {
   return {
     name,
     tab: pipelineTab(typeof raw.tab === "string" ? raw.tab : undefined),
-    q: typeof raw.q === "string" ? raw.q.slice(0, 200) : "",
+    q: typeof raw.q === "string" ? raw.q : "",
     min,
     sort,
     dir: raw.dir === 1 || raw.dir === "1" ? 1 : -1,
