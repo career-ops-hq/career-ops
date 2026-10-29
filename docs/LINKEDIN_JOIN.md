@@ -49,24 +49,24 @@ LinkedIn warm-intro join
   Siemens Digital Industries Software  [#1 Applied · Staff Engineer]
     · Jane Doe — Director, Platform Engineering — since 2021-08 — strong match: "Siemens"
         https://www.linkedin.com/in/janedoe
-    2nd-degree: https://www.linkedin.com/search/people/?keywords=Siemens%20Digital%20Industries%20Software&network=%5B%22S%22%5D
+    2nd-degree: https://www.linkedin.com/search/results/people/?keywords=Siemens%20Digital%20Industries%20Software&network=%5B%22S%22%5D
 
   Datavant  [#2 Screening · Platform Engineer]
     · Ravi Patel — Staff Data Engineer — since 2019-02
         https://www.linkedin.com/in/ravipatel
-    2nd-degree: https://www.linkedin.com/search/people/?keywords=Datavant&network=%5B%22S%22%5D
+    2nd-degree: https://www.linkedin.com/search/results/people/?keywords=Datavant&network=%5B%22S%22%5D
 
 ── Scanner targets (no application yet) ─────────────────────
 
   Akamai Technologies
     · Alex Kim — Solutions Architect — since 2020-06 — strong match: "Akamai"
         https://www.linkedin.com/in/alexkim
-    2nd-degree: https://www.linkedin.com/search/people/?keywords=Akamai%20Technologies&network=%5B%22S%22%5D
+    2nd-degree: https://www.linkedin.com/search/results/people/?keywords=Akamai%20Technologies&network=%5B%22S%22%5D
 
   Ørsted
     · Mette Sørensen — Wind Analytics Lead — since 2023-11
         https://www.linkedin.com/in/mettes
-    2nd-degree: https://www.linkedin.com/search/people/?keywords=%C3%98rsted&network=%5B%22S%22%5D
+    2nd-degree: https://www.linkedin.com/search/results/people/?keywords=%C3%98rsted&network=%5B%22S%22%5D
 
 Notes:
   ! 1 connections have no employer listed (cannot join)
@@ -102,7 +102,7 @@ Do you know anyone at "Datavant"?
         https://www.linkedin.com/in/ravipatel
 
   Second-degree (not in any export — open it yourself, nothing is fetched):
-    https://www.linkedin.com/search/people/?keywords=Datavant&network=%5B%22S%22%5D
+    https://www.linkedin.com/search/results/people/?keywords=Datavant&network=%5B%22S%22%5D
 ```
 
 ```
