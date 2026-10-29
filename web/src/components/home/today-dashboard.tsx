@@ -251,7 +251,7 @@ export function TodayDashboard({
             ))}
           </div>
           {followupRest.hidden > 0 && (
-            <Link href="/followups" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
+            <Link href="/followups" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand-text max-sm:min-h-[44px]">
               See all {followupRest.total} {followupRest.total === 1 ? "follow-up" : "follow-ups"}
             </Link>
           )}
