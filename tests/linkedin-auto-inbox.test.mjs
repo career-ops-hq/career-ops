@@ -343,13 +343,35 @@ test('CJK text larger than twice the character limit still imports', async () =>
   }
 });
 
-test('a file that cannot fit the character limit is skipped before it is read', async () => {
+test('base64 CJK text larger than three times the character limit still imports', async () => {
   const { LINKEDIN_IMPORT_MAX_CHARS } = await import('../lib/linkedin-import.mjs');
+  const { MAIL_BYTES_OVER_LIMIT } = await import('../lib/linkedin-mail-drop.mjs');
+  const { root, dir } = dropRoot('linkedin-drop-base64-cjk-');
+  const payload = `https://www.linkedin.com/jobs/view/${JOB_ID}\n` + '\u4e00'.repeat(1_600_000);
+  assert.ok(payload.length <= LINKEDIN_IMPORT_MAX_CHARS);
+  const text = `Content-Transfer-Encoding: base64\r\n\r\n${Buffer.from(payload, 'utf8').toString('base64')}\r\n`;
+  const bytes = Buffer.byteLength(text);
+  assert.ok(bytes > LINKEDIN_IMPORT_MAX_CHARS * 3);
+  assert.ok(bytes <= MAIL_BYTES_OVER_LIMIT);
+  writeFileSync(join(dir, 'wide.eml'), text);
+  try {
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir });
+      assert.equal(result.added, 1);
+      assert.deepEqual(result.skipped, []);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a file that cannot fit the character limit is skipped before it is read', async () => {
+  const { MAIL_BYTES_OVER_LIMIT } = await import('../lib/linkedin-mail-drop.mjs');
   const { root, dir } = dropRoot('linkedin-drop-huge-');
   const file = join(dir, 'huge.mbox');
   const fd = openSync(file, 'w');
   try {
-    ftruncateSync(fd, LINKEDIN_IMPORT_MAX_CHARS * 3 + 1);
+    ftruncateSync(fd, MAIL_BYTES_OVER_LIMIT + 1);
   } finally {
     closeSync(fd);
   }
