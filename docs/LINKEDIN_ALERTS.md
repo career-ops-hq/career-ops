@@ -11,7 +11,7 @@ Each job is stored as `https://www.linkedin.com/jobs/view/{id}`. A job already i
 This path has no password and no API key.
 
 1. Create `data/linkedin-alerts` in your CareerOps data root.
-2. In your mail app, write each message to a temporary name in that folder. When the write finishes, rename it to a final `.eml`, `.txt`, or `.mbox` name. The importer reads only those final names.
+2. In your mail app, write each message to a temporary name that does not end in `.eml`, `.txt`, or `.mbox`, such as `alert.eml.part`. When the write finishes, rename it to one of those three endings. The importer reads only those endings, so a file already named `draft.eml` can be imported before the write finishes.
 3. Run `node linkedin-watch.mjs` once to confirm a job lands in the pipeline. `--dir` points at another folder. `--json` prints the result as JSON. `--dry-run` prints the count and writes nothing.
 4. Install the 15-minute worker if you have not already. macOS and Linux use `sh web/scripts/install-scan-schedule.sh`. Windows uses `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1`. The steps are in [docs/AUTOMATION.md](AUTOMATION.md).
 
