@@ -16,6 +16,19 @@ export function isSearchOnlyWrite(updates) {
 }
 
 /**
+ * A tab, sort, or filter change already carries the typed search. A search
+ * write that is still waiting would build its URL from the old query and
+ * could drop that change. A click that does not change the URL must leave
+ * the waiting write alone.
+ *
+ * @param {Record<string, unknown>} updates
+ * @param {boolean} committed
+ */
+export function shouldCancelSearchDebounce(updates, committed) {
+  return Boolean(committed) && !isSearchOnlyWrite(updates);
+}
+
+/**
  * The `q` a list navigation will put in the URL. A tab or sort change uses
  * the search typed so far. A search write uses its own `q`.
  *
@@ -70,8 +83,9 @@ export function rememberNavigation(expected, updates, live, committed) {
  * there too, or its arrival looks like Back and replaces newer typing.
  * A URL that is not in that list is Back or a shared link: it wins, and the
  * in-flight writes move to `cancelled`. When one of those lands late, write
- * the local query back at once. An older in-flight URL is ignored while a
- * newer write is still out.
+ * the local query back at once. An older in-flight URL does not replace the
+ * local text. If that text is not what landed, write it again: the newer
+ * navigation may never arrive.
  *
  * @param {{ local: string, url: string, urlChanged: boolean, expected?: string[], cancelled?: string[] }} state
  * @returns {{ adopt: boolean, write: string | null, immediate: boolean, expected: string[], cancelled: string[] }}
@@ -96,7 +110,11 @@ export function nextSearchWrite({ local, url, urlChanged, expected = [], cancell
     return { ...settled, write: local };
   }
   if (idx !== -1) {
-    return { ...hold, expected: inFlight.slice(idx + 1) };
+    return {
+      ...hold,
+      write: local === url ? null : local,
+      expected: inFlight.slice(idx + 1),
+    };
   }
   if (dropped.includes(url)) {
     if (local === url) {

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isSearchOnlyWrite, nextSearchWrite, noteNavigation, queryWithLiveSearch, rememberNavigation } from "../../src/lib/list-search-sync.mjs";
+import { isSearchOnlyWrite, nextSearchWrite, noteNavigation, queryWithLiveSearch, rememberNavigation, shouldCancelSearchDebounce } from "../../src/lib/list-search-sync.mjs";
 
 function decide(state) {
   return nextSearchWrite({ expected: [], cancelled: [], ...state });
@@ -27,7 +27,8 @@ test("a typed search is written, and a landed write does not clobber newer typin
     expected: ["Quill", "Quillfeather"],
   });
   assert.equal(older.adopt, false);
-  assert.equal(older.write, null);
+  assert.equal(older.write, "Quillfeather");
+  assert.equal(older.immediate, false);
   assert.deepEqual(older.expected, ["Quillfeather"]);
 });
 
@@ -84,8 +85,15 @@ test("a tab click that leaves the URL alone does not hide a search write still o
   assert.deepEqual(landed.expected, []);
   const recorded = rememberNavigation(pending, { tab: "SKIP" }, "Quill", true);
   const stuck = decide({ local: "Quill", url: "Quillfeather", urlChanged: true, expected: recorded });
-  assert.equal(stuck.write, null);
+  assert.equal(stuck.write, "Quill");
   assert.deepEqual(stuck.expected, ["Quill"]);
+});
+
+test("a list change cancels a waiting search write, and a search write does not cancel itself", () => {
+  assert.equal(shouldCancelSearchDebounce({ tab: "SKIP" }, true), true);
+  assert.equal(shouldCancelSearchDebounce({ sort: "company" }, true), true);
+  assert.equal(shouldCancelSearchDebounce({ tab: "SKIP" }, false), false);
+  assert.equal(shouldCancelSearchDebounce({ q: "Quill" }, true), false);
 });
 
 test("tab changes keep the search the reader has typed", () => {

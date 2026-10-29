@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
-import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite, rememberNavigation } from "@/lib/list-search-sync.mjs";
+import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite, rememberNavigation, shouldCancelSearchDebounce } from "@/lib/list-search-sync.mjs";
 
 type SearchParamsLike = { get: (key: string) => string | null };
 
@@ -16,12 +16,18 @@ export function useListSearch(
   qRef: MutableRefObject<string>,
 ) {
   const [q, setQ] = useState(() => params.get("q") ?? "");
+  const debounceRef = useRef<number | null>(null);
   const expectedRef = useRef<string[]>([]);
   const cancelledRef = useRef<string[]>([]);
   const seenUrl = useRef(params.get("q") ?? "");
   const queueNavigation = useCallback((updates: Record<string, string | number | null>) => {
     // A click that leaves the URL alone must not count as a newer write.
-    expectedRef.current = rememberNavigation(expectedRef.current, updates, qRef.current, commit(updates));
+    const committed = commit(updates);
+    if (shouldCancelSearchDebounce(updates, committed) && debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    expectedRef.current = rememberNavigation(expectedRef.current, updates, qRef.current, committed);
   }, [commit, qRef]);
   const queueRef = useRef(queueNavigation);
   // After commit. A discarded render must not publish a search or a navigation.
@@ -55,10 +61,15 @@ export function useListSearch(
       return;
     }
     const handle = window.setTimeout(() => {
+      if (debounceRef.current === handle) debounceRef.current = null;
       if (qRef.current !== write) return;
       queueRef.current({ q: write ? write : null });
     }, LIST_SEARCH_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
+    debounceRef.current = handle;
+    return () => {
+      window.clearTimeout(handle);
+      if (debounceRef.current === handle) debounceRef.current = null;
+    };
   }, [q, urlQ, qRef]);
 
   return {
