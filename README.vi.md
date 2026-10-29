@@ -291,15 +291,15 @@ Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor hoặc bất kỳ CLI nào khác | Ngôn ngữ thường: "Run the career-ops scan mode" |
 
-`/career-ops` đứng một mình sẽ hiện menu lệnh. Ngôn ngữ thường dùng được trong mọi CLI. Khi dùng như plugin của Claude Code, lệnh là `/career-ops:career-ops`.
+`/career-ops` đứng một mình sẽ hiện menu lệnh trong các CLI dùng lệnh này. Ngôn ngữ thường dùng được trong mọi CLI. Khi dùng như plugin của Claude Code, lệnh là `/career-ops:career-ops`.
 
-Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`, và cùng các tệp `modes/*.md`, nên một mode hoạt động giống nhau dù CLI nào chạy nó. Slash command không được đảm bảo trong Codex: hãy yêu cầu bằng ngôn ngữ thường, hoặc chạy một prompt ở chế độ headless bằng `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cách chạy trong từng CLI được hỗ trợ, lệnh headless với những CLI có lệnh này, và các ghi chú thiết lập riêng cho từng CLI như `/trust` của Pi nằm trong [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`, và cùng các tệp `modes/*.md`, nên một mode hoạt động giống nhau dù CLI nào chạy nó. Slash command không được đảm bảo trong Codex: hãy yêu cầu bằng ngôn ngữ thường, hoặc chạy một prompt ở chế độ headless bằng `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cách chạy trong từng CLI được hỗ trợ, lệnh headless với những CLI có lệnh này, và các ghi chú thiết lập riêng cho từng CLI nằm trong [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Các lệnh dùng hằng ngày
 
 | Lệnh | Chức năng |
 | --- | --- |
-| *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-G, báo cáo, CV đã tùy chỉnh (mặc định là PDF), một dòng trong tracker |
+| *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-G cộng H khi điểm cao, báo cáo, CV đã tùy chỉnh (mặc định là PDF), một dòng trong tracker |
 | `scan` | Quét các cổng của bạn để tìm tin mới và thêm vào hộp thư (`data/pipeline.md`) |
 | `pipeline` | Đánh giá mọi URL đang chờ trong hộp thư |
 | `apply` | Cùng bạn điền form ứng tuyển, từng trường một. Dừng lại trước khi Gửi |
@@ -327,7 +327,7 @@ Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`
 | Lệnh | Chức năng |
 | --- | --- |
 | *dán URL hoặc JD* | [Auto-pipeline](modes/auto-pipeline.md): đánh giá + báo cáo + CV đã tùy chỉnh (mặc định là PDF) + mục trong tracker |
-| [`oferta`](modes/oferta.md) | Chỉ đánh giá, các block A đến G (không có PDF) |
+| [`oferta`](modes/oferta.md) | Chỉ đánh giá, các block A đến G cộng H khi điểm cao (không có PDF) |
 | [`ofertas`](modes/ofertas.md) | So sánh và xếp hạng nhiều offer |
 | [`deep`](modes/deep.md) | Prompt nghiên cứu chuyên sâu về công ty |
 | [`eu-swe`](modes/regional/eu-swe.md) | Hiệu chỉnh một hồ sơ ứng tuyển kỹ sư phần mềm ở châu Âu trước khi làm CV, nộp đơn hoặc phỏng vấn |
