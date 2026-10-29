@@ -281,7 +281,7 @@ Xem [docs/SETUP.md](docs/SETUP.md) để có hướng dẫn thiết lập đầy
 
 ## Cách dùng
 
-Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh PDF và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên.
+Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh CV của bạn (mặc định là PDF) và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên.
 
 ### Cách gọi một mode
 
@@ -299,7 +299,7 @@ Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`
 
 | Lệnh | Chức năng |
 | --- | --- |
-| *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-H, báo cáo, PDF đã tùy chỉnh, một dòng trong tracker |
+| *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-H, báo cáo, CV đã tùy chỉnh (mặc định là PDF), một dòng trong tracker |
 | `scan` | Quét các cổng của bạn để tìm tin mới và thêm vào hộp thư (`data/pipeline.md`) |
 | `pipeline` | Đánh giá mọi URL đang chờ trong hộp thư |
 | `apply` | Cùng bạn điền form ứng tuyển, từng trường một. Dừng lại trước khi Gửi |
