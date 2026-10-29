@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cursorAfterRemoval, inboxCommand, moveCursor, typingFromTarget } from "../../src/lib/inbox-keys.mjs";
+import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "../../src/lib/inbox-keys.mjs";
 
 test("j and k move, s saves, and x skips the focused posting", () => {
   assert.equal(inboxCommand({ key: "j" }), "next");
@@ -53,6 +53,14 @@ test("the cursor stays inside the visible list", () => {
   assert.equal(moveCursor(4, 5, 1), 4);
   assert.equal(moveCursor(2, 5, 1), 3);
   assert.equal(moveCursor(0, 0, 1), -1);
+});
+
+test("a direct skip drops that posting from the checks and leaves the others", () => {
+  const selected = new Set(["https://example.com/a", "https://example.com/b"]);
+  const next = selectionWithout(selected, "https://example.com/a");
+  assert.deepEqual([...next], ["https://example.com/b"]);
+  assert.equal(selectionWithout(selected, "https://example.com/missing"), selected);
+  assert.equal(selectionWithout(next, "https://example.com/a"), next);
 });
 
 test("skipping the focused row leaves the cursor on the row that slides up", () => {

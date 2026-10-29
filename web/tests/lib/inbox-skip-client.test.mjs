@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createInboxSkipActions, queueInboxSkip } from "../../src/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, rejectedSkipUrls } from "../../src/lib/inbox-skip-client.mjs";
+
+test("a bulk skip reports only the rejected URLs, in order", () => {
+  const urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"];
+  assert.deepEqual(rejectedSkipUrls(urls, [{ status: "fulfilled" }, { status: "rejected" }, { status: "fulfilled" }]), ["https://example.com/b"]);
+  assert.deepEqual(rejectedSkipUrls(urls, [{ status: "fulfilled" }, { status: "fulfilled" }, { status: "fulfilled" }]), []);
+});
 
 const url = "https://example.com/fixture-alpha";
 const ok = (done) => Response.json({ ok: true, done, matched: 1, changed: 1 });

@@ -34,6 +34,14 @@ export function moveCursor(index, count, delta) {
   return Math.max(0, Math.min(count - 1, start));
 }
 
+/** Drop one posting from the checks. Other checks stay. An absent URL keeps the same set. */
+export function selectionWithout(selected, url) {
+  if (!(selected instanceof Set) || !selected.has(url)) return selected;
+  const next = new Set(selected);
+  next.delete(url);
+  return next;
+}
+
 /** The removed row left the list. An earlier removal shifts the cursor up. The focused removal stays put, on the row that slid into that slot. */
 export function cursorAfterRemoval(index, removedIndex) {
   if (removedIndex < index) return index - 1;

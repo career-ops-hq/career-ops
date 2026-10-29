@@ -20,6 +20,18 @@ export function createInboxSkipActions(persistSkip, onSkipFailure) {
   };
 }
 
+/** URLs whose skip request was rejected. One result lines up with one URL.
+ * @param {string[]} urls
+ * @param {{ status?: string }[]} results
+ */
+export function rejectedSkipUrls(urls, results) {
+  const failed = [];
+  for (let i = 0; i < urls.length; i++) {
+    if (results[i]?.status === "rejected") failed.push(urls[i]);
+  }
+  return failed;
+}
+
 /** Serialize writes for one posting while still reporting failures to the UI.
  * A failed request must not poison the chain: the next Undo/retry still runs.
  * @param {Map<string, Promise<void>>} chains

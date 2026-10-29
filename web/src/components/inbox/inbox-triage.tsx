@@ -8,14 +8,14 @@ import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_SOURCES } from "@/lib/explore";
 import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
-import { cursorAfterRemoval, inboxCommand, moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
+import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
-import { createInboxSkipActions, queueInboxSkip } from "@/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, rejectedSkipUrls } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
@@ -209,6 +209,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   };
   const skip = (job: InboxJob) => {
     setWriteError("");
+    setSelected((current) => selectionWithout(current, job.url));
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     const actions = createInboxSkipActions((done) => persistSkip(job.url, done), () => {
       setHidden((h) => h.filter((u) => u !== job.url));
@@ -268,9 +269,17 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       },
     };
     setUndo(notice);
-    void Promise.all(urls.map((url) => persistSkip(url, true))).catch(() => {
+    // One refresh after the batch. A failure still shows in the page alert if a
+    // later skip has already replaced this Undo notice.
+    const alreadyHidden = new Set(hidden);
+    void Promise.allSettled(urls.map((url) => queueInboxSkip(skipChain.current, url, true))).then((results) => {
+      const failed = rejectedSkipUrls(urls, results);
+      if (failed.length === 0) return;
+      const reveal = failed.filter((url) => !alreadyHidden.has(url));
+      if (reveal.length > 0) setHidden((h) => h.filter((url) => !reveal.includes(url)));
+      setWriteError("Could not skip every selected role.");
       setUndo((current) => current?.fn === notice.fn ? { ...current, error: "Could not skip every selected role." } : current);
-    });
+    }).finally(() => router.refresh());
   };
   const skipSelected = () => {
     const jobs = skippableJobs(enriched.filter((e) => selected.has(e.job.url)).map((e) => e.job), scoreByUrl);
