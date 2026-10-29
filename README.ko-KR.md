@@ -277,17 +277,17 @@ npm i -g @santifer/career-ops
 
 ## 사용법
 
-채용 공고 URL이나 설명을 AI CLI에 붙여 넣으세요. career-ops는 링크가 있는 공고가 아직 열려 있는지 확인하고(붙여 넣은 텍스트에는 확인할 링크가 없습니다), 이력서와 비교해 점수를 매기고, 리포트를 작성하고, 이력서를 맞춤 제작하고(기본은 PDF), 트래커에 한 줄을 추가합니다. 대부분의 날은 이것으로 충분합니다. 나머지는 모두 이름으로 요청하는 모드입니다.
+채용 공고 URL이나 설명을 AI CLI에 붙여 넣으세요. career-ops는 링크가 있는 공고가 아직 열려 있는지 확인하고(붙여 넣은 텍스트에는 확인할 링크가 없습니다), 이력서와 비교해 점수를 매기고, 리포트를 작성하고, 이력서를 맞춤 제작하고(기본은 PDF), 트래커에 한 줄을 추가합니다. 대부분의 날은 이것으로 충분합니다. 나머지는 모두 이름으로 요청하는 모드입니다. 공고를 읽을 수 없으면 파이프라인이 멈추고 텍스트를 붙여 넣어 달라고 요청합니다.
 
 ### 모드 요청하는 방법
 
 | CLI | `scan` 요청 방법 |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Cursor 또는 그 밖의 CLI | 일상 언어: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor 또는 그 밖의 CLI | 일상 언어: "Run the career-ops scan mode" |
 
-`/career-ops`만 입력하면 명령어 메뉴가 표시됩니다. 일상 언어는 모든 CLI에서 동작합니다.
+`/career-ops`만 입력하면 명령어 메뉴가 표시됩니다. 일상 언어는 모든 CLI에서 동작합니다. Claude Code 플러그인으로 사용할 때 명령어는 `/career-ops:career-ops`입니다.
 
 모든 CLI가 하나의 라우터 `.agents/skills/career-ops/SKILL.md`와 같은 `modes/*.md` 파일을 공유하므로, 어떤 CLI에서 실행해도 모드는 똑같이 동작합니다. Codex에서는 슬래시 명령이 보장되지 않습니다. 일상 언어로 요청하거나 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`로 프롬프트 하나를 헤드리스로 실행하세요([docs/CODEX.md](docs/CODEX.md)). 지원하는 각 CLI에서 실행하는 방법, 헤드리스 명령이 있는 CLI의 해당 명령, Pi의 `/trust` 같은 CLI별 설정 참고 사항은 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)에 있습니다.
 
@@ -295,7 +295,7 @@ npm i -g @santifer/career-ops
 
 | 명령어 | 기능 |
 | --- | --- |
-| *URL 또는 채용 공고 붙여넣기* | 전체 파이프라인: 공고 게시 여부 확인(URL만), A-H 평가, 리포트, 맞춤 이력서(기본은 PDF), 트래커 행 |
+| *URL 또는 채용 공고 붙여넣기* | 전체 파이프라인: 공고 게시 여부 확인(URL만), A-G 평가, 리포트, 맞춤 이력서(기본은 PDF), 트래커 행 |
 | `scan` | 포털을 스캔해 새 공고를 찾고 인박스(`data/pipeline.md`)에 추가 |
 | `pipeline` | 인박스에서 대기 중인 모든 URL 평가 |
 | `apply` | 지원서 양식을 사용자와 함께 항목별로 작성. 제출 직전에 멈춤 |
@@ -322,8 +322,8 @@ npm i -g @santifer/career-ops
 
 | 명령어 | 기능 |
 | --- | --- |
-| *URL 또는 채용 공고 붙여넣기* | [Auto-pipeline](modes/auto-pipeline.md): 평가 + 리포트 + PDF + 트래커 항목 |
-| [`oferta`](modes/oferta.md) | 평가만 수행, 블록 A~H (PDF 없음) |
+| *URL 또는 채용 공고 붙여넣기* | [Auto-pipeline](modes/auto-pipeline.md): 평가 + 리포트 + 맞춤 이력서(기본은 PDF) + 트래커 항목 |
+| [`oferta`](modes/oferta.md) | 평가만 수행, 블록 A~G (PDF 없음) |
 | [`ofertas`](modes/ofertas.md) | 여러 공고 비교 및 순위 매기기 |
 | [`deep`](modes/deep.md) | 기업에 대한 심층 리서치 프롬프트 |
 | [`eu-swe`](modes/regional/eu-swe.md) | 이력서, 지원, 면접 전에 유럽 소프트웨어 엔지니어링 지원을 조정 |
