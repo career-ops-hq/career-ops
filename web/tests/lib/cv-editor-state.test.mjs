@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, initialEditor, saveFollowUp, shouldSave } from "../../src/lib/cv-editor-state.mjs";
+import { draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, followUpJob, initialEditor, saveFollowUp, shouldSave } from "../../src/lib/cv-editor-state.mjs";
 
 const ready = (content, extra = {}) => ({
   ...initialEditor(),
@@ -180,6 +180,12 @@ test("reverting to the saved text during a conflict does not look saved", () => 
   });
   assert.equal(loaded.content, "Written elsewhere.");
   assert.equal(draftToStore(loaded), null);
+});
+
+test("an exit flush keeps keepalive when an ordinary save finishes first", () => {
+  const job = followUpJob({ keepalive: false }, { text: "C", keepalive: true }, "C");
+  assert.deepEqual(job, { text: "C", keepalive: true });
+  assert.deepEqual(followUpJob({ keepalive: false }, null, "C"), { text: "C", keepalive: false });
 });
 
 test("a follow-up save expects the write that just landed", () => {

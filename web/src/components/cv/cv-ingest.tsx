@@ -11,6 +11,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import { cvReadiness, parseCvStream, type CvSeed } from "@/lib/cv/quality";
 import { ingestErrorMessage } from "@/lib/cv/ingest-error.mjs";
 import { cvIngestSaveBody } from "@/lib/cv-write.mjs";
+import { canReviewIngest, planIngestSave } from "@/lib/cv-ingest-base.mjs";
 import { DEFAULT_FILTERS, filtersToParams } from "@/lib/explore";
 
 type Phase = "input" | "parsing" | "review" | "saving" | "error";
@@ -41,30 +42,59 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const baseRef = useRef<{ content: string; exists: boolean } | null>(null);
   const baseLoad = useRef<Promise<{ content: string; exists: boolean }> | null>(null);
-  const readBase = useCallback(() => {
-    if (baseRef.current) return Promise.resolve(baseRef.current);
-    if (!baseLoad.current) {
-      baseLoad.current = fetch("/api/cv")
-        .then(async (r) => {
-          if (!r.ok) throw new Error("load failed");
-          const data = (await r.json()) as { content?: unknown; exists?: unknown };
-          const base = {
-            content: typeof data.content === "string" ? data.content : "",
-            exists: data.exists === true,
-          };
-          baseRef.current = base;
-          return base;
-        })
-        .catch((err) => {
+  const [baseReady, setBaseReady] = useState(false);
+  const [baseFailed, setBaseFailed] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [waitingForBase, setWaitingForBase] = useState(false);
+  const loadBase = useCallback((force = false) => {
+    if (!force && baseRef.current) return Promise.resolve(baseRef.current);
+    if (!force && baseLoad.current) return baseLoad.current;
+    const run = fetch("/api/cv")
+      .then(async (r) => {
+        if (!r.ok) throw new Error("load failed");
+        const data = (await r.json()) as { content?: unknown; exists?: unknown };
+        const base = {
+          content: typeof data.content === "string" ? data.content : "",
+          exists: data.exists === true,
+        };
+        if (baseLoad.current !== run) return base;
+        baseRef.current = base;
+        setBaseReady(true);
+        setBaseFailed(false);
+        setConflict(false);
+        return base;
+      })
+      .catch((err) => {
+        if (baseLoad.current === run) {
           baseLoad.current = null;
-          throw err;
-        });
+          baseRef.current = null;
+          setBaseReady(false);
+          setBaseFailed(true);
+        }
+        throw err;
+      });
+    baseLoad.current = run;
+    return run;
+  }, []);
+  const enterReview = useCallback(() => {
+    if (canReviewIngest(baseRef.current)) {
+      setWaitingForBase(false);
+      setPhase("review");
+      return;
     }
-    return baseLoad.current;
+    setWaitingForBase(true);
+    setTrace("Reading the CV already on this machine…");
+    setPhase("parsing");
   }, []);
   useEffect(() => {
-    void readBase().catch(() => {});
-  }, [readBase]);
+    void loadBase(false).catch(() => {});
+  }, [loadBase]);
+  useEffect(() => {
+    if (waitingForBase && baseReady && canReviewIngest(baseRef.current)) {
+      setWaitingForBase(false);
+      setPhase("review");
+    }
+  }, [waitingForBase, baseReady]);
 
   const readiness = md ? cvReadiness(md) : null;
 
@@ -111,12 +141,12 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       }
       setMd(final.markdown);
       setSeed(final.seed);
-      setPhase("review");
+      enterReview();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "stream error");
       setPhase("error");
     }
-  }, []);
+  }, [enterReview]);
 
   const ingestText = (text: string) => {
     const trimmed = text.trim();
@@ -131,7 +161,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     if (!id) {
       setSeed(null);
       setMd(trimmed);
-      setPhase("review");
+      enterReview();
       return;
     }
     void runStream({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: trimmed, cliId: id }) });
@@ -150,7 +180,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           }
           setSeed(null);
           setMd(t.trim());
-          setPhase("review");
+          enterReview();
         })
         .catch(() => {
           setErr("Couldn't read that file — paste your CV instead.");
@@ -178,23 +208,26 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       return;
     }
     setSaveErr("");
-    setPhase("saving");
-    let base: { content: string; exists: boolean };
-    try {
-      base = await readBase();
-    } catch {
-      setSaveErr("Couldn't read the current CV, so it was not replaced.");
+    const plan = planIngestSave(baseRef.current, { conflict });
+    if (!plan.post) {
+      setSaveErr(
+        plan.reason === "conflict"
+          ? "cv.md changed somewhere else. Load the current file, then save again if you still want to replace it."
+          : "The current CV was not read. Load it before saving.",
+      );
       setPhase("review");
       return;
     }
+    setPhase("saving");
     try {
       const r = await fetch("/api/cv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cvIngestSaveBody(md, base)),
+        body: JSON.stringify(cvIngestSaveBody(md, plan.base)),
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
+        if (r.status === 409) setConflict(true);
         setSaveErr(d.error || "Couldn't save your CV — try again.");
         setPhase("review"); // keep the parsed CV so they don't lose it
         return;
@@ -285,19 +318,62 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     );
   }
 
+  const acceptCurrentFile = async () => {
+    setSaveErr("");
+    setErr("");
+    try {
+      await loadBase(true);
+    } catch {
+      const message = "The current CV could not be read. Load it again before saving.";
+      if (waitingForBase) setErr(message);
+      else setSaveErr(message);
+    }
+  };
+
+  const startOver = () => {
+    baseRef.current = null;
+    baseLoad.current = null;
+    setBaseReady(false);
+    setBaseFailed(false);
+    setConflict(false);
+    setWaitingForBase(false);
+    setMd("");
+    setSeed(null);
+    setSaveErr("");
+    setPhase("input");
+    void loadBase(true).catch(() => {});
+  };
+
   // ── PARSING (the 10s bridge) ──
   if (phase === "parsing") {
     return (
       <div className="rounded-2xl border border-border bg-surface/60 p-6 backdrop-blur-sm">
         <style>{STYLE}</style>
-        <div className="flex items-center gap-2.5">
-          <Loader2 className="size-4 animate-spin text-brand-text" />
-          <span className={`${instrumentSerif.className} text-lg text-foreground`}>{trace || "Reading your CV…"}</span>
-        </div>
-        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-          <span className="size-1.5 rounded-full bg-emerald-500" /> 0 tokens · $0.00 · local
-        </div>
-        {md && <div className="co-cvtrace mt-4 max-h-40 overflow-hidden rounded-lg border border-border bg-surface/40 p-3 text-[11px] text-faint">{md.slice(0, 400)}…</div>}
+        {waitingForBase && baseFailed ? (
+          <div className="space-y-3">
+            <p className="flex items-center gap-1.5 text-[13px] text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="size-3.5 shrink-0" /> The current CV could not be read. Load it again before review.
+            </p>
+            <button
+              type="button"
+              onClick={() => void acceptCurrentFile()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-brand/40"
+            >
+              Load the current CV
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2.5">
+              <Loader2 className="size-4 animate-spin text-brand-text" />
+              <span className={`${instrumentSerif.className} text-lg text-foreground`}>{trace || "Reading your CV…"}</span>
+            </div>
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="size-1.5 rounded-full bg-emerald-500" /> 0 tokens · $0.00 · local
+            </div>
+            {md && <div className="co-cvtrace mt-4 max-h-40 overflow-hidden rounded-lg border border-border bg-surface/40 p-3 text-[11px] text-faint">{md.slice(0, 400)}…</div>}
+          </>
+        )}
       </div>
     );
   }
@@ -323,9 +399,20 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       </div>
       {readiness?.hint && <p className="mb-2 text-[12px] text-amber-600 dark:text-amber-400">{readiness.hint}</p>}
       {saveErr && (
-        <p className="mb-2 flex items-center gap-1.5 text-[12px] text-red-500">
-          <AlertTriangle className="size-3.5 shrink-0" /> {saveErr}
-        </p>
+        <div className="mb-2 space-y-2">
+          <p className="flex items-center gap-1.5 text-[12px] text-red-500">
+            <AlertTriangle className="size-3.5 shrink-0" /> {saveErr}
+          </p>
+          {(conflict || !baseReady) && (
+            <button
+              type="button"
+              onClick={() => void acceptCurrentFile()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-brand/40"
+            >
+              Use the CV file as it is now
+            </button>
+          )}
+        </div>
       )}
       <div className="grid gap-3 md:grid-cols-2">
         <textarea
@@ -349,11 +436,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         </button>
         <button
           type="button"
-          onClick={() => {
-            setMd("");
-            setSeed(null);
-            setPhase("input");
-          }}
+          onClick={startOver}
           className="inline-flex items-center gap-1.5 text-[13px] text-muted transition hover:text-foreground"
         >
           <RotateCcw className="size-3.5" /> Start over

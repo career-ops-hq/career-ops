@@ -12,6 +12,7 @@ import {
   editorReducer,
   editorStatus,
   initialEditor,
+  followUpJob,
   saveFollowUp,
   shouldSave,
 } from "@/lib/cv-editor-state.mjs";
@@ -77,7 +78,7 @@ export function CvEditor() {
         window.dispatchEvent(new CustomEvent("co-cv-saved"));
         const follow = saveFollowUp(stateRef.current, snapshot);
         if (follow) {
-          pendingRef.current = { text: follow.text, keepalive: job.keepalive };
+          pendingRef.current = followUpJob(job, pendingRef.current, follow.text);
           pump(follow.expected);
         }
       })

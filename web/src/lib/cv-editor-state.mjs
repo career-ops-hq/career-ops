@@ -138,6 +138,20 @@ export function saveFollowUp(state, written) {
 }
 
 /**
+ * The save that follows one already in flight. An exit flush may have queued
+ * the newer text with keepalive while the ordinary save was still running.
+ * That flag has to survive, or closing the tab cancels the follow-up.
+ *
+ * @param {{ keepalive?: boolean } | null} running
+ * @param {{ keepalive?: boolean } | null} queued
+ * @param {string} text
+ * @returns {{ text: string, keepalive: boolean }}
+ */
+export function followUpJob(running, queued, text) {
+  return { text, keepalive: Boolean(running && running.keepalive) || Boolean(queued && queued.keepalive) };
+}
+
+/**
  * What to do with the stored draft. Undefined leaves it alone: until the CV
  * has loaded there is nothing to compare it with, and a failed load must not
  * erase the draft the next reload would restore. Null removes it.
