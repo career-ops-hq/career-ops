@@ -249,7 +249,7 @@ report를 저장하고 tracker에 기록한 뒤, `modes/oferta.md` -> Cover Lett
 (ATS 최적화를 위한 공고 키워드 15-20개)
 
 ## Keyword Coverage
-(`node keyword-match.mjs <report>`가 생성 -- coverage %, present, thin, missing)
+(`keyword-match.mjs` (1b)가 생성 -- coverage %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (공고 전문을 그대로 붙여넣음 -- 아래 요구 사항 참고)
@@ -259,11 +259,44 @@ report를 저장하고 tracker에 기록한 뒤, `modes/oferta.md` -> Cover Lett
 
 **Machine Summary(필수):** 헤더 바로 뒤에 YAML 블록을 두고, `batch/batch-prompt.md`의 스키마, 정확한 필드 이름, 규칙을 따릅니다(그 파일이 기준이며 여기서 중복하지 않습니다). `advertised_comp`(공고 금액 그대로, 없으면 `null`), `risk_summary`, `requirement_importance`(블록 B를 행 단위로; `inferred` 제한은 여기에도 적용)를 포함합니다.
 
-**공고 보관(필수, #2789):** 모든 report에는 공고 전문을 담은 `## Job Description (archived verbatim)` 섹션이 반드시 있어야 하며, 요약하거나 바꿔 쓰지 않습니다. 제목은 영어 그대로 둡니다. `check-jd-archive.mjs`가 이름으로 찾습니다. 첫 줄은 화면에 보이는 게시일입니다(`Posted: {날짜 또는 상대 표현}`, 없으면 `Posted: not visible in source`). report 파일 날짜를 쓰지 않습니다. 공고가 너무 길거나 전부 인용할 수 없으면 `archive-posting.mjs <url> --company={company-slug} --report={num}`로 저장하고, 섹션에는 **정확히** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`만 다른 텍스트 없이 씁니다. 자동 저장이 불가능하면(예: URL 없이 붙여넣은 긴 텍스트) 섹션 제목을 `## Job Description (not archived)`로 바꾸고 이유를 적습니다. 대신 요약문을 넣지 않습니다. 전체 규칙은 `modes/oferta.md` (**JD archival**)에 있습니다.
+**공고 보관(필수, #2789):** 모든 report에는 공고 전문을 담은 `## Job Description (archived verbatim)` 섹션이 반드시 있어야 하며, 요약하거나 바꿔 쓰지 않습니다. 제목은 영어 그대로 둡니다. `check-jd-archive.mjs`가 이름으로 찾습니다. 첫 줄은 화면에 보이는 게시일입니다(`Posted: {날짜 또는 상대 표현}`, 없으면 `Posted: not visible in source`). report 파일 날짜를 쓰지 않습니다. 공고가 너무 길거나 전부 인용할 수 없으면 `archive-posting.mjs` (아래 명령)로 저장하고, 섹션에는 **정확히** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`만 다른 텍스트 없이 씁니다. 자동 저장이 불가능하면(예: URL 없이 붙여넣은 긴 텍스트) 섹션 제목을 `## Job Description (not archived)`로 바꾸고 이유를 적습니다. 대신 요약문을 넣지 않습니다. 전체 규칙은 `modes/oferta.md` (**JD archival**)에 있습니다.
+
+**명령 인수(#5853):** 공고 URL, 회사 slug, report 경로를 명령줄에 직접 쓰지 않습니다. 따옴표 안에도 쓰지 않습니다. 파일 도구로 값을 JSON 파일에 쓰고(`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) 아래 명령을 실행합니다. 이 명령은 각 값을 검사하고(slug는 `^[a-z0-9-]+$`와 일치해야 함) 셸 없이 각 값을 별도의 인수로 스크립트에 넘깁니다. 검사에 실패한 값은 실행을 멈춥니다. 값을 고치고, 검사는 절대 고치지 않습니다. 전체 규칙은 `modes/oferta.md`(**Command arguments**)에 있습니다.
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. ATS 키워드 커버리지 삽입
 
-저장 후 `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md`를 실행하고, `## Keyword Coverage` 블록을 추출한 키워드 아래에 붙여넣습니다. 진단용일 뿐이며, 실제 경험과 맞을 때만 키워드를 추가합니다.
+저장 후 `keyword-match.mjs` (아래 명령)를 실행하고, `## Keyword Coverage` 블록을 추출한 키워드 아래에 붙여넣습니다. 진단용일 뿐이며, 실제 경험과 맞을 때만 키워드를 추가합니다.
+
+이를 위해 `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}`를 JSON 파일에 쓰고(위의 **명령 인수** 참고) 다음을 실행합니다:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. tracker 추가 항목 작성
 

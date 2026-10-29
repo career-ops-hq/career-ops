@@ -247,7 +247,7 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 (liste med 15-20 nøgleord fra opslaget til ATS-optimering)
 
 ## Keyword Coverage
-(genereres af `node keyword-match.mjs <report>` -- dækning i %, present, thin, missing)
+(genereres af `keyword-match.mjs` (1b) -- dækning i %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (opslagets fulde tekst, indsat ordret -- se kravet nedenfor)
@@ -257,11 +257,44 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 
 **Machine Summary (obligatorisk):** YAML-blok lige efter hovedet, med skema, eksakte feltnavne og regler fra `batch/batch-prompt.md` (kilden; gentages ikke her). Indeholder `advertised_comp` (opslagets lønbeløb ordret, eller `null`), `risk_summary` og `requirement_importance` (blok B række for række; `inferred`-grænsen gælder også her).
 
-**Arkivering af opslaget (obligatorisk, #2789):** Hver rapport SKAL have et afsnit `## Job Description (archived verbatim)` med opslagets fulde tekst, aldrig opsummeret eller omskrevet. Overskriften forbliver på engelsk: `check-jd-archive.mjs` finder den ved navn. Første linje er den synlige opslagsdato (`Posted: {dato eller relativ tekst}`, eller `Posted: not visible in source`), aldrig rapportfilens dato. Er opslaget for langt eller kan ikke citeres helt, så gem det med `archive-posting.mjs <url> --company={company-slug} --report={num}` og skriv **præcis** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` i afsnittet, uden anden tekst. Er ingen maskinel sikring mulig (fx en lang indsat tekst uden URL), så omdøb afsnittet til `## Job Description (not archived)` og skriv hvorfor. Aldrig en parafrase i stedet; den fulde regel står i `modes/oferta.md` (**JD archival**).
+**Arkivering af opslaget (obligatorisk, #2789):** Hver rapport SKAL have et afsnit `## Job Description (archived verbatim)` med opslagets fulde tekst, aldrig opsummeret eller omskrevet. Overskriften forbliver på engelsk: `check-jd-archive.mjs` finder den ved navn. Første linje er den synlige opslagsdato (`Posted: {dato eller relativ tekst}`, eller `Posted: not visible in source`), aldrig rapportfilens dato. Er opslaget for langt eller kan ikke citeres helt, så gem det med `archive-posting.mjs` (kommandoen nedenfor) og skriv **præcis** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` i afsnittet, uden anden tekst. Er ingen maskinel sikring mulig (fx en lang indsat tekst uden URL), så omdøb afsnittet til `## Job Description (not archived)` og skriv hvorfor. Aldrig en parafrase i stedet; den fulde regel står i `modes/oferta.md` (**JD archival**).
+
+**Kommandoargumenter (#5853):** skriv aldrig opslagets URL, virksomheds-slug eller rapportsti ind i en kommandolinje, heller ikke i anførselstegn. Skriv værdierne i en JSON-fil med dit filværktøj (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) og kør kommandoen nedenfor: den kontrollerer hver værdi (slug'en skal matche `^[a-z0-9-]+$`) og giver hver værdi til scriptet som sit eget argument, uden shell. En værdi, der fejler kontrollen, stopper kørslen: ret værdien, aldrig kontrollen. Hele reglen står i `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. Indsæt ATS-nøgleordsdækning
 
-Efter at rapporten er gemt, kør `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` og indsæt blokken `## Keyword Coverage` under de udtrukne nøgleord. Kun diagnostik: tilføj kun et nøgleord, hvis det svarer til reel erfaring.
+Efter at rapporten er gemt, kør `keyword-match.mjs` (kommandoen nedenfor) og indsæt blokken `## Keyword Coverage` under de udtrukne nøgleord. Kun diagnostik: tilføj kun et nøgleord, hvis det svarer til reel erfaring.
+
+Til kommandoen: skriv `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` i en JSON-fil (se **Kommandoargumenter** ovenfor) og kør:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Registrér i trackeren
 

@@ -22,6 +22,8 @@
  *   - a claim check: repos cv.md names vs. what GitHub records
  *   - the README of each allowlisted repo (#5426), so expand can describe the
  *     user's own private projects that its zero-key public scan cannot see
+ *   - what is new on repos cv.md or article-digest.md already names since the
+ *     previous scan (or --since), so an entry written once is not frozen there
  *
  * Evidence rules:
  *   - Only PRs and commits whose author is the user count. Owning a repo is not
@@ -48,6 +50,8 @@
  * Usage:
  *   node github-evidence.mjs          # writes output/github-evidence-{date}.{md,json}
  *   node github-evidence.mjs --json   # same, and prints the JSON on stdout
+ *   node github-evidence.mjs --since 2026-10-01   # new activity since that day,
+ *                                     # instead of since the previous scan
  *
  * Exit codes:
  *   0  report written (a failed or partial commit search is still a 0: the
@@ -59,20 +63,25 @@
  */
 
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, relative } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { parseDate } from './lib/parse-date.mjs';
+import { digestEntries } from './add-entry.mjs';
 
-const KNOWN_FLAGS = ['--json', '--help', '-h'];
+const KNOWN_FLAGS = ['--json', '--since', '--help', '-h'];
+const VALUE_FLAGS = ['--since'];
 const USAGE = `Usage:
   node github-evidence.mjs          # write output/github-evidence-{date}.{md,json}
   node github-evidence.mjs --json   # also print the JSON on stdout
+  node github-evidence.mjs --since YYYY-MM-DD   # new activity on named repos since that day
 
 Reads PRs and commits you authored through your existing \`gh auth\` (metadata only).
+Without --since, new activity is counted from the previous output/github-evidence-*.json.
 Exit 3 when gh is missing or not logged in: expand then stays zero-key.`;
 
 export const EXIT_GH_UNAVAILABLE = 3;
@@ -525,7 +534,10 @@ const sleepSync = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)
 
 /**
  * What is kept of one commit search result: repo, sha, author login, author
- * date, and the repo's visibility and fork flag. The message is dropped here.
+ * date, commit time, and the repo's visibility and fork flag. The message is
+ * dropped here. `committedAt` (the committer timestamp, else the author's) is
+ * when the commit was applied, which a rebase merge moves and the author date
+ * keeps; it is compared against the previous scan and never reaches the report.
  */
 function commitRow(item) {
   const repo = item?.repository?.full_name;
@@ -536,6 +548,7 @@ function commitRow(item) {
     sha: item.sha,
     login: typeof item.author?.login === 'string' ? item.author.login : null,
     date: String(item.commit?.author?.date || '').slice(0, 10) || null,
+    committedAt: String(item.commit?.committer?.date || item.commit?.author?.date || '') || null,
     private: flag(item.repository.private),
     fork: flag(item.repository.fork),
   };
@@ -659,12 +672,190 @@ export function collectCommits(user, runGh, { repoMeta = new Map(), allowlist = 
   return { commitSearch, commitItems: items, commitCounts, repoMeta: meta };
 }
 
+// ── new activity on repos already named (#5677) ─────────────────────
+// An entry in cv.md or article-digest.md is written once. Without this step a
+// repo they name never comes up again: mergedNotNamed and commitsNotNamed skip
+// it by design, and add-entry.mjs treats its entry as a duplicate. So the entry
+// stays at whatever the first scan saw. These functions find what is new on
+// such a repo since a baseline; expand proposes it as a dated bullet under the
+// existing article-digest entry, through its confirm gate.
+
+const SCAN_FILE = /^github-evidence-(\d{4}-\d{2}-\d{2})\.json$/;
+
+/** Local midnight of a YYYY-MM-DD day, as an ISO instant. */
+export function startOfLocalDay(day) {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toISOString();
+}
+
+/**
+ * The baseline given by `--since YYYY-MM-DD`: that local day from midnight on.
+ *
+ * @returns {object|null} null when the value is not a real date or is after today.
+ */
+export function sinceFromFlag(day, today) {
+  if (!parseDate(day) || day > today) return null;
+  return { status: 'ok', source: 'flag', date: day, at: startOfLocalDay(day), file: null, detail: null };
+}
+
+/**
+ * The baseline given by the previous scan: the newest
+ * `github-evidence-{date}.json` in `outDir` dated before today that reads as a
+ * report (`status: "ok"`). Its `scannedAt` is the exact baseline. A report
+ * written before that field existed gives the start of its day, so work from
+ * earlier that day may be listed again, never missed. Today's own file is not
+ * a baseline, so a second run on the same day compares against the same scan.
+ *
+ * @returns {{status: 'ok'|'none', source: 'previous-scan'|null, date: string|null,
+ *   at: string|null, file: string|null, detail: string|null}}
+ */
+export function findPreviousScan(outDir, today) {
+  let names = [];
+  try { names = readdirSync(outDir); } catch { /* no output/ yet */ }
+  const scans = names.map((n) => SCAN_FILE.exec(n)).filter((m) => m && m[1] < today)
+    .sort((a, b) => b[1].localeCompare(a[1]));
+  const skipped = [];
+  for (const [file, day] of scans) {
+    let report = null;
+    try { report = JSON.parse(readFileSync(join(outDir, file), 'utf8')); } catch { /* unreadable */ }
+    if (report?.status !== 'ok') { skipped.push(`output/${file}`); continue; }
+    const exact = typeof report.scannedAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(report.scannedAt)
+      && Number.isFinite(Date.parse(report.scannedAt));
+    const notes = [];
+    if (skipped.length) notes.push(`skipped unreadable ${skipped.join(', ')}`);
+    if (!exact) notes.push('that report has no scannedAt, so the baseline is the start of its day');
+    return {
+      status: 'ok', source: 'previous-scan', date: day,
+      at: exact ? new Date(report.scannedAt).toISOString() : startOfLocalDay(day),
+      file: `output/${file}`, detail: notes.join('; ') || null,
+    };
+  }
+  const unread = skipped.length ? ` that could be read (skipped ${skipped.join(', ')})` : '';
+  return { status: 'none', source: null, date: null, at: null, file: null, detail: `no earlier output/github-evidence-*.json${unread} and no --since` };
+}
+
+/**
+ * Pure: repos that cv.md or article-digest.md already name, with the merged PRs
+ * and commits that are new on them since `since.at`. Only `contributions` rows
+ * qualify, so the evidence rules hold unchanged: never an own repo or a fork,
+ * and a private repo only when allowlisted. Authorship is re-checked as in
+ * buildEvidence. New merged PRs and new commits are separate figures, never
+ * added together.
+ *
+ * A PR is new when it merged at or after the baseline. A commit is new when it
+ * was applied (committer time) at or after it, so a commit that reached the
+ * default branch through a merge commit keeps its earlier time and is not
+ * counted. When the commit search stopped early, the count is a lower bound
+ * (a rebased commit with an old author date can sit past the cut); when it
+ * failed (or did not run), the count is unknown.
+ *
+ * @param {object} input
+ * @param {object} input.result - buildEvidence() output.
+ * @param {object} input.since - sinceFromFlag() or findPreviousScan() output.
+ * @param {object[]} [input.merged] - The `--merged` search rows buildEvidence read.
+ * @param {object[]} [input.commitItems] - collectCommits() items.
+ * @param {object|null} [input.commitSearch] - collectCommits() search status.
+ * @param {string|null} [input.cvText]
+ * @param {string|null} [input.digestText] - article-digest.md, or null.
+ * @returns {object[]}
+ */
+export function namedWithNewActivity({
+  result, since, merged = [], commitItems = [], commitSearch = null,
+  cvText = null, digestText = null, maxTitles = MAX_TITLES_PER_REPO,
+}) {
+  if (since?.status !== 'ok') return [];
+  const at = Date.parse(since.at);
+  const isNew = (iso) => Date.parse(iso) >= at; // NaN never counts
+  const userKey = result.user.toLowerCase();
+  const cvLower = typeof cvText === 'string' ? cvText.toLowerCase() : null;
+  const digestLines = typeof digestText === 'string' ? digestText.split('\n') : null;
+  const entries = digestLines ? digestEntries(digestText).map((e) => ({
+    name: e.name, text: digestLines.slice(e.start, e.end).join('\n').toLowerCase(),
+  })) : [];
+  const commitsKnown = commitSearch != null && commitSearch.status !== 'failed';
+  // The search is ordered by author date and newness is judged by committer
+  // time, so a search that stopped early never proves it saw every new commit.
+  const lowerBound = commitsKnown && commitSearch.status !== 'ok';
+
+  const rows = [];
+  for (const c of result.contributions) {
+    const key = c.repo.toLowerCase();
+    const matchedOn = cvLower === null ? null : cvMention(cvLower, c.repo);
+    const named = entries.map((e) => ({ name: e.name, matchedOn: cvMention(e.text, c.repo) })).filter((e) => e.matchedOn);
+    if (!matchedOn && !named.length) continue;
+    const seen = new Set();
+    const prs = (merged || []).filter((pr) => {
+      if (String(pr?.author?.login || '').toLowerCase() !== userKey) return false;
+      if (String(pr?.repository?.nameWithOwner || '').toLowerCase() !== key || seen.has(pr.url)) return false;
+      seen.add(pr.url);
+      return isNew(pr.closedAt);
+    });
+    let newCommits = null;
+    if (commitsKnown) {
+      const shas = new Set();
+      for (const x of commitItems || []) {
+        if (String(x?.login || '').toLowerCase() === userKey && String(x.repo).toLowerCase() === key && isNew(x.committedAt)) shas.add(x.sha);
+      }
+      newCommits = { count: shas.size, lowerBound };
+    }
+    if (!prs.length && !(newCommits?.count > 0)) continue;
+    rows.push({
+      repo: c.repo, visibility: c.visibility, stars: c.stars, matchedOn, digestEntries: named,
+      newMerged: prs.length, recentNewMerged: recentTitles(prs, maxTitles), newCommits,
+    });
+  }
+  return rows.sort((a, b) => (b.newMerged - a.newMerged)
+    || ((b.newCommits?.count ?? 0) - (a.newCommits?.count ?? 0)) || a.repo.localeCompare(b.repo));
+}
+
+/** The report with `scannedAt`, `since` and `claimCheck.namedWithNewActivity` added. */
+export function withNamedActivity(result, { scannedAt = null, since, ...input }) {
+  return {
+    ...result,
+    scannedAt,
+    since,
+    claimCheck: { ...result.claimCheck, namedWithNewActivity: namedWithNewActivity({ result, since, ...input }) },
+  };
+}
+
 // ── report ──────────────────────────────────────────────────────────
 
 const fmtStars = (s) => (s == null ? '?' : s >= 1000 ? `${(s / 1000).toFixed(1)}K` : String(s));
 // Backslashes first, so a `\` already in the input cannot pair with the `\` added
 // before a pipe and turn it back into a column delimiter.
 const cell = (s) => String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+/** Markdown lines for `claimCheck.namedWithNewActivity`; none when that step did not run. */
+function renderNamedActivity(result) {
+  const { since } = result;
+  const rows = result.claimCheck?.namedWithNewActivity;
+  if (!since || !Array.isArray(rows)) return [];
+  const md = ['## Named in cv.md or article-digest.md: new activity', ''];
+  if (since.status !== 'ok') {
+    md.push(`Skipped: ${since.detail}. Rerun with \`--since YYYY-MM-DD\` to compare against a date.`, '');
+    return md;
+  }
+  const from = since.source === 'flag' ? `--since ${since.date}` : `previous scan ${since.file}, ${since.at}`;
+  md.push(`Since ${since.date} (${from})${since.detail ? `; ${since.detail}` : ''}. New merged PRs and new commits are separate figures, never added together.`, '');
+  if (!rows.length) {
+    md.push('No new merged PRs or commits on repos cv.md or article-digest.md names.', '');
+    return md;
+  }
+  const fmtNew = (c) => {
+    if (c?.count == null) return '?';
+    if (!c.lowerBound) return String(c.count);
+    return c.count === 0 ? '?' : `≥${c.count}`;
+  };
+  md.push('| Repo | Visibility | Stars | cv.md | article-digest.md | New merged PRs | New commits |', '|---|---|---:|---|---|---:|---:|');
+  for (const r of rows) {
+    const digest = r.digestEntries.map((e) => `${e.name} (${e.matchedOn})`).join('; ') || '—';
+    md.push(`| ${cell(r.repo)} | ${cell(r.visibility)} | ${fmtStars(r.stars)} | ${cell(r.matchedOn ?? '—')} | ${cell(digest)} | ${r.newMerged} | ${fmtNew(r.newCommits)} |`);
+  }
+  md.push('');
+  const titles = rows.flatMap((r) => r.recentNewMerged.map((t) => `- ${r.repo}: merged #${t.number} (${t.date}): ${t.title}`));
+  if (titles.length) md.push(...titles, '');
+  return md;
+}
 
 /** The human-readable report the mode shows next to its confirm table. */
 export function renderMarkdown(result) {
@@ -706,6 +897,7 @@ export function renderMarkdown(result) {
     }
     md.push('');
   }
+  md.push(...renderNamedActivity(result));
   md.push('## Contributions (public + allowlisted private)', '');
   for (const r of result.contributions) {
     md.push(`### ${r.repo} — ${fmtStars(r.stars)} stars${r.visibility === 'private' ? ' (private, allowlisted)' : ''}`);
@@ -752,9 +944,17 @@ export function runCli({
   args = [], dataRoot = getCareerOpsRoot(), runGh = defaultGhRunner,
   profilePath = hasProfileOverride() ? getProfilePath() : getProfilePath(dataRoot),
   today = localToday(), stdout = (s) => process.stdout.write(s), stderr = (s) => process.stderr.write(s),
-  pause = sleepSync,
+  pause = sleepSync, now = () => new Date(),
 } = {}) {
   const asJson = args.includes('--json');
+  let since = null;
+  if (hasFlag(args, '--since')) {
+    since = sinceFromFlag(flagValue(args, '--since'), today);
+    if (!since) {
+      stderr(`github-evidence: --since takes a date as YYYY-MM-DD, on or before today (${today}).\n`);
+      return 1;
+    }
+  }
   const unavailable = (reason, detail) => {
     stderr(`github-evidence: ${detail}. Skipping the GitHub evidence step; expand stays zero-key.\n`);
     if (asJson) stdout(`${JSON.stringify({ status: 'gh-unavailable', reason, detail })}\n`);
@@ -778,6 +978,8 @@ export function runCli({
     stderr(`github-evidence: ignoring github_evidence.private_allowlist entries that are not "owner/repo": ${invalid.join(', ')}\n`);
   }
 
+  // Taken before the first read, so a PR merged while this runs is new next time.
+  const scannedAt = now().toISOString();
   let data;
   try {
     const gh = checkGh(runGh);
@@ -801,7 +1003,16 @@ export function runCli({
 
   const cvPath = join(dataRoot, 'cv.md');
   const cvText = existsSync(cvPath) ? readFileSync(cvPath, 'utf8') : null;
-  const result = buildEvidence({ user, ...data, ...commits, allowlist, cvText, generatedAt: today });
+  const digestPath = join(dataRoot, 'article-digest.md');
+  const digestText = existsSync(digestPath) ? readFileSync(digestPath, 'utf8') : null;
+  // Read before this run writes today's file.
+  since ??= findPreviousScan(join(dataRoot, 'output'), today);
+  if (since.status !== 'ok') {
+    stderr(`github-evidence: ${since.detail}: skipping new activity on repos cv.md or article-digest.md already names.\n`);
+  }
+  const result = withNamedActivity(buildEvidence({ user, ...data, ...commits, allowlist, cvText, generatedAt: today }), {
+    scannedAt, since, merged: data.merged, commitItems: commits.commitItems, commitSearch: commits.commitSearch, cvText, digestText,
+  });
 
   const outDir = join(dataRoot, 'output');
   mkdirSync(outDir, { recursive: true });
@@ -816,6 +1027,6 @@ export function runCli({
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE);
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   process.exitCode = runCli({ args });
 }

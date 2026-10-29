@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a>,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders">700+명의 기여자</a>와 함께</p>
 
 <p align="center">
 <strong>몇 달 동안 이력서를 보내도 답&#8288;이&nbsp;없&#8288;었&#8288;습&#8288;니&#8288;다.</strong><br>
@@ -123,6 +123,8 @@ npx @santifer/career-ops init
 <br>
 
 채용은 저절로 고쳐지지 않습니다. 그것을 겪는 사람들은 고칠 수 있고, 이미 그 방에 모여 서로 메모를 비교하고 서로의 설정을 고쳐 주고 있습니다.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ko-KR" alt="기여자들의 GitHub 아바타가 2026년 4월부터 도착한 순서대로 채워지는 애니메이션 벽. 다음 칸은 비워 두었습니다." width="100%"></a></p>
 
