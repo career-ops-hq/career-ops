@@ -38,7 +38,7 @@ export function StatCard({
         "hover:border-brand/40 hover:bg-surface-hover group-hover:from-brand/20",
       )}
     >
-      <Icon className="size-5 text-brand" />
+      <Icon className="size-5 text-brand-text" />
       <div
         className={cn(
           "mt-3 text-4xl leading-none tabular-nums",
