@@ -40,7 +40,6 @@
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
@@ -2185,6 +2184,11 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
+async function launchChromium(options) {
+  const { chromium } = await import('playwright');
+  return chromium.launch(options);
+}
+
 /**
  * Render an HTML string to a PDF file via headless Chromium.
  *
@@ -2211,7 +2215,33 @@ export async function inlineLocalFonts(html) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  // A passed launchBrowser is a test double and always paints in this process.
+  // The shared painter is only for the batch, which opts in with the env var,
+  // and the painter process itself must not dial its own socket.
+  if (!opts.launchBrowser
+    && process.env.CAREER_OPS_PDF_SHARED === '1'
+    && process.env.CAREER_OPS_PDF_SERVER_PROCESS !== '1') {
+    try {
+      const { renderViaSharedPdfServer } = await import('./lib/pdf-server.mjs');
+      const result = await renderViaSharedPdfServer(
+        html,
+        outputPath,
+        { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
+        fileURLToPath(import.meta.url),
+      );
+      console.log(`✅ PDF generated: ${result.outputPath}`);
+      console.log(`📊 Pages: ${result.pageCount}`);
+      // The painter's own warning goes nowhere, so repeat it here. A strict
+      // overflow already came back as an error.
+      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
+      console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);
+      return result;
+    } catch (err) {
+      if (err?.code !== 'PDF_SERVER_UNAVAILABLE') throw err;
+      console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
+    }
+  }
+  const launchBrowser = opts.launchBrowser || launchChromium;
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });
@@ -2427,7 +2457,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
  * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
  */
 export async function renderBatch(entries, opts = {}) {
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  const launchBrowser = opts.launchBrowser || launchChromium;
   const results = [];
   let browser = null;
   try {
@@ -2463,8 +2493,32 @@ export async function renderBatch(entries, opts = {}) {
   }
 }
 
+async function runPdfServer() {
+  const { startPdfServer } = await import('./lib/pdf-server.mjs');
+  const server = await startPdfServer({
+    rootDir: __dirname,
+    launchBrowser: launchChromium,
+    render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
+  });
+  if (server.alreadyRunning) return;
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close().then(() => process.exit(0), () => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+  await server.closed;
+}
+
 const isMain = isMainModule(import.meta.url);
-if (isMain) {
+if (isMain && process.argv[2] === '--pdf-server') {
+  runPdfServer().then(() => process.exit(0), (err) => {
+    console.error(`❌ PDF browser failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);
     process.exit(1);
