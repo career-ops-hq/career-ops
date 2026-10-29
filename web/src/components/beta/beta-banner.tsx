@@ -101,7 +101,7 @@ export function BetaBanner() {
         <div className="fixed inset-0 z-[96] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Report a bug" onClick={() => setOpen(false)}>
           <div className="w-full max-w-lg rounded-2xl border border-border bg-[var(--bg)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center gap-2">
-              <Bug className="size-4 text-brand" />
+              <Bug className="size-4 text-brand-text" />
               <h2 className="text-sm font-semibold text-foreground">Report a bug · {diag.channel}</h2>
               <button onClick={() => setOpen(false)} aria-label="Close" className="ml-auto text-faint transition-colors hover:text-foreground">
                 <X className="size-4" />
@@ -119,7 +119,7 @@ export function BetaBanner() {
               <button
                 onClick={checkExisting}
                 disabled={searching}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand disabled:opacity-60"
+                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand-text disabled:opacity-60"
               >
                 {searching ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} Check for existing reports first
               </button>
@@ -142,7 +142,7 @@ export function BetaBanner() {
                 <ul className="mt-1.5 space-y-1">
                   {similar.map((s) => (
                     <li key={s.number}>
-                      <a href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-foreground underline-offset-2 transition-colors hover:text-brand hover:underline">
+                      <a href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-foreground underline-offset-2 transition-colors hover:text-brand-text hover:underline">
                         <ThumbsUp className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
                         <span className="font-mono">#{s.number}</span> {s.title.slice(0, 60)}
                       </a>

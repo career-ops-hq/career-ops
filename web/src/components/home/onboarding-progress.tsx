@@ -113,7 +113,7 @@ function Row({ state, label }: { state: "filled" | "template" | "missing"; label
   const hint = state === "template" ? "still the example" : state === "missing" ? "not yet" : "";
   return (
     <li className={`flex items-center gap-2 ${tone}`}>
-      <Icon className={`size-3.5 shrink-0 ${state === "filled" ? "text-brand" : "text-faint"}`} aria-hidden />
+      <Icon className={`size-3.5 shrink-0 ${state === "filled" ? "text-brand-text" : "text-faint"}`} aria-hidden />
       <span className="truncate">{label}</span>
       {hint && <span className="ml-auto shrink-0 text-[11px] text-faint">{hint}</span>}
     </li>
