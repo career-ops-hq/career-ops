@@ -201,7 +201,9 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
       await row("Fixture Alpha").getByRole("checkbox").click();
       await row("Fixture Beta").getByRole("checkbox").click();
       await page.getByRole("button", { name: "Skip selected", exact: true }).click();
-      await page.getByRole("alert").filter({ hasText: "Could not skip every selected role." }).waitFor();
+      // The same sentence is on the page and on the Undo notice. Either one
+      // shows that the failed skip was reported. first() keeps the locator strict.
+      await page.getByRole("alert").filter({ hasText: "Could not skip every selected role." }).first().waitFor();
       await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").waitFor();
       await until(() => betaSeen);
       assert.equal(await row("Fixture Beta").count(), 0);
