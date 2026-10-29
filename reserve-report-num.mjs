@@ -198,7 +198,7 @@ function addLedgerNum(occupied, cell) {
   if (Number.isSafeInteger(n) && n > 0) occupied.add(n);
 }
 
-function occupiedFromLedgers(trackerPath, options) {
+export function occupiedTrackerNumbersFromLedgers(trackerPath, options = {}) {
   const occupied = new Set();
   const paths = ledgerPathsFor(trackerPath, options);
   // status-log.tsv and salary-observations.tsv: tracker# in column 1.
@@ -226,7 +226,7 @@ function collectOccupied(reportsDir, trackerPath, batchStateFile, options) {
   const occupied = occupiedFromReports(reportsDir);
   for (const num of occupiedFromTracker(trackerPath)) occupied.add(num);
   for (const num of occupiedFromFailedBatchState(batchStateFile)) occupied.add(num);
-  for (const num of occupiedFromLedgers(trackerPath, options)) occupied.add(num);
+  for (const num of occupiedTrackerNumbersFromLedgers(trackerPath, options)) occupied.add(num);
   return occupied;
 }
 
