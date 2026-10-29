@@ -266,28 +266,10 @@ This installs the `career-ops` binary globally, so you can run `career-ops init 
 - `npx @santifer/career-ops init`: best for first use; creates a dedicated project folder.
 - `npm i -g @santifer/career-ops`: if you'd rather type `career-ops init` than the `npx` form. It adds no other commands.
 
-### Install as a Claude plugin (Claude desktop app)
+### Other ways to run it
 
-Install career-ops once and use it from any folder in the Claude desktop app's **Code** tab. You don't need to clone anything or open a career-ops folder.
-
-1. In the Claude desktop app, open **Customize → Plugins**.
-2. Select **Add → Add marketplace** and enter `career-ops-hq/career-ops`.
-3. Open **Discover**, find **career-ops**, and select **Add**.
-4. To get new versions without doing anything, open the marketplace you added and turn on **Sync automatically**. **Check for updates** pulls them right away. A new version means a new `version` in `.claude-plugin/plugin.json`. Pushes that leave it unchanged don't reach installs (see [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md#updating)).
-5. Start a new session in the **Code** tab. The first start takes a few extra seconds while career-ops installs its Node packages. Then type `/career-ops:career-ops`, or paste a job URL. On first use it walks you through setup.
-
-By default, your CV, profile, tracker and reports are saved in `~/career-ops-data` (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` picks another folder). They are never saved inside the plugin: a folder inside it is refused, so plugin updates never touch your files.
-
-From the Claude Code CLI, the same install is two commands:
-
-```text
-/plugin marketplace add career-ops-hq/career-ops
-/plugin install career-ops@career-ops
-```
-
-> **Code tab and Claude Code only.** A plugin added in Customize also shows up in Chat and Cowork, but career-ops can't run there as a plugin: Chat has no access to your files, and Cowork can't install the plugin's packages. To use career-ops in Cowork, open a career-ops folder instead ([docs/COWORK.md](docs/COWORK.md)).
-
-Where everything lives, how updates work and how to pick another data folder: [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **From any folder, as a Claude Code plugin:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **Without an AI CLI:** standalone Gemini, Ollama and OpenAI-compatible scripts evaluate a JD on their own. See [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
 
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
@@ -302,7 +284,6 @@ Paste a job URL or description into your AI CLI. career-ops checks that the post
 | CLI | How you ask for `scan` |
 | --- | --- |
 | Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
-| Claude plugin (desktop app or Claude Code) | `/career-ops:career-ops scan` |
 | Pi | `/skill:career-ops scan` |
 | Codex, Cursor, or any other CLI | Plain language: "Run the career-ops scan mode" |
 
@@ -410,27 +391,6 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`update`](modes/update.md) | Update career-ops system files, with a diff preview and compatibility check |
 
 </details>
-
-### Without an AI CLI: the Gemini API script
-
-`gemini-eval.mjs` evaluates a job description with the Gemini API directly. It needs no AI CLI, only Node and a free API key.
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-npm run gemini:eval -- "JD text here"
-```
-
-> **Free tier:** the script works without billing. It uses `gemini-3.6-flash`; rate limits depend on the model and tier (see Google AI docs for current quotas). For the full system at zero cost, see [docs/FREE_TIER.md](docs/FREE_TIER.md).
-
 
 ## Pre-configured Portals
 
