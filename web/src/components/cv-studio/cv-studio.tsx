@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, FileText, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -90,7 +90,10 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   const savedJsonRef = useRef(JSON.stringify(data.edits));
   const savingJsonRef = useRef<string | null>(null);
   const editsRef = useRef(edits);
-  editsRef.current = edits;
+  // After commit, not during render. A discarded render must not publish edits the screen no longer shows.
+  useLayoutEffect(() => {
+    editsRef.current = edits;
+  }, [edits]);
   const tabRef = useRef(Math.random().toString(36).slice(2, 12));
   const revRef = useRef(0);
   const [, rerender] = useState(0);
