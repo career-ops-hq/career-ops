@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { SkillGaps } from "@/components/skill-gaps";
 import remarkGfm from "remark-gfm";
@@ -37,11 +37,13 @@ export function CvEditor() {
   const [importing, setImporting] = useState(false);
   const [importSaving, setImportSaving] = useState(false);
   const stateRef = useRef(state);
-  stateRef.current = state;
   const snapshotPriorRef = useRef(true);
   const runningRef = useRef(false);
   const pendingRef = useRef<{ text: string; keepalive: boolean } | null>(null);
-  if (state.snapshotPrior) snapshotPriorRef.current = true;
+  useLayoutEffect(() => {
+    stateRef.current = state;
+    if (state.snapshotPrior) snapshotPriorRef.current = true;
+  }, [state]);
 
   const pump = useCallback((confirmed?: { content: string; exists: boolean }) => {
     if (runningRef.current) return;
