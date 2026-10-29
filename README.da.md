@@ -277,7 +277,7 @@ Se [docs/SETUP.md](docs/SETUP.md) for den fulde opsætningsguide, [docs/RUNNING_
 
 ## Brug
 
-Indsæt en job-URL eller jobbeskrivelse i din AI-CLI. career-ops tjekker, at et linket opslag stadig er aktivt (indsat tekst har intet link at tjekke), vurderer det op mod dit CV, skriver en rapport, tilpasser en PDF og tilføjer en række til din tracker. Det dækker de fleste dage. Alt andet er en tilstand, du beder om ved navn.
+Indsæt en job-URL eller jobbeskrivelse i din AI-CLI. career-ops tjekker, at et linket opslag stadig er aktivt (indsat tekst har intet link at tjekke), vurderer det op mod dit CV, skriver en rapport, tilpasser dit CV (som PDF som standard) og tilføjer en række til din tracker. Det dækker de fleste dage. Alt andet er en tilstand, du beder om ved navn.
 
 ### Sådan beder du om en tilstand
 
@@ -295,7 +295,7 @@ De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `mod
 
 | Kommando | Hvad den gør |
 | --- | --- |
-| *indsæt en URL eller jobbeskrivelse* | Hele pipelinen: tjek af om opslaget stadig er aktivt (kun URL'er), A-H-vurdering, rapport, tilpasset PDF, tracker-række |
+| *indsæt en URL eller jobbeskrivelse* | Hele pipelinen: tjek af om opslaget stadig er aktivt (kun URL'er), A-H-vurdering, rapport, tilpasset CV (PDF som standard), tracker-række |
 | `scan` | Scan dine portaler for nye opslag og læg dem i indbakken (`data/pipeline.md`) |
 | `pipeline` | Vurdér hver URL, der venter i indbakken |
 | `apply` | Udfyld en ansøgningsformular sammen med dig, felt for felt. Den stopper før Send |
