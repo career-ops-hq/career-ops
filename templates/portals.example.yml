@@ -418,6 +418,40 @@
 #     - "no sponsorship"
 #     - "unable to sponsor"
 
+# -- Experience filter (optional, off unless set) --
+# Reads the years of experience each NEW posting's JD asks for, after every
+# other cut, and marks a posting `above band` when the JD clearly states an
+# overall minimum above your band. By default nothing is dropped: a wrong drop
+# silently costs you a real job, a wrong label costs one glance at a row. Set
+# `action: drop` to remove those postings instead. Your years come from config/profile.yml
+# (candidate.years_of_experience). One JD request per new posting at most, via
+# the ATS's public JSON API: Greenhouse, Lever, Ashby (one request per board),
+# Workday, SmartRecruiters, Workable, Zoho Recruit. Zero LLM tokens. Other hosts
+# fall back to the listing's own description, which is shown but never drops.
+# The first scan with this on reads every new posting's JD, so it runs longer.
+#
+# In band: the JD's minimum is <= your years + stretch_years. A range counts by
+# its floor ("3-5 years" is a 3), and "7 with a BS or 5 with an MS" by its
+# lowest bar, and several required bars by the lowest. Never dropped, only
+# labelled on the pipeline row (`yrs:`): preferred-only and skill-specific
+# figures ("2+ years of SQL"), bars with an "equivalent combination of
+# education and experience" route, JDs that state none, and JDs that could
+# not be read.
+#
+# Independent of skip_tiers: that reads the title, this reads the JD. Use both
+# (skip_tiers drops interns cheaply, before any JD is fetched) or either.
+#
+# experience_filter:
+#   enabled: true
+#   stretch_years: 1     # how far above your years a JD's minimum may go (default 1)
+#   action: label        # label (default: keep every row, mark `above band`) | drop
+#   # years: 4           # overrides candidate.years_of_experience for scanning
+#   # concurrency: 4     # parallel JD requests (1-16)
+#
+# Example, strict: 3 years, stretch_years: 0 keeps "2-4" and "3-5" (floors 2
+# and 3) and marks "4+", "5-7" and "5+" above band (or drops them with
+# `action: drop`).
+
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
 # At least 1 positive must match AND 0 negatives must match (case-insensitive).
