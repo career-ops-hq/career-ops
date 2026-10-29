@@ -1,31 +1,134 @@
-import { resolve, dirname, join, basename, parse, sep } from 'path';
+import { resolve, dirname, join, basename, parse, sep, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, realpathSync } from 'fs';
+import { homedir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// The directories under Claude Code's plugins root that hold a plugin's files
+// on Claude Code's behalf: cache/ (the per-version copy an install loads),
+// marketplaces/ (the marketplace clone, re-fetched on refresh) and synced/
+// (plugins synced from claude.ai). Claude Code replaces each of them on its
+// own schedule, so none of them can hold a user's files.
+const PLUGIN_COPY_SUBDIRS = ['cache', 'marketplaces', 'synced'];
+
+/**
+ * Claude Code's plugins roots: CLAUDE_CODE_PLUGIN_CACHE_DIR when set, and
+ * `plugins/` under the config directory (CLAUDE_CONFIG_DIR, else ~/.claude).
+ * Both are listed because the variable may be set for one process and not
+ * another, and a copy under either is still a copy.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string[]}
+ */
+export function claudePluginsRoots(env = process.env) {
+  const roots = [];
+  const cacheDir = env.CLAUDE_CODE_PLUGIN_CACHE_DIR?.trim();
+  if (cacheDir) roots.push(resolve(cacheDir));
+  const configDir = env.CLAUDE_CONFIG_DIR?.trim();
+  roots.push(join(configDir ? resolve(configDir) : join(homedir(), '.claude'), 'plugins'));
+  return roots;
+}
+
+function spellings(path) {
+  const out = [resolve(path)];
+  try {
+    out.push(realpathSync(path));
+  } catch {
+    // Not on disk yet: the lexical spelling is all there is.
+  }
+  return process.platform === 'win32' ? out.map((p) => p.toLowerCase()) : out;
+}
+
+function isWithin(child, parent) {
+  const rel = relative(parent, child);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+/**
+ * True when `dir` is inside a copy Claude Code keeps for an installed plugin
+ * (see PLUGIN_COPY_SUBDIRS). A checkout loaded in place, such as a marketplace
+ * added from a local path or a project's .claude/skills/, is not a copy.
+ *
+ * @param {string} [dir] Defaults to this file's own directory: the code root
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function isPluginInstallCopy(dir = __dirname, env = process.env) {
+  const candidates = spellings(dir);
+  return claudePluginsRoots(env).some((root) => PLUGIN_COPY_SUBDIRS.some((sub) => {
+    const parents = spellings(join(root, sub));
+    return candidates.some((c) => parents.some((p) => isWithin(c, p)));
+  }));
+}
+
+/**
+ * Where a plugin install keeps the user's files when neither the environment
+ * nor a marker says where: ~/career-ops-data.
+ *
+ * @returns {string}
+ */
+export function pluginDefaultDataRoot() {
+  return join(homedir(), 'career-ops-data');
+}
+
+/**
+ * Thrown by getCareerOpsRoot() when an explicit data root (an environment
+ * variable or the marker file) resolves inside a plugin install copy. Claude
+ * Code deletes that copy on the next plugin update, so every write there would
+ * be lost. The override is refused rather than redirected: it names a folder
+ * on purpose, and silently writing somewhere else would hide the mistake.
+ */
+export class UnsafeDataRootError extends Error {
+  constructor(root, source) {
+    super(
+      `${source} points inside a Claude Code plugin install (${root}), which Claude Code replaces on every plugin update. ` +
+      `Set it to a folder outside ~/.claude/plugins, or remove it to use ${pluginDefaultDataRoot()}.`,
+    );
+    this.name = 'UnsafeDataRootError';
+    this.code = 'CAREER_OPS_UNSAFE_DATA_ROOT';
+    this.root = root;
+    this.source = source;
+  }
+}
+
+function explicitRoot(root, source) {
+  if (isPluginInstallCopy(root)) throw new UnsafeDataRootError(root, source);
+  return root;
+}
 
 /**
  * Returns the resolved career-ops data directory root.
  * Priority: process.env.CAREER_OPS_ROOT or process.env.CAREER_OPS_DATA_DIR >
- * .career-ops-data marker file > codebase root (__dirname).
- * 
+ * .career-ops-data marker file > ~/career-ops-data when the code root is a
+ * Claude Code plugin install copy > codebase root (__dirname).
+ *
  * @returns {string} Absolute path to the data root
+ * @throws {UnsafeDataRootError} When the environment or the marker names a
+ *   folder inside a plugin install copy
  */
 export function getCareerOpsRoot() {
+  const envName = process.env.CAREER_OPS_ROOT?.trim() ? 'CAREER_OPS_ROOT' : 'CAREER_OPS_DATA_DIR';
   const env = process.env.CAREER_OPS_ROOT?.trim() || process.env.CAREER_OPS_DATA_DIR?.trim();
   if (env) {
-    return resolve(__dirname, env);
+    return explicitRoot(resolve(__dirname, env), envName);
   }
   const markerFile = join(__dirname, '.career-ops-data');
   if (existsSync(markerFile)) {
+    let content = '';
     try {
-      const content = readFileSync(markerFile, 'utf-8').trim();
-      if (content) {
-        return resolve(__dirname, content);
-      }
+      content = readFileSync(markerFile, 'utf-8').trim();
     } catch {
       // ignore read errors
     }
+    if (content) {
+      return explicitRoot(resolve(__dirname, content), 'The .career-ops-data marker');
+    }
+  }
+  // A plugin install copy is replaced on every plugin update, so the code
+  // root can't double as the data root there.
+  if (isPluginInstallCopy(__dirname)) {
+    return pluginDefaultDataRoot();
   }
   return __dirname;
 }
