@@ -200,6 +200,10 @@ Alat ini menyusun ulang kalimat di CV Anda, tetapi pantang mengarang bebas. Peng
 
 </details>
 
+## Cara Kerjanya
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-id-dark.svg"><img src="docs/how-it-works-id-light.svg" alt="Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), PDF (output/*.pdf), Entri Tracker (data/applications.md)" width="760"></picture></p>
+
 ## Mulai Cepat (Quick Start)
 
 **Cara tercepat, cukup satu perintah:**
@@ -243,22 +247,15 @@ claude   # atau codex / opencode / qwen / agy / grok
 # "Update my profile with this CV I'm pasting"
 
 # 3. Mulai gunakan
-# Tempel URL lowongan atau teks JD untuk memicu auto-pipeline
-# Jika CLI Anda mendukung slash command, gunakan /career-ops (atau alias spesifik CLI tersebut)
-# Di Codex, minta mode yang sama menggunakan bahasa sehari-hari, misalnya:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Tempel URL lowongan atau teks JD untuk memicu auto-pipeline.
+# Mode lainnya, dan cara memintanya di CLI Anda: lihat Penggunaan di bawah.
 ```
 
 </details>
 
 ### Memindai melalui *outbound proxy*
 
-Fungsi `fetch()` bawaan Node mungkin mengabaikan variabel `HTTP_PROXY`, `HTTPS_PROXY`, dan `NO_PROXY` di dalam *sandbox* yang hanya mengizinkan koneksi lewat *proxy*. Request ke penyedia layanan dapat memanfaatkan variabel-variabel tersebut dengan menjalankan `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. Cara ini menggunakan *proxy dispatcher* yang hanya berlaku per request; request lain yang tidak berkaitan tidak akan terpengaruh, dan tujuan yang tercantum di `NO_PROXY` tetap diperiksa oleh mekanisme perlindungan alamat privat lokal.
-
-Aktifkan *flag* ini **hanya jika *proxy* yang dikonfigurasi memang memblokir koneksi ke alamat privat, *loopback*, dan metadata**. Saat *proxy* melakukan resolusi alamat tujuan dari jarak jauh (*remote*), career-ops tidak dapat memverifikasi alamat akhir tersebut secara lokal; pihak *proxy*-lah yang harus menegakkan batas perlindungan SSRF tersebut. Tanpa pengaturan kepercayaan eksplisit ini, request ke penyedia layanan akan tetap menggunakan jalur transportasi langsung seperti biasa, dan jika terjadi kegagalan DNS, pesan error akan menyebutkan konfigurasi *proxy* yang diperlukan. URL *proxy* yang memuat kredensial wajib menggunakan HTTPS; *proxy* HTTP tanpa kredensial tetap didukung. Instalasi yang sudah ada akan tetap menggunakan jalur langsung setelah pembaruan sistem; variabel *environment* *proxy* saja tidak cukup untuk mengaktifkannya. Sebelum mengaktifkan *flag* ini, jalankan `npm install` di direktori career-ops untuk menginstal dependensi tambahan `undici`. Modul ini hanya dimuat ketika *flag* diaktifkan beserta *proxy* yang terkonfigurasi, sehingga pemindaian langsung tetap berfungsi normal meskipun dependensi tersebut belum terinstal.
+Jika Anda memindai dari *sandbox* yang hanya mengizinkan koneksi lewat *proxy*, jalankan `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. Aktifkan *flag* ini **hanya jika *proxy* yang dikonfigurasi memang memblokir koneksi ke alamat privat, *loopback*, dan metadata**. Langkah lengkapnya (dalam bahasa Inggris) ada di [docs/SETUP.md](docs/SETUP.md#scanning-through-an-outbound-proxy).
 
 ### Instalasi global
 
@@ -272,187 +269,131 @@ Perintah ini menginstal *binary* `career-ops` secara global sehingga Anda bisa m
 - `npx @santifer/career-ops init`: paling pas untuk penggunaan pertama kali; membuatkan folder proyek khusus.
 - `npm i -g @santifer/career-ops`: jika Anda lebih suka mengetik `career-ops init` daripada bentuk `npx`. Instalasi ini tidak menambahkan perintah lain.
 
+### Cara lain untuk menjalankannya
+
+- **Dari folder mana pun, sebagai plugin Claude Code:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **Tanpa CLI AI:** skrip mandiri Gemini, Ollama, dan yang kompatibel dengan OpenAI mengevaluasi sebuah deskripsi pekerjaan sendiri. Lihat [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
+
 > **Sistem ini dirancang agar bisa dikustomisasi langsung oleh AI coding CLI Anda.** Mode, arketipe peran, bobot penilaian, hingga skrip negosiasi -- cukup minta AI CLI Anda untuk mengubahnya. Karena ia membaca file yang sama dengan yang ia gunakan, ia tahu persis bagian mana yang harus diedit.
 
 Lihat [docs/SETUP.md](docs/SETUP.md) untuk panduan instalasi lengkap, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) untuk petunjuk menjalankan career-ops secara hemat memakai model kustom atau lokal (serta [docs/FREE_TIER.md](docs/FREE_TIER.md) untuk menjalankannya tanpa biaya di *free tier* Antigravity CLI), [docs/AUTOMATION.md](docs/AUTOMATION.md) untuk menjadwalkan pemindaian berkala dan resep penyaringan nol-token menjadi daftar incaran (*shortlist*), [docs/KEEPING_PORTALS_LIVE.md](docs/KEEPING_PORTALS_LIVE.md) untuk menjaga daftar perusahaan Anda tetap mutakhir, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) untuk detail alur pengisian formulir ATS otomatis, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) untuk mencocokkan ekspor koneksi LinkedIn dengan daftar perusahaan di *funnel* Anda, serta [docs/FAQ.md](docs/FAQ.md) untuk jawaban atas pertanyaan umum seputar instalasi, termasuk [bagaimana pelacakan sumber cerita (*story provenance*) mencegah munculnya angka karangan](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Prinsip desain dijelaskan di [ARCHITECTURE.md](ARCHITECTURE.md); alur kerja *runtime* dapat dilihat di [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Penggunaan
 
-career-ops menggunakan *router* perintah bersama. Pada CLI yang mendukung *slash command*, tampilannya seperti ini:
+Tempel URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang bertautan masih dibuka (teks yang ditempel tidak punya tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan PDF, dan menambahkan satu baris ke tracker Anda. Itu sudah cukup untuk sebagian besar hari. Selebihnya adalah mode yang Anda minta dengan menyebut namanya.
 
-```
-/career-ops            → Menampilkan semua perintah yang tersedia
-/career-ops {JD}       → AUTO-PIPELINE: evaluasi + laporan + PDF + tracker (tempel teks atau URL)
-/career-ops pipeline   → Memproses URL yang tertunda di kotak masuk (data/pipeline.md)
-/career-ops oferta     → Hanya evaluasi, blok A sampai H (tanpa buat PDF otomatis)
-/career-ops ofertas    → Membandingkan dan mengurutkan beberapa lowongan/tawaran
-/career-ops contacto   → Langkah strategis LinkedIn: cari kontak + buat draf pesan
-/career-ops deep       → Prompt riset mendalam tentang perusahaan
-/career-ops interview-prep → Membuat dokumen persiapan wawancara khusus untuk perusahaan terkait
-/career-ops interview    → Wawancara interaktif untuk onboarding profil/CV awal
-/career-ops master-profile → Mengimpor, meninjau, dan memvalidasi Master Career Profile Anda
-/career-ops eu-swe     → Kalibrasi lamaran SWE pasar Eropa sebelum tahap CV/lamar/wawancara
-/career-ops interview/plan → Rencana persiapan berbasis blok waktu untuk wawancara mendatang
-/career-ops interview/practice → Latihan wawancara, satu pertanyaan tiap giliran beserta umpan balik
-/career-ops interview/debrief → Evaluasi pasca-wawancara: tutup celah kekurangan, prediksi ronde berikutnya
-/career-ops interview-redflag → Menganalisis tanda peringatan (red flag) perusahaan sebelum bergabung
-/career-ops pdf        → Hanya buat PDF, CV yang dioptimalkan untuk ATS
-/career-ops text       → CV Markdown yang disesuaikan (mengikuti format cv.md, tanpa PDF)
-/career-ops latex      → Mengekspor CV sebagai file .tex LaTeX/Overleaf
-/career-ops latex-tex  → Menyesuaikan file resume.tex milik Anda secara langsung (opsional; cv.md tetap menjadi bawaan)
-/career-ops cover      → Cover letter: tempel JD mandiri atau jalankan /career-ops cover {slug}
-/career-ops email      → Draf email lamaran formal (hanya draf; tidak pernah mengirim, submit, atau mengeklik)
-/career-ops add        → Menambahkan proyek/makalah/peran ke CV Anda (ambil data + pratinjau + konfirmasi)
-/career-ops expand     → Menemukan dan menambahkan kompetensi yang belum tercatat dari tautan profil secara otomatis
-/career-ops training   → Mengevaluasi kursus/sertifikasi terhadap tujuan utama (North Star) Anda
-/career-ops project    → Mengevaluasi ide proyek portofolio
-/career-ops tracker    → Ringkasan status seluruh lamaran
-/career-ops agent-inbox → Mengantrekan/memproses permintaan untuk sesi berikutnya (data/agent-inbox.md)
-/career-ops apply      → Asisten pengisian lamaran langsung (membaca formulir + menyiapkan jawaban)
-/career-ops scan       → Memindai portal kerja dan menemukan lowongan baru
-/career-ops discover   → Memetakan daftar perusahaan ke papan ATS yang bisa dipindai + menambahkannya ke portals.yml (nol-token)
-/career-ops batch      → Pemrosesan batch dengan worker paralel
-/career-ops patterns   → Menganalisis pola penolakan dan mempertajam target lamaran
-/career-ops offer-prep → Membaca surat tawaran/kontrak kerja bersama kandidat: bedah pasal + daftar pertanyaan untuk pengacara (bukan nasihat hukum)
-/career-ops titles     → Menyarankan nama posisi/jabatan serupa dari CV Anda untuk memperluas pencarian
-/career-ops upskill    → Analisis gabungan kesenjangan keahlian (skill-gap) dari laporan evaluasi Anda
-/career-ops followup   → Pelacak ritme follow-up: menandai yang lewat tenggat dan menyiapkan drafnya
-/career-ops reply-watch → Mengklasifikasikan balasan perusahaan dan menyarankan pembaruan status di tracker
-/career-ops outcome    → Mencatat hasil akhir lamaran & mengarsipkan dokumen terkait
-/career-ops calibrate  → Laporan tinjauan: apakah skor evaluasi Anda akurat memprediksi hasil di dunia nyata? Membaca data /outcome; tidak pernah mengubah rumus penilaian
-/career-ops update     → Memperbarui file sistem career-ops dengan pratinjau diff + pemeriksaan kompatibilitas
-```
+### Cara meminta sebuah mode
 
-Atau cukup tempelkan URL maupun deskripsi lowongan kerja secara langsung -- career-ops akan mendeteksinya secara otomatis dan menjalankan seluruh rangkaian *pipeline*.
+| CLI | Cara meminta `scan` |
+| --- | --- |
+| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex, Cursor, atau CLI lainnya | Bahasa biasa: "Run the career-ops scan mode" |
 
-Di Codex, ketersediaan *slash command* tidak selalu dijamin. Gunakan nama mode yang sama di dalam *prompt* biasa, atau panggil melalui `codex exec`.
+`/career-ops` tanpa tambahan apa pun menampilkan menu perintah. Bahasa biasa berfungsi di semua CLI.
 
-## Cara Kerjanya
+Semuanya memakai satu router yang sama, `.agents/skills/career-ops/SKILL.md`, dan berkas `modes/*.md` yang sama, sehingga sebuah mode berperilaku sama di CLI mana pun. Perintah slash tidak dijamin di Codex: minta dengan bahasa biasa, atau jalankan satu prompt secara headless dengan `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cara menjalankannya di setiap CLI yang didukung, perintah headless untuk CLI yang memilikinya, dan catatan penyiapan per CLI seperti `/trust` milik Pi ada di [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-id-dark.svg"><img src="docs/how-it-works-id-light.svg" alt="Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), PDF (output/*.pdf), Entri Tracker (data/applications.md)" width="760"></picture></p>
+### Perintah sehari-hari
 
-## Integrasi Antigravity CLI
+| Perintah | Fungsinya |
+| --- | --- |
+| *tempel URL atau deskripsi lowongan* | Pipeline lengkap: pemeriksaan apakah lowongan masih dibuka (hanya untuk URL), evaluasi A-H, laporan, PDF yang disesuaikan, baris di tracker |
+| `scan` | Memindai portal Anda untuk mencari lowongan baru dan menambahkannya ke kotak masuk (`data/pipeline.md`) |
+| `pipeline` | Mengevaluasi setiap URL yang menunggu di kotak masuk |
+| `apply` | Mengisi formulir lamaran bersama Anda, kolom demi kolom. Berhenti sebelum Kirim |
+| `tracker` | Posisi setiap lamaran saat ini |
+| `followup` | Lamaran mana yang waktunya ditindaklanjuti, beserta draf |
 
-career-ops mendukung Antigravity CLI secara bawaan (*native*), sama seperti dukungannya terhadap Claude Code dan OpenCode. Semua *slash command* tersedia melalui satu pintu masuk *skill* bersama dengan menggunakan logika evaluasi `modes/*.md` yang sama.
+<details>
+<summary><b>Semua perintah, menurut tahap pencarian</b></summary>
 
-Google telah mengalihkan akses Gemini CLI konsumen ke Antigravity CLI. File `GEMINI.md` kini berfungsi sebagai pelindung kompatibilitas (*no-op guard*) agar Antigravity tidak menduplikasi instruksi proyek secara ganda saat membaca `AGENTS.md` dan `GEMINI.md` sekaligus.
+`oferta`, `ofertas`, dan `contacto` tetap memakai nama asli bahasa Spanyol: tawaran, beberapa tawaran, kontak.
 
-### Antigravity CLI Native
+**Cari posisi**
 
-```bash
-# 1. Jalankan di dalam direktori career-ops
-cd career-ops
-agy
+| Perintah | Fungsinya |
+| --- | --- |
+| [`scan`](modes/scan.md) | Memindai portal dan menemukan lowongan baru |
+| [`discover`](modes/discover.md) | Mengubah daftar nama perusahaan menjadi papan ATS yang dapat dipindai dan menambahkannya ke `portals.yml` (tanpa token) |
+| [`pipeline`](modes/pipeline.md) | Memproses URL yang tertunda di kotak masuk (`data/pipeline.md`) |
+| [`triage`](modes/triage.md) | Penyaringan awal cepat (lanjut atau tidak) berdasarkan `modes/_brief.md`, sebelum evaluasi lengkap (tidak menulis berkas) |
+| [`batch`](modes/batch.md) | Mengevaluasi banyak lowongan dengan worker headless paralel |
+| [`titles`](modes/titles.md) | Menyarankan jabatan yang berdekatan dari CV Anda untuk memperluas pencarian |
 
-# 2. Gunakan perintah terpadu /career-ops beserta sub-perintahnya:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**Evaluasi sebuah posisi**
 
-*Skill* ini didefinisikan menggunakan standar terbuka di `.agents/skills/career-ops/SKILL.md` dan dihubungkan (*symlink*/referensi) ke masing-masing CLI yang didukung (misalnya `.claude/`, `.qwen/`, `.antigravitycli/`, `.grok/`). Cursor secara otomatis mengenali *skill* bersama yang ada di dalam `.agents/skills/`.
+| Perintah | Fungsinya |
+| --- | --- |
+| *tempel URL atau deskripsi lowongan* | [Auto-pipeline](modes/auto-pipeline.md): evaluasi + laporan + PDF + entri tracker |
+| [`oferta`](modes/oferta.md) | Hanya evaluasi, blok A sampai H (tanpa PDF) |
+| [`ofertas`](modes/ofertas.md) | Membandingkan dan mengurutkan beberapa lowongan/tawaran |
+| [`deep`](modes/deep.md) | Prompt riset mendalam tentang perusahaan |
+| [`eu-swe`](modes/regional/eu-swe.md) | Mengkalibrasi lamaran rekayasa perangkat lunak di Eropa sebelum CV, melamar, atau wawancara |
 
-## Integrasi Codex
+**Melamar**
 
-career-ops mendukung Codex melalui *router* bersama yang sama, namun cara pemanggilannya sedikit berbeda dari CLI yang mendaftarkan *slash command* secara otomatis. Untuk panduan lengkapnya, lihat [docs/CODEX.md](docs/CODEX.md).
+| Perintah | Fungsinya |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | CV yang dioptimalkan untuk ATS dalam bentuk PDF |
+| [`ats`](modes/ats.md) | Pemeriksaan keramahan ATS pada CV yang dihasilkan: skor dan masalah yang dapat diperbaiki |
+| [`text`](modes/text.md) | CV yang disesuaikan dalam markdown (mencerminkan `cv.md`, tanpa PDF) |
+| [`latex`](modes/latex.md) | Mengekspor CV sebagai `.tex` LaTeX/Overleaf |
+| [`latex-tex`](modes/latex-tex.md) | Menyesuaikan `resume.tex` Anda sendiri di tempat (opsional; `cv.md` tetap menjadi default) |
+| [`cover`](modes/cover.md) | Surat lamaran, dari deskripsi pekerjaan yang ditempel atau laporan yang sudah dievaluasi (`cover {slug}`) |
+| [`email`](modes/email.md) | Draf email lamaran formal. Hanya draf: tidak pernah mengirim, menyerahkan, atau mengklik |
+| [`contacto`](modes/contacto.md) | Mencari hiring manager, rekruter, atau rekan sejawat, lalu membuat draf pesan LinkedIn |
+| [`apply`](modes/apply.md) | Asisten lamaran langsung (Playwright dari checkout ini). Tidak mengirim lamaran |
 
-### Codex Interaktif
+**Wawancara**
 
-```bash
-cd career-ops
-codex
-```
+| Perintah | Fungsinya |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | Dokumen persiapan wawancara khusus perusahaan |
+| [`interview/plan`](modes/interview/plan.md) | Rencana persiapan berbasis blok waktu untuk wawancara yang akan datang |
+| [`interview/practice`](modes/interview/practice.md) | Latihan wawancara, satu pertanyaan sekali waktu, dengan umpan balik |
+| [`interview/debrief`](modes/interview/debrief.md) | Evaluasi setelah wawancara: tutup celah, perkirakan putaran berikutnya |
+| [`interview-redflag`](modes/interview-redflag.md) | Menganalisis tanda-tanda peringatan dari pemberi kerja sebelum Anda bergabung |
 
-*Slash command* tidak selalu tersedia di Codex. Jika `/career-ops` tidak muncul, minta Codex menjalankan modenya secara langsung menggunakan kalimat biasa:
+**Setelah melamar**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| Perintah | Fungsinya |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | Ringkasan status seluruh lamaran |
+| [`followup`](modes/followup.md) | Ritme tindak lanjut: menandai lamaran yang terlambat, membuat draf |
+| [`reply-watch`](modes/reply-watch.md) | Mengklasifikasikan balasan pemberi kerja dan menyarankan pembaruan tracker |
+| [`outcome`](modes/outcome.md) | Mencatat hasil sebuah lamaran dan mengarsipkan artefaknya |
+| [`offer-prep`](modes/offer-prep.md) | Membaca tawaran atau kontrak yang Anda terima bersama Anda: menelusuri klausul dan pertanyaan untuk pengacara (bukan nasihat hukum) |
 
-### Codex Sekali Jalan (`codex exec`)
+**Profil dan CV Anda**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| Perintah | Fungsinya |
+| --- | --- |
+| [`interview`](modes/interview.md) | Penyiapan profil: wawancara interaktif tentang pengalaman Anda yang membangun CV dan profil Anda (bukan latihan wawancara) |
+| [`intake`](modes/intake.md) | Membangun atau memperkaya profil Anda dari berkas di `documents/` (CV induk, ekspor LinkedIn). Tidak ada yang ditulis tanpa konfirmasi Anda |
+| [`master-profile`](modes/master-profile.md) | Mengimpor, meninjau, dan memvalidasi Master Career Profile Anda, lalu menyiapkan fakta terpilih sebagai poin CV |
+| [`add`](modes/add.md) | Menambahkan proyek, makalah, atau peran ke CV Anda (ambil data, pratinjau, konfirmasi) |
+| [`expand`](modes/expand.md) | Menemukan kompetensi yang belum ada di CV Anda dari tautan profil Anda |
+| [`retro`](modes/retro.md) | Meninjau sesi ini dan menyimpan apa yang Anda ajarkan sebagai aturan (hanya menulis yang Anda terima) |
 
-## Integrasi Grok Build CLI
+**Perbaiki bidikan Anda**
 
-career-ops mendukung Grok Build CLI secara *native*, sama seperti Claude Code dan OpenCode. `AGENTS.md` dimuat secara otomatis sebagai aturan proyek, dan semua *slash command* dapat diakses lewat pintu masuk *skill* bersama.
+| Perintah | Fungsinya |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | Menganalisis pola penolakan dan memperbaiki bidikan |
+| [`calibrate`](modes/calibrate.md) | Memeriksa apakah skor evaluasi Anda memprediksi hasil nyata. Bersifat saran: tidak pernah mengubah penilaian |
+| [`upskill`](modes/upskill.md) | Analisis kesenjangan keterampilan dari seluruh laporan Anda yang sudah dievaluasi |
+| [`training`](modes/training.md) | Mengevaluasi kursus atau sertifikasi terhadap North Star Anda |
+| [`project`](modes/project.md) | Mengevaluasi ide proyek portofolio |
 
-### Grok Build CLI Native
+**Sistem**
 
-```bash
-# 1. Jalankan di dalam direktori career-ops
-cd career-ops
-grok
+| Perintah | Fungsinya |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | Mengantrekan permintaan untuk sesi berikutnya dan mengerjakannya saat itu (`data/agent-inbox.md`). `inbox` juga berfungsi |
+| [`update`](modes/update.md) | Memperbarui berkas sistem career-ops, dengan pratinjau diff dan pemeriksaan kompatibilitas |
 
-# 2. Gunakan perintah terpadu /career-ops beserta sub-perintahnya:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-Untuk menjalankan *batch worker* secara *headless*, gunakan `grok -p "prompt"` (tambahkan `--yolo` untuk menyetujui eksekusi alat secara otomatis).
-
-## Integrasi Pi
-
-career-ops mendukung [Pi](https://github.com/earendil-works/pi) secara *native* tanpa memerlukan file pembungkus (*wrapper*) tambahan: Pi langsung membaca `AGENTS.md` dari *root* repositori sebagai konteks proyek dan mengenali *skill* bersama di `.agents/skills/career-ops/SKILL.md` secara mandiri. *Router* perintah kemudian dapat dipanggil lewat `/skill:career-ops`.
-
-### Pi Native
-
-```bash
-# 1. Jalankan di dalam direktori career-ops
-cd career-ops
-pi
-
-# 2. Gunakan skill bersama beserta sub-perintahnya:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### Pi Sekali Jalan (`pi -p`)
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-Jika versi Pi yang Anda gunakan membatasi sumber daya proyek dengan persetujuan kepercayaan (*trust decision*), jalankan `/trust` satu kali di dalam repositori lalu mulai ulang `pi` agar *skill* proyek dimuat (`/trust` berlaku untuk proses Pi berikutnya), atau jalankan dengan opsi `-a` yang langsung memberikan izin untuk satu sesi tanpa perlu memulai ulang.
-
-### Skrip Mandiri Gemini API (Tanpa perlu instalasi CLI)
-
-```bash
-# 1. Dapatkan API key gratis di https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit file .env, isi GEMINI_API_KEY=key_anda_di_sini
-
-# 2. Instal dependensi
-npm install
-
-# 3. Evaluasi deskripsi pekerjaan (JD)
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # antrekan permintaan untuk sesi berikutnya
-npm run gemini:eval -- "Teks JD di sini"
-```
-
-> **Free tier:** Kedua opsi di atas dapat berjalan tanpa perlu kartu kredit/penagihan (*billing*). CLI *native* menggunakan Google OAuth; sedangkan skrip API menggunakan `gemini-3.6-flash` (batas pemakaian/*rate limit* bergantung pada model dan tingkatan akun; lihat dokumentasi Google AI untuk kuota terbaru).
+</details>
 
 ## Portal yang Sudah Dikonfigurasi
 
