@@ -26,7 +26,9 @@ const STYLE = `
 .co-mnav{position:sticky;top:0;z-index:30;background:var(--bg);padding-top:calc(env(safe-area-inset-top) + .8rem)}
 .co-mscrim{position:fixed;inset:0;z-index:60;background:rgba(8,8,12,.45);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .3s ease}
 .co-mscrim.open{opacity:1;pointer-events:auto}
-.co-mdrawer{position:fixed;top:0;right:0;bottom:0;z-index:61;width:min(20rem,86vw);display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;transform:translateX(102%);transition:transform .34s cubic-bezier(.32,.72,0,1);will-change:transform;box-shadow:-16px 0 48px -16px rgba(0,0,0,.4);padding-top:calc(env(safe-area-inset-top) + .25rem)}
+/* Unlayered, so no display here or it beats md:hidden. Closed, the extra 6rem
+   moves the shadow's blur and the html scrollbar gutter off screen. */
+.co-mdrawer{position:fixed;top:0;right:0;bottom:0;z-index:61;width:min(20rem,86vw);overflow-y:auto;overscroll-behavior:contain;transform:translateX(calc(100% + 6rem));transition:transform .34s cubic-bezier(.32,.72,0,1);will-change:transform;box-shadow:-16px 0 48px -16px rgba(0,0,0,.4);padding-top:calc(env(safe-area-inset-top) + .25rem)}
 .co-mdrawer.open{transform:translateX(0)}
 .co-msafe{padding-bottom:calc(1rem + env(safe-area-inset-bottom))}
 .co-pulse{animation:co-pulse 1.6s ease-in-out infinite}
@@ -80,6 +82,17 @@ export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
     };
   }, [open]);
 
+  // md:hidden conceals the drawer on desktop but leaves `open` set, so the
+  // scroll lock above would stay after a resize. Close when the desktop layout applies.
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 48rem)");
+    const closeOnDesktop = () => {
+      if (desktop.matches) setOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
+  }, []);
+
   // Swipe-right-to-close.
   const drag = useRef({ x0: 0, dx: 0, active: false });
   const onTouchStart = (e: React.TouchEvent) => {
@@ -132,7 +145,7 @@ export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
         aria-modal="true"
         aria-label="Navigation menu"
         inert={!open}
-        className={cn("co-mdrawer border-l border-border bg-surface md:hidden", open && "open")}
+        className={cn("co-mdrawer flex flex-col border-l border-border bg-surface md:hidden", open && "open")}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

@@ -91,7 +91,7 @@ export function ReportView({
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
       <Link
         href={backHref}
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
       >
         <ArrowLeft className="size-4" /> Pipeline
       </Link>
@@ -116,7 +116,7 @@ export function ReportView({
           {applyHref && (
             <Link
               href={applyHref}
-              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
             >
               Apply checklist
             </Link>
@@ -149,7 +149,7 @@ export function ReportView({
                 href={applyUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
+                className="inline-flex items-center justify-center gap-1 text-brand-text hover:underline max-sm:min-h-[44px]"
               >
                 posting <ExternalLink className="size-3" />
               </a>

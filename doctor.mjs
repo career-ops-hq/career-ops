@@ -5,10 +5,10 @@
  * Checks all prerequisites and prints a pass/fail checklist.
  */
 
-import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { join, dirname, resolve } from 'path';
+import { delimiter, join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
@@ -741,10 +741,68 @@ function isPlaywrightMcpConfigured(root, activeCli) {
 
 // CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
 // runtime marker (OPENCODE=1 → opencode) > checkout hint (an opencode.json
-// with no Claude MCP config beside it) > default ('claude'). An unknown value
-// at ANY level returns the sentinel 'unknown' and produces no output —
-// CLI-dependent checks are silently skipped. .env parsing is best-effort:
-// missing file is normal, malformed values are caught per call below.
+// with no Claude MCP config beside it) > one other CLI executable on PATH >
+// several other CLIs on PATH (unset, so the user picks) > default ('claude').
+// An unknown value at ANY explicit level returns the sentinel 'unknown' and
+// produces no MCP output — CLI-dependent checks are silently skipped. .env
+// parsing is best-effort: missing file is normal, malformed values are caught
+// per call below.
+//
+// The binary name is the id, except Antigravity, which installs as `agy`.
+// Same mapping the web UI uses. A new CLI in AGENT_CLIS is found under its id.
+const CLI_BIN = Object.fromEntries(AGENT_CLIS.map((id) => [id, id === 'antigravity' ? 'agy' : id]));
+
+// Executable file on PATH. stat + X_OK, never a --version spawn: doctor stays
+// offline, and a CLI that prints to the terminal on startup must not run just
+// because setup is being checked. A directory, or a file without the execute
+// bit, is not an install.
+function cliExecutableOnPath(bin) {
+  const pathEnv = process.env.PATH;
+  // Unset or empty PATH means nothing is installed. A hermetic run keeps the
+  // claude default. A set PATH can still contain an empty component.
+  if (!pathEnv) return false;
+  const exts = process.platform === 'win32'
+    ? ['', ...(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((ext) => ext.trim()).filter(Boolean)]
+    : [''];
+  for (const dir of pathEnv.split(delimiter)) {
+    // POSIX searches the current directory for an empty component (a leading,
+    // trailing, or doubled separator). Windows does not.
+    const searchDir = dir || (process.platform === 'win32' ? '' : '.');
+    if (!searchDir) continue;
+    for (const ext of exts) {
+      const candidate = join(searchDir, bin + ext);
+      try {
+        if (!statSync(candidate).isFile()) continue;
+        accessSync(candidate, constants.X_OK);
+        return true;
+      } catch {
+        // Absent, or present but not executable.
+      }
+    }
+  }
+  return false;
+}
+
+// PATH is only consulted when nothing else named a CLI. claude on PATH, or no
+// known CLI at all, keeps the historical default so a hermetic run (CI, a
+// machine with nothing installed) does not change. One other CLI is unambiguous.
+// Two or more, with claude absent, is a guess — report them and ask for
+// remember-cli instead of checking Claude's plugin.
+function resolveCliFromPath() {
+  const present = AGENT_CLIS.filter((id) => cliExecutableOnPath(CLI_BIN[id]));
+  if (present.includes('claude') || present.length === 0) {
+    return { cli: 'claude', source: 'default' };
+  }
+  if (present.length === 1) {
+    return { cli: present[0], source: 'path' };
+  }
+  return {
+    cli: 'unset',
+    source: 'path',
+    warning: `Several agent CLIs are on PATH (${present.join(', ')}) and none is selected. Pick one with \`node remember-cli.mjs <cli>\`.`,
+  };
+}
+
 function resolveActiveCli() {
   if (cliFlag !== undefined && cliFlag !== null) {
     if (!AGENT_CLIS.includes(cliFlag)) {
@@ -790,12 +848,14 @@ function resolveActiveCli() {
   if (hasOpenCodeCfg && !hasClaudeCfg) {
     return { cli: 'opencode', source: 'auto' };
   }
-  return { cli: 'claude', source: 'default' };
+  return resolveCliFromPath();
 }
 
 function checkPlaywrightMcp(root, activeCli) {
-  // Unknown CLI (typo / not in AGENT_CLIS).
-  if (activeCli === 'unknown') return null;
+  // Unknown CLI (typo / not in AGENT_CLIS), or several CLIs on PATH and no
+  // selection yet. Neither has a config to scan, and neither should be handed
+  // another CLI's install command.
+  if (activeCli === 'unknown' || activeCli === 'unset') return null;
 
   // Known CLI without an MCP file mapping.
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
@@ -1546,7 +1606,7 @@ function onboardingState(root) {
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
-  const playwrightMcp = activeCli !== 'unknown' && MCP_CONFIGS.find((c) => c.cli === activeCli)
+  const playwrightMcp = activeCli !== 'unknown' && activeCli !== 'unset' && MCP_CONFIGS.find((c) => c.cli === activeCli)
     ? { [activeCli]: mcpCheck?.pass === true }
     : {};
 
