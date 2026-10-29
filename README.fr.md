@@ -279,7 +279,7 @@ Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/
 
 ## Utilisation
 
-Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte un PDF et ajoute une ligne à ton tracker. Cela couvre la plupart des jours. Tout le reste est un mode que tu demandes par son nom.
+Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela couvre la plupart des jours. Tout le reste est un mode que tu demandes par son nom.
 
 ### Demander un mode
 
@@ -297,7 +297,7 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 
 | Commande | Ce qu'elle fait |
 | --- | --- |
-| *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-H, rapport, PDF adapté, ligne dans le tracker |
+| *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-H, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
 | `scan` | Scanner tes portails pour trouver de nouvelles offres et les ajouter à la boîte d'entrée (`data/pipeline.md`) |
 | `pipeline` | Évaluer chaque URL qui attend dans la boîte d'entrée |
 | `apply` | Remplir un formulaire de candidature avec toi, champ par champ. Elle s'arrête avant l'envoi |
