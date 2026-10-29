@@ -38,6 +38,8 @@ test("hiding a bullet and leaving the studio keeps the hide, and the status does
   const autosaveHeld = new Promise((resolve) => { releaseAutosave = resolve; });
   let markAutosave;
   const autosaveSeen = new Promise((resolve) => { markAutosave = resolve; });
+  let autosaveSettled;
+  const autosaveDone = new Promise((resolve) => { autosaveSettled = resolve; });
   let markExit;
   const exitSeen = new Promise((resolve) => { markExit = resolve; });
   let puts = 0;
@@ -47,7 +49,14 @@ test("hiding a bullet and leaving the studio keeps the hide, and the status does
     if (puts === 1) {
       markAutosave();
       await autosaveHeld;
-      await route.continue();
+      try {
+        await route.continue();
+      } catch (error) {
+        // Navigation aborts the held autosave. Playwright then refuses a second continue.
+        if (!(error instanceof Error) || !error.message.includes("already handled")) throw error;
+      } finally {
+        autosaveSettled();
+      }
       return;
     }
     await route.continue();
@@ -75,6 +84,7 @@ test("hiding a bullet and leaving the studio keeps the hide, and the status does
   }
   assert.deepEqual(hidden, [section0Item0Bullet0]);
   releaseAutosave();
+  await autosaveDone;
   await page.unroute("**/api/cv-studio/**");
 
   await page.goto(`${origin.origin}/pipeline/11/cv-studio`);
