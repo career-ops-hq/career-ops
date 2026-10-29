@@ -43,11 +43,13 @@ export function editorReducer(state, action) {
     case "loaded": {
       const server = typeof action.content === "string" ? action.content : "";
       const draft = action.draft;
+      const bases = [];
+      if (draft && typeof draft.base === "string") bases.push(draft.base);
+      if (draft && typeof draft.inflight === "string" && !bases.includes(draft.inflight)) bases.push(draft.inflight);
       const restore =
         !!draft &&
-        typeof draft.base === "string" &&
         typeof draft.content === "string" &&
-        draft.base === server &&
+        bases.includes(server) &&
         draft.content !== server;
       return {
         phase: "ready",
@@ -91,10 +93,14 @@ export function editorReducer(state, action) {
 export function editorStatus(state) {
   if (state.phase === "loading") return { label: "Loading", canSave: false };
   if (state.phase !== "ready") return { label: "Could not load", canSave: false };
+  if (state.inflight !== null && state.inflight !== state.content && state.content === state.saved) {
+    return { label: "Saving", canSave: false };
+  }
   if (state.content !== state.saved) {
     if (state.inflight === state.content) return { label: "Saving", canSave: false };
     return { label: "Unsaved", canSave: state.inflight === null };
   }
+  if (!state.exists) return { label: "No file yet", canSave: false };
   return { label: "Saved", canSave: false };
 }
 
@@ -124,6 +130,10 @@ export function draftChange(state) {
 
 /** @param {EditorState} state @returns {CvDraft} */
 export function draftToStore(state) {
-  if (state.phase !== "ready" || state.content === state.saved) return null;
-  return { base: state.saved, content: state.content };
+  if (state.phase !== "ready") return null;
+  const inflight = typeof state.inflight === "string" && state.inflight !== state.saved ? state.inflight : null;
+  if (state.content === state.saved && inflight === null) return null;
+  const draft = { base: state.saved, content: state.content };
+  if (inflight !== null) draft.inflight = inflight;
+  return draft;
 }

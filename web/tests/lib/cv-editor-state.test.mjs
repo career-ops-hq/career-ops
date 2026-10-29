@@ -94,6 +94,50 @@ test("a draft written on top of the file comes back, and a draft for an older fi
   assert.equal(editorStatus(stale).label, "Saved");
 });
 
+test("an empty editor does not say Saved when cv.md does not exist", () => {
+  const state = editorReducer(initialEditor(), { type: "loaded", content: "", exists: false, draft: null });
+  assert.equal(state.exists, false);
+  assert.equal(editorStatus(state).label, "No file yet");
+  assert.equal(editorStatus(state).canSave, false);
+});
+
+test("reverting to the saved text while another save is in flight still says Saving", () => {
+  let state = editorReducer(ready("A"), { type: "edit", content: "B" });
+  state = editorReducer(state, { type: "save-start", content: "B" });
+  state = editorReducer(state, { type: "edit", content: "A" });
+  assert.equal(state.inflight, "B");
+  assert.equal(editorStatus(state).label, "Saving");
+  assert.deepEqual(draftToStore(state), { base: "A", inflight: "B", content: "A" });
+  const landed = editorReducer(initialEditor(), {
+    type: "loaded",
+    content: "B",
+    exists: true,
+    draft: draftToStore(state),
+  });
+  assert.equal(landed.content, "A");
+  const replaced = editorReducer(initialEditor(), {
+    type: "loaded",
+    content: "replaced on disk",
+    exists: true,
+    draft: draftToStore(state),
+  });
+  assert.equal(replaced.content, "replaced on disk");
+});
+
+test("a newer edit keeps the in-flight text as a draft base", () => {
+  let state = editorReducer(ready("A"), { type: "edit", content: "B" });
+  state = editorReducer(state, { type: "save-start", content: "B" });
+  state = editorReducer(state, { type: "edit", content: "C" });
+  assert.deepEqual(draftToStore(state), { base: "A", inflight: "B", content: "C" });
+  const landed = editorReducer(initialEditor(), {
+    type: "loaded",
+    content: "B",
+    exists: true,
+    draft: draftToStore(state),
+  });
+  assert.equal(landed.content, "C");
+});
+
 test("a failed load cannot be saved, so an empty page cannot replace the file", () => {
   const state = editorReducer(initialEditor(), { type: "load-failed", error: "The CV could not be loaded." });
   assert.equal(editorStatus(state).canSave, false);
