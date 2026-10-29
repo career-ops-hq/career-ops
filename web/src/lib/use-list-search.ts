@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite, noteNavigation } from "@/lib/list-search-sync.mjs";
 
 type SearchParamsLike = { get: (key: string) => string | null };
@@ -16,18 +16,19 @@ export function useListSearch(
   qRef: MutableRefObject<string>,
 ) {
   const [q, setQ] = useState(() => params.get("q") ?? "");
-  qRef.current = q;
   const expectedRef = useRef<string[]>([]);
   const cancelledRef = useRef<string[]>([]);
   const seenUrl = useRef(params.get("q") ?? "");
-  const commitRef = useRef(commit);
-  commitRef.current = commit;
-  const queueNavigation = (updates: Record<string, string | number | null>) => {
+  const queueNavigation = useCallback((updates: Record<string, string | number | null>) => {
     expectedRef.current = noteNavigation(expectedRef.current, updates, qRef.current);
-    commitRef.current(updates);
-  };
+    commit(updates);
+  }, [commit, qRef]);
   const queueRef = useRef(queueNavigation);
-  queueRef.current = queueNavigation;
+  // After commit. A discarded render must not publish a search or a navigation.
+  useLayoutEffect(() => {
+    qRef.current = q;
+    queueRef.current = queueNavigation;
+  }, [q, qRef, queueNavigation]);
   // Depend on the query text, not the search-params object. A parent re-render
   // hands the effect a new params object and would cancel the pause forever.
   const urlQ = params.get("q") ?? "";

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
 import { CalendarClock, ChevronDown, ChevronRight, Loader2, Pin, Search, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -119,9 +119,15 @@ export function FollowupsView() {
     (updates: Record<string, string | number | null>) => {
       const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
       if (qs === params.toString()) return;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return;
+      }
       startRouteProgress();
       startTransition(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(href, { scroll: false });
       });
     },
     [params, router, pathname, startTransition],

@@ -18,7 +18,7 @@ import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
 import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/lib/pipeline-navigation.mjs";
-import { queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
@@ -75,13 +75,19 @@ export function PipelineView({
     (updates: Record<string, string | number | null>) => {
       const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
       if (qs === params.toString()) return;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return;
+      }
       if (Object.prototype.hasOwnProperty.call(updates, "tab")) {
         const nextTab = String(updates.tab ?? "INBOX").toUpperCase();
         if ((PIPELINE_TABS as readonly string[]).includes(nextTab)) setPendingTab(nextTab as Tab);
       }
       startRouteProgress();
       startNavigation(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(href, { scroll: false });
       });
     },
     [params, router, pathname, startNavigation],

@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nextSearchWrite, noteNavigation, queryWithLiveSearch } from "../../src/lib/list-search-sync.mjs";
+import { isSearchOnlyWrite, nextSearchWrite, noteNavigation, queryWithLiveSearch } from "../../src/lib/list-search-sync.mjs";
 
 function decide(state) {
   return nextSearchWrite({ expected: [], cancelled: [], ...state });
@@ -41,6 +41,13 @@ test("a later render still writes a search that never reached the URL", () => {
   assert.equal(decide({ local: "Quill", url: "", urlChanged: false }).write, "Quill");
   const queued = decide({ local: "Quill", url: "", urlChanged: false, expected: ["Quill"] });
   assert.equal(queued.write, null);
+});
+
+test("a search URL write is not a page change, and a tab change is", () => {
+  assert.equal(isSearchOnlyWrite({ q: "Quill" }), true);
+  assert.equal(isSearchOnlyWrite({ q: null }), true);
+  assert.equal(isSearchOnlyWrite({ tab: "SKIP" }), false);
+  assert.equal(isSearchOnlyWrite({ urgency: "DUE", q: "Quill" }), false);
 });
 
 test("a tab change that wrote B does not replace typing that continued to C", () => {

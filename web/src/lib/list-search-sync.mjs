@@ -5,6 +5,17 @@
 export const LIST_SEARCH_DEBOUNCE_MS = 300;
 
 /**
+ * A URL write that only sets `q`. The table already filtered locally, so this
+ * must not start the route transition that swaps the rows for a skeleton.
+ *
+ * @param {Record<string, unknown>} updates
+ */
+export function isSearchOnlyWrite(updates) {
+  const keys = Object.keys(updates);
+  return keys.length > 0 && keys.every((key) => key === "q");
+}
+
+/**
  * The `q` a list navigation will put in the URL. A tab or sort change uses
  * the search typed so far. A search write uses its own `q`.
  *
