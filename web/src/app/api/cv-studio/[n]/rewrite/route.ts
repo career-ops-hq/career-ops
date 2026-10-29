@@ -40,7 +40,8 @@ export async function POST(req: Request, { params }: RouteContext) {
   }
   const text = parseRewrite(run.reply);
   if (!text) return NextResponse.json({ error: MESSAGES["no-answer"] }, { status: 422 });
-  const claims = await unsupportedRewriteClaims(text, [bullet.base, bullet.tailored].filter((t) => t !== null).join("\n"));
-  if (claims.length) return NextResponse.json({ error: `${MESSAGES.unsupported} ${claims.join(", ")}.`, claims }, { status: 422 });
-  return NextResponse.json({ text, keywords: (await keywordsInText(n, text)) ?? [], warning: run.warning });
+  const check = await unsupportedRewriteClaims(text, [bullet.base, bullet.tailored].filter((t) => t !== null).join("\n"));
+  if (check.claims.length) return NextResponse.json({ error: `${MESSAGES.unsupported} ${check.claims.join(", ")}.`, claims: check.claims }, { status: 422 });
+  const warning = [run.warning, check.warning].filter((item) => item).join(" ") || null;
+  return NextResponse.json({ text, keywords: (await keywordsInText(n, text)) ?? [], warning });
 }

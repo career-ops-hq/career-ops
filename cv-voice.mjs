@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { metricClaims, stripMarkup } from './verify-cv-facts.mjs';
 
 export const BANNED_PHRASES = [
@@ -61,6 +63,64 @@ function hasPhrase(text, phrase) {
   return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'iu').test(text);
 }
 
+// The banned list names words to avoid. A word that only appears there is
+// not one the candidate uses.
+function wordingFromVoiceDna(text) {
+  const lines = String(text).split('\n');
+  const kept = [];
+  let skipping = false;
+  let skipLevel = 0;
+  for (const line of lines) {
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      if (skipping && level <= skipLevel) skipping = false;
+      if (!skipping && /\bbanned\b/i.test(heading[2])) {
+        skipping = true;
+        skipLevel = level;
+      }
+    }
+    if (!skipping) kept.push(line);
+  }
+  return kept.join('\n');
+}
+
+function wordingFromFacts(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return '';
+  }
+  if (!data || typeof data !== 'object') return '';
+  const parts = [];
+  for (const key of ['allow_facts', 'allow_metrics']) {
+    const list = data[key];
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (typeof item === 'string' && item.trim()) parts.push(item);
+    }
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Words the candidate wrote down, outside cv.md. A missing file is normal.
+ * A cv-facts.json that does not parse adds nothing, so a broken file cannot
+ * allow a stock phrase by accident. forbidden_phrases stay blocked.
+ *
+ * @param {string} root
+ * @returns {string}
+ */
+export function candidateOwnWords(root) {
+  const chunks = [];
+  const dnaPath = join(root, 'voice-dna.md');
+  if (existsSync(dnaPath)) chunks.push(wordingFromVoiceDna(readFileSync(dnaPath, 'utf8')));
+  const factsPath = join(root, 'config', 'cv-facts.json');
+  if (existsSync(factsPath)) chunks.push(wordingFromFacts(readFileSync(factsPath, 'utf8')));
+  return chunks.filter(Boolean).join('\n');
+}
+
 /**
  * @param {string} generated
  * @param {string} source
@@ -103,17 +163,30 @@ export function voiceIssues(generated, source) {
 }
 
 /**
- * The wording failure a renderer shows. Null when the only issues are
- * numbers, which the fact gate already reports.
+ * The wording failure a renderer shows. A long dash is a warning, not a
+ * failure: the PDF path already normalizes it. Null when nothing blocks.
  *
  * @param {{kind: string, value: string}[]} issues
  * @param {string} [label]
  * @returns {string|null}
  */
 export function voiceTellMessage(issues, label) {
-  const tells = issues.filter((issue) => issue.kind !== 'invented-number');
+  const tells = issues.filter((issue) => issue.kind === 'banned-phrase');
   if (!tells.length) return null;
   const where = label ? ` for ${label}` : '';
-  const bits = tells.map((issue) => (issue.kind === 'em-dash' ? `an ${issue.value}` : `"${issue.value}"`));
+  const bits = tells.map((issue) => `"${issue.value}"`);
   return `Voice check failed${where}: ${bits.join(', ')}. That wording is not in the source CV. Keep the candidate's own words.`;
+}
+
+/**
+ * @param {{kind: string, value: string}[]} issues
+ * @param {string} [label]
+ * @returns {string|null}
+ */
+export function voiceDashWarning(issues, label) {
+  const dashes = issues.filter((issue) => issue.kind === 'em-dash');
+  if (!dashes.length) return null;
+  const where = label ? ` for ${label}` : '';
+  const bits = [...new Set(dashes.map((issue) => issue.value))];
+  return `Voice check warning${where}: ${bits.map((value) => `an ${value}`).join(', ')}. The build continues. Long dashes are normalized for ATS.`;
 }

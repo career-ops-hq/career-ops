@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { voiceIssues, voiceTellMessage } from '../cv-voice.mjs';
+import { candidateOwnWords, voiceDashWarning, voiceIssues, voiceTellMessage } from '../cv-voice.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -46,13 +46,18 @@ test('a generated line that adds spearheaded, leveraged, or an em dash fails', (
   assert.ok(values.includes('em dash'));
   assert.match(voiceTellMessage(issues, 'cv.html'), /Voice check failed for cv\.html/);
   assert.match(voiceTellMessage(issues, 'cv.html'), /Keep the candidate's own words/);
+  assert.equal(/em dash/.test(voiceTellMessage(issues, 'cv.html')), false);
+  assert.match(voiceDashWarning(issues, 'cv.html'), /Voice check warning for cv\.html/);
+  assert.match(voiceDashWarning(issues, 'cv.html'), /an em dash/);
 });
 
-test('an en dash in a new line fails and a copied en dash does not', () => {
+test('an en dash in a new line warns and a copied en dash does not', () => {
   const source = 'Northwind Payments \u2013 2021 to 2024';
   assert.deepEqual(voiceIssues(source, source).filter((issue) => issue.kind === 'em-dash'), []);
   const fresh = voiceIssues('Owned the payments calendar \u2013 the one the team prints', source);
   assert.deepEqual(fresh.filter((issue) => issue.kind === 'em-dash').map((issue) => issue.value), ['en dash']);
+  assert.equal(voiceTellMessage(fresh), null);
+  assert.match(voiceDashWarning(fresh), /an en dash/);
 });
 
 test('a short line copied whole from the CV keeps its dash', () => {
@@ -72,13 +77,13 @@ test('a date range dash and the page title are not stock wording', () => {
   assert.deepEqual(prose.filter((issue) => issue.kind === 'em-dash').map((issue) => issue.value), ['en dash']);
 });
 
-test('a metric range written with a dash is still a stock tell', () => {
+test('a metric range written with a dash warns and does not fail the check', () => {
   const source = 'Improved conversion by 20 to 30% on the refund page';
   const generated = 'Improved conversion by 20\u201330% on the refund page';
-  assert.deepEqual(
-    voiceIssues(generated, source).filter((issue) => issue.kind === 'em-dash').map((issue) => issue.value),
-    ['en dash'],
-  );
+  const issues = voiceIssues(generated, source);
+  assert.deepEqual(issues.filter((issue) => issue.kind === 'em-dash').map((issue) => issue.value), ['en dash']);
+  assert.equal(voiceTellMessage(issues), null);
+  assert.match(voiceDashWarning(issues), /an en dash/);
 });
 
 test('a number that is not in the source fails, and one that is does not', () => {
@@ -145,6 +150,91 @@ test('a dash the candidate wrote still counts when --source is a separate tex fi
     const report = JSON.parse(run.stdout);
     const reason = report.factCheck.reason || '';
     assert.equal(/dash/.test(reason), false, reason);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a word in the cv-facts allow list or in voice-dna outside the banned list is kept', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cv-voice-own-'));
+  try {
+    mkdirSync(join(root, 'config'));
+    writeFileSync(join(root, 'config', 'cv-facts.json'), JSON.stringify({
+      allow_metrics: [],
+      allow_facts: ['spearheaded the on-call rota'],
+      forbidden_phrases: ['leveraged'],
+      warn_phrases: [],
+    }));
+    writeFileSync(join(root, 'voice-dna.md'), [
+      '# Voice',
+      'I write leveraged when I mean the loan book at Northwind.',
+      '## 3. BANNED LIST',
+      'spearheaded, leveraged, delve',
+      '## 4. After',
+      'Short sentences.',
+    ].join('\n'));
+    const own = candidateOwnWords(root);
+    const spear = voiceIssues('She spearheaded the on-call rota for Northwind', `${SOURCE}\n${own}`);
+    assert.equal(spear.some((issue) => issue.value === 'spearheaded'), false);
+    const loan = voiceIssues('She leveraged the loan book at Northwind', `${SOURCE}\n${own}`);
+    assert.equal(loan.some((issue) => issue.value === 'leveraged'), false);
+    writeFileSync(join(root, 'voice-dna.md'), '# Voice\n## Banned list\nspearheaded\n');
+    writeFileSync(join(root, 'config', 'cv-facts.json'), JSON.stringify({
+      allow_metrics: [],
+      allow_facts: [],
+      forbidden_phrases: ['spearheaded'],
+      warn_phrases: [],
+    }));
+    const bannedOnly = voiceIssues('She spearheaded the weekly release train', `${SOURCE}\n${candidateOwnWords(root)}`);
+    assert.ok(bannedOnly.some((issue) => issue.value === 'spearheaded'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('generate-latex warns on a long dash and does not block the build', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cv-voice-dash-'));
+  try {
+    mkdirSync(join(root, 'output'));
+    writeFileSync(join(root, 'cv.md'), SOURCE);
+    writeFileSync(join(root, 'output', 'dash.tex'), `\\documentclass{article}\n\\begin{document}\nRan the weekly release train \u2013 the Tuesday one\n\\end{document}\n`);
+    const run = spawnSync(process.execPath, [join(ROOT, 'generate-latex.mjs'), 'output/dash.tex', '--compile-only'], {
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 30_000,
+      env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '' },
+    });
+    const report = JSON.parse(run.stdout);
+    assert.equal(report.factCheck.verdict, 'warn');
+    assert.match(report.factCheck.reason, /en dash/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('generate-latex allows a stock verb the candidate listed in cv-facts', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cv-voice-allow-'));
+  try {
+    mkdirSync(join(root, 'output'));
+    mkdirSync(join(root, 'config'));
+    writeFileSync(join(root, 'cv.md'), SOURCE);
+    writeFileSync(join(root, 'config', 'cv-facts.json'), JSON.stringify({
+      allow_metrics: [],
+      allow_facts: ['spearheaded'],
+      forbidden_phrases: [],
+      warn_phrases: [],
+    }));
+    writeFileSync(join(root, 'output', 'own.tex'), '\\documentclass{article}\n\\begin{document}\n\\resumeItem{Spearheaded the weekly release train for the payments app}\n\\end{document}\n');
+    const run = spawnSync(process.execPath, [join(ROOT, 'generate-latex.mjs'), 'output/own.tex', '--compile-only'], {
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 30_000,
+      env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '' },
+    });
+    const report = JSON.parse(run.stdout);
+    const reason = report.factCheck.reason || '';
+    assert.equal(/spearheaded/.test(reason), false, reason);
+    assert.notEqual(report.factCheck.verdict, 'block');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

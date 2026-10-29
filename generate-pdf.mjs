@@ -1622,14 +1622,17 @@ async function runFactGate(html, label, rawHtml = html) {
   // module is genuinely missing in a real workspace this throws and the render
   // fails, which is the correct direction to fail for a fact gate.
   const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
-  const { voiceIssues, voiceTellMessage } = await import('./cv-voice.mjs');
+  const { voiceIssues, voiceTellMessage, voiceDashWarning, candidateOwnWords } = await import('./cv-voice.mjs');
   const inputs = factGateInputs();
-  // The voice check allows only wording the CV already has. article-digest.md
-  // backs facts, not phrasing, so it stays out of this source.
+  // The voice check allows wording the CV, voice-dna.md, and the cv-facts
+  // allow lists already have. article-digest.md backs facts, not phrasing.
   const cvPath = resolve(workspaceRoot, 'cv.md');
   const source = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
-  const voiceError = voiceTellMessage(voiceIssues(rawHtml, source), label);
+  const found = voiceIssues(rawHtml, `${source}\n${candidateOwnWords(workspaceRoot)}`);
+  const voiceError = voiceTellMessage(found, label);
   if (voiceError) throw new Error(voiceError);
+  const dashWarning = voiceDashWarning(found, label);
+  if (dashWarning) console.warn(`⚠️  ${dashWarning}`);
   const factCheck = assertFacts(html, { label, ...inputs });
   // Ahead of the verdict, because it qualifies it: with no config the phrase
   // lists are empty, so a "passed" below covers metrics and facts only.

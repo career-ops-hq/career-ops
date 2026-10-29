@@ -312,7 +312,7 @@ export async function runLatexFactGate(content, { root = getCareerOpsRoot(), ext
   // Imported lazily, as generate-pdf.mjs does: a test that copies this script
   // alone into a temp workspace has no cv.md and never reaches the import.
   const { assertFacts, stripMarkup } = await import('./verify-cv-facts.mjs');
-  const { voiceIssues, voiceTellMessage } = await import('./cv-voice.mjs');
+  const { voiceIssues, voiceTellMessage, voiceDashWarning, candidateOwnWords } = await import('./cv-voice.mjs');
   // An explicit --source that does not exist is a mistyped path, not an empty
   // source. Read as empty, it would leave the claims it was passed to back
   // unsupported and blame the CV instead of the path.
@@ -320,8 +320,9 @@ export async function runLatexFactGate(content, { root = getCareerOpsRoot(), ext
   const missing = extraPaths.filter(p => !existsSync(p));
   if (missing.length) return { verdict: 'block', reason: `--source file not found: ${missing.join(', ')}` };
   const sourcePaths = [cvPath, join(root, 'article-digest.md'), ...extraPaths];
-  // The voice check allows only wording the candidate wrote: cv.md plus any
-  // --source file. article-digest.md backs facts, not phrasing.
+  // The voice check allows wording the candidate wrote: cv.md, any --source
+  // file, voice-dna.md, and the cv-facts allow lists. article-digest.md
+  // backs facts, not phrasing.
   // Strip each file on its own. Joined first, one \begin{document} in a
   // --source .tex file drops the cv.md lines that came before it.
   let voiceSource = '';
@@ -329,11 +330,15 @@ export async function runLatexFactGate(content, { root = getCareerOpsRoot(), ext
     const source = await readFile(sourcePath, 'utf-8');
     voiceSource += `\n${stripMarkup(source, { keepLineBreaks: true })}`;
   }
-  const voiceError = voiceTellMessage(voiceIssues(content, voiceSource), label);
+  voiceSource += `\n${candidateOwnWords(root)}`;
+  const voiceIssuesFound = voiceIssues(content, voiceSource);
+  const voiceError = voiceTellMessage(voiceIssuesFound, label);
   if (voiceError) return { verdict: 'block', reason: voiceError };
+  const voiceWarning = voiceDashWarning(voiceIssuesFound, label);
   try {
     const result = assertFacts(content, { sourcePaths, configPath: join(root, 'config', 'cv-facts.json'), label });
-    return { verdict: result.verdict, result };
+    if (result.verdict === 'block' || !voiceWarning) return { verdict: result.verdict, result };
+    return { verdict: 'warn', result, reason: voiceWarning, voiceWarning };
   } catch (err) {
     return { verdict: 'block', reason: err.message };
   }
@@ -432,16 +437,19 @@ async function main() {
   if (factCheck.result?.configMissing) {
     console.error('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
   }
-  if (factCheck.verdict === 'warn') {
+  if (factCheck.voiceWarning) console.error(`⚠️  ${factCheck.voiceWarning}`);
+  if (factCheck.verdict === 'warn' && factCheck.result) {
     const { printFactWarnings } = await import('./verify-cv-facts.mjs');
     console.error(`⚠️  CV fact check warning: ${basename(absPath)}`);
     printFactWarnings(factCheck.result, console.error);
   }
 
   const report = await compileLatexFile(absPath, content, outputPath || null, compileOnly);
-  report.factCheck = factCheck.result
-    ? { verdict: factCheck.verdict, configMissing: factCheck.result.configMissing }
-    : { verdict: factCheck.verdict, reason: factCheck.reason };
+  report.factCheck = {
+    verdict: factCheck.verdict,
+    ...(factCheck.reason ? { reason: factCheck.reason } : {}),
+    ...(factCheck.result ? { configMissing: factCheck.result.configMissing } : {}),
+  };
   console.log(JSON.stringify(report, null, 2));
   process.exit(report.compiled ? 0 : (report.valid ? 1 : 1));
 }
