@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, readdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,14 +9,16 @@ import { importMailDrop } from '../lib/linkedin-mail-drop.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const JOB_ID = '5151515151';
-const DATA_PATH_VARS = ['CAREER_OPS_SCAN_HISTORY', 'CAREER_OPS_PIPELINE', 'CAREER_OPS_TRACKER', 'CAREER_OPS_DATA_DIR'];
 
-// The env for a spawned runner, with every data path left to follow
-// CAREER_OPS_ROOT. Inherited from a developer shell, they would point the
-// child at that developer's own files.
+// The env for a spawned runner. Every CAREER_OPS_* value inherited from a
+// developer shell is removed, then the fixture root is set. One leftover, such
+// as CAREER_OPS_SCHEDULED_JOBS_PATH, would make the child claim a real job.
 function runnerEnv(root) {
-  const env = { ...process.env, CAREER_OPS_ROOT: root, NO_COLOR: '1' };
-  for (const key of DATA_PATH_VARS) delete env[key];
+  const env = { ...process.env, NO_COLOR: '1' };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('CAREER_OPS_')) delete env[key];
+  }
+  env.CAREER_OPS_ROOT = root;
   return env;
 }
 
@@ -279,6 +281,99 @@ test('the scheduled inbox poll holds the same lock as the job run', () => {
   assert.ok(lockAt > 0 && pollAt > lockAt, 'poll runs inside the runner lock');
   const callback = src.slice(lockAt, src.indexOf('timeoutMs:', lockAt));
   assert.match(callback, /if \(!manualJobId\) \{[\s\S]*await pollLinkedInInbox\(/);
+});
+
+test('a base64 line with a space and a tab in the middle still yields the job', async () => {
+  const { root, dir } = dropRoot('linkedin-drop-base64-gap-');
+  const html = Buffer.from(`<a href="https://www.linkedin.com/jobs/view/${JOB_ID}?trk=eml">Analyst</a>`).toString('base64');
+  const wrapped = html.match(/.{1,76}/g);
+  wrapped[0] = `${wrapped[0].slice(0, 8)} \t${wrapped[0].slice(8)}`;
+  writeFileSync(join(dir, 'alert.eml'), [
+    'Content-Transfer-Encoding: base64',
+    '',
+    ...wrapped,
+    '',
+  ].join('\n'));
+  try {
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir });
+      assert.equal(result.added, 1);
+      assert.deepEqual(result.skipped, []);
+      assert.ok(existsSync(join(dir, 'imported', 'alert.eml')));
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CJK text larger than twice the character limit still imports', async () => {
+  const { LINKEDIN_IMPORT_MAX_CHARS } = await import('../lib/linkedin-import.mjs');
+  const { root, dir } = dropRoot('linkedin-drop-cjk-');
+  const url = `https://www.linkedin.com/jobs/view/${JOB_ID}\n`;
+  const text = url + '\u4e00'.repeat(1_400_000);
+  assert.ok(Buffer.byteLength(text) > LINKEDIN_IMPORT_MAX_CHARS * 2);
+  assert.ok(text.length <= LINKEDIN_IMPORT_MAX_CHARS);
+  writeFileSync(join(dir, 'wide.eml'), text);
+  try {
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir });
+      assert.equal(result.added, 1);
+      assert.deepEqual(result.skipped, []);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a file that cannot fit the character limit is skipped before it is read', async () => {
+  const { LINKEDIN_IMPORT_MAX_CHARS } = await import('../lib/linkedin-import.mjs');
+  const { root, dir } = dropRoot('linkedin-drop-huge-');
+  const file = join(dir, 'huge.mbox');
+  const fd = openSync(file, 'w');
+  try {
+    ftruncateSync(fd, LINKEDIN_IMPORT_MAX_CHARS * 3 + 1);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir });
+      assert.deepEqual(result.skipped, ['huge.mbox']);
+      assert.deepEqual(result.unreadable, []);
+      assert.match(result.message, /too large to read: huge\.mbox/);
+      assert.ok(existsSync(file));
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('runnerEnv drops every inherited CAREER_OPS path', () => {
+  const keys = ['CAREER_OPS_SCHEDULED_JOBS_PATH', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_PIPELINE', 'CAREER_OPS_ROOT'];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.CAREER_OPS_SCHEDULED_JOBS_PATH = '/tmp/not-the-fixture.json';
+  process.env.CAREER_OPS_DATA_DIR = '/tmp/not-the-fixture';
+  process.env.CAREER_OPS_PIPELINE = '/tmp/not-the-fixture.md';
+  process.env.CAREER_OPS_ROOT = '/tmp/not-the-fixture';
+  try {
+    const env = runnerEnv('/tmp/fixture-root');
+    assert.equal(env.CAREER_OPS_ROOT, '/tmp/fixture-root');
+    assert.equal(env.CAREER_OPS_SCHEDULED_JOBS_PATH, undefined);
+    assert.equal(env.CAREER_OPS_DATA_DIR, undefined);
+    assert.equal(env.CAREER_OPS_PIPELINE, undefined);
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
+});
+
+test('a size error from the read is skipped, and a permission error stays unreadable', async () => {
+  const { mailReadFailure } = await import('../lib/linkedin-mail-drop.mjs');
+  assert.equal(mailReadFailure({ code: 'ERR_FS_FILE_TOO_LARGE' }), 'skipped');
+  assert.equal(mailReadFailure({ code: 'ERR_STRING_TOO_LONG' }), 'skipped');
+  assert.equal(mailReadFailure({ code: 'EACCES' }), 'unreadable');
 });
 
 test('the scheduled poll logs alert files it had to skip', async () => {
