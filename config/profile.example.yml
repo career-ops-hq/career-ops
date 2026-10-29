@@ -10,6 +10,10 @@ candidate:
   # no title element.
   # title: "Senior Backend Engineer"
   email: "jane@example.com"
+  # Optional. Total years of professional experience. portals.yml
+  # experience_filter compares it with the minimum each JD states; nothing
+  # reads it unless that filter is on. A number (2.5 is fine).
+  # years_of_experience: 6
   # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
   # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
   # alternate_emails:

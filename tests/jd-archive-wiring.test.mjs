@@ -19,6 +19,7 @@
 
 import { pass, fail, ROOT } from './helpers.mjs';
 import { FROZEN_EVALUATION_MODES, discoverEvaluationModes, readModeText } from './evaluation-mode-parity-helpers.mjs';
+import { hasEmbeddedJdArchive } from '../check-jd-archive.mjs';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -88,6 +89,26 @@ try {
     pass('every re-synced localized evaluation mode carries a Job Description (archived verbatim) section');
   } else {
     fail(`localized evaluation modes missing the Job Description (archived verbatim) section: ${localizedWithoutArchive.join(', ')}`);
+  }
+
+  // Each template's own placeholder line, left in place by an evaluator, must
+  // not pass as an archive. check-jd-archive.mjs collects them from modes/ by
+  // shape (a parenthesized line under the heading); a template whose
+  // placeholder loses that shape would silently drop out of the set.
+  const placeholderTemplates = ['oferta.md', ...discoverEvaluationModes(ROOT)
+    .filter(file => !FROZEN_EVALUATION_MODES.has(file))];
+  const unrejectedPlaceholders = [];
+  for (const file of placeholderTemplates) {
+    const lines = readModeText(ROOT, `modes/${file}`).split(/\r?\n/);
+    const at = lines.indexOf('## Job Description (archived verbatim)');
+    const placeholder = at === -1 ? '' : lines[at + 1].trim();
+    const report = `## Job Description (archived verbatim)\n${placeholder}\n\n## Machine Summary\n`;
+    if (!placeholder || hasEmbeddedJdArchive(report)) unrejectedPlaceholders.push(`${file}: ${placeholder || '(no placeholder line)'}`);
+  }
+  if (unrejectedPlaceholders.length === 0) {
+    pass(`check-jd-archive.mjs rejects the unfilled placeholder of all ${placeholderTemplates.length} evaluation-mode templates`);
+  } else {
+    fail(`check-jd-archive.mjs credits an unfilled template placeholder as an archive: ${unrejectedPlaceholders.join('; ')}`);
   }
 
   const pdfDoc = readFile('modes/pdf.md');

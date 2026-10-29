@@ -27,13 +27,13 @@ test("the auto-selected CLI is persisted, not only rendered", () => {
   // reaches localStorage.
   assert.match(
     src,
-    /persistCliId\(\s*auto\s*\)/,
-    "config-form.tsx must call persistCliId(auto) so the rendered default is written to storage",
+    /persistCliId\(\s*cliId\s*\)/,
+    "config-form.tsx must call persistCliId(cliId) so the rendered default is written to storage",
   );
 });
 
 test("persisting is guarded by readSavedCliId so an explicit choice is never overwritten", () => {
-  assert.match(src, /if\s*\(\s*!readSavedCliId\(\)\s*\)\s*persistCliId\(\s*auto\s*\)/);
+  assert.match(src, /!readSavedCliId\(\)\s*\)\s*persistCliId\(\s*cliId\s*\)/);
 });
 
 test("the detect effect picks with pickDefaultInstalled, not the sole-install helper", () => {
@@ -47,12 +47,12 @@ test("the detect effect picks with pickDefaultInstalled, not the sole-install he
   );
 });
 
-test("the persist call lives in the detect effect, ahead of save()", () => {
-  const persist = src.indexOf("persistCliId(auto)");
+test("the persist call lives in an effect, ahead of save()", () => {
+  const persist = src.indexOf("persistCliId(cliId)");
   const save = src.indexOf("function save()");
   assert.notEqual(persist, -1);
   assert.notEqual(save, -1);
-  assert.ok(persist < save, "persistCliId(auto) must run in the detect effect, not only on an explicit Save");
+  assert.ok(persist < save, "persistCliId(cliId) must run in an effect, not only on an explicit Save");
 });
 
 // #4012: the restore effect puts the saved id into state before /api/clis
@@ -67,4 +67,15 @@ test("the detect effect only keeps the restored id while its CLI is installed", 
     /if\s*\(\s*prev\s*\)\s*return\s+prev/,
     "an unchecked prev keeps a stale id selected and save() writes it back",
   );
+});
+
+// A setState updater runs while React renders ConfigForm. persistCliId fires
+// the config-changed event, AssistantConsole sets state from it, and React
+// logs "Cannot update a component while rendering a different component" on
+// every first visit to Config, which `npm run ui` shows as a red issue badge.
+test("the setCliId updater in the detect effect writes nothing", () => {
+  const start = src.indexOf("setCliId((prev) =>");
+  assert.notEqual(start, -1, "could not locate the setCliId updater");
+  const updater = src.slice(start, src.indexOf("});", start));
+  assert.doesNotMatch(updater, /persistCliId\(|writeConfig\(|dispatchEvent\(/);
 });
