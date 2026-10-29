@@ -185,13 +185,13 @@ export function TodayDashboard({
               <>
                 {shown.newThisWeek > 0 && (
                   <>
-                    <span className="text-brand tabular-nums">{shown.newThisWeek}</span> new match{shown.newThisWeek === 1 ? "" : "es"} this week
+                    <span className="text-brand-text tabular-nums">{shown.newThisWeek}</span> new match{shown.newThisWeek === 1 ? "" : "es"} this week
                   </>
                 )}
                 {shown.newThisWeek > 0 && shown.overdue > 0 && <span className="text-faint"> · </span>}
                 {shown.overdue > 0 && (
                   <>
-                    <span className="text-brand tabular-nums">{shown.overdue}</span> follow-up{shown.overdue === 1 ? "" : "s"} due
+                    <span className="text-brand-text tabular-nums">{shown.overdue}</span> follow-up{shown.overdue === 1 ? "" : "s"} due
                   </>
                 )}
                 {/* queue-partial with work known only from the server snapshot:
@@ -218,7 +218,7 @@ export function TodayDashboard({
             <Link href="/explore" className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]">
               Find new roles <ArrowRight className="size-4" />
             </Link>
-            <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
+            <Link href="/pipeline" className="inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]">
               Open pipeline
             </Link>
           </div>
@@ -229,7 +229,7 @@ export function TodayDashboard({
       {dataError && !dataLoading && (
         <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface/40 px-5 py-4 text-sm text-muted">
           <p>{missingSources} could not be loaded.</p>
-          <button type="button" onClick={refetch} className="font-medium text-brand hover:underline">Retry updates</button>
+          <button type="button" onClick={refetch} className="font-medium text-brand-text hover:underline">Retry updates</button>
         </div>
       )}
 
@@ -258,7 +258,7 @@ export function TodayDashboard({
               <li key={`${item.num ?? item.company}-${item.nextFollowupDate ?? ""}`}>
                 <Link
                   href={item.num != null ? `/pipeline/${item.num}` : "/followups"}
-                  className="text-sm text-muted hover:text-brand"
+                  className="text-sm text-muted hover:text-brand-text"
                 >
                   <span className="font-medium text-foreground">{item.company}</span>
                   {item.role ? <span> · {item.role}</span> : null}
@@ -311,7 +311,7 @@ export function TodayDashboard({
             ))}
           </div>
           {fresh.length > 6 && (
-            <Link href="/explore?view=fresh" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand max-sm:min-h-[44px]">
+            <Link href="/explore?view=fresh" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand-text max-sm:min-h-[44px]">
               See all {freshCount} →
             </Link>
           )}
@@ -320,9 +320,9 @@ export function TodayDashboard({
 
       {allClear && upcoming.length === 0 && (
         <div className="mt-8 rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">
-          <Sparkles className="mx-auto size-6 text-brand" />
+          <Sparkles className="mx-auto size-6 text-brand-text" />
           <p className="mx-auto mt-3 max-w-md text-sm text-muted">
-            Nothing needs you right now. Run a <Link href="/explore" className="text-brand hover:underline">free scan</Link> to surface this week&apos;s roles, or check your <Link href="/pipeline" className="text-brand hover:underline">pipeline</Link>.
+            Nothing needs you right now. Run a <Link href="/explore" className="text-brand-text hover:underline">free scan</Link> to surface this week&apos;s roles, or check your <Link href="/pipeline" className="text-brand-text hover:underline">pipeline</Link>.
           </p>
         </div>
       )}
@@ -334,7 +334,7 @@ export function TodayDashboard({
               <span className="text-muted" role="status">{decisionUndo.label}</span>
               {decisionUndo.error && <p role="alert" className="text-red-600 dark:text-red-400">{decisionUndo.error}</p>}
             </div>
-            <button type="button" onClick={() => void undoDecision(decisionUndo)} disabled={decisionUndo.busy} aria-busy={Boolean(decisionUndo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand disabled:opacity-50 max-sm:min-h-[44px]">
+            <button type="button" onClick={() => void undoDecision(decisionUndo)} disabled={decisionUndo.busy} aria-busy={Boolean(decisionUndo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-text disabled:opacity-50 max-sm:min-h-[44px]">
               <Undo2 className="size-3.5" /> {decisionUndo.busy ? "Undoing…" : decisionUndo.error ? "Retry undo" : "Undo"}
             </button>
             {decisionUndo.error && (
@@ -353,7 +353,7 @@ function Section({ icon: Icon, title, hint, children }: { icon: React.ComponentT
   return (
     <section className="mt-10">
       <div className="mb-3 flex items-center gap-2">
-        <Icon className="size-4 text-brand" />
+        <Icon className="size-4 text-brand-text" />
         <h2 className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">{title}</h2>
         <span className="text-xs text-faint">· {hint}</span>
       </div>
