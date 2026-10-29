@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createInboxSkipActions, queueInboxSkip, reportSkipRejections } from "../../src/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "../../src/lib/inbox-skip-client.mjs";
 
 test("a failed skip is reported before the rest of the batch settles", async () => {
   let release;
@@ -15,6 +15,32 @@ test("a failed skip is reported before the rest of the batch settles", async () 
   release();
   await done;
   assert.deepEqual(seen, [0]);
+});
+
+test("a restored url is unhidden before the rest of the undo batch settles", async () => {
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const restored = [];
+  const alpha = "https://example.com/fixture-alpha";
+  const beta = "https://example.com/fixture-beta";
+  const done = restoreSkippedUrls([alpha, beta], (url) => url === alpha ? Promise.resolve() : pending, (url) => {
+    restored.push(url);
+  });
+  for (let i = 0; i < 8 && restored.length === 0; i += 1) await Promise.resolve();
+  assert.deepEqual(restored, [alpha]);
+  release();
+  await done;
+  assert.deepEqual(restored, [alpha, beta]);
+});
+
+test("a failed restore still reports the urls that succeeded", async () => {
+  const restored = [];
+  await assert.rejects(restoreSkippedUrls(
+    ["https://example.com/fixture-alpha", "https://example.com/fixture-beta"],
+    (url) => url.endsWith("alpha") ? Promise.resolve() : Promise.reject(new Error("Pipeline busy")),
+    (url) => { restored.push(url); },
+  ), /Pipeline busy/);
+  assert.deepEqual(restored, ["https://example.com/fixture-alpha"]);
 });
 
 const url = "https://example.com/fixture-alpha";

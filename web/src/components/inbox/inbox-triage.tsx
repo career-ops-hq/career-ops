@@ -15,7 +15,7 @@ import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
-import { createInboxSkipActions, queueInboxSkip, reportSkipRejections } from "@/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
@@ -264,8 +264,9 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     const notice: UndoNotice = {
       label,
       fn: async () => {
-        await Promise.all(urls.map((url) => persistSkip(url, false)));
-        setHidden((h) => h.filter((url) => !urls.includes(url)));
+        await restoreSkippedUrls(urls, (url) => persistSkip(url, false), (url) => {
+          setHidden((h) => h.filter((item) => item !== url));
+        });
       },
     };
     setUndo(notice);
