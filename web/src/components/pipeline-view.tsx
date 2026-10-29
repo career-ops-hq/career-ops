@@ -29,6 +29,7 @@ type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
 const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
 const VIEWS_KEY = "career-ops:pipeline-views";
+const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -136,7 +137,8 @@ export function PipelineView({
       return true;
     } catch {
       storageRejected.current = true;
-      setViewError("This view stays on this page only.");
+      if (action === "remove") setRemovalWarning(REMOVAL_WARNING);
+      else setViewError("This view stays on this page only.");
       return false;
     }
   }
@@ -187,7 +189,7 @@ export function PipelineView({
       omittedWhileRejected.current.add(name);
       pendingWhileRejected.current.delete(name);
       setViews((current) => current.filter((view) => view.name !== name));
-      setRemovalWarning("This removal is not saved yet. Reloading brings the view back.");
+      setRemovalWarning(REMOVAL_WARNING);
       return;
     }
     setViews(next);
