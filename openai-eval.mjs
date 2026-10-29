@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, Together, Groq, DeepSeek, Zhipu GLM,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, Together, Groq, DeepSeek, Zhipu GLM,
  * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -96,7 +96,8 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   OPTIONS
     --file <path>    Read JD from a file instead of inline text
-    --model <id>     Model id            (env OPENAI_MODEL, default gpt-4o-mini)
+    --model <id>     Model id            (env OPENAI_MODEL; MiniMax direct default
+                                         MiniMax-M3.1-Flash, otherwise gpt-4o-mini)
     --url <base>     OpenAI-compatible base URL, including any /v1
                      (env OPENAI_BASE_URL, default https://api.openai.com/v1)
     --key <key>      API key             (env OPENAI_API_KEY)
@@ -115,10 +116,13 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
     API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
     Runcrate:    --url https://api.runcrate.ai/v1  --model deepseek-ai/DeepSeek-V4.1-Flash
+    CloudGPU:    --url https://cloudgpu.app/v1  --model deepseek-v4.1-flash
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
     Zhipu GLM:   --url https://open.bigmodel.cn/api/paas/v4  --model glm-4-flash
+    MiniMax:     --url https://api.minimax.io/v1       --model MiniMax-M3.1-Flash
+                 --url https://api.minimax.cn/v1       --model MiniMax-M3
     LM Studio:   --url http://localhost:1234/v1        --model <loaded-model>   (no key)
 
   EXAMPLES
@@ -131,7 +135,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 // Parse flags
 let jdText     = '';
 let postingUrl = '';
-let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+let modelName  = process.env.OPENAI_MODEL || '';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
 let saveReport = true;
@@ -201,6 +205,13 @@ let endpointHost;
     process.exit(1);
   }
   endpointHost = parsed.hostname;
+  // Resolve the default after CLI flags, without replacing saved/custom models.
+  // Limit this to the direct API; subscription and gateway routes are separate.
+  if (!modelName) {
+    const isMiniMax = ['https://api.minimax.io', 'https://api.minimax.cn'].includes(parsed.origin)
+      && parsed.pathname === '/v1';
+    modelName = isMiniMax ? 'MiniMax-M3.1-Flash' : 'gpt-4o-mini';
+  }
   const isLoopback = endpointHost === 'localhost' || endpointHost === '127.0.0.1' || endpointHost === '::1';
 
   if (!isLoopback && parsed.protocol !== 'https:') {
