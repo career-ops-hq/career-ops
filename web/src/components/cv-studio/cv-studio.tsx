@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, FileText, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -63,8 +63,12 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   const [edits, dispatchEdit] = useReducer((e: StudioEdits, a: StudioAction) => studioReducer(e, a, doc), data.edits);
   const history = useRef<StudioEdits[]>([]);
   const [canUndo, setCanUndo] = useState(false);
+  // Handlers set this before dispatch. The effect stores the committed
+  // object, which is the one Save compares. A discarded render must not write it.
   const latestEdits = useRef(edits);
-  latestEdits.current = edits;
+  useLayoutEffect(() => {
+    latestEdits.current = edits;
+  }, [edits]);
   const recordEdit = useCallback((action: StudioAction) => {
     const applied = applyRecordedEdit(latestEdits.current, action, doc, history.current);
     if (!applied.recorded) return;
@@ -77,6 +81,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
     const prev = history.current.pop();
     setCanUndo(history.current.length > 0);
     if (!prev) return;
+    latestEdits.current = prev;
     dispatchEdit({ type: "replace", edits: prev });
   }, []);
   const [save, setSave] = useState<SaveState>({ kind: "idle" });

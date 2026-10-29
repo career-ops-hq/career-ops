@@ -127,6 +127,17 @@ export function emptyEdits(sourceHash) {
   return { v: 1, sourceHash, preset: { ...DEFAULT_PRESET }, use: {}, hidden: [], shown: [], order: {}, restored: {} };
 }
 
+/** True when Reset would change nothing. A fresh object here would still count as a new undo step. */
+function isUntouched(edits) {
+  return edits.preset.length === DEFAULT_PRESET.length
+    && edits.preset.tone === DEFAULT_PRESET.tone
+    && edits.hidden.length === 0
+    && edits.shown.length === 0
+    && Object.keys(edits.use).length === 0
+    && Object.keys(edits.order).length === 0
+    && Object.keys(edits.restored).length === 0;
+}
+
 /**
  * Edits saved against another version of the tailored CV are dropped rather
  * than misapplied to whatever bullets now sit at the same ids. Null when `raw`
@@ -208,10 +219,13 @@ export function studioReducer(edits, action, doc) {
     }
     case "unrestore":
       return { ...edits, restored: { ...edits.restored, [action.item]: (edits.restored[action.item] ?? []).filter((i) => i !== action.index) } };
-    case "preset":
-      return { ...edits, preset: { ...edits.preset, ...action.preset } };
+    case "preset": {
+      const preset = { ...edits.preset, ...action.preset };
+      if (preset.length === edits.preset.length && preset.tone === edits.preset.tone) return edits;
+      return { ...edits, preset };
+    }
     case "reset":
-      return emptyEdits(edits.sourceHash);
+      return isUntouched(edits) ? edits : emptyEdits(edits.sourceHash);
     case "replace":
       return action.edits;
   }

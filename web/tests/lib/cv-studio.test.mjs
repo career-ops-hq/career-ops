@@ -156,6 +156,42 @@ test("a wording change recorded after a hide still undoes to the hidden CV", () 
   assert.equal(undone.use.s2i0b0, undefined);
 });
 
+test("clicking the selected preset or resetting an untouched CV records nothing", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const sameLength = applyRecordedEdit(before, { type: "preset", preset: { length: "full" } }, doc, []);
+  assert.equal(sameLength.recorded, false);
+  assert.equal(sameLength.edits, before);
+  const sameTone = applyRecordedEdit(before, { type: "preset", preset: { tone: "tailored" } }, doc, []);
+  assert.equal(sameTone.recorded, false);
+  const reset = applyRecordedEdit(before, { type: "reset" }, doc, []);
+  assert.equal(reset.recorded, false);
+  assert.equal(reset.edits, before);
+
+  const onePage = applyRecordedEdit(before, { type: "preset", preset: { length: "one-page" } }, doc, []);
+  assert.equal(onePage.recorded, true);
+  const again = applyRecordedEdit(onePage.edits, { type: "preset", preset: { length: "one-page" } }, doc, onePage.history);
+  assert.equal(again.recorded, false);
+  assert.equal(again.history, onePage.history);
+  const cleared = applyRecordedEdit(onePage.edits, { type: "reset" }, doc, onePage.history);
+  assert.equal(cleared.recorded, true);
+  assert.deepEqual(cleared.edits.preset, { length: "full", tone: "tailored" });
+});
+
+test("a wording change after undo is recorded against the restored CV", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const hide = applyRecordedEdit(before, { type: "toggle", id: "s2i0b2" }, doc, []);
+  const restored = hide.history.at(-1);
+  const history = hide.history.slice(0, -1);
+  const wording = applyRecordedEdit(restored, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, history);
+  assert.equal(wording.history.at(-1), restored);
+  assert.deepEqual(wording.edits.hidden, []);
+  const undone = studioReducer(wording.edits, { type: "replace", edits: wording.history.at(-1) }, doc);
+  assert.equal(undone, restored);
+  assert.deepEqual(undone.hidden, []);
+});
+
 test("undo puts back the edits from before a hide", () => {
   const { doc } = studio();
   const before = emptyEdits("h1");
