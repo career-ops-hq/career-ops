@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite } from "@/lib/list-search-sync.mjs";
+import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite, noteNavigation } from "@/lib/list-search-sync.mjs";
 
 type SearchParamsLike = { get: (key: string) => string | null };
 
@@ -12,15 +12,22 @@ type SearchParamsLike = { get: (key: string) => string | null };
  */
 export function useListSearch(
   params: SearchParamsLike,
-  setParams: (updates: Record<string, string | number | null>) => void,
+  commit: (updates: Record<string, string | number | null>) => void,
   qRef: MutableRefObject<string>,
 ) {
   const [q, setQ] = useState(() => params.get("q") ?? "");
   qRef.current = q;
-  const pendingRef = useRef<string | null>(null);
+  const expectedRef = useRef<string[]>([]);
+  const cancelledRef = useRef<string[]>([]);
   const seenUrl = useRef(params.get("q") ?? "");
-  const setParamsRef = useRef(setParams);
-  setParamsRef.current = setParams;
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
+  const queueNavigation = (updates: Record<string, string | number | null>) => {
+    expectedRef.current = noteNavigation(expectedRef.current, updates, qRef.current);
+    commitRef.current(updates);
+  };
+  const queueRef = useRef(queueNavigation);
+  queueRef.current = queueNavigation;
   // Depend on the query text, not the search-params object. A parent re-render
   // hands the effect a new params object and would cancel the pause forever.
   const urlQ = params.get("q") ?? "";
@@ -29,24 +36,33 @@ export function useListSearch(
     const decision = nextSearchWrite({
       local: q,
       url: urlQ,
-      pending: pendingRef.current,
       urlChanged: urlQ !== seenUrl.current,
+      expected: expectedRef.current,
+      cancelled: cancelledRef.current,
     });
     seenUrl.current = urlQ;
-    if (decision.clearPending) pendingRef.current = null;
+    expectedRef.current = decision.expected;
+    cancelledRef.current = decision.cancelled;
     if (decision.adopt) {
       setQ(urlQ);
       return;
     }
     if (decision.write == null) return;
     const write = decision.write;
+    if (decision.immediate) {
+      queueRef.current({ q: write ? write : null });
+      return;
+    }
     const handle = window.setTimeout(() => {
       if (qRef.current !== write) return;
-      pendingRef.current = write;
-      setParamsRef.current({ q: write ? write : null });
+      queueRef.current({ q: write ? write : null });
     }, LIST_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(handle);
   }, [q, urlQ, qRef]);
 
-  return { q, setQ };
+  return {
+    q,
+    setQ,
+    setParams: (updates: Record<string, string | number | null>) => queueRef.current(updates),
+  };
 }

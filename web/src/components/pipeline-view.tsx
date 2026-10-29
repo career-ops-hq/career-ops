@@ -71,7 +71,7 @@ export function PipelineView({
   // reload or the browser Back button still has it. Tab changes include the
   // typed value immediately, before that pause.
   const qRef = useRef(params.get("q") ?? "");
-  const setParams = useCallback(
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
       const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
       if (qs === params.toString()) return;
@@ -86,7 +86,7 @@ export function PipelineView({
     },
     [params, router, pathname, startNavigation],
   );
-  const { q, setQ } = useListSearch(params, setParams, qRef);
+  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
   // Typing stays local until the URL catches up, so include it when leaving.
   const detailQuery = pipelineQuery(params.toString(), q);
 

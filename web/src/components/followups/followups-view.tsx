@@ -115,7 +115,7 @@ export function FollowupsView() {
   const dir = (params.get("dir") === "-1" ? -1 : 1) as 1 | -1;
 
   const qRef = useRef(params.get("q") ?? "");
-  const setParams = useCallback(
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
       const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
       if (qs === params.toString()) return;
@@ -126,7 +126,7 @@ export function FollowupsView() {
     },
     [params, router, pathname, startTransition],
   );
-  const { q, setQ } = useListSearch(params, setParams, qRef);
+  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
 
   const entries = useMemo(() => (data?.available ? data.entries : []), [data]);
   const upcoming = useMemo(() => {

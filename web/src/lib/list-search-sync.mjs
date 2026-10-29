@@ -5,35 +5,83 @@
 export const LIST_SEARCH_DEBOUNCE_MS = 300;
 
 /**
+ * The `q` a list navigation will put in the URL. A tab or sort change uses
+ * the search typed so far. A search write uses its own `q`.
+ *
+ * @param {Record<string, string | number | null | undefined>} updates
+ * @param {string} live
+ * @returns {string}
+ */
+export function searchQueuedByNavigation(updates, live) {
+  if (Object.prototype.hasOwnProperty.call(updates, "q")) {
+    const value = updates.q;
+    return value == null || value === "" ? "" : String(value);
+  }
+  return live ?? "";
+}
+
+/**
+ * Remember a navigation this tab asked for, oldest first. The same value
+ * queued twice in a row stays one entry.
+ *
+ * @param {string[]} expected
+ * @param {Record<string, string | number | null | undefined>} updates
+ * @param {string} live
+ * @returns {string[]}
+ */
+export function noteNavigation(expected, updates, live) {
+  const outgoing = searchQueuedByNavigation(updates, live);
+  if (expected[expected.length - 1] === outgoing) return expected;
+  return [...expected, outgoing];
+}
+
+/**
  * Decide how a local search and the URL `q` stay in step.
  *
- * `pending` is the value this tab already asked the router to write, or null.
- * An outside URL change while nothing is in flight (Back, a shared link)
- * wins. A local edit is written. When that write lands, drop `pending` and
- * write again only if the reader typed something newer. A URL that arrives
- * while a newer write is in flight is ignored so the older one cannot wipe it.
+ * `expected` is every `q` this tab has asked the router to write and has not
+ * seen land, oldest first. A list navigation that included the search belongs
+ * there too, or its arrival looks like Back and replaces newer typing.
+ * A URL that is not in that list is Back or a shared link: it wins, and the
+ * in-flight writes move to `cancelled`. When one of those lands late, write
+ * the local query back at once. An older in-flight URL is ignored while a
+ * newer write is still out.
  *
- * @param {{ local: string, url: string, pending: string | null, urlChanged: boolean }} state
- * @returns {{ adopt: boolean, clearPending: boolean, write: string | null }}
+ * @param {{ local: string, url: string, urlChanged: boolean, expected?: string[], cancelled?: string[] }} state
+ * @returns {{ adopt: boolean, write: string | null, immediate: boolean, expected: string[], cancelled: string[] }}
  */
-export function nextSearchWrite({ local, url, pending, urlChanged }) {
-  if (urlChanged && pending != null && url === pending) {
-    if (local === url) return { adopt: false, clearPending: true, write: null };
-    return { adopt: false, clearPending: true, write: local };
+export function nextSearchWrite({ local, url, urlChanged, expected = [], cancelled = [] }) {
+  const inFlight = expected.slice();
+  let dropped = cancelled.slice();
+  const hold = { adopt: false, write: null, immediate: false, expected: inFlight, cancelled: dropped };
+
+  if (!urlChanged) {
+    if (local !== url && inFlight[inFlight.length - 1] !== local) {
+      return { ...hold, write: local };
+    }
+    return hold;
   }
-  if (urlChanged && pending != null) {
-    return { adopt: false, clearPending: false, write: null };
+
+  const idx = inFlight.lastIndexOf(url);
+  if (idx === inFlight.length - 1 && idx !== -1) {
+    dropped = dropped.filter((item) => item !== url);
+    const settled = { ...hold, expected: [], cancelled: dropped };
+    if (local === url) return settled;
+    return { ...settled, write: local };
   }
-  if (urlChanged && url !== local) {
-    return { adopt: true, clearPending: true, write: null };
+  if (idx !== -1) {
+    return { ...hold, expected: inFlight.slice(idx + 1) };
   }
-  if (local !== url && pending !== local) {
-    return { adopt: false, clearPending: false, write: local };
+  if (dropped.includes(url)) {
+    if (local === url) {
+      return { ...hold, cancelled: dropped.filter((item) => item !== url) };
+    }
+    return { ...hold, write: local, immediate: true };
   }
-  if (pending != null && url === pending && local === url) {
-    return { adopt: false, clearPending: true, write: null };
+
+  for (const item of inFlight) {
+    if (!dropped.includes(item)) dropped.push(item);
   }
-  return { adopt: false, clearPending: false, write: null };
+  return { adopt: local !== url, write: null, immediate: false, expected: [], cancelled: dropped };
 }
 
 /**
