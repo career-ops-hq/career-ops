@@ -82,8 +82,10 @@ export function savedViewPayload(action, views) {
  * overwritten. After a rejected write, names in `pending` keep the in-memory
  * copy. Every other name uses the stored copy, so this page does not write a
  * stale view back over the other tab. Omitting `pending` treats every
- * in-memory name as pending. A successful write uses disk only, including a
- * view the other tab removed.
+ * in-memory name as pending. A pending name that is not stored is added only
+ * while the list is under the limit, so a full list from another tab is not
+ * shortened. A successful write uses disk only, including a view the other
+ * tab removed.
  *
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} memory
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
@@ -106,6 +108,10 @@ export function viewsForMutation(memory, stored, keepUnstored, omitted = [], pen
     return merged;
   }
   const pendingNames = new Set(Array.isArray(pending) ? pending : []);
+  const memoryByName = new Map();
+  for (const view of Array.isArray(memory) ? memory : []) {
+    if (view && typeof view.name === "string" && !memoryByName.has(view.name)) memoryByName.set(view.name, view);
+  }
   const merged = [];
   const seen = new Set();
   const take = (view) => {
@@ -114,11 +120,36 @@ export function viewsForMutation(memory, stored, keepUnstored, omitted = [], pen
     seen.add(view.name);
     merged.push(view);
   };
-  for (const view of Array.isArray(memory) ? memory : []) {
+  for (const view of disk) {
+    const local = pendingNames.has(view.name) ? memoryByName.get(view.name) : null;
+    take(local || view);
+  }
+  for (const view of memoryByName.values()) {
     if (pendingNames.has(view.name)) take(view);
   }
-  for (const view of disk) take(view);
   return merged;
+}
+
+/**
+ * A write must not drop a view another tab stored. Names in `allow` were
+ * removed on this page and may be absent.
+ *
+ * @param {{name?: string}[]} payload
+ * @param {{name?: string}[]} stored
+ * @param {string[]} [allow]
+ */
+export function keepsStoredNames(payload, stored, allow = []) {
+  const names = new Set();
+  for (const view of Array.isArray(payload) ? payload : []) {
+    if (view && typeof view.name === "string") names.add(view.name);
+  }
+  const skip = new Set(Array.isArray(allow) ? allow : []);
+  const disk = Array.isArray(stored) ? stored.slice(0, VIEW_LIMIT) : [];
+  for (const view of disk) {
+    if (!view || typeof view.name !== "string" || skip.has(view.name)) continue;
+    if (!names.has(view.name)) return false;
+  }
+  return true;
 }
 
 /**

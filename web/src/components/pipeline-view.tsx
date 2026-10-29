@@ -21,7 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { SCORE_FLOORS, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
+import { SCORE_FLOORS, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -139,14 +139,15 @@ export function PipelineView({
     }
   }
 
-  function mutationBase() {
-    const omitted = [...omittedWhileRejected.current];
+  function mutationBase(extraOmitted: string[] = []) {
+    const omitted = [...omittedWhileRejected.current, ...extraOmitted];
     const pending = [...pendingWhileRejected.current];
     try {
-      return viewsForMutation(views, parseViews(localStorage.getItem(VIEWS_KEY) || "[]"), storageRejected.current, omitted, pending);
+      const stored = parseViews(localStorage.getItem(VIEWS_KEY) || "[]");
+      return { stored, base: viewsForMutation(views, stored, storageRejected.current, omitted, pending) };
     } catch {
       // Disk could not be read, so keep the in-memory list rather than dropping unchanged views.
-      return viewsForMutation(views, [], true, omitted);
+      return { stored: [] as SavedView[], base: viewsForMutation(views, [], true, omitted) };
     }
   }
 
@@ -156,14 +157,15 @@ export function PipelineView({
       setViewError("Name the view first.");
       return;
     }
-    const base = mutationBase();
+    const { stored, base } = mutationBase();
     const next = upsertView(base, view);
     const added = base.some((item) => item.name === view.name) || next.length > base.length;
-    omittedWhileRejected.current = new Set(omissionAfterAttempt([...omittedWhileRejected.current], view.name, added));
-    if (!added) {
+    const allow = [...omittedWhileRejected.current];
+    if (!added || !keepsStoredNames(next, stored, allow)) {
       setViewError("Remove a view first.");
       return;
     }
+    omittedWhileRejected.current = new Set(omissionAfterAttempt(allow, view.name, true));
     setViews(next);
     setNaming(false);
     setDraftName("");
@@ -172,7 +174,13 @@ export function PipelineView({
   }
 
   function removeSavedView(name: string) {
-    const next = removeView(mutationBase(), name);
+    const allow = [...omittedWhileRejected.current, name];
+    const { stored, base } = mutationBase([name]);
+    const next = removeView(base, name);
+    if (!keepsStoredNames(next, stored, allow)) {
+      setViewError("Remove a view first.");
+      return;
+    }
     setViews(next);
     if (!writeSavedViews("remove", next)) {
       omittedWhileRejected.current.add(name);
