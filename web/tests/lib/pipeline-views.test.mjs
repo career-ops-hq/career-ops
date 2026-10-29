@@ -83,3 +83,10 @@ test("a view storage rejected stays for the next save, with the other tab's view
   const saved = upsertView(base, { name: "Newer", tab: "ALL" });
   assert.deepEqual(saved.map((view) => view.name), ["Page only", "Other tab", "Newer"]);
 });
+
+test("a view removed while storage is rejected is not merged back from disk", () => {
+  const memory = [normalizeView({ name: "Kept", tab: "ALL" })];
+  const stored = [normalizeView({ name: "Kept", tab: "ALL" }), normalizeView({ name: "Gone", tab: "SKIP" })];
+  assert.deepEqual(viewsForMutation(memory, stored, true, ["Gone"]).map((view) => view.name), ["Kept"]);
+  assert.deepEqual(viewsForMutation(memory, stored, true).map((view) => view.name), ["Kept", "Gone"]);
+});

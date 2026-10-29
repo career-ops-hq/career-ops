@@ -84,15 +84,17 @@ export function savedViewPayload(action, views) {
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} memory
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
  * @param {boolean} keepUnstored
+ * @param {string[]} [omitted] names removed while storage was rejecting the write
  */
-export function viewsForMutation(memory, stored, keepUnstored) {
+export function viewsForMutation(memory, stored, keepUnstored, omitted = []) {
   const disk = Array.isArray(stored) ? stored.slice(0, VIEW_LIMIT) : [];
   if (!keepUnstored) return disk;
+  const skip = new Set(Array.isArray(omitted) ? omitted : []);
   const names = new Set(memory.map((view) => view.name));
   const merged = memory.slice(0, VIEW_LIMIT);
   for (const view of disk) {
     if (merged.length === VIEW_LIMIT) break;
-    if (names.has(view.name)) continue;
+    if (names.has(view.name) || skip.has(view.name)) continue;
     merged.push(view);
   }
   return merged;

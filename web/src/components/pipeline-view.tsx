@@ -60,6 +60,7 @@ export function PipelineView({
   const [draftName, setDraftName] = useState("");
   const [viewError, setViewError] = useState("");
   const storageRejected = useRef(false);
+  const omittedWhileRejected = useRef(new Set<string>());
   const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
@@ -122,21 +123,26 @@ export function PipelineView({
 
   function writeSavedViews(action: "save" | "remove", next: SavedView[]) {
     const payload = savedViewPayload(action, next);
-    if (payload == null) return;
+    if (payload == null) return false;
     try {
       localStorage.setItem(VIEWS_KEY, payload);
       storageRejected.current = false;
+      omittedWhileRejected.current.clear();
+      setViewError("");
+      return true;
     } catch {
       storageRejected.current = true;
       setViewError("This view stays on this page only.");
+      return false;
     }
   }
 
   function mutationBase() {
+    const omitted = [...omittedWhileRejected.current];
     try {
-      return viewsForMutation(views, parseViews(localStorage.getItem(VIEWS_KEY) || "[]"), storageRejected.current);
+      return viewsForMutation(views, parseViews(localStorage.getItem(VIEWS_KEY) || "[]"), storageRejected.current, omitted);
     } catch {
-      return viewsForMutation(views, [], true);
+      return viewsForMutation(views, [], true, omitted);
     }
   }
 
@@ -146,6 +152,7 @@ export function PipelineView({
       setViewError("Name the view first.");
       return;
     }
+    omittedWhileRejected.current.delete(view.name);
     const base = mutationBase();
     const next = upsertView(base, view);
     const added = base.some((item) => item.name === view.name) || next.length > base.length;
@@ -163,7 +170,7 @@ export function PipelineView({
   function removeSavedView(name: string) {
     const next = removeView(mutationBase(), name);
     setViews(next);
-    writeSavedViews("remove", next);
+    if (!writeSavedViews("remove", next)) omittedWhileRejected.current.add(name);
   }
 
   function applySaved(view: SavedView) {
