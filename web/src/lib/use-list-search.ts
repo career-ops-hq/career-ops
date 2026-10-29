@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
-import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite, noteNavigation } from "@/lib/list-search-sync.mjs";
+import { LIST_SEARCH_DEBOUNCE_MS, nextSearchWrite, rememberNavigation } from "@/lib/list-search-sync.mjs";
 
 type SearchParamsLike = { get: (key: string) => string | null };
 
@@ -12,7 +12,7 @@ type SearchParamsLike = { get: (key: string) => string | null };
  */
 export function useListSearch(
   params: SearchParamsLike,
-  commit: (updates: Record<string, string | number | null>) => void,
+  commit: (updates: Record<string, string | number | null>) => boolean,
   qRef: MutableRefObject<string>,
 ) {
   const [q, setQ] = useState(() => params.get("q") ?? "");
@@ -20,8 +20,8 @@ export function useListSearch(
   const cancelledRef = useRef<string[]>([]);
   const seenUrl = useRef(params.get("q") ?? "");
   const queueNavigation = useCallback((updates: Record<string, string | number | null>) => {
-    expectedRef.current = noteNavigation(expectedRef.current, updates, qRef.current);
-    commit(updates);
+    // A click that leaves the URL alone must not count as a newer write.
+    expectedRef.current = rememberNavigation(expectedRef.current, updates, qRef.current, commit(updates));
   }, [commit, qRef]);
   const queueRef = useRef(queueNavigation);
   // After commit. A discarded render must not publish a search or a navigation.

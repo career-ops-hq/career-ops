@@ -47,6 +47,22 @@ export function noteNavigation(expected, updates, live) {
 }
 
 /**
+ * Record a navigation only after the URL change is scheduled. A click that
+ * leaves the query as it is must not hide an older search write still on
+ * its way.
+ *
+ * @param {string[]} expected
+ * @param {Record<string, string | number | null | undefined>} updates
+ * @param {string} live
+ * @param {boolean} committed
+ * @returns {string[]}
+ */
+export function rememberNavigation(expected, updates, live, committed) {
+  if (!committed) return expected;
+  return noteNavigation(expected, updates, live);
+}
+
+/**
  * Decide how a local search and the URL `q` stay in step.
  *
  * `expected` is every `q` this tab has asked the router to write and has not

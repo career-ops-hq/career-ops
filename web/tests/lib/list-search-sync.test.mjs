@@ -6,7 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isSearchOnlyWrite, nextSearchWrite, noteNavigation, queryWithLiveSearch } from "../../src/lib/list-search-sync.mjs";
+import { isSearchOnlyWrite, nextSearchWrite, noteNavigation, queryWithLiveSearch, rememberNavigation } from "../../src/lib/list-search-sync.mjs";
 
 function decide(state) {
   return nextSearchWrite({ expected: [], cancelled: [], ...state });
@@ -72,6 +72,20 @@ test("Back cancels a search write that has not landed, and that write does not s
   assert.equal(late.write, "");
   assert.equal(late.immediate, true);
   assert.deepEqual(late.cancelled, ["Quill"]);
+});
+
+test("a tab click that leaves the URL alone does not hide a search write still on its way", () => {
+  const pending = rememberNavigation([], { q: "Quillfeather" }, "", true);
+  const sameTab = rememberNavigation(pending, { tab: "SKIP" }, "Quill", false);
+  assert.deepEqual(sameTab, ["Quillfeather"]);
+  const landed = decide({ local: "Quill", url: "Quillfeather", urlChanged: true, expected: sameTab });
+  assert.equal(landed.adopt, false);
+  assert.equal(landed.write, "Quill");
+  assert.deepEqual(landed.expected, []);
+  const recorded = rememberNavigation(pending, { tab: "SKIP" }, "Quill", true);
+  const stuck = decide({ local: "Quill", url: "Quillfeather", urlChanged: true, expected: recorded });
+  assert.equal(stuck.write, null);
+  assert.deepEqual(stuck.expected, ["Quill"]);
 });
 
 test("tab changes keep the search the reader has typed", () => {

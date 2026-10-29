@@ -118,17 +118,18 @@ export function FollowupsView() {
   const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
       const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
-      if (qs === params.toString()) return;
+      if (qs === params.toString()) return false;
       const href = `${pathname}${qs ? `?${qs}` : ""}`;
       // Search already filtered the rows. A transition would hide them.
       if (isSearchOnlyWrite(updates)) {
         router.replace(href, { scroll: false });
-        return;
+        return true;
       }
       startRouteProgress();
       startTransition(() => {
         router.replace(href, { scroll: false });
       });
+      return true;
     },
     [params, router, pathname, startTransition],
   );
