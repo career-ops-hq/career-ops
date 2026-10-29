@@ -302,6 +302,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         typing,
         composing: event.isComposing || event.key === "Process",
         selected: current.selectedSize,
+        repeat: event.repeat,
       });
       if (!command) return;
       if (command === "next" || command === "prev") {

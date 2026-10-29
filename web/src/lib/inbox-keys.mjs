@@ -1,10 +1,12 @@
-/** @param {{ key?: string, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean, altKey?: boolean, typing?: boolean, composing?: boolean, selected?: number }} input */
+/** @param {{ key?: string, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean, altKey?: boolean, typing?: boolean, composing?: boolean, selected?: number, repeat?: boolean }} input */
 export function inboxCommand(input) {
   if (!input || input.typing || input.composing || input.metaKey || input.ctrlKey || input.altKey) return null;
   const key = input.key;
   // Arrow keys stay with the browser so the page still scrolls.
+  // Holding j or k may repeat. Holding s or x must not skip or save every row that slides into place.
   if (key === "j") return "next";
   if (key === "k") return "prev";
+  if (input.repeat) return null;
   if (key === "s" || key === "S") return "save";
   if ((key === "x" || key === "X") && input.shiftKey && (input.selected ?? 0) > 0) return "skip-selected";
   if (key === "x" || key === "X") return "skip";

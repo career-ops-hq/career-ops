@@ -17,6 +17,14 @@ test("Shift+X skips the selection only when something is selected", () => {
   assert.equal(inboxCommand({ key: "x", shiftKey: true, selected: 0 }), "skip");
 });
 
+test("holding x or s does not skip or save again, and holding j still moves", () => {
+  assert.equal(inboxCommand({ key: "x", repeat: true }), null);
+  assert.equal(inboxCommand({ key: "s", repeat: true }), null);
+  assert.equal(inboxCommand({ key: "X", shiftKey: true, selected: 2, repeat: true }), null);
+  assert.equal(inboxCommand({ key: "j", repeat: true }), "next");
+  assert.equal(inboxCommand({ key: "k", repeat: true }), "prev");
+});
+
 test("keys do nothing while typing, composing, or holding a modifier", () => {
   assert.equal(inboxCommand({ key: "x", typing: true }), null);
   assert.equal(inboxCommand({ key: "j", composing: true }), null);
