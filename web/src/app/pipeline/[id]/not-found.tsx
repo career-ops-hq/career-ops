@@ -13,7 +13,7 @@ export default function ReportNotFound() {
     <PageFrame className="max-w-3xl">
       <Link
         href={`/pipeline${query ? `?${query}` : ""}`}
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand"
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
       >
         <ArrowLeft className="size-4" /> Pipeline
       </Link>
