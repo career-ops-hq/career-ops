@@ -60,6 +60,24 @@ test("Modal dialogs take focus, trap Tab, close on Escape and return focus", { s
     assertModalKeyboard("/followups", () => row().getByRole("button", { name: "Log follow-up for Fixture Beta", exact: true }), /Log follow-up.*Fixture Beta/));
   await t.test("Next follow-up date", () =>
     assertModalKeyboard("/followups", () => row().getByRole("button", { name: "Next date for Fixture Beta", exact: true }), /Pin next follow-up.*Fixture Beta/));
+  await t.test("Next follow-up date field takes a key and Tab stays in the dialog", async () => {
+    await page.goto(`${origin.origin}/followups`);
+    const opener = row().getByRole("button", { name: "Next date for Fixture Beta", exact: true });
+    await opener.waitFor();
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: /Pin next follow-up.*Fixture Beta/ });
+    await dialog.waitFor();
+    const date = dialog.locator("input[type='date']");
+    await until(() => focused(date), "the date field takes focus");
+    const before = await date.inputValue();
+    await page.keyboard.press("ArrowUp");
+    await until(async () => (await date.inputValue()) !== before, "ArrowUp edits the date");
+    await page.keyboard.press("Tab");
+    assert.equal(await dialog.evaluate((el) => el.contains(document.activeElement)), true);
+    await page.keyboard.press("Escape");
+    await until(async () => (await dialog.count()) === 0, "Escape closes the date dialog");
+  });
   await t.test("Report a bug", () =>
     assertModalKeyboard("/", () => page.getByRole("button", { name: "Report a bug", exact: true }), /Report a bug/));
   assert.deepEqual(unexpected, []);
