@@ -7,7 +7,7 @@ import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download 
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { CANONICAL_STATES, canonStatus, scoreNum, scoreTone } from "@/lib/format";
+import { CANONICAL_STATES, scoreNum, scoreTone } from "@/lib/format";
 import { StatusSelect } from "@/components/status-select";
 import { applicationKey, applySavedStatus, saveStatuses } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
@@ -17,10 +17,11 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/lib/pipeline-navigation.mjs";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 
@@ -31,10 +32,12 @@ export function PipelineView({
   applications,
   inbox,
   inboxCount,
+  trackerShape = "rows",
 }: {
   applications: Application[];
   inbox: InboxJob[] | null;
   inboxCount: number;
+  trackerShape?: "missing" | "empty" | "malformed" | "rows";
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -110,7 +113,7 @@ export function PipelineView({
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
     let rows = visibleApplications;
-    if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
+    if (tab !== "ALL") rows = rows.filter((r) => rowOnPipelineTab(r.status, tab));
     if (minFilter != null) {
       rows = rows.filter((r) => {
         const n = scoreNum(r.score);
@@ -211,7 +214,8 @@ export function PipelineView({
               ? inboxCount
               : t === "ALL"
                 ? visibleApplications.length
-                : visibleApplications.filter((r) => canonStatus(r.status).includes(t)).length;
+                : visibleApplications.filter((r) => rowOnPipelineTab(r.status, t)).length;
+          if (t === "OTHER" && count === 0 && visibleTab !== "OTHER") return null;
           return (
             <button
               key={t}
@@ -242,7 +246,7 @@ export function PipelineView({
           <button
             type="button"
             onClick={() => setParams({ min: null })}
-            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text transition-colors hover:bg-brand/15"
             title="Clear score filter"
           >
             score ≥ {minFilter.toFixed(1)}
@@ -270,14 +274,14 @@ export function PipelineView({
             type="button"
             onClick={applyBulkStatus}
             disabled={!bulkStatus || bulkBusy}
-            className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand disabled:opacity-50"
+            className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text disabled:opacity-50"
           >
             {bulkBusy ? "Saving…" : "Apply"}
           </button>
           {selectedRows.length >= 2 && selectedRows.length <= COMPARE_MAX && (
             <Link
               href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}`}
-              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand"
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand-text"
             >
               Compare
             </Link>
@@ -366,12 +370,12 @@ export function PipelineView({
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-                      <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand">
+                      <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand-text">
                         #{r.n}
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
                         <CompanyLogo name={company.logoName} size={20} />
                         {company.label}
                       </Link>
@@ -385,7 +389,7 @@ export function PipelineView({
                           target="_blank"
                           rel="noreferrer"
                           title={posting}
-                          className="inline-flex shrink-0 items-center gap-1 text-xs text-brand hover:underline"
+                          className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
                         >
                           {postingLabel(posting)}
                           <ExternalLink className="size-3" />
@@ -406,7 +410,7 @@ export function PipelineView({
                         // If this focused row leaves its tab, preserve a useful
                         // focus target. Do not interrupt someone using search.
                         const focusedRow = document.activeElement?.closest("tr");
-                        if (tab !== "ALL" && !canonStatus(status).includes(tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+                        if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
                           activeTab.current?.focus();
                         }
                         setAnnouncement(`Application #${r.n} status saved as ${status}.`);
@@ -430,12 +434,32 @@ export function PipelineView({
           </table>
         </div>
       ) : (
-        <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
-        </div>
+        <EmptyTracker shape={trackerShape} query={deferredQ} min={minFilter} tab={tab} />
       )}
     </PageFrame>
+  );
+}
+
+function EmptyTracker({
+  shape,
+  query,
+  min,
+  tab,
+}: {
+  shape: string;
+  query: string;
+  min: number | null;
+  tab: string;
+}) {
+  const copy = trackerEmptyMessage({ shape, query, min, tab });
+  return (
+    <div
+      role={copy.kind === "malformed" ? "alert" : "status"}
+      className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center"
+    >
+      <p className="font-display text-lg">{copy.title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{copy.detail}</p>
+    </div>
   );
 }
 
@@ -452,7 +476,7 @@ function InboxEmpty({ tracked }: { tracked: number }) {
       </div>
       <div className="px-6 py-10 text-center">
         <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
+          Your <span className="text-brand-text">inbox</span> is empty.
         </p>
         {tracked > 0 && (
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted">

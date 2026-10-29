@@ -259,9 +259,11 @@ const BARE = companyRoleDedupKey(CO, ROLE);
       null, 'labeled `posted:` segment in the 4th cell is not a location'],
     ['- [ ] https://ex.com/p/5 | Acme Corp | Backend Engineer |  | 120000 EUR',
       null, 'empty location cell forced by a compensation column is not a location'],
-    // The other three emitted labels — each must still be rejected.
+    // The other emitted labels — each must still be rejected.
     ['- [ ] https://ex.com/p/6 | Acme Corp | Site Reliability Engineer | trust: 60 missing_apply_url,suspicious_domain',
       null, 'labeled `trust:` segment in the 4th cell is not a location'],
+    ['- [ ] https://ex.com/p/7b | Acme Corp | Strategy Analyst | yrs: 3-5',
+      null, 'labeled `yrs:` segment (experience_filter) in the 4th cell is not a location'],
     ['- [ ] https://ex.com/p/7 | Acme Corp | Product Designer | note: curated list',
       null, 'labeled `note:` segment in the 4th cell is not a location'],
     ['- [ ] https://ex.com/p/8 | Acme Corp | ML Engineer | rank: 4.2/5 — Strong match',
