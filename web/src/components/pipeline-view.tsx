@@ -21,7 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { SCORE_FLOORS, normalizeView, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
+import { SCORE_FLOORS, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -152,10 +152,10 @@ export function PipelineView({
       setViewError("Name the view first.");
       return;
     }
-    omittedWhileRejected.current.delete(view.name);
     const base = mutationBase();
     const next = upsertView(base, view);
     const added = base.some((item) => item.name === view.name) || next.length > base.length;
+    omittedWhileRejected.current = new Set(omissionAfterAttempt([...omittedWhileRejected.current], view.name, added));
     if (!added) {
       setViewError("Remove a view first.");
       return;

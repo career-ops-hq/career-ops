@@ -100,6 +100,20 @@ export function viewsForMutation(memory, stored, keepUnstored, omitted = []) {
   return merged;
 }
 
+/**
+ * A refused save must not forget a removal that storage never accepted.
+ * The name leaves the omission list only after the save fits in the list.
+ *
+ * @param {string[]} omitted
+ * @param {string} name
+ * @param {boolean} accepted
+ */
+export function omissionAfterAttempt(omitted, name, accepted) {
+  const names = Array.isArray(omitted) ? omitted : [];
+  if (!accepted) return names.slice();
+  return names.filter((item) => item !== name);
+}
+
 /** @param {NonNullable<ReturnType<typeof normalizeView>>} view */
 export function viewUpdates(view) {
   return {

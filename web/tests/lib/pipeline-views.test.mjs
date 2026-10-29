@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeView, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
+import { normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
 
 const staff = { name: "Staff 4+", tab: "evaluated", q: "Staff", min: "4", sort: "score", dir: "-1" };
 
@@ -89,4 +89,9 @@ test("a view removed while storage is rejected is not merged back from disk", ()
   const stored = [normalizeView({ name: "Kept", tab: "ALL" }), normalizeView({ name: "Gone", tab: "SKIP" })];
   assert.deepEqual(viewsForMutation(memory, stored, true, ["Gone"]).map((view) => view.name), ["Kept"]);
   assert.deepEqual(viewsForMutation(memory, stored, true).map((view) => view.name), ["Kept", "Gone"]);
+});
+
+test("a refused save keeps a removed name omitted", () => {
+  assert.deepEqual(omissionAfterAttempt(["Gone"], "Gone", false), ["Gone"]);
+  assert.deepEqual(omissionAfterAttempt(["Gone", "Other"], "Gone", true), ["Other"]);
 });
