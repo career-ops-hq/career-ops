@@ -212,9 +212,10 @@ function resolveTrackerPath(override) {
 }
 
 function resolveFollowupsPath(override) {
-  if (override) return override;
-  if (process.env.CAREER_OPS_FOLLOWUPS) return process.env.CAREER_OPS_FOLLOWUPS;
-  return join(CAREER_OPS, 'data/follow-ups.md');
+  const path = override || process.env.CAREER_OPS_FOLLOWUPS || join(CAREER_OPS, 'data/follow-ups.md');
+  // Follow file symlinks before locking and replacing the file, so every
+  // spelling continues to read and update the same reminder history.
+  return canonicalizeTrackerPath(path);
 }
 
 function envInt(name, fallback) {
