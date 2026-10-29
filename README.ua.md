@@ -287,15 +287,15 @@ npm i -g @santifer/career-ops
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor або будь-який інший CLI | Звичайною мовою: "Run the career-ops scan mode" |
 
-`/career-ops` без продовження показує меню команд. Звичайна мова працює в будь-якому CLI. Як плагін Claude Code команда має вигляд `/career-ops:career-ops`.
+`/career-ops` без продовження показує меню команд у CLI, які його використовують. Звичайна мова працює в будь-якому CLI. Як плагін Claude Code команда має вигляд `/career-ops:career-ops`.
 
-Усі вони мають один спільний роутер, `.agents/skills/career-ops/SKILL.md`, і ті самі файли `modes/*.md`, тому режим працює однаково в будь-якому CLI. Slash-команди в Codex не гарантовані: просіть звичайною мовою або запустіть один промпт у headless-режимі через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Як запускати career-ops у кожному підтримуваному CLI, headless-команди там, де вони є, і нотатки щодо налаштування окремих CLI, наприклад `/trust` у Pi, — у [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Усі вони мають один спільний роутер, `.agents/skills/career-ops/SKILL.md`, і ті самі файли `modes/*.md`, тому режим працює однаково в будь-якому CLI. Slash-команди в Codex не гарантовані: просіть звичайною мовою або запустіть один промпт у headless-режимі через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Як запускати career-ops у кожному підтримуваному CLI, headless-команди там, де вони є, і нотатки щодо налаштування окремих CLI — у [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Щоденні команди
 
 | Команда | Що робить |
 | --- | --- |
-| *вставте URL або опис вакансії* | Повний пайплайн: перевірка, що вакансія ще відкрита (лише для URL), оцінка A-G, звіт, адаптоване резюме (за замовчуванням PDF), рядок у трекері |
+| *вставте URL або опис вакансії* | Повний пайплайн: перевірка, що вакансія ще відкрита (лише для URL), оцінка A-G плюс H за високої оцінки, звіт, адаптоване резюме (за замовчуванням PDF), рядок у трекері |
 | `scan` | Сканує ваші портали в пошуку нових вакансій і додає їх до вхідних (`data/pipeline.md`) |
 | `pipeline` | Оцінює кожен URL, що чекає у вхідних |
 | `apply` | Заповнює форму заявки разом із вами, поле за полем. Зупиняється перед надсиланням |
@@ -323,7 +323,7 @@ npm i -g @santifer/career-ops
 | Команда | Що робить |
 | --- | --- |
 | *вставте URL або опис вакансії* | [Auto-pipeline](modes/auto-pipeline.md): оцінка + звіт + адаптоване резюме (за замовчуванням PDF) + запис у трекері |
-| [`oferta`](modes/oferta.md) | Лише оцінка, блоки A–G (без PDF) |
+| [`oferta`](modes/oferta.md) | Лише оцінка, блоки A–G плюс H за високої оцінки (без PDF) |
 | [`ofertas`](modes/ofertas.md) | Порівнює та ранжує кілька вакансій |
 | [`deep`](modes/deep.md) | Промпт для глибокого дослідження компанії |
 | [`eu-swe`](modes/regional/eu-swe.md) | Калібрує європейську заявку на посаду в розробці ПЗ перед резюме, заявкою або інтерв'ю |
