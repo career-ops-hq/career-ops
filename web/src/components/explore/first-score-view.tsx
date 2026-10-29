@@ -123,7 +123,7 @@ export function FirstScoreView() {
         </button>
 
         <div className="relative px-7 pb-7 pt-8">
-          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-brand">
+          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-brand-text">
             <span className="text-faint">//</span> the job we found you — scored
           </p>
 
@@ -149,7 +149,7 @@ export function FirstScoreView() {
 
           {/* THE WHY — the hero. A sentence that read THIS CV against THIS job. */}
           <blockquote className={`${instrumentSerif.className} mt-5 border-l-2 border-brand/40 pl-4 text-[19px] leading-snug text-foreground`}>
-            <Sparkles className="mb-1 inline size-4 text-brand" /> {why}
+            <Sparkles className="mb-1 inline size-4 text-brand-text" /> {why}
           </blockquote>
 
           {legit && (
@@ -182,7 +182,7 @@ export function FirstScoreView() {
                 close();
                 router.push("/explore");
               }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface/50 px-4 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface/50 px-4 py-2.5 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand-text"
             >
               <Compass className="size-4" /> Find more like this
             </button>

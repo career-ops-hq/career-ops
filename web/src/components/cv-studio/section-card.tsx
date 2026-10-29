@@ -54,7 +54,7 @@ export function SectionCard({ section, siblings, first, last, ...common }: Commo
               key={t.id}
               aria-pressed={!hidden.has(t.id)}
               onClick={() => dispatch({ type: "toggle", id: t.id })}
-              className={cn("rounded-full border px-2.5 py-0.5 text-xs transition-colors", hidden.has(t.id) ? "border-dashed border-border text-faint line-through" : "border-brand/30 bg-brand-soft text-brand")}
+              className={cn("rounded-full border px-2.5 py-0.5 text-xs transition-colors", hidden.has(t.id) ? "border-dashed border-border text-faint line-through" : "border-brand/30 bg-brand-soft text-brand-text")}
             >
               {t.label}
             </button>
@@ -106,7 +106,7 @@ function ItemBlock({ item, section, siblings, first, last, ...common }: Common &
                   <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wide">Dropped by the tailor</span>
                   {r.text}
                 </span>
-                <button className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-muted hover:border-brand/40 hover:text-brand" onClick={() => dispatch({ type: "restore", item: item.id, index: idx })}>
+                <button className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-muted hover:border-brand/40 hover:text-brand-text" onClick={() => dispatch({ type: "restore", item: item.id, index: idx })}>
                   <Plus className="size-3" /> Add back
                 </button>
               </li>
@@ -182,7 +182,7 @@ function BulletRow({ n, bullet, parent, siblings, first, last, movable, edits, h
         )}
         {shown.source === "tailored" &&
           bullet.drivenBy.map((k) => (
-            <span key={k} className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] text-brand" title="Job keyword this rewrite added">
+            <span key={k} className="rounded-full bg-brand-soft px-2 py-0.5 text-[11px] text-brand-text" title="Job keyword this rewrite added">
               +{k}
             </span>
           ))}
@@ -196,7 +196,7 @@ function BulletRow({ n, bullet, parent, siblings, first, last, movable, edits, h
                 role="radio"
                 aria-checked={shown.source === kind}
                 onClick={() => dispatch({ type: "use", id: bullet.id, use: { kind } })}
-                className={cn("rounded-full px-2 py-0.5 transition-colors", shown.source === kind ? "bg-brand-soft font-medium text-brand" : "text-muted hover:text-foreground")}
+                className={cn("rounded-full px-2 py-0.5 transition-colors", shown.source === kind ? "bg-brand-soft font-medium text-brand-text" : "text-muted hover:text-foreground")}
               >
                 {kind === "tailored" ? "Tailored" : "Original"}
               </button>
@@ -266,7 +266,7 @@ function RewritePanel({ n, bullet, current, onUse }: { n: string; bullet: Studio
       </form>
       <div className="mt-1.5 flex flex-wrap gap-1">
         {QUICK.map((q) => (
-          <button key={q} type="button" disabled={proposal.kind === "running"} onClick={() => { setInstruction(q); run(q); }} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted hover:border-brand/40 hover:text-brand disabled:opacity-50">
+          <button key={q} type="button" disabled={proposal.kind === "running"} onClick={() => { setInstruction(q); run(q); }} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted hover:border-brand/40 hover:text-brand-text disabled:opacity-50">
             {q}
           </button>
         ))}

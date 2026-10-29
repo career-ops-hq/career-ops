@@ -10,12 +10,13 @@ import { isRealCalendarDate } from './followup-cadence.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
+import { scanHeadings } from './lib/personalization.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { parseMarkdownLinks, parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
 import { acquireTrackerLock, resolveWorkspaceRoot, trackerLockDirFor, writeFileAtomic } from './tracker-utils.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
-const FENCE = /(##[ \t]*Machine Summary[ \t]*\n+```(?:yaml|yml)?[ \t]*\n)([\s\S]*?)(\n```)/i;
+const FENCE = /^(##[ \t]*Machine Summary[ \t]*\n+```(?:yaml|yml)?[ \t]*\n)([\s\S]*?)(\n```)/i;
 
 const KNOWN_FLAGS = ['--app', '--dealbreaker', '--contact-name', '--contact-email', '--contact-type', '--next', '--why', '--help', '-h'];
 const VALUE_FLAGS = ['--app', '--dealbreaker', '--contact-name', '--contact-email', '--contact-type', '--next', '--why'];
@@ -145,7 +146,8 @@ function parseSummary(yamlBody) {
 }
 
 function applyReport(report, sentence) {
-  const fence = report.match(FENCE);
+  const section = scanHeadings(report).heads.find((heading) => heading.level === 2 && /^##[ \t]+Machine Summary[ \t]*$/i.test(heading.heading));
+  const fence = section && report.slice(section.start, section.end).match(FENCE);
   if (!fence) planError('BAD_PLAN', 'the report has no Machine Summary YAML');
   const summary = parseSummary(fence[2]);
   if (summary == null || typeof summary !== 'object' || Array.isArray(summary)) {
@@ -156,7 +158,8 @@ function applyReport(report, sentence) {
   if (written?.final_decision !== 'Skip' || !hardStops(written).includes(sentence)) {
     planError('BAD_PLAN', 'the Machine Summary could not be rewritten safely; edit final_decision and hard_stops by hand');
   }
-  return report.replace(fence[0], () => `${fence[1]}${nextYaml}${fence[3]}`);
+  const start = section.start + fence.index;
+  return report.slice(0, start) + `${fence[1]}${nextYaml}${fence[3]}` + report.slice(start + fence[0].length);
 }
 
 function reportPathFor(row, workspaceRoot) {

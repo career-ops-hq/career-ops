@@ -130,7 +130,7 @@ export function PortalsView({ watched }: { watched: WatchedCompany[] }) {
 function FixAffordance({ company, job, onFix }: { company: string; job?: Job; onFix: () => void }) {
   if (job?.status === "running")
     return (
-      <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand">
+      <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-text">
         <Loader2 className="size-3 animate-spin" /> Fixing…
       </Link>
     );
@@ -144,7 +144,7 @@ function FixAffordance({ company, job, onFix }: { company: string; job?: Job; on
     <button
       onClick={onFix}
       title={`Have the agent repair ${company}'s portal slug`}
-      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
+      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand-text"
     >
       <Wrench className="size-3" /> Fix
     </button>

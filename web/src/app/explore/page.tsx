@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { ExplorerView } from "@/components/explore/explorer-view";
 import { seedExploreFilters } from "@/lib/core/portals";
 import { readInbox, readApplications, careerOpsRoot } from "@/lib/career-ops";
+import { exploreSnapshot } from "@/lib/explore-snapshot.mjs";
 import { DEFAULT_FILTERS } from "@/lib/explore";
 
 // Read live data at request time so a bare checkout (or `next build` with no
@@ -21,7 +22,9 @@ export default function ExplorePage() {
   } catch {
     /* ignore */
   }
+  const applications = readApplications();
+  const snap = exploreSnapshot(readInbox(applications), applications);
   return (
-    <ExplorerView seed={seed} inboxSnapshot={readInbox()} appsSnapshot={readApplications()} rootExists={rootExists} />
+    <ExplorerView seed={seed} inboxUrls={snap.inboxUrls} evaluated={snap.evaluated} rootExists={rootExists} />
   );
 }

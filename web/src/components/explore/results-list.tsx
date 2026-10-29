@@ -62,7 +62,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
                 key={s}
                 type="button"
                 onClick={() => setSort(s)}
-                className={cn("rounded-md px-2.5 py-1 font-medium capitalize transition-colors", sort === s ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground")}
+                className={cn("rounded-md px-2.5 py-1 font-medium capitalize transition-colors", sort === s ? "bg-brand-soft text-brand-text" : "text-muted hover:text-foreground")}
               >
                 {s}
               </button>
@@ -72,7 +72,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
             <button
               type="button"
               onClick={() => addToPipeline(addable)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/40 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand-text"
             >
               <Plus className="size-3.5" /> Add all {addable.length}
             </button>

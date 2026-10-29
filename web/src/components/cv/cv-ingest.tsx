@@ -210,7 +210,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px] max-sm:px-4"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px] max-sm:px-4"
             >
               <Upload className="size-3.5" /> Upload PDF / file
             </button>
@@ -252,7 +252,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       <div className="rounded-2xl border border-border bg-surface/60 p-6 backdrop-blur-sm">
         <style>{STYLE}</style>
         <div className="flex items-center gap-2.5">
-          <Loader2 className="size-4 animate-spin text-brand" />
+          <Loader2 className="size-4 animate-spin text-brand-text" />
           <span className={`${instrumentSerif.className} text-lg text-foreground`}>{trace || "Reading your CV…"}</span>
         </div>
         <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-400">
@@ -268,7 +268,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     <div className="rounded-2xl border border-border bg-surface/60 p-4 backdrop-blur-sm md:p-5">
       <style>{STYLE}</style>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <FileText className="size-4 text-brand" />
+        <FileText className="size-4 text-brand-text" />
         <h3 className={`${instrumentSerif.className} text-lg text-foreground`}>Here&apos;s your CV — review and save</h3>
         {readiness && (
           <span
@@ -294,7 +294,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
           onChange={(e) => setMd(e.target.value)}
           className="h-72 w-full resize-none rounded-lg border border-border bg-surface/40 p-3 font-mono text-[12px] leading-relaxed outline-none focus:border-brand/40"
         />
-        <div className="prose prose-sm dark:prose-invert h-72 max-w-none overflow-y-auto rounded-lg border border-border bg-surface/40 p-3 text-[13px]">
+        <div className="prose prose-sm dark:prose-invert h-72 max-w-none [&_p]:whitespace-pre-line overflow-y-auto rounded-lg border border-border bg-surface/40 p-3 text-[13px]">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
         </div>
       </div>
