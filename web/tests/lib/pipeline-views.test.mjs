@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
+import { VIEW_LIMIT, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
 
 const staff = { name: "Staff 4+", tab: "evaluated", q: "Staff", min: "4", sort: "score", dir: "-1" };
 
@@ -80,10 +80,49 @@ test("a save starts from the list on disk when the last write landed", () => {
 test("a view storage rejected stays for the next save, with the other tab's view", () => {
   const memory = [normalizeView({ name: "Page only", tab: "ALL" })];
   const stored = [normalizeView({ name: "Other tab", tab: "SKIP" })];
-  const base = viewsForMutation(memory, stored, true);
+  const base = viewsForMutation(memory, stored, true, [], ["Page only"]);
   assert.deepEqual(base.map((view) => view.name), ["Page only", "Other tab"]);
+  assert.deepEqual(viewsForMutation(memory, stored, true).map((view) => view.name), ["Page only", "Other tab"]);
   const saved = upsertView(base, { name: "Newer", tab: "ALL" });
   assert.deepEqual(saved.map((view) => view.name), ["Page only", "Other tab", "Newer"]);
+});
+
+test("a rejected save keeps the changed view and another tab's newer copy of the rest", () => {
+  const memory = [
+    normalizeView({ name: "Staff", tab: "ALL", q: "stale" }),
+    normalizeView({ name: "Local", tab: "ALL", q: "mine" }),
+  ];
+  const stored = [
+    normalizeView({ name: "Staff", tab: "EVALUATED", q: "fresh" }),
+    normalizeView({ name: "Other", tab: "SKIP" }),
+  ];
+  const merged = viewsForMutation(memory, stored, true, [], ["Local"]);
+  assert.deepEqual(merged.map((view) => view.name), ["Local", "Staff", "Other"]);
+  assert.equal(merged.find((view) => view.name === "Staff").q, "fresh");
+  assert.equal(merged.find((view) => view.name === "Staff").tab, "EVALUATED");
+  assert.equal(merged.find((view) => view.name === "Local").q, "mine");
+  const edited = viewsForMutation(
+    [normalizeView({ name: "Staff", tab: "ALL", q: "mine" })],
+    stored,
+    true,
+    [],
+    ["Staff"],
+  );
+  assert.equal(edited[0].q, "mine");
+  assert.deepEqual(edited.map((view) => view.name), ["Staff", "Other"]);
+  const storedOnly = viewsForMutation(memory, stored, true, ["Other"], []);
+  assert.deepEqual(storedOnly.map((view) => view.name), ["Staff"]);
+  assert.equal(storedOnly[0].q, "fresh");
+});
+
+test("pending names stay inside the eight-view limit", () => {
+  const memory = Array.from({ length: VIEW_LIMIT }, (_, index) => normalizeView({ name: `Local ${index}`, tab: "ALL" }));
+  const stored = [normalizeView({ name: "Other", tab: "SKIP" })];
+  const pending = memory.map((view) => view.name);
+  assert.equal(viewsForMutation(memory, stored, true, [], pending).length, VIEW_LIMIT);
+  const room = viewsForMutation(memory.slice(0, VIEW_LIMIT - 1), stored, true, [], pending.slice(0, VIEW_LIMIT - 1));
+  assert.equal(room.at(-1).name, "Other");
+  assert.equal(room.length, VIEW_LIMIT);
 });
 
 test("a view removed while storage is rejected is not merged back from disk", () => {

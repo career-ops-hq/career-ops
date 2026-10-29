@@ -79,25 +79,45 @@ export function savedViewPayload(action, views) {
 
 /**
  * A save or delete starts from the list on disk, so another tab is not
- * overwritten. Views kept only in memory, because storage rejected the write,
- * stay. After a successful write, disk wins, including a view the other tab removed.
+ * overwritten. After a rejected write, names in `pending` keep the in-memory
+ * copy. Every other name uses the stored copy, so this page does not write a
+ * stale view back over the other tab. Omitting `pending` treats every
+ * in-memory name as pending. A successful write uses disk only, including a
+ * view the other tab removed.
  *
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} memory
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
  * @param {boolean} keepUnstored
  * @param {string[]} [omitted] names removed while storage was rejecting the write
+ * @param {string[] | null} [pending] names this page changed while storage was rejecting. Null keeps every memory view.
  */
-export function viewsForMutation(memory, stored, keepUnstored, omitted = []) {
+export function viewsForMutation(memory, stored, keepUnstored, omitted = [], pending = null) {
   const disk = Array.isArray(stored) ? stored.slice(0, VIEW_LIMIT) : [];
   if (!keepUnstored) return disk;
   const skip = new Set(Array.isArray(omitted) ? omitted : []);
-  const names = new Set(memory.map((view) => view.name));
-  const merged = memory.slice(0, VIEW_LIMIT);
-  for (const view of disk) {
-    if (merged.length === VIEW_LIMIT) break;
-    if (names.has(view.name) || skip.has(view.name)) continue;
-    merged.push(view);
+  if (pending == null) {
+    const names = new Set(memory.map((view) => view.name));
+    const merged = memory.slice(0, VIEW_LIMIT);
+    for (const view of disk) {
+      if (merged.length === VIEW_LIMIT) break;
+      if (names.has(view.name) || skip.has(view.name)) continue;
+      merged.push(view);
+    }
+    return merged;
   }
+  const pendingNames = new Set(Array.isArray(pending) ? pending : []);
+  const merged = [];
+  const seen = new Set();
+  const take = (view) => {
+    if (!view || typeof view.name !== "string") return;
+    if (merged.length === VIEW_LIMIT || seen.has(view.name) || skip.has(view.name)) return;
+    seen.add(view.name);
+    merged.push(view);
+  };
+  for (const view of Array.isArray(memory) ? memory : []) {
+    if (pendingNames.has(view.name)) take(view);
+  }
+  for (const view of disk) take(view);
   return merged;
 }
 

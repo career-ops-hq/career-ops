@@ -61,6 +61,7 @@ export function PipelineView({
   const [viewError, setViewError] = useState("");
   const storageRejected = useRef(false);
   const omittedWhileRejected = useRef(new Set<string>());
+  const pendingWhileRejected = useRef(new Set<string>());
   const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
@@ -128,6 +129,7 @@ export function PipelineView({
       localStorage.setItem(VIEWS_KEY, payload);
       storageRejected.current = false;
       omittedWhileRejected.current.clear();
+      pendingWhileRejected.current.clear();
       setViewError("");
       return true;
     } catch {
@@ -139,9 +141,11 @@ export function PipelineView({
 
   function mutationBase() {
     const omitted = [...omittedWhileRejected.current];
+    const pending = [...pendingWhileRejected.current];
     try {
-      return viewsForMutation(views, parseViews(localStorage.getItem(VIEWS_KEY) || "[]"), storageRejected.current, omitted);
+      return viewsForMutation(views, parseViews(localStorage.getItem(VIEWS_KEY) || "[]"), storageRejected.current, omitted, pending);
     } catch {
+      // Disk could not be read, so keep the in-memory list rather than dropping unchanged views.
       return viewsForMutation(views, [], true, omitted);
     }
   }
@@ -164,13 +168,16 @@ export function PipelineView({
     setNaming(false);
     setDraftName("");
     setViewError("");
-    writeSavedViews("save", next);
+    if (!writeSavedViews("save", next)) pendingWhileRejected.current.add(view.name);
   }
 
   function removeSavedView(name: string) {
     const next = removeView(mutationBase(), name);
     setViews(next);
-    if (!writeSavedViews("remove", next)) omittedWhileRejected.current.add(name);
+    if (!writeSavedViews("remove", next)) {
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+    }
   }
 
   function applySaved(view: SavedView) {
