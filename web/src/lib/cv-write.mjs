@@ -35,3 +35,18 @@ export function decideCvWrite(disk, body) {
   }
   return { ok: true, backup: body.backup !== false };
 }
+
+/**
+ * The ingest screen replaces cv.md with the text it parsed. The body names
+ * the file it read before that editing, so a change made during the review
+ * is refused instead of overwritten.
+ *
+ * @param {string} content
+ * @param {{ content: string, exists: boolean }} base
+ */
+export function cvIngestSaveBody(content, base) {
+  return {
+    content,
+    expected: { content: base.content, exists: base.exists },
+  };
+}

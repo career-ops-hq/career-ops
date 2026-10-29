@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { cvReadiness, parseCvStream, type CvSeed } from "@/lib/cv/quality";
 import { ingestErrorMessage } from "@/lib/cv/ingest-error.mjs";
+import { cvIngestSaveBody } from "@/lib/cv-write.mjs";
 import { DEFAULT_FILTERS, filtersToParams } from "@/lib/explore";
 
 type Phase = "input" | "parsing" | "review" | "saving" | "error";
@@ -38,6 +39,32 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   const [seed, setSeed] = useState<CvSeed | null>(null);
   const [err, setErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const baseRef = useRef<{ content: string; exists: boolean } | null>(null);
+  const baseLoad = useRef<Promise<{ content: string; exists: boolean }> | null>(null);
+  const readBase = useCallback(() => {
+    if (baseRef.current) return Promise.resolve(baseRef.current);
+    if (!baseLoad.current) {
+      baseLoad.current = fetch("/api/cv")
+        .then(async (r) => {
+          if (!r.ok) throw new Error("load failed");
+          const data = (await r.json()) as { content?: unknown; exists?: unknown };
+          const base = {
+            content: typeof data.content === "string" ? data.content : "",
+            exists: data.exists === true,
+          };
+          baseRef.current = base;
+          return base;
+        })
+        .catch((err) => {
+          baseLoad.current = null;
+          throw err;
+        });
+    }
+    return baseLoad.current;
+  }, []);
+  useEffect(() => {
+    void readBase().catch(() => {});
+  }, [readBase]);
 
   const readiness = md ? cvReadiness(md) : null;
 
@@ -152,8 +179,20 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     }
     setSaveErr("");
     setPhase("saving");
+    let base: { content: string; exists: boolean };
     try {
-      const r = await fetch("/api/cv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: md }) });
+      base = await readBase();
+    } catch {
+      setSaveErr("Couldn't read the current CV, so it was not replaced.");
+      setPhase("review");
+      return;
+    }
+    try {
+      const r = await fetch("/api/cv", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cvIngestSaveBody(md, base)),
+      });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         setSaveErr(d.error || "Couldn't save your CV — try again.");

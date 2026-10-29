@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, initialEditor, shouldSave } from "../../src/lib/cv-editor-state.mjs";
+import { draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, initialEditor, saveFollowUp, shouldSave } from "../../src/lib/cv-editor-state.mjs";
 
 const ready = (content, extra = {}) => ({
   ...initialEditor(),
@@ -154,6 +154,41 @@ test("a conflicting save keeps the draft and does not write again", () => {
   assert.equal(state.content, "E");
   assert.equal(shouldSave(state), false);
   assert.equal(draftToStore(state).content, "E");
+});
+
+test("reverting to the saved text during a conflict does not look saved", () => {
+  let state = editorReducer(ready("A"), { type: "edit", content: "B" });
+  state = editorReducer(state, { type: "save-start", content: "B" });
+  state = editorReducer(state, { type: "edit", content: "A" });
+  state = editorReducer(state, {
+    type: "save-failed",
+    content: "B",
+    error: "cv.md changed somewhere else. Your text is still in this tab.",
+    conflict: true,
+  });
+  assert.equal(state.content, "A");
+  assert.equal(state.saved, "A");
+  assert.equal(editorStatus(state).label, "Unsaved");
+  assert.equal(editorStatus(state).canSave, false);
+  assert.equal(shouldSave(state), false);
+  assert.deepEqual(draftToStore(state), { base: "A", content: "A" });
+  const loaded = editorReducer(initialEditor(), {
+    type: "loaded",
+    content: "Written elsewhere.",
+    exists: true,
+    draft: draftToStore(state),
+  });
+  assert.equal(loaded.content, "Written elsewhere.");
+  assert.equal(draftToStore(loaded), null);
+});
+
+test("a follow-up save expects the write that just landed", () => {
+  let state = editorReducer(ready("A"), { type: "edit", content: "B" });
+  state = editorReducer(state, { type: "save-start", content: "B" });
+  assert.equal(saveFollowUp(state, "B"), null);
+  state = editorReducer(state, { type: "edit", content: "C" });
+  assert.deepEqual(saveFollowUp(state, "B"), { text: "C", expected: { content: "B", exists: true } });
+  assert.equal(saveFollowUp(state, "A"), null);
 });
 
 test("a newer edit keeps the in-flight text as a draft base", () => {

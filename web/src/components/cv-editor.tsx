@@ -12,6 +12,7 @@ import {
   editorReducer,
   editorStatus,
   initialEditor,
+  saveFollowUp,
   shouldSave,
 } from "@/lib/cv-editor-state.mjs";
 
@@ -37,11 +38,12 @@ export function CvEditor() {
   const pendingRef = useRef<{ text: string; keepalive: boolean } | null>(null);
   if (state.snapshotPrior) snapshotPriorRef.current = true;
 
-  const pump = useCallback(() => {
+  const pump = useCallback((confirmed?: { content: string; exists: boolean }) => {
     if (runningRef.current) return;
     const job = pendingRef.current;
     const current = stateRef.current;
-    if (!job || current.phase !== "ready" || job.text !== current.content || job.text === current.saved) {
+    const base = confirmed ?? { content: current.saved, exists: current.exists };
+    if (!job || current.phase !== "ready" || job.text !== current.content || job.text === base.content) {
       pendingRef.current = null;
       return;
     }
@@ -49,7 +51,7 @@ export function CvEditor() {
     runningRef.current = true;
     const snapshot = job.text;
     const backup = snapshotPriorRef.current;
-    const expected = { content: current.saved, exists: current.exists };
+    const expected = { content: base.content, exists: base.exists };
     dispatch({ type: "save-start", content: snapshot });
     const bytes = new TextEncoder().encode(snapshot).length;
     fetch("/api/cv", {
@@ -73,9 +75,10 @@ export function CvEditor() {
         if (backup) snapshotPriorRef.current = false;
         dispatch({ type: "save-ok", content: snapshot });
         window.dispatchEvent(new CustomEvent("co-cv-saved"));
-        if (stateRef.current.content !== snapshot) {
-          pendingRef.current = { text: stateRef.current.content, keepalive: job.keepalive };
-          pump();
+        const follow = saveFollowUp(stateRef.current, snapshot);
+        if (follow) {
+          pendingRef.current = { text: follow.text, keepalive: job.keepalive };
+          pump(follow.expected);
         }
       })
       .catch(() => {

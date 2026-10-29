@@ -106,6 +106,9 @@ export function editorStatus(state) {
     if (state.inflight === state.content) return { label: "Saving", canSave: false };
     return { label: "Unsaved", canSave: state.inflight === null && !state.conflict };
   }
+  // The file changed underneath. Matching the last save this tab made is not
+  // the same as the file still holding that text.
+  if (state.conflict) return { label: "Unsaved", canSave: false };
   if (!state.exists) return { label: "No file yet", canSave: false };
   return { label: "Saved", canSave: false };
 }
@@ -119,6 +122,19 @@ export function editorStatus(state) {
  */
 export function shouldSave(state) {
   return state.phase === "ready" && state.error === null && !state.conflict && state.content !== state.saved && state.inflight !== state.content;
+}
+
+/**
+ * The next save after `written` lands. The reducer has not re-rendered, so
+ * `state.saved` is still the older text. The follow-up must expect `written`.
+ *
+ * @param {EditorState} state
+ * @param {string} written
+ * @returns {{ text: string, expected: { content: string, exists: boolean } } | null}
+ */
+export function saveFollowUp(state, written) {
+  if (state.phase !== "ready" || state.inflight !== written || state.content === written) return null;
+  return { text: state.content, expected: { content: written, exists: true } };
 }
 
 /**
@@ -155,7 +171,7 @@ export function draftFromStore(raw) {
 export function draftToStore(state) {
   if (state.phase !== "ready") return null;
   const inflight = typeof state.inflight === "string" && state.inflight !== state.saved ? state.inflight : null;
-  if (state.content === state.saved && inflight === null) return null;
+  if (state.content === state.saved && inflight === null && !state.conflict) return null;
   const draft = { base: state.saved, content: state.content };
   if (inflight !== null) draft.inflight = inflight;
   return draft;
