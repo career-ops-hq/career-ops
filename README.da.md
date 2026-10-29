@@ -305,7 +305,7 @@ De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `mod
 <details>
 <summary><b>Alle kommandoer, efter fase i jobsøgningen</b></summary>
 
-`oferta`, `ofertas` og `contacto` beholder deres oprindelige spanske navne: tilbud, tilbud (flertal), kontakt.
+`oferta`, `ofertas` og `contacto` beholder deres oprindelige spanske navne: tilbud, flere tilbud, kontakt.
 
 **Find stillinger**
 
