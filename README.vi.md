@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Tạo bởi <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Tạo bởi <a href="https://github.com/santifer"><strong>@santifer</strong></a>, cùng&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders">700+ người đóng góp</a></p>
 
 <p align="center">
 <strong>Nhiều tháng gửi CV vào&nbsp;im&nbsp;lặng.</strong><br>
@@ -123,6 +123,8 @@ Sự im lặng sau khi bạn bấm gửi không phải lỗi của bạn. Đủ 
 <br>
 
 Việc tuyển dụng sẽ không tự sửa. Những người đang trải qua nó thì có thể, và họ đã ở trong phòng, trao đổi kinh nghiệm và sửa cấu hình cho nhau.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=vi" alt="Bức tường động gồm ảnh đại diện GitHub của những người đóng góp, lấp đầy theo thứ tự tham gia từ tháng 4 năm 2026, với ô tiếp theo để trống." width="100%"></a></p>
 
