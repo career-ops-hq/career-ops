@@ -28,6 +28,7 @@
  *
  * Usage:
  *   node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"
+ *   node agent-inbox.mjs add "follow-up alert: 5 overdue" --supersede "follow-up alert:"
  *   node agent-inbox.mjs list [--all]                 # pending only, or every item
  *   node agent-inbox.mjs resolve 1 [--expect "Acme"] [--result "scored 4.3 — report 012"]
  */
@@ -140,6 +141,20 @@ function parseItems() {
   return items;
 }
 
+// Replace the queue file with `lines` (see the long note in resolve() for why a
+// same-directory temp file and rename, through a symlink, keeping the mode).
+// MUST be called with the queue lock held.
+function writeQueue(lines) {
+  const real = realpathSync(PATH);
+  writeFileAtomic(real, lines.join('\n'), { mode: statSync(real).mode & 0o7777 });
+}
+
+// The request part of an item's text, without the "<stamp> — " prefix `add`
+// writes. A hand-written item with no stamp is matched on its whole text.
+function requestOf(text) {
+  return text.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} — /, '');
+}
+
 function opt(name, def = '') {
   const i = process.argv.indexOf('--' + name);
   if (i < 0) return def;
@@ -161,7 +176,20 @@ function optAll(name) {
 }
 
 async function add() {
-  const text = oneLine(process.argv.slice(3).join(' '));
+  // `--supersede <prefix>` is a flag of `add`, not part of the request, so it is
+  // taken out of the arguments before they are joined into the item text.
+  const args = process.argv.slice(3);
+  let supersede = null;
+  const flag = args.indexOf('--supersede');
+  if (flag >= 0) {
+    const value = args[flag + 1];
+    if (value === undefined || value.startsWith('--') || !value.trim()) {
+      fail('--supersede needs a prefix, e.g. add "follow-up alert: 5 overdue" --supersede "follow-up alert:"');
+    }
+    supersede = value.trim();
+    args.splice(flag, 2);
+  }
+  const text = oneLine(args.join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
   // Append rather than rewrite. This is the queue's concurrent path — anything
   // running in the background can drop an item in — and a read-whole-file /
@@ -210,11 +238,35 @@ async function add() {
   // narrow: no writer can observe the file until the creator has released, and
   // the creator writes the header before it releases. 'wx' above stays as the
   // guard against writers that are not this function.
+  //
+  // --supersede is for a scheduled job that re-queues the same alert on every
+  // run, which otherwise leaves one pending copy per run. Inside the same lock,
+  // before the append, every PENDING item whose request starts with the prefix
+  // is ticked with a result saying it was superseded. That is a rewrite, so it
+  // goes through the same atomic replace resolve() uses; when nothing matches
+  // the queue is not rewritten and the plain append below is all that runs.
+  // Resolved items are never touched, and the prefix is matched against the
+  // request, not the stamp, so a mid-sentence mention does not match.
+  const superseded = [];
   await withPipelineLock(PATH, () => {
     ensureFile();
+    if (supersede !== null) {
+      const matches = parseItems().filter((it) => !it.done && requestOf(it.text).startsWith(supersede));
+      if (matches.length) {
+        const lines = readFileSync(PATH, 'utf8').split('\n');
+        for (const it of matches) {
+          let updated = lines[it.line].replace('[ ]', '[x]');
+          if (!/→ result:/.test(updated)) updated += ' → result: superseded by a newer item';
+          lines[it.line] = updated;
+          superseded.push(it);
+        }
+        writeQueue(lines);
+      }
+    }
     const separator = needsLeadingNewline(PATH) ? '\n' : '';
     appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
   }, { timeoutMs: 30_000 });
+  for (const it of superseded) process.stdout.write(`Superseded #${it.num}: ${requestOf(it.text)}\n`);
   process.stdout.write(`Queued: ${text}\n`);
 }
 
@@ -285,8 +337,7 @@ async function resolve() {
     // for: write THROUGH a symlinked inbox (rename over the link would swap it
     // for a regular file and leave its target stale), and keep the queue's
     // permissions (a 0600 inbox must not come back 0644 under the umask).
-    const real = realpathSync(PATH);
-    writeFileAtomic(real, lines.join('\n'), { mode: statSync(real).mode & 0o7777 });
+    writeQueue(lines);
     return { target };
   }, { timeoutMs: 30_000 });
   // Fail only after withPipelineLock has released. process.exit() inside the
@@ -307,12 +358,14 @@ else if (cmd === 'resolve') await resolve();
 else {
   process.stdout.write(
     'Usage:\n' +
-    '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
+    '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42" [--supersede "prefix"]\n' +
     '  node agent-inbox.mjs list [--all]\n' +
     '  node agent-inbox.mjs resolve <n> [--expect "substring"] [--result "..."]\n' +
     '\n' +
     'Numbers are stable file positions: `list` shows gaps once items are\n' +
     'resolved, and a batch of resolves read off one `list` stays correct.\n' +
-    '--expect aborts unless the target item contains that substring.\n',
+    '--expect aborts unless the target item contains that substring.\n' +
+    '--supersede resolves pending items whose request starts with the prefix,\n' +
+    'then queues the new one (for a job that re-queues the same alert).\n',
   );
 }

@@ -18,6 +18,19 @@ node agent-inbox.mjs add "draft a follow-up for application #7"
 node agent-inbox.mjs add "run a scan and triage anything new"
 ```
 
+A job that queues the same alert on every run (a daily follow-up digest from
+cron, say) should pass `--supersede` with the fixed start of its text:
+
+```bash
+node agent-inbox.mjs add "follow-up alert: 5 overdue" --supersede "follow-up alert:"
+```
+
+Before appending, this ticks every still-pending item whose request starts with
+that prefix (`→ result: superseded by a newer item`), so the queue holds one
+current alert instead of one per run. Resolved items are never touched, and
+items are matched on the request text, not the timestamp. Use a prefix only that
+job writes: anything pending that starts with it is superseded.
+
 ## Inspect / resolve
 
 ```bash
@@ -27,7 +40,7 @@ node agent-inbox.mjs resolve 1 --expect "Acme" --result "scored 4.3 — report 0
 ```
 
 **Item numbers are stable file positions, not positions in the pending list.**
-`add` only appends, so a number never changes meaning once printed: you can read
+`add` only appends (with `--supersede` it also ticks older items in place, never moving them), so a number never changes meaning once printed: you can read
 a whole batch off a single `list` and resolve them in any order. `list` shows
 gaps as items get resolved (1, 3, 5) — that is the receipt that something was
 already handled, not a display bug.
