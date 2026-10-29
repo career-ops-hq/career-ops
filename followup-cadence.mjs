@@ -814,7 +814,17 @@ export function resolveReportPath(reportField, appsFile = APPS_FILE, repoRoot = 
 // days) — matching the cadence table in modes/followup.md ("Responded: every
 // 3 days · Assessment uses the responded cadence · Interview: thank-you, then
 // every 3 days, no limit").
-export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
+//
+// `hasRepliableContact` says whether the tracker notes name somebody who can be
+// written to. For a thread where the company has already replied, a due
+// follow-up with a person on the other end is `urgent`, and one with nobody to
+// write to stays `overdue`. Without this, `urgent` was reachable only while
+// daysSinceApp < responded_initial (1 day), so a live thread aged into
+// `overdue` within a day and read the same as a dead no-reply row. It defaults
+// to false, so existing callers behave as before. `applied` is not escalated:
+// no reply has arrived, so a contact address is not evidence of a conversation.
+export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount, hasRepliableContact = false) {
+  const due = hasRepliableContact ? 'urgent' : 'overdue';
   if (status === 'applied') {
     if (followupCount >= CADENCE.applied_max_followups) return 'cold';
     if (followupCount === 0 && daysSinceApp >= CADENCE.applied_first) return 'overdue';
@@ -823,17 +833,17 @@ export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, foll
   }
   if (status === 'responded' || status === 'assessment') {
     if (daysSinceLastFollowup !== null) {
-      return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
+      return daysSinceLastFollowup >= CADENCE.responded_subsequent ? due : 'waiting';
     }
     if (daysSinceApp < CADENCE.responded_initial) return 'urgent';
-    if (daysSinceApp >= CADENCE.responded_subsequent) return 'overdue';
+    if (daysSinceApp >= CADENCE.responded_subsequent) return due;
     return 'waiting';
   }
   if (status === 'interview') {
     if (daysSinceLastFollowup !== null) {
-      return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
+      return daysSinceLastFollowup >= CADENCE.responded_subsequent ? due : 'waiting';
     }
-    return daysSinceApp >= CADENCE.interview_thankyou ? 'overdue' : 'waiting';
+    return daysSinceApp >= CADENCE.interview_thankyou ? due : 'waiting';
   }
   return 'waiting';
 }
@@ -941,7 +951,10 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
       if (lastDate) daysSinceLastFollowup = daysBetween(lastDate, now);
     }
 
-    let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
+    // Extracted before urgency: whether a person can be written to is an input to it.
+    const contacts = extractContacts(app.notes);
+    const hasRepliableContact = contacts.some((c) => (c.email && !/no-?reply|donotreply/i.test(c.email)) || c.name);
+    let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount, hasRepliableContact);
     let nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
 
     // A pinned next-date takes precedence over the computed cadence (explicit
@@ -964,7 +977,6 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
-    const contacts = extractContacts(app.notes);
     const reportPath = resolveReportPath(app.report);
 
     entries.push({
