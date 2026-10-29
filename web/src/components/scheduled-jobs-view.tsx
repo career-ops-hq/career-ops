@@ -156,7 +156,7 @@ export function ScheduledJobsView() {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
         <div>
           <div className="flex items-center gap-2.5">
-            <CalendarClock className="size-6 text-brand" />
+            <CalendarClock className="size-6 text-brand-text" />
             <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Scheduled Scans</h1>
           </div>
           <p className="mt-1.5 max-w-2xl text-sm text-muted">
@@ -178,7 +178,7 @@ export function ScheduledJobsView() {
             onClick={() => setHistoryDrawerOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
           >
-            <History className="size-4 text-brand" />
+            <History className="size-4 text-brand-text" />
             Run Logs ({store.runs.length})
           </button>
           <button
@@ -188,7 +188,7 @@ export function ScheduledJobsView() {
             className="inline-flex size-9 items-center justify-center rounded-full border border-border bg-surface/60 text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
             title="Refresh list"
           >
-            <RefreshCw className={`size-4 ${loading ? "animate-spin text-brand" : ""}`} />
+            <RefreshCw className={`size-4 ${loading ? "animate-spin text-brand-text" : ""}`} />
           </button>
         </div>
       </div>
@@ -197,7 +197,7 @@ export function ScheduledJobsView() {
       {/* Stats Cards */}
       <div className="grid gap-3.5 sm:grid-cols-4">
         <StatCard label="Active Scans" value={activeJobs.length} subtitle={`${jobsList.length} total jobs`} icon={<Zap className="size-4 text-emerald-500" />} />
-        <StatCard label="Executed Runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand" />} />
+        <StatCard label="Executed Runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand-text" />} />
         <StatCard label="Roles Discovered" value={totalRolesFound} subtitle="Pushed to pipeline" icon={<Sparkles className="size-4 text-amber-500" />} />
         <StatCard label="Success Rate" value={successRate} subtitle={`${failedRuns} failed runs`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
       </div>
@@ -207,7 +207,7 @@ export function ScheduledJobsView() {
         <div className="co-rise rounded-2xl border border-border bg-surface/40 p-4 shadow-sm backdrop-blur-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="grid size-9 place-items-center rounded-xl bg-surface-hover text-brand">
+              <div className="grid size-9 place-items-center rounded-xl bg-surface-hover text-brand-text">
                 <Clock className="size-5" />
               </div>
               <div>
@@ -242,7 +242,7 @@ export function ScheduledJobsView() {
               disabled={osRunning || scheduler.running || !scheduler.available}
               className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-hover disabled:opacity-50"
             >
-              {osRunning ? <Loader2 className="size-3.5 animate-spin text-brand" /> : <Zap className="size-3.5 text-brand" />}
+              {osRunning ? <Loader2 className="size-3.5 animate-spin text-brand-text" /> : <Zap className="size-3.5 text-brand-text" />}
               {osRunning ? "Checking..." : "Check due jobs now"}
             </button>}
           </div>
@@ -363,7 +363,7 @@ function StatCard({
         <div className="mt-1 text-2xl font-bold tracking-tight text-foreground">{value}</div>
         <div className="mt-0.5 text-[11px] text-faint">{subtitle}</div>
       </div>
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
+      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand-text">
         {icon}
       </div>
     </div>
