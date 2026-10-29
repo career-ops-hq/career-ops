@@ -82,3 +82,36 @@ if (routedModes.length < 20) {
 } else {
   fail(`routed modes with no context-loading rule: ${withoutContextRule.join(', ')}`);
 }
+
+// The discovery menu is what the agent prints for `/career-ops` with no
+// arguments. It had drifted from the routing table: `interview-redflag` and
+// `reply-watch` were routed but never listed, and `oferta` still read "A-F"
+// after the evaluation grew to A-H (#6214). The per-mode loop above only knows
+// five hard-coded names, so compare the two lists in full.
+const menu = skill.split('Show this menu:')[1]?.match(/```\n([\s\S]*?)\n```/)?.[1] ?? '';
+// `{JD}` is the auto-pipeline line, not a mode name.
+const menuInputs = [...menu.matchAll(/^  \/career-ops (\S+) +→/gm)].map((m) => m[1]).filter((input) => input !== '{JD}');
+const routeInputs = new Map([...skill.matchAll(/^\| `([^`]+)` \| `([^`]+)` \|$/gm)].map((m) => [m[1], m[2]]));
+
+if (menuInputs.length < 20 || routeInputs.size < 20) {
+  fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs)`);
+} else {
+  // An alias such as `inbox` → `agent-inbox` needs no line of its own while
+  // another input for the same mode is listed.
+  const listedModes = new Set(menuInputs.map((input) => routeInputs.get(input)));
+  const missing = [...new Set(routeInputs.values())].filter((mode) => !listedModes.has(mode));
+  const unrouted = menuInputs.filter((input) => !routeInputs.has(input));
+  if (missing.length === 0 && unrouted.length === 0) {
+    pass(`discovery menu lists every routed mode (${listedModes.size}) and only routed ones`);
+  } else {
+    if (missing.length) fail(`routed modes missing from the discovery menu: ${missing.join(', ')}`);
+    if (unrouted.length) fail(`discovery menu lists inputs the routing table does not route: ${unrouted.join(', ')}`);
+  }
+}
+
+const oferta = menu.match(/^  \/career-ops oferta .*$/m)?.[0] ?? '';
+if (/A-H/.test(oferta) && !/A-F/.test(oferta)) {
+  pass('discovery menu describes oferta as the A-H evaluation');
+} else {
+  fail(`discovery menu line for oferta should say A-H, not A-F: ${oferta || '(no oferta line found)'}`);
+}
