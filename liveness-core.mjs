@@ -184,6 +184,15 @@ const APPLY_PATTERNS = [
   // which is why the deadline check in classifyLiveness runs before the apply
   // control is read.
   /\bnop [dđ]on ung tuyen\b/i,
+  // Bulgarian (dev.bg, zaplata.bg, wherewework.bg): "Кандидатствай" /
+  // "Кандидатствайте сега". normalizeForMatch strips the breve, so "й" arrives
+  // as "и". \b only knows ASCII word characters, so Cyrillic edges use
+  // lookarounds instead.
+  /^кандидатства[ий](?:те)?(?![\p{L}\p{M}])/iu,
+  // jobtiger.bg labels Apply with the noun, wherewework.bg's external link with
+  // "Външно кандидатстване". Only at the start of the label: the noun also ends
+  // advice-article links ("…писмо за кандидатстване"), which are not Apply.
+  /^(?:външно )?кандидатстване(?![\p{L}\p{M}])/iu,
 ];
 
 // CareerViet prints the application deadline in the posting's info block as
