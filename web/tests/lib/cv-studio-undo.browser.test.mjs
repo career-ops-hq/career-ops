@@ -32,21 +32,47 @@ test("undo puts a hidden bullet back and the saved edits do not keep the hide", 
   await undo.waitFor();
   assert.equal(await undo.isDisabled(), true);
 
+  const editsPath = path.join(root, ".career-ops-web", "cv-studio", "011.json");
+  const hiddenNow = () => {
+    if (!fs.existsSync(editsPath)) return null;
+    return JSON.parse(fs.readFileSync(editsPath, "utf8")).hidden ?? [];
+  };
+  const waitForHide = async (accept) => {
+    const deadline = Date.now() + 8_000;
+    let hidden = hiddenNow();
+    while (Date.now() < deadline) {
+      hidden = hiddenNow();
+      if (accept(hidden)) return hidden;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return hidden;
+  };
+
+  // Undo before autosave writes. A missing file is not a saved hide. A hide that
+  // lands late still has to be gone before the wait ends.
   await page.getByRole("button", { name: "Hide bullet", exact: true }).click();
   await page.getByRole("button", { name: "Show bullet", exact: true }).waitFor();
   await undo.click();
   await page.getByRole("button", { name: "Hide bullet", exact: true }).waitFor();
-
-  const editsPath = path.join(root, ".career-ops-web", "cv-studio", "011.json");
   const deadline = Date.now() + 8_000;
-  let hidden = [section0Item0Bullet0];
+  let sawHide = false;
+  let hidden = hiddenNow();
   while (Date.now() < deadline) {
-    if (fs.existsSync(editsPath)) {
-      hidden = JSON.parse(fs.readFileSync(editsPath, "utf8")).hidden ?? [];
-      if (!hidden.includes(section0Item0Bullet0)) break;
-    }
+    hidden = hiddenNow();
+    if (Array.isArray(hidden) && hidden.includes(section0Item0Bullet0)) sawHide = true;
+    if (sawHide && Array.isArray(hidden) && !hidden.includes(section0Item0Bullet0)) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  assert.deepEqual(hidden, []);
+  assert.ok(hidden === null || !hidden.includes(section0Item0Bullet0));
+
+  // Undo after the hide is on disk. The stored edits have to drop it.
+  await page.getByRole("button", { name: "Hide bullet", exact: true }).click();
+  await page.getByRole("button", { name: "Show bullet", exact: true }).waitFor();
+  const stored = await waitForHide((value) => Array.isArray(value) && value.includes(section0Item0Bullet0));
+  assert.deepEqual(stored, [section0Item0Bullet0]);
+  await undo.click();
+  await page.getByRole("button", { name: "Hide bullet", exact: true }).waitFor();
+  const cleared = await waitForHide((value) => Array.isArray(value) && !value.includes(section0Item0Bullet0));
+  assert.deepEqual(cleared, []);
   assert.deepEqual(errors, []);
 });

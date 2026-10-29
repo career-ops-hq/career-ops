@@ -66,11 +66,12 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   const history = useRef<StudioEdits[]>([]);
   const editsRef = useRef(edits);
   const [canUndo, setCanUndo] = useState(false);
-  // Handlers set this before dispatch. The effect stores the committed
-  // object, which is the one Save compares. A discarded render must not write it.
+  // Handlers set these before dispatch. This effect stores the committed
+  // objects. A discarded render must not write them, or a save can send an edit that was undone.
   const latestEdits = useRef(edits);
   useLayoutEffect(() => {
     latestEdits.current = edits;
+    editsRef.current = edits;
   }, [edits]);
   const recordEdit = useCallback((action: StudioAction) => {
     const applied = applyRecordedEdit(latestEdits.current, action, doc, history.current);
@@ -120,7 +121,6 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
 
   const savedJsonRef = useRef(JSON.stringify(data.edits));
   const savingJsonRef = useRef<string | null>(null);
-  editsRef.current = edits;
   const tabRef = useRef(Math.random().toString(36).slice(2, 12));
   const revRef = useRef(0);
   const [, rerender] = useState(0);
@@ -172,7 +172,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
     const serialized = JSON.stringify(edits);
     if (serialized === savedJsonRef.current || serialized === savingJsonRef.current) return;
     setSave((s) => (s.kind === "saved" || s.kind === "outdated" ? { kind: "idle" } : s));
-    const timer = setTimeout(() => putEdits(editsRef.current, false), 500);
+    const timer = setTimeout(() => putEdits(edits, false), 500);
     return () => clearTimeout(timer);
   }, [edits, putEdits]);
 
