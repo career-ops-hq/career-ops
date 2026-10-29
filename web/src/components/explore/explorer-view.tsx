@@ -5,7 +5,6 @@ import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } fr
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
-import type { Application, InboxJob } from "@/lib/career-ops";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
@@ -32,13 +31,13 @@ const CLI_NAMES: Record<string, string> = {
 
 export function ExplorerView({
   seed,
-  inboxSnapshot,
-  appsSnapshot,
+  inboxUrls,
+  evaluated,
   rootExists,
 }: {
   seed: { filters: ExploreFilters; seededFrom: string[] };
-  inboxSnapshot: InboxJob[];
-  appsSnapshot: Application[];
+  inboxUrls: string[];
+  evaluated: { n: string; company: string; role: string }[];
   rootExists: boolean;
 }) {
   const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
@@ -90,22 +89,20 @@ export function ExplorerView({
     }
   }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
-  const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
-  const enriched: EnrichedOffer[] = useMemo(
-    () =>
-      offers.map((o) => {
-        const inPipeline = inboxUrls.has(o.url);
-        const c = norm(o.company);
-        const t = norm(o.title);
-        const ev = appsSnapshot.find((a) => {
-          if (norm(a.company) !== c) return false;
-          const ar = norm(a.role);
-          return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
-        });
-        return { ...o, inPipeline, evaluatedN: ev?.n };
-      }),
-    [offers, inboxUrls, appsSnapshot],
-  );
+  const enriched: EnrichedOffer[] = useMemo(() => {
+    const trackedUrls = new Set(inboxUrls);
+    return offers.map((o) => {
+      const inPipeline = trackedUrls.has(o.url);
+      const c = norm(o.company);
+      const t = norm(o.title);
+      const ev = evaluated.find((a) => {
+        if (norm(a.company) !== c) return false;
+        const ar = norm(a.role);
+        return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
+      });
+      return { ...o, inPipeline, evaluatedN: ev?.n };
+    });
+  }, [offers, inboxUrls, evaluated]);
 
   const isAi = mode === "ai";
   const isResults = phase === "results";
