@@ -319,7 +319,7 @@ export function PipelineView({
               onChange={(event) => setDraftName(event.target.value)}
               className="w-36 rounded-md border border-border bg-surface px-2 py-1 text-sm outline-none focus:border-brand/50"
             />
-            <button type="submit" className="text-xs font-medium text-brand">Save</button>
+            <button type="submit" className="text-xs font-medium text-brand-text">Save</button>
             <button type="button" onClick={() => { setNaming(false); setDraftName(""); setViewError(""); }} className="text-xs text-muted">Cancel</button>
           </form>
         ) : (
