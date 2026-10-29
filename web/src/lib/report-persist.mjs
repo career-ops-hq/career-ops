@@ -15,6 +15,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { slugify } from "./pdf-paths.mjs";
 import { setInboxSkip } from "./inbox-skip.mjs";
+import { parseEvaluationOptions } from "./evaluation-options.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const YAML_FENCE = /##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
@@ -187,10 +188,23 @@ function spawnScript({ spawnFn, execPath, root, script, args = [], input = null 
  * the sentinel. Never throws: the caller routes `{ok:false}` through the same
  * honesty gate as every other evaluate failure.
  *
- * @param {{spawnFn: Function, execPath: string, root: string, markdown: string, url: string, today: string, postedAt?: string}} args
+ * @param {{spawnFn: Function, execPath: string, root: string, markdown: string, url: string, today: string, postedAt?: string, evaluationSections?: string[]}} args
  * @returns {Promise<{ok: true, num: string, reportFile: string, warnings: string[]} | {ok: false, error: string}>}
  */
-export async function persistEvaluation({ spawnFn, execPath, root, markdown, url, today, postedAt }) {
+export async function persistEvaluation({ spawnFn, execPath, root, markdown, url, today, postedAt, evaluationSections = undefined }) {
+  const evaluation = parseEvaluationOptions(evaluationSections);
+  if (!evaluation.ok) return { ok: false, error: evaluation.error };
+  if (!evaluation.full) {
+    // Scope is user-selected request data, never a model-inferred claim.
+    const scope = evaluation.sections.join(", ") || "fit score only";
+    // Only normalize the report header; matching text in the archived JD is data.
+    const bodyStart = markdown.search(/^##\s|^---\s*$/m);
+    const cut = bodyStart < 0 ? markdown.length : bodyStart;
+    const header = markdown.slice(0, cut)
+      .replace(/^\*\*Evaluation scope:\*\*[^\n]*\n?/gmi, "")
+      .replace(/^(# .+)$/m, `$1\n\n**Evaluation scope:** Focused — ${scope}.`);
+    markdown = header + markdown.slice(cut);
+  }
   if (!ISO_DATE_RE.test(String(today ?? ""))) {
     return { ok: false, error: `Invalid evaluation date "${today}" — expected YYYY-MM-DD.` };
   }
@@ -255,7 +269,8 @@ export async function persistEvaluation({ spawnFn, execPath, root, markdown, url
   }
 
   const postingUrl = /^https?:\/\//i.test(String(url ?? "")) ? String(url) : "";
-  const notes = ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : "";
+  const notes = (ISO_DATE_RE.test(String(postedAt ?? "")) ? `; posted: ${postedAt}` : "")
+    + (!evaluation.full ? `; Focused evaluation: ${evaluation.sections.join(", ") || "fit score only"}` : "");
 
   const written = await spawnScript({
     spawnFn, execPath, root,
