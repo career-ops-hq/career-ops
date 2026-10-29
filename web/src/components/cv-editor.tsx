@@ -8,6 +8,7 @@ import { Check, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CvIngest } from "@/components/cv/cv-ingest";
 import {
+  cvSaveUsesKeepalive,
   draftChange,
   draftFromStore,
   editorReducer,
@@ -57,12 +58,12 @@ export function CvEditor() {
     const backup = snapshotPriorRef.current;
     const expected = { content: base.content, exists: base.exists };
     dispatch({ type: "save-start", content: snapshot });
-    const bytes = new TextEncoder().encode(snapshot).length;
+    const payload = { content: snapshot, backup, expected };
     fetch("/api/cv", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: snapshot, backup, expected }),
-      keepalive: job.keepalive && bytes < 60_000,
+      body: JSON.stringify(payload),
+      keepalive: cvSaveUsesKeepalive(job.keepalive, payload),
     })
       .then(async (res) => {
         runningRef.current = false;
@@ -173,7 +174,7 @@ export function CvEditor() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            disabled={state.phase !== "ready" || importSaving || state.inflight !== null}
+            disabled={state.phase !== "ready" || importSaving || state.inflight !== null || state.conflict}
             aria-expanded={importing}
             aria-controls="cv-import"
             onClick={() => setImporting(!importing)}
@@ -204,10 +205,11 @@ export function CvEditor() {
       {state.error && (
         <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">
           {state.error}
+          {state.conflict && " Reloading drops this text, because the file changed."}
         </p>
       )}
 
-      {importing && state.phase === "ready" && (
+      {importing && state.phase === "ready" && !state.conflict && (
         <section id="cv-import" aria-label="Import CV" className="mt-6">
           <p className="mb-3 text-sm text-muted">
             Upload your CV, review the conversion, then update cv.md.
@@ -217,6 +219,7 @@ export function CvEditor() {
             variant="editor"
             onSavingChange={setImportSaving}
             onSaved={(markdown) => {
+              if (stateRef.current.conflict) return;
               dispatch({ type: "imported", content: markdown });
               setImporting(false);
               setImportSaving(false);

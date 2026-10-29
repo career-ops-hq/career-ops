@@ -1,17 +1,3 @@
-/**
- * The file the ingest screen read before review. Start over forgets it.
- * Accepting the file on disk replaces it. A save never reads again by itself.
- *
- * @param {{ content: string, exists: boolean } | null} base
- * @param {{ forget?: boolean, accept?: { content: string, exists: boolean } | null }} [action]
- * @returns {{ content: string, exists: boolean } | null}
- */
-export function nextIngestBase(base, action = {}) {
-  if (action.forget) return null;
-  if (action.accept) return { content: action.accept.content, exists: action.accept.exists };
-  return base;
-}
-
 /** @param {{ content: string, exists: boolean } | null} base */
 export function canReviewIngest(base) {
   return base !== null;

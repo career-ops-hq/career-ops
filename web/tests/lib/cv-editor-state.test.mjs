@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, followUpJob, initialEditor, saveFollowUp, shouldSave } from "../../src/lib/cv-editor-state.mjs";
+import { cvSaveUsesKeepalive, draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, followUpJob, initialEditor, saveFollowUp, shouldSave } from "../../src/lib/cv-editor-state.mjs";
 
 const ready = (content, extra = {}) => ({
   ...initialEditor(),
@@ -180,6 +180,15 @@ test("reverting to the saved text during a conflict does not look saved", () => 
   });
   assert.equal(loaded.content, "Written elsewhere.");
   assert.equal(draftToStore(loaded), null);
+});
+
+test("keepalive measures the saved file and the new text together", () => {
+  const prior = "A".repeat(35_000);
+  const next = `${prior}\nTuesday review.`;
+  const payload = { content: next, backup: false, expected: { content: prior, exists: true } };
+  assert.equal(cvSaveUsesKeepalive(true, payload), false);
+  assert.equal(cvSaveUsesKeepalive(true, { content: "Jane Doe\n", backup: true, expected: { content: "", exists: false } }), true);
+  assert.equal(cvSaveUsesKeepalive(false, payload), false);
 });
 
 test("an exit flush keeps keepalive when an ordinary save finishes first", () => {

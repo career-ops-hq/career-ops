@@ -166,6 +166,22 @@ export function followUpJob(running, queued, text) {
   return { text, keepalive: Boolean(running && running.keepalive) || Boolean(queued && queued.keepalive) };
 }
 
+/** Browsers drop a keepalive body over this size. The limit is 64KB. */
+const KEEPALIVE_BYTE_LIMIT = 60_000;
+
+/**
+ * An exit save repeats the last file inside `expected`, so the size check
+ * has to measure the whole JSON body. Measuring only the new text lets a
+ * CV of about 35KB through, and the browser then drops the request.
+ *
+ * @param {boolean} requested
+ * @param {unknown} payload
+ */
+export function cvSaveUsesKeepalive(requested, payload) {
+  if (!requested) return false;
+  return new TextEncoder().encode(JSON.stringify(payload)).length < KEEPALIVE_BYTE_LIMIT;
+}
+
 /**
  * What to do with the stored draft. Undefined leaves it alone: until the CV
  * has loaded there is nothing to compare it with, and a failed load must not
