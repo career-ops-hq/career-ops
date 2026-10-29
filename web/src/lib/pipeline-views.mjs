@@ -64,15 +64,6 @@ export function removeView(views, name) {
 }
 
 /**
- * A save or delete starts from the list on disk, so another tab is not
- * overwritten. Views kept only in memory, because storage rejected the write,
- * stay. After a successful write, disk wins, including a view the other tab removed.
- *
- * @param {NonNullable<ReturnType<typeof normalizeView>>[]} memory
- * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
- * @param {boolean} keepUnstored
- */
-/**
  * JSON to store after a user save or delete. Loading returns null so a page
  * that just read the list does not write it back over another tab.
  *
@@ -85,6 +76,15 @@ export function savedViewPayload(action, views) {
   return JSON.stringify(Array.isArray(views) ? views : []);
 }
 
+/**
+ * A save or delete starts from the list on disk, so another tab is not
+ * overwritten. Views kept only in memory, because storage rejected the write,
+ * stay. After a successful write, disk wins, including a view the other tab removed.
+ *
+ * @param {NonNullable<ReturnType<typeof normalizeView>>[]} memory
+ * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
+ * @param {boolean} keepUnstored
+ */
 export function viewsForMutation(memory, stored, keepUnstored) {
   const disk = Array.isArray(stored) ? stored.slice(0, VIEW_LIMIT) : [];
   if (!keepUnstored) return disk;
