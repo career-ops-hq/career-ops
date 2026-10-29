@@ -285,17 +285,17 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor அல்லது வேறு எந்த CLI | சாதாரண மொழியில்: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor அல்லது ஆதரிக்கப்படும் வேறு எந்த CLI | சாதாரண மொழியில்: "Run the career-ops scan mode" |
 
-பின்னால் எதுவும் இல்லாத `/career-ops` கட்டளை மெனுவைக் காட்டும். சாதாரண மொழி எல்லா CLI-களிலும் வேலை செய்யும். Claude Code plugin ஆக இருந்தால் கட்டளை `/career-ops:career-ops`.
+பின்னால் எதுவும் இல்லாத `/career-ops` கட்டளை மெனுவைக் காட்டும் அதைப் பயன்படுத்தும் CLI-களில். சாதாரண மொழி ஆதரிக்கப்படும் எல்லா CLI-களிலும் வேலை செய்யும். Claude Code plugin ஆக இருந்தால் கட்டளை `/career-ops:career-ops`.
 
-இவை அனைத்தும் ஒரே router-ஆன `.agents/skills/career-ops/SKILL.md`-ஐயும் அதே `modes/*.md` கோப்புகளையும் பகிர்கின்றன; எனவே எந்த CLI இயக்கினாலும் ஒரு mode ஒரே மாதிரி நடந்துகொள்ளும். Codex-இல் slash கட்டளைகளுக்கு உத்தரவாதம் இல்லை: சாதாரண மொழியில் கேளுங்கள், அல்லது `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` மூலம் ஒரு prompt-ஐ headless-ஆக இயக்குங்கள் ([docs/CODEX.md](docs/CODEX.md)). ஆதரிக்கப்படும் ஒவ்வொரு CLI-யிலும் இதை எப்படி இயக்குவது, headless கட்டளை உள்ள CLI-களுக்கு அந்தக் கட்டளைகள், Pi-யின் `/trust` போன்ற CLI-வாரியான அமைப்புக் குறிப்புகள் ஆகியவை [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)-இல் உள்ளன.
+இவை அனைத்தும் ஒரே router-ஆன `.agents/skills/career-ops/SKILL.md`-ஐயும் அதே `modes/*.md` கோப்புகளையும் பகிர்கின்றன; எனவே எந்த CLI இயக்கினாலும் ஒரு mode ஒரே மாதிரி நடந்துகொள்ளும். Codex-இல் slash கட்டளைகளுக்கு உத்தரவாதம் இல்லை: சாதாரண மொழியில் கேளுங்கள், அல்லது `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` மூலம் ஒரு prompt-ஐ headless-ஆக இயக்குங்கள் ([docs/CODEX.md](docs/CODEX.md)). ஆதரிக்கப்படும் ஒவ்வொரு CLI-யிலும் இதை எப்படி இயக்குவது, headless கட்டளை உள்ள CLI-களுக்கு அந்தக் கட்டளைகள், CLI-வாரியான அமைப்புக் குறிப்புகள் ஆகியவை [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)-இல் உள்ளன.
 
 ### அன்றாடக் கட்டளைகள்
 
 | கட்டளை | என்ன செய்கிறது |
 | --- | --- |
-| *URL அல்லது JD-ஐ ஒட்டு* | முழு pipeline: வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா எனச் சரிபார்த்தல் (URL-களுக்கு மட்டும்), A-G மதிப்பீடு, report, ஏற்றவாறு தயாரித்த CV (இயல்பாக PDF), tracker வரி |
+| *URL அல்லது JD-ஐ ஒட்டு* | முழு pipeline: வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா எனச் சரிபார்த்தல் (URL-களுக்கு மட்டும்), A-G மதிப்பீடு மற்றும் உயர் மதிப்பெண்ணில் H, report, ஏற்றவாறு தயாரித்த CV (இயல்பாக PDF), tracker வரி |
 | `scan` | உங்கள் portal-களில் புதிய அறிவிப்புகளைத் தேடி inbox-இல் (`data/pipeline.md`) சேர் |
 | `pipeline` | inbox-இல் காத்திருக்கும் ஒவ்வொரு URL-ஐயும் மதிப்பிடு |
 | `apply` | ஒரு விண்ணப்பப் படிவத்தை உங்களுடன் சேர்ந்து, புலம் புலமாக நிரப்பு. Submit-க்கு முன் நின்றுவிடும் |
@@ -323,7 +323,7 @@ npm i -g @santifer/career-ops
 | கட்டளை | என்ன செய்கிறது |
 | --- | --- |
 | *URL அல்லது JD-ஐ ஒட்டு* | [Auto-pipeline](modes/auto-pipeline.md): மதிப்பீடு + report + ஏற்றவாறு தயாரித்த CV (இயல்பாக PDF) + tracker பதிவு |
-| [`oferta`](modes/oferta.md) | மதிப்பீடு மட்டும், A முதல் G வரையிலான பகுதிகள் (PDF இல்லை) |
+| [`oferta`](modes/oferta.md) | மதிப்பீடு மட்டும், A முதல் G வரையிலான பகுதிகள் மற்றும் உயர் மதிப்பெண்ணில் H (PDF இல்லை) |
 | [`ofertas`](modes/ofertas.md) | பல வாய்ப்புகளை ஒப்பிட்டுத் தரவரிசைப்படுத்து |
 | [`deep`](modes/deep.md) | நிறுவனம் பற்றிய ஆழமான ஆராய்ச்சி prompt |
 | [`eu-swe`](modes/regional/eu-swe.md) | CV, விண்ணப்பம் அல்லது நேர்காணலுக்கு முன், ஐரோப்பிய மென்பொருள் பொறியியல் விண்ணப்பத்தைச் சீரமை |
