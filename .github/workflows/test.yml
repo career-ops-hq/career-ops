@@ -165,3 +165,21 @@ jobs:
         run: node upgrade-tests.mjs --local-edit
       - name: Local-edit canary (an inverted --force branch must go red)
         run: node upgrade-tests.mjs --local-edit-canary
+
+  dependency-audit:
+    name: Dependency audit
+    # Informative by design: the root has no tracked lockfile (ranges resolve
+    # at install time), so a newly published advisory in a third-party range
+    # must not turn required checks red on unrelated PRs (#5897).
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts
+      - run: npm audit --audit-level=high

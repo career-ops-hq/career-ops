@@ -11,7 +11,7 @@ export default function ApplyPage() {
       <ApplyBackdropMount />
       <div className="relative z-10 mx-auto max-w-3xl px-6 py-8">
         <div className="flex items-center gap-3">
-          <Send className="size-6 text-brand" />
+          <Send className="size-6 text-brand-text" />
           <h1 className="font-display text-2xl tracking-tight text-landing">Apply</h1>
         </div>
         <p className="mt-1.5 max-w-xl text-sm text-muted">

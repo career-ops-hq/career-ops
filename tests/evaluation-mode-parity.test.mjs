@@ -78,15 +78,18 @@ test('canonical and re-synced locales embed ## Keyword Coverage and run keyword-
 });
 
 test('keyword coverage: the template placeholder, prose and comments cannot stand in', () => {
-  const step = '\nRun `node keyword-match.mjs reports/{###}-{slug}-{date}.md`.\n';
-  const block = '## Keyword Coverage\n(from `node keyword-match.mjs <report>`)\n';
+  const step = '\n```bash\nnode --input-type=module -e \'const args = ["keyword-match.mjs", p.report];\' {json-file}\n```\n';
+  const block = '## Keyword Coverage\n(from `keyword-match.mjs` (1b))\n';
   assert.deepEqual(keywordCoverageGaps(mode(REPORT + block) + step), []);
   assert.deepEqual(keywordCoverageGaps(mode(REPORT + block)), ['keyword-match.mjs step']);
   // The report template is output, so a command written only there is no step.
-  assert.deepEqual(keywordCoverageGaps(mode(REPORT + block + step)), ['keyword-match.mjs step']);
-  // The step may have its own fence, as modes/oferta.md's bash block does.
+  assert.deepEqual(keywordCoverageGaps(mode(REPORT + block + step.replace(/```(bash)?/g, ''))), ['keyword-match.mjs step']);
+  // The command's text quoted in prose is not a runnable step.
   assert.deepEqual(keywordCoverageGaps(
-    `${mode(REPORT + block)}\n\`\`\`bash\nnode keyword-match.mjs reports/{###}-{slug}-{date}.md\n\`\`\`\n`), []);
+    `${mode(REPORT + block)}\nThe command builds \`["keyword-match.mjs", p.report]\`.\n`), ['keyword-match.mjs step']);
+  // The old form, a report path typed into the command line, is not the step (#5853).
+  assert.deepEqual(keywordCoverageGaps(
+    `${mode(REPORT + block)}\nRun \`node keyword-match.mjs reports/{###}-{slug}-{date}.md\`.\n`), ['keyword-match.mjs step']);
   assert.deepEqual(keywordCoverageGaps(mode(REPORT) + step), ['## Keyword Coverage']);
   assert.deepEqual(keywordCoverageGaps(`${mode(REPORT)}\n${block}${step}`), ['## Keyword Coverage']);
   assert.deepEqual(keywordCoverageGaps(mode(REPORT + block + block) + step), ['duplicate ## Keyword Coverage']);
