@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeView, parseViews, removeView, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
+import { normalizeView, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
 
 const staff = { name: "Staff 4+", tab: "evaluated", q: "Staff", min: "4", sort: "score", dir: "-1" };
 
@@ -59,6 +59,13 @@ test("corrupt storage drops bad entries and keeps the first of a repeated name",
   assert.deepEqual(parseViews("not json"), []);
   assert.deepEqual(parseViews("{"), []);
   assert.deepEqual(removeView(parseViews(raw), "Ok"), []);
+});
+
+test("loading saved views does not write them back", () => {
+  const views = [normalizeView({ name: "Other tab", tab: "ALL" })];
+  assert.equal(savedViewPayload("load", views), null);
+  assert.equal(savedViewPayload("save", views), JSON.stringify(views));
+  assert.equal(savedViewPayload("remove", []), "[]");
 });
 
 test("a save starts from the list on disk when the last write landed", () => {

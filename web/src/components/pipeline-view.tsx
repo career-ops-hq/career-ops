@@ -21,7 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { SCORE_FLOORS, normalizeView, parseViews, removeView, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
+import { SCORE_FLOORS, normalizeView, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -56,7 +56,6 @@ export function PipelineView({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
   const [views, setViews] = useState<SavedView[]>([]);
-  const [viewsLoaded, setViewsLoaded] = useState(false);
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [viewError, setViewError] = useState("");
@@ -119,18 +118,19 @@ export function PipelineView({
     } catch {
       setViews([]);
     }
-    setViewsLoaded(true);
   }, []);
-  useEffect(() => {
-    if (!viewsLoaded) return;
+
+  function writeSavedViews(action: "save" | "remove", next: SavedView[]) {
+    const payload = savedViewPayload(action, next);
+    if (payload == null) return;
     try {
-      localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+      localStorage.setItem(VIEWS_KEY, payload);
       storageRejected.current = false;
     } catch {
       storageRejected.current = true;
       setViewError("This view stays on this page only.");
     }
-  }, [views, viewsLoaded]);
+  }
 
   function mutationBase() {
     try {
@@ -157,10 +157,13 @@ export function PipelineView({
     setNaming(false);
     setDraftName("");
     setViewError("");
+    writeSavedViews("save", next);
   }
 
   function removeSavedView(name: string) {
-    setViews(removeView(mutationBase(), name));
+    const next = removeView(mutationBase(), name);
+    setViews(next);
+    writeSavedViews("remove", next);
   }
 
   function applySaved(view: SavedView) {

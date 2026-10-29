@@ -72,6 +72,19 @@ export function removeView(views, name) {
  * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
  * @param {boolean} keepUnstored
  */
+/**
+ * JSON to store after a user save or delete. Loading returns null so a page
+ * that just read the list does not write it back over another tab.
+ *
+ * @param {"load" | "save" | "remove"} action
+ * @param {NonNullable<ReturnType<typeof normalizeView>>[]} views
+ * @returns {string | null}
+ */
+export function savedViewPayload(action, views) {
+  if (action !== "save" && action !== "remove") return null;
+  return JSON.stringify(Array.isArray(views) ? views : []);
+}
+
 export function viewsForMutation(memory, stored, keepUnstored) {
   const disk = Array.isArray(stored) ? stored.slice(0, VIEW_LIMIT) : [];
   if (!keepUnstored) return disk;
