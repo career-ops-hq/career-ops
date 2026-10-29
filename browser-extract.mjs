@@ -591,6 +591,9 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
  * @param {number} [textCap]
  */
 export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  // A closed posting can still ship its ad; liveness-api.mjs reads `active:
+  // false` as expired, so no text is taken from it (null = read the page).
+  if (json?.active === false) return null;
   const sections = json?.jobAd?.sections;
   if (!sections || typeof sections !== 'object') return null;
 

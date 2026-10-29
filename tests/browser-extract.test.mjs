@@ -395,6 +395,18 @@ try {
   if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
   else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
 
+  // A closed posting can still ship its ad; liveness-api.mjs reads `active: false`
+  // as expired, so the normalizer yields no text (null = fall through to the browser).
+  const srAd = { sections: { jobDescription: { title: 'Job Description', text: '<p>Own the API.</p>' } } };
+  const srClosed = normalizeSmartRecruitersJob({ name: 'X', active: false, jobAd: srAd }, 'https://x/1');
+  const srOpen = normalizeSmartRecruitersJob({ name: 'X', active: true, jobAd: srAd }, 'https://x/1');
+  const srUnflagged = normalizeSmartRecruitersJob({ name: 'X', jobAd: srAd }, 'https://x/1');
+  if (srClosed === null && srOpen?.text.includes('Own the API.') && srUnflagged?.text === srOpen.text) {
+    pass('normalizeSmartRecruitersJob returns null for an inactive posting, text for active or unflagged ones');
+  } else {
+    fail(`normalizeSmartRecruitersJob active flag => ${JSON.stringify({ srClosed, srOpen, srUnflagged })}`);
+  }
+
   // normalizeZohoJob — Zoho Recruit has no JSON API; the posting page embeds
   // the record as a JS string literal, and its Job_Description is HTML.
   const zohoFixture = (name) => readFileSync(join(ROOT, 'tests', 'fixtures', name), 'utf8');
