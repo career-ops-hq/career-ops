@@ -279,7 +279,7 @@ Siehe [docs/SETUP.md](docs/SETUP.md) für die vollständige Einrichtungsanleitun
 
 ## Nutzung
 
-Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, erstellt ein angepasstes PDF und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst.
+Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst.
 
 ### Einen Modus anfordern
 
@@ -297,7 +297,7 @@ Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselb
 
 | Befehl | Was er tut |
 | --- | --- |
-| *URL oder Stellenbeschreibung einfügen* | Komplette Pipeline: Aktualitätsprüfung (nur bei URLs), A-H-Bewertung, Report, angepasstes PDF, Tracker-Zeile |
+| *URL oder Stellenbeschreibung einfügen* | Komplette Pipeline: Aktualitätsprüfung (nur bei URLs), A-H-Bewertung, Report, angepasster Lebenslauf (standardmäßig PDF), Tracker-Zeile |
 | `scan` | Deine Portale nach neuen Stellen scannen und sie in die Inbox legen (`data/pipeline.md`) |
 | `pipeline` | Jede URL bewerten, die in der Inbox wartet |
 | `apply` | Ein Bewerbungsformular gemeinsam mit dir ausfüllen, Feld für Feld. Vor dem Absenden hält er an |
