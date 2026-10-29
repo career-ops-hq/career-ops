@@ -279,17 +279,17 @@ Veja [docs/SETUP.md](docs/SETUP.md) para o guia completo de configuração, [doc
 
 ## Uso
 
-Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome.
+Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome. Se uma vaga não puder ser lida, o pipeline para e pede que você cole o texto.
 
 ### Como pedir um modo
 
 | CLI | Como você pede `scan` |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Cursor ou qualquer outra CLI | Linguagem natural: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor ou qualquer outra CLI | Linguagem natural: "Run the career-ops scan mode" |
 
-`/career-ops` sem nada depois mostra o menu de comandos. A linguagem natural funciona em todas as CLIs.
+`/career-ops` sem nada depois mostra o menu de comandos. A linguagem natural funciona em todas as CLIs. Como plugin do Claude Code, o comando é `/career-ops:career-ops`.
 
 Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e os mesmos arquivos `modes/*.md`, então um modo se comporta do mesmo jeito em qualquer CLI. Comandos com barra não são garantidos no Codex: peça em linguagem natural ou rode um prompt em modo headless com `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Como rodar em cada CLI compatível, os comandos headless quando a CLI tem um e as notas de configuração de cada CLI, como o `/trust` do Pi, estão em [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
@@ -297,7 +297,7 @@ Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e o
 
 | Comando | O que faz |
 | --- | --- |
-| *cole uma URL ou uma descrição de vaga* | Pipeline completo: verificação de que a vaga está aberta (só URLs), avaliação A-H, relatório, currículo adaptado (PDF por padrão), linha no tracker |
+| *cole uma URL ou uma descrição de vaga* | Pipeline completo: verificação de que a vaga está aberta (só URLs), avaliação A-G, relatório, currículo adaptado (PDF por padrão), linha no tracker |
 | `scan` | Escaneia seus portais em busca de vagas novas e as adiciona à caixa de entrada (`data/pipeline.md`) |
 | `pipeline` | Avalia cada URL que espera na caixa de entrada |
 | `apply` | Preenche um formulário de candidatura com você, campo a campo. Para antes de Enviar |
@@ -324,8 +324,8 @@ Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e o
 
 | Comando | O que faz |
 | --- | --- |
-| *cole uma URL ou uma descrição de vaga* | [Auto-pipeline](modes/auto-pipeline.md): avaliação + relatório + PDF + entrada no tracker |
-| [`oferta`](modes/oferta.md) | Só avaliação, blocos A a H (sem PDF) |
+| *cole uma URL ou uma descrição de vaga* | [Auto-pipeline](modes/auto-pipeline.md): avaliação + relatório + currículo adaptado (PDF por padrão) + entrada no tracker |
+| [`oferta`](modes/oferta.md) | Só avaliação, blocos A a G (sem PDF) |
 | [`ofertas`](modes/ofertas.md) | Compara e ranqueia várias vagas |
 | [`deep`](modes/deep.md) | Prompt de pesquisa aprofundada sobre a empresa |
 | [`eu-swe`](modes/regional/eu-swe.md) | Calibra uma candidatura europeia de engenharia de software antes do currículo, da candidatura ou da entrevista |
