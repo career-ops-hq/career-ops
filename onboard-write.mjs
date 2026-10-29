@@ -27,7 +27,7 @@ const USAGE = `
   Existing files are kept unless --force. --only limits the run to one file. Prints {"written":[],"kept":[]} as JSON.
   Answers shape:
   {
-    "candidate": { "full_name", "email", "location", "phone"?, "linkedin"?, "portfolio_url"?, "github"?, "twitter"? },
+    "candidate": { "full_name", "email", "location", "phone"?, "linkedin"?, "portfolio_url"?, "github"?, "twitter"?, "years_of_experience"? },
     "target_roles": ["..."],
     "compensation": { "target_range", "currency"?, "minimum"?, "location_flexibility"? },
     "location": { "country", "timezone", "city"?, "visa_status"?, "authorized_in"?, "needs_sponsorship"? },
@@ -39,7 +39,8 @@ const USAGE = `
       "negative": ["extra excluded word", ...],
       "countries": ["United States"],
       "cities": ["Berlin"],
-      "max_posting_age_days": 45
+      "max_posting_age_days": 45,
+      "experience_filter"?: { "stretch_years"?: 1, "action"?: "label" | "drop" }
     }
   }
 `;
@@ -107,6 +108,23 @@ export function normalizeAnswers(raw) {
   if (!Number.isInteger(age) || age < 0) {
     throw new AnswerError('portals.max_posting_age_days must be a whole number of days (0 turns it off)');
   }
+  const years = candidate.years_of_experience ?? null;
+  if (years !== null && (typeof years !== 'number' || !Number.isFinite(years) || years < 0 || years > 60)) {
+    throw new AnswerError('candidate.years_of_experience must be a number from 0 to 60');
+  }
+  const ef = portals.experience_filter;
+  let experienceFilter = null;
+  if (ef !== undefined && ef !== null && ef !== false) {
+    if (years === null) throw new AnswerError('portals.experience_filter needs candidate.years_of_experience');
+    const opts = typeof ef === 'object' ? ef : {};
+    const stretch = opts.stretch_years ?? 1;
+    if (typeof stretch !== 'number' || !Number.isFinite(stretch) || stretch < 0 || stretch > 60) {
+      throw new AnswerError('portals.experience_filter.stretch_years must be a number from 0 to 60');
+    }
+    const action = opts.action ?? 'label';
+    if (action !== 'drop' && action !== 'label') throw new AnswerError('portals.experience_filter.action must be drop or label');
+    experienceFilter = { stretch_years: stretch, action };
+  }
   const negative = list(portals.negative);
   for (const n of negative) {
     const matches = compileKeyword(foldTitle(n));
@@ -120,6 +138,7 @@ export function normalizeAnswers(raw) {
       location: required(candidate.location, 'candidate.location'),
       ...Object.fromEntries(CONTACT_KEYS.map((k) => [k, typeof candidate[k] === 'string' ? candidate[k].trim() : ''])),
     },
+    years_of_experience: years,
     target_roles: roles,
     compensation: {
       target_range: required(compensation.target_range, 'compensation.target_range'),
@@ -153,6 +172,7 @@ export function normalizeAnswers(raw) {
       countries: list(portals.countries),
       cities: list(portals.cities),
       max_posting_age_days: age,
+      experience_filter: experienceFilter,
     },
   };
 }
@@ -218,6 +238,11 @@ export function buildProfile(template, a) {
   for (const [k, v] of Object.entries(loc)) setScalar(lines, 'location', k, q(v));
   setScalar(lines, 'location', 'authorized_in', `[${authorized_in.map(q).join(', ')}]`);
   setScalar(lines, 'location', 'needs_sponsorship', String(needs_sponsorship));
+  if (a.years_of_experience !== null && a.years_of_experience !== undefined) {
+    const at = lines.findIndex((l) => /^  # years_of_experience: /.test(l));
+    if (at < 0) throw new Error('template has no "# years_of_experience" line');
+    lines[at] = `  years_of_experience: ${a.years_of_experience}`;
+  }
   const tier = lines.findIndex((l) => l.startsWith('spend_tier:'));
   if (tier < 0) throw new Error('template has no spend_tier');
   lines[tier] = `spend_tier: ${a.spend_tier}`;
@@ -271,6 +296,13 @@ export function buildPortals(template, a) {
     lines[age] = `max_posting_age_days: ${p.max_posting_age_days}`;
   }
 
+  if (p.experience_filter) {
+    const at = lines.findIndex((l) => l.startsWith('# -- Title filter --'));
+    if (at < 0) throw new Error('template has no title-filter section to anchor experience_filter');
+    lines.splice(at, 0, 'experience_filter:', '  enabled: true',
+      `  stretch_years: ${p.experience_filter.stretch_years}`, `  action: ${p.experience_filter.action}`, '');
+  }
+
   if (p.countries.length || p.cities.length) {
     const at = lines.findIndex((l) => l.startsWith('# -- Country-eligibility filter'));
     if (at < 0) throw new Error('template has no country-eligibility section to anchor location_filter');
@@ -287,7 +319,8 @@ function checkProfile(text, a) {
   const ok = p.candidate.full_name === a.candidate.full_name
     && JSON.stringify(p.target_roles.primary) === JSON.stringify(a.target_roles)
     && p.location.country === a.location.country
-    && p.spend_tier === a.spend_tier;
+    && p.spend_tier === a.spend_tier
+    && (a.years_of_experience === null || a.years_of_experience === undefined || p.candidate.years_of_experience === a.years_of_experience);
   if (!ok) throw new Error('profile.yml did not read back as written');
 }
 
@@ -296,7 +329,10 @@ function checkPortals(text, templateText, a) {
   const t = loadYaml(templateText);
   const ok = JSON.stringify(c.title_filter.positive) === JSON.stringify(a.portals.positive)
     && c.tracked_companies.length === t.tracked_companies.length
-    && (a.portals.max_posting_age_days > 0 ? c.max_posting_age_days === a.portals.max_posting_age_days : c.max_posting_age_days === undefined);
+    && (a.portals.max_posting_age_days > 0 ? c.max_posting_age_days === a.portals.max_posting_age_days : c.max_posting_age_days === undefined)
+    && (a.portals.experience_filter
+      ? c.experience_filter?.stretch_years === a.portals.experience_filter.stretch_years && c.experience_filter?.action === a.portals.experience_filter.action
+      : c.experience_filter === undefined);
   if (!ok) throw new Error('portals.yml did not read back as written');
 }
 
