@@ -315,6 +315,42 @@ hiringRoomHelp.result === 'uncertain' && hiringRoomHelp.code === 'no_apply_contr
   ? pass('the "¿Cómo me postulo?" help link is not an Apply control')
   : fail(`the help link alone classified ${hiringRoomHelp.result}/${hiringRoomHelp.code}, expected uncertain/no_apply_control`);
 
+console.log('\nliveness-core — Bulgarian apply controls');
+
+// dev.bg and zaplata.bg label Apply "Кандидатствай", wherewework.bg
+// "Кандидатствайте" / "Външно кандидатстване", jobtiger.bg "Кандидатстване".
+// Without them every live posting on those boards read no_apply_control and
+// scan --verify dropped it for good, as in #4832.
+const bulgarianBody = 'Описание на позицията\nТърсим опитен PHP разработчик, който да се присъедини към екипа ни и да работи по уеб приложения.\n'.repeat(4);
+for (const label of ['Кандидатствай', 'Кандидатствайте сега', 'КАНДИДАТСТВАЙ', 'Кандидатстване', 'Външно кандидатстване']) {
+  const bulgarianApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.wherewework.bg/bg/obiavi/backend-developer-php/115000',
+    finalUrl: 'https://www.wherewework.bg/bg/obiavi/backend-developer-php/115000',
+    bodyText: bulgarianBody,
+    applyControls: ['Запазете', label],
+  });
+  bulgarianApply.result === 'active' && bulgarianApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Bulgarian posting active`)
+    : fail(`"${label}" classified ${bulgarianApply.result}/${bulgarianApply.code}, expected active/apply_control_visible`);
+}
+
+// The noun counts only when it opens the label. jobtiger.bg's advice links end
+// with it, and "кандидати" (candidates) and "кандидатствахте" (you applied)
+// share the stem.
+for (const label of ['Мотивационното писмо Как да напишем добро писмо за кандидатстване', 'F.A.Q. Кандидати', 'Вече кандидатствахте']) {
+  const bulgarianNotApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://www.jobtiger.bg/obiavi-za-rabota/back-end-developer-330211-2',
+    finalUrl: 'https://www.jobtiger.bg/obiavi-za-rabota/back-end-developer-330211-2',
+    bodyText: bulgarianBody,
+    applyControls: [label],
+  });
+  bulgarianNotApply.result === 'uncertain' && bulgarianNotApply.code === 'no_apply_control'
+    ? pass(`"${label}" is not an Apply control`)
+    : fail(`"${label}" classified ${bulgarianNotApply.result}/${bulgarianNotApply.code}, expected uncertain/no_apply_control`);
+}
+
 console.log('\nliveness-core — role/position "is closed" and bare "Job Expired" banners classify as expired');
 
 // Reported on agentic-engineering-jobs.com (111 of 111 uncertain postings

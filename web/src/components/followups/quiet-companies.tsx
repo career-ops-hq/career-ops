@@ -106,7 +106,7 @@ function Caveats({ warnings, disclaimer }: { warnings: string[]; disclaimer: str
 function Header({ courtesyDays }: { courtesyDays: number | null }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Clock3 className="size-4 text-brand" />
+      <Clock3 className="size-4 text-brand-text" />
       <h2 className="font-display text-base text-landing">No reply since your last round</h2>
       {courtesyDays !== null && <span className="text-xs text-faint">past {courtesyDays} days</span>}
     </div>

@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 创建</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 创建，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders">700+ 位贡献者</a>参与</p>
 
 <p align="center">
 <strong>几个月投出的简历，全都石&#8288;沉&#8288;大&#8288;海。</strong><br>
@@ -125,6 +125,8 @@ npx @santifer/career-ops init
 <br>
 
 招聘不会自己修好。正在经历它的人可以，而且他们已经在这个房间里，交换笔记，互相修各自的配置。
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=cn" alt="贡献者 GitHub 头像组成的动态墙，自 2026年4月 起按加入顺序依次填满，下一个方格留空。" width="100%"></a></p>
 
