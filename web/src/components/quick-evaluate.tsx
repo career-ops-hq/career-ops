@@ -30,7 +30,7 @@ export function QuickEvaluate() {
   return (
     <div className="mt-7">
       <div className="flex max-w-xl items-center gap-2 rounded-full border border-border bg-surface/70 py-1.5 pl-4 pr-1.5 shadow-sm focus-within:border-brand/50">
-        <Sparkles className="size-4 shrink-0 text-brand/70" />
+        <Sparkles className="size-4 shrink-0 text-brand-text/70" />
         <input
           value={url}
           onChange={(e) => {
@@ -55,7 +55,7 @@ export function QuickEvaluate() {
         <span className="text-xs text-faint">Evaluation runs on your own AI — your key, your machine.</span>
       </div>
       <details className="mt-3 max-w-xl">
-        <summary className="cursor-pointer text-xs text-brand">Evaluation options · {sections.length === FULL_EVALUATION.length ? "full evaluation" : `${sections.length} optional sections`}</summary>
+        <summary className="cursor-pointer text-xs text-brand-text">Evaluation options · {sections.length === FULL_EVALUATION.length ? "full evaluation" : `${sections.length} optional sections`}</summary>
         <div className="mt-3"><EvaluationOptions sections={sections} onChange={setSections} /></div>
       </details>
       {hint && <p className="mt-1 text-xs text-faint">{hint}</p>}

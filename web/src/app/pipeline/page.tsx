@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { pipelineSummary } from "@/lib/career-ops";
+import { pipelineSummary, readTrackerShape } from "@/lib/career-ops";
 import { pendingInbox } from "@/lib/inbox-pending.mjs";
 import { PipelineView } from "@/components/pipeline-view";
 import { pipelineTab } from "@/lib/pipeline-navigation.mjs";
@@ -13,9 +13,10 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   const onInbox = pipelineTab(tab) === "INBOX";
   const { inbox, applications } = pipelineSummary();
   const pending = pendingInbox(inbox);
+  const trackerShape = readTrackerShape();
   return (
     <Suspense>
-      <PipelineView applications={applications} inbox={onInbox ? pending : null} inboxCount={pending.length} />
+      <PipelineView applications={applications} inbox={onInbox ? pending : null} inboxCount={pending.length} trackerShape={trackerShape} />
     </Suspense>
   );
 }
