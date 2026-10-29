@@ -54,9 +54,9 @@ test("a rewrite that adds spearheaded is a voice failure and a copied spearheade
 
 test("the rewrite prompt tells the model to keep the original words", () => {
   const prompt = buildRewritePrompt({ instruction: "Shorter", ...SOURCE, keywords: [] });
-  assert.match(prompt, /Use the original's words/);
-  assert.match(prompt, /No stock phrase, no em dash, and no en dash/);
-  assert.match(prompt, /Original bullet from the candidate's CV: "Cut deploy time from 2 weeks to 4 hours with CI\/CD". Use the original's words./);
+  assert.match(prompt, /Use the original's words, including a stock phrase already in this bullet/);
+  assert.match(prompt, /Do not add stock phrases\. No em dash and no en dash/);
+  assert.match(prompt, /Original bullet from the candidate's CV: "Cut deploy time from 2 weeks to 4 hours with CI\/CD". Use the original's words, including a stock phrase already in this bullet./);
 });
 
 test("a bullet with no CV match is not labeled as the candidate's original", () => {
@@ -65,6 +65,8 @@ test("a bullet with no CV match is not labeled as the candidate's original", () 
   assert.match(prompt, /The candidate's CV has no bullet that matches this one. Edit the current tailored bullet./);
   assert.equal(prompt.includes("Original bullet from the candidate's CV"), false);
   assert.equal(prompt.includes("Use the original's words"), false);
+  assert.equal(prompt.includes("stock phrase already in this bullet"), false);
+  assert.match(prompt, /Do not add stock phrases/);
   assert.ok(prompt.includes(`Current tailored bullet: ${JSON.stringify(tailored)}`));
 });
 
