@@ -66,7 +66,7 @@ test("assistant confirmation context and keyboard continuation during streaming"
   const proposal = (n, status) => `\n<<act:setStatus ${JSON.stringify({ n, status })}>>`;
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL`);
-  const open = page.getByRole("button", { name: "Open assistant", exact: true });
+  const open = page.getByRole("button", { name: "Ask the assistant", exact: true });
   await open.waitFor();
   await tabTo(open);
   await page.keyboard.press("Enter");
