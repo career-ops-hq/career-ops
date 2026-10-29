@@ -512,7 +512,7 @@ export function PipelineView({
                   className={cn(
                     "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/40",
                     i === 0
-                      ? "border-brand/40 bg-brand-soft text-brand hover:bg-brand/15"
+                      ? "border-brand/40 bg-brand-soft text-brand-text hover:bg-brand/15"
                       : "border-border text-muted hover:text-foreground",
                   )}
                 >
