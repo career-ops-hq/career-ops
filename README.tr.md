@@ -277,17 +277,17 @@ Tam kurulum kılavuzu için [docs/SETUP.md](docs/SETUP.md), career-ops'u özel v
 
 ## Kullanım
 
-Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur.
+Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur. Bir ilan okunamazsa pipeline durur ve metni yapıştırmanı ister.
 
 ### Bir mod istemek
 
 | CLI | `scan`'i nasıl istersin |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Cursor veya başka herhangi bir CLI | Düz dil: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor veya başka herhangi bir CLI | Düz dil: "Run the career-ops scan mode" |
 
-Arkasında hiçbir şey olmayan `/career-ops` komut menüsünü gösterir. Düz dil her CLI'da çalışır.
+Arkasında hiçbir şey olmayan `/career-ops` komut menüsünü gösterir. Düz dil her CLI'da çalışır. Claude Code eklentisi olarak komut `/career-ops:career-ops` biçimindedir.
 
 Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `modes/*.md` dosyalarını paylaşır; bu yüzden bir mod hangi CLI çalıştırırsa çalıştırsın aynı davranır. Codex'te eğik çizgi komutları garanti değildir: düz dille iste ya da `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ile tek bir prompt'u headless çalıştır ([docs/CODEX.md](docs/CODEX.md)). Desteklenen her CLI'da nasıl çalıştırılacağı, headless komutu olan CLI'lar için bu komutlar ve Pi'nin `/trust`'ı gibi CLI'ya özel kurulum notları [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) içindedir.
 
@@ -295,7 +295,7 @@ Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `m
 
 | Komut | Ne yapar |
 | --- | --- |
-| *bir URL veya iş tanımı yapıştır* | Tam pipeline: ilanın hâlâ yayında olup olmadığının denetimi (yalnızca URL'ler), A-H değerlendirmesi, rapor, uyarlanmış CV (varsayılan olarak PDF), tracker satırı |
+| *bir URL veya iş tanımı yapıştır* | Tam pipeline: ilanın hâlâ yayında olup olmadığının denetimi (yalnızca URL'ler), A-G değerlendirmesi, rapor, uyarlanmış CV (varsayılan olarak PDF), tracker satırı |
 | `scan` | Portallarını yeni ilanlar için tarar ve bunları gelen kutusuna ekler (`data/pipeline.md`) |
 | `pipeline` | Gelen kutusunda bekleyen her URL'yi değerlendirir |
 | `apply` | Bir başvuru formunu seninle birlikte alan alan doldurur. Gönder'den önce durur |
@@ -322,8 +322,8 @@ Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `m
 
 | Komut | Ne yapar |
 | --- | --- |
-| *bir URL veya iş tanımı yapıştır* | [Auto-pipeline](modes/auto-pipeline.md): değerlendirme + rapor + PDF + tracker kaydı |
-| [`oferta`](modes/oferta.md) | Yalnızca değerlendirme, A'dan H'ye bloklar (PDF yok) |
+| *bir URL veya iş tanımı yapıştır* | [Auto-pipeline](modes/auto-pipeline.md): değerlendirme + rapor + uyarlanmış CV (varsayılan olarak PDF) + tracker kaydı |
+| [`oferta`](modes/oferta.md) | Yalnızca değerlendirme, A'dan G'ye bloklar (PDF yok) |
 | [`ofertas`](modes/ofertas.md) | Birkaç ilanı karşılaştırır ve sıralar |
 | [`deep`](modes/deep.md) | Şirket hakkında derin araştırma prompt'u |
 | [`eu-swe`](modes/regional/eu-swe.md) | CV, başvuru veya mülakattan önce Avrupa'daki bir yazılım mühendisliği başvurusunu kalibre eder |
