@@ -25,6 +25,8 @@ const routes = new Map([...SKILL.matchAll(/^\| `([a-z/-]+)` \| `([^`]+)` \|$/gm)
 const rows = [...usage.matchAll(/^\| \[`([a-z/-]+)`\]\(([^)]+)\) \|/gm)].map((m) => [m[1], m[2]]);
 /** The everyday-commands rows, which name a command without linking it. */
 const everyday = [...usage.matchAll(/^\| `([a-z/-]+)` \|/gm)].map((m) => m[1]);
+/** Every mode-file link in Usage, including rows with no command (the paste row → auto-pipeline). */
+const modeLinks = [...usage.matchAll(/\]\((modes\/[^)#]+\.md)\)/g)].map((m) => m[1]);
 
 test('every routed mode has a row in the README command tables', () => {
   assert.ok(routes.size >= 30, `only ${routes.size} router inputs parsed — the routing table format changed`);
@@ -46,4 +48,10 @@ test('every README command links to the mode file the router runs', () => {
   const wrong = rows.filter(([command, link]) => link !== `modes/${routes.get(command)}.md` || !existsSync(join(ROOT, link)))
     .map(([command, link]) => `${command} → ${link}`);
   assert.deepEqual(wrong, [], `README.md Usage links that miss the routed mode file: ${wrong.join(', ')}`);
+});
+
+test('every mode file linked from README Usage exists', () => {
+  assert.ok(modeLinks.length > rows.length, `only ${modeLinks.length} mode links parsed — the link format changed`);
+  const ghosts = [...new Set(modeLinks)].filter((link) => !existsSync(join(ROOT, link)));
+  assert.deepEqual(ghosts, [], `README.md Usage links to missing mode file(s): ${ghosts.join(', ')}`);
 });
