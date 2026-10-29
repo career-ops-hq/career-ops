@@ -287,17 +287,17 @@ Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie 
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor ou toute autre CLI | Langage naturel : « Run the career-ops scan mode » |
+| Codex, Qwen, Cursor ou toute autre CLI prise en charge | Langage naturel : « Run the career-ops scan mode » |
 
-`/career-ops` seul affiche le menu des commandes. Le langage naturel fonctionne dans toutes les CLI. En tant que plugin Claude Code, la commande est `/career-ops:career-ops`.
+`/career-ops` seul affiche le menu des commandes dans les CLI qui l'utilisent. Le langage naturel fonctionne dans toutes les CLI prises en charge. En tant que plugin Claude Code, la commande est `/career-ops:career-ops`.
 
-Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les mêmes fichiers `modes/*.md` : un mode se comporte donc de la même façon quelle que soit la CLI qui l'exécute. Les commandes slash ne sont pas garanties dans Codex : demande en langage naturel, ou lance un prompt en mode headless avec `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). La façon de lancer career-ops dans chaque CLI prise en charge, les commandes headless quand une CLI en a une, et les notes de configuration propres à chaque CLI, comme le `/trust` de Pi, sont dans [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les mêmes fichiers `modes/*.md` : un mode se comporte donc de la même façon quelle que soit la CLI qui l'exécute. Les commandes slash ne sont pas garanties dans Codex : demande en langage naturel, ou lance un prompt en mode headless avec `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). La façon de lancer career-ops dans chaque CLI prise en charge, les commandes headless quand une CLI en a une, et les notes de configuration propres à chaque CLI sont dans [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Les commandes du quotidien
 
 | Commande | Ce qu'elle fait |
 | --- | --- |
-| *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-G, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
+| *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-G plus H si le score est élevé, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
 | `scan` | Scanner tes portails pour trouver de nouvelles offres et les ajouter à la boîte d'entrée (`data/pipeline.md`) |
 | `pipeline` | Évaluer chaque URL qui attend dans la boîte d'entrée |
 | `apply` | Remplir un formulaire de candidature avec toi, champ par champ. Elle s'arrête avant l'envoi |
@@ -325,7 +325,7 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 | Commande | Ce qu'elle fait |
 | --- | --- |
 | *colle une URL ou une description d'offre* | [Auto-pipeline](modes/auto-pipeline.md) : évaluation + rapport + CV adapté (PDF par défaut) + entrée dans le tracker |
-| [`oferta`](modes/oferta.md) | Évaluation seule, blocs A à G (sans PDF) |
+| [`oferta`](modes/oferta.md) | Évaluation seule, blocs A à G plus H si le score est élevé (sans PDF) |
 | [`ofertas`](modes/ofertas.md) | Comparer et classer plusieurs offres |
 | [`deep`](modes/deep.md) | Prompt de recherche approfondie sur l'entreprise |
 | [`eu-swe`](modes/regional/eu-swe.md) | Calibrer une candidature européenne en ingénierie logicielle avant le CV, la candidature ou l'entretien |
