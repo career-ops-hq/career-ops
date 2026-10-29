@@ -188,8 +188,8 @@ function markerFixture(script) {
   mkdirSync(join(dataRoot, 'output'), { recursive: true });
 
   for (const file of CLOSURE[script]) copyFileSync(join(ROOT, file), join(codeRoot, file));
-  // generate-pdf.mjs imports playwright at module scope and tracker-utils.mjs
-  // imports js-yaml, so without this the child dies before it can print anything
+  // tracker-utils.mjs imports js-yaml, and a real paint loads Playwright, so
+  // without this the child dies before it can print anything
   // and the assertions say nothing. linkNodeModules() rather than a raw
   // symlinkSync: it uses a junction on Windows, where a 'dir' link needs a
   // privilege a normal shell lacks, and it returns a reason instead of leaving a
@@ -253,7 +253,6 @@ test('set-status honours a .career-ops-data marker, not just CAREER_OPS_ROOT', (
 
 test('generate-pdf honours a .career-ops-data marker for its workspace boundary', (t) => {
   const f = markerFixture('generate-pdf.mjs');
-  // generate-pdf imports playwright at module scope, same vacuity.
   if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
   try {
     const r = runFromCodeRoot(f, 'generate-pdf.mjs',
@@ -272,7 +271,7 @@ test('generate-pdf honours a .career-ops-data marker for its workspace boundary'
 test('generate-pdf follows a .career-ops-data marker that changes mid-process', (t) => {
   const f = markerFixture('generate-pdf.mjs');
   // Same vacuity as the two above, one step further in: the probe imports
-  // generate-pdf.mjs from the copied code root, so playwright at module scope
+  // generate-pdf.mjs from the copied code root, so a missing dependency
   // kills it before it prints RESULT and the assertion reports a missing line
   // rather than the absent dependency tree.
   if (f.depsReason) { markerCleanup(f); return t.skip(f.depsReason); }
