@@ -285,17 +285,17 @@ Indsæt en job-URL eller jobbeskrivelse i din AI-CLI. career-ops tjekker, at et 
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor eller en hvilken som helst anden CLI | Almindeligt sprog: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor eller en hvilken som helst anden understøttet CLI | Almindeligt sprog: "Run the career-ops scan mode" |
 
-`/career-ops` uden noget efter sig viser kommandomenuen. Almindeligt sprog virker i alle CLI'er. Som Claude Code-plugin er kommandoen `/career-ops:career-ops`.
+`/career-ops` uden noget efter sig viser kommandomenuen i de CLI'er, der bruger den. Almindeligt sprog virker i alle understøttede CLI'er. Som Claude Code-plugin er kommandoen `/career-ops:career-ops`.
 
-De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `modes/*.md`-filer, så en tilstand opfører sig ens, uanset hvilken CLI der kører den. Slash-kommandoer er ikke garanteret i Codex: bed om det i almindeligt sprog, eller kør ét prompt headless med `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Hvordan du kører det i hver understøttet CLI, headless-kommandoer hvor en CLI har en, og opsætningsnoter for den enkelte CLI, som Pis `/trust`, står i [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `modes/*.md`-filer, så en tilstand opfører sig ens, uanset hvilken CLI der kører den. Slash-kommandoer er ikke garanteret i Codex: bed om det i almindeligt sprog, eller kør ét prompt headless med `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Hvordan du kører det i hver understøttet CLI, headless-kommandoer hvor en CLI har en, og opsætningsnoter for den enkelte CLI står i [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Hverdagens kommandoer
 
 | Kommando | Hvad den gør |
 | --- | --- |
-| *indsæt en URL eller jobbeskrivelse* | Hele pipelinen: tjek af om opslaget stadig er aktivt (kun URL'er), A-G-vurdering, rapport, tilpasset CV (PDF som standard), tracker-række |
+| *indsæt en URL eller jobbeskrivelse* | Hele pipelinen: tjek af om opslaget stadig er aktivt (kun URL'er), A-G-vurdering plus H ved høje scorer, rapport, tilpasset CV (PDF som standard), tracker-række |
 | `scan` | Scan dine portaler for nye opslag og læg dem i indbakken (`data/pipeline.md`) |
 | `pipeline` | Vurdér hver URL, der venter i indbakken |
 | `apply` | Udfyld en ansøgningsformular sammen med dig, felt for felt. Den stopper før Send |
@@ -323,7 +323,7 @@ De deler alle én router, `.agents/skills/career-ops/SKILL.md`, og de samme `mod
 | Kommando | Hvad den gør |
 | --- | --- |
 | *indsæt en URL eller jobbeskrivelse* | [Auto-pipeline](modes/auto-pipeline.md): vurdering + rapport + tilpasset CV (PDF som standard) + tracker-indgang |
-| [`oferta`](modes/oferta.md) | Kun vurdering, blok A til G (ingen PDF) |
+| [`oferta`](modes/oferta.md) | Kun vurdering, blok A til G plus H ved høje scorer (ingen PDF) |
 | [`ofertas`](modes/ofertas.md) | Sammenlign og rangér flere tilbud |
 | [`deep`](modes/deep.md) | Prompt til dybdegående research om virksomheden |
 | [`eu-swe`](modes/regional/eu-swe.md) | Kalibrér en europæisk softwareudviklingsansøgning før CV, ansøgning eller samtale |
