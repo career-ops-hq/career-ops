@@ -53,7 +53,7 @@ function run(src, flags = [], cwd = WEB) {
   }
 }
 
-// web/package.json allows Node >=22.13 (the project floor), but four cases
+// web/package.json allows Node 22.13+ (the project floor), but four cases
 // below reach a .ts module, and that needs type stripping on top: added behind
 // --experimental-strip-types in 22.6, on by default only from 22.18. On
 // 22.13-22.17 without the flag the child dies with

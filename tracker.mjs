@@ -43,6 +43,7 @@
  *   node tracker.mjs query [--status Applied] [--company acme] [--role designer] [--csv]
  *                          [--since 2026-01-01] [--min-score 4] [--id N] [--limit 20] [--json]
  *   node tracker.mjs history --id N             # status transitions: the ledger's, plus changes only a sync saw
+ *   node tracker.mjs history N                  # same read; one bare tracker number
  *   node tracker.mjs export [--out FILE] [--force]  # inverse: applications.db → markdown (stdout by default)
  *                                               # --force: write even when columns would be dropped
  *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
@@ -943,12 +944,52 @@ async function query(args, ctx) {
   }
 }
 
+// One tracker number: `--id N`, `--id=N`, or a single bare number. find.mjs and
+// set-status.mjs already take the bare form. A second token, or a number next
+// to --id, is a usage error so the wrong row is never printed.
+function historyId(args, ctx) {
+  const positional = [];
+  let hasIdFlag = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (typeof arg !== 'string' || arg === '') continue;
+    if (arg === '--id') {
+      hasIdFlag = true;
+      // The operand is not a second selector. A missing one falls through to
+      // the positive-integer check (the CLI already rejects it).
+      if (args[i + 1] !== undefined && !String(args[i + 1]).startsWith('--')) i += 1;
+      continue;
+    }
+    if (arg.startsWith('--id=')) {
+      hasIdFlag = true;
+      continue;
+    }
+    if (arg.startsWith('-')) continue;
+    positional.push(arg);
+  }
+  if (hasIdFlag && positional.length > 0) {
+    ctx.error(`Error: history takes either --id N or one tracker number, not both (${positional.join(' ')})`);
+    throw new TrackerExit(1);
+  }
+  if (!hasIdFlag && positional.length > 1) {
+    ctx.error(`Error: history takes one tracker number, got ${positional.join(' ')}. Example: node tracker.mjs history --id 318`);
+    throw new TrackerExit(1);
+  }
+  const idRaw = hasIdFlag ? flagValue(args, '--id') : positional[0];
+  const id = parseApplicationId(idRaw);
+  if (id === null) {
+    const got = idRaw == null ? '' : ` Got "${idRaw}".`;
+    ctx.error(`Error: history requires --id N (a positive integer).${got} Example: node tracker.mjs history 318`);
+    throw new TrackerExit(1);
+  }
+  return id;
+}
+
 async function history(args, ctx) {
+  const id = historyId(args, ctx);
   const DatabaseSync = await loadSqlite(ctx);
   const db = ctx.openDb(DatabaseSync);
   ensureFresh(db, loadStates(ctx), ctx);
-  const id = parseApplicationId(flagValue(args, '--id'));
-  if (id === null) { ctx.error('Error: history requires --id N (a positive integer)'); throw new TrackerExit(1); }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
   if (!app) { ctx.error(`Error: no application with id ${id}`); throw new TrackerExit(1); }
   ctx.log(`#${app.id} ${app.company} — ${app.role}`);
@@ -1230,9 +1271,6 @@ async function deleteApp(args, ctx) {
 
 const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };
 
-const TOP_LEVEL_USAGE = 'Usage: node tracker.mjs <sync|query|history|export|delete> [flags]\n'
-  + 'See the header comment of this file for examples, or docs/SCRIPTS.md.';
-
 // Every flag each subcommand accepts, from the header comment (lines 24-32).
 // #4602: unvalidated flags let a mistyped `--dryrun` (missing the hyphen)
 // fall through `delete`'s `args.includes('--dry-run')` check unseen, so the
@@ -1259,6 +1297,7 @@ const SUBCOMMAND_FLAGS = {
     known: ['--id', '--help', '-h'],
     valueFlags: ['--id'],
     usage: 'Usage: node tracker.mjs history --id N\n'
+      + '  a bare number is the same read: node tracker.mjs history N\n'
       + '  status transitions from status-log.tsv, plus changes only a sync saw',
   },
   export: {
@@ -1275,6 +1314,12 @@ const SUBCOMMAND_FLAGS = {
       + '  remove one application row from applications.md + reindex',
   },
 };
+
+const TOP_LEVEL_USAGE = [
+  'Usage: node tracker.mjs <sync|query|history|export|delete> [flags]',
+  ...Object.values(SUBCOMMAND_FLAGS).map(({ usage }) => usage),
+  'node tracker.mjs <command> --help prints one command. More examples: docs/SCRIPTS.md.',
+].join('\n\n');
 
 /**
  * Run one tracker.mjs command against the paths given, in-process.
