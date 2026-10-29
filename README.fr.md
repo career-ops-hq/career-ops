@@ -279,17 +279,17 @@ Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/
 
 ## Utilisation
 
-Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela couvre la plupart des jours. Tout le reste est un mode que tu demandes par son nom.
+Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela couvre la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte.
 
 ### Demander un mode
 
 | CLI | Comment demander `scan` |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Cursor ou toute autre CLI | Langage naturel : « Run the career-ops scan mode » |
+| Codex, Qwen, Cursor ou toute autre CLI | Langage naturel : « Run the career-ops scan mode » |
 
-`/career-ops` seul affiche le menu des commandes. Le langage naturel fonctionne dans toutes les CLI.
+`/career-ops` seul affiche le menu des commandes. Le langage naturel fonctionne dans toutes les CLI. En tant que plugin Claude Code, la commande est `/career-ops:career-ops`.
 
 Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les mêmes fichiers `modes/*.md` : un mode se comporte donc de la même façon quelle que soit la CLI qui l'exécute. Les commandes slash ne sont pas garanties dans Codex : demande en langage naturel, ou lance un prompt en mode headless avec `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). La façon de lancer career-ops dans chaque CLI prise en charge, les commandes headless quand une CLI en a une, et les notes de configuration propres à chaque CLI, comme le `/trust` de Pi, sont dans [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
@@ -297,7 +297,7 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 
 | Commande | Ce qu'elle fait |
 | --- | --- |
-| *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-H, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
+| *colle une URL ou une description d'offre* | Pipeline complet : vérification que l'offre est ouverte (URL uniquement), évaluation A-G, rapport, CV adapté (PDF par défaut), ligne dans le tracker |
 | `scan` | Scanner tes portails pour trouver de nouvelles offres et les ajouter à la boîte d'entrée (`data/pipeline.md`) |
 | `pipeline` | Évaluer chaque URL qui attend dans la boîte d'entrée |
 | `apply` | Remplir un formulaire de candidature avec toi, champ par champ. Elle s'arrête avant l'envoi |
@@ -324,8 +324,8 @@ Toutes partagent un même routeur, `.agents/skills/career-ops/SKILL.md`, et les 
 
 | Commande | Ce qu'elle fait |
 | --- | --- |
-| *colle une URL ou une description d'offre* | [Auto-pipeline](modes/auto-pipeline.md) : évaluation + rapport + PDF + entrée dans le tracker |
-| [`oferta`](modes/oferta.md) | Évaluation seule, blocs A à H (sans PDF) |
+| *colle une URL ou une description d'offre* | [Auto-pipeline](modes/auto-pipeline.md) : évaluation + rapport + CV adapté (PDF par défaut) + entrée dans le tracker |
+| [`oferta`](modes/oferta.md) | Évaluation seule, blocs A à G (sans PDF) |
 | [`ofertas`](modes/ofertas.md) | Comparer et classer plusieurs offres |
 | [`deep`](modes/deep.md) | Prompt de recherche approfondie sur l'entreprise |
 | [`eu-swe`](modes/regional/eu-swe.md) | Calibrer une candidature européenne en ingénierie logicielle avant le CV, la candidature ou l'entretien |
