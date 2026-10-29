@@ -12,16 +12,21 @@ const MAX_TABS = 500;
  * Whether this payload should be sent.
  *
  * A payload the server already has is not sent again, except on the way out
- * of the page while a different payload is still in flight. That in-flight
- * save can land after the tab is gone, and the page can no longer correct it.
+ * of the page while a different payload is still in flight, or when an
+ * earlier response may have been lost after writing. That in-flight save can
+ * land after the tab is gone, and the page can no longer correct it.
  *
  * @param {string} saved - JSON already stored.
  * @param {string} current - JSON on screen.
  * @param {string | null} inflight - JSON of the save that has not finished.
  * @param {boolean} keepalive - True for the page-exit flush.
+ * @param {boolean} [uncertain] - A previous response may have been lost after writing.
  */
-export function shouldSendEdits(saved, current, inflight, keepalive) {
-  if (current === saved) return keepalive === true && typeof inflight === "string" && inflight !== current;
+export function shouldSendEdits(saved, current, inflight, keepalive, uncertain = false) {
+  if (current === saved) {
+    if (uncertain) return typeof inflight !== "string" || (keepalive === true && inflight !== current);
+    return keepalive === true && typeof inflight === "string" && inflight !== current;
+  }
   if (current === inflight && keepalive !== true) return false;
   return true;
 }
@@ -62,12 +67,13 @@ export function postWroteEdits(status, superseded) {
  * @param {string} current
  * @param {string | null} saving
  * @param {string | null} posting
+ * @param {boolean} [uncertain] - A previous response may have been lost after writing.
  * @returns {"Saving" | "Unsaved" | "Saved"}
  */
-export function editSaveStatus(saved, current, saving, posting) {
+export function editSaveStatus(saved, current, saving, posting, uncertain = false) {
   const inflight = inflightEdits(saving, posting, current);
   if (inflight === current || (current === saved && inflight !== null)) return "Saving";
-  if (current !== saved) return "Unsaved";
+  if (current !== saved || uncertain) return "Unsaved";
   return "Saved";
 }
 

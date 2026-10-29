@@ -120,6 +120,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   );
 
   const savedJsonRef = useRef(JSON.stringify(data.edits));
+  const autosaveUncertainRef = useRef(false);
   const savingJsonRef = useRef<string | null>(null);
   const postingJsonRef = useRef<string | null>(null);
   const tabRef = useRef(Math.random().toString(36).slice(2, 12));
@@ -131,7 +132,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
     (payload: StudioEdits, keepalive: boolean) => {
       const serialized = JSON.stringify(payload);
       const inflight = inflightEdits(savingJsonRef.current, postingJsonRef.current, serialized);
-      if (!shouldSendEdits(savedJsonRef.current, serialized, inflight, keepalive)) return;
+      if (!shouldSendEdits(savedJsonRef.current, serialized, inflight, keepalive, autosaveUncertainRef.current)) return;
       savingJsonRef.current = serialized;
       showStatus();
       revRef.current += 1;
@@ -149,11 +150,15 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
           const latest = JSON.stringify(editsRef.current);
           setAutosaveError(null);
           savedJsonRef.current = serialized;
+          autosaveUncertainRef.current = false;
           if (latest !== serialized) putEdits(editsRef.current, keepalive);
           showStatus();
         })
         .catch(() => {
           if (savingJsonRef.current === serialized) savingJsonRef.current = null;
+          // The response was lost, so the server may already hold this payload.
+          // Do not send again from here. The next edit or page exit does.
+          autosaveUncertainRef.current = true;
           setAutosaveError("Autosave failed. Is the dashboard still running?");
           showStatus();
         });
@@ -172,14 +177,15 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
 
   useEffect(() => {
     const serialized = JSON.stringify(edits);
-    if (serialized === savedJsonRef.current || serialized === savingJsonRef.current || serialized === postingJsonRef.current) return;
+    const sameAsSaved = !autosaveUncertainRef.current && serialized === savedJsonRef.current;
+    if (sameAsSaved || serialized === savingJsonRef.current || serialized === postingJsonRef.current) return;
     setSave((s) => (s.kind === "saved" || s.kind === "outdated" ? { kind: "idle" } : s));
     const timer = setTimeout(() => putEdits(edits, false), 500);
     return () => clearTimeout(timer);
   }, [edits, putEdits]);
 
   const editsJson = JSON.stringify(edits);
-  const editStatus = editSaveStatus(savedJsonRef.current, editsJson, savingJsonRef.current, postingJsonRef.current);
+  const editStatus = editSaveStatus(savedJsonRef.current, editsJson, savingJsonRef.current, postingJsonRef.current, autosaveUncertainRef.current);
 
   const saveForApply = useCallback(async () => {
     setSave({ kind: "saving" });
@@ -212,10 +218,9 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
       }
     } catch {
       // The response never arrived. The server may already have stored this
-      // payload. Send the screen while that payload is still in flight, or an
-      // undo back to the saved CV is skipped on the way out of the page.
-      const latest = editsRef.current;
-      if (JSON.stringify(latest) !== serialized) putEdits(latest, true);
+      // payload. Send the screen even when it still matches that payload, so a
+      // later undo is measured against the write that may have landed.
+      putEdits(editsRef.current, true);
       if (postingJsonRef.current === serialized) postingJsonRef.current = null;
       setSave({ kind: "failed", error: "Saving failed. Is the dashboard still running?" });
     }

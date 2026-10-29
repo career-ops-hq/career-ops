@@ -48,6 +48,15 @@ test("a Save for apply that already wrote is corrected when the screen has moved
 test("a lost save still sends restored edits while the sent payload is in flight", () => {
   assert.equal(shouldSendEdits("restored", "restored", "hidden", false), false);
   assert.equal(shouldSendEdits("restored", "restored", "hidden", true), true);
+  assert.equal(shouldSendEdits("saved", "current", "current", true), true);
+});
+
+test("a lost autosave keeps the restored snapshot unsaved", () => {
+  assert.equal(shouldSendEdits("saved", "saved", null, true, true), true);
+  assert.equal(shouldSendEdits("saved", "saved", null, false, true), true);
+  assert.equal(shouldSendEdits("saved", "saved", "newer", false, true), false);
+  assert.equal(editSaveStatus("saved", "saved", null, null, true), "Unsaved");
+  assert.equal(editSaveStatus("saved", "saved", null, null, false), "Saved");
 });
 
 test("a PUT without a usable tab or number is written", () => {
