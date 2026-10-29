@@ -27,8 +27,9 @@
  *   - Per-job HTML (LinkedIn): the guest endpoint returns the rendered posting as
  *     HTML and answers 200 for closed postings too, so `interpret` reads two
  *     independent signals out of the body and only concludes when they agree.
- *     Zoho Recruit is the same shape: its posting page embeds the record and
- *     answers 200 for a removed posting too, so `interpret` reads the body.
+ *     Zoho Recruit and UltiPro are the same shape: their posting pages embed
+ *     the record and answer 200 for a removed posting too, so `interpret` reads
+ *     the body.
  *
  * SSRF-safe by construction: the request URL is built from a FIXED, hard-coded API
  * host plus path segments extracted from the posting URL with a strict charset
@@ -38,6 +39,7 @@
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
 import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
+import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
 import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
@@ -305,6 +307,36 @@ const ATS_PROVIDERS = [
       let html;
       try { html = await res.text(); } catch { return null; }
       return classifyZohoPostingPage(html, id);
+    },
+  },
+  {
+    id: 'ultipro',
+    // {host}/{tenant}/JobBoard/{boardId}/OpportunityDetail?opportunityId={id}, the
+    // URL providers/ultipro.mjs writes. Like Zoho Recruit, UKG has no per-posting
+    // JSON endpoint: the detail page embeds the record (see providers/ultipro.mjs)
+    // and answers 200 for a closed posting too, so `interpret` reads the body.
+    //
+    // The browser reads a closed posting here as uncertain: it either keeps its
+    // page without an Apply control or gets the board's near-empty page, and on
+    // 2026-10-28 all 57 closed postings read uncertain. Measured that day on 156
+    // postings across 24 tenants, against each board's own listing: 99 listed
+    // postings carried an open record, 14 unlisted ones a closed record and 42
+    // the empty page's notice; the last, an internal-only posting, stays with
+    // the browser.
+    match(u) {
+      if (!ULTIPRO_HOST_RE.test(u.hostname)) return null;
+      const m = u.pathname.match(/^\/([^/]+)\/JobBoard\/([^/]+)\/OpportunityDetail\/?$/);
+      const id = u.searchParams.get('opportunityId');
+      if (!m || !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+      // UKG reads the id in any case and answers with the record's own lower-case id.
+      return { host: u.hostname, tenant: m[1], boardId: m[2], id: id.toLowerCase() };
+    },
+    api: ({ host, tenant, boardId, id }) => `https://${host}/${tenant}/JobBoard/${boardId}/OpportunityDetail?opportunityId=${id}`,
+    accept: 'text/html',
+    async interpret(res, { id }) {
+      let html;
+      try { html = await res.text(); } catch { return null; }
+      return classifyUltiproDetailPage(html, id);
     },
   },
   {
@@ -872,6 +904,47 @@ export function classifyZohoPostingPage(html, id) {
   }
   return /This job posting is no longer available/i.test(html)
     ? { result: 'expired', code: 'zoho_recruit_unavailable', reason: 'Zoho Recruit shows "This job posting is no longer available."' }
+    : null;
+}
+
+// The notice on UKG's empty detail page, the one the browser shows as "This
+// opportunity is currently not available." An internal-only posting's page has
+// no record either, but carries a sign-in notice instead, so it does not match.
+const ULTIPRO_UNAVAILABLE_NOTICE = 'data-i18n="Opportunity.OpportunityError.OpportunityUnavailableMessage"';
+
+/**
+ * Decide liveness for one UltiPro (UKG Pro Recruiting) posting from its own
+ * detail page. Pure + deterministic (no I/O), mirroring classifyZohoPostingPage.
+ *
+ * A posting's page embeds its record, and the record for THIS id says whether
+ * it is closed: `OpportunityIsClosed` false is live, true is closed (a closed
+ * posting can keep its whole page, only without an Apply control). A posting
+ * UKG no longer shows gets the board's empty page: no record, and the
+ * "opportunity unavailable" notice. Anything else (a record for another id or
+ * without the flag, an internal-only notice, an error page, a markup change)
+ * returns null so the browser rung decides.
+ *
+ * @param {any} html - the detail page's body
+ * @param {string} id - the opportunityId from the posting URL
+ * @returns {{ result: 'active' | 'expired', code: string, reason: string } | null}
+ */
+export function classifyUltiproDetailPage(html, id) {
+  if (typeof html !== 'string' || !html) return null;
+  let page;
+  try {
+    page = extractCandidateOpportunityDetail(html, id);
+  } catch {
+    return null; // a record for another id, or one that no longer parses
+  }
+  if (page.status === 'ok') {
+    const closed = page.detail.OpportunityIsClosed;
+    if (typeof closed !== 'boolean') return null;
+    return closed
+      ? { result: 'expired', code: 'ultipro_api_closed', reason: 'UKG marks the opportunity closed (OpportunityIsClosed)' }
+      : { result: 'active', code: 'ultipro_api_open', reason: 'UKG marks the opportunity open (live)' };
+  }
+  return html.includes(ULTIPRO_UNAVAILABLE_NOTICE)
+    ? { result: 'expired', code: 'ultipro_api_unavailable', reason: 'UKG shows "This opportunity is currently not available."' }
     : null;
 }
 
