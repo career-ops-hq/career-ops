@@ -83,7 +83,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           onClick={log}
           title={state === "error" && errorMsg ? errorMsg : undefined}
           className={cn(
-            "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-surface-hover px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-brand-soft hover:text-brand max-sm:min-h-[44px]",
+            "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md bg-surface-hover px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-brand-soft hover:text-brand-text max-sm:min-h-[44px]",
             state === "error" && "text-red-500 hover:text-red-400",
           )}
         >
@@ -92,7 +92,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
           <span className="sm:hidden">{state === "error" ? "Retry" : "Followed up"}</span>
         </button>
         {followup.num != null && (
-          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand max-sm:min-h-[44px] max-sm:min-w-[44px]">
+          <a href={`/pipeline/${followup.num}`} title="Open report" className="inline-flex shrink-0 items-center justify-center rounded p-1 text-faint transition hover:text-brand-text max-sm:min-h-[44px] max-sm:min-w-[44px]">
             <FileText className="size-4" />
           </a>
         )}

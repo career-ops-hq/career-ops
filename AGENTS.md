@@ -251,6 +251,7 @@ If `config/profile.yml` is missing, ask:
 > - Your location and timezone
 > - What roles are you targeting? (e.g., 'Senior Backend Engineer', 'AI Product Manager')
 > - Your salary target range and its currency
+> - How many years of professional experience do you have? (optional: the scanner can then skip postings whose stated minimum is out of reach, and how far you'd stretch above it)
 > - How much do you want to spend on model usage per evaluation? Three options:
 >   - **economy** — cheapest and fastest, good for scanning lots of offers quickly
 >   - **standard** — balanced cost and quality (default if you're not sure)
@@ -269,7 +270,7 @@ Then write both files in one run. Do not copy or hand-edit the templates. `templ
 ```bash
 node onboard-write.mjs --answers - <<'JSON'
 {
-  "candidate": { "full_name": "...", "email": "...", "location": "City, Region" },
+  "candidate": { "full_name": "...", "email": "...", "location": "City, Region", "years_of_experience": 6 },
   "target_roles": ["..."],
   "compensation": { "target_range": "...", "currency": "USD", "minimum": "..." },
   "location": { "country": "...", "city": "...", "timezone": "..." },
@@ -288,6 +289,7 @@ JSON
   - When they name cities, pass the cities and leave `countries` empty, since a country in `always_allow` admits every city in it.
   - "Remote" and "Hybrid" are not places, and the writer refuses them, because an allow-list entry like that admits every country.
   - A posting labeled only "Remote" (no country) will not match a US `always_allow` / `allow` list. Tell the candidate that limitation during onboarding; do not add "Remote" as an unconditional country match. Titles that themselves signal remote work can still match on the title filter.
+- `candidate.years_of_experience` is optional. When they give it, also ask whether the scanner should check postings whose JD states a minimum above it, by how much they would stretch (default 1 year), and whether to mark those rows (the default) or drop them. A yes becomes `portals.experience_filter: { "stretch_years": 1 }` (add `"action": "drop"` only if they want those rows removed: a wrong drop silently costs a real job, a wrong label costs one glance). It reads each new posting's JD, marks (or with `drop`, removes) only a clearly stated minimum above the band, and keeps unclear or unread ones unmarked; it is independent of `skip_tiers`, which reads the title.
 - `max_posting_age_days` defaults to 45. Tell them it also hides long-open roles on a company's own board. Set 0 only when they ask for older postings.
 - Contact fields they did not give are blanked, so the example person never reaches a CV.
 - Existing files are kept. Pass `--force` only when the user asks to redo setup. `node onboard-write.mjs --help` shows every field.
@@ -548,7 +550,7 @@ Job aggregators keep stale, filled, and ghost listings live long after the emplo
 
 1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as above.
 2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
-3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Record it in `data/scan-history.tsv` with status `skipped_expired`, the status `check-liveness.mjs` records for a dead posting, so the next scan treats the URL as seen until `scan_history.recheck_after_days` releases it. Write the row through `appendToScanHistory` in `scan.mjs`, not by hand. The URL, role and company come from the posting, so never put them into a shell command: write them to a JSON file with your file tool (`{"url": "…", "title": "…", "company": "…"}`), then run `node --input-type=module -e 'import { readFileSync } from "node:fs"; import { appendToScanHistory } from "./scan.mjs"; const p = JSON.parse(readFileSync(process.argv[1], "utf8")); await appendToScanHistory([{ ...p, source: "manual" }], process.argv[2], "skipped_expired")' <file.json> YYYY-MM-DD`. The status decides what the scanner does: `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa` and `skipped_country_eligibility` never count as seen, so the listing comes back, and a status the scanner does not know pins the URL for good. If it is already in the tracker, run `node set-status.mjs --report <report#> Discarded --note "not found at employer"` (or `"<company>"` for a row with no report) — never silently delete the record, since that is what stops it being re-added as new on the next scan.
+3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Record it in `data/scan-history.tsv` with status `skipped_expired`, the status `check-liveness.mjs` records for a dead posting, so the next scan treats the URL as seen until `scan_history.recheck_after_days` releases it. Write the row through `appendToScanHistory` in `scan.mjs`, not by hand. The URL, role and company come from the posting, so never put them into a shell command: write them to a JSON file with your file tool (`{"url": "…", "title": "…", "company": "…"}`), then run `node --input-type=module -e 'import { readFileSync } from "node:fs"; import { appendToScanHistory } from "./scan.mjs"; const p = JSON.parse(readFileSync(process.argv[1], "utf8")); await appendToScanHistory([{ ...p, source: "manual" }], process.argv[2], "skipped_expired")' <file.json> YYYY-MM-DD`. The status decides what the scanner does: `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility` and `skipped_experience` never count as seen, so the listing comes back, and a status the scanner does not know pins the URL for good. If it is already in the tracker, run `node set-status.mjs --report <report#> Discarded --note "not found at employer"` (or `"<company>"` for a row with no report) — never silently delete the record, since that is what stops it being re-added as new on the next scan.
 4. **Employer has no careers page / ATS you can find → leave it UNCONFIRMED, not stale.** Keep the aggregator URL and tell the user the role could not be confirmed at the employer.
 5. **Employer unidentifiable** (some aggregator and agency posts hide the company) → that is a **Block G posting-legitimacy signal**, not a research gap. Report it and stop. NEVER infer, guess, or invent the employer.
 
