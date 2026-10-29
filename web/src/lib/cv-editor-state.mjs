@@ -12,7 +12,7 @@
  */
 
 /**
- * @typedef {{ base: string, content: string } | null} CvDraft
+ * @typedef {{ base: string, content: string, inflight?: string } | null} CvDraft
  */
 
 /** @returns {EditorState} */
@@ -126,6 +126,23 @@ export function shouldSave(state) {
 export function draftChange(state) {
   if (state.phase !== "ready") return undefined;
   return draftToStore(state);
+}
+
+/**
+ * Read a draft that was stored as JSON. `inflight` is the text still being
+ * written when the page was closed. Dropping it makes a reload reject the
+ * draft once that text has reached the file.
+ *
+ * @param {unknown} raw
+ * @returns {CvDraft}
+ */
+export function draftFromStore(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const draft = /** @type {{ base?: unknown, content?: unknown, inflight?: unknown }} */ (raw);
+  if (typeof draft.base !== "string" || typeof draft.content !== "string") return null;
+  const parsed = { base: draft.base, content: draft.content };
+  if (typeof draft.inflight === "string") parsed.inflight = draft.inflight;
+  return parsed;
 }
 
 /** @param {EditorState} state @returns {CvDraft} */

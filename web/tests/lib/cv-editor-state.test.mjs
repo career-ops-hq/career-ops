@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { draftChange, draftToStore, editorReducer, editorStatus, initialEditor, shouldSave } from "../../src/lib/cv-editor-state.mjs";
+import { draftChange, draftFromStore, draftToStore, editorReducer, editorStatus, initialEditor, shouldSave } from "../../src/lib/cv-editor-state.mjs";
 
 const ready = (content, extra = {}) => ({
   ...initialEditor(),
@@ -122,6 +122,18 @@ test("reverting to the saved text while another save is in flight still says Sav
     draft: draftToStore(state),
   });
   assert.equal(replaced.content, "replaced on disk");
+});
+
+test("a stored draft keeps the in-flight base for the reload", () => {
+  let state = editorReducer(ready("A"), { type: "edit", content: "B" });
+  state = editorReducer(state, { type: "save-start", content: "B" });
+  state = editorReducer(state, { type: "edit", content: "C" });
+  const draft = draftFromStore(JSON.parse(JSON.stringify(draftToStore(state))));
+  assert.equal(draft.inflight, "B");
+  const landed = editorReducer(initialEditor(), { type: "loaded", content: "B", exists: true, draft });
+  assert.equal(landed.content, "C");
+  const ignored = draftFromStore({ base: "A", content: "C", inflight: { nope: true } });
+  assert.equal(ignored.inflight, undefined);
 });
 
 test("a newer edit keeps the in-flight text as a draft base", () => {

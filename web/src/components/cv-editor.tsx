@@ -8,6 +8,7 @@ import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   draftChange,
+  draftFromStore,
   editorReducer,
   editorStatus,
   initialEditor,
@@ -21,9 +22,7 @@ function readDraft() {
   try {
     const raw = sessionStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    const draft = JSON.parse(raw) as { base?: unknown; content?: unknown };
-    if (typeof draft?.base !== "string" || typeof draft.content !== "string") return null;
-    return { base: draft.base, content: draft.content };
+    return draftFromStore(JSON.parse(raw));
   } catch {
     return null;
   }
