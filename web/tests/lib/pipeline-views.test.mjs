@@ -54,6 +54,8 @@ test("corrupt storage drops bad entries and keeps the first of a repeated name",
     "nope",
   ]);
   assert.deepEqual(parseViews(raw).map((view) => view.name), ["Ok"]);
+  assert.deepEqual(parseViews('[{"name":"Ok","tab":"ALL"},{"name":{"toString":null}},{"name":"Later","sort":{"toString":null}}]').map((view) => view.name), ["Ok", "Later"]);
+  assert.equal(parseViews('[{"name":"Later","sort":{"toString":null}}]')[0].sort, "score");
   assert.deepEqual(parseViews("not json"), []);
   assert.deepEqual(parseViews("{"), []);
   assert.deepEqual(removeView(parseViews(raw), "Ok"), []);

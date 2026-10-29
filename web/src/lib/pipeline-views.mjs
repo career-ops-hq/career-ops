@@ -8,14 +8,16 @@ export const PIPELINE_SORT_KEYS = ["tracker", "company", "role", "score", "statu
 export function normalizeView(input) {
   if (!input || typeof input !== "object") return null;
   const raw = /** @type {Record<string, unknown>} */ (input);
-  const name = String(raw.name ?? "").trim();
+  if (typeof raw.name !== "string") return null;
+  const name = raw.name.trim();
   if (!name || name.length > 40) return null;
   let min = null;
   if (raw.min != null && raw.min !== "") {
+    if (typeof raw.min !== "number" && typeof raw.min !== "string") return null;
     min = typeof raw.min === "number" ? raw.min : Number(raw.min);
     if (!Number.isFinite(min)) return null;
   }
-  const sort = PIPELINE_SORT_KEYS.includes(String(raw.sort)) ? String(raw.sort) : "score";
+  const sort = typeof raw.sort === "string" && PIPELINE_SORT_KEYS.includes(raw.sort) ? raw.sort : "score";
   return {
     name,
     tab: pipelineTab(typeof raw.tab === "string" ? raw.tab : undefined),
