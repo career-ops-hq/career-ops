@@ -5,8 +5,8 @@ external service — things the zero-keys, local-first core doesn't carry. They 
 **opt-in**, sandboxed-by-convention, and additive: with no plugins enabled, the
 core runs exactly as it always has.
 
-> This is **not** the Claude Code plugin (`.claude-plugin/`). These plugins
-> extend career-ops itself.
+> This is **not** the Claude Code plugin (`.claude-plugin/`, see
+> [CLAUDE_PLUGIN.md](CLAUDE_PLUGIN.md)). These plugins extend career-ops itself.
 
 ## Using plugins
 

@@ -196,12 +196,13 @@ That is what `update-system.mjs apply` does with every system file this install 
 
 ## Custom Data Directory
 
-By default, all User Layer files reside inside the project repository root. You can configure a separate, external directory for your personal data.
+By default, a checkout keeps all User Layer files inside the project repository root. A Claude Code plugin install keeps them in `~/career-ops-data` instead (see the Plugin Install Default below). Either way, you can configure a separate, external directory for your personal data.
 
 ### Resolution Precedence:
-1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory.
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory. A directory inside a Claude Code plugin install copy is refused, here and in the marker file, because Claude Code replaces that copy on every plugin update.
 2. **Marker File (`.career-ops-data`):** A repository-level marker file named `.career-ops-data` containing the path (absolute or relative) to the user data directory.
-3. **Repository Default:** Defaults to the codebase/repository root directory.
+3. **Plugin Install Default (`~/career-ops-data`):** When neither is set and the code runs from a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`). Claude Code replaces that copy on every plugin update, so it can never hold User Layer files. See [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+4. **Repository Default:** Otherwise, defaults to the codebase/repository root directory.
 
 When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`, `batch/tracker-additions/`) will be resolved relative to that path. System Layer files continue to be resolved relative to the codebase/repository root, keeping code and personal data completely separate.
 

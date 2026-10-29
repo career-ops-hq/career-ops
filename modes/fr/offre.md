@@ -247,7 +247,7 @@ Les libelles de l'en-tete (`**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:*
 (liste de 15-20 mots-cles de l'offre pour l'optimisation ATS)
 
 ## Keyword Coverage
-(genere par `node keyword-match.mjs <report>` -- couverture en %, present, thin, missing)
+(genere par `keyword-match.mjs` (1b) -- couverture en %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (le texte complet de l'offre, colle mot pour mot -- voir l'exigence ci-dessous)
@@ -257,11 +257,44 @@ Les libelles de l'en-tete (`**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:*
 
 **Machine Summary (obligatoire) :** bloc YAML juste apres l'en-tete, avec le schema, les noms de champs exacts et les regles de `batch/batch-prompt.md` (la source ; ne pas le dupliquer ici). Il contient `advertised_comp` (le montant de l'offre mot pour mot, ou `null`), `risk_summary` et `requirement_importance` (le bloc B ligne par ligne ; la limite `inferred` s'applique aussi ici).
 
-**Archivage de l'offre (obligatoire, #2789) :** chaque report DOIT comporter une section `## Job Description (archived verbatim)` avec le texte complet de l'offre, jamais resume ni reformule. Le titre reste en anglais : `check-jd-archive.mjs` le cherche par son nom. La premiere ligne est la date de publication visible (`Posted: {date ou texte relatif}`, ou `Posted: not visible in source`), jamais la date du fichier du report. Si l'offre est trop longue ou ne peut pas etre citee en entier, la capturer avec `archive-posting.mjs <url> --company={company-slug} --report={num}` et mettre dans la section **exactement** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, sans autre texte. Si aucune capture automatique n'est possible (par exemple un long texte colle sans URL), renommer la section en `## Job Description (not archived)` et en donner la raison. Jamais une paraphrase a la place ; la regle complete est dans `modes/oferta.md` (**JD archival**).
+**Archivage de l'offre (obligatoire, #2789) :** chaque report DOIT comporter une section `## Job Description (archived verbatim)` avec le texte complet de l'offre, jamais resume ni reformule. Le titre reste en anglais : `check-jd-archive.mjs` le cherche par son nom. La premiere ligne est la date de publication visible (`Posted: {date ou texte relatif}`, ou `Posted: not visible in source`), jamais la date du fichier du report. Si l'offre est trop longue ou ne peut pas etre citee en entier, la capturer avec `archive-posting.mjs` (commande ci-dessous) et mettre dans la section **exactement** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, sans autre texte. Si aucune capture automatique n'est possible (par exemple un long texte colle sans URL), renommer la section en `## Job Description (not archived)` et en donner la raison. Jamais une paraphrase a la place ; la regle complete est dans `modes/oferta.md` (**JD archival**).
+
+**Arguments de commande (#5853) :** ne jamais taper l'URL de l'offre, le slug de l'entreprise ou le chemin du report dans une ligne de commande, meme entre guillemets. Ecrire les valeurs dans un fichier JSON avec l'outil de fichiers (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) puis executer la commande ci-dessous : elle verifie chaque valeur (le slug doit correspondre a `^[a-z0-9-]+$`) et passe chacune au script comme argument distinct, sans shell. Une valeur qui echoue a la verification arrete l'execution : corriger la valeur, jamais la verification. La regle complete est dans `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. Inserer la couverture des mots-cles ATS
 
-Apres la sauvegarde, executer `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` et coller le bloc `## Keyword Coverage` sous les mots-cles extraits. Diagnostic seulement : n'ajouter un mot-cle que s'il correspond a une experience reelle.
+Apres la sauvegarde, executer `keyword-match.mjs` (commande ci-dessous) et coller le bloc `## Keyword Coverage` sous les mots-cles extraits. Diagnostic seulement : n'ajouter un mot-cle que s'il correspond a une experience reelle.
+
+Pour cela, ecrire `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` dans un fichier JSON (voir **Arguments de commande** ci-dessus) et executer :
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Enregistrer dans le tracker
 

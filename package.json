@@ -60,6 +60,7 @@
     "freshness": "node check-table-freshness.mjs",
     "jd-archive": "node check-jd-archive.mjs",
     "rejection-latency": "node rejection-latency.mjs",
+    "role-clarity": "node role-clarity.mjs",
     "closing-soon": "node closing-soon.mjs",
     "close-stale": "node close-stale.mjs",
     "reeval-candidates": "node reeval-candidates.mjs",

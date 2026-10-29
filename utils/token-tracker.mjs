@@ -3,7 +3,8 @@
  */
 
 export const RATES = {
-  // MiniMax models
+  // MiniMax models (legacy entries remain available for explicit model requests)
+  'MiniMax-M3.1-Flash': { input: 0.15 / 1000000, output: 0.60 / 1000000, cachedInput: 0.015 / 1000000 },
   'MiniMax-M3': { input: 0.60 / 1000000, output: 2.40 / 1000000, cachedInput: 0.12 / 1000000 },
   'MiniMax-M2.7': { input: 0.30 / 1000000, output: 1.20 / 1000000, cachedInput: 0.06 / 1000000 },
 

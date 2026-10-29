@@ -253,7 +253,7 @@ export function FollowupsView() {
           <table className="w-full min-w-[880px] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr>
-                <th className="w-8 px-2 py-2.5" aria-label="Expand" />
+                <th className="w-8 px-2 py-2.5"><span className="sr-only">Expand</span></th>
                 {COLUMNS.map((c) => {
                   const active = sortKey === c.key;
                   return (
@@ -303,7 +303,7 @@ export function FollowupsView() {
           <ul className="mt-3 divide-y divide-border rounded-2xl border border-border">
             {upcoming.map((entry) => (
               <li key={entry.num} className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 text-sm">
-                <Link href={`/pipeline/${entry.num}`} className="font-medium text-foreground hover:text-brand">
+                <Link href={`/pipeline/${entry.num}`} className="font-medium text-foreground hover:text-brand-text">
                   {entry.company}
                   {entry.role ? <span className="font-normal text-muted"> · {entry.role}</span> : null}
                 </Link>
@@ -392,7 +392,7 @@ function FollowupRow({
         </td>
         <td className="px-2.5 py-3 font-medium">
           {e.reportPath ? (
-            <Link href={`/pipeline/${e.num}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+            <Link href={`/pipeline/${e.num}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
               <CompanyLogo name={e.company} size={20} />
               {e.company}
             </Link>
@@ -433,7 +433,7 @@ function FollowupRow({
               title={`Pinned to ${e.nextOverride} — cleared when you log a follow-up`}
               aria-label="Pinned manually"
             >
-              <Pin className="size-3 text-brand" />
+              <Pin className="size-3 text-brand-text" />
             </span>
           )}
         </td>
@@ -446,19 +446,20 @@ function FollowupRow({
             <button
               type="button"
               onClick={onLog}
+              aria-label={`Log follow-up for ${e.company}`}
               title="Log a follow-up (date, channel, contact, notes)"
-              className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand"
+              className="rounded-md px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-brand-soft hover:text-brand-text"
             >
               Log
             </button>
             <button
               type="button"
               onClick={onPin}
-              aria-label={e.nextOverride ? `Change next follow-up date for ${e.company}` : `Set next follow-up date for ${e.company}`}
+              aria-label={`Next date for ${e.company}`}
               title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
               className={cn(
-                "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand",
-                e.nextOverride ? "text-brand" : "text-faint",
+                "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand-text",
+                e.nextOverride ? "text-brand-text" : "text-faint",
               )}
             >
               <CalendarClock className="size-3.5" />
@@ -519,7 +520,7 @@ function HistoryPanel({ entry: e, onRemove }: { entry: CadenceEntry; onRemove: (
           {e.contacts.map((c, i) => (
             <span key={c.email}>
               {i > 0 && ", "}
-              <a href={`mailto:${c.email}`} className="text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-brand">
+              <a href={`mailto:${c.email}`} className="text-muted underline decoration-dotted underline-offset-2 transition-colors hover:text-brand-text">
                 {c.name ? `${c.name} <${c.email}>` : c.email}
               </a>
             </span>
