@@ -136,6 +136,26 @@ test("a stored draft keeps the in-flight base for the reload", () => {
   assert.equal(ignored.inflight, undefined);
 });
 
+test("a conflicting save keeps the draft and does not write again", () => {
+  let state = editorReducer(ready("A"), { type: "edit", content: "C" });
+  state = editorReducer(state, { type: "save-start", content: "C" });
+  state = editorReducer(state, { type: "edit", content: "D" });
+  state = editorReducer(state, {
+    type: "save-failed",
+    content: "C",
+    error: "cv.md changed somewhere else. Your text is still in this tab.",
+    conflict: true,
+  });
+  assert.equal(state.content, "D");
+  assert.equal(state.saved, "A");
+  assert.equal(shouldSave(state), false);
+  assert.equal(editorStatus(state).canSave, false);
+  state = editorReducer(state, { type: "edit", content: "E" });
+  assert.equal(state.content, "E");
+  assert.equal(shouldSave(state), false);
+  assert.equal(draftToStore(state).content, "E");
+});
+
 test("a newer edit keeps the in-flight text as a draft base", () => {
   let state = editorReducer(ready("A"), { type: "edit", content: "B" });
   state = editorReducer(state, { type: "save-start", content: "B" });

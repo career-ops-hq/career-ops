@@ -49,12 +49,13 @@ export function CvEditor() {
     runningRef.current = true;
     const snapshot = job.text;
     const backup = snapshotPriorRef.current;
+    const expected = { content: current.saved, exists: current.exists };
     dispatch({ type: "save-start", content: snapshot });
     const bytes = new TextEncoder().encode(snapshot).length;
     fetch("/api/cv", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: snapshot, backup }),
+      body: JSON.stringify({ content: snapshot, backup, expected }),
       keepalive: job.keepalive && bytes < 60_000,
     })
       .then(async (res) => {
@@ -65,6 +66,7 @@ export function CvEditor() {
             type: "save-failed",
             content: snapshot,
             error: body.error || "Could not save. Your text is still in this tab.",
+            conflict: res.status === 409,
           });
           return;
         }

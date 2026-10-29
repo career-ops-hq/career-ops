@@ -9,6 +9,7 @@
  * @property {string | null} error
  * @property {boolean} exists
  * @property {boolean} snapshotPrior
+ * @property {boolean} conflict
  */
 
 /**
@@ -25,6 +26,7 @@ export function initialEditor() {
     error: null,
     exists: false,
     snapshotPrior: true,
+    conflict: false,
   };
 }
 
@@ -35,7 +37,7 @@ export function initialEditor() {
  *   | { type: 'edit', content: string }
  *   | { type: 'save-start', content: string }
  *   | { type: 'save-ok', content: string }
- *   | { type: 'save-failed', content: string, error: string }} action
+ *   | { type: 'save-failed', content: string, error: string, conflict?: boolean }} action
  * @returns {EditorState}
  */
 export function editorReducer(state, action) {
@@ -59,6 +61,7 @@ export function editorReducer(state, action) {
         error: null,
         exists: action.exists === true || server.length > 0,
         snapshotPrior: true,
+        conflict: false,
       };
     }
     case "load-failed":
@@ -68,7 +71,7 @@ export function editorReducer(state, action) {
       return {
         ...state,
         content: action.content,
-        error: null,
+        error: state.conflict ? state.error : null,
         snapshotPrior: state.content === state.saved ? true : state.snapshotPrior,
       };
     case "save-start":
@@ -78,9 +81,12 @@ export function editorReducer(state, action) {
       return { ...state, inflight: action.content };
     case "save-ok":
       if (action.content !== state.inflight) return state;
-      return { ...state, inflight: null, saved: action.content, exists: true, error: null, snapshotPrior: false };
+      return { ...state, inflight: null, saved: action.content, exists: true, error: null, snapshotPrior: false, conflict: false };
     case "save-failed":
       if (action.content !== state.inflight) return state;
+      // A conflict means the file on disk is not the text this edit started
+      // from. Keep the draft, including text typed while the save was in flight.
+      if (action.conflict) return { ...state, inflight: null, conflict: true, error: action.error };
       // The failed text is the one that was sent. An edit that landed while
       // that request was in flight is a different draft and can still save.
       return { ...state, inflight: null, error: state.content === action.content ? action.error : null };
@@ -98,7 +104,7 @@ export function editorStatus(state) {
   }
   if (state.content !== state.saved) {
     if (state.inflight === state.content) return { label: "Saving", canSave: false };
-    return { label: "Unsaved", canSave: state.inflight === null };
+    return { label: "Unsaved", canSave: state.inflight === null && !state.conflict };
   }
   if (!state.exists) return { label: "No file yet", canSave: false };
   return { label: "Saved", canSave: false };
@@ -112,7 +118,7 @@ export function editorStatus(state) {
  * @param {EditorState} state
  */
 export function shouldSave(state) {
-  return state.phase === "ready" && state.error === null && state.content !== state.saved && state.inflight !== state.content;
+  return state.phase === "ready" && state.error === null && !state.conflict && state.content !== state.saved && state.inflight !== state.content;
 }
 
 /**
