@@ -287,15 +287,15 @@ npm i -g @santifer/career-ops
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor 또는 그 밖의 CLI | 일상 언어: "Run the career-ops scan mode" |
 
-`/career-ops`만 입력하면 명령어 메뉴가 표시됩니다. 일상 언어는 모든 CLI에서 동작합니다. Claude Code 플러그인으로 사용할 때 명령어는 `/career-ops:career-ops`입니다.
+`/career-ops`만 입력하면 명령어 메뉴가 표시됩니다 (이를 사용하는 CLI에서). 일상 언어는 모든 CLI에서 동작합니다. Claude Code 플러그인으로 사용할 때 명령어는 `/career-ops:career-ops`입니다.
 
-모든 CLI가 하나의 라우터 `.agents/skills/career-ops/SKILL.md`와 같은 `modes/*.md` 파일을 공유하므로, 어떤 CLI에서 실행해도 모드는 똑같이 동작합니다. Codex에서는 슬래시 명령이 보장되지 않습니다. 일상 언어로 요청하거나 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`로 프롬프트 하나를 헤드리스로 실행하세요([docs/CODEX.md](docs/CODEX.md)). 지원하는 각 CLI에서 실행하는 방법, 헤드리스 명령이 있는 CLI의 해당 명령, Pi의 `/trust` 같은 CLI별 설정 참고 사항은 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)에 있습니다.
+모든 CLI가 하나의 라우터 `.agents/skills/career-ops/SKILL.md`와 같은 `modes/*.md` 파일을 공유하므로, 어떤 CLI에서 실행해도 모드는 똑같이 동작합니다. Codex에서는 슬래시 명령이 보장되지 않습니다. 일상 언어로 요청하거나 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`로 프롬프트 하나를 헤드리스로 실행하세요([docs/CODEX.md](docs/CODEX.md)). 지원하는 각 CLI에서 실행하는 방법, 헤드리스 명령이 있는 CLI의 해당 명령, CLI별 설정 참고 사항은 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md)에 있습니다.
 
 ### 자주 쓰는 명령어
 
 | 명령어 | 기능 |
 | --- | --- |
-| *URL 또는 채용 공고 붙여넣기* | 전체 파이프라인: 공고 게시 여부 확인(URL만), A-G 평가, 리포트, 맞춤 이력서(기본은 PDF), 트래커 행 |
+| *URL 또는 채용 공고 붙여넣기* | 전체 파이프라인: 공고 게시 여부 확인(URL만), A-G 평가 + 높은 점수에서 H, 리포트, 맞춤 이력서(기본은 PDF), 트래커 행 |
 | `scan` | 포털을 스캔해 새 공고를 찾고 인박스(`data/pipeline.md`)에 추가 |
 | `pipeline` | 인박스에서 대기 중인 모든 URL 평가 |
 | `apply` | 지원서 양식을 사용자와 함께 항목별로 작성. 제출 직전에 멈춤 |
@@ -323,7 +323,7 @@ npm i -g @santifer/career-ops
 | 명령어 | 기능 |
 | --- | --- |
 | *URL 또는 채용 공고 붙여넣기* | [Auto-pipeline](modes/auto-pipeline.md): 평가 + 리포트 + 맞춤 이력서(기본은 PDF) + 트래커 항목 |
-| [`oferta`](modes/oferta.md) | 평가만 수행, 블록 A~G (PDF 없음) |
+| [`oferta`](modes/oferta.md) | 평가만 수행, 블록 A~G + 높은 점수에서 H (PDF 없음) |
 | [`ofertas`](modes/ofertas.md) | 여러 공고 비교 및 순위 매기기 |
 | [`deep`](modes/deep.md) | 기업에 대한 심층 리서치 프롬프트 |
 | [`eu-swe`](modes/regional/eu-swe.md) | 이력서, 지원, 면접 전에 유럽 소프트웨어 엔지니어링 지원을 조정 |
