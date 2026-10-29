@@ -287,15 +287,15 @@ Wklej adres URL lub opis oferty do swojego CLI z AI. career-ops sprawdza, czy of
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor lub dowolne inne CLI | Zwykły język: "Run the career-ops scan mode" |
 
-`/career-ops` bez niczego po nim pokazuje menu komend. Zwykły język działa w każdym CLI. Jako wtyczka Claude Code komenda to `/career-ops:career-ops`.
+`/career-ops` bez niczego po nim pokazuje menu komend w CLI, które go używają. Zwykły język działa w każdym CLI. Jako wtyczka Claude Code komenda to `/career-ops:career-ops`.
 
-Wszystkie korzystają z jednego routera, `.agents/skills/career-ops/SKILL.md`, i tych samych plików `modes/*.md`, więc tryb działa tak samo w każdym CLI. Komendy slash nie są gwarantowane w Codex: poproś zwykłym językiem albo uruchom jeden prompt w trybie headless przez `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Jak uruchomić career-ops w każdym obsługiwanym CLI, komendy headless tam, gdzie CLI je ma, oraz uwagi konfiguracyjne dla poszczególnych CLI, np. `/trust` w Pi, są w [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Wszystkie korzystają z jednego routera, `.agents/skills/career-ops/SKILL.md`, i tych samych plików `modes/*.md`, więc tryb działa tak samo w każdym CLI. Komendy slash nie są gwarantowane w Codex: poproś zwykłym językiem albo uruchom jeden prompt w trybie headless przez `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Jak uruchomić career-ops w każdym obsługiwanym CLI, komendy headless tam, gdzie CLI je ma, oraz uwagi konfiguracyjne dla poszczególnych CLI są w [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Codzienne komendy
 
 | Komenda | Co robi |
 | --- | --- |
-| *wklej URL lub opis oferty* | Pełny pipeline: sprawdzenie, czy oferta jest aktualna (tylko URL-e), ocena A-G, raport, dopasowane CV (domyślnie PDF), wiersz w trackerze |
+| *wklej URL lub opis oferty* | Pełny pipeline: sprawdzenie, czy oferta jest aktualna (tylko URL-e), ocena A-G plus H przy wysokim wyniku, raport, dopasowane CV (domyślnie PDF), wiersz w trackerze |
 | `scan` | Skanuje Twoje portale w poszukiwaniu nowych ofert i dodaje je do skrzynki (`data/pipeline.md`) |
 | `pipeline` | Ocenia każdy URL czekający w skrzynce |
 | `apply` | Wypełnia z Tobą formularz aplikacyjny, pole po polu. Zatrzymuje się przed wysłaniem |
@@ -323,7 +323,7 @@ Wszystkie korzystają z jednego routera, `.agents/skills/career-ops/SKILL.md`, i
 | Komenda | Co robi |
 | --- | --- |
 | *wklej URL lub opis oferty* | [Auto-pipeline](modes/auto-pipeline.md): ocena + raport + dopasowane CV (domyślnie PDF) + wpis w trackerze |
-| [`oferta`](modes/oferta.md) | Sama ocena, bloki A–G (bez PDF) |
+| [`oferta`](modes/oferta.md) | Sama ocena, bloki A–G plus H przy wysokim wyniku (bez PDF) |
 | [`ofertas`](modes/ofertas.md) | Porównuje i szereguje kilka ofert |
 | [`deep`](modes/deep.md) | Prompt do pogłębionego researchu o firmie |
 | [`eu-swe`](modes/regional/eu-swe.md) | Kalibruje europejską aplikację na stanowisko programistyczne przed CV, aplikowaniem lub rozmową |
