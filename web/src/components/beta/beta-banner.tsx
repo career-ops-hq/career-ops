@@ -102,7 +102,7 @@ export function BetaBanner() {
           panelClassName="max-w-lg bg-[var(--bg)] p-5"
         >
             <div className="mb-3 flex items-center gap-2">
-              <Bug className="size-4 text-brand" />
+              <Bug className="size-4 text-brand-text" />
               <h2 id="bug-report-title" className="text-sm font-semibold text-foreground">Report a bug · {diag.channel}</h2>
               <button onClick={() => setOpen(false)} aria-label="Close" className="ml-auto text-faint transition-colors hover:text-foreground">
                 <X className="size-4" />
@@ -120,7 +120,7 @@ export function BetaBanner() {
               <button
                 onClick={checkExisting}
                 disabled={searching}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand disabled:opacity-60"
+                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand-text disabled:opacity-60"
               >
                 {searching ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} Check for existing reports first
               </button>
@@ -143,7 +143,7 @@ export function BetaBanner() {
                 <ul className="mt-1.5 space-y-1">
                   {similar.map((s) => (
                     <li key={s.number}>
-                      <a href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-foreground underline-offset-2 transition-colors hover:text-brand hover:underline">
+                      <a href={s.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs text-foreground underline-offset-2 transition-colors hover:text-brand-text hover:underline">
                         <ThumbsUp className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
                         <span className="font-mono">#{s.number}</span> {s.title.slice(0, 60)}
                       </a>
