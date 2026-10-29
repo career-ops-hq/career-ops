@@ -34,7 +34,7 @@ test("Assistant markdown loads only once the console opens", { skip: liveServerS
   assert.equal(beforeOpen.filter(hasParser).length, 0, "no script loaded before opening the assistant contains the markdown parser");
 
   scripts = [];
-  await page.getByRole("button", { name: "Open assistant", exact: true }).click();
+  await page.getByRole("button", { name: "Ask the assistant", exact: true }).click();
   const panel = page.getByRole("region", { name: "Assistant", exact: true });
   const greeting = panel.locator(".report-prose p", { hasText: "I'm your career-ops assistant" });
   await greeting.waitFor({ state: "visible" });
