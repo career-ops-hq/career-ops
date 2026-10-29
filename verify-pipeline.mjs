@@ -176,7 +176,12 @@ for (const e of entries) {
   // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
   // so every Japanese company and every Japanese role keyed to '' and unrelated
   // rows were reported as "possible duplicates".
-  const key = normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
+  // Company '?' (unknown end employer, #1596) means company+role alone cannot
+  // tell two postings apart: fold in Via (the agency), the only field that
+  // separates genuinely different anonymous openings.
+  const key = String(e.company || '').trim() === '?'
+    ? normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role) + '::' + normalizeTextKey(e.via)
+    : normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
 }
