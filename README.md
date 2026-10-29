@@ -287,15 +287,15 @@ Paste a job URL or description into your AI CLI. career-ops checks that a linked
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor, or any other CLI | Plain language: "Run the career-ops scan mode" |
 
-`/career-ops` with nothing after it shows the command menu. Plain language works in every CLI. As a Claude Code plugin, the command is `/career-ops:career-ops`.
+`/career-ops` with nothing after it shows the command menu in the CLIs that use it. Plain language works in every CLI. As a Claude Code plugin, the command is `/career-ops:career-ops`.
 
-All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same `modes/*.md` files, so a mode behaves the same whichever CLI runs it. Slash commands are not guaranteed in Codex: ask in plain language, or run one prompt headless with `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). How to run it in each supported CLI, headless commands where a CLI has one, and per-CLI setup notes such as Pi's `/trust`, are in [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same `modes/*.md` files, so a mode behaves the same whichever CLI runs it. Slash commands are not guaranteed in Codex: ask in plain language, or run one prompt headless with `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). How to run it in each supported CLI, headless commands where a CLI has one, and per-CLI setup notes are in [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### The everyday commands
 
 | Command | What it does |
 | --- | --- |
-| *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-G evaluation, report, tailored CV (PDF by default), tracker row |
+| *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-G evaluation plus H at high scores, report, tailored CV (PDF by default), tracker row |
 | `scan` | Scan your portals for new postings and add them to the inbox (`data/pipeline.md`) |
 | `pipeline` | Evaluate every URL waiting in the inbox |
 | `apply` | Fill an application form with you, field by field. It stops before Submit |
@@ -323,7 +323,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | Command | What it does |
 | --- | --- |
 | *paste a URL or JD* | [Auto-pipeline](modes/auto-pipeline.md): evaluation + report + tailored CV (PDF by default) + tracker entry |
-| [`oferta`](modes/oferta.md) | Evaluation only, Blocks A to G (no PDF) |
+| [`oferta`](modes/oferta.md) | Evaluation only, Blocks A to G plus H at high scores (no PDF) |
 | [`ofertas`](modes/ofertas.md) | Compare and rank several offers |
 | [`deep`](modes/deep.md) | Deep research prompt about the company |
 | [`eu-swe`](modes/regional/eu-swe.md) | Calibrate a European software-engineering application before CV, apply or interview |
