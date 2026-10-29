@@ -23,6 +23,8 @@ const usage = README.split('\n## Usage\n')[1]?.split('\n## ')[0] ?? '';
 const routes = new Map([...SKILL.matchAll(/^\| `([a-z/-]+)` \| `([^`]+)` \|$/gm)].map((m) => [m[1], m[2]]));
 /** Command-table rows as [command, mode-file link]. */
 const rows = [...usage.matchAll(/^\| \[`([a-z/-]+)`\]\(([^)]+)\) \|/gm)].map((m) => [m[1], m[2]]);
+/** The everyday-commands rows, which name a command without linking it. */
+const everyday = [...usage.matchAll(/^\| `([a-z/-]+)` \|/gm)].map((m) => m[1]);
 
 test('every routed mode has a row in the README command tables', () => {
   assert.ok(routes.size >= 30, `only ${routes.size} router inputs parsed — the routing table format changed`);
@@ -35,7 +37,8 @@ test('every routed mode has a row in the README command tables', () => {
 });
 
 test('every README command is one the router accepts', () => {
-  const rejected = rows.map(([command]) => command).filter((command) => !routes.has(command));
+  assert.ok(everyday.length >= 3, `only ${everyday.length} everyday command rows parsed — the table format changed`);
+  const rejected = [...rows.map(([command]) => command), ...everyday].filter((command) => !routes.has(command));
   assert.deepEqual(rejected, [], `README.md Usage lists command(s) the router does not route: ${rejected.join(', ')}`);
 });
 
