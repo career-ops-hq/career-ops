@@ -114,10 +114,10 @@ Bloklar A-F tamamlandıktan sonra **HER ZAMAN** şunları yap:
 
 ### 1. Rapor .md Kaydet
 
-Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olarak kaydet.
+Değerlendirmenin tamamını `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` olarak kaydet.
 
 - `{###}` = sıradaki numara (3 haneli, sıfır dolgulu). Bu numarayı atomik olarak atamak ve yarış durumlarını (race condition) önlemek için, numarayı rezerve etmek üzere `node reserve-report-num.mjs` komutunu çalıştırmalısınız (standart çıktı `{###}` değerini döndürür), raporu yazmalı ve ardından sentineli serbest bırakmak için `node reserve-report-num.mjs --release {###}` komutunu çalıştırmalısınız.
-- `{sirket-slug}` = şirket adı küçük harfle, boşluksuz (tire kullan)
+- `{company-slug}` = şirket adının yalnızca küçük ASCII harf, rakam ve tireden oluşan biçimi: küçük harfe çevir, aksanları ve Türkçe harfleri ASCII karşılıklarına indir (`ç` → `c`, `ğ` → `g`, `ı` → `i`, `ö` → `o`, `ş` → `s`, `ü` → `u`, `é` → `e`), diğer karakterlerin (boşluk, `&`, `.`, tırnak, `/`) her dizisini tek bir `-` ile değiştir ve baştaki ve sondaki `-` işaretlerini kırp. Sonuç `^[a-z0-9-]+$` ile eşleşmelidir; aşağıdaki arşiv ve anahtar kelime komutları başka bir değeri reddeder. Latin harf ya da rakam içermeyen bir addan geriye hiçbir şey kalmaz: harf çevirisi tahmin etmek yerine şirketin ilandaki kendi Latin harfli adını (kariyer sitesinin alan adı ya da ATS pano adı) kullan.
 - `{YYYY-MM-DD}` = bugünün tarihi
 
 **Rapor formatı:**
@@ -190,7 +190,7 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 
 **JD arşivi (zorunlu, #2789):** Her rapor, ilanın tam metnini olduğu gibi içeren bir `## Job Description (archived verbatim)` bölümü taşır; metin asla özetlenmez, asla başka sözcüklerle yeniden yazılmaz. Başlık İngilizce kalır, çünkü `check-jd-archive.mjs` bölümü adıyla arar. `**URL:**` alanı bir arşiv değildir: ilan kapandığında bağlantı çalışmaz olur ve özgün gereksinimleri geri getirmenin bir yolu kalmaz. Bölümün ilk satırı, kaynakta göründüğü haliyle yayın tarihidir (`Posted: {tarih ya da göründüğü gibi göreli ifade}`, gerçekten görünmüyorsa `Posted: not visible in source`); bu satır asla rapor dosyasının tarihiyle doldurulmaz. İlan çok uzunsa ya da tamamı alıntılanamıyorsa, `archive-posting.mjs` (aşağıdaki komut) ile kaydedin ve bölüme başka hiçbir metin eklemeden **tam olarak** şu cümleyi yazın: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` Metnin yerine başka sözcüklerle yazılmış bir özet konmaz; kuralın tamamı `modes/oferta.md` içinde (**JD archival**).
 
-**Komut argümanları (#5853):** ilanın URL'sini, şirket slug'ını ya da rapor yolunu asla bir komut satırına yazmayın, tırnak içinde bile. Değerleri dosya aracınızla bir JSON dosyasına yazın (`{"url": "…", "company": "{sirket-slug}", "report": "{num}"}`) ve aşağıdaki komutu çalıştırın: her değeri denetler (slug `^[a-z0-9-]+$` ile eşleşmelidir) ve her birini betiğe shell olmadan ayrı bir argüman olarak verir. Denetimden geçemeyen bir değer çalıştırmayı durdurur: değeri düzeltin, denetimi asla. Kuralın tamamı `modes/oferta.md` içinde (**Command arguments**).
+**Komut argümanları (#5853):** ilanın URL'sini, şirket slug'ını ya da rapor yolunu asla bir komut satırına yazmayın, tırnak içinde bile. Değerleri dosya aracınızla bir JSON dosyasına yazın (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) ve aşağıdaki komutu çalıştırın: her değeri denetler (slug `^[a-z0-9-]+$` ile eşleşmelidir) ve her birini betiğe shell olmadan ayrı bir argüman olarak verir. Denetimden geçemeyen bir değer çalıştırmayı durdurur: değeri düzeltin, denetimi asla. Kuralın tamamı `modes/oferta.md` içinde (**Command arguments**).
 
 ```bash
 node --input-type=module -e '
@@ -209,7 +209,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 Raporu kaydettikten sonra `keyword-match.mjs` (aşağıdaki komut) komutunu çalıştırın ve çıktıdaki `## Keyword Coverage` bloğunu çıkarılan anahtar kelimelerin hemen altına, `## Job Description (archived verbatim)` bölümünden önce yapıştırın. Başlık İngilizce kalır. Yalnızca tanı amaçlıdır: bir anahtar kelimeyi CV'ye ancak gerçek bir deneyime karşılık geliyorsa ekleyin.
 
-Bunun için `{"report": "reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md"}` değerini bir JSON dosyasına yazın (yukarıdaki **Komut argümanları** bölümüne bakın) ve çalıştırın:
+Bunun için `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` değerini bir JSON dosyasına yazın (yukarıdaki **Komut argümanları** bölümüne bakın) ve çalıştırın:
 
 ```bash
 node --input-type=module -e '
@@ -227,11 +227,11 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 ### 2. Takipçiye Kaydet
 
-**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `batch/tracker-additions/{num}-{sirket-slug}.tsv` dosyasına sekmeyle ayrılmış **iki** satır yaz: önce **sütun adları** satırı, hemen altına tam olarak bir veri satırı.
+**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv` dosyasına sekmeyle ayrılmış **iki** satır yaz: önce **sütun adları** satırı, hemen altına tam olarak bir veri satırı.
 
 ```tsv
 num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
+{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{company-slug}-{date}.md)\t{note}\t{url}
 ```
 
 Her iki satırı da **tam olarak yukarıdaki gibi** yaz: sütun adları İngilizce, değerler ise **üstlerindeki adlarla aynı sırada**. `merge-tracker.mjs` alanları ADA göre çözer; tam da bu yüzden adların altlarındaki satırı tarif etmesi gerekir — satırlardan yalnızca birini yeniden sıralarsan `company` ile `role` sessizce yer değiştirir (ikisi de serbest metin olduğu için içerik kontrolü bunu yakalayamaz).
