@@ -158,8 +158,16 @@ export async function unsupportedRewriteClaims(text: string, bulletText: string)
   const root = careerOpsRoot();
   const { verifyFacts, auditClaims } = await coreModule<VerifyCvFacts>("verify-cv-facts");
   const voice = await coreModule<CvVoice>("cv-voice");
-  const cv = verifyFacts(text, { sourcePaths: [path.join(root, "cv.md"), path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
-  const issues = voice.voiceIssues(text, `${bulletText}\n${voice.candidateOwnWords(root)}`);
+  const cvPath = path.join(root, "cv.md");
+  const cv = verifyFacts(text, { sourcePaths: [cvPath, path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
+  // Wording may come from any bullet in cv.md. The fact audit below stays on this bullet.
+  let cvText = "";
+  try {
+    cvText = fs.readFileSync(cvPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  const issues = voice.voiceIssues(text, `${bulletText}\n${cvText}\n${voice.candidateOwnWords(root)}`);
   const tells = issues.filter((issue) => issue.kind === "banned-phrase").map((issue) => issue.value);
   const claims = [...new Set([...unsupportedClaims(cv, auditClaims(text, bulletText)), ...tells])];
   return { claims, warning: voice.voiceDashWarning(issues) };

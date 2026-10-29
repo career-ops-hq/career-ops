@@ -108,7 +108,7 @@ _If `voice-dna.md` exists, its §3 Banned List is the canonical, fuller version 
 - "in today's fast-paced world"
 - "demonstrated ability to" / "best practices" (name the practice)
 
-PDF render, LaTeX compile, and CV Studio reject stock phrasing that is not already in your CV, in `voice-dna.md` outside its banned list, or in the allow lists of `config/cv-facts.json`. `cv-voice.mjs` is that check. A long dash is a warning. The PDF path normalizes it.
+PDF render, LaTeX compile, and CV Studio reject stock phrasing that is not already in your CV, in `voice-dna.md` outside its banned list and its patterns-to-avoid section, or in the allow lists of `config/cv-facts.json`. `cv-voice.mjs` is that check. A long dash is a warning. The PDF path normalizes it. LaTeX and CV Studio leave it in the text.
 
 ### Unicode normalization for ATS
 `generate-pdf.mjs` automatically normalizes em-dashes, smart quotes, and zero-width characters to ASCII equivalents for maximum ATS compatibility. But avoid generating them in the first place.

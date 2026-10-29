@@ -57,7 +57,10 @@ test('an en dash in a new line warns and a copied en dash does not', () => {
   const fresh = voiceIssues('Owned the payments calendar \u2013 the one the team prints', source);
   assert.deepEqual(fresh.filter((issue) => issue.kind === 'em-dash').map((issue) => issue.value), ['en dash']);
   assert.equal(voiceTellMessage(fresh), null);
-  assert.match(voiceDashWarning(fresh), /an en dash/);
+  const warning = voiceDashWarning(fresh);
+  assert.match(warning, /an en dash/);
+  assert.match(warning, /PDF generation normalizes long dashes/);
+  assert.match(warning, /LaTeX and CV Studio leave the dash/);
 });
 
 test('a short line copied whole from the CV keeps its dash', () => {
@@ -150,6 +153,27 @@ test('a dash the candidate wrote still counts when --source is a separate tex fi
     const report = JSON.parse(run.stdout);
     const reason = report.factCheck.reason || '';
     assert.equal(/dash/.test(reason), false, reason);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a stock word quoted only under patterns to avoid stays blocked', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cv-voice-avoid-'));
+  try {
+    writeFileSync(join(root, 'voice-dna.md'), [
+      '# Voice',
+      '## 4. AI WRITING PATTERNS TO AVOID',
+      '### 4A. Puffery',
+      'Do not write pivotal.',
+      '## 5. Later',
+      'I write spearheaded when I started the rota.',
+    ].join('\n'));
+    const own = candidateOwnWords(root);
+    const pivotal = voiceIssues('This was a pivotal release for the payments app', `${SOURCE}\n${own}`);
+    assert.ok(pivotal.some((issue) => issue.value === 'pivotal'));
+    const started = voiceIssues('She spearheaded the rota the team already had', `${SOURCE}\n${own}`);
+    assert.equal(started.some((issue) => issue.value === 'spearheaded'), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

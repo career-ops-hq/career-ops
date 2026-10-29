@@ -63,8 +63,12 @@ function hasPhrase(text, phrase) {
   return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, 'iu').test(text);
 }
 
-// The banned list names words to avoid. A word that only appears there is
-// not one the candidate uses.
+// A heading that lists words to avoid is not the candidate's own wording.
+// The shipped template uses both "banned" and "patterns to avoid".
+function isAvoidHeading(title) {
+  return /\bbanned\b/i.test(title) || /\bpatterns to avoid\b/i.test(title);
+}
+
 function wordingFromVoiceDna(text) {
   const lines = String(text).split('\n');
   const kept = [];
@@ -75,7 +79,7 @@ function wordingFromVoiceDna(text) {
     if (heading) {
       const level = heading[1].length;
       if (skipping && level <= skipLevel) skipping = false;
-      if (!skipping && /\bbanned\b/i.test(heading[2])) {
+      if (!skipping && isAvoidHeading(heading[2])) {
         skipping = true;
         skipLevel = level;
       }
@@ -188,5 +192,5 @@ export function voiceDashWarning(issues, label) {
   if (!dashes.length) return null;
   const where = label ? ` for ${label}` : '';
   const bits = [...new Set(dashes.map((issue) => issue.value))];
-  return `Voice check warning${where}: ${bits.map((value) => `an ${value}`).join(', ')}. The build continues. Long dashes are normalized for ATS.`;
+  return `Voice check warning${where}: ${bits.map((value) => `an ${value}`).join(', ')}. The build continues. PDF generation normalizes long dashes for ATS. LaTeX and CV Studio leave the dash in the text.`;
 }
