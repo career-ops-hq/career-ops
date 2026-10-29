@@ -45,6 +45,26 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
   CV editing with preview, settings.
 
+### Full or focused evaluation
+
+Open **Evaluation options** below the pasted-URL form, or select sections when
+confirming **Score shortlist**. Full evaluation is the default. **Essentials**
+keeps a short job summary; you can also choose optional sections individually.
+Your selection is remembered in this browser.
+
+Every selection keeps the fit score, requirements and gaps, evidence confidence,
+basic posting checks, and the archived job description. Focused reports identify
+their scope in the report and tracker notes. Unselected research and drafting
+tasks are excluded from the request; missing research remains unknown evidence.
+Fewer sections can reduce token use, but there is no fixed saving. Estimates use
+your completed runs with the same selection.
+
+The `/api/run` evaluate request accepts `evaluationSections`, an array of IDs:
+`summary`, `strategy`, `research`, `customization`, `interview`, `application`,
+and `keywords`. Omitting it preserves the full evaluation; `[]` requests the
+required assessment without optional sections. Invalid selections return 400
+before starting an AI run.
+
 ## Safety
 
 - **Local-first:** the local web app runs entirely on your machine — no cloud,

@@ -305,6 +305,31 @@ test("persistEvaluation: writes report + TSV, reserves, merges, releases", async
   }
 });
 
+test("persistEvaluation: a focused selection is recorded in the report and tracker notes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "co-evalpersist-focused-"));
+  const { spawnFn } = makeRouterSpawn({
+    "reserve-report-num.mjs": (args) => args.includes("--release") ? { exitCode: 0 } : { exitCode: 0, stdout: "035\n" },
+    "persist-evaluation-report.mjs": writerSpec(),
+    "merge-tracker.mjs": { exitCode: 0 },
+  });
+  try {
+    const archive = "\n## Job Description (archived verbatim)\n**Evaluation scope:** This is literal posting text.\n";
+    const markdown = REPORT.replace("\n\n", "\n\n**Evaluation scope:** Focused — interview.\n\n") + archive;
+    const result = await persistEvaluation({ spawnFn, execPath: "node", root, markdown, url: "https://jobs.example.test/7", today: "2026-10-25", evaluationSections: ["summary"] });
+    assert.equal(result.ok, true);
+    const saved = readFileSync(join(root, "reports", result.reportFile), "utf8");
+    assert.match(saved, /\*\*Evaluation scope:\*\* Focused — summary\./);
+    assert.equal((saved.match(/\*\*Evaluation scope:/g) || []).length, 2);
+    assert.ok(!saved.includes("Focused — interview"));
+    assert.ok(saved.includes(archive));
+    assert.match(readFileSync(join(root, "batch", "tracker-additions", "035-acme-ai.tsv"), "utf8"), /Focused evaluation: summary/);
+    const refused = await persistEvaluation({ spawnFn: () => assert.fail("invalid selections must not reserve a report"), execPath: "node", root, markdown: REPORT, url: "https://jobs.example.test/7", today: "2026-10-25", evaluationSections: ["unknown"] });
+    assert.equal(refused.ok, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("persistEvaluation: tab in company does not reserve or write a TSV", async () => {
   const root = mkdtempSync(join(tmpdir(), "co-evalpersist-"));
   const { spawnFn, calls } = makeRouterSpawn({

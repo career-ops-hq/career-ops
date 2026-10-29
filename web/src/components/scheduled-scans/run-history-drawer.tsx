@@ -23,7 +23,7 @@ export function RunHistoryDrawer({
     <ScheduledOverlay isOpen={isOpen} onClose={onClose} titleId="run-history-title" initialFocusRef={closeRef} overlayClassName="justify-end" panelClassName="!my-0 !mr-0 !h-full !max-h-none max-w-md rounded-none rounded-l-2xl border-y-0 border-r-0 p-0 flex flex-col">
         <div className="flex items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-2">
-            <TerminalSquare className="size-5 text-brand" />
+            <TerminalSquare className="size-5 text-brand-text" />
             <h2 id="run-history-title" className="text-base font-semibold text-foreground">Execution Run History</h2>
           </div>
           <button
@@ -58,7 +58,7 @@ export function RunHistoryDrawer({
                       {isSuccess ? (
                         <CheckCircle2 className="size-4 text-emerald-500" />
                       ) : isRunning ? (
-                        <Loader2 className="size-4 animate-spin text-brand" />
+                        <Loader2 className="size-4 animate-spin text-brand-text" />
                       ) : isQueued ? (
                         <Clock className="size-4 text-amber-500" />
                       ) : isCancelled ? (
