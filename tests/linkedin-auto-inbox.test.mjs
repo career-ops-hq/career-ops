@@ -119,6 +119,24 @@ function dropRoot(prefix) {
   return { root, dir };
 }
 
+test('a temporary name is not imported until it has a final mail extension', async () => {
+  const { root, dir } = dropRoot('linkedin-drop-partial-');
+  const body = `https://www.linkedin.com/jobs/view/${JOB_ID}\n`;
+  writeFileSync(join(dir, 'alert.eml.part'), body);
+  writeFileSync(join(dir, 'alert.tmp'), body);
+  try {
+    await withDataEnv(root, async () => {
+      const result = await importMailDrop({ root, dir });
+      assert.equal(result.added, 0);
+      assert.equal(result.found, 0);
+      assert.ok(existsSync(join(dir, 'alert.eml.part')));
+      assert.ok(existsSync(join(dir, 'alert.tmp')));
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a base64 MIME part is decoded before its job links are read', async () => {
   const { root, dir } = dropRoot('linkedin-drop-base64-');
   const html = Buffer.from(`<a href="https://www.linkedin.com/comm/jobs/view/${JOB_ID}?trk=eml">Analyst</a>`).toString('base64');
