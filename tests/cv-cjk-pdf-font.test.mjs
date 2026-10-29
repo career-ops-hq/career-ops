@@ -5,7 +5,7 @@
 // after the Latin faces and before the generic family.
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { inflateSync } from 'zlib';
+import { deflateSync, inflateSync } from 'zlib';
 import { listTree } from '../lib/walk-tree.mjs';
 import { pass, fail, warn, ROOT, toolUnavailable } from './helpers.mjs';
 
@@ -30,13 +30,10 @@ function pdfObjects(pdf) {
     let stream = null;
     if (at >= 0 && dict.includes('/FlateDecode')) {
       let start = m.index + m[0].indexOf(body) + at + 6;
-      if (pdf[start] === 0x0d) start++;
-      if (pdf[start] === 0x0a) start++;
-      const end = pdf.indexOf('endstream', start);
-      let data = pdf.subarray(start, end);
-      while (data.length && (data[data.length - 1] === 0x0a || data[data.length - 1] === 0x0d)) {
-        data = data.subarray(0, data.length - 1);
-      }
+      if (pdf[start] === 0x0d && pdf[start + 1] === 0x0a) start += 2;
+      else if (pdf[start] === 0x0a || pdf[start] === 0x0d) start++;
+      const length = Number(dict.match(/\/Length\s+(\d+)/)?.[1]);
+      const data = Number.isInteger(length) ? pdf.subarray(start, start + length) : pdf.subarray(start, pdf.indexOf('endstream', start));
       stream = inflateSync(data).toString('latin1');
     }
     objects.set(m[1], { dict, stream });
@@ -152,6 +149,31 @@ if (zhBody.startsWith("var(--font-family, 'Arial Unicode MS'), 'Arial Unicode MS
   pass('zh-minimal leads its Simplified Chinese stack with Arial Unicode MS, then PingFang SC');
 } else {
   fail(`zh-minimal Simplified Chinese stack should lead with Arial Unicode MS: ${zhBody || '(not found)'}`);
+}
+
+// A compressed stream may end in 0x0a or 0x0d. /Length is that byte count.
+// Trimming every trailing newline cuts the stream and inflateSync throws.
+let flateSample = null;
+for (let i = 0; i < 4000; i++) {
+  const payload = Buffer.from(`Jane Doe line ${i}\n`);
+  const compressed = deflateSync(payload);
+  const last = compressed[compressed.length - 1];
+  if (last === 0x0a || last === 0x0d) {
+    flateSample = { payload, compressed };
+    break;
+  }
+}
+if (!flateSample) fail('could not build a Flate stream that ends in a newline');
+else {
+  const header = Buffer.from(`%PDF-1.4\n1 0 obj\n<< /Length ${flateSample.compressed.length} /Filter /FlateDecode >>\nstream\n`);
+  const pdf = Buffer.concat([header, flateSample.compressed, Buffer.from('\nendstream\nendobj\n')]);
+  try {
+    const got = Buffer.from(pdfObjects(pdf).get('1').stream, 'latin1');
+    if (got.equals(flateSample.payload)) pass('a Flate stream that ends in a newline keeps its last byte');
+    else fail('a Flate stream that ends in a newline lost bytes');
+  } catch (err) {
+    fail(`a Flate stream that ends in a newline did not inflate: ${err.message}`);
+  }
 }
 
 const fontFile = FONT_FILES.find((p) => existsSync(p));
