@@ -280,7 +280,7 @@ Lihat [docs/SETUP.md](docs/SETUP.md) untuk panduan instalasi lengkap, [docs/RUNN
 
 ## Penggunaan
 
-Tempel URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang bertautan masih dibuka (teks yang ditempel tidak punya tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan PDF, dan menambahkan satu baris ke tracker Anda. Itu sudah cukup untuk sebagian besar hari. Selebihnya adalah mode yang Anda minta dengan menyebut namanya.
+Tempel URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang bertautan masih dibuka (teks yang ditempel tidak punya tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan CV Anda (PDF secara bawaan), dan menambahkan satu baris ke tracker Anda. Itu sudah cukup untuk sebagian besar hari. Selebihnya adalah mode yang Anda minta dengan menyebut namanya.
 
 ### Cara meminta sebuah mode
 
@@ -298,7 +298,7 @@ Semuanya memakai satu router yang sama, `.agents/skills/career-ops/SKILL.md`, da
 
 | Perintah | Fungsinya |
 | --- | --- |
-| *tempel URL atau deskripsi lowongan* | Pipeline lengkap: pemeriksaan apakah lowongan masih dibuka (hanya untuk URL), evaluasi A-H, laporan, PDF yang disesuaikan, baris di tracker |
+| *tempel URL atau deskripsi lowongan* | Pipeline lengkap: pemeriksaan apakah lowongan masih dibuka (hanya untuk URL), evaluasi A-H, laporan, CV yang disesuaikan (PDF secara bawaan), baris di tracker |
 | `scan` | Memindai portal Anda untuk mencari lowongan baru dan menambahkannya ke kotak masuk (`data/pipeline.md`) |
 | `pipeline` | Mengevaluasi setiap URL yang menunggu di kotak masuk |
 | `apply` | Mengisi formulir lamaran bersama Anda, kolom demi kolom. Berhenti sebelum Kirim |
