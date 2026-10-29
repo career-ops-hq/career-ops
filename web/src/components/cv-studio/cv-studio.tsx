@@ -211,6 +211,11 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
         setSave({ kind: "saved", pdf: body.pdf, indexed: body.indexed === true, warnings: body.warnings ?? [] });
       }
     } catch {
+      // The response never arrived. The server may already have stored this
+      // payload. Send the screen while that payload is still in flight, or an
+      // undo back to the saved CV is skipped on the way out of the page.
+      const latest = editsRef.current;
+      if (JSON.stringify(latest) !== serialized) putEdits(latest, true);
       if (postingJsonRef.current === serialized) postingJsonRef.current = null;
       setSave({ kind: "failed", error: "Saving failed. Is the dashboard still running?" });
     }

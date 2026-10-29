@@ -113,11 +113,14 @@ test("undo then leaving keeps the restored edits after the older hide lands", {
   let puts = 0;
   let hidePayload = "";
   let exitPayload = "";
+  let heldRequest;
+  let exitResponse;
   await page.route("**/api/cv-studio/**", async (route) => {
     if (route.request().method() !== "PUT") return route.continue();
     puts += 1;
     if (puts === 1) {
       hidePayload = route.request().postData() ?? "";
+      heldRequest = route.request();
       markHide();
       await hideHeld;
       try {
@@ -129,7 +132,11 @@ test("undo then leaving keeps the restored edits after the older hide lands", {
       }
       return;
     }
-    if (puts === 2) exitPayload = route.request().postData() ?? "";
+    if (puts === 2) {
+      exitPayload = route.request().postData() ?? "";
+      const request = route.request();
+      exitResponse = page.waitForResponse((res) => res.request() === request);
+    }
     await route.continue();
     markExit();
   });
@@ -151,18 +158,16 @@ test("undo then leaving keeps the restored edits after the older hide lands", {
 
   const editsPath = path.join(root, ".career-ops-web", "cv-studio", "011.json");
   const hiddenNow = () => JSON.parse(fs.readFileSync(editsPath, "utf8")).hidden ?? [];
-  const deadline = Date.now() + 8_000;
-  let hidden = null;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(editsPath)) {
-      hidden = hiddenNow();
-      if (!hidden.includes(section0Item0Bullet0)) break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  assert.ok(Array.isArray(hidden) && !hidden.includes(section0Item0Bullet0));
+  // The earlier test can leave an empty hidden list. Wait until this exit
+  // response is back, so that leftover file cannot pass the check early.
+  assert.ok(exitResponse);
+  await exitResponse;
+  assert.ok(fs.existsSync(editsPath));
+  assert.ok(!hiddenNow().includes(section0Item0Bullet0));
 
+  const hideResponse = page.waitForResponse((res) => res.request() === heldRequest);
   releaseHide();
+  await hideResponse;
   await hideDone;
   await page.unroute("**/api/cv-studio/**");
   assert.ok(!hiddenNow().includes(section0Item0Bullet0));

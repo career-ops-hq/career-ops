@@ -45,6 +45,11 @@ test("a Save for apply that already wrote is corrected when the screen has moved
   assert.equal(editSaveStatus("saved", "hidden", "hidden", null), "Saving");
 });
 
+test("a lost save still sends restored edits while the sent payload is in flight", () => {
+  assert.equal(shouldSendEdits("restored", "restored", "hidden", false), false);
+  assert.equal(shouldSendEdits("restored", "restored", "hidden", true), true);
+});
+
 test("a PUT without a usable tab or number is written", () => {
   const order = createPutOrder();
   assert.equal(order.accept("011", undefined, undefined), true);
