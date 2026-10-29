@@ -279,7 +279,7 @@ Veja [docs/SETUP.md](docs/SETUP.md) para o guia completo de configuração, [doc
 
 ## Uso
 
-Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta um PDF e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome.
+Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome.
 
 ### Como pedir um modo
 
@@ -297,7 +297,7 @@ Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e o
 
 | Comando | O que faz |
 | --- | --- |
-| *cole uma URL ou uma descrição de vaga* | Pipeline completo: verificação de que a vaga está aberta (só URLs), avaliação A-H, relatório, PDF adaptado, linha no tracker |
+| *cole uma URL ou uma descrição de vaga* | Pipeline completo: verificação de que a vaga está aberta (só URLs), avaliação A-H, relatório, currículo adaptado (PDF por padrão), linha no tracker |
 | `scan` | Escaneia seus portais em busca de vagas novas e as adiciona à caixa de entrada (`data/pipeline.md`) |
 | `pipeline` | Avalia cada URL que espera na caixa de entrada |
 | `apply` | Preenche um formulário de candidatura com você, campo a campo. Para antes de Enviar |
