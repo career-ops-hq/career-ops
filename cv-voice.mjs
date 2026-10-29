@@ -139,6 +139,9 @@ export function voiceIssues(generated, source) {
   const sourceText = String(source ?? '');
   const sourceNorm = norm(stripMarkup(sourceText));
   const sourceLines = new Set(linesOf(sourceText).map(norm));
+  // Emphasis is still the candidate's phrase: "best **practices**" matches
+  // "best practices". Line breaks stay, so two neighboring lines do not join.
+  const sourcePhrases = stripMarkup(sourceText, { keepLineBreaks: true });
   const issues = [];
   const seen = new Set();
   const push = (kind, value) => {
@@ -159,7 +162,7 @@ export function voiceIssues(generated, source) {
     if (prose.includes(EN_DASH)) push('em-dash', 'en dash');
     for (const phrase of BANNED_PHRASES) {
       if (!hasPhrase(line, phrase)) continue;
-      if (hasPhrase(sourceText, phrase)) continue;
+      if (hasPhrase(sourcePhrases, phrase)) continue;
       push('banned-phrase', phrase);
     }
   }

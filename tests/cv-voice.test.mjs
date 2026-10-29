@@ -25,6 +25,18 @@ jane@example.com
 
 const WITH_OWN_VERB = `${SOURCE}- Spearheaded the on-call rota the team already had\n`;
 
+test('markdown emphasis in the source still counts as the candidate phrase', () => {
+  const bold = `${SOURCE}- Followed the team best **practices** for the refund page\n`;
+  const italic = `${SOURCE}- Followed the team best *practices* for the refund page\n`;
+  const generated = 'Followed best practices when rewriting the refund desk';
+  assert.equal(voiceIssues(generated, bold).some((issue) => issue.value === 'best practices'), false);
+  assert.equal(voiceIssues(generated, italic).some((issue) => issue.value === 'best practices'), false);
+  const split = `${SOURCE}best\n**practices** for the refund page\n`;
+  assert.equal(voiceIssues(generated, split).some((issue) => issue.value === 'best practices'), true);
+  const absent = `${SOURCE}- Followed the team **refund** process\n`;
+  assert.equal(voiceIssues(generated, absent).some((issue) => issue.value === 'best practices'), true);
+});
+
 test('a line the candidate wrote is kept, stock verb included', () => {
   const copied = 'Spearheaded the on-call rota the team already had';
   assert.deepEqual(voiceIssues(copied, WITH_OWN_VERB).filter((issue) => issue.kind !== 'invented-number'), []);
