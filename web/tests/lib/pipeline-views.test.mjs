@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeView, parseViews, removeView, upsertView, viewUpdates } from "../../src/lib/pipeline-views.mjs";
+import { normalizeView, parseViews, removeView, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
 
 const staff = { name: "Staff 4+", tab: "evaluated", q: "Staff", min: "4", sort: "score", dir: "-1" };
 
@@ -59,4 +59,20 @@ test("corrupt storage drops bad entries and keeps the first of a repeated name",
   assert.deepEqual(parseViews("not json"), []);
   assert.deepEqual(parseViews("{"), []);
   assert.deepEqual(removeView(parseViews(raw), "Ok"), []);
+});
+
+test("a save starts from the list on disk when the last write landed", () => {
+  const memory = [normalizeView({ name: "Local", tab: "ALL" })];
+  const stored = [normalizeView({ name: "Other tab", tab: "EVALUATED" })];
+  assert.deepEqual(viewsForMutation(memory, stored, false).map((view) => view.name), ["Other tab"]);
+  assert.deepEqual(removeView(viewsForMutation(memory, stored, false), "Other tab"), []);
+});
+
+test("a view storage rejected stays for the next save, with the other tab's view", () => {
+  const memory = [normalizeView({ name: "Page only", tab: "ALL" })];
+  const stored = [normalizeView({ name: "Other tab", tab: "SKIP" })];
+  const base = viewsForMutation(memory, stored, true);
+  assert.deepEqual(base.map((view) => view.name), ["Page only", "Other tab"]);
+  const saved = upsertView(base, { name: "Newer", tab: "ALL" });
+  assert.deepEqual(saved.map((view) => view.name), ["Page only", "Other tab", "Newer"]);
 });

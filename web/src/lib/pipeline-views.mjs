@@ -63,6 +63,28 @@ export function removeView(views, name) {
   return views.filter((view) => view.name !== name);
 }
 
+/**
+ * A save or delete starts from the list on disk, so another tab is not
+ * overwritten. Views kept only in memory, because storage rejected the write,
+ * stay. After a successful write, disk wins, including a view the other tab removed.
+ *
+ * @param {NonNullable<ReturnType<typeof normalizeView>>[]} memory
+ * @param {NonNullable<ReturnType<typeof normalizeView>>[]} stored
+ * @param {boolean} keepUnstored
+ */
+export function viewsForMutation(memory, stored, keepUnstored) {
+  const disk = Array.isArray(stored) ? stored.slice(0, VIEW_LIMIT) : [];
+  if (!keepUnstored) return disk;
+  const names = new Set(memory.map((view) => view.name));
+  const merged = memory.slice(0, VIEW_LIMIT);
+  for (const view of disk) {
+    if (merged.length === VIEW_LIMIT) break;
+    if (names.has(view.name)) continue;
+    merged.push(view);
+  }
+  return merged;
+}
+
 /** @param {NonNullable<ReturnType<typeof normalizeView>>} view */
 export function viewUpdates(view) {
   return {

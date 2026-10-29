@@ -21,7 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { SCORE_FLOORS, normalizeView, parseViews, removeView, upsertView, viewUpdates } from "@/lib/pipeline-views.mjs";
+import { SCORE_FLOORS, normalizeView, parseViews, removeView, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -60,6 +60,7 @@ export function PipelineView({
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [viewError, setViewError] = useState("");
+  const storageRejected = useRef(false);
   const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
@@ -124,10 +125,20 @@ export function PipelineView({
     if (!viewsLoaded) return;
     try {
       localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+      storageRejected.current = false;
     } catch {
+      storageRejected.current = true;
       setViewError("This view stays on this page only.");
     }
   }, [views, viewsLoaded]);
+
+  function mutationBase() {
+    try {
+      return viewsForMutation(views, parseViews(localStorage.getItem(VIEWS_KEY) || "[]"), storageRejected.current);
+    } catch {
+      return viewsForMutation(views, [], true);
+    }
+  }
 
   function saveCurrentView(name: string) {
     const view = normalizeView({ name, tab, q, min: minFilter, sort: sort.key, dir: sort.dir });
@@ -135,8 +146,9 @@ export function PipelineView({
       setViewError("Name the view first.");
       return;
     }
-    const next = upsertView(views, view);
-    const added = views.some((item) => item.name === view.name) || next.length > views.length;
+    const base = mutationBase();
+    const next = upsertView(base, view);
+    const added = base.some((item) => item.name === view.name) || next.length > base.length;
     if (!added) {
       setViewError("Remove a view first.");
       return;
@@ -145,6 +157,10 @@ export function PipelineView({
     setNaming(false);
     setDraftName("");
     setViewError("");
+  }
+
+  function removeSavedView(name: string) {
+    setViews(removeView(mutationBase(), name));
   }
 
   function applySaved(view: SavedView) {
@@ -279,7 +295,7 @@ export function PipelineView({
               <button type="button" onClick={() => applySaved(view)} className="px-2.5 py-1 text-xs font-medium text-foreground">
                 {view.name}
               </button>
-              <button type="button" aria-label={`Remove view ${view.name}`} onClick={() => setViews(removeView(views, view.name))} className="px-1.5 text-xs text-faint hover:text-foreground">
+              <button type="button" aria-label={`Remove view ${view.name}`} onClick={() => removeSavedView(view.name)} className="px-1.5 text-xs text-faint hover:text-foreground">
                 ×
               </button>
             </span>
