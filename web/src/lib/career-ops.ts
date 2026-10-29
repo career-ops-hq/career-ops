@@ -422,8 +422,9 @@ function reportNumber(n: string): number | null {
 function listReportFiles(root: string): string[] | null {
   try {
     return fs.readdirSync(path.join(root, "reports"));
-  } catch {
-    return null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
 }
 

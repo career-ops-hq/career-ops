@@ -66,3 +66,54 @@ test("Search stats reads the tracker and lists reports/ once for the whole page"
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("two rows that share a number keep the report each one links", { skip: skipTs }, () => {
+  const root = mkdtempSync(join(tmpdir(), "co-analytics-shared-number-"));
+  const prevRoot = process.env.CAREER_OPS_ROOT;
+  try {
+    mkdirSync(join(root, "data"), { recursive: true });
+    mkdirSync(join(root, "reports"), { recursive: true });
+    writeFileSync(join(root, "reports", "011-larkspur.md"), report("Larkspur"));
+    writeFileSync(join(root, "reports", "011-quillfeather.md"), report("Quillfeather"));
+    writeFileSync(join(root, "data", "applications.md"), [
+      "# Applications Tracker", "",
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 11 | 2026-10-01 | Larkspur Analytics | Engineer | 4.0/5 | Applied | ❌ | [11](../reports/011-larkspur.md) | remote |",
+      "| 11 | 2026-10-02 | Quillfeather Health | Designer | 4.0/5 | Applied | ❌ | [11](../reports/011-quillfeather.md) | remote |",
+      "",
+    ].join("\n"));
+    process.env.CAREER_OPS_ROOT = root;
+    const rows = analytics.analyticsApplications(careerOps.readApplications());
+    assert.deepEqual(rows.map((row) => row.archetype), ["Larkspur", "Quillfeather"]);
+  } finally {
+    if (prevRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = prevRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a reports path that is not a directory is an error, not missing data", { skip: skipTs }, () => {
+  const root = mkdtempSync(join(tmpdir(), "co-analytics-reports-not-dir-"));
+  const prevRoot = process.env.CAREER_OPS_ROOT;
+  try {
+    mkdirSync(join(root, "data"), { recursive: true });
+    writeFileSync(join(root, "reports"), "not a directory\n");
+    writeFileSync(join(root, "data", "applications.md"), [
+      "# Applications Tracker", "",
+      "| # | Date | Company | Role | Score | Status | PDF | Report | Notes |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 11 | 2026-10-01 | Larkspur Analytics | Engineer | 4.0/5 | Applied | ❌ | - | remote |",
+      "",
+    ].join("\n"));
+    process.env.CAREER_OPS_ROOT = root;
+    assert.throws(
+      () => analytics.analyticsApplications(careerOps.readApplications()),
+      (err) => err && err.code === "ENOTDIR",
+    );
+  } finally {
+    if (prevRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = prevRoot;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
