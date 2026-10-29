@@ -206,7 +206,6 @@ function fromEmbeddedDescription(html) {
 async function main() {
   const [url, rawFile, outFile, strippedArg] = process.argv.slice(2);
   const minWords = Number(process.env.JD_RESCUE_MIN_WORDS || 80);
-  const timeoutMs = Number(process.env.JD_RESCUE_TIMEOUT_MS || 12000);
   const strippedWords = Number.isFinite(Number(strippedArg)) ? Number(strippedArg) : 0;
   const thin = strippedWords < minWords;
 
