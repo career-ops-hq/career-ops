@@ -19,7 +19,6 @@
  * Exit code: 0 if all active, 1 if any expired or uncertain
  */
 
-import { chromium } from 'playwright';
 import { readFile } from 'fs/promises';
 import {
   checkUrlLivenessWithFallback,
@@ -248,6 +247,7 @@ async function main() {
   let browser = null, page = null, headed = null;
   async function ensureBrowser() {
     if (browser) return;
+    const { chromium } = await import('playwright');
     const launched = await chromium.launch({ headless: true });
     try {
       page = await newLivenessPage(launched);
@@ -301,7 +301,8 @@ async function main() {
       } catch (err) {
         result = 'uncertain';
         code = 'browser_unavailable';
-        reason = `browser unavailable (${String(err?.message ?? err).split('\n')[0]}); run \`npx playwright install\` and re-run`;
+        const fix = err?.code === 'ERR_MODULE_NOT_FOUND' ? 'npm install' : 'npx playwright install chromium';
+        reason = `browser unavailable (${String(err?.message ?? err).split('\n')[0]}); run \`${fix}\` and re-run`;
       }
     }
 
