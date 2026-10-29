@@ -54,7 +54,7 @@ export default function JobsHistory() {
               <li key={j.id}>
                 <Link href={`/jobs/${j.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-hover">
                   {j.status === "running" ? (
-                    <Loader2 className="size-4 shrink-0 animate-spin text-brand" />
+                    <Loader2 className="size-4 shrink-0 animate-spin text-brand-text" />
                   ) : j.status === "error" ? (
                     <AlertTriangle className="size-4 shrink-0 text-red-400" />
                   ) : (
