@@ -71,11 +71,11 @@ export function JobCard({
       <div className="space-y-2.5">
         {/* Top Header: Logo + Title + 3-Dots Menu */}
         <div className="flex items-start gap-3">
-          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-sm font-semibold text-brand">
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-sm font-semibold text-brand-text">
             {letter}
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand`}>
+            <h2 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand-text`}>
               {job.name}
             </h2>
             <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-muted">
@@ -107,7 +107,7 @@ export function JobCard({
                     setMenuOpen(false);
                     onEdit(job);
                   }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-brand-soft hover:text-brand-text"
                 >
                   <Edit3 className="size-3.5" /> Edit Scan
                 </button>
@@ -132,7 +132,7 @@ export function JobCard({
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-medium",
-              isFull ? "border-brand/30 bg-brand-soft/60 text-brand" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+              isFull ? "border-brand/30 bg-brand-soft/60 text-brand-text" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             )}
           >
             {isFull ? <Globe className="size-3" /> : <Zap className="size-3" />}
@@ -180,7 +180,7 @@ export function JobCard({
           ) : (
             <p className="text-faint">No runs recorded yet</p>
           )}
-          {runMessage && <p className="mt-1 font-medium text-brand">{runMessage}</p>}
+          {runMessage && <p className="mt-1 font-medium text-brand-text">{runMessage}</p>}
         </div>
       </div>
 
@@ -190,7 +190,7 @@ export function JobCard({
           type="button"
           onClick={handleRunNow}
           disabled={running}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-50 max-sm:min-h-[44px]"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-brand/30 px-2.5 py-2 text-xs font-medium text-brand-text transition-colors hover:bg-brand-soft disabled:opacity-50 max-sm:min-h-[44px]"
         >
           {running ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
           {running ? "Scanning…" : "Run now"}
@@ -201,7 +201,7 @@ export function JobCard({
           onClick={() => onToggleStatus(job.id, job.status)}
           className={cn(
             "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-            isActive ? "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            isActive ? "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           )}
         >
           {isActive ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
