@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">700+ contribuidores</a></p>
 
 <p align="center">
 <strong>Meses mandando CVs al&nbsp;silencio.</strong><br>
@@ -125,6 +125,8 @@ El silencio después de pulsar enviar no va contigo. Bastante gente vio lo mismo
 <br>
 
 La contratación no va a arreglarse sola. La gente que la sufre sí puede, y ya está en la sala, comparando notas y arreglándose los setups unos a otros.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=es" alt="Muro animado con los avatares de GitHub de quienes contribuyen, que se llena por orden de llegada desde abril de 2026 y deja libre la siguiente casilla." width="100%"></a></p>
 

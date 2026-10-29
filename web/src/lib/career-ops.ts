@@ -6,7 +6,7 @@ import { resolveDataRoot } from "@/lib/core/data-root.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { readTrackerFile } from "@/lib/core/tracker-files.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
-import { parseApplications } from "@/lib/tracker-table.mjs";
+import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
@@ -176,6 +176,15 @@ export function readApplications(): Application[] {
   // third argument is the running system checkout, so a data-only root (no
   // tracker-aliases.json of its own) still resolves headers correctly.
   return parseApplications(md, careerOpsRoot(), path.resolve(process.cwd(), "..")) as Application[];
+}
+
+export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
+
+/** Same file readApplications uses. Missing, empty, and damaged stay distinct
+ *  so the pipeline does not tell every zero-row case to clear the search. */
+export function readTrackerShape(): TrackerShape {
+  const md = readTrackerFile(careerOpsRoot());
+  return classifyTracker(md, careerOpsRoot(), path.resolve(process.cwd(), ".."));
 }
 
 export type StatusLogRow = {

@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Created by <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Created by <a href="https://github.com/santifer"><strong>@santifer</strong></a>, with&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders">700+ contributors</a></p>
 
 <p align="center">
 <strong>Months of sending CVs into&nbsp;silence.</strong><br>
@@ -123,6 +123,8 @@ The silence after you hit send is not about you. Enough people saw the same thin
 <br>
 
 Hiring will not fix itself. The people going through it can, and they are already in the room, comparing notes and fixing each other's setups.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=en" alt="Animated wall of contributors' GitHub avatars, filling in order of arrival since April 2026, with the next square left open." width="100%"></a></p>
 
