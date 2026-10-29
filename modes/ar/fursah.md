@@ -261,11 +261,51 @@
 ## Keywords extracted
 (قائمة تحتوي على 15-20 كلمة مفتاحية مستخرجة من الـ JD ومهمة لتحسين الـ ATS)
 
+## Keyword Coverage
+(يُنشئه `keyword-match.mjs` (1b) — نسبة التغطية، present، thin، missing)
+
 ## Job Description (archived verbatim)
 (النص الكامل لإعلان الوظيفة، يُلصق حرفياً — انظر المتطلب أدناه)
 ```
 
-**أرشفة الـ JD (إلزامي، #2789):** يجب أن يحتوي كل تقرير على قسم `## Job Description (archived verbatim)` يضم النص الكامل للإعلان كما هو، دون تلخيص أو إعادة صياغة. يبقى العنوان بالإنجليزية لأن `check-jd-archive.mjs` يبحث عنه بالاسم. حقل `**URL:**` ليس أرشيفاً: يتوقف الرابط عن العمل عند إغلاق الإعلان، ولا يعود هناك سبيل لاستعادة المتطلبات الأصلية. السطر الأول من القسم هو تاريخ النشر كما يظهر في المصدر (`Posted: {التاريخ أو العبارة النسبية كما تظهر}`، أو `Posted: not visible in source` إن لم يظهر فعلاً)، ولا يُستبدل أبداً بتاريخ ملف التقرير. إذا كان الـ JD طويلاً جداً أو تعذّر اقتباسه كاملاً، احفظه بالأمر `archive-posting.mjs <url> --company={company-slug} --report={num}` واكتب في القسم **حرفياً** الجملة `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` دون أي نص آخر. لا تُوضع إعادة صياغة مكان النص؛ القاعدة الكاملة في `modes/oferta.md` (**JD archival**).
+**أرشفة الـ JD (إلزامي، #2789):** يجب أن يحتوي كل تقرير على قسم `## Job Description (archived verbatim)` يضم النص الكامل للإعلان كما هو، دون تلخيص أو إعادة صياغة. يبقى العنوان بالإنجليزية لأن `check-jd-archive.mjs` يبحث عنه بالاسم. حقل `**URL:**` ليس أرشيفاً: يتوقف الرابط عن العمل عند إغلاق الإعلان، ولا يعود هناك سبيل لاستعادة المتطلبات الأصلية. السطر الأول من القسم هو تاريخ النشر كما يظهر في المصدر (`Posted: {التاريخ أو العبارة النسبية كما تظهر}`، أو `Posted: not visible in source` إن لم يظهر فعلاً)، ولا يُستبدل أبداً بتاريخ ملف التقرير. إذا كان الـ JD طويلاً جداً أو تعذّر اقتباسه كاملاً، احفظه بالأمر `archive-posting.mjs` (الأمر أدناه) واكتب في القسم **حرفياً** الجملة `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` دون أي نص آخر. لا تُوضع إعادة صياغة مكان النص؛ القاعدة الكاملة في `modes/oferta.md` (**JD archival**).
+
+**وسائط الأوامر (#5853):** لا تكتب أبداً رابط الإعلان أو الـ slug الخاص بالشركة أو مسار التقرير داخل سطر أوامر، ولا حتى بين علامات اقتباس. اكتب القيم في ملف JSON بأداة الملفات (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) ثم شغّل الأمر أدناه: يتحقق من كل قيمة (يجب أن يطابق الـ slug النمط `^[a-z0-9-]+$`) ويمرّر كل قيمة إلى السكربت كوسيط مستقل، دون shell. القيمة التي تفشل في التحقق توقف التشغيل: صحّح القيمة، لا التحقق. القاعدة الكاملة في `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+### 1b. إدراج تغطية الكلمات المفتاحية لـ ATS
+
+بعد حفظ التقرير، شغّل `keyword-match.mjs` (الأمر أدناه) والصق كتلة `## Keyword Coverage` أسفل الكلمات المفتاحية المستخرجة (يبقى العنوان بالإنجليزية). للتشخيص فقط: لا تُضف كلمة مفتاحية إلا إذا كانت تعكس خبرة حقيقية.
+
+لذلك اكتب `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` في ملف JSON (انظر **وسائط الأوامر** أعلاه) وشغّل:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. التسجيل في نظام التتبع
 

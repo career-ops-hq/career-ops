@@ -26,15 +26,18 @@ import { profileRef } from "@/lib/core/profile-path.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
+import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
+  const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
+  if (evaluation && !evaluation.ok) return Response.json({ error: evaluation.error }, { status: 400 });
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
@@ -80,6 +83,26 @@ export async function POST(req: Request) {
       }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
+  }
+
+  // Assemble selected canonical instructions before any extraction or model call.
+  // Omitted work never becomes part of the worker's evaluation instructions.
+  let evaluationInstructions: string | null = null;
+  if (evaluation?.ok && !evaluation.full) {
+    try {
+      // modes/ and batch/ are system files: they live in the code checkout.
+      const root = codeRoot;
+      evaluationInstructions = selectedEvaluationInstructions({
+        mode: fs.readFileSync(/* turbopackIgnore: true */ requiredPath, "utf8"),
+        canonicalMode: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/oferta.md"), "utf8"),
+        shared: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "modes/_shared.md"), "utf8"),
+        batch: fs.readFileSync(/* turbopackIgnore: true */ path.join(root, "batch/batch-prompt.md"), "utf8"),
+        sections: evaluation.sections,
+      });
+    } catch (error) {
+      console.error("[career-ops] Failed to load focused evaluation instructions:", error);
+      return Response.json({ error: "Could not load the selected evaluation instructions. No AI run was started." }, { status: 422 });
+    }
   }
 
   // fix-portal's prompt puts this straight into a shell command the agent runs, and
@@ -159,6 +182,7 @@ export async function POST(req: Request) {
     reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
     coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
     profile: profileRef(careerOpsRoot()),
+    evaluationInstructions,
   });
 
   const isClaude = cliId === "claude";
@@ -447,6 +471,7 @@ export async function POST(req: Request) {
             url: input,
             today,
             postedAt,
+            evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
           });
           if (!result.ok) {
             send({ type: "error", msg: result.error.slice(0, 200) });

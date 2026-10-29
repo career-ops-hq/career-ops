@@ -439,6 +439,21 @@ test("buildPrompt: a codeRoot with unusual characters stays absolute, quoted per
   );
 });
 
+test("buildPrompt: the shell-quoted checkout path escapes an apostrophe for the shell in use", () => {
+  const codeRoot = "C:/srv/O'Neil/career-ops";
+  const original = Object.getOwnPropertyDescriptor(process, "platform");
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const win = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
+    assert.ok(win.includes(`node 'C:/srv/O''Neil/career-ops/verify-portals.mjs' --add "Acme"`), "PowerShell doubles the quote");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const posix = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
+    assert.ok(posix.includes(`node 'C:/srv/O'\\''Neil/career-ops/verify-portals.mjs' --add "Acme"`), "POSIX closes, escapes, reopens");
+  } finally {
+    Object.defineProperty(process, "platform", original);
+  }
+});
+
 test("buildPrompt: a codeRoot that is not a plain path keeps the relative form", () => {
   for (const bad of ["/opt/x/../etc", "/opt/line\nbreak"]) {
     const portal = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot: bad });

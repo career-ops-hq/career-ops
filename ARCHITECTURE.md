@@ -37,19 +37,7 @@ This was three arrangements until recently — `tests/`, a `test/` directory, an
 
 ## Component map
 
-```
-AI coding CLI  ─┐
-(or scripts)    │  reads prompt files
-                ▼
-   modes/*.md  ──────────────►  the "brain": scoring, evaluation,
-   (_shared.md = scoring core)   apply, scan, interview, etc. prompts
-                │
-   ┌────────────┼─────────────────────────────────────────────┐
-   ▼            ▼                  ▼               ▼            ▼
- scan        evaluate          generate         track       update
- scan.mjs    oferta.md         PDFs/CVs/        data/        update-
- providers/  (+eval scripts)   cover letters    reports/     system.mjs
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/architecture-component-map-dark.svg"><img src="docs/architecture-component-map-light.svg" alt="Component map: an AI coding CLI (or a script) reads the prompt files in modes/*.md, the brain: scoring, evaluation, apply, scan and interview prompts, with _shared.md as the scoring core. They drive five areas: scan (scan.mjs, providers/), evaluate (modes/oferta.md plus the eval scripts), generate (PDFs, CVs, cover letters), track (data/, reports/) and update (update-system.mjs)." width="760"></picture></p>
 
 ### Discovery — `scan.mjs` + `providers/`
 Finds jobs from **open, no-auth public sources**. `scan.mjs` is zero-token: it calls public ATS APIs (Greenhouse, Ashby, Lever, BambooHR, Teamtailor, Workday, Breezy) and RSS/JSON boards via per-board modules in `providers/`. Auth-gated/login-required sources are intentionally out of core (they belong in the plugin layer). Results land in `data/pipeline.md`.
@@ -79,13 +67,7 @@ A standalone Go TUI under `dashboard/` for browsing the pipeline. Isolated from 
 
 ## Data flow (a typical run)
 
-```
-scan ──► data/pipeline.md ──► evaluate (oferta + cv) ──► reports/NNN-*.md
-                                          │                      │
-                                          └──► data/applications.md (tracker)
-                                                         │
-                                          apply (human reviews + clicks)
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/architecture-data-flow-dark.svg"><img src="docs/architecture-data-flow-light.svg" alt="Data flow of a typical run: scan (scan.mjs) adds URLs to data/pipeline.md; evaluate (oferta.md with cv.md) writes reports/NNN-*.md and a row in the tracker, data/applications.md, which links the report; then you apply: you review and click Submit yourself." width="760"></picture></p>
 
 ## Quality gates
 

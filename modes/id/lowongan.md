@@ -247,7 +247,7 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 (daftar 15-20 kata kunci dari lowongan untuk optimasi ATS)
 
 ## Keyword Coverage
-(dihasilkan oleh `node keyword-match.mjs <report>` -- cakupan dalam %, present, thin, missing)
+(dihasilkan oleh `keyword-match.mjs` (1b) -- cakupan dalam %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (teks lengkap lowongan, ditempel kata per kata -- lihat ketentuan di bawah)
@@ -257,11 +257,44 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 
 **Machine Summary (wajib):** blok YAML tepat setelah header, dengan skema, nama field yang persis, dan aturan dari `batch/batch-prompt.md` (sumbernya; jangan diduplikasi di sini). Berisi `advertised_comp` (angka gaji dari lowongan kata per kata, atau `null`), `risk_summary`, dan `requirement_importance` (Blok B baris per baris; batas `inferred` juga berlaku di sini).
 
-**Arsip lowongan (wajib, #2789):** setiap report WAJIB memiliki bagian `## Job Description (archived verbatim)` berisi teks lengkap lowongan, tidak pernah diringkas atau diparafrasekan. Judulnya tetap dalam bahasa Inggris: `check-jd-archive.mjs` mencarinya berdasarkan nama. Baris pertama adalah tanggal posting yang terlihat (`Posted: {tanggal atau teks relatif}`, atau `Posted: not visible in source`), tidak pernah tanggal file report. Jika lowongan terlalu panjang atau tidak bisa dikutip utuh, simpan dengan `archive-posting.mjs <url> --company={company-slug} --report={num}` dan tulis di bagian itu **persis** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, tanpa teks lain. Jika tidak ada cara menyimpan secara otomatis (mis. teks panjang yang ditempel tanpa URL), ganti judul bagian itu menjadi `## Job Description (not archived)` dan jelaskan alasannya. Jangan pernah parafrase sebagai gantinya; aturan lengkapnya ada di `modes/oferta.md` (**JD archival**).
+**Arsip lowongan (wajib, #2789):** setiap report WAJIB memiliki bagian `## Job Description (archived verbatim)` berisi teks lengkap lowongan, tidak pernah diringkas atau diparafrasekan. Judulnya tetap dalam bahasa Inggris: `check-jd-archive.mjs` mencarinya berdasarkan nama. Baris pertama adalah tanggal posting yang terlihat (`Posted: {tanggal atau teks relatif}`, atau `Posted: not visible in source`), tidak pernah tanggal file report. Jika lowongan terlalu panjang atau tidak bisa dikutip utuh, simpan dengan `archive-posting.mjs` (perintah di bawah) dan tulis di bagian itu **persis** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, tanpa teks lain. Jika tidak ada cara menyimpan secara otomatis (mis. teks panjang yang ditempel tanpa URL), ganti judul bagian itu menjadi `## Job Description (not archived)` dan jelaskan alasannya. Jangan pernah parafrase sebagai gantinya; aturan lengkapnya ada di `modes/oferta.md` (**JD archival**).
+
+**Argumen perintah (#5853):** jangan pernah mengetik URL lowongan, slug perusahaan, atau path report ke dalam baris perintah, bahkan di dalam tanda kutip. Tulis nilainya ke file JSON dengan alat file Anda (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) lalu jalankan perintah di bawah: perintah itu memeriksa setiap nilai (slug harus cocok dengan `^[a-z0-9-]+$`) dan meneruskan masing-masing ke skrip sebagai argumen tersendiri, tanpa shell. Nilai yang gagal diperiksa menghentikan proses: perbaiki nilainya, jangan pernah pemeriksaannya. Aturan lengkapnya ada di `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. Sisipkan cakupan kata kunci ATS
 
-Setelah menyimpan, jalankan `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` dan tempel blok `## Keyword Coverage` di bawah kata kunci terekstraksi. Hanya diagnostik: tambahkan kata kunci hanya jika sesuai dengan pengalaman nyata.
+Setelah menyimpan, jalankan `keyword-match.mjs` (perintah di bawah) dan tempel blok `## Keyword Coverage` di bawah kata kunci terekstraksi. Hanya diagnostik: tambahkan kata kunci hanya jika sesuai dengan pengalaman nyata.
+
+Untuk itu, tulis `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` ke file JSON (lihat **Argumen perintah** di atas) lalu jalankan:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Catat ke tracker
 

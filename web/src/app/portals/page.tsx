@@ -7,22 +7,26 @@ import { loadPortalsDocument, watchedCompanies, type WatchedCompany } from "@/li
 
 export const dynamic = "force-dynamic";
 
-function readWatched(): { watched: WatchedCompany[]; error: string | null } {
+function readWatched(): { watched: WatchedCompany[]; missing: boolean; error: string | null } {
   const root = careerOpsRoot();
   try {
-    const { doc, seeded } = loadPortalsDocument(portalsConfigPath(root), path.join(resolveCodeRoot(process.cwd(), process.env), "templates", "portals.example.yml"));
-    return { watched: seeded ? [] : watchedCompanies(doc), error: null };
+    // The template ships with the code, which a data-only CAREER_OPS_ROOT does not hold.
+    const template = path.join(resolveCodeRoot(process.cwd(), process.env), "templates", "portals.example.yml");
+    const { doc, seeded } = loadPortalsDocument(portalsConfigPath(root), template);
+    return { watched: seeded ? [] : watchedCompanies(doc), missing: seeded, error: null };
   } catch (e) {
-    return { watched: [], error: e instanceof Error ? e.message : String(e) };
+    return { watched: [], missing: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
 export default function PortalsPage() {
-  const { watched, error } = readWatched();
+  const { watched, missing, error } = readWatched();
+  // Name the file the page reads, which CAREER_OPS_PORTALS can move.
+  const target = process.env.CAREER_OPS_PORTALS?.trim() ? portalsConfigPath(careerOpsRoot()) : "portals.yml";
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
       <div className="flex items-center gap-3">
-        <Radar className="size-6 text-brand" />
+        <Radar className="size-6 text-brand-text" />
         <h1 className="font-display text-2xl tracking-tight text-landing">Portals</h1>
       </div>
       <p className="mt-1.5 max-w-xl text-sm text-muted">
@@ -38,7 +42,7 @@ export default function PortalsPage() {
         </p>
       )}
       <div className="mt-6">
-        <PortalsView watched={watched} />
+        <PortalsView watched={watched} missing={missing} target={target} />
       </div>
     </div>
   );

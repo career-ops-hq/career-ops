@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="404" viewBox="0 0 760 404" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-labelledby="hiw-title">
+  <title id="hiw-title">Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), PDF (output/*.pdf), Entri Tracker (data/applications.md)</title>
+  <rect width="760" height="404" rx="12" fill="#0d1117"/>
+  <rect x="160" y="16" width="440" height="44" rx="22" fill="#0d1117" stroke="#DD7627" stroke-width="2"/>
+  <text x="380" y="44" text-anchor="middle" font-size="15" font-weight="600" fill="#e6edf3">Anda menempelkan URL atau deskripsi lowongan</text>
+  <line x1="380" y1="60" x2="380" y2="85" stroke="#6e7681" stroke-width="2"/><path d="M374 83 L386 83 L380 92 Z" fill="#6e7681"/>
+  <rect x="100" y="92" width="560" height="72" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="clip92"><rect x="100" y="92" width="560" height="72" rx="10"/></clipPath>
+  <rect x="100" y="92" width="6" height="72" fill="#DD7627" clip-path="url(#clip92)"/>
+  <text x="380" y="122" text-anchor="middle" font-size="17" fill="#e6edf3"><tspan font-weight="700">Deteksi Arketipe</tspan></text>
+  <text x="380" y="145" text-anchor="middle" font-size="13.5" fill="#9198a1">Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation</text>
+  <line x1="380" y1="164" x2="380" y2="189" stroke="#6e7681" stroke-width="2"/><path d="M374 187 L386 187 L380 196 Z" fill="#6e7681"/>
+  <rect x="100" y="196" width="560" height="72" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="clip196"><rect x="100" y="196" width="560" height="72" rx="10"/></clipPath>
+  <rect x="100" y="196" width="6" height="72" fill="#DD7627" clip-path="url(#clip196)"/>
+  <text x="380" y="226" text-anchor="middle" font-size="17" fill="#e6edf3"><tspan font-weight="700">Evaluasi A-H</tspan><tspan font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#9198a1">  membaca cv.md</tspan></text>
+  <text x="380" y="249" text-anchor="middle" font-size="13.5" fill="#9198a1">Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan</text>
+  <line x1="380" y1="268" x2="380" y2="294" stroke="#6e7681" stroke-width="2"/>
+  <line x1="160" y1="294" x2="600" y2="294" stroke="#6e7681" stroke-width="2" stroke-linecap="round"/>
+  <line x1="160" y1="294" x2="160" y2="317" stroke="#6e7681" stroke-width="2"/><path d="M154 315 L166 315 L160 324 Z" fill="#6e7681"/><line x1="380" y1="294" x2="380" y2="317" stroke="#6e7681" stroke-width="2"/><path d="M374 315 L386 315 L380 324 Z" fill="#6e7681"/><line x1="600" y1="294" x2="600" y2="317" stroke="#6e7681" stroke-width="2"/><path d="M594 315 L606 315 L600 324 Z" fill="#6e7681"/>
+  <rect x="60" y="324" width="200" height="64" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="160" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Laporan</text>
+  <text x="160" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">reports/*.md</text>
+  <rect x="280" y="324" width="200" height="64" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="380" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">PDF</text>
+  <text x="380" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">output/*.pdf</text>
+  <rect x="500" y="324" width="200" height="64" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="600" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Entri Tracker</text>
+  <text x="600" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">data/applications.md</text>
+</svg>

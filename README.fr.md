@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Créé par <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Créé par <a href="https://github.com/santifer"><strong>@santifer</strong></a>, avec&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders">700+ contributeurs</a></p>
 
 <p align="center">
 <strong>Des mois à envoyer des CV dans le&nbsp;silence.</strong><br>
@@ -125,6 +125,8 @@ Le silence après avoir cliqué sur envoyer ne dit rien de toi. Assez de gens on
 <br>
 
 Le recrutement ne se réparera pas tout seul. Les gens qui le subissent, eux, le peuvent, et ils sont déjà dans la salle, à comparer leurs notes et à réparer les setups les uns des autres.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=fr" alt="Mur animé des avatars GitHub des contributeurs, qui se remplit par ordre d'arrivée depuis avril 2026, la case suivante restant libre." width="100%"></a></p>
 
@@ -324,25 +326,7 @@ Dans Codex, les commandes slash ne sont pas garanties. Utilise plutôt les même
 
 ## Comment ça fonctionne
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Intégration Antigravity CLI
 

@@ -40,7 +40,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -72,7 +72,7 @@ const OPENROUTER_API_URL    = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const MAX_TOKENS            = 8192;
 const RATE_LIMIT_DELAY_MS   = 2500;  // pause between requests on free tier
-const MODEL_TIMEOUT_MS      = 15_000; // abort a single model call after 15 s
+const MODEL_TIMEOUT_MS      = 120_000; // abort a single model call after 120 s
 
 // Provider priority order — models are sorted by provider prefix, not hardcoded names.
 // Add, remove, or reorder providers here; model names are resolved at runtime from the API.
@@ -152,7 +152,13 @@ async function loadFreeModels() {
 
     freeModels = list.sort((a, b) => {
       const diff = priorityOf(a) - priorityOf(b);
-      return diff !== 0 ? diff : a.localeCompare(b);
+      if (diff !== 0) return diff;
+      if (providerOf(a) === 'minimax' && providerOf(b) === 'minimax') {
+        const flash = 'minimax/minimax-m3.1-flash:free';
+        if (a === flash) return b === flash ? 0 : -1;
+        if (b === flash) return 1;
+      }
+      return a.localeCompare(b);
     });
 
     console.log(`[models] ${freeModels.length} free models loaded from OpenRouter API.`);
@@ -399,7 +405,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
 // Exported so tests/openrouter-runner-429-reset.test.mjs can script fetch()
 // against the real rotation and blacklist logic without a network or a CLI run.
-export { callOpenRouter, rateLimitCounts, blacklistedModels };
+export { callOpenRouter, rateLimitCounts, blacklistedModels, MODEL_TIMEOUT_MS };
 
 // ---------------------------------------------------------------------------
 // Context loading
@@ -507,8 +513,10 @@ function assertSafeRemoteUrl(url) {
 }
 
 // Verdicts from the liveness check that mean the page is not an open posting
-// that can be read: besides any `expired` one (404, nav/footer text only, a
-// closed or listing page), a bot wall or a redirect away from the posting.
+// that can be read: besides any `expired` one (404, a closed or listing page),
+// a page too short to read (isUnreadableVerdict: nav/footer only, or not
+// rendered yet, which classifyLiveness reports as `uncertain`), a bot wall or
+// a redirect away from the posting.
 const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting']);
 
 // Why a fetched page holds no job description to evaluate, or null when it
@@ -518,7 +526,7 @@ const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting'
 export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = '', text = '' } = {}) {
   if (status >= 400) return `HTTP ${status}`;
   const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText: text });
-  if (verdict.result === 'expired' || UNREADABLE_PAGE_CODES.has(verdict.code)) {
+  if (verdict.result === 'expired' || isUnreadableVerdict(verdict) || UNREADABLE_PAGE_CODES.has(verdict.code)) {
     return `${verdict.code}: ${verdict.reason}`;
   }
   return null;

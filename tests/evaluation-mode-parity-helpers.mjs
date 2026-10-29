@@ -118,14 +118,20 @@ function heading(line) {
     || (match[1].startsWith(name) && /^[ \t]/.test(match[1].slice(name.length)))) ?? null;
 }
 
+const isReportTemplate = lines => lines.some(line => heading(line) === 'A)');
+
+function reportTemplates(text) {
+  return fenceParts(withoutComments(text)).blocks
+    .map(body => fenceParts(body).visible)
+    .filter(isReportTemplate);
+}
+
 /** Missing or malformed parts of the single fenced report-format template.
  * @param {string} text Mode documentation, whose template H1 may be localized.
  * @returns {string[]} Empty only when the template satisfies the shared contract.
  */
 export function structuralGaps(text) {
-  const templates = fenceParts(withoutComments(text)).blocks
-    .map(body => fenceParts(body).visible)
-    .filter(lines => lines.some(line => heading(line) === 'A)'));
+  const templates = reportTemplates(text);
   if (templates.length !== 1) return [`expected one fenced report template, found ${templates.length}`];
   const lines = templates[0];
   const headings = lines.map(heading).filter(Boolean);
@@ -146,5 +152,28 @@ export function structuralGaps(text) {
       gaps.push(`**${label}:** in report header`);
     }
   }
+  return gaps;
+}
+
+/** Missing parts of the ATS keyword-coverage contract (modes/oferta.md step 1b).
+ * The heading stays English in every locale, and the step is the JSON-file
+ * command that starts keyword-match.mjs with the report path as its own
+ * argument (#5853); tests/mode-command-arguments.test.mjs pins its exact text.
+ * It must be a fenced block outside the report template, which is report
+ * output rather than an instruction.
+ * @param {string} text Mode documentation.
+ * @returns {string[]} Empty when the template and the step are both present.
+ */
+export function keywordCoverageGaps(text) {
+  const templates = reportTemplates(text);
+  if (templates.length !== 1) return [`expected one fenced report template, found ${templates.length}`];
+  const gaps = [];
+  const count = templates[0].filter(line => /^ {0,3}##[ \t]+Keyword Coverage[ \t]*$/.test(line)).length;
+  if (count === 0) gaps.push('## Keyword Coverage');
+  else if (count > 1) gaps.push('duplicate ## Keyword Coverage');
+  // Only a fenced command counts: the same text quoted in prose is not something to run.
+  const { blocks } = fenceParts(withoutComments(text));
+  const commands = blocks.filter(body => !isReportTemplate(fenceParts(body).visible));
+  if (!commands.some(body => body.includes('"keyword-match.mjs", p.report'))) gaps.push('keyword-match.mjs step');
   return gaps;
 }

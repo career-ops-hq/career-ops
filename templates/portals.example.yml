@@ -188,7 +188,10 @@
 # unlike the shared location filter, that alternative does not use URL hints.
 #
 # Example below targets US-based remote + a couple of US metros, blocking
-# common foreign hubs. Customize to your geography.
+# common foreign hubs. Customize to your geography. Keywords match whole words
+# and take no `word:`/`stem:` prefix. Some providers mark remote roles in their
+# own words: arbeitsagentur writes "Deutschlandweit (Homeoffice)", so a German
+# commute filter needs always_allow: ["Deutschlandweit"] (see its entry below).
 
 # location_filter:
 #   # always_allow is checked BEFORE block — keep this list to your home region only
@@ -414,6 +417,40 @@
 #   negative:
 #     - "no sponsorship"
 #     - "unable to sponsor"
+
+# -- Experience filter (optional, off unless set) --
+# Reads the years of experience each NEW posting's JD asks for, after every
+# other cut, and marks a posting `above band` when the JD clearly states an
+# overall minimum above your band. By default nothing is dropped: a wrong drop
+# silently costs you a real job, a wrong label costs one glance at a row. Set
+# `action: drop` to remove those postings instead. Your years come from config/profile.yml
+# (candidate.years_of_experience). One JD request per new posting at most, via
+# the ATS's public JSON API: Greenhouse, Lever, Ashby (one request per board),
+# Workday, SmartRecruiters, Workable, Zoho Recruit. Zero LLM tokens. Other hosts
+# fall back to the listing's own description, which is shown but never drops.
+# The first scan with this on reads every new posting's JD, so it runs longer.
+#
+# In band: the JD's minimum is <= your years + stretch_years. A range counts by
+# its floor ("3-5 years" is a 3), and "7 with a BS or 5 with an MS" by its
+# lowest bar, and several required bars by the lowest. Never dropped, only
+# labelled on the pipeline row (`yrs:`): preferred-only and skill-specific
+# figures ("2+ years of SQL"), bars with an "equivalent combination of
+# education and experience" route, JDs that state none, and JDs that could
+# not be read.
+#
+# Independent of skip_tiers: that reads the title, this reads the JD. Use both
+# (skip_tiers drops interns cheaply, before any JD is fetched) or either.
+#
+# experience_filter:
+#   enabled: true
+#   stretch_years: 1     # how far above your years a JD's minimum may go (default 1)
+#   action: label        # label (default: keep every row, mark `above band`) | drop
+#   # years: 4           # overrides candidate.years_of_experience for scanning
+#   # concurrency: 4     # parallel JD requests (1-16)
+#
+# Example, strict: 3 years, stretch_years: 0 keeps "2-4" and "3-5" (floors 2
+# and 3) and marks "4+", "5-7" and "5+" above band (or drops them with
+# `action: drop`).
 
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
@@ -1191,6 +1228,8 @@ search_queries:
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
 #   pinpoint        <slug>.pinpointhq.com
+#   clearcompany    careers-api.clearcompany.com/v1/<siteId>  (or the careers page's embed script
+#                   careers-content.clearcompany.com/js/v1/career-site.js?siteId=<siteId>)
 #   prevueaps       <tenant>.prevueaps.ca  (or api: field; domainId resolved from the tenant's /jobs/ page)
 #   rippling        ats.rippling.com/<slug>/jobs
 #   dover           app.dover.com/<Company>/careers/<board-uuid>
@@ -1215,8 +1254,8 @@ search_queries:
 #                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
 #                   same provider; just use whichever host the employer's careers link actually points at.)
 #   taleo           <tenant>.taleo.net/careersection/<section>/jobsearch.ftl (Taleo Enterprise Edition public sections)
-#   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
-#                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
+#   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded host like
+#                   careers.<company>.com is NOT matched unless the entry names it in eightfold_host:. Optional domain:
 #                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
 #   gem             jobs.gem.com/<boardId>; or explicit api:
 #                   https://api.gem.com/job_board/v0/<vanity_path>/job_posts/
@@ -1241,7 +1280,7 @@ search_queries:
 #                   recruiting.ultipro.(ca|com) / recruiting2/3.ultipro.com variants, matched by pattern —
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
-#   zoho-recruit    <tenant>.zohorecruit.com  (any path; the board is always read from /jobs/Careers)
+#   zoho-recruit    <tenant>.zohorecruit.<com|ca|eu|in|com.au|jp|sa|com.cn>  (any path; the board is always read from /jobs/Careers)
 #   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
@@ -1316,6 +1355,13 @@ search_queries:
 #
 # - name: Example Breezy Co
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
+#   enabled: true
+#
+# - name: Example ClearCompany Co
+#   careers_url: https://careers-api.clearcompany.com/v1/00000000-0000-4000-8000-000000000000
+#                          # the siteId GUID from the careers page's embed script
+#                          # (career-site.js?siteId=...); that script URL works too
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 300)
 #   enabled: true
 #
 # - name: Example Pinpoint Co
@@ -1411,7 +1457,7 @@ search_queries:
 #   enabled: true
 #
 # - name: Example Zoho Recruit Co
-#   careers_url: https://exampleco.zohorecruit.com/jobs/Careers   # any <tenant>.zohorecruit.com URL
+#   careers_url: https://exampleco.zohorecruit.com/jobs/Careers   # any <tenant>.zohorecruit.<tld> URL
 #   zohoRecruit:
 #     fetchDetails: false   # optional: fetch each posting's page for its full description, date and salary (one extra request per posting)
 #     detailLimit: 25       # optional: max detail fetches per sweep when fetchDetails is true (max 100)
@@ -1453,9 +1499,14 @@ search_queries:
 #
 # - name: Example Eightfold Co
 #   # Eightfold AI talent-acquisition board. Auto-detects any *.eightfold.ai
-#   # tenant host. A branded CNAME (careers.exampleco.com) is NOT matched — the
-#   # API is host-pinned, so point careers_url (or api:) at the eightfold.ai form.
+#   # tenant host. A branded host (careers.exampleco.com) is NOT matched unless
+#   # named in eightfold_host: (below); otherwise point careers_url (or api:) at
+#   # the eightfold.ai form.
 #   careers_url: https://exampleco.eightfold.ai/careers
+#   # Some tenants serve the same API only from their own domain. Name that
+#   # one host exactly to allow it (bare hostname: no scheme, port, path or *):
+#   # careers_url: https://careers.exampleco.com/careers?domain=exampleco.com
+#   # eightfold_host: careers.exampleco.com
 #   # domain: exampleco.com  # optional — the server infers it from the tenant
 #                            # host; set it only for multi-brand tenants that
 #                            # scope their board by domain.
@@ -1750,6 +1801,25 @@ search_queries:
 #     umkreis: 50         # optional km radius around wo (0-1000)
 #     days: 30            # optional recency window (1-1000)
 #     size: 100           # optional results per keyword (1-100)
+#     angebotsart: [1]    # optional offer types: 1 job (default), 34 internship/
+#                         #   trainee (most Werkstudent/Praktikum ads), 4 vocational
+#                         #   training, 2 self-employment; [1, 34] queries both
+#     # Remote roles: a posting in Germany whose title says it is remote, or
+#     # that states 100 % home office, gets "Deutschlandweit (Homeoffice)" added
+#     # to its location, next to its city. If your location_filter is limited to a
+#     # commute area, add always_allow: ["Deutschlandweit"] to keep these roles.
+#     # Keywords match whole words, so "Deutschland" or "Remote" do not match it.
+#     # The optional nationwide pass below also finds remote roles whose office
+#     # is outside wo/umkreis. It runs only when wo is set.
+#     remoteNationwide: false # optional: true runs the remote pass
+#     remoteMatch: title  # optional, how the pass finds remote roles:
+#                         #   title  (default) nationwide search, keeps hits whose
+#                         #          title says remote or that state 100 % home office
+#                         #   filter (recommended) server-side "home office possible"
+#                         #          search, paginated; same proof needed for the
+#                         #          marker, other hits keep their own city
+#                         #   off    no remote pass
+#     remoteMaxPages: 1   # optional, filter mode: pages per keyword (1-20)
 #   enabled: true
 #
 # - name: VDAB — AI/ML Vlaanderen        # Flanders (BE) public employment service
@@ -2106,6 +2176,18 @@ search_queries:
 #   - name: SomeAgency
 #     careers_url: https://jobs.lever.co/someagency
 #     aggregator: true
+
+# ── max_response_mb (optional, per entry) ─────────────────────────────
+# The scanner refuses a response body over 10 MB, so a broken or hostile
+# endpoint cannot fill its memory. A board that returns its whole catalogue,
+# descriptions included, in one response can be bigger, and the scan then
+# reports "HTTP body exceeded maxBytes" for it. Raise the cap for that entry
+# only, in megabytes. The value wins over any limit the provider sets; every
+# other entry keeps the default.
+#
+#   - name: BigCo
+#     careers_url: https://jobs.ashbyhq.com/bigco
+#     max_response_mb: 20
 
 tracked_companies:
 

@@ -7,6 +7,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 import type { WatchedCompany } from "@/lib/portals-config.mjs";
+import { showPortalsSetup } from "@/lib/portals-setup.mjs";
 
 type Company = { name: string; status: string; detail: string };
 type Result = { available: boolean; configured: boolean; companies: Company[]; error?: string };
@@ -19,7 +20,15 @@ const TONE: Record<string, { dot: string; label: string; chip: string }> = {
 };
 const ORDER: Record<string, number> = { broken: 0, empty: 1, live: 2, skipped: 3 };
 
-export function PortalsView({ watched }: { watched: WatchedCompany[] }) {
+export function PortalsView({
+  watched,
+  missing = false,
+  target = "portals.yml",
+}: {
+  watched: WatchedCompany[];
+  missing?: boolean;
+  target?: string;
+}) {
   const [res, setRes] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false);
   const { jobs, startJob } = useJobs();
@@ -79,9 +88,11 @@ export function PortalsView({ watched }: { watched: WatchedCompany[] }) {
           <code className="break-all font-mono text-xs text-faint">{res.error}</code>
         </p>
       )}
-      {res && res.available && !res.configured && (
+      {showPortalsSetup(missing, res) && (
         <p className="mt-4 rounded-xl border border-dashed border-border bg-surface/30 p-4 text-sm text-muted">
-          No <code className="text-foreground">portals.yml</code> yet — ask the assistant to set up the companies to scan.
+          No <code className="break-all text-foreground">{target}</code> yet. Copy{" "}
+          <code className="text-foreground">templates/portals.example.yml</code> to{" "}
+          <code className="break-all text-foreground">{target}</code> and list the companies to watch. A health check does not create that file.
         </p>
       )}
 
@@ -130,7 +141,7 @@ export function PortalsView({ watched }: { watched: WatchedCompany[] }) {
 function FixAffordance({ company, job, onFix }: { company: string; job?: Job; onFix: () => void }) {
   if (job?.status === "running")
     return (
-      <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand">
+      <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-brand-text">
         <Loader2 className="size-3 animate-spin" /> Fixing…
       </Link>
     );
@@ -144,7 +155,7 @@ function FixAffordance({ company, job, onFix }: { company: string; job?: Job; on
     <button
       onClick={onFix}
       title={`Have the agent repair ${company}'s portal slug`}
-      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
+      className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand-text"
     >
       <Wrench className="size-3" /> Fix
     </button>

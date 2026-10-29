@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a> при участии&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders">700+ контрибьюторов</a></p>
 
 <p align="center">
 <strong>Месяцы отправки резюме в&nbsp;тишину.</strong><br>
@@ -123,6 +123,8 @@ npx @santifer/career-ops init
 <br>
 
 Найм сам себя не починит. Люди, которые через него проходят, могут, и они уже в комнате: сверяют заметки и чинят друг другу настройки.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ru" alt="Анимированная стена из GitHub-аватаров участников, которая заполняется в порядке прихода с апрель 2026 г.; следующая клетка оставлена свободной." width="100%"></a></p>
 
@@ -322,25 +324,7 @@ career-ops использует общий роутер команд. В CLI, к
 
 ## Как это работает
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Интеграция с Antigravity CLI
 
