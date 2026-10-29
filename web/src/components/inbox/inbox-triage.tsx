@@ -15,7 +15,7 @@ import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
 import { cn } from "@/lib/cn";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
-import { createInboxSkipActions, queueInboxSkip, rejectedSkipUrls } from "@/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, reportSkipRejections } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
@@ -269,17 +269,18 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       },
     };
     setUndo(notice);
-    // One refresh after the batch. A failure still shows in the page alert if a
-    // later skip has already replaced this Undo notice.
+    // Each failure shows as soon as that request rejects. A hung request must
+    // not hide it. The page still refreshes once, after the whole batch settles.
     const alreadyHidden = new Set(hidden);
-    void Promise.allSettled(urls.map((url) => queueInboxSkip(skipChain.current, url, true))).then((results) => {
-      const failed = rejectedSkipUrls(urls, results);
-      if (failed.length === 0) return;
-      const reveal = failed.filter((url) => !alreadyHidden.has(url));
-      if (reveal.length > 0) setHidden((h) => h.filter((url) => !reveal.includes(url)));
-      setWriteError("Could not skip every selected role.");
-      setUndo((current) => current?.fn === notice.fn ? { ...current, error: "Could not skip every selected role." } : current);
-    }).finally(() => router.refresh());
+    void reportSkipRejections(
+      urls.map((url) => queueInboxSkip(skipChain.current, url, true)),
+      (index) => {
+        const url = urls[index];
+        if (!alreadyHidden.has(url)) setHidden((h) => h.filter((item) => item !== url));
+        setWriteError("Could not skip every selected role.");
+        setUndo((current) => current?.fn === notice.fn ? { ...current, error: "Could not skip every selected role." } : current);
+      },
+    ).finally(() => router.refresh());
   };
   const skipSelected = () => {
     const jobs = skippableJobs(enriched.filter((e) => selected.has(e.job.url)).map((e) => e.job), scoreByUrl);

@@ -20,16 +20,15 @@ export function createInboxSkipActions(persistSkip, onSkipFailure) {
   };
 }
 
-/** URLs whose skip request was rejected. One result lines up with one URL.
- * @param {string[]} urls
- * @param {{ status?: string }[]} results
+/** Tell the caller as soon as one skip fails. The returned promise waits for the whole batch.
+ * @param {Promise<unknown>[]} tasks
+ * @param {(index: number) => void} onReject
+ * @returns {Promise<void>}
  */
-export function rejectedSkipUrls(urls, results) {
-  const failed = [];
-  for (let i = 0; i < urls.length; i++) {
-    if (results[i]?.status === "rejected") failed.push(urls[i]);
-  }
-  return failed;
+export function reportSkipRejections(tasks, onReject) {
+  return Promise.allSettled(tasks.map((task, index) => Promise.resolve(task).catch(() => {
+    onReject(index);
+  }))).then(() => {});
 }
 
 /** Serialize writes for one posting while still reporting failures to the UI.

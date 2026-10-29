@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createInboxSkipActions, queueInboxSkip, rejectedSkipUrls } from "../../src/lib/inbox-skip-client.mjs";
+import { createInboxSkipActions, queueInboxSkip, reportSkipRejections } from "../../src/lib/inbox-skip-client.mjs";
 
-test("a bulk skip reports only the rejected URLs, in order", () => {
-  const urls = ["https://example.com/a", "https://example.com/b", "https://example.com/c"];
-  assert.deepEqual(rejectedSkipUrls(urls, [{ status: "fulfilled" }, { status: "rejected" }, { status: "fulfilled" }]), ["https://example.com/b"]);
-  assert.deepEqual(rejectedSkipUrls(urls, [{ status: "fulfilled" }, { status: "fulfilled" }, { status: "fulfilled" }]), []);
+test("a failed skip is reported before the rest of the batch settles", async () => {
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const seen = [];
+  const done = reportSkipRejections([
+    Promise.reject(new Error("skip failed")),
+    pending,
+  ], (index) => { seen.push(index); });
+  await Promise.resolve();
+  assert.deepEqual(seen, [0]);
+  release();
+  await done;
+  assert.deepEqual(seen, [0]);
 });
 
 const url = "https://example.com/fixture-alpha";
