@@ -21,6 +21,7 @@ export const NODE_DEFS = [
   { id: "tracked", label: "Tracked", rank: 0, tone: "neutral" },
   { id: "skip", label: "SKIP", rank: 1, tone: "danger" },
   { id: "evaluated", label: "Still evaluated", rank: 1, tone: "muted" },
+  { id: "other", label: "Other status", rank: 1, tone: "muted" },
   { id: "discardedEarly", label: "Discarded (no application recorded)", rank: 1, tone: "muted" },
   { id: "submitted", label: "Submitted", rank: 1, tone: "info" },
   { id: "waiting", label: "Waiting", rank: 2, tone: "warn" },
@@ -47,6 +48,7 @@ const SUBMITTED_OR_LATER = new Set(["APPLIED", "RESPONDED", "ASSESSMENT", "INTER
 const LEAVES = [
   "skip",
   "evaluated",
+  "other",
   "discardedEarly",
   "waiting",
   "screening",
@@ -154,7 +156,7 @@ export function classifyLeaf(app, log) {
     if (reachedInterview) return "discardedInterview";
     return logReachedSubmitted(num, log) ? "discarded" : "discardedEarly";
   }
-  return "evaluated";
+  return "other";
 }
 
 /**
@@ -184,6 +186,7 @@ export function buildPipelineSankey(apps, log = []) {
     tracked: rows.length,
     skip: counts.skip,
     evaluated: counts.evaluated,
+    other: counts.other,
     discardedEarly: counts.discardedEarly,
     submitted,
     waiting: counts.waiting,
@@ -204,6 +207,7 @@ export function buildPipelineSankey(apps, log = []) {
   const rawLinks = [
     { source: "tracked", target: "skip", value: values.skip },
     { source: "tracked", target: "evaluated", value: values.evaluated },
+    { source: "tracked", target: "other", value: values.other },
     { source: "tracked", target: "discardedEarly", value: values.discardedEarly },
     { source: "tracked", target: "submitted", value: values.submitted },
     { source: "submitted", target: "waiting", value: values.waiting },
