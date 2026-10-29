@@ -39,6 +39,13 @@ test('a confirmed invite still gives a Scheduled row', () => {
   assert.match(buildRow(event), /\| Scheduled \|/);
 });
 
+test('a METHOD:CANCEL in an earlier calendar does not cancel the next one', () => {
+  const earlier = ['BEGIN:VCALENDAR', 'METHOD:CANCEL', 'BEGIN:VTODO', 'SUMMARY:Old task', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+  const { event } = parseIcs(`${earlier}\r\n${calendar([], [])}`, { displayZone: 'UTC' });
+  assert.equal(event.cancelled, false);
+  assert.match(buildRow(event), /\| Scheduled \|/);
+});
+
 test('the CLI prints the cancellation instead of a row to paste', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ics-cancel-'));
   try {

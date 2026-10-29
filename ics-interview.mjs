@@ -153,6 +153,7 @@ export function firstEvent(text) {
     const p = parseContentLine(line);
     if (!p) continue;
     if (p.name === 'BEGIN') {
+      if (!inEvent && p.value.toUpperCase() === 'VCALENDAR') { method = null; continue; }
       if (!inEvent && p.value.toUpperCase() === 'VEVENT') { inEvent = true; depth = 0; continue; }
       if (inEvent) depth += 1;
       continue;
