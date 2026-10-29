@@ -308,7 +308,6 @@ async function main() {
       if (!manualJobId) {
         try {
           await pollLinkedInInbox(root, {
-            codeRoot: CODE_ROOT,
             log: (line) => process.stderr.write(`${line}\n`),
           });
         } catch (error) {
