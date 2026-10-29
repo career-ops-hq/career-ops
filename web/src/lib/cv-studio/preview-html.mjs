@@ -18,7 +18,7 @@ function renderInline(text) {
 
 function mapText(html) {
   const masks = [];
-  const masked = html.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, (match) => {
+  const masked = html.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, (match) => {
     const token = `\u0000MASK${masks.length}\u0000`;
     masks.push(match);
     return token;

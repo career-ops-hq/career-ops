@@ -26,6 +26,13 @@ test("live preview renders markdown italic and leaves snake_case and paths alone
   }
 });
 
+test("live preview leaves markdown inside a style or script whose closing tag has a space", () => {
+  const html = '<style>.x { content: "**note**"; }</style ><script>const a = "**keep**";</script\n>';
+  const got = shown(html);
+  assert.match(got, /content: "\*\*note\*\*"/);
+  assert.match(got, /const a = "\*\*keep\*\*"/);
+});
+
 test("live preview does not rewrite markdown markers in styles, scripts, or attributes", () => {
   const html = '<style>.x { content: "**"; }</style><script>const a = "**";</script><a href="https://example.com/_x_/">**y**</a>';
   const got = shown(html);
