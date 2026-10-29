@@ -200,6 +200,10 @@ Nó diễn đạt lại CV của bạn; nó không bao giờ được bịa ra. 
 
 </details>
 
+## Cách hoạt động
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-vi-dark.svg"><img src="docs/how-it-works-vi-light.svg" alt="Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), PDF (output/*.pdf), Tracker (data/applications.md)" width="760"></picture></p>
+
 ## Bắt đầu nhanh
 
 **Cách nhanh nhất, một lệnh:**
@@ -244,22 +248,15 @@ claude   # hoặc codex / opencode / qwen / agy / grok
 # "Cập nhật hồ sơ của tôi bằng CV tôi đang dán"
 
 # 3. Bắt đầu dùng
-# Dán URL tin tuyển dụng hoặc văn bản JD để kích hoạt auto-pipeline
-# Nếu CLI của bạn hỗ trợ slash command, dùng /career-ops (hoặc bí danh riêng của CLI đó)
-# Trong Codex, hãy yêu cầu cùng mode đó bằng ngôn ngữ thường, ví dụ:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# Dán URL tin tuyển dụng hoặc văn bản JD để kích hoạt auto-pipeline.
+# Các mode còn lại, và cách yêu cầu chúng trong CLI của bạn: xem Cách dùng bên dưới.
 ```
 
 </details>
 
 ### Quét qua proxy đi ra ngoài
 
-`fetch()` thông thường của Node có thể bỏ qua `HTTP_PROXY`, `HTTPS_PROXY` và `NO_PROXY` trong một sandbox chỉ cho đi qua proxy. Các request của provider có thể dùng các biến này với `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. Cách này dùng một bộ điều phối proxy theo phạm vi request; các request không liên quan không bị ảnh hưởng, và các đích trong `NO_PROXY` vẫn dùng lớp bảo vệ địa chỉ riêng cục bộ.
-
-Chỉ đặt cờ này **khi chính proxy được cấu hình đã chặn kết nối tới các địa chỉ riêng tư, loopback và metadata**. Khi proxy phân giải đích từ xa, career-ops không thể xác minh địa chỉ cuối cùng ở máy cục bộ; proxy phải tự thực thi phần đó của ranh giới SSRF. Nếu không có thiết lập tin cậy tường minh này, các request của provider giữ đường truyền trực tiếp bình thường và lỗi DNS sẽ nêu rõ thiết lập proxy cần có. URL proxy chứa thông tin đăng nhập phải dùng HTTPS; proxy HTTP không có thông tin đăng nhập vẫn được hỗ trợ. Cờ này yêu cầu Node.js 18.17 trở lên. Các bản cài hiện có vẫn giữ đường truyền trực tiếp sau khi cập nhật hệ thống; chỉ riêng biến môi trường proxy không bật nó. Trước khi bật cờ, chạy `npm install` trong thư mục career-ops để cài phụ thuộc `undici` được thêm vào. Nó chỉ được nạp cho request đã chọn tham gia và có proxy được cấu hình, nên quét trực tiếp vẫn chạy bình thường ngay cả khi phụ thuộc đó chưa được cài.
+Nếu bạn quét từ một sandbox chỉ cho đi qua proxy, hãy chạy `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. Chỉ đặt cờ này **khi chính proxy được cấu hình đã chặn kết nối tới các địa chỉ riêng tư, loopback và metadata**. Các bước đầy đủ (bằng tiếng Anh) nằm trong [docs/SETUP.md](docs/SETUP.md#scanning-through-an-outbound-proxy).
 
 ### Cài toàn cục
 
@@ -273,187 +270,131 @@ Lệnh này cài binary `career-ops` ở cấp toàn cục để bạn chạy `c
 - `npx @santifer/career-ops init`: tốt nhất cho lần dùng đầu; tạo một thư mục dự án riêng.
 - `npm i -g @santifer/career-ops`: nếu bạn thích gõ `career-ops init` hơn dạng `npx`. Nó không thêm lệnh nào khác.
 
+### Những cách khác để chạy
+
+- **Từ bất kỳ thư mục nào, dưới dạng plugin Claude Code:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **Không cần AI CLI:** các script độc lập cho Gemini, Ollama và các mô hình tương thích OpenAI tự đánh giá một JD. Xem [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
+
 > **Hệ thống được thiết kế để chính AI coding CLI của bạn tùy chỉnh.** Mode, archetype, trọng số chấm điểm, kịch bản đàm phán -- chỉ cần nhờ nó thay đổi. Nó đọc chính những file nó dùng, nên biết chính xác cần sửa gì.
 
 Xem [docs/SETUP.md](docs/SETUP.md) để có hướng dẫn thiết lập đầy đủ, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) để chạy career-ops với chi phí thấp bằng mô hình tùy chỉnh hoặc cục bộ (và [docs/FREE_TIER.md](docs/FREE_TIER.md) để chạy với chi phí bằng không trên gói miễn phí của Antigravity CLI), [docs/AUTOMATION.md](docs/AUTOMATION.md) để lên lịch quét định kỳ và công thức phân loại tới shortlist không tốn token, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) để biết chi tiết luồng tự điền ATS, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) để đối chiếu bản xuất danh sách kết nối LinkedIn với các công ty trong phễu của bạn, và [docs/FAQ.md](docs/FAQ.md) cho câu trả lời về các câu hỏi thiết lập thường gặp, gồm cả [cách nguồn gốc câu chuyện ngăn việc bịa số liệu](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Nguyên tắc thiết kế nằm ở [ARCHITECTURE.md](ARCHITECTURE.md); luồng chạy ở [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Cách dùng
 
-career-ops dùng một bộ định tuyến lệnh dùng chung. Trong các CLI đăng ký slash command, nó trông như sau:
+Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh PDF và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên.
 
-```
-/career-ops           → Hiện mọi lệnh có sẵn
-/career-ops {JD}      → AUTO-PIPELINE: đánh giá + báo cáo + PDF + tracker (dán văn bản hoặc URL)
-/career-ops pipeline  → Xử lý các URL đang chờ trong hộp thư (data/pipeline.md)
-/career-ops oferta    → Chỉ đánh giá, các block A đến H (không tự tạo PDF)
-/career-ops ofertas   → So sánh và xếp hạng nhiều offer
-/career-ops contacto  → Nước đi mạnh trên LinkedIn: tìm liên hệ + soạn nháp tin nhắn
-/career-ops deep      → Prompt nghiên cứu sâu về công ty
-/career-ops interview-prep → Tạo tài liệu chuẩn bị phỏng vấn riêng cho công ty
-/career-ops interview    → Buổi phỏng vấn tương tác để thiết lập hồ sơ/CV
-/career-ops master-profile → Nhập, xem lại và xác thực Master Career Profile của bạn
-/career-ops eu-swe    → Hiệu chỉnh một đơn ứng tuyển SWE châu Âu trước CV/apply/phỏng vấn
-/career-ops interview/plan → Kế hoạch chuẩn bị theo khung giờ cho buổi phỏng vấn sắp tới
-/career-ops interview/practice → Phỏng vấn thử, từng câu một kèm phản hồi
-/career-ops interview/debrief → Tổng kết sau phỏng vấn: lấp khoảng trống, dự đoán vòng sau
-/career-ops interview-redflag → Phân tích dấu hiệu cảnh báo của nhà tuyển dụng trước khi gia nhập
-/career-ops pdf       → Chỉ PDF, CV tối ưu cho ATS
-/career-ops text      → CV markdown đã điều chỉnh (phản chiếu cv.md, không PDF)
-/career-ops latex     → Xuất CV dạng LaTeX/Overleaf .tex
-/career-ops latex-tex → Điều chỉnh trực tiếp resume.tex của riêng bạn (tùy chọn; cv.md vẫn là mặc định)
-/career-ops cover     → Cover letter: dán JD độc lập hoặc /career-ops cover {slug}
-/career-ops email     → Nháp email ứng tuyển chính thức (chỉ nháp; không bao giờ gửi, nộp hay bấm)
-/career-ops add       → Thêm dự án/bài báo/vai trò vào CV (lấy + xem trước + xác nhận)
-/career-ops expand    → Tự phát hiện và thêm các năng lực còn thiếu từ liên kết hồ sơ
-/career-ops training  → Đánh giá khóa học/chứng chỉ so với North Star
-/career-ops project   → Đánh giá ý tưởng dự án portfolio
-/career-ops tracker   → Tổng quan trạng thái ứng tuyển
-/career-ops agent-inbox → Xếp hàng/xử lý yêu cầu cho phiên sau (data/agent-inbox.md)
-/career-ops apply     → Trợ lý ứng tuyển trực tiếp (đọc form + tạo câu trả lời)
-/career-ops scan      → Quét các cổng và tìm tin mới
-/career-ops discover  → Chuyển danh sách công ty thành bảng ATS quét được + thêm vào portals.yml (không tốn token)
-/career-ops batch     → Xử lý hàng loạt với worker song song
-/career-ops patterns  → Phân tích mẫu hình bị từ chối và cải thiện mục tiêu
-/career-ops offer-prep → Cùng ứng viên đọc offer/hợp đồng nhận được: đi qua điều khoản + câu hỏi cho luật sư (không phải tư vấn pháp lý)
-/career-ops titles    → Gợi ý các chức danh lân cận từ CV để mở rộng tìm kiếm
-/career-ops upskill   → Tổng hợp phân tích khoảng trống kỹ năng từ các báo cáo đã đánh giá
-/career-ops followup  → Theo dõi nhịp follow-up: đánh dấu quá hạn, tạo bản nháp
-/career-ops reply-watch → Phân loại phản hồi của nhà tuyển dụng và gợi ý cập nhật tracker
-/career-ops outcome   → Ghi kết quả ứng tuyển và lưu trữ các tài liệu
-/career-ops calibrate → Báo cáo tham vấn: điểm đánh giá có dự đoán đúng kết quả thật của bạn không? Đọc dữ liệu /outcome; không bao giờ thay đổi cách chấm điểm
-/career-ops update    → Cập nhật file hệ thống career-ops với xem trước diff + kiểm tra tương thích
-```
+### Cách gọi một mode
 
-Hoặc chỉ cần dán thẳng URL hay mô tả tin tuyển dụng -- career-ops tự nhận diện và chạy toàn bộ pipeline.
+| CLI | Cách gọi `scan` |
+| --- | --- |
+| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex, Cursor hoặc bất kỳ CLI nào khác | Ngôn ngữ thường: "Run the career-ops scan mode" |
 
-Trong Codex, slash command không được đảm bảo. Hãy dùng cùng tên mode trong prompt, hoặc gọi chúng từ `codex exec`.
+`/career-ops` đứng một mình sẽ hiện menu lệnh. Ngôn ngữ thường dùng được trong mọi CLI.
 
-## Cách hoạt động
+Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`, và cùng các tệp `modes/*.md`, nên một mode hoạt động giống nhau dù CLI nào chạy nó. Slash command không được đảm bảo trong Codex: hãy yêu cầu bằng ngôn ngữ thường, hoặc chạy một prompt ở chế độ headless bằng `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cách chạy trong từng CLI được hỗ trợ, lệnh headless với những CLI có lệnh này, và các ghi chú thiết lập riêng cho từng CLI như `/trust` của Pi nằm trong [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-vi-dark.svg"><img src="docs/how-it-works-vi-light.svg" alt="Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), PDF (output/*.pdf), Tracker (data/applications.md)" width="760"></picture></p>
+### Các lệnh dùng hằng ngày
 
-## Tích hợp Antigravity CLI
+| Lệnh | Chức năng |
+| --- | --- |
+| *dán URL hoặc JD* | Pipeline đầy đủ: kiểm tra tin còn mở hay không (chỉ với URL), đánh giá A-H, báo cáo, PDF đã tùy chỉnh, một dòng trong tracker |
+| `scan` | Quét các cổng của bạn để tìm tin mới và thêm vào hộp thư (`data/pipeline.md`) |
+| `pipeline` | Đánh giá mọi URL đang chờ trong hộp thư |
+| `apply` | Cùng bạn điền form ứng tuyển, từng trường một. Dừng lại trước khi Gửi |
+| `tracker` | Mỗi hồ sơ ứng tuyển đang ở đâu |
+| `followup` | Hồ sơ nào đến lúc cần follow-up, kèm bản nháp |
 
-career-ops hỗ trợ Antigravity CLI một cách tự nhiên, giống như hỗ trợ Claude Code và OpenCode. Mọi slash command đều dùng được qua điểm vào skill dùng chung, với cùng logic đánh giá trong `modes/*.md`.
+<details>
+<summary><b>Tất cả các lệnh, theo giai đoạn tìm việc</b></summary>
 
-Google đã chuyển quyền truy cập Gemini CLI dành cho người dùng cá nhân sang Antigravity CLI. `GEMINI.md` hiện là một lớp bảo vệ tương thích không làm gì, để Antigravity không nhân đôi toàn bộ hướng dẫn dự án khi đọc cả `AGENTS.md` và `GEMINI.md`.
+`oferta`, `ofertas` và `contacto` giữ nguyên tên gốc tiếng Tây Ban Nha: offer, nhiều offer, liên hệ.
 
-### Antigravity CLI gốc
+**Tìm vị trí**
 
-```bash
-# 1. Chạy trong thư mục career-ops
-cd career-ops
-agy
+| Lệnh | Chức năng |
+| --- | --- |
+| [`scan`](modes/scan.md) | Quét các cổng và tìm tin mới |
+| [`discover`](modes/discover.md) | Chuyển danh sách tên công ty thành các bảng ATS có thể quét và thêm vào `portals.yml` (không tốn token) |
+| [`pipeline`](modes/pipeline.md) | Xử lý các URL đang chờ trong hộp thư (`data/pipeline.md`) |
+| [`triage`](modes/triage.md) | Lọc nhanh lần đầu theo kiểu nên hay không nên ứng tuyển dựa trên `modes/_brief.md`, trước khi đánh giá đầy đủ (không ghi tệp nào) |
+| [`batch`](modes/batch.md) | Đánh giá nhiều tin bằng các worker headless chạy song song |
+| [`titles`](modes/titles.md) | Gợi ý các chức danh liên quan từ CV của bạn để mở rộng tìm kiếm |
 
-# 2. Dùng lệnh /career-ops thống nhất với các lệnh con:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
+**Đánh giá một vị trí**
 
-Skill được định nghĩa theo chuẩn mở trong `.agents/skills/career-ops/SKILL.md` và được symlink/tham chiếu cho từng CLI được hỗ trợ (ví dụ `.claude/`, `.cursor/`, `.qwen/`, `.antigravitycli/`, `.grok/`).
+| Lệnh | Chức năng |
+| --- | --- |
+| *dán URL hoặc JD* | [Auto-pipeline](modes/auto-pipeline.md): đánh giá + báo cáo + PDF + mục trong tracker |
+| [`oferta`](modes/oferta.md) | Chỉ đánh giá, các block A đến H (không có PDF) |
+| [`ofertas`](modes/ofertas.md) | So sánh và xếp hạng nhiều offer |
+| [`deep`](modes/deep.md) | Prompt nghiên cứu chuyên sâu về công ty |
+| [`eu-swe`](modes/regional/eu-swe.md) | Hiệu chỉnh một hồ sơ ứng tuyển kỹ sư phần mềm ở châu Âu trước khi làm CV, nộp đơn hoặc phỏng vấn |
 
-## Tích hợp Codex
+**Ứng tuyển**
 
-career-ops hỗ trợ Codex qua cùng bộ định tuyến dùng chung, nhưng cách gọi khác với các CLI tự đăng ký slash command. Xem hướng dẫn đầy đủ tại [docs/CODEX.md](docs/CODEX.md).
+| Lệnh | Chức năng |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | CV tối ưu cho ATS dưới dạng PDF |
+| [`ats`](modes/ats.md) | Kiểm tra mức thân thiện với ATS của CV đã tạo: điểm số và các vấn đề có thể sửa |
+| [`text`](modes/text.md) | CV đã tùy chỉnh dưới dạng markdown (phản chiếu `cv.md`, không có PDF) |
+| [`latex`](modes/latex.md) | Xuất CV thành `.tex` LaTeX/Overleaf |
+| [`latex-tex`](modes/latex-tex.md) | Tùy chỉnh `resume.tex` của chính bạn ngay tại chỗ (tùy chọn; `cv.md` vẫn là mặc định) |
+| [`cover`](modes/cover.md) | Thư xin việc, từ một JD đã dán hoặc một báo cáo đã đánh giá (`cover {slug}`) |
+| [`email`](modes/email.md) | Bản nháp email ứng tuyển trang trọng. Chỉ là bản nháp: không bao giờ gửi, nộp hay bấm nút |
+| [`contacto`](modes/contacto.md) | Tìm hiring manager, recruiter hoặc một đồng nghiệp cùng ngành, rồi soạn nháp tin nhắn LinkedIn |
+| [`apply`](modes/apply.md) | Trợ lý ứng tuyển trực tiếp (Playwright từ checkout này). Không tự nộp |
 
-### Codex tương tác
+**Phỏng vấn**
 
-```bash
-cd career-ops
-codex
-```
+| Lệnh | Chức năng |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | Tài liệu chuẩn bị phỏng vấn riêng cho từng công ty |
+| [`interview/plan`](modes/interview/plan.md) | Kế hoạch chuẩn bị chia theo khung giờ cho một buổi phỏng vấn sắp tới |
+| [`interview/practice`](modes/interview/practice.md) | Phỏng vấn thử, mỗi lần một câu hỏi, kèm phản hồi |
+| [`interview/debrief`](modes/interview/debrief.md) | Tổng kết sau phỏng vấn: bù đắp thiếu sót, dự đoán vòng tiếp theo |
+| [`interview-redflag`](modes/interview-redflag.md) | Phân tích các dấu hiệu cảnh báo của nhà tuyển dụng trước khi bạn gia nhập |
 
-Slash command không được đảm bảo trong Codex. Nếu `/career-ops` không có, hãy nhờ Codex chạy mode trực tiếp bằng ngôn ngữ thường:
+**Sau khi ứng tuyển**
 
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
+| Lệnh | Chức năng |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | Tổng quan trạng thái ứng tuyển |
+| [`followup`](modes/followup.md) | Nhịp follow-up: đánh dấu hồ sơ quá hạn, tạo bản nháp |
+| [`reply-watch`](modes/reply-watch.md) | Phân loại phản hồi của nhà tuyển dụng và đề xuất cập nhật tracker |
+| [`outcome`](modes/outcome.md) | Ghi lại kết quả của một hồ sơ ứng tuyển và lưu trữ các tài liệu liên quan |
+| [`offer-prep`](modes/offer-prep.md) | Cùng bạn đọc một offer hoặc hợp đồng đã nhận: duyệt từng điều khoản và các câu hỏi dành cho luật sư (không phải tư vấn pháp lý) |
 
-### Codex một lần (`codex exec`)
+**Hồ sơ và CV của bạn**
 
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
+| Lệnh | Chức năng |
+| --- | --- |
+| [`interview`](modes/interview.md) | Thiết lập hồ sơ: một buổi phỏng vấn tương tác về kinh nghiệm của bạn để xây dựng CV và hồ sơ (không phải luyện phỏng vấn) |
+| [`intake`](modes/intake.md) | Xây dựng hoặc bổ sung hồ sơ của bạn từ các tệp trong `documents/` (CV gốc, bản xuất LinkedIn). Không có gì được ghi nếu bạn chưa xác nhận |
+| [`master-profile`](modes/master-profile.md) | Nhập, rà soát và xác thực Master Career Profile của bạn, rồi chuẩn bị các dữ kiện được chọn thành các gạch đầu dòng trong CV |
+| [`add`](modes/add.md) | Thêm một dự án, bài báo hoặc vai trò vào CV (lấy, xem trước, xác nhận) |
+| [`expand`](modes/expand.md) | Tìm các năng lực còn thiếu trong CV, dựa trên các liên kết trong hồ sơ của bạn |
+| [`retro`](modes/retro.md) | Xem lại phiên này và giữ những gì bạn đã dạy làm quy tắc (chỉ ghi những quy tắc bạn chấp nhận) |
 
-## Tích hợp Grok Build CLI
+**Cải thiện định hướng của bạn**
 
-career-ops hỗ trợ Grok Build CLI một cách tự nhiên, giống như hỗ trợ Claude Code và OpenCode. `AGENTS.md` được tự động nạp làm quy tắc dự án, và mọi slash command đều dùng được qua điểm vào skill dùng chung.
+| Lệnh | Chức năng |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | Phân tích các mẫu bị từ chối và cải thiện định hướng |
+| [`calibrate`](modes/calibrate.md) | Kiểm tra xem điểm đánh giá của bạn có dự đoán được kết quả thực tế hay không. Chỉ mang tính tham khảo: không bao giờ thay đổi cách chấm điểm |
+| [`upskill`](modes/upskill.md) | Phân tích khoảng trống kỹ năng trên các báo cáo đã đánh giá của bạn |
+| [`training`](modes/training.md) | Đánh giá một khóa học hoặc chứng chỉ so với North Star của bạn |
+| [`project`](modes/project.md) | Đánh giá một ý tưởng dự án cho portfolio |
 
-### Grok Build CLI gốc
+**Hệ thống**
 
-```bash
-# 1. Chạy trong thư mục career-ops
-cd career-ops
-grok
+| Lệnh | Chức năng |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | Xếp hàng các yêu cầu cho phiên sau và xử lý chúng lúc đó (`data/agent-inbox.md`). `inbox` cũng dùng được |
+| [`update`](modes/update.md) | Cập nhật các tệp hệ thống của career-ops, kèm xem trước diff và kiểm tra tương thích |
 
-# 2. Dùng lệnh /career-ops thống nhất với các lệnh con:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-Với worker batch headless, dùng `grok -p "prompt"` (thêm `--yolo` để tự động chấp thuận việc chạy công cụ).
-
-## Tích hợp Pi
-
-career-ops hỗ trợ [Pi](https://github.com/earendil-works/pi) một cách tự nhiên, không có file bọc nào cần bảo trì: Pi đọc `AGENTS.md` ở thư mục gốc repo làm ngữ cảnh dự án và tự tìm skill dùng chung tại `.agents/skills/career-ops/SKILL.md`. Khi đó bộ định tuyến dùng được dưới dạng `/skill:career-ops`.
-
-### Pi gốc
-
-```bash
-# 1. Chạy trong thư mục career-ops
-cd career-ops
-pi
-
-# 2. Dùng skill dùng chung với các lệnh con:
-/skill:career-ops "Senior AI Engineer at Anthropic..."
-/skill:career-ops pipeline
-/skill:career-ops scan
-/skill:career-ops pdf
-/skill:career-ops tracker
-```
-
-### Pi một lần (`pi -p`)
-
-```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
-```
-
-Nếu một bản Pi chặn tài nguyên dự án sau một quyết định tin cậy, hãy chạy `/trust` một lần trong repo rồi khởi động lại `pi` để skill của dự án được nạp (`/trust` áp dụng cho các tiến trình Pi sau này), hoặc khởi động với `-a`, tin cậy cho đúng một lần chạy và không cần khởi động lại.
-
-### Script Gemini API độc lập (không cần cài CLI)
-
-```bash
-# 1. Lấy API key miễn phí tại https://aistudio.google.com/apikey
-cp .env.example .env
-# Sửa .env, đặt GEMINI_API_KEY=your_key_here
-
-# 2. Cài các phụ thuộc
-npm install
-
-# 3. Đánh giá một mô tả công việc
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # xếp hàng một yêu cầu cho phiên sau
-npm run gemini:eval -- "JD text here"
-```
-
-> **Gói miễn phí:** Cả hai cách đều chạy được mà không cần thanh toán. CLI gốc dùng Google OAuth; script API dùng `gemini-3.6-flash` (giới hạn tốc độ phụ thuộc mô hình và gói; xem tài liệu Google AI để biết hạn mức hiện tại).
+</details>
 
 ## Các cổng đã cấu hình sẵn
 
