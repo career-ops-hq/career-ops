@@ -279,17 +279,17 @@ npm i -g @santifer/career-ops
 
 ## 使用方式
 
-把職缺連結或職缺描述貼到你的 AI CLI 中。career-ops 會檢查附有連結的職缺是否仍在徵才（貼上的文字沒有可檢查的連結），對照你的履歷評分，撰寫報告，客製化你的履歷（預設為 PDF），並在你的追蹤表中新增一列。大多數日子這樣就夠了。其餘一切都是依名稱呼叫的模式。
+把職缺連結或職缺描述貼到你的 AI CLI 中。career-ops 會檢查附有連結的職缺是否仍在徵才（貼上的文字沒有可檢查的連結），對照你的履歷評分，撰寫報告，客製化你的履歷（預設為 PDF），並在你的追蹤表中新增一列。大多數日子這樣就夠了。其餘一切都是依名稱呼叫的模式。如果無法讀取某則職缺，流程會停下並請你貼上文字。
 
 ### 如何呼叫模式
 
 | CLI | 如何呼叫 `scan` |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex、Cursor 或任何其他 CLI | 自然語言：「Run the career-ops scan mode」 |
+| Codex、Qwen、Cursor 或任何其他 CLI | 自然語言：「Run the career-ops scan mode」 |
 
-單獨輸入 `/career-ops` 會顯示命令選單。自然語言在所有 CLI 中都能用。
+單獨輸入 `/career-ops` 會顯示命令選單。自然語言在所有 CLI 中都能用。作為 Claude Code 外掛使用時，指令是 `/career-ops:career-ops`。
 
 它們共用同一個路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 檔案，所以不論由哪個 CLI 執行，模式的行為都一樣。Codex 不保證支援斜線命令：請用自然語言提出要求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以無頭方式執行一則提示詞（[docs/CODEX.md](docs/CODEX.md)）。如何在每個受支援的 CLI 中執行、具備無頭命令的 CLI 所對應的命令，以及 Pi 的 `/trust` 這類各 CLI 的設定說明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
 
@@ -297,7 +297,7 @@ npm i -g @santifer/career-ops
 
 | 命令 | 作用 |
 | --- | --- |
-| *貼上連結或職缺描述* | 完整流程：職缺是否仍在徵才的檢查（僅限連結）、A-H 評估、報告、客製化履歷（預設 PDF）、追蹤表新增一列 |
+| *貼上連結或職缺描述* | 完整流程：職缺是否仍在徵才的檢查（僅限連結）、A-G 評估、報告、客製化履歷（預設 PDF）、追蹤表新增一列 |
 | `scan` | 掃描你的求職平台以發現新職缺，並加入收件匣（`data/pipeline.md`） |
 | `pipeline` | 評估收件匣中等待處理的每個連結 |
 | `apply` | 與你一起逐欄填寫申請表。送出前會停下 |
@@ -324,8 +324,8 @@ npm i -g @santifer/career-ops
 
 | 命令 | 作用 |
 | --- | --- |
-| *貼上連結或職缺描述* | [Auto-pipeline](modes/auto-pipeline.md)：評估 + 報告 + PDF + 追蹤表項目 |
-| [`oferta`](modes/oferta.md) | 僅評估，區塊 A 到 H（不產生 PDF） |
+| *貼上連結或職缺描述* | [Auto-pipeline](modes/auto-pipeline.md)：評估 + 報告 + 客製化履歷（預設 PDF） + 追蹤表項目 |
+| [`oferta`](modes/oferta.md) | 僅評估，區塊 A 到 G（不產生 PDF） |
 | [`ofertas`](modes/ofertas.md) | 比較並排序多個職缺 |
 | [`deep`](modes/deep.md) | 針對企業的深度調查提示詞 |
 | [`eu-swe`](modes/regional/eu-swe.md) | 在準備履歷、申請或面試之前，校準一份歐洲軟體工程職缺的申請 |
