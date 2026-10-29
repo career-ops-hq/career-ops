@@ -277,7 +277,7 @@ See [docs/SETUP.md](docs/SETUP.md) for the full setup guide (including [scanning
 
 ## Usage
 
-Paste a job URL or description into your AI CLI. career-ops checks that a linked posting is still live (pasted text has no link to check), scores it against your CV, writes a report, tailors a PDF and adds a row to your tracker. That covers most days. Everything else is a mode you ask for by name.
+Paste a job URL or description into your AI CLI. career-ops checks that a linked posting is still live (pasted text has no link to check), scores it against your CV, writes a report, tailors your CV (a PDF by default) and adds a row to your tracker. That covers most days. Everything else is a mode you ask for by name.
 
 ### Asking for a mode
 
@@ -295,7 +295,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 
 | Command | What it does |
 | --- | --- |
-| *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-H evaluation, report, tailored PDF, tracker row |
+| *paste a URL or JD* | Full pipeline: liveness check (URLs only), A-H evaluation, report, tailored CV (PDF by default), tracker row |
 | `scan` | Scan your portals for new postings and add them to the inbox (`data/pipeline.md`) |
 | `pipeline` | Evaluate every URL waiting in the inbox |
 | `apply` | Fill an application form with you, field by field. It stops before Submit |

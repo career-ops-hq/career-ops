@@ -25,6 +25,10 @@ const routes = new Map([...SKILL.matchAll(/^\| `([a-z/-]+)` \| `([^`]+)` \|$/gm)
 const rows = [...usage.matchAll(/^\| \[`([a-z/-]+)`\]\(([^)]+)\) \|/gm)].map((m) => [m[1], m[2]]);
 /** The everyday-commands rows, which name a command without linking it. */
 const everyday = [...usage.matchAll(/^\| `([a-z/-]+)` \|/gm)].map((m) => m[1]);
+/** The mode the router runs for a pasted JD or URL with no sub-command. */
+const pasteMode = SKILL.match(/^\| JD text or URL \(no sub-command\) \| \*\*`([^`]+)`\*\* \|$/m)?.[1];
+/** Mode-file links on the README's paste rows, which name no command. */
+const pasteLinks = [...usage.matchAll(/^\| \*paste a URL or JD\* \|[^\n]*?\]\((modes\/[^)]+)\)/gm)].map((m) => m[1]);
 /** Every mode-file link in Usage, including rows with no command (the paste row → auto-pipeline). */
 const modeLinks = [...usage.matchAll(/\]\((modes\/[^)#]+\.md)\)/g)].map((m) => m[1]);
 
@@ -48,6 +52,13 @@ test('every README command links to the mode file the router runs', () => {
   const wrong = rows.filter(([command, link]) => link !== `modes/${routes.get(command)}.md` || !existsSync(join(ROOT, link)))
     .map(([command, link]) => `${command} → ${link}`);
   assert.deepEqual(wrong, [], `README.md Usage links that miss the routed mode file: ${wrong.join(', ')}`);
+});
+
+test('the paste row links to the mode the router runs for a pasted JD or URL', () => {
+  assert.ok(pasteMode, 'router row for JD text or URL not parsed — the routing table format changed');
+  assert.ok(pasteLinks.length >= 1, 'no linked paste row parsed in README.md Usage — the table format changed');
+  const wrong = pasteLinks.filter((link) => link !== `modes/${pasteMode}.md`);
+  assert.deepEqual(wrong, [], `README.md paste row links to ${wrong.join(', ')}, not modes/${pasteMode}.md`);
 });
 
 test('every mode file linked from README Usage exists', () => {
