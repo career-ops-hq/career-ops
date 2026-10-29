@@ -22,9 +22,12 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 //       size: 100               # results per keyword (1–100, default 100)
 //       remoteNationwide: true  # also run a nationwide pass keeping remote-eligible hits
 //       remoteMatch: filter     # how that pass detects remote (default 'title'):
-//                               #   'filter' — server-side `homeoffice=nv_true` query + pagination to narrow
-//                               #              the set, then the same title check as 'title'. Recommended:
-//                               #              same standard of proof, applied to a far better candidate set.
+//                               #   'filter' — paginate a nationwide pass and keep only hits whose
+//                               #              `homeofficemoeglich` is true, then the same title check
+//                               #              as 'title'. Recommended: same standard of proof, applied
+//                               #              to a far better candidate set. The v4 server-side
+//                               #              `homeoffice=nv_true` query param is gone in v6 — every
+//                               #              value is rejected with HTTP 400 (see the note below).
 //                               #              (v4 confirmed `homeofficetyp: VOLLSTAENDIG` per hit via the
 //                               #              detail endpoint; v6 no longer serves it to this key — #2494.)
 //                               #   'title'  — regex on the job title only (cheap; misses body-level remote)
@@ -33,9 +36,10 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 //     enabled: true
 
 // v6. The v4 search and detail endpoints both 404 as of 2026-08-04 (#2494);
-// v5 does too. v6 keeps every query parameter this provider sends
-// (was/wo/umkreis/veroeffentlichtseit/angebotsart/homeoffice/page/size) but
-// renames the response fields — see normalizeJob().
+// v5 does too. v6 keeps the query parameters this provider sends
+// (was/wo/umkreis/veroeffentlichtseit/angebotsart/page/size) but renames the
+// response fields — see normalizeJob(). `homeoffice` is the exception: v6
+// rejects every value with HTTP 400, so it is no longer sent at all.
 const API_URL = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs';
 const API_KEY = 'jobboerse-jobsuche'; // public client key the arbeitsagentur.de UI uses
 const DETAIL_BASE = 'https://www.arbeitsagentur.de/jobsuche/jobdetail/';
@@ -129,15 +133,23 @@ export function normalizeJob(job) {
 //
 // v4 proved a role was fully remote by reading `homeofficetyp: VOLLSTAENDIG`
 // from the detail endpoint, because the `homeoffice=nv_true` query alone also
-// returns `NACH_VEREINBARUNG` ("nach Absprache") — an office-anchored hybrid.
+// returned `NACH_VEREINBARUNG` ("nach Absprache") — an office-anchored hybrid.
+// v6 also **removed the `homeoffice` query parameter entirely**: every value
+// (`nv_true`, `true`, `1`, `nv`, `ja`, `VOLLSTAENDIG`, `TEILWEISE`) is answered
+// with HTTP 400 `EINGABEN_UNVOLLSTAENDIG_ODER_FEHLERHAFT`, so the old
+// server-side narrowing silently returned nothing and the remote pass
+// contributed zero hits. The boolean `homeofficemoeglich` on each hit is the
+// only remaining signal, and it is applied client-side below — same semantics,
+// no invalid parameter.
 // That proof is gone: v6's detail endpoint answers 403 to this public client
 // key, and the only home-office field on a v6 search hit is the boolean
 // `homeofficemoeglich`, which is exactly what nv_true already filtered on (a
 // sampled nv_true page was 100% `true`). A boolean that cannot separate
 // fully-remote from hybrid is not evidence.
 //
-// So 'filter' keeps the half that still works — the server-side query narrows
-// the candidate set far better than a nationwide sweep — and falls back to the
+// So 'filter' keeps the half that still works — that boolean still narrows the
+// candidate set far better than a blind nationwide sweep, it just has to be
+// applied on the response instead of in the request — and falls back to the
 // posting's own title for the proof, the same standard 'title' mode uses. A
 // candidate whose title makes no remote claim keeps its real city, which is the
 // fail-closed behaviour an unverifiable lookup had in v4: the `Deutschlandweit
@@ -197,21 +209,22 @@ export default {
       }
       // Pass B (optional): a nationwide pass for remote roles hosted at a far HQ
       // (which the radius pass misses). Detection is config-driven via `remoteMatch`:
-      //   'filter' — server-side `homeoffice=nv_true` query + pagination, narrowing
-      //              the candidate set; the title still has to claim remote (see
-      //              the note on what v6 took away, above)
+      //   'filter' — nationwide pagination, keeping hits whose `homeofficemoeglich`
+      //              is true; the title still has to claim remote (see the note on
+      //              what v6 took away, above)
       //   'title'  — keep only nationwide hits whose title matches the remote regex
       // Its failure must NOT discard the primary results already fetched above.
       let wide = [];
       if (wo && remoteNationwide && remoteMatch !== 'off') {
         try {
           if (remoteMatch === 'filter') {
-            // Server-side home-office filter: collect the candidates. `nv_true` only
-            // means "home office is possible", so these are not yet known to be
-            // remote — the title check below is what decides.
+            // v6 has no working home-office query param, so the narrowing happens
+            // here: keep the hits that advertise home office at all, and let the
+            // title check below decide whether they count as remote. `size` is the
+            // raw page length, so the short-page stop test stays correct.
             for (let page = 1; page <= remoteMaxPages; page++) {
-              const res = await fetchKeyword(kw, { homeoffice: 'nv_true', page: String(page) });
-              wide.push(...res);
+              const res = await fetchKeyword(kw, { page: String(page) });
+              wide.push(...res.filter(j => j && j.homeofficemoeglich === true));
               if (res.length < size) break; // short page → done
             }
           } else { // 'title'
@@ -233,9 +246,9 @@ export default {
       // smuggles an office-anchored hybrid past the distance check, so it may
       // only be applied on evidence:
       //   'title'  — the posting's own title claims remote; take it at face value.
-      //   'filter' — `homeoffice=nv_true` narrowed the set but only means "home
-      //              office possible", so the title is what proves it. Hits that
-      //              make no such claim keep their real city.
+      //   'filter' — `homeofficemoeglich` only means "home office possible", so the
+      //              title is what proves it. Hits that make no such claim keep
+      //              their real city.
       // Dedup by refnr first: paginating a live index can return the same posting
       // on two pages.
       const wideJobs = [...new Map(

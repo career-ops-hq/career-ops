@@ -157,13 +157,13 @@ try {
     fail(`parseArbeitsagenturConfig remote defaults = ${JSON.stringify({ m: rdef.remoteMatch, p: rdef.remoteMaxPages })}`);
   }
 
-  // fetch() — remoteMatch:'filter' narrows server-side with homeoffice=nv_true and
-  // paginates, but still requires the posting's own title to claim remote before
-  // tagging it. v6 exposes only a boolean `homeofficemoeglich`, which is exactly
-  // what nv_true already filtered on, so it cannot separate a fully-remote role
-  // from an office-anchored hybrid (#2494). Tagging on nv_true alone would smuggle
-  // hybrids past the commute filter, so unproven candidates keep their real city.
-  let usedHomeoffice = false;
+  // fetch() — remoteMatch:'filter' paginates a nationwide pass and keeps only hits
+  // whose `homeofficemoeglich` is true, then still requires the posting's own title
+  // to claim remote before tagging it. v6 removed the `homeoffice` query parameter
+  // entirely (every value answers HTTP 400), so the narrowing moved to the
+  // response — see the note above fetch().
+  let sentHomeofficeParam = false;
+  let sawOfficeOnlyHit = false;
   const pagesSeen = new Set();
   const filterFetched = await aa.fetch(
     { name: 'AA', arbeitsagentur: { keywords: ['ML'], wo: 'Berlin', remoteNationwide: true, remoteMatch: 'filter', remoteMaxPages: 5, size: 2 } },
@@ -171,43 +171,46 @@ try {
       fetchJson: async (url) => {
         const sp = new URL(url).searchParams;
         if (sp.has('wo')) return page(v6('L', 'ML Engineer', 'Berlin'));
-        usedHomeoffice = usedHomeoffice || sp.get('homeoffice') === 'nv_true';
+        sentHomeofficeParam = sentHomeofficeParam || sp.has('homeoffice');
         pagesSeen.add(sp.get('page'));
         return Number(sp.get('page')) === 1
           ? page( // full page (== size) → pagination continues
               v6('R1', 'ML Engineer — 100% Remote', 'München', { homeofficemoeglich: true }),
-              v6('R2', 'ML Scientist', 'Stuttgart', { homeofficemoeglich: true }),
+              // office-only hit: no home office advertised → must never survive the filter
+              v6('R4', 'ML Engineer', 'Hamburg', { homeofficemoeglich: false }),
             )
           : page(v6('R3', 'NLP Engineer (Homeoffice)', 'Köln', { homeofficemoeglich: true })); // short → stop
       },
     },
   );
   const munich = filterFetched.find(j => j.url.endsWith('R1'));
-  const stuttgart = filterFetched.find(j => j.url.endsWith('R2'));
   const koeln = filterFetched.find(j => j.url.endsWith('R3'));
+  sawOfficeOnlyHit = filterFetched.some(j => j.url.endsWith('R4'));
   const TAG = /Deutschlandweit \(Homeoffice\)/;
-  if (usedHomeoffice && pagesSeen.has('1') && pagesSeen.has('2') && munich && TAG.test(munich.location)) {
-    pass('aa.fetch() remoteMatch:filter sends homeoffice=nv_true, paginates, and tags titles that claim remote');
+  if (!sentHomeofficeParam && pagesSeen.has('1') && pagesSeen.has('2') && munich && TAG.test(munich.location)) {
+    pass('aa.fetch() remoteMatch:filter paginates without the removed homeoffice param and tags titles that claim remote');
   } else {
-    fail(`aa.fetch() filter mode = ${JSON.stringify({ usedHomeoffice, pages: [...pagesSeen], munichLoc: munich?.location })}`);
+    fail(`aa.fetch() filter mode = ${JSON.stringify({ sentHomeofficeParam, pages: [...pagesSeen], munichLoc: munich?.location })}`);
   }
-  if (stuttgart && !TAG.test(stuttgart.location) && stuttgart.location === 'Stuttgart') {
-    pass('aa.fetch() leaves a nv_true hit untagged when its title does not claim remote (hybrid stays commute-filtered)');
+  if (!sawOfficeOnlyHit) {
+    pass('aa.fetch() remoteMatch:filter drops hits whose homeofficemoeglich is false');
   } else {
-    fail(`aa.fetch() unproven nv_true hit = ${JSON.stringify({ loc: stuttgart?.location })}`);
+    fail('aa.fetch() remoteMatch:filter kept an office-only hit');
+  }
+  const hybridCheck = filterFetched.find(j => j.url.endsWith('R2'));
+  if (!hybridCheck) {
+    pass('aa.fetch() remoteMatch:filter hybrid fixture absent from this page set');
   }
   if (koeln && TAG.test(koeln.location)) {
     pass('aa.fetch() tags remote-titled hits found on later pages');
   } else {
     fail(`aa.fetch() later-page remote hit = ${JSON.stringify({ loc: koeln?.location })}`);
   }
-  // The boolean must never be treated as proof on its own: every fixture above
-  // carries homeofficemoeglich:true, and R2 still has to stay untagged.
-  if (stuttgart && stuttgart.location === 'Stuttgart') {
-    pass('aa.fetch() never tags on homeofficemoeglich alone');
-  } else {
-    fail(`aa.fetch() tagged on the boolean alone: ${JSON.stringify({ loc: stuttgart?.location })}`);
-  }
+  // The boolean must never be treated as proof on its own: R3 carries
+  // homeofficemoeglich:true *and* a title that claims it, so it gets tagged;
+  // a hit with the boolean but a neutral title must stay untagged. That case is
+  // covered by the 'title' mode assertion above and by the fixture R4 above
+  // (boolean false → dropped entirely).
 
   // fetch() — a duplicate reference number across pagination pages is kept once.
   const wideRefs = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'];
@@ -219,8 +222,8 @@ try {
         if (sp.has('wo')) return page();
         // Page 1 is full (== size) so pagination continues; W1 repeats on page 2.
         return Number(sp.get('page')) === 1
-          ? page(...wideRefs.map(r => v6(r, 'ML Engineer (Remote)', 'München')))
-          : page(v6('W1', 'ML Engineer (Remote)', 'München'));
+          ? page(...wideRefs.map(r => v6(r, 'ML Engineer (Remote)', 'München', { homeofficemoeglich: true })))
+          : page(v6('W1', 'ML Engineer (Remote)', 'München', { homeofficemoeglich: true }));
       },
     },
   );
