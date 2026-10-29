@@ -26,6 +26,51 @@ export function shouldSendEdits(saved, current, inflight, keepalive) {
   return true;
 }
 
+/**
+ * The in-flight payload a page-exit flush can still lose a race to.
+ * One that differs from the screen wins, so an undo is sent instead of
+ * the autosave or Save for apply that is already on the wire.
+ *
+ * @param {string | null} saving - Autosave JSON that has not finished.
+ * @param {string | null} posting - Save-for-apply JSON that has not finished.
+ * @param {string} current - JSON on screen.
+ * @returns {string | null}
+ */
+export function inflightEdits(saving, posting, current) {
+  if (typeof posting === "string" && posting !== current) return posting;
+  if (typeof saving === "string" && saving !== current) return saving;
+  if (typeof saving === "string") return saving;
+  if (typeof posting === "string") return posting;
+  return null;
+}
+
+/**
+ * True when Save for apply stored the edits before it answered.
+ * Rendering runs after that write, so 422 still means the file changed.
+ * A superseded response, or a stale or busy 409, means it did not.
+ *
+ * @param {number} status
+ * @param {boolean} superseded
+ */
+export function postWroteEdits(status, superseded) {
+  if (superseded === true) return false;
+  return status === 200 || status === 422;
+}
+
+/**
+ * @param {string} saved
+ * @param {string} current
+ * @param {string | null} saving
+ * @param {string | null} posting
+ * @returns {"Saving" | "Unsaved" | "Saved"}
+ */
+export function editSaveStatus(saved, current, saving, posting) {
+  const inflight = inflightEdits(saving, posting, current);
+  if (inflight === current || (current === saved && inflight !== null)) return "Saving";
+  if (current !== saved) return "Unsaved";
+  return "Saved";
+}
+
 export function createPutOrder() {
   /** @type {Map<string, number>} */
   const last = new Map();

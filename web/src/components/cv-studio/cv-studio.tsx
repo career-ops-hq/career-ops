@@ -6,7 +6,7 @@ import { ArrowLeft, Check, FileText, Loader2, RotateCcw, Undo2 } from "lucide-re
 import { cn } from "@/lib/cn";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
 import { applyRecordedEdit, emptyEdits, isStudioUndoKey, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
-import { shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
+import { editSaveStatus, inflightEdits, postWroteEdits, shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
 import { SectionCard } from "./section-card";
 import { CvPreview } from "./cv-preview";
 import { CoverageMeter } from "./coverage-meter";
@@ -121,6 +121,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
 
   const savedJsonRef = useRef(JSON.stringify(data.edits));
   const savingJsonRef = useRef<string | null>(null);
+  const postingJsonRef = useRef<string | null>(null);
   const tabRef = useRef(Math.random().toString(36).slice(2, 12));
   const revRef = useRef(0);
   const [, rerender] = useState(0);
@@ -129,7 +130,8 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   const putEdits = useCallback(
     (payload: StudioEdits, keepalive: boolean) => {
       const serialized = JSON.stringify(payload);
-      if (!shouldSendEdits(savedJsonRef.current, serialized, savingJsonRef.current, keepalive)) return;
+      const inflight = inflightEdits(savingJsonRef.current, postingJsonRef.current, serialized);
+      if (!shouldSendEdits(savedJsonRef.current, serialized, inflight, keepalive)) return;
       savingJsonRef.current = serialized;
       showStatus();
       revRef.current += 1;
@@ -170,22 +172,33 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
 
   useEffect(() => {
     const serialized = JSON.stringify(edits);
-    if (serialized === savedJsonRef.current || serialized === savingJsonRef.current) return;
+    if (serialized === savedJsonRef.current || serialized === savingJsonRef.current || serialized === postingJsonRef.current) return;
     setSave((s) => (s.kind === "saved" || s.kind === "outdated" ? { kind: "idle" } : s));
     const timer = setTimeout(() => putEdits(edits, false), 500);
     return () => clearTimeout(timer);
   }, [edits, putEdits]);
 
   const editsJson = JSON.stringify(edits);
-  const editStatus = savingJsonRef.current === editsJson ? "Saving" : editsJson !== savedJsonRef.current ? "Unsaved" : "Saved";
+  const editStatus = editSaveStatus(savedJsonRef.current, editsJson, savingJsonRef.current, postingJsonRef.current);
 
   const saveForApply = useCallback(async () => {
     setSave({ kind: "saving" });
     const sent = edits;
+    const serialized = JSON.stringify(sent);
+    // Save for apply writes this payload before it renders. Undo can put the
+    // screen back while the request is still out, and the page-exit flush has
+    // to see that payload or it will skip the restored edits.
+    postingJsonRef.current = serialized;
     try {
       revRef.current += 1;
       const r = await send("POST", { op: "save", edits: sent, tab: tabRef.current, rev: revRef.current });
       const body = (await r.json()) as { pdf?: string; indexed?: boolean; warnings?: string[]; error?: string; superseded?: boolean };
+      const wrote = postWroteEdits(r.status, body.superseded === true);
+      if (postingJsonRef.current === serialized) postingJsonRef.current = null;
+      if (wrote) {
+        savedJsonRef.current = serialized;
+        if (JSON.stringify(editsRef.current) !== serialized) putEdits(editsRef.current, false);
+      }
       if (body.superseded) {
         setSave({ kind: "failed", error: "A newer edit was saved while this one was sending. Save again to export the latest." });
         return;
@@ -198,9 +211,10 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
         setSave({ kind: "saved", pdf: body.pdf, indexed: body.indexed === true, warnings: body.warnings ?? [] });
       }
     } catch {
+      if (postingJsonRef.current === serialized) postingJsonRef.current = null;
       setSave({ kind: "failed", error: "Saving failed. Is the dashboard still running?" });
     }
-  }, [edits, send]);
+  }, [edits, putEdits, send]);
 
   useEffect(() => {
     const undoShortcut = (event: KeyboardEvent) => {
