@@ -76,6 +76,8 @@ test('a date range dash and the page title are not stock wording', () => {
     '</body></html>',
   ].join('\n');
   assert.deepEqual(voiceIssues(html, SOURCE).filter((issue) => issue.kind === 'em-dash'), []);
+  assert.deepEqual(voiceIssues('Program Manager, Mar 2020 \u2013 Dec 2022', SOURCE).filter((issue) => issue.kind === 'em-dash'), []);
+  assert.deepEqual(voiceIssues('Program Manager, March 2020 \u2013 December 2022', SOURCE).filter((issue) => issue.kind === 'em-dash'), []);
   const prose = voiceIssues('<p>Shipped in 2024 \u2013 on time</p>', SOURCE);
   assert.deepEqual(prose.filter((issue) => issue.kind === 'em-dash').map((issue) => issue.value), ['en dash']);
 });
@@ -153,6 +155,26 @@ test('a dash the candidate wrote still counts when --source is a separate tex fi
     const report = JSON.parse(run.stdout);
     const reason = report.factCheck.reason || '';
     assert.equal(/dash/.test(reason), false, reason);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a stock word under a Windows line ending in patterns to avoid stays blocked', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cv-voice-crlf-'));
+  try {
+    writeFileSync(join(root, 'voice-dna.md'), [
+      '# Voice',
+      '## 4. AI WRITING PATTERNS TO AVOID',
+      'Do not write pivotal.',
+      '## 5. Later',
+      'I write spearheaded when I started the rota.',
+    ].join('\r\n'));
+    const own = candidateOwnWords(root);
+    const pivotal = voiceIssues('This was a pivotal release for the payments app', `${SOURCE}\n${own}`);
+    assert.ok(pivotal.some((issue) => issue.value === 'pivotal'));
+    const started = voiceIssues('She spearheaded the rota the team already had', `${SOURCE}\n${own}`);
+    assert.equal(started.some((issue) => issue.value === 'spearheaded'), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

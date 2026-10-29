@@ -39,10 +39,15 @@ function norm(text) {
   return String(text).toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-// A dash between two years is how a range is written, not a stock tell. The
-// HTML builder prints "2022–2024" from the start and end fields itself.
+// A dash between two years is how a range is written, not a stock tell.
+// A month may sit before the end year: "Mar 2020 – Dec 2022".
+// The HTML builder prints "2022–2024" from the start and end fields itself.
 // A metric such as "20–30%" is not a date, so it stays a tell.
-const DATE_RANGE_DASH = /((?:19|20)\d{2})\s*[\u2013\u2014]\s*(?=(?:19|20)\d{2}\b|present\b|current\b|now\b|today\b)/giu;
+const MONTH = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
+const DATE_RANGE_DASH = new RegExp(
+  `((?:19|20)\\d{2})\\s*[\\u2013\\u2014]\\s*(?=(?:(?:${MONTH})\\b\\.?\\s+)?(?:(?:19|20)\\d{2}\\b|present\\b|current\\b|now\\b|today\\b))`,
+  'giu',
+);
 
 function linesOf(text) {
   const broken = String(text)
@@ -70,7 +75,7 @@ function isAvoidHeading(title) {
 }
 
 function wordingFromVoiceDna(text) {
-  const lines = String(text).split('\n');
+  const lines = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const kept = [];
   let skipping = false;
   let skipLevel = 0;

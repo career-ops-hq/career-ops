@@ -101,6 +101,11 @@ test("a stock phrase from another CV bullet is allowed and a metric from that bu
     assert.ok(moved.claims.includes("37%"));
     const invented = await unsupportedRewriteClaims("Spearheaded the weekly release train for the payments app", bullet);
     assert.ok(invented.claims.includes("spearheaded"));
+    const tailored = await unsupportedRewriteClaims(
+      "Spearheaded the weekly release train for the payments app",
+      "Spearheaded the weekly release train for the payments app",
+    );
+    assert.ok(tailored.claims.includes("spearheaded"));
     const dashed = await unsupportedRewriteClaims("Ran the weekly release train \u2013 the Tuesday one", bullet);
     assert.deepEqual(dashed.claims, []);
     assert.match(dashed.warning, /en dash/);
