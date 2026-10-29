@@ -153,6 +153,27 @@ export function keepsStoredNames(payload, stored, allow = []) {
 }
 
 /**
+ * A write must not drop a view this page saved while storage was rejecting.
+ * Names in `allow` were removed on purpose and may be absent.
+ *
+ * @param {{name?: string}[]} payload
+ * @param {string[]} pending
+ * @param {string[]} [allow]
+ */
+export function keepsPendingNames(payload, pending, allow = []) {
+  const names = new Set();
+  for (const view of Array.isArray(payload) ? payload : []) {
+    if (view && typeof view.name === "string") names.add(view.name);
+  }
+  const skip = new Set(Array.isArray(allow) ? allow : []);
+  for (const name of Array.isArray(pending) ? pending : []) {
+    if (typeof name !== "string" || skip.has(name)) continue;
+    if (!names.has(name)) return false;
+  }
+  return true;
+}
+
+/**
  * A refused save must not forget a removal that storage never accepted.
  * The name leaves the omission list only after the save fits in the list.
  *

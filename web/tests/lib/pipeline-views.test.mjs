@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { VIEW_LIMIT, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
+import { VIEW_LIMIT, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "../../src/lib/pipeline-views.mjs";
 
 const staff = { name: "Staff 4+", tab: "evaluated", q: "Staff", min: "4", sort: "score", dir: "-1" };
 
@@ -133,6 +133,9 @@ test("a pending view does not push a stored view out of a full list", () => {
   assert.equal(keepsStoredNames(merged, stored), true);
   assert.equal(keepsStoredNames(stored.slice(0, VIEW_LIMIT - 1), stored), false);
   assert.equal(keepsStoredNames(stored.slice(0, VIEW_LIMIT - 1), stored, [`Stored ${VIEW_LIMIT - 1}`]), true);
+  assert.equal(keepsPendingNames(stored, ["Local"]), false);
+  assert.equal(keepsPendingNames(stored, ["Local"], ["Local"]), true);
+  assert.equal(keepsPendingNames([...stored.slice(0, VIEW_LIMIT - 1), local], ["Local"]), true);
 });
 
 test("a view removed while storage is rejected is not merged back from disk", () => {

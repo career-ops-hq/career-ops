@@ -21,7 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
-import { SCORE_FLOORS, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
+import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -161,7 +161,8 @@ export function PipelineView({
     const next = upsertView(base, view);
     const added = base.some((item) => item.name === view.name) || next.length > base.length;
     const allow = [...omittedWhileRejected.current];
-    if (!added || !keepsStoredNames(next, stored, allow)) {
+    const pending = [...pendingWhileRejected.current];
+    if (!added || !keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
       setViewError("Remove a view first.");
       return;
     }
@@ -175,10 +176,15 @@ export function PipelineView({
 
   function removeSavedView(name: string) {
     const allow = [...omittedWhileRejected.current, name];
+    const pending = [...pendingWhileRejected.current];
     const { stored, base } = mutationBase([name]);
     const next = removeView(base, name);
-    if (!keepsStoredNames(next, stored, allow)) {
-      setViewError("Remove a view first.");
+    if (!keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      // One removal may not free room for every pending view. Remember it
+      // and wait for a later write that can keep those views.
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+      setViews((current) => current.filter((view) => view.name !== name));
       return;
     }
     setViews(next);
