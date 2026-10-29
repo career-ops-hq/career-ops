@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { contentHeightPx, frameHeightPx, PREVIEW_PAGE_PX, previewPageCount } from "@/lib/cv-studio/page-estimate.mjs";
+import { contentHeightPx, frameHeightAfterProbe, frameHeightPx, PREVIEW_PAGE_PX, previewPageCount } from "@/lib/cv-studio/page-estimate.mjs";
 
 const PAGE_WIDTH = 816;
 
@@ -29,6 +29,9 @@ export function CvPreview({ html }: { html: string }) {
     frameEl.style.height = `${PREVIEW_PAGE_PX}px`;
     const content = contentHeightPx(doc);
     const nextFrame = frameHeightPx(doc);
+    // Set the measured height on the iframe itself. If the numbers did not
+    // change, React skips the state update and would leave the probe height.
+    frameEl.style.height = `${frameHeightAfterProbe(nextFrame, frameHeight)}px`;
     if (content > 0) setContentPx(content);
     if (nextFrame > 0) setFramePx(nextFrame);
   };

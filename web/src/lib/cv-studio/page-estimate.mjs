@@ -41,6 +41,17 @@ export function contentHeightPx(doc) {
   return height > 0 ? height : 0;
 }
 
+/**
+ * Height to write back after measuring at one page.
+ * An unchanged measurement must not leave the one-page probe on the iframe.
+ *
+ * @param {number} measured
+ * @param {number} current
+ */
+export function frameHeightAfterProbe(measured, current) {
+  return measured > 0 ? measured : current;
+}
+
 /** Iframe height. Includes the offset above the first page so the margin is not clipped. */
 export function frameHeightPx(doc) {
   const body = doc?.body;

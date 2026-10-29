@@ -5,7 +5,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { contentHeightPx, frameHeightPx, previewPageCount, PREVIEW_PAGE_PX } from "../../src/lib/cv-studio/page-estimate.mjs";
+import { contentHeightPx, frameHeightAfterProbe, frameHeightPx, previewPageCount, PREVIEW_PAGE_PX } from "../../src/lib/cv-studio/page-estimate.mjs";
 
 function doc({ content, viewport }) {
   return {
@@ -23,6 +23,12 @@ function doc({ content, viewport }) {
 test("a shorter CV estimates from the content box, not the iframe viewport", () => {
   assert.equal(contentHeightPx(doc({ content: 626, viewport: 1515 })), 626);
   assert.equal(previewPageCount(626), 1);
+});
+
+test("a repeated measure puts the measured height back, not the one-page probe", () => {
+  assert.equal(frameHeightAfterProbe(2112, 2112), 2112);
+  assert.equal(frameHeightAfterProbe(0, 2112), 2112);
+  assert.equal(frameHeightAfterProbe(1800, PREVIEW_PAGE_PX), 1800);
 });
 
 test("content taller than one page estimates two", () => {
