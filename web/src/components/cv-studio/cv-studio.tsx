@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Check, FileText, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
-import { applyRecordedEdit, emptyEdits, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
+import { applyRecordedEdit, emptyEdits, isStudioUndoKey, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
 import { shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
 import { SectionCard } from "./section-card";
 import { CvPreview } from "./cv-preview";
@@ -204,7 +204,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
 
   useEffect(() => {
     const undoShortcut = (event: KeyboardEvent) => {
-      if (event.key !== "z" || event.shiftKey || !(event.metaKey || event.ctrlKey)) return;
+      if (!isStudioUndoKey(event)) return;
       const target = event.target;
       if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement || (target instanceof HTMLElement && target.isContentEditable)) return;
       event.preventDefault();

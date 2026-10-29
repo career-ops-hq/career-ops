@@ -424,6 +424,18 @@ export function pushUndo(history, state, limit = UNDO_LIMIT) {
 }
 
 /**
+ * Cmd+Z or Ctrl+Z steps back. Shift stays out so Cmd+Shift+Z and Ctrl+Shift+Z
+ * remain redo. Caps Lock reports Z with shift off, so the letter is folded.
+ *
+ * @param {{ key?: string, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean }} event
+ * @returns {boolean}
+ */
+export function isStudioUndoKey(event) {
+  const key = typeof event?.key === "string" ? event.key.toLowerCase() : "";
+  return key === "z" && event.shiftKey !== true && Boolean(event.metaKey || event.ctrlKey);
+}
+
+/**
  * Record one edit against the edits on screen now.
  *
  * A wording save can call this after an await. The edits argument has to be

@@ -32,8 +32,21 @@ test("hiding a bullet and leaving the studio keeps the hide, and the status does
   const status = () => page.getByRole("status").filter({ hasText: /^(?:Unsaved|Saving|Saved)$/ });
   await status().filter({ hasText: /^Saved$/ }).waitFor();
 
+  // Hold the autosave so a slow click cannot reach Saved before this check.
+  let releasePut;
+  const putHeld = new Promise((resolve) => { releasePut = resolve; });
+  await page.route("**/api/cv-studio/**", async (route) => {
+    if (route.request().method() !== "PUT") return route.continue();
+    await putHeld;
+    await route.continue();
+  });
+
   await page.getByRole("button", { name: "Hide bullet", exact: true }).click();
-  assert.equal((await status().innerText()).trim(), "Unsaved");
+  const dirty = (await status().innerText()).trim();
+  assert.notEqual(dirty, "Saved");
+  assert.match(dirty, /^(?:Unsaved|Saving)$/);
+  releasePut();
+  await page.unroute("**/api/cv-studio/**");
   await page.getByRole("complementary").getByRole("link", { name: "Today", exact: true }).click();
   await page.waitForURL((next) => new URL(next).pathname === "/");
 

@@ -12,6 +12,7 @@ import {
   emptyEdits,
   parseEdits,
   applyRecordedEdit,
+  isStudioUndoKey,
   pushUndo,
   resolveStudio,
   studioReducer,
@@ -131,6 +132,18 @@ test("each bullet knows its original, its change, and the keywords that drove it
   );
   assert.deepEqual(techfin.restorable, [{ text: "Ran the on-call rotation for the model serving stack", keywords: ["on-call"] }]);
   assert.equal(doc.sections[0].items[0].bullets[0].base, "Full-stack AI engineer building production ML systems.");
+});
+
+test("cmd or ctrl plus z undoes, including caps lock, and shift stays redo", () => {
+  assert.equal(isStudioUndoKey({ key: "z", metaKey: true }), true);
+  assert.equal(isStudioUndoKey({ key: "z", ctrlKey: true }), true);
+  assert.equal(isStudioUndoKey({ key: "Z", metaKey: true, shiftKey: false }), true);
+  assert.equal(isStudioUndoKey({ key: "Z", ctrlKey: true, shiftKey: false }), true);
+  assert.equal(isStudioUndoKey({ key: "z", metaKey: true, shiftKey: true }), false);
+  assert.equal(isStudioUndoKey({ key: "Z", ctrlKey: true, shiftKey: true }), false);
+  assert.equal(isStudioUndoKey({ key: "z" }), false);
+  assert.equal(isStudioUndoKey({ key: "y", metaKey: true }), false);
+  assert.equal(isStudioUndoKey(null), false);
 });
 
 test("the undo history keeps the last 30 states in order and drops the oldest", () => {
