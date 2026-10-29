@@ -167,11 +167,11 @@ export function isSafePublicHttpUrl(raw) {
 /**
  * Extract labeled segments from a pipeline row body ("| label: value").
  * @param {string} body - Raw pipeline row body.
- * @returns {{note?: string, trust?: string, rank?: string, posted?: string}}
+ * @returns {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}}
  */
 export function extractLabels(body) {
   const labels = {};
-  const labelRe = /\|\s*(posted|trust|note|rank):\s*([^|]+)/g;
+  const labelRe = /\|\s*(posted|trust|yrs|note|rank):\s*([^|]+)/g;
   let m;
   while ((m = labelRe.exec(body)) !== null) {
     labels[m[1]] = m[2].trim();
@@ -191,7 +191,7 @@ export function lineCompany(body) {
 
 /**
  * Build the batch `notes` field from labeled segments.
- * @param {{note?: string, trust?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
+ * @param {{note?: string, trust?: string, yrs?: string, rank?: string, posted?: string}} labels - Label dictionary from extractLabels.
  * @returns {string}
  */
 export function buildNotes(labels) {

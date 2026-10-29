@@ -8,6 +8,7 @@ const FIELD_KEYS = {
   legitimacy: "Legitimacy",
   legitimidad: "Legitimacy",
   pdf: "PDF",
+  "evaluation scope": "Evaluation scope",
 };
 
 const DECISION_LABELS = {

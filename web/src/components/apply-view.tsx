@@ -59,7 +59,7 @@ export function ApplyView() {
               <div className="min-w-0">
                 <p className="text-sm text-amber-800 dark:text-amber-300">{a.error}</p>
                 {a.url && /^https?:\/\//.test(a.url) && (
-                  <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+                  <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
                     Open the form directly <ExternalLink className="size-3" />
                   </a>
                 )}
@@ -123,13 +123,13 @@ export function ApplyView() {
             <div className="mb-4 flex items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/60 px-4 py-3 backdrop-blur-sm">
               <span className="relative grid size-8 shrink-0 place-items-center">
                 <span className="co-orb absolute inset-0 rounded-full bg-brand/40 blur-[6px]" />
-                <Sparkles className="size-4 text-brand" />
+                <Sparkles className="size-4 text-brand-text" />
               </span>
               <div className="min-w-0">
                 <div className="text-sm font-medium text-foreground">Drafting your answers…</div>
                 <RotatingStatus />
               </div>
-              <Loader2 className="ml-auto size-4 shrink-0 animate-spin text-brand" />
+              <Loader2 className="ml-auto size-4 shrink-0 animate-spin text-brand-text" />
             </div>
           )}
 
@@ -137,7 +137,7 @@ export function ApplyView() {
             <button
               onClick={a.prefill}
               disabled={prefilling || filling}
-              className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 text-sm font-medium text-brand transition-colors hover:bg-brand/15 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3.5 py-1.5 text-sm font-medium text-brand-text transition-colors hover:bg-brand/15 disabled:opacity-50"
             >
               {prefilling ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
               {prefilling ? "Drafting from your CV…" : "Pre-fill from my CV"}
@@ -149,7 +149,7 @@ export function ApplyView() {
             <details className="mb-4 rounded-lg border border-border bg-surface/60 backdrop-blur-sm" open={false}>
               <summary className="flex cursor-pointer select-none items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted">
                 <Terminal className="size-3.5" /> Pre-fill diagnostics
-                {prefilling && <Loader2 className="size-3 animate-spin text-brand" />}
+                {prefilling && <Loader2 className="size-3 animate-spin text-brand-text" />}
                 <span className="ml-auto text-faint">{a.prefillLog.length} steps</span>
               </summary>
               <div className="max-h-52 overflow-y-auto border-t border-border px-3 py-2">
@@ -195,7 +195,7 @@ export function ApplyView() {
               onClick={a.agentFill}
               disabled={filling || prefilling}
               title="Let the AI drive the real form and fill it field-by-field (for tricky / multi-step forms). It never submits."
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text disabled:opacity-50"
             >
               <MousePointerClick className="size-4" /> Let the AI fill it
             </button>
@@ -341,7 +341,7 @@ function ApplyExitBar() {
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={() => (needsLeaveConfirmation({ status: a.status, answers: a.answers }) ? setConfirming(true) : leave())}
-          className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+          className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
         >
           <ArrowLeft className="size-4" /> Back
         </button>
@@ -373,7 +373,7 @@ function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean 
         <span className="relative grid size-14 place-items-center">
           <span className="co-orb absolute inset-0 rounded-full bg-brand/30 blur-lg" />
           <span className="co-ring absolute inset-0 rounded-full border-2 border-brand/30 border-t-brand" />
-          <MousePointerClick className="size-6 text-brand" />
+          <MousePointerClick className="size-6 text-brand-text" />
         </span>
         <div className="font-display text-2xl text-landing">{filling ? "AI is filling the form…" : "Reaching your form…"}</div>
         <p className="max-w-sm text-sm text-muted">{filling ? "The AI is driving the real form field-by-field on your machine — it never submits; you review and submit." : "The AI is navigating the real application on your machine to reach the form — it never submits."}</p>
@@ -388,7 +388,7 @@ function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean 
         <ol className="mt-3 space-y-1.5 rounded-xl border border-border/70 bg-surface/70 p-3 backdrop-blur-sm">
           {steps.map((s, i) => (
             <li key={i} className={cn("flex items-center gap-2 text-xs", i === steps.length - 1 ? "text-foreground" : "text-muted")}>
-              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-brand-soft text-[10px] font-semibold text-brand">{s.turn}</span>
+              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-brand-soft text-[10px] font-semibold text-brand-text">{s.turn}</span>
               <span className="shrink-0 font-medium">{DRIVE_VERB[s.action] ?? s.action}</span>
               <span className="truncate text-faint">{s.detail}</span>
               {/* `submit-control` is the guard doing its job (good news, distinct
@@ -460,7 +460,7 @@ function PhaseRail({ phase }: { phase: number }) {
                 className={cn(
                   "relative grid size-6 place-items-center rounded-full border transition-colors",
                   state === "done" && "border-brand bg-brand text-brand-foreground",
-                  state === "active" && "border-brand text-brand",
+                  state === "active" && "border-brand text-brand-text",
                   state === "todo" && "border-border text-faint",
                 )}
               >
@@ -509,7 +509,7 @@ function ProcessingHero({ title, subtitle }: { title: string; subtitle: string }
       <span className="relative grid size-16 place-items-center">
         <span className="co-orb absolute inset-0 rounded-full bg-brand/30 blur-lg" />
         <span className="co-ring absolute inset-0 rounded-full border-2 border-brand/30 border-t-brand" />
-        <Sparkles className="size-7 text-brand" />
+        <Sparkles className="size-7 text-brand-text" />
       </span>
       <div className="font-display text-3xl text-landing">{title}</div>
       <p className="max-w-sm text-sm text-muted">{subtitle}</p>
@@ -585,7 +585,7 @@ function FieldRow({
         ) : (
           <label htmlFor={controlId} className={f.label ? undefined : "text-faint"}>{labelText}</label>
         )}
-        {f.required && <Asterisk aria-hidden="true" className="size-3 text-brand" />}
+        {f.required && <Asterisk aria-hidden="true" className="size-3 text-brand-text" />}
         {needs && <span id={confirmationId} className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
       </div>
       {writing ? (
