@@ -277,7 +277,7 @@ Tam kurulum kılavuzu için [docs/SETUP.md](docs/SETUP.md), career-ops'u özel v
 
 ## Kullanım
 
-Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, bir PDF'i ilana göre uyarlar ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur.
+Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur.
 
 ### Bir mod istemek
 
@@ -295,7 +295,7 @@ Hepsi tek bir yönlendiriciyi, `.agents/skills/career-ops/SKILL.md`, ve aynı `m
 
 | Komut | Ne yapar |
 | --- | --- |
-| *bir URL veya iş tanımı yapıştır* | Tam pipeline: ilanın hâlâ yayında olup olmadığının denetimi (yalnızca URL'ler), A-H değerlendirmesi, rapor, uyarlanmış PDF, tracker satırı |
+| *bir URL veya iş tanımı yapıştır* | Tam pipeline: ilanın hâlâ yayında olup olmadığının denetimi (yalnızca URL'ler), A-H değerlendirmesi, rapor, uyarlanmış CV (varsayılan olarak PDF), tracker satırı |
 | `scan` | Portallarını yeni ilanlar için tarar ve bunları gelen kutusuna ekler (`data/pipeline.md`) |
 | `pipeline` | Gelen kutusunda bekleyen her URL'yi değerlendirir |
 | `apply` | Bir başvuru formunu seninle birlikte alan alan doldurur. Gönder'den önce durur |
