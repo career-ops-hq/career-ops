@@ -462,8 +462,20 @@ export function languageSubtag(value) {
  * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
  */
 export function postingUrlRelation(rawA, rawB) {
-  const a = postingLanguageKey(rawA);
-  const b = postingLanguageKey(rawB);
+  return relatePostingLanguageKeys(postingLanguageKey(rawA), postingLanguageKey(rawB));
+}
+
+/**
+ * What two postingLanguageKey() results say about one posting.
+ *
+ * Same answers as postingUrlRelation(). A caller that already parsed both
+ * URLs compares the keys here instead of parsing them again.
+ *
+ * @param {{key: string, language: string, script: string}} a
+ * @param {{key: string, language: string, script: string}} b
+ * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
+ */
+export function relatePostingLanguageKeys(a, b) {
   if (!a.key || !b.key) return 'no-key';
   if (a.key !== b.key) return 'distinct';
   if (a.language === b.language) {

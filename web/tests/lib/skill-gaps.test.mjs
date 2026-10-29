@@ -62,6 +62,42 @@ test("an empty gap map is not flagged as thin", () => {
   assert.equal(m.caveats.find((x) => x.kind === "thin-coverage"), undefined);
 });
 
+test("an empty install does not claim the CV had no recognised skills", () => {
+  // /api/upskill on a fresh data root returns available:true with an error
+  // string and no metadata. num() turns the missing knownSkillCount into 0,
+  // so the panel used to print the no-known-skills caveat next to
+  // "No recurring gaps yet" when there was no CV and no tracker.
+  const fresh = skillGapModel({
+    available: true,
+    data: { error: "No applications tracker found. Run some evaluations first." },
+  });
+  assert.equal(fresh.available, true);
+  assert.equal(fresh.gaps.length, 0);
+  assert.equal(fresh.caveats.find((x) => x.kind === "no-known-skills"), undefined);
+
+  // A counted zero with no gaps is the same situation. The caveat exists to
+  // qualify a list of skills, and there is no list.
+  const empty = skillGapModel(payload({ knownSkillCount: 0 }, []));
+  assert.equal(empty.gaps.length, 0);
+  assert.equal(empty.caveats.find((x) => x.kind === "no-known-skills"), undefined);
+});
+
+test("gaps with no knownSkillCount are not a CV that had zero skills", () => {
+  // knownSkillCount absent is not the number 0. A check on gaps.length alone,
+  // or num() which turns a missing field into 0, would flag this map.
+  const uncounted = skillGapModel({
+    available: true,
+    data: {
+      metadata: { reportsRead: 9, reportsWithMachineSummary: 5 },
+      gaps: [
+        { skill: "Kubernetes", reports: 4, lowFitReports: 2, weightedScore: 3.5, tier: "High", sources: [2, 3] },
+      ],
+    },
+  });
+  assert.equal(uncounted.gaps.length, 1);
+  assert.equal(uncounted.caveats.find((x) => x.kind === "no-known-skills"), undefined);
+});
+
 test("malformed gaps cannot reach the panel", () => {
   const m = skillGapModel(payload({}, [
     { skill: "Kubernetes", weightedScore: 3.5 },
