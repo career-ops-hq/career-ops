@@ -20,7 +20,6 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { linkedInJobsFromText } from '../../lib/linkedin-import.mjs';
 import {
   extractUrls, isCleanUrl, isAuthenticEmail, parseRoleAtCompany,
   getMessageBody, companyFromUrl,
@@ -148,13 +147,7 @@ export default {
       }
 
       const seed = parseRoleAtCompany(subject);
-      const body = getMessageBody(msg.payload);
-      const linkedInJobs = linkedInJobsFromText(body);
-      const linkedInIds = new Set(linkedInJobs.map((job) => job.id));
-      // extractUrls returns strings, so compare ids with the same text parser.
-      const cleanUrls = extractUrls(body).filter(isCleanUrl).filter(
-        (url) => !linkedInJobsFromText(url).some((job) => linkedInIds.has(job.id)),
-      );
+      const cleanUrls = extractUrls(getMessageBody(msg.payload)).filter(isCleanUrl);
       for (const url of cleanUrls) {
         if (seenUrls.has(url)) continue;
         seenUrls.add(url);
@@ -162,16 +155,6 @@ export default {
           title: seed?.role || 'Job lead (email)',
           url,
           company: companyFromUrl(url) || seed?.company || '',
-          location: '',
-        });
-      }
-      for (const job of linkedInJobs) {
-        if (seenUrls.has(job.url)) continue;
-        seenUrls.add(job.url);
-        jobs.push({
-          title: seed?.role || 'Job alert',
-          url: job.url,
-          company: 'LinkedIn',
           location: '',
         });
       }
