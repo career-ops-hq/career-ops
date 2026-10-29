@@ -247,7 +247,7 @@ De veldnamen in de kop (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 (lijst van 15-20 trefwoorden uit de vacature voor ATS-optimalisatie)
 
 ## Keyword Coverage
-(gegenereerd door `node keyword-match.mjs <report>` -- dekking in %, present, thin, missing)
+(gegenereerd door `keyword-match.mjs` (1b) -- dekking in %, present, thin, missing)
 
 ## Job Description (archived verbatim)
 (de volledige tekst van de vacature, letterlijk geplakt -- zie de eis hieronder)
@@ -257,11 +257,44 @@ De veldnamen in de kop (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 
 **Machine Summary (verplicht):** YAML-blok direct na de kop, met schema, exacte veldnamen en regels uit `batch/batch-prompt.md` (de bron; hier niet herhalen). Bevat `advertised_comp` (het salarisbedrag van de vacature letterlijk, of `null`), `risk_summary` en `requirement_importance` (blok B rij voor rij; de `inferred`-grens geldt ook hier).
 
-**Archivering van de vacature (verplicht, #2789):** Elk rapport MOET een sectie `## Job Description (archived verbatim)` bevatten met de volledige tekst van de vacature, nooit samengevat of herschreven. De kop blijft Engels: `check-jd-archive.mjs` zoekt hem op naam. De eerste regel is de zichtbare publicatiedatum (`Posted: {datum of relatieve tekst}`, of `Posted: not visible in source`), nooit de datum van het rapportbestand. Is de vacature te lang of niet volledig te citeren, sla haar dan op met `archive-posting.mjs <url> --company={company-slug} --report={num}` en zet in de sectie **exact** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, zonder andere tekst. Is geen machinale opslag mogelijk (bijvoorbeeld een lange geplakte tekst zonder URL), hernoem de sectie dan naar `## Job Description (not archived)` en vermeld waarom. Nooit een parafrase in plaats daarvan; de volledige regel staat in `modes/oferta.md` (**JD archival**).
+**Archivering van de vacature (verplicht, #2789):** Elk rapport MOET een sectie `## Job Description (archived verbatim)` bevatten met de volledige tekst van de vacature, nooit samengevat of herschreven. De kop blijft Engels: `check-jd-archive.mjs` zoekt hem op naam. De eerste regel is de zichtbare publicatiedatum (`Posted: {datum of relatieve tekst}`, of `Posted: not visible in source`), nooit de datum van het rapportbestand. Is de vacature te lang of niet volledig te citeren, sla haar dan op met `archive-posting.mjs` (opdracht hieronder) en zet in de sectie **exact** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, zonder andere tekst. Is geen machinale opslag mogelijk (bijvoorbeeld een lange geplakte tekst zonder URL), hernoem de sectie dan naar `## Job Description (not archived)` en vermeld waarom. Nooit een parafrase in plaats daarvan; de volledige regel staat in `modes/oferta.md` (**JD archival**).
+
+**Opdrachtargumenten (#5853):** typ de URL van de vacature, de bedrijfsslug of het rapportpad nooit in een opdrachtregel, ook niet tussen aanhalingstekens. Schrijf de waarden met je bestandstool naar een JSON-bestand (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) en voer de opdracht hieronder uit: die controleert elke waarde (de slug moet overeenkomen met `^[a-z0-9-]+$`) en geeft elke waarde als apart argument aan het script, zonder shell. Een waarde die de controle niet doorstaat, stopt de uitvoering: verbeter de waarde, nooit de controle. De volledige regel staat in `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 1b. ATS-trefwoorddekking invoegen
 
-Voer na het opslaan `node keyword-match.mjs reports/{###}-{company-slug}-{YYYY-MM-DD}.md` uit en plak het blok `## Keyword Coverage` onder de geëxtraheerde trefwoorden. Alleen diagnostisch: voeg een trefwoord alleen toe als het overeenkomt met echte ervaring.
+Voer na het opslaan `keyword-match.mjs` (opdracht hieronder) uit en plak het blok `## Keyword Coverage` onder de geëxtraheerde trefwoorden. Alleen diagnostisch: voeg een trefwoord alleen toe als het overeenkomt met echte ervaring.
+
+Schrijf daarvoor `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` naar een JSON-bestand (zie **Opdrachtargumenten** hierboven) en voer uit:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Opslaan in tracker
 

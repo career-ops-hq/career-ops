@@ -40,6 +40,12 @@ try {
     if (hit?.url === BOARD_URL) pass(`detect claims ${careers_url} as ${BOARD_URL}`);
     else fail(`detect(${careers_url}) = ${JSON.stringify(hit)}, want ${BOARD_URL}`);
   }
+  for (const tld of ['com', 'ca', 'eu', 'in', 'com.au', 'jp', 'sa', 'com.cn']) {
+    const host = `exampleconsulting.zohorecruit.${tld}`;
+    const hit = zoho.detect({ name: 'ExampleConsulting', careers_url: `https://${host}/jobs/Emplois/100000000048333021` });
+    if (hit?.url === `https://${host}/jobs/Careers`) pass(`detect accepts the .${tld} regional domain`);
+    else fail(`detect(.${tld}) = ${JSON.stringify(hit)}`);
+  }
   if (zoho.detect({ name: 'ExampleCo', api: BOARD_URL })?.url === BOARD_URL) pass('detect also reads api:');
   else fail('detect ignored an api: board URL');
 
@@ -48,7 +54,11 @@ try {
     'https://zohorecruit.com/jobs/Careers',
     'https://exampleco.zohorecruit.com.evil.example/jobs/Careers',
     'https://exampleco.evilzohorecruit.com/jobs/Careers',
-    'https://exampleco.zohorecruit.eu/jobs/Careers',
+    'https://exampleco.zohorecruit.com.evil.test/jobs/Careers',
+    'https://exampleco.zohorecruit.ca.evil.test/jobs/Careers',
+    'https://evil-zohorecruit.ca/jobs/Careers',
+    'https://exampleconsulting.zohorecruit.xyz/jobs/Careers',
+    'https://zohorecruit.ca/jobs/Careers',
     'http://exampleco.zohorecruit.com/',
     'not a url',
     '',
@@ -294,9 +304,10 @@ try {
   let guardedCalls = 0;
   const guardCtx = { fetchText: async () => { guardedCalls++; return fixture('zoho-recruit-list.html'); } };
   for (const [careers_url, re] of [
-    ['http://exampleco.zohorecruit.com/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\.com careers_url/],
-    ['https://exampleco.zohorecruit.com.evil.example/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\.com careers_url/],
-    ['https://169.254.169.254/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\.com careers_url/],
+    ['http://exampleco.zohorecruit.com/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\./],
+    ['https://exampleco.zohorecruit.com.evil.example/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\./],
+    ['https://exampleconsulting.zohorecruit.ca.evil.test/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\./],
+    ['https://169.254.169.254/jobs/Careers', /needs an https:\/\/<tenant>\.zohorecruit\./],
   ]) {
     let message = '';
     try { await zoho.fetch({ name: 'ExampleCo', provider: 'zoho-recruit', careers_url }, guardCtx); }

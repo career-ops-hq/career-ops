@@ -56,7 +56,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
     }
     assert.fail("control is not keyboard reachable");
   }
-  const opener = (page) => page.getByRole("button", { name: "Open assistant", exact: true });
+  const opener = (page) => page.getByRole("button", { name: "Ask the assistant", exact: true });
   const composer = (page) => page.getByRole("textbox", { name: "Message to assistant", exact: true });
   const panel = (page) => page.getByRole("region", { name: "Assistant", exact: true });
   async function openWithKeyboard(page, target = opener(page)) {

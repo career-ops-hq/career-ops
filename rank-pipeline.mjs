@@ -29,7 +29,7 @@
  *   node rank-pipeline.mjs --self-test         # in-memory suite; spawns no subprocess
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
@@ -37,6 +37,7 @@ import { fileURLToPath } from 'url';
 import { flagValue, hasFlag, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
 import { sanitizeMarkdownField } from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readRememberedCli } from './lib/agent-cli.mjs';
@@ -483,7 +484,7 @@ async function main(args) {
       const current = readFileSync(PIPELINE_PATH, 'utf-8');
       const result = applyAnnotations(current, annotations, original);
       written = result.written;
-      if (written) writeFileSync(PIPELINE_PATH, result.text);
+      if (written) replaceUserFile(PIPELINE_PATH, result.text);
     });
   }
 
