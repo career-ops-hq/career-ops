@@ -56,6 +56,15 @@ test("the rewrite prompt tells the model to keep the original words", () => {
   const prompt = buildRewritePrompt({ instruction: "Shorter", ...SOURCE, keywords: [] });
   assert.match(prompt, /Use the original's words/);
   assert.match(prompt, /No stock phrase, no em dash, and no en dash/);
+  assert.match(prompt, /Original bullet from the candidate's CV: "Cut deploy time from 2 weeks to 4 hours with CI\/CD"/);
+});
+
+test("a bullet with no CV match is not labeled as the candidate's original", () => {
+  const tailored = "Spearheaded the weekly release train for the payments app";
+  const prompt = buildRewritePrompt({ instruction: "Shorter", base: null, tailored, keywords: [] });
+  assert.match(prompt, /The candidate's CV has no bullet that matches this one/);
+  assert.equal(prompt.includes("Original bullet from the candidate's CV"), false);
+  assert.ok(prompt.includes(`Current tailored bullet: ${JSON.stringify(tailored)}`));
 });
 
 test("the instruction and the bullet reach the prompt as quoted data", () => {
