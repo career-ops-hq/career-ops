@@ -12,9 +12,9 @@ const MAX_TABS = 500;
  * Whether this payload should be sent.
  *
  * A payload the server already has is not sent again, except on the way out
- * of the page while a different payload is still in flight, or when an
- * earlier response may have been lost after writing. That in-flight save can
- * land after the tab is gone, and the page can no longer correct it.
+ * of the page while another save is still in flight, or when an earlier
+ * response may have been lost after writing. The browser can cancel the open
+ * request as the page closes, so the exit flush sends that payload again.
  *
  * @param {string} saved - JSON already stored.
  * @param {string} current - JSON on screen.
@@ -24,7 +24,7 @@ const MAX_TABS = 500;
  */
 export function shouldSendEdits(saved, current, inflight, keepalive, uncertain = false) {
   if (current === saved) {
-    if (uncertain) return typeof inflight !== "string" || (keepalive === true && inflight !== current);
+    if (uncertain) return typeof inflight !== "string" || keepalive === true;
     return keepalive === true && typeof inflight === "string" && inflight !== current;
   }
   if (current === inflight && keepalive !== true) return false;

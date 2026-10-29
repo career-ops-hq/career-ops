@@ -54,6 +54,8 @@ test("a lost save still sends restored edits while the sent payload is in flight
 test("a lost autosave keeps the restored snapshot unsaved", () => {
   assert.equal(shouldSendEdits("saved", "saved", null, true, true), true);
   assert.equal(shouldSendEdits("saved", "saved", null, false, true), true);
+  assert.equal(shouldSendEdits("saved", "saved", "saved", true, true), true);
+  assert.equal(shouldSendEdits("saved", "saved", "saved", false, true), false);
   assert.equal(shouldSendEdits("saved", "saved", "newer", false, true), false);
   assert.equal(editSaveStatus("saved", "saved", null, null, true), "Unsaved");
   assert.equal(editSaveStatus("saved", "saved", null, null, false), "Saved");
