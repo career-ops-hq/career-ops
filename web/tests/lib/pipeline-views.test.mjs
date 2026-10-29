@@ -19,6 +19,8 @@ test("a blank name or a non-numeric score floor is rejected", () => {
   assert.equal(normalizeView({ name: "   ", tab: "ALL" }), null);
   assert.equal(normalizeView({ name: "x".repeat(41), tab: "ALL" }), null);
   assert.equal(normalizeView({ name: "Bad", tab: "ALL", min: "high" }), null);
+  assert.equal(normalizeView({ name: "Blank floor", tab: "ALL", min: " " }), null);
+  assert.equal(normalizeView({ name: "Padded", tab: "ALL", min: " 4 " }).min, 4);
   assert.equal(normalizeView(null), null);
 });
 

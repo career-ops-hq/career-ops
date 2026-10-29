@@ -14,6 +14,7 @@ export function normalizeView(input) {
   let min = null;
   if (raw.min != null && raw.min !== "") {
     if (typeof raw.min !== "number" && typeof raw.min !== "string") return null;
+    if (typeof raw.min === "string" && raw.min.trim() === "") return null;
     min = typeof raw.min === "number" ? raw.min : Number(raw.min);
     if (!Number.isFinite(min)) return null;
   }
