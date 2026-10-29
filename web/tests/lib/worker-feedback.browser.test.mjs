@@ -71,7 +71,7 @@ test("workers expose task-specific state and notify once without moving focus", 
     await page.route('**/api/runs/save', (route) => route.fulfill({ json: { ok: true } }));
     for (const path of ['assistant', 'run']) await page.route('**/api/' + path, (route) => route.continue({ url: 'http://127.0.0.1:' + fixture.address().port + '/' + path }));
     const input = page.getByRole('textbox', { name: 'Message to assistant', exact: true });
-    const opener = page.getByRole('button', { name: 'Open assistant', exact: true });
+    const opener = page.getByRole('button', { name: 'Ask the assistant', exact: true });
     const status = page.getByRole('status', { name: 'Assistant request status', exact: true });
     async function until(check, message) {
       for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise((r) => setTimeout(r, 30)); }
