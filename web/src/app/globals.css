@@ -33,8 +33,8 @@
   --color-landing: var(--landing); /* editorial olive (light) / cream (dark) — docs landing-foreground */
   /* Brand as SMALL TEXT: the raw orange only passes AA in dark (4.95); in light
      it's 2.6-3.1 on cream/white. brand-text darkens it for light and keeps the
-     raw brand in dark. Use for small text/badges; brand stays for accents,
-     surfaces, icons and large headings (≥24px passes at 3:1). */
+     raw brand in dark. Every text color (text-*, CSS color) uses brand-text;
+     brand stays for fills, borders, rings and gradients. */
   --color-brand-text: var(--brand-text);
 }
 
@@ -228,12 +228,12 @@ html {
 .report-prose li,
 .report-prose blockquote { max-width: 76ch; }
 .report-prose strong { color: var(--fg); font-weight: 600; }
-.report-prose a { color: var(--color-brand); text-decoration: none; }
+.report-prose a { color: var(--color-brand-text); text-decoration: none; }
 .report-prose a:hover { text-decoration: underline; }
 .report-prose code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  color: var(--color-brand);
+  color: var(--color-brand-text);
   background: var(--surface-hover);
   padding: 0.1em 0.35em;
   border-radius: 0.3rem;
