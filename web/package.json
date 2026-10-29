@@ -12,7 +12,7 @@
     "test:browser": "node tests/browser-suites.mjs"
   },
   "engines": {
-    "node": ">=22.13.0"
+    "node": "^22.13.0 || >=23.4.0"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.80",

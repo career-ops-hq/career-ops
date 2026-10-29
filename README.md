@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Created by <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Created by <a href="https://github.com/santifer"><strong>@santifer</strong></a>, with&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders">700+ contributors</a></p>
 
 <p align="center">
 <strong>Months of sending CVs into&nbsp;silence.</strong><br>
@@ -123,6 +123,8 @@ The silence after you hit send is not about you. Enough people saw the same thin
 <br>
 
 Hiring will not fix itself. The people going through it can, and they are already in the room, comparing notes and fixing each other's setups.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=en" alt="Animated wall of contributors' GitHub avatars, filling in order of arrival since April 2026, with the next square left open." width="100%"></a></p>
 
@@ -270,6 +272,29 @@ This installs the `career-ops` binary globally, so you can run `career-ops init 
 **Which one should you use?**
 - `npx @santifer/career-ops init`: best for first use; creates a dedicated project folder.
 - `npm i -g @santifer/career-ops`: if you'd rather type `career-ops init` than the `npx` form. It adds no other commands.
+
+### Install as a Claude plugin (Claude desktop app)
+
+Install career-ops once and use it from any folder in the Claude desktop app's **Code** tab. You don't need to clone anything or open a career-ops folder.
+
+1. In the Claude desktop app, open **Customize → Plugins**.
+2. Select **Add → Add marketplace** and enter `career-ops-hq/career-ops`.
+3. Open **Discover**, find **career-ops**, and select **Add**.
+4. To get new versions without doing anything, open the marketplace you added and turn on **Sync automatically**. **Check for updates** pulls them right away. A new version means a new `version` in `.claude-plugin/plugin.json`. Pushes that leave it unchanged don't reach installs (see [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md#updating)).
+5. Start a new session in the **Code** tab. The first start takes a few extra seconds while career-ops installs its Node packages. Then type `/career-ops:career-ops`, or paste a job URL. On first use it walks you through setup.
+
+By default, your CV, profile, tracker and reports are saved in `~/career-ops-data` (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` picks another folder). They are never saved inside the plugin: a folder inside it is refused, so plugin updates never touch your files.
+
+From the Claude Code CLI, the same install is two commands:
+
+```text
+/plugin marketplace add career-ops-hq/career-ops
+/plugin install career-ops@career-ops
+```
+
+> **Code tab and Claude Code only.** A plugin added in Customize also shows up in Chat and Cowork, but career-ops can't run there as a plugin: Chat has no access to your files, and Cowork can't install the plugin's packages. To use career-ops in Cowork, open a career-ops folder instead ([docs/COWORK.md](docs/COWORK.md)).
+
+Where everything lives, how updates work and how to pick another data folder: [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
 
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
