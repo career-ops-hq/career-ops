@@ -279,17 +279,17 @@ Siehe [docs/SETUP.md](docs/SETUP.md) für die vollständige Einrichtungsanleitun
 
 ## Nutzung
 
-Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst.
+Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst. Lässt sich eine Stelle nicht lesen, hält die Pipeline an und bittet dich, den Text einzufügen.
 
 ### Einen Modus anfordern
 
 | CLI | So forderst du `scan` an |
 | --- | --- |
-| Claude Code, OpenCode, Qwen, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Cursor oder jede andere CLI | Normale Sprache: „Run the career-ops scan mode“ |
+| Codex, Qwen, Cursor oder jede andere CLI | Normale Sprache: „Run the career-ops scan mode“ |
 
-`/career-ops` ohne weiteren Zusatz zeigt das Befehlsmenü. Normale Sprache funktioniert in jeder CLI.
+`/career-ops` ohne weiteren Zusatz zeigt das Befehlsmenü. Normale Sprache funktioniert in jeder CLI. Als Claude-Code-Plugin lautet der Befehl `/career-ops:career-ops`.
 
 Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselben `modes/*.md`-Dateien, ein Modus verhält sich also in jeder CLI gleich. Slash Commands sind in Codex nicht garantiert: Frag in normaler Sprache oder führe einen Prompt headless aus mit `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Wie du career-ops in jeder unterstützten CLI startest, die Headless-Befehle, wo eine CLI einen hat, und CLI-spezifische Hinweise wie Pis `/trust` stehen in [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
@@ -297,7 +297,7 @@ Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselb
 
 | Befehl | Was er tut |
 | --- | --- |
-| *URL oder Stellenbeschreibung einfügen* | Komplette Pipeline: Aktualitätsprüfung (nur bei URLs), A-H-Bewertung, Report, angepasster Lebenslauf (standardmäßig PDF), Tracker-Zeile |
+| *URL oder Stellenbeschreibung einfügen* | Komplette Pipeline: Aktualitätsprüfung (nur bei URLs), A-G-Bewertung, Report, angepasster Lebenslauf (standardmäßig PDF), Tracker-Zeile |
 | `scan` | Deine Portale nach neuen Stellen scannen und sie in die Inbox legen (`data/pipeline.md`) |
 | `pipeline` | Jede URL bewerten, die in der Inbox wartet |
 | `apply` | Ein Bewerbungsformular gemeinsam mit dir ausfüllen, Feld für Feld. Vor dem Absenden hält er an |
@@ -324,8 +324,8 @@ Alle teilen sich einen Router, `.agents/skills/career-ops/SKILL.md`, und dieselb
 
 | Befehl | Was er tut |
 | --- | --- |
-| *URL oder Stellenbeschreibung einfügen* | [Auto-Pipeline](modes/auto-pipeline.md): Bewertung + Report + PDF + Tracker-Eintrag |
-| [`oferta`](modes/oferta.md) | Nur Bewertung, Blöcke A bis H (kein PDF) |
+| *URL oder Stellenbeschreibung einfügen* | [Auto-Pipeline](modes/auto-pipeline.md): Bewertung + Report + angepasster Lebenslauf (standardmäßig PDF) + Tracker-Eintrag |
+| [`oferta`](modes/oferta.md) | Nur Bewertung, Blöcke A bis G (kein PDF) |
 | [`ofertas`](modes/ofertas.md) | Mehrere Angebote vergleichen und ranken |
 | [`deep`](modes/deep.md) | Tiefen-Recherche-Prompt zum Unternehmen |
 | [`eu-swe`](modes/regional/eu-swe.md) | Eine europäische Softwareentwicklungs-Bewerbung vor Lebenslauf, Bewerbung oder Interview kalibrieren |
