@@ -187,6 +187,16 @@ export function parseEdits(raw, sourceHash) {
  *   | {type: "replace", edits: StudioEdits}} StudioAction
  */
 
+/** @param {BulletUse} a @param {BulletUse} b */
+function sameBulletUse(a, b) {
+  if (a.kind !== b.kind) return false;
+  if (a.kind !== "custom") return true;
+  if (a.text !== b.text) return false;
+  const left = a.keywords;
+  const right = b.keywords;
+  return left.length === right.length && left.every((word, i) => word === right[i]);
+}
+
 /**
  * @param {StudioEdits} edits
  * @param {StudioAction} action
@@ -195,8 +205,11 @@ export function parseEdits(raw, sourceHash) {
  */
 export function studioReducer(edits, action, doc) {
   switch (action.type) {
-    case "use":
+    case "use": {
+      const chosen = edits.use[action.id];
+      if (chosen && sameBulletUse(chosen, action.use)) return edits;
       return { ...edits, use: { ...edits.use, [action.id]: action.use } };
+    }
     case "toggle": {
       const isHidden = hiddenSet(doc, edits).has(action.id);
       const presetHides = presetHidden(doc, edits.preset).has(action.id);

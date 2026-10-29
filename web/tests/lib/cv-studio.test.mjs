@@ -156,6 +156,23 @@ test("a wording change recorded after a hide still undoes to the hidden CV", () 
   assert.equal(undone.use.s2i0b0, undefined);
 });
 
+test("clicking the wording that is already selected records nothing", () => {
+  const { doc } = studio();
+  const before = emptyEdits("h1");
+  const first = applyRecordedEdit(before, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, []);
+  assert.equal(first.recorded, true);
+  const again = applyRecordedEdit(first.edits, { type: "use", id: "s2i0b0", use: { kind: "base" } }, doc, first.history);
+  assert.equal(again.recorded, false);
+  assert.equal(again.edits, first.edits);
+  assert.equal(again.history, first.history);
+  assert.equal(again.history.at(-1).use.s2i0b0, undefined);
+  const custom = applyRecordedEdit(first.edits, { type: "use", id: "s2i0b0", use: { kind: "custom", text: "Led the model registry", keywords: ["MLOps"] } }, doc, first.history);
+  assert.equal(custom.recorded, true);
+  const sameCustom = applyRecordedEdit(custom.edits, { type: "use", id: "s2i0b0", use: { kind: "custom", text: "Led the model registry", keywords: ["MLOps"] } }, doc, custom.history);
+  assert.equal(sameCustom.recorded, false);
+  assert.equal(sameCustom.history, custom.history);
+});
+
 test("clicking the selected preset or resetting an untouched CV records nothing", () => {
   const { doc } = studio();
   const before = emptyEdits("h1");
