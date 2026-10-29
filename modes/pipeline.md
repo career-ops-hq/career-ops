@@ -85,7 +85,7 @@ read as having empty values for the missing trailing columns.
 
 Beyond the positional cells, rows may carry optional **labeled** segments —
 `| {label}: {value}` — that ride on any row shape (bare URL, 3-, 4-, or 5-column),
-because the `{label}:` prefix identifies them regardless of column position. Three
+because the `{label}:` prefix identifies them regardless of column position. These
 are defined:
 
 - `| posted: {YYYY-MM-DD}` — the posting date, when the provider's API exposed one
@@ -103,6 +103,16 @@ are defined:
   a low score as a ghost/scam-posting warning and weigh it in Block G legitimacy
   before spending an evaluation. The same score + flags are also written to the
   trailing columns of `data/scan-history.tsv`.
+- `| yrs: {years}` — the years of experience the JD states, written only when
+  `experience_filter` is on in `portals.yml` (`jd-years.mjs`). `5+` and `3-5` are
+  a required overall bar (ranges by their floor); `2/5+ by degree` lists
+  degree-conditional bars; `2/5+` lists several required bars (the lowest decides);
+  `5+ or equivalent` is a bar the JD lets you meet another way (never drops);
+  `pref 5+` and `skill 3+` are preferred-only or skill-specific figures that do not
+  gate; `none stated` means the JD names no figure; `unread` means it could not be
+  fetched. `… above band` marks a row above your band; the default `action: label`
+  keeps it, `action: drop` would have removed it.
+  Check `unread` and `none stated` rows yourself: the filter never drops them.
 - `| note: {text}` — a free-text ranking signal an importer attached to the offer
   (`- [ ] {url} | {company} | {title} | note: curated shortlist` is valid). The
   deterministic scanner never sets it.
@@ -115,7 +125,7 @@ are defined:
   row can go unranked because the CLI call failed, returned malformed JSON, or
   gave no usable reason — all of which still spent tokens.)
 
-When more than one is present the order is `posted:` → `trust:` → `note:` →
+When more than one is present the order is `posted:` → `trust:` → `yrs:` → `note:` →
 `rank:`. Treat them as hints when triaging; none changes how you process the URL.
 
 ## Intelligent JD detection from URL

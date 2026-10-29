@@ -7,7 +7,7 @@ import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { readTrackerFile, resolveTrackerPath } from "@/lib/core/tracker-files.mjs";
 import { cachedFileValue } from "@/lib/stat-file-cache.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
-import { parseApplications } from "@/lib/tracker-table.mjs";
+import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
@@ -196,6 +196,15 @@ export function readApplications(): Application[] {
     parseApplications(md, root, codeRoot) as Application[],
   );
   return rows ?? [];
+}
+
+export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
+
+/** Same file readApplications uses. Missing, empty, and damaged stay distinct
+ *  so the pipeline does not tell every zero-row case to clear the search. */
+export function readTrackerShape(): TrackerShape {
+  const md = readTrackerFile(careerOpsRoot());
+  return classifyTracker(md, careerOpsRoot(), path.resolve(process.cwd(), ".."));
 }
 
 export type StatusLogRow = {

@@ -296,11 +296,25 @@ export const MIN_STEM_CHARS = 3;
 export function companiesMatchIgnoringCorporateForm(a, b) {
   const ta = normalizeTextKey(a, ' ').split(' ').filter(Boolean);
   const tb = normalizeTextKey(b, ' ').split(' ').filter(Boolean);
+  return corporateFormTokensMatch(ta, tb);
+}
+
+/**
+ * True when two already-tokenized company names match as a corporate-form pair.
+ *
+ * Same rule as companiesMatchIgnoringCorporateForm(). The tokens are
+ * normalizeTextKey(name, ' ') split on spaces, so a caller that already built
+ * them for a row can compare pairs without running that key again. Equal
+ * lengths are either the exact tier's business or a genuine disagreement on a
+ * substantive token. An empty stem is the blind-employer `?` marker and every
+ * other punctuation-only cell, which must never match a named employer.
+ *
+ * @param {string[]} ta - Tokens of one company cell.
+ * @param {string[]} tb - Tokens of the other company cell.
+ * @returns {boolean}
+ */
+export function corporateFormTokensMatch(ta, tb) {
   const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
-  // Equal lengths are either the exact tier's business or a genuine
-  // disagreement on a substantive token. An empty stem is the blind-employer
-  // `?` marker and every other punctuation-only cell, which must never match a
-  // named employer.
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
