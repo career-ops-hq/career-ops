@@ -137,8 +137,8 @@ export function candidateOwnWords(root) {
  */
 export function voiceIssues(generated, source) {
   const sourceText = String(source ?? '');
-  const sourceNorm = norm(stripMarkup(sourceText));
-  const sourceLines = new Set(linesOf(sourceText).map(norm));
+  const sourceLineNorms = linesOf(sourceText).map(norm);
+  const sourceLines = new Set(sourceLineNorms);
   // Emphasis is still the candidate's phrase: "best **practices**" matches
   // "best practices". Line breaks stay, so two neighboring lines do not join.
   const sourcePhrases = stripMarkup(sourceText, { keepLineBreaks: true });
@@ -153,9 +153,11 @@ export function voiceIssues(generated, source) {
 
   for (const line of linesOf(generated)) {
     // A whole source line counts at any length, so a copied "2021–2024" stays.
-    // A fragment of one has to be long enough not to match by accident.
+    // A fragment has to be long enough, and it has to sit inside one source
+    // line. Searching the collapsed CV would join "best" and "practices".
     const lineNorm = norm(line);
-    const alreadyInSource = sourceLines.has(lineNorm) || (lineNorm.length >= 12 && sourceNorm.includes(lineNorm));
+    const alreadyInSource = sourceLines.has(lineNorm)
+      || (lineNorm.length >= 12 && sourceLineNorms.some((sourceLine) => sourceLine.includes(lineNorm)));
     if (alreadyInSource) continue;
     const prose = line.replace(DATE_RANGE_DASH, '$1 ');
     if (prose.includes(EM_DASH)) push('em-dash', 'em dash');

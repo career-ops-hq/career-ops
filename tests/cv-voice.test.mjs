@@ -33,6 +33,10 @@ test('markdown emphasis in the source still counts as the candidate phrase', () 
   assert.equal(voiceIssues(generated, italic).some((issue) => issue.value === 'best practices'), false);
   const split = `${SOURCE}best\n**practices** for the refund page\n`;
   assert.equal(voiceIssues(generated, split).some((issue) => issue.value === 'best practices'), true);
+  const joined = 'best practices for the refund page';
+  assert.equal(voiceIssues(joined, split).some((issue) => issue.value === 'best practices'), true);
+  const onOneLine = `${SOURCE}- Followed the team best practices for the refund page\n`;
+  assert.equal(voiceIssues(joined, onOneLine).some((issue) => issue.value === 'best practices'), false);
   const absent = `${SOURCE}- Followed the team **refund** process\n`;
   assert.equal(voiceIssues(generated, absent).some((issue) => issue.value === 'best practices'), true);
 });
