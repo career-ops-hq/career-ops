@@ -31,13 +31,14 @@
  *      node invite-match.mjs --file invite.txt
  *      echo "..." | node invite-match.mjs --summary
  *      node invite-match.mjs --apply [--id N]      (rejection-classified matches only; advances status to Rejected)
+ *      node invite-match.mjs --no-clarification-draft   (omit the pre-interview clarification draft)
  *      node invite-match.mjs --self-test
  *
  * Issue #1495, #2098 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
@@ -65,12 +66,13 @@ const args = process.argv.slice(2);
 // validateFlags() (#2775). Order matters: the unrecognized-flag check runs
 // BEFORE the --help check, so `--help --bogus` still errors instead of
 // printing usage and exiting 0.
-const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--no-clarification-draft', '--help', '-h'];
 const USAGE = `Usage:
   node invite-match.mjs < invite.txt          # JSON to stdout
   node invite-match.mjs --file invite.txt     # read invite text from a file
   node invite-match.mjs --summary             # human-readable summary instead of JSON
   node invite-match.mjs --apply [--id N]      # rejection-classified matches only; advances status to Rejected
+  node invite-match.mjs --no-clarification-draft  # invites only: omit the pre-interview clarification email draft
   node invite-match.mjs --self-test           # run the built-in self-test suite
   node invite-match.mjs --help                # print this usage block and exit
   node invite-match.mjs -h                    # same as --help`;
@@ -98,6 +100,7 @@ if (isMainModule(import.meta.url)) {
 
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+const noClarificationDraft = args.includes('--no-clarification-draft');
 const fileIdx = args.indexOf('--file');
 // Treat a following recognized flag (e.g. `--file --summary`) the same as a
 // missing value — otherwise it's silently accepted as the path and produces
@@ -816,6 +819,150 @@ export function matchInvite(signals, trackerRows) {
   return scored;
 }
 
+// --- Pre-interview clarification draft (#6092) ---
+
+// Locale-keyed so a market mode can add its own wording later; English only for
+// now. Placeholders are literal bracketed text the candidate fills in.
+const CLARIFICATION_TEMPLATES = {
+  en: {
+    subject: (company, role) => `Questions ahead of the ${role} interview at ${company}`,
+    greeting: name => (name ? `Hello ${name},` : 'Hello,'),
+    intro: (company, role) =>
+      `Thank you for the invitation to interview for the ${role} position at ${company}. I am looking forward to it, and I would like to prepare well. Could you share a few details beforehand?`,
+    questions: [
+      'Who does this role report to?',
+      'What are the main deliverables expected in the first three months?',
+      'Is the posting the full scope of the role, or are there responsibilities beyond what it lists?',
+    ],
+    closing: 'Thank you, and I look forward to speaking with you.',
+    signoff: 'Best regards,\n[Your name]',
+  },
+};
+const PLACEHOLDER_COMPANY = '[company]';
+const PLACEHOLDER_ROLE = '[role]';
+
+const REPORTING_LINE_STATED = /\b(?:reports?\s+(?:directly\s+)?to|reporting\s+(?:line|to|structure)|you\s+will\s+report|will\s+report\s+to)\b/i;
+const DELIVERABLES_STATED = /\b(?:deliverables?|first\s+(?:three|3|90|ninety)\s+(?:months?|days?)|first\s+(?:quarter|90\s*days)|key\s+responsibilities|responsibilities\s+(?:include|are)|you\s+will\s+be\s+responsible)\b/i;
+
+// Text that came from the invite is untrusted: only ever let a short, plain
+// name through, never anything carrying a link, address, or line break.
+function safeName(value, maxLen) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > maxLen) return null;
+  if (!/^[\p{L}][\p{L}0-9 '&.,-]*$/u.test(v)) return null;
+  if (/https?|www\.|@/i.test(v)) return null;
+  return v;
+}
+
+// Tracker cells are the user's own data, so they get a wider allowlist than
+// invite-derived text (parentheses, slashes, digits, combining marks), with the
+// same hard stops: length, control characters, links and addresses.
+const TRACKER_NAME_RE = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} '&.,()+\/#:;\u{2019}\u{2013}\u{2014}-]*$/u;
+function safeTrackerName(value, maxLen) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > maxLen) return null;
+  if (/[\p{Cc}\u{2028}\u{2029}]/u.test(v)) return null;
+  if (!TRACKER_NAME_RE.test(v) || /https?|www\.|@/i.test(v)) return null;
+  return v;
+}
+
+// A contact name is used only when the invite names one in a place a sender
+// belongs: a From: line, or a sign-off followed by a name line. First name only.
+function extractContactName(text) {
+  const NAME_ONLY = /^[\p{Lu}][\p{L}'.-]*(?:\s+[\p{Lu}][\p{L}'.-]*){0,2}$/u;
+  // Sender labels that name a team or organisation, not a person. Deliberately
+  // not NOT_A_PERSON, whose "link" would reject real surnames.
+  const NOT_A_CONTACT = /\b(?:careers?|recruit(?:er|ers|ing|ment)|talent|hiring|resources|team|support|notifications?|hr|staffing)\b/i;
+  const firstName = raw => {
+    const t = raw.trim();
+    if (!NAME_ONLY.test(t) || NOT_A_CONTACT.test(t)) return null;
+    return safeName(t, 40)?.split(/\s+/)[0] ?? null;
+  };
+  const from = text.match(/^\s*from\s*:\s*([^\n<]+?)\s*(?:<[^>\n]*>)?\s*$/im);
+  const fromName = from ? firstName(from[1]) : null;
+  if (fromName) return fromName;
+  // A rejected From: label (e.g. a team) falls through to the sign-off.
+  const sign = text.match(/\n\s*(?:best(?: regards)?|kind regards|regards|thanks|thank you|sincerely|cheers)\s*,?\s*\n\s*([^\n]+)\s*(?:\n|$)/i);
+  return sign ? firstName(sign[1]) : null;
+}
+
+// The report cell is a markdown link; resolve it against each root in turn.
+// Reads only local .md files that stay inside one of those roots.
+function readReportHeader(reportCell, roots) {
+  const href = typeof reportCell === 'string' ? reportCell.match(/\]\(([^)\s]+)\)/)?.[1] : null;
+  if (!href || !href.toLowerCase().endsWith('.md') || /^[a-z]+:/i.test(href)) return '';
+  for (const root of roots) {
+    const full = resolve(root, href);
+    const rel = relative(root, full);
+    if (rel.startsWith('..') || isAbsolute(rel)) continue;
+    try {
+      if (existsSync(full)) return readFileSync(full, 'utf-8').split('\n').slice(0, 40).join('\n');
+    } catch { /* unreadable report: treat as no record */ }
+  }
+  return '';
+}
+
+/**
+ * Build the pre-interview clarification email draft (subject + body) for an
+ * invite-classified analysis. Pure and offline: reads only the analysis, the
+ * invite text, and (optionally) the matched row's report header. Never sends.
+ *
+ * Company/role come from the tracker row only when exactly one candidate
+ * matched with an exact company-name match; otherwise the role is left as a
+ * `[role]` placeholder rather than guessed.
+ *
+ * @param {object} analysis - Result of analyzeInvite (before clarificationDraft is added).
+ * @param {string} text - The pasted invite text.
+ * @param {{row?: object|null, readReport?: (row: object) => string, lang?: string}} [options]
+ * @returns {{subject: string|null, body: string|null, skipped: boolean, skipReason: string|null}|null}
+ */
+export function buildClarificationDraft(analysis, text, options = {}) {
+  if (!analysis || analysis.classification !== 'invite') return null;
+  const tpl = CLARIFICATION_TEMPLATES[options.lang] || CLARIFICATION_TEMPLATES.en;
+  const skip = reason => ({ subject: null, body: null, skipped: true, skipReason: reason });
+  const invite = typeof text === 'string' ? text : '';
+
+  const candidates = analysis.candidates || [];
+  const confident = candidates.length === 1 && candidates[0].nameScore === 1 ? candidates[0] : null;
+
+  if (confident && options.row) {
+    const row = options.row;
+    if (REPORTING_LINE_STATED.test(row.notes || '')) {
+      return skip(`tracker row #${row.num} notes already record a reporting line`);
+    }
+    const header = options.readReport ? options.readReport(row) : '';
+    if (REPORTING_LINE_STATED.test(header)) {
+      return skip(`report for tracker row #${row.num} already records a reporting line`);
+    }
+  }
+  if (REPORTING_LINE_STATED.test(invite) && DELIVERABLES_STATED.test(invite)) {
+    return skip('the invite already states the reporting line and deliverables');
+  }
+
+  let company = null;
+  let role = null;
+  if (confident) {
+    company = safeTrackerName(confident.company, 60);
+    role = safeTrackerName(confident.role, 80);
+  } else {
+    // No tracker fallback outside an exact single match.
+    company = safeName(analysis.signals?.company, 60);
+  }
+  company = company || PLACEHOLDER_COMPANY;
+  role = role || PLACEHOLDER_ROLE;
+
+  const lines = [
+    tpl.greeting(extractContactName(invite)), '',
+    tpl.intro(company, role), '',
+    ...tpl.questions.map((q, i) => `${i + 1}. ${q}`), '',
+    tpl.closing, '',
+    tpl.signoff,
+  ];
+  return { subject: tpl.subject(company, role), body: lines.join('\n'), skipped: false, skipReason: null };
+}
+
 /**
  * End-to-end: parse invite text, load the tracker, return ranked candidates
  * plus the signals that were extracted (so the caller/CLI can show what was
@@ -823,9 +970,10 @@ export function matchInvite(signals, trackerRows) {
  *
  * @param {string} text - Raw invite/rejection email text.
  * @param {Array<object>} [trackerRows] - Injectable for tests; defaults to loadTracker().
- * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>, constraints: Array<{key: string, tag: string, detail?: string}>}}
+ * @param {{clarificationDraft?: boolean, readReport?: (row: object) => string}} [options] - clarificationDraft:false suppresses the draft (`--no-clarification-draft`); readReport is injectable for tests.
+ * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>, constraints: Array<{key: string, tag: string, detail?: string}>, clarificationDraft: object|null}}
  */
-export function analyzeInvite(text, trackerRows = null) {
+export function analyzeInvite(text, trackerRows = null, options = {}) {
   const signals = {
     company: extractCompany(text),
     date: extractDate(text),
@@ -841,7 +989,18 @@ export function analyzeInvite(text, trackerRows = null) {
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
   const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
-  return { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
+  const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
+  // Additive (#6092): appended last so every existing key keeps its position.
+  // null unless the text is an invite and the draft was not suppressed.
+  let clarificationDraft = null;
+  if (options.clarificationDraft !== false) {
+    const row = candidates.length === 1 ? rows.find(r => r.num === candidates[0].appNumber) : null;
+    clarificationDraft = buildClarificationDraft(result, text, {
+      row,
+      readReport: options.readReport ?? (r => readReportHeader(r.report, [dirname(APPS_FILE), CAREER_OPS])),
+    });
+  }
+  return { ...result, clarificationDraft };
 }
 
 /**
@@ -955,6 +1114,18 @@ export function selectApplyTarget(result, idArg) {
 }
 
 // --- Summary mode ---
+function printClarificationDraft(draft) {
+  if (!draft) return;
+  if (draft.skipped) {
+    console.log(`  Clarification draft: skipped (${draft.skipReason})\n`);
+    return;
+  }
+  console.log('  Clarification draft (not sent -- review before sending):');
+  console.log(`  Subject: ${draft.subject}`);
+  for (const line of draft.body.split('\n')) console.log(`    ${line}`);
+  console.log('');
+}
+
 function printSummary(result) {
   console.log(`\n${'='.repeat(70)}`);
   console.log('  Interview Invite / Rejection Matcher — career-ops');
@@ -972,6 +1143,7 @@ function printSummary(result) {
     console.log('  Length not stated -- mark the calendar block as a guess.');
   }
   console.log('');
+  printClarificationDraft(result.clarificationDraft);
 
   if (!result.signals.company) {
     console.log('  Could not find a company name in the invite text — paste more context or check manually.\n');
@@ -1047,7 +1219,7 @@ if (isMainModule(import.meta.url)) {
       text = readFileSync(0, 'utf-8'); // stdin
     }
 
-    const result = analyzeInvite(text);
+    const result = analyzeInvite(text, null, { clarificationDraft: !noClarificationDraft });
 
     if (applyMode) {
       // Scoped strictly to the Rejected transition (#2098) — never applies
