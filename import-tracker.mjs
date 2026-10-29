@@ -20,13 +20,14 @@
  *   node import-tracker.mjs <export.csv> --day-first  # read 03/04/2026 as 3 April
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
-import { basename, dirname, join } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'fs';
+import { basename, dirname, isAbsolute, join } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import { parseCsv } from './linkedin-join.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
-import { loadCanonicalStates, resolveCanonicalState, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { getCareerOpsRoot, resolveTrackerPath, resolveTrackerPathForWrite } from './path-resolver.mjs';
 import { reserveReportNumbers, releaseReportNumbers } from './reserve-report-num.mjs';
@@ -315,12 +316,12 @@ function createTracker(path, withUrl) {
   writeFileSync(path, `# Applications Tracker\n\n| ${cols.join(' | ')} |\n|${cols.map(() => '---').join('|')}|\n`, { flag: 'wx' });
 }
 
-async function writeImport(entries, { trackerPath, colmap }) {
-  const additionsDir = join(resolveWorkspaceRoot(trackerPath), 'batch/tracker-additions');
-  mkdirSync(additionsDir, { recursive: true });
+async function writeImport(entries, { colmap }) {
+  // Private directory: --confirm must not merge or delete TSVs that were already waiting,
+  // and CAREER_OPS_ADDITIONS must not point merge at a different directory than these files.
+  const additionsDir = mkdtempSync(join(tmpdir(), 'import-tracker-'));
   const shape = { locationColumn: colmap?.location != null, urlColumn: colmap?.url != null };
   const reservations = [];
-  const written = [];
   try {
     for (let i = 0; i < entries.length; i += RESERVE_CHUNK) {
       const chunk = entries.slice(i, i + RESERVE_CHUNK);
@@ -329,13 +330,15 @@ async function writeImport(entries, { trackerPath, colmap }) {
       chunk.forEach((entry, j) => {
         const file = join(additionsDir, `${nums[j]}-${slugifyCompany(entry.company)}.tsv`);
         writeFileSync(file, additionTsv(entry, nums[j], shape), { flag: 'wx' });
-        written.push(file);
       });
     }
-    const merge = spawnSync(process.execPath, [join(CODE_ROOT, 'merge-tracker.mjs')], { stdio: 'inherit', env: process.env });
+    const merge = spawnSync(process.execPath, [join(CODE_ROOT, 'merge-tracker.mjs')], {
+      stdio: 'inherit',
+      env: { ...process.env, CAREER_OPS_ADDITIONS: additionsDir },
+    });
     return merge.status ?? 1;
   } finally {
-    for (const file of written) if (existsSync(file)) rmSync(file);
+    rmSync(additionsDir, { recursive: true, force: true });
     for (const nums of reservations) await releaseReportNumbers(nums);
   }
 }
@@ -344,12 +347,13 @@ if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   validateFlags(args, ['--confirm', '--day-first', '--help', '-h'], usage(), { requireOperand: true });
   const fail = (msg) => { console.error(`import-tracker: ${msg}`); process.exit(1); };
-  const file = args.find((a) => !a.startsWith('-'));
-  if (!file) fail('name the CSV file to import. See --help.');
+  const named = args.find((a) => !a.startsWith('-'));
+  if (!named) fail('name the CSV file to import. See --help.');
+  const dataRoot = getCareerOpsRoot();
+  const file = isAbsolute(named) ? named : join(dataRoot, named);
   if (!existsSync(file)) fail(`no such file: ${file}`);
 
   const confirm = hasFlag(args, '--confirm');
-  const dataRoot = getCareerOpsRoot();
   let trackerPath = resolveTrackerPath(dataRoot);
   let tracker = readTracker(trackerPath);
   if (!tracker.exists) trackerPath = resolveTrackerPathForWrite(dataRoot);
@@ -377,5 +381,5 @@ if (isMainModule(import.meta.url)) {
     tracker = readTracker(trackerPath);
   }
   console.log('');
-  process.exit(await writeImport(toImport, { trackerPath, colmap: tracker.colmap }));
+  process.exit(await writeImport(toImport, { colmap: tracker.colmap }));
 }

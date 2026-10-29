@@ -47,9 +47,13 @@ function makeRoot({ tracker = trackerText(EXISTING), csv = TEAL_CSV } = {}) {
   return { root, trackerPath, csvPath, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-function run(fx, args = []) {
+function run(fx, args = [], { csv = fx.csvPath, cwd, env: extra } = {}) {
   const env = { ...process.env, CAREER_OPS_ROOT: fx.root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER_DB: join(fx.root, 'tracker.db') };
-  return spawnSync(process.execPath, [SCRIPT, fx.csvPath, ...args], { encoding: 'utf-8', env, timeout: 60_000 });
+  delete env.CAREER_OPS_ADDITIONS;
+  delete env.CAREER_OPS_REPORTS_DIR;
+  delete env.CAREER_OPS_PDF_INDEX;
+  Object.assign(env, extra);
+  return spawnSync(process.execPath, [SCRIPT, csv, ...args], { encoding: 'utf-8', env, cwd, timeout: 60_000 });
 }
 
 function withRoot(opts, fn) {
@@ -138,8 +142,43 @@ test('--confirm leaves no reservation or addition file behind', () => {
   withRoot({}, (fx) => {
     assert.equal(run(fx, ['--confirm']).status, 0);
     assert.deepEqual(readdirSync(join(fx.root, 'reports')), [], 'reserved numbers are released');
-    const pending = readdirSync(join(fx.root, 'batch', 'tracker-additions')).filter((f) => f.endsWith('.tsv'));
-    assert.deepEqual(pending, []);
+    assert.equal(existsSync(join(fx.root, 'batch', 'tracker-additions')), false, 'confirm does not use the shared additions directory');
+  });
+});
+
+test('--confirm does not merge or remove a TSV that was already waiting', () => {
+  withRoot({}, (fx) => {
+    const dir = join(fx.root, 'batch', 'tracker-additions');
+    mkdirSync(dir, { recursive: true });
+    const decoy = join(dir, '900-decoy-co.tsv');
+    writeFileSync(decoy, 'pending decoy\n');
+    const envDir = mkdtempSync(join(tmpdir(), 'import-tracker-env-'));
+    const envDecoy = join(envDir, '901-other-co.tsv');
+    writeFileSync(envDecoy, 'env decoy\n');
+    try {
+      const inherited = run(fx, ['--confirm'], { env: { CAREER_OPS_ADDITIONS: envDir } });
+      assert.equal(inherited.status, 0, describeSpawn(inherited));
+      assert.equal(readFileSync(decoy, 'utf-8'), 'pending decoy\n');
+      assert.equal(readFileSync(envDecoy, 'utf-8'), 'env decoy\n');
+      assert.ok(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Larkspur Analytics'));
+    } finally {
+      rmSync(envDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('a relative CSV name is read from the data root', () => {
+  withRoot({}, (fx) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'import-tracker-cwd-'));
+    writeFileSync(join(elsewhere, 'export.csv'), 'Company,Job Position,Status\nNot The File,Analyst,Applied\n');
+    try {
+      const r = run(fx, [], { csv: 'export.csv', cwd: elsewhere });
+      assert.equal(r.status, 0, describeSpawn(r));
+      assert.match(r.stdout, /5 to import/);
+      assert.doesNotMatch(r.stdout, /Not The File/);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   });
 });
 
