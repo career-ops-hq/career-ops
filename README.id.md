@@ -290,15 +290,15 @@ Tempel URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah l
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor, atau CLI lainnya | Bahasa biasa: "Run the career-ops scan mode" |
 
-`/career-ops` tanpa tambahan apa pun menampilkan menu perintah. Bahasa biasa berfungsi di semua CLI. Sebagai plugin Claude Code, perintahnya adalah `/career-ops:career-ops`.
+`/career-ops` tanpa tambahan apa pun menampilkan menu perintah di CLI yang memakainya. Bahasa biasa berfungsi di semua CLI. Sebagai plugin Claude Code, perintahnya adalah `/career-ops:career-ops`.
 
-Semuanya memakai satu router yang sama, `.agents/skills/career-ops/SKILL.md`, dan berkas `modes/*.md` yang sama, sehingga sebuah mode berperilaku sama di CLI mana pun. Perintah slash tidak dijamin di Codex: minta dengan bahasa biasa, atau jalankan satu prompt secara headless dengan `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cara menjalankannya di setiap CLI yang didukung, perintah headless untuk CLI yang memilikinya, dan catatan penyiapan per CLI seperti `/trust` milik Pi ada di [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
+Semuanya memakai satu router yang sama, `.agents/skills/career-ops/SKILL.md`, dan berkas `modes/*.md` yang sama, sehingga sebuah mode berperilaku sama di CLI mana pun. Perintah slash tidak dijamin di Codex: minta dengan bahasa biasa, atau jalankan satu prompt secara headless dengan `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cara menjalankannya di setiap CLI yang didukung, perintah headless untuk CLI yang memilikinya, dan catatan penyiapan per CLI ada di [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
 ### Perintah sehari-hari
 
 | Perintah | Fungsinya |
 | --- | --- |
-| *tempel URL atau deskripsi lowongan* | Pipeline lengkap: pemeriksaan apakah lowongan masih dibuka (hanya untuk URL), evaluasi A-G, laporan, CV yang disesuaikan (PDF secara bawaan), baris di tracker |
+| *tempel URL atau deskripsi lowongan* | Pipeline lengkap: pemeriksaan apakah lowongan masih dibuka (hanya untuk URL), evaluasi A-G ditambah H pada skor tinggi, laporan, CV yang disesuaikan (PDF secara bawaan), baris di tracker |
 | `scan` | Memindai portal Anda untuk mencari lowongan baru dan menambahkannya ke kotak masuk (`data/pipeline.md`) |
 | `pipeline` | Mengevaluasi setiap URL yang menunggu di kotak masuk |
 | `apply` | Mengisi formulir lamaran bersama Anda, kolom demi kolom. Berhenti sebelum Kirim |
@@ -326,7 +326,7 @@ Semuanya memakai satu router yang sama, `.agents/skills/career-ops/SKILL.md`, da
 | Perintah | Fungsinya |
 | --- | --- |
 | *tempel URL atau deskripsi lowongan* | [Auto-pipeline](modes/auto-pipeline.md): evaluasi + laporan + CV yang disesuaikan (PDF secara bawaan) + entri tracker |
-| [`oferta`](modes/oferta.md) | Hanya evaluasi, blok A sampai G (tanpa PDF) |
+| [`oferta`](modes/oferta.md) | Hanya evaluasi, blok A sampai G ditambah H pada skor tinggi (tanpa PDF) |
 | [`ofertas`](modes/ofertas.md) | Membandingkan dan mengurutkan beberapa lowongan/tawaran |
 | [`deep`](modes/deep.md) | Prompt riset mendalam tentang perusahaan |
 | [`eu-swe`](modes/regional/eu-swe.md) | Mengkalibrasi lamaran rekayasa perangkat lunak di Eropa sebelum CV, melamar, atau wawancara |
