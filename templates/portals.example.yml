@@ -1284,6 +1284,7 @@ search_queries:
 #   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
+#   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #
@@ -1754,6 +1755,11 @@ search_queries:
 #   max_pages: 5                          # optional page cap (20 jobs/page, default 5, max 20)
 #   max_jobs: 100                         # optional (default 100, max 500)
 #   enabled: true                         # random 1-2s pause between pages
+#
+# - name: Example Bulldogjob              # Polish tech board, many employers
+#   careers_url: https://bulldogjob.pl/companies/jobs/s/role,devops/experienceLevel,medium/city,Remote  # auto-detected; any search URL
+#   max_pages: 5                          # optional page cap (50 jobs/page, default 25, max 100)
+#   enabled: true                         # 250ms pacing between pages
 #
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
@@ -3452,7 +3458,7 @@ job_boards:
     enabled: false
     notes: "Polish job board — Other specialists division"
 
-  # ── JustJoin.it / NoFluffJobs (Polish tech market) ────────────────────────
+  # ── JustJoin.it / NoFluffJobs / Bulldogjob (Polish tech market) ───────────
   # Public job-board APIs. Disabled by default; enable and rely on the global
   # title_filter/location_filter/salary_filter above for your target profile.
 
@@ -3467,6 +3473,12 @@ job_boards:
     provider: nofluffjobs
     enabled: false
     notes: "Polish tech job board — newest public postings"
+
+  - name: Bulldogjob
+    careers_url: https://bulldogjob.pl/companies/jobs
+    provider: bulldogjob
+    enabled: false
+    notes: "Polish tech job board — whole board; narrow it with a search URL from the site"
 
   # ── Jobs.cz / Prace.cz (Czech job portals) ─────────────────────────────────
   # Keyword search; keywords default to config/profile.yml target_roles.
