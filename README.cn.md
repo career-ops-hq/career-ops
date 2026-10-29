@@ -287,17 +287,17 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex、Qwen、Cursor 或任何其他 CLI | 自然语言：“Run the career-ops scan mode” |
+| Codex、Qwen、Cursor 或任何其他受支持的 CLI | 自然语言：“Run the career-ops scan mode” |
 
-单独输入 `/career-ops` 会显示命令菜单。自然语言在所有 CLI 中都能用。作为 Claude Code 插件使用时，命令是 `/career-ops:career-ops`。
+单独输入 `/career-ops` 会显示命令菜单（在使用它的 CLI 中）。自然语言在所有受支持的 CLI 中都能用。作为 Claude Code 插件使用时，命令是 `/career-ops:career-ops`。
 
-它们共用同一个路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 文件，所以无论由哪个 CLI 运行，模式的行为都一样。Codex 不保证支持斜杠命令：请用自然语言提出请求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以无头方式运行一条提示词（[docs/CODEX.md](docs/CODEX.md)）。如何在每个受支持的 CLI 中运行、带有无头命令的 CLI 的对应命令，以及 Pi 的 `/trust` 这类各 CLI 的设置说明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
+它们共用同一个路由器 `.agents/skills/career-ops/SKILL.md` 和同一批 `modes/*.md` 文件，所以无论由哪个 CLI 运行，模式的行为都一样。Codex 不保证支持斜杠命令：请用自然语言提出请求，或用 `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` 以无头方式运行一条提示词（[docs/CODEX.md](docs/CODEX.md)）。如何在每个受支持的 CLI 中运行、带有无头命令的 CLI 的对应命令，以及 各 CLI 的设置说明，都在 [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) 中。
 
 ### 日常命令
 
 | 命令 | 作用 |
 | --- | --- |
-| *粘贴链接或职位描述* | 完整流水线：职位是否仍在招的检查（仅限链接）、A-G 评估、报告、定制简历（默认 PDF）、追踪表新增一行 |
+| *粘贴链接或职位描述* | 完整流水线：职位是否仍在招的检查（仅限链接）、A-G 评估（高分时另加 H）、报告、定制简历（默认 PDF）、追踪表新增一行 |
 | `scan` | 扫描你的招聘平台以发现新职位，并加入收件箱（`data/pipeline.md`） |
 | `pipeline` | 评估收件箱中等待处理的每个链接 |
 | `apply` | 与你一起逐个字段填写申请表。提交前会停下 |
@@ -325,7 +325,7 @@ npm i -g @santifer/career-ops
 | 命令 | 作用 |
 | --- | --- |
 | *粘贴链接或职位描述* | [Auto-pipeline](modes/auto-pipeline.md)：评估 + 报告 + 定制简历（默认 PDF） + 追踪表条目 |
-| [`oferta`](modes/oferta.md) | 仅评估，区块 A 到 G（不生成 PDF） |
+| [`oferta`](modes/oferta.md) | 仅评估，区块 A 到 G，高分时另加 H（不生成 PDF） |
 | [`ofertas`](modes/ofertas.md) | 比较并排序多个职位 |
 | [`deep`](modes/deep.md) | 针对公司的深度调研提示词 |
 | [`eu-swe`](modes/regional/eu-swe.md) | 在准备简历、申请或面试之前，校准一份欧洲软件工程岗位的申请 |
