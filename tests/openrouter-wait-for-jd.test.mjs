@@ -89,3 +89,54 @@ test('waitForJobText ignores nav/footer text and leaves the page as it was', { t
   assert.ok(state.main.length >= 2500, `waited only until "${state.main.slice(0, 40)}" (${state.main.length} chars)`);
   assert.ok(state.main.includes('Senior Platform Engineer at Acme Corp.'));
 });
+
+// Text a visitor cannot see does not count: the read takes innerText, which
+// drops it. 3,000+ chars in a display:none block (and a visibility:hidden one)
+// next to a visible "Loading..." must not end the wait.
+const HIDDEN_PAGE = `<!doctype html><html><head><title>Job</title></head><body>
+<div style="display:none">${'Hidden filler text for another tab. '.repeat(100)}</div>
+<div style="visibility:hidden">${'Invisible filler text for a collapsed panel. '.repeat(100)}</div>
+<div id="app">Loading...</div>
+<script>
+  setTimeout(() => {
+    document.getElementById('app').textContent = ${JSON.stringify(JD)};
+  }, 3000);
+</script></body></html>`;
+
+test('waitForJobText ignores display:none and visibility:hidden text', { timeout: 60_000 }, async (t) => {
+  if (launchError) {
+    if (toolRequired('browser')) throw launchError;
+    t.skip('no Chromium');
+    return;
+  }
+  const page = await browser.newPage();
+  await page.setContent(HIDDEN_PAGE);
+  await waitForJobText(page);
+  const text = await page.evaluate(() => (document.body?.innerText || '').replace(/\s+/g, ' ').trim());
+  assert.ok(text.includes('Senior Platform Engineer at Acme Corp.'), `waited only until "${text.slice(0, 40)}" (${text.length} chars)`);
+});
+
+// The count stays inside the main content. A visible consent panel outside
+// <main> (not a nav/header/footer) must not end the wait while <main> still
+// says "Loading...".
+const CONSENT_PAGE = `<!doctype html><html><head><title>Job</title></head><body>
+<div id="consent">${'We use cookies to improve your experience and to measure traffic. '.repeat(40)}</div>
+<main><div id="app">Loading...</div></main>
+<script>
+  setTimeout(() => {
+    document.getElementById('app').textContent = ${JSON.stringify(JD)};
+  }, 3000);
+</script></body></html>`;
+
+test('waitForJobText counts the main content, not a consent panel outside it', { timeout: 60_000 }, async (t) => {
+  if (launchError) {
+    if (toolRequired('browser')) throw launchError;
+    t.skip('no Chromium');
+    return;
+  }
+  const page = await browser.newPage();
+  await page.setContent(CONSENT_PAGE);
+  await waitForJobText(page);
+  const main = await page.evaluate(() => (document.querySelector('main')?.innerText || '').trim());
+  assert.ok(main.includes('Senior Platform Engineer at Acme Corp.'), `waited only until "${main.slice(0, 40)}" (${main.length} chars)`);
+});

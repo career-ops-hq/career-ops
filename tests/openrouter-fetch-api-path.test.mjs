@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchJobPage } from '../openrouter-runner.mjs';
+import { normalizeSmartRecruitersJob, normalizeWorkdayJob } from '../browser-extract.mjs';
 
 const URL_ = 'https://boards.greenhouse.io/acme/jobs/48213';
 
@@ -48,4 +49,39 @@ test('the API fetcher is asked for the runner cap, and the result stays within i
   assert.equal(askedFor, 16_000);
   assert.equal(content.length, 16_000);
   assert.ok(content.startsWith('Senior Platform Engineer\n\n'));
+});
+
+// A closed posting keeps its closure: the ATS text carries "Applications
+// closed", and the runner stops on that verdict instead of reading the page,
+// which would lose it. fetch is stubbed to fail, and the URLs are .invalid hosts,
+// so with the fix missing the page read fails fast and no real site is reached.
+const CLOSED_JD = (TEXT + ' ').repeat(12);
+
+async function rejectsClosed(url, apiResult) {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => { throw new Error(`unexpected network call: ${u}`); };
+  try {
+    await assert.rejects(
+      fetchJobPage(url, { fetchApi: async () => apiResult }),
+      /No job description to evaluate at .*expired/,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+test('a closed Workday posting is rejected instead of read in the browser', async () => {
+  const url = 'https://workday.example.invalid/Careers/job/Engineer_R1';
+  const wd = normalizeWorkdayJob({ jobPostingInfo: { title: 'Engineer', jobDescription: `<p>${CLOSED_JD}</p>`, canApply: false } }, url);
+  await rejectsClosed(url, { ...wd, ats: 'workday' });
+});
+
+test('an inactive SmartRecruiters posting is rejected instead of read in the browser', async () => {
+  const url = 'https://smartrecruiters.example.invalid/acme/744000151772990-engineer';
+  const sr = normalizeSmartRecruitersJob({
+    name: 'Engineer',
+    active: false,
+    jobAd: { sections: { jobDescription: { title: 'Job Description', text: `<p>${CLOSED_JD}</p>` } } },
+  }, url);
+  await rejectsClosed(url, { ...sr, ats: 'smartrecruiters' });
 });

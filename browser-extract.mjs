@@ -591,9 +591,6 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
  * @param {number} [textCap]
  */
 export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_CAP) {
-  // A closed posting can still ship its ad; liveness-api.mjs reads `active:
-  // false` as expired, so no text is taken from it (null = read the page).
-  if (json?.active === false) return null;
   const sections = json?.jobAd?.sections;
   if (!sections || typeof sections !== 'object') return null;
 
@@ -612,6 +609,10 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
   if (where) meta.push(`Location: ${where}`);
   if (loc.remote === true) meta.push('Work model: Remote');
   else if (loc.hybrid === true) meta.push('Work model: Hybrid');
+  // A closed posting can still ship its ad. The marker carries `active: false`
+  // with the text the way Workday carries `canApply: false`, so the caller
+  // reads the closure instead of falling back to a page that hides it.
+  if (json?.active === false) meta.push('Applications closed (active: false)');
 
   return {
     url: postingUrl,

@@ -535,17 +535,20 @@ const NON_CONTENT_SELECTOR = 'script,style,nav,footer,header';
 const JD_TEXT_CAP = 16_000;
 
 // Wait for a single-page app to render its job description: until the text the
-// read will keep (the body minus nav/header/footer) holds more than 1500
-// chars, or 15 s. Counting the whole body let a long nav pass while the
-// description still said "Loading...". The count leaves the live DOM alone; the
-// read strips it afterwards. A page that never gets that long (a short
-// posting) is read as it stands.
+// read will keep (the main content, minus nav/header/footer and what is not
+// shown) holds more than 1500 chars, or 15 s. Counting the whole body let a
+// long nav or a consent panel pass while the description still said
+// "Loading...". The count leaves the live DOM alone; the read strips it
+// afterwards. A page that never gets that long (a short posting) is read as it
+// stands.
 export async function waitForJobText(page) {
   await page.waitForFunction((selector) => {
-    const walker = document.createTreeWalker(document.body || document, NodeFilter.SHOW_TEXT);
+    const root = document.querySelector('main, [role="main"], article') || document.body || document;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let length = 0;
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.parentElement?.closest(selector)) continue;
+      const el = node.parentElement;
+      if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
       length += node.nodeValue.trim().length;
       if (length > 1500) return true;
     }
@@ -561,8 +564,15 @@ export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) 
     const { title, text } = viaApi;
     // The title leads the content, as fetch-jd.mjs prints it: the normalizers
     // keep it apart from the text and a description need not repeat it.
-    if (!unreadableJobPage({ status: 200, requestedUrl: url, finalUrl: url, text })) {
-      return (title ? `${title}\n\n${text}` : text).slice(0, JD_TEXT_CAP);
+    const unreadable = unreadableJobPage({ status: 200, requestedUrl: url, finalUrl: url, text });
+    if (!unreadable) return (title ? `${title}\n\n${text}` : text).slice(0, JD_TEXT_CAP);
+    // The ATS says the posting is closed (Workday canApply, SmartRecruiters
+    // active): a browser read would only lose that. Any other unreadable
+    // reason (too short ...) still falls through to the page.
+    if (classifyLiveness({ status: 200, requestedUrl: url, finalUrl: url, bodyText: text }).result === 'expired') {
+      // Left pending in pipeline.md like any unreadable page (#5814): cmdPipeline
+      // marks a row done only when cmdEvaluate returns a report.
+      throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
     }
   }
   let chromium;

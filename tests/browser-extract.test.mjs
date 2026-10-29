@@ -395,14 +395,18 @@ try {
   if (srNulls.every((v) => v === null)) pass('normalizeSmartRecruitersJob returns null without a description body');
   else fail(`normalizeSmartRecruitersJob nulls => ${JSON.stringify(srNulls)}`);
 
-  // A closed posting can still ship its ad; liveness-api.mjs reads `active: false`
-  // as expired, so the normalizer yields no text (null = fall through to the browser).
+  // A closed posting can still ship its ad. The marker carries `active: false`
+  // with the text, the way Workday carries `canApply: false`.
   const srAd = { sections: { jobDescription: { title: 'Job Description', text: '<p>Own the API.</p>' } } };
   const srClosed = normalizeSmartRecruitersJob({ name: 'X', active: false, jobAd: srAd }, 'https://x/1');
   const srOpen = normalizeSmartRecruitersJob({ name: 'X', active: true, jobAd: srAd }, 'https://x/1');
   const srUnflagged = normalizeSmartRecruitersJob({ name: 'X', jobAd: srAd }, 'https://x/1');
-  if (srClosed === null && srOpen?.text.includes('Own the API.') && srUnflagged?.text === srOpen.text) {
-    pass('normalizeSmartRecruitersJob returns null for an inactive posting, text for active or unflagged ones');
+  if (srClosed?.text.startsWith('Applications closed (active: false)')
+      && srClosed.text.includes('Own the API.')
+      && srOpen?.text.includes('Own the API.')
+      && !srOpen.text.includes('Applications closed')
+      && srUnflagged?.text === srOpen.text) {
+    pass('normalizeSmartRecruitersJob keeps an inactive posting with an Applications closed marker; active or unflagged ones carry none');
   } else {
     fail(`normalizeSmartRecruitersJob active flag => ${JSON.stringify({ srClosed, srOpen, srUnflagged })}`);
   }
