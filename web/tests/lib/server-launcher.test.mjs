@@ -334,6 +334,18 @@ test("starting the dashboard starts the PDF painter from the repo root and does 
     process.kill(pid, 0);
     assert.equal(realpathSync(painterCwd), realpathSync(root), "the painter runs from the repo root, like the export child");
   } finally {
+    // An assertion above can fail before the marker loop assigns pid. The
+    // painter is already detached, so read the marker here and stop it.
+    if (!(pid > 0)) {
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline && !(pid > 0)) {
+        try {
+          const [first, cwd] = readFileSync(marker, "utf8").split("\n");
+          if (cwd && Number(first) > 0) pid = Number(first);
+        } catch { /* not written yet */ }
+        if (!(pid > 0)) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
     if (pid > 0) {
       try { process.kill(pid, "SIGTERM"); } catch {}
       // The painter's cwd is the temp root now, and Windows will not remove a
