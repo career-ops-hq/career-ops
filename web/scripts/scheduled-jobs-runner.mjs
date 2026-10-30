@@ -15,6 +15,7 @@ import { nextScheduledRun } from "../src/lib/scheduled-cadence.mjs";
 import { isMainModule } from "../../lib/is-main-module.mjs";
 import { scheduledRunnerResourcePath, scheduledStorePath } from "../src/lib/scheduled-runner-path.mjs";
 import { getCareerOpsRoot } from "../../path-resolver.mjs";
+import { pollLinkedInInbox } from "../../lib/linkedin-auto.mjs";
 import { getProfilePath } from "../src/lib/core/profile-path.mjs";
 import { scanFailureMessage } from "../src/lib/scheduled-scan-error.mjs";
 
@@ -295,13 +296,24 @@ function requestedJobId(args) {
 
 async function main() {
   const root = getCareerOpsRoot();
+  const manualJobId = requestedJobId(process.argv.slice(2));
   const storePath = scheduledStorePath(root);
   const runnerResource = runnerResourcePath(storePath);
-  const manualJobId = requestedJobId(process.argv.slice(2));
 
   return withResourceLock(
     runnerResource,
     async () => {
+      // The inbox belongs to the 15-minute worker. Running one job by hand does not drain it.
+      // The poll shares this lock so two workers cannot plan the same alert.
+      if (!manualJobId) {
+        try {
+          await pollLinkedInInbox(root, {
+            log: (line) => process.stderr.write(`${line}\n`),
+          });
+        } catch (error) {
+          process.stderr.write(`linkedin inbox: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
       let claim;
       if (manualJobId) {
         if (!isSafeScheduledId(manualJobId)) throw new Error("Invalid scheduled job identifier.");

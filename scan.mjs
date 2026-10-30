@@ -3442,23 +3442,27 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
 // lock is not reentrant, so that caller cannot simply wrap this call; it takes
 // the lock itself and passes true. Everything else must leave it alone: true
 // with no lock actually held reintroduces both races described above.
-export async function appendToScanHistory(offers, date, status = 'added', { alreadyLocked = false } = {}) {
+//
+// `historyPath` is for a caller that resolves its own data root at call time,
+// as the LinkedIn mail drop does for the pipeline it writes next to it.
+// SCAN_HISTORY_PATH is fixed when this module first loads.
+export async function appendToScanHistory(offers, date, status = 'added', { alreadyLocked = false, historyPath = SCAN_HISTORY_PATH } = {}) {
   const write = () => {
     // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
     // list the row writer (formatScanHistoryRow) emits in order. Written ONLY
     // on fresh-file creation; existing files are never rewritten.
-    if (!existsSync(SCAN_HISTORY_PATH)) {
-      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      atomicWriteFile(SCAN_HISTORY_PATH, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
+    if (!existsSync(historyPath)) {
+      mkdirSync(path.dirname(historyPath), { recursive: true });
+      atomicWriteFile(historyPath, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
     }
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-    appendLedgerRows(SCAN_HISTORY_PATH, lines);
+    appendLedgerRows(historyPath, lines);
   };
 
   if (alreadyLocked) write();
-  else await withPipelineLock(SCAN_HISTORY_PATH, write);
+  else await withPipelineLock(historyPath, write);
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────

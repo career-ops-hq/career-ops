@@ -171,6 +171,10 @@ Run the installer again after you change them.
 After any of these, new postings land in `data/pipeline.md` under `## Pending` on
 each run. Next you decide which are worth your attention — cheaply.
 
+The 15-minute worker in option B also reads `data/linkedin-alerts` when that
+folder exists. A fixed `scan.mjs` job in option A does not. Running one saved
+job by hand does not either. See [docs/LINKEDIN_ALERTS.md](LINKEDIN_ALERTS.md).
+
 ---
 
 ## 2. Triage the queue
