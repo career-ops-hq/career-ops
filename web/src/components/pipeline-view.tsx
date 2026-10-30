@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
@@ -105,11 +105,15 @@ export function PipelineView({
   // keystroke arrives, so typing no longer waits on the whole table.
   const deferredQ = useDeferredValue(q);
   // The rendered link keeps the deferred search, so a keystroke does not
-  // re-render every row. A click reads the box as it is now.
-  const paramsRef = useRef(params.toString());
+  // re-render every row. A click reads the box as it is now. The list URL is
+  // written after commit, so a render React abandons cannot change it.
+  const paramsText = params.toString();
+  const paramsRef = useRef(paramsText);
   const routerRef = useRef(router);
-  paramsRef.current = params.toString();
-  routerRef.current = router;
+  useLayoutEffect(() => {
+    paramsRef.current = paramsText;
+    routerRef.current = router;
+  }, [paramsText, router]);
   const detailQuery = pipelineQuery(params.toString(), deferredQ);
   const followDetail = useCallback((event: React.MouseEvent<HTMLAnchorElement>, n: string) => {
     const href = trackerDetailHref(n, paramsRef.current, qRef.current);
