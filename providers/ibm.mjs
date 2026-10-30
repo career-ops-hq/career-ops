@@ -42,11 +42,22 @@ export function buildPostFilter(cfg) {
 }
 
 /**
+ * Epoch ms for `dcdate` (a plain YYYY-MM-DD, which Date.parse reads as UTC
+ * midnight), or undefined when absent or unparseable.
+ * @param {unknown} value
+ */
+function toEpochMs(value) {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Date.parse(value.trim());
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/**
  * Normalizes one page of the IBM careers API response into job entries.
  * Throws if the response doesn't carry the expected `hits.hits[]` shape, so a
  * silent endpoint change surfaces as a hard error instead of empty results.
  * @param {any} json - A single API response page.
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
  */
 export function parseIbmResponse(json) {
   const hits = json && json.hits && Array.isArray(json.hits.hits) ? json.hits.hits : null;
@@ -61,12 +72,18 @@ export function parseIbmResponse(json) {
     if (typeof s.url !== 'string' || !/^https?:\/\//i.test(s.url.trim())) continue;
     const loc = typeof s.field_keyword_19 === 'string' ? s.field_keyword_19.trim() : '';
     const mode = typeof s.field_keyword_17 === 'string' ? s.field_keyword_17.trim() : '';
-    out.push({
+    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number}} */
+    const job = {
       title: s.title.trim(),
       url: s.url.trim(),
       company: 'IBM',
       location: [loc, mode].filter(Boolean).join(' · '),
-    });
+    };
+    // `dcdate` is the only date the API lets a caller request; it tracks the
+    // job ids (newer id, later date), so it reads as the posting date.
+    const postedAt = toEpochMs(s.dcdate);
+    if (postedAt !== undefined) job.postedAt = postedAt;
+    out.push(job);
   }
   return out;
 }
@@ -98,7 +115,7 @@ export default {
         lang: 'zz',
         localeSelector: {},
         sm: { query: '', lang: 'zz' },
-        _source: ['_id', 'title', 'url', 'description', 'language',
+        _source: ['_id', 'title', 'url', 'description', 'language', 'dcdate',
           'field_keyword_05', 'field_keyword_08', 'field_keyword_17',
           'field_keyword_18', 'field_keyword_19'],
       };
