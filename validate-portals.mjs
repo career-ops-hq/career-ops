@@ -395,6 +395,28 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  if (config.experience_filter !== undefined) {
+    const ef = config.experience_filter;
+    if (!isObject(ef)) {
+      add(errors, 'experience_filter', 'experience_filter must be an object');
+    } else {
+      if (ef.enabled !== undefined && typeof ef.enabled !== 'boolean') {
+        add(errors, 'experience_filter.enabled', 'must be a boolean when set');
+      }
+      for (const key of ['years', 'stretch_years']) {
+        if (ef[key] !== undefined && (typeof ef[key] !== 'number' || !Number.isFinite(ef[key]) || ef[key] < 0 || ef[key] > 60)) {
+          add(errors, `experience_filter.${key}`, 'must be a number from 0 to 60 when set');
+        }
+      }
+      if (ef.action !== undefined && ef.action !== 'drop' && ef.action !== 'label') {
+        add(errors, 'experience_filter.action', 'must be "drop" or "label" when set');
+      }
+      if (ef.concurrency !== undefined && (!Number.isInteger(ef.concurrency) || ef.concurrency < 1 || ef.concurrency > 16)) {
+        add(errors, 'experience_filter.concurrency', 'must be an integer from 1 to 16 when set');
+      }
+    }
+  }
+
   if (config.search_queries !== undefined && !Array.isArray(config.search_queries)) {
     add(errors, 'search_queries', 'search_queries must be an array when set');
   }
