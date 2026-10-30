@@ -289,9 +289,9 @@ Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor hoặc bất kỳ CLI nào khác | Ngôn ngữ thường: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor hoặc bất kỳ CLI nào khác được hỗ trợ | Ngôn ngữ thường: "Run the career-ops scan mode" |
 
-`/career-ops` đứng một mình sẽ hiện menu lệnh trong các CLI dùng lệnh này. Ngôn ngữ thường dùng được trong mọi CLI. Khi dùng như plugin của Claude Code, lệnh là `/career-ops:career-ops`.
+`/career-ops` đứng một mình sẽ hiện menu lệnh trong các CLI dùng lệnh này. Ngôn ngữ thường dùng được trong mọi CLI được hỗ trợ. Khi dùng như plugin của Claude Code, lệnh là `/career-ops:career-ops`.
 
 Tất cả đều dùng chung một router, `.agents/skills/career-ops/SKILL.md`, và cùng các tệp `modes/*.md`, nên một mode hoạt động giống nhau dù CLI nào chạy nó. Slash command không được đảm bảo trong Codex: hãy yêu cầu bằng ngôn ngữ thường, hoặc chạy một prompt ở chế độ headless bằng `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cách chạy trong từng CLI được hỗ trợ, lệnh headless với những CLI có lệnh này, và các ghi chú thiết lập riêng cho từng CLI nằm trong [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
