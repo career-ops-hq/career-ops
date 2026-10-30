@@ -410,6 +410,67 @@ test("PDF tailoring reads the resolved report even when the application number d
   assert.ok(!prompt.includes("reports/018-"), "the exact unpadded filename must be retained");
 });
 
+test("buildPrompt: checkout-owned files are anchored to codeRoot, user files stay relative", () => {
+  // The worker's cwd is the data root. Modes and scripts only exist in the checkout.
+  const codeRoot = "/opt/career-ops";
+  const pdf = buildPrompt({ kind: "pdf", ...ARGS, codeRoot });
+  assert.match(pdf, /"\/opt\/career-ops\/modes\/pdf\.md"/);
+  const cover = buildPrompt({ kind: "cover", ...ARGS, ...COVER_ARGS, codeRoot });
+  assert.match(cover, /"\/opt\/career-ops\/modes\/cover\.md"/);
+  assert.match(cover, /"\/opt\/career-ops\/modes\/_writing\.md"/);
+  const evaluate = buildPrompt({ kind: "evaluate", ...ARGS, codeRoot });
+  assert.match(evaluate, /"\/opt\/career-ops\/modes\/oferta\.md"/);
+  const portal = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
+  assert.match(portal, /node '\/opt\/career-ops\/verify-portals\.mjs' --add "Acme"/);
+  // user-layer files are not the checkout's
+  assert.ok(!/opt\/career-ops\/(cv\.md|modes\/_profile\.md)/.test(pdf + cover + evaluate));
+});
+
+test("buildPrompt: a codeRoot with unusual characters stays absolute, quoted per use", () => {
+  // Valid directory names (accents, parentheses, $, a quote) must not drop the worker
+  // back to the data root: the path is data in instructions and escaped for the shell.
+  const codeRoot = "/srv/José/it's ($HOME)/career-ops";
+  const pdf = buildPrompt({ kind: "pdf", ...ARGS, codeRoot });
+  assert.ok(pdf.includes(JSON.stringify(`${codeRoot}/modes/pdf.md`)), "instruction paths are JSON-quoted data");
+  const portal = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
+  assert.ok(
+    // The apostrophe is escaped for the shell in use (see the test below).
+    portal.includes(`node '/srv/José/it${process.platform === "win32" ? "''" : "'\\''"}s ($HOME)/career-ops/verify-portals.mjs' --add "Acme"`),
+    "the shell command single-quotes the path and escapes the embedded quote",
+  );
+});
+
+test("buildPrompt: the shell-quoted checkout path escapes an apostrophe for the shell in use", () => {
+  const codeRoot = "C:/srv/O'Neil/career-ops";
+  const original = Object.getOwnPropertyDescriptor(process, "platform");
+  try {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const win = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
+    assert.ok(win.includes(`node 'C:/srv/O''Neil/career-ops/verify-portals.mjs' --add "Acme"`), "PowerShell doubles the quote");
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const posix = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
+    assert.ok(posix.includes(`node 'C:/srv/O'\\''Neil/career-ops/verify-portals.mjs' --add "Acme"`), "POSIX closes, escapes, reopens");
+  } finally {
+    Object.defineProperty(process, "platform", original);
+  }
+});
+
+test("buildPrompt: a codeRoot that is not a plain path keeps the relative form", () => {
+  for (const bad of ["/opt/x/../etc", "/opt/line\nbreak"]) {
+    const portal = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot: bad });
+    assert.match(portal, /node verify-portals\.mjs --add "Acme"/);
+  }
+});
+
+test("buildPrompt: the pdf prompt anchors the template to the checkout when given its root", () => {
+  // The worker's cwd is the data root; on a split layout templates/ is only in the checkout.
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: "templates/cv-template.mine.html", codeRoot: "/opt/career-ops/" });
+  assert.match(prompt, /"\/opt\/career-ops\/templates\/cv-template\.mine\.html"/);
+  // An unsafe template still falls back to the base template, anchored the same way
+  const bad = buildPrompt({ kind: "pdf", ...ARGS, cvTemplate: "../../etc/passwd", codeRoot: "/opt/career-ops" });
+  assert.match(bad, /"\/opt\/career-ops\/templates\/cv-template\.html"/);
+});
+
 test("buildPrompt: the pdf prompt fills the template the caller resolved", () => {
   // Given a user whose config/profile.yml selects a non-base CV template. The
   // route resolves it through cv-templates.mjs and hands the path in; the worker
