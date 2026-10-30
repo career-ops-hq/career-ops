@@ -190,11 +190,13 @@ function MetricCard({ label, value, icon }: { label: string; value: string | num
   return <div className="rounded-xl border border-border bg-surface/45 p-4"><div className="flex items-center justify-between text-brand-text"><span className="font-mono text-[10px] font-semibold uppercase tracking-[0.15em] text-muted">{label}</span>{icon}</div><div className="mt-3 font-display text-3xl tracking-tight text-landing tabular-nums">{value}</div></div>;
 }
 
+const NO_RATE_EXPLANATION = "No applications sent yet, so this rate has nothing to measure";
+
 function RateRow({ label, value }: { label: string; value: number | null }) {
   // An em dash for a rate taken over nothing. `0.0%` here would be the view
   // stating a measurement it never made — see computeProgressMetrics.
   const absent = value === null;
-  return <div className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0 xl:first:pt-0"><span className="text-sm text-muted">{label} rate</span><span className="font-mono text-lg font-semibold tabular-nums text-foreground" title={absent ? "No applications sent yet, so this rate has nothing to measure" : undefined}>{absent ? "—" : `${value.toFixed(1)}%`}</span></div>;
+  return <div className="flex items-center justify-between gap-3 border-b border-border py-3 last:border-0 xl:first:pt-0"><span className="text-sm text-muted">{label} rate</span><span className="font-mono text-lg font-semibold tabular-nums text-foreground" title={absent ? NO_RATE_EXPLANATION : undefined}>{absent ? <><span aria-hidden="true">—</span><span className="sr-only">{NO_RATE_EXPLANATION}</span></> : `${value.toFixed(1)}%`}</span></div>;
 }
 
 function BarRow({ label, count, pct, widthPct, tone }: { label: string; count: number; pct?: number; widthPct: number; tone: string }) {
