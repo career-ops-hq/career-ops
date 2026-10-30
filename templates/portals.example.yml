@@ -1915,6 +1915,7 @@ search_queries:
 #   ibm:
 #     country: Germany                      # optional facet filter
 #     categories: ["Software Engineering"]  # optional facet filter
+#   max_pages: 20         # optional page cap (30 jobs/page, default 20, max 300)
 #   enabled: true
 #
 # - name: SolidJobs — Engineering        # Polish multi-division job board
