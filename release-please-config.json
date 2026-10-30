@@ -86,6 +86,19 @@
           "path": "cursor-directory/README.md"
         },
         {
+          "type": "json",
+          "path": "antigravity-directory/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "antigravity-directory/skills/career-ops/SKILL.md"
+        },
+        {
+          "type": "generic",
+          "path": "antigravity-directory/README.md"
+        },
+        {
           "type": "generic",
           "path": ".agents/skills/career-ops/SKILL.md"
         }
