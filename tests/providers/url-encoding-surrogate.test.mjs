@@ -52,6 +52,18 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // deel.parseDeelBoard — .map() over the board's jobPostings array.
+  const { parseDeelBoard } = await load('deel.mjs');
+  const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
+  check(
+    'deel.parseDeelBoard',
+    () => parseDeelBoard(
+      deelPage([{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'ok-5', title: 'Good Id' }]),
+      { slug: 'x', company: 'X' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.deel.com/x/job-details/ok-5/overview',
+  );
+
   // bamboohr.parseBambooHRResponse — .map() over one page.
   const { parseBambooHRResponse } = await load('bamboohr.mjs');
   check(
@@ -176,6 +188,18 @@ try {
       normalizeHubJob({ id: 'g-1', title: 'Good' }),
     ],
     ([bad, good]) => bad === null && good !== null && good.url.includes('g-1'),
+  );
+
+  // bulldogjob.parseBulldogjobPage — for…of over __NEXT_DATA__ pageProps.jobs; id feeds the board URL.
+  const { parseBulldogjobPage } = await load('bulldogjob.mjs');
+  const bulldogjobHtml = (jobs) => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { totalCount: jobs.length, jobs } } })}</script>`;
+  check(
+    'bulldogjob.parseBulldogjobPage',
+    () => parseBulldogjobPage(bulldogjobHtml([
+      { id: `${LONE}bad`, position: 'Bad', company: { name: 'Acme' } },
+      { id: 'g-1', position: 'Good', company: { name: 'Acme' } },
+    ])).rows,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/g-1'),
   );
 
   // manfred.normalizeManfredOffer — slug feeds the URL; a bad one must yield null.
@@ -306,7 +330,7 @@ try {
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
   const CONVERTED = [
-    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
+    'alibaba.mjs', 'apple.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'bulldogjob.mjs', 'deel.mjs', 'dover.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
     'kalibrr.mjs', 'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'paylocity.mjs', 'phenom.mjs', 'platsbanken.mjs',
     'techinasia.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs', 'zoho-recruit.mjs',
   ];
