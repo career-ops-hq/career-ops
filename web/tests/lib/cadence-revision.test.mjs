@@ -100,6 +100,23 @@ test("an unreadable profile is an error, not defaults the form can save", async 
   });
 });
 
+test("malformed profile YAML is an error, not defaults the form can save", async () => {
+  await withProfile(async (file) => {
+    const broken = "followup_cadence: [\n";
+    writeFileSync(file, broken);
+    const blocked = await GET();
+    assert.equal(blocked.status, 500);
+    const blockedBody = await blocked.json();
+    assert.equal(blockedBody.revision, undefined);
+    assert.equal(blockedBody.defaults, undefined);
+    assert.match(blockedBody.error, /could not be read as YAML/);
+
+    const saved = await POST(post({ applied_first_days: 3 }));
+    assert.equal(saved.status, 409);
+    assert.equal(readFileSync(file, "utf8"), broken);
+  });
+});
+
 test("a cadence save without a revision still merges", async () => {
   await withProfile(async (file) => {
     const saved = await POST(post({ applied_max_followups: 4 }));

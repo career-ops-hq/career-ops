@@ -112,7 +112,9 @@ export async function GET() {
       const parsed = yaml.load(raw);
       profile = isObj(parsed) ? parsed : {};
     } catch {
-      profile = {};
+      // A syntax error is not an empty profile. Defaults here would look
+      // like the saved cadence, and a later save is refused anyway.
+      return Response.json({ error: "config/profile.yml could not be read as YAML." }, { status: 500 });
     }
     enabled = followupsEnabledFromProfile(profile);
     const source = isObj(profile.followup_cadence) ? profile.followup_cadence : {};
