@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
@@ -29,6 +29,7 @@ export function CadenceSettings() {
   const [enabled, setEnabled] = useState(true);
   const [toggling, setToggling] = useState(false);
   const [revision, setRevision] = useState<string | null>(null);
+  const writePending = useRef(false);
 
   // On a failed load, do NOT fall back to defaults: the user would see 7/7/2/…
   // with no warning and a Save would overwrite their real profile.yml
@@ -57,7 +58,7 @@ export function CadenceSettings() {
   useEffect(load, [load]);
 
   const save = async () => {
-    if (!values) return;
+    if (!values || writePending.current) return;
     const payload: Partial<Record<ProfileCadenceKey, number>> = {};
     for (const k of PROFILE_CADENCE_KEYS) {
       // Number(), not parseInt(): "3.5" and "7abc" must be rejected, not truncated.
@@ -69,6 +70,7 @@ export function CadenceSettings() {
       }
       payload[k] = n;
     }
+    writePending.current = true;
     setSaving(true);
     setError(null);
     try {
@@ -90,10 +92,13 @@ export function CadenceSettings() {
     } catch {
       setError("Could not save.");
     }
+    writePending.current = false;
     setSaving(false);
   };
 
   const toggle = async (next: boolean) => {
+    if (writePending.current) return;
+    writePending.current = true;
     setToggling(true);
     setError(null);
     try {
@@ -119,6 +124,7 @@ export function CadenceSettings() {
     } catch {
       setError("Could not save.");
     }
+    writePending.current = false;
     setToggling(false);
   };
 
@@ -156,7 +162,7 @@ export function CadenceSettings() {
               <input
                 type="checkbox"
                 checked={enabled}
-                disabled={toggling}
+                disabled={toggling || saving}
                 onChange={(e) => toggle(e.target.checked)}
                 className="size-4 accent-brand"
               />
@@ -188,7 +194,7 @@ export function CadenceSettings() {
                 <button
                   type="button"
                   onClick={save}
-                  disabled={saving}
+                  disabled={saving || toggling}
                   className={cn(
                     "mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover",
                     "disabled:pointer-events-none disabled:opacity-60",

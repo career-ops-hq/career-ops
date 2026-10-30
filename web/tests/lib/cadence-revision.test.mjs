@@ -82,6 +82,24 @@ test("a stale cadence revision is refused and the first save stays", async () =>
   });
 });
 
+test("an unreadable profile is an error, not defaults the form can save", async () => {
+  await withProfile(async (file) => {
+    rmSync(file);
+    mkdirSync(file);
+    const blocked = await GET();
+    assert.equal(blocked.status, 500);
+    const blockedBody = await blocked.json();
+    assert.equal(blockedBody.revision, undefined);
+    assert.match(blockedBody.error, /could not be read/);
+
+    rmSync(file, { recursive: true });
+    writeFileSync(file, PROFILE);
+    const loaded = await (await GET()).json();
+    assert.equal(typeof loaded.revision, "string");
+    assert.equal(loaded.effective.applied_first_days, 12);
+  });
+});
+
 test("a cadence save without a revision still merges", async () => {
   await withProfile(async (file) => {
     const saved = await POST(post({ applied_max_followups: 4 }));

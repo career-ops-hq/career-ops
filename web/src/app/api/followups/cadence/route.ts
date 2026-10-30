@@ -92,16 +92,26 @@ export async function GET() {
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
   let enabled = true;
   let revision: string | null = ABSENT_REVISION;
-  if (fs.existsSync(file)) {
-    revision = null;
+  let raw: string | undefined;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as { code?: unknown }).code) : "";
+    // A missing profile is the first-run case. Any other read error must not
+    // look like defaults, or the form saves those defaults with no revision
+    // once the file can be read again.
+    if (code !== "ENOENT") {
+      return Response.json({ error: "config/profile.yml could not be read." }, { status: 500 });
+    }
+  }
+  if (raw !== undefined) {
+    revision = textRevision(raw);
     let profile: Record<string, unknown> = {};
     try {
-      const raw = fs.readFileSync(file, "utf8");
-      revision = textRevision(raw);
       const parsed = yaml.load(raw);
       profile = isObj(parsed) ? parsed : {};
     } catch {
-      /* unreadable/malformed → show defaults (read is best-effort) */
+      profile = {};
     }
     enabled = followupsEnabledFromProfile(profile);
     const source = isObj(profile.followup_cadence) ? profile.followup_cadence : {};
