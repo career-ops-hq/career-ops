@@ -285,9 +285,9 @@ npm i -g @santifer/career-ops
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex أو Qwen أو Cursor أو أي واجهة أخرى | لغة عادية: "Run the career-ops scan mode" |
+| Codex أو Qwen أو Cursor أو أي واجهة أخرى مدعومة | لغة عادية: "Run the career-ops scan mode" |
 
-كتابة `/career-ops` وحدها تعرض قائمة الأوامر في الواجهات التي تستخدمه. واللغة العادية تعمل في كل واجهة. عند استخدامه كإضافة لـ Claude Code يكون الأمر `/career-ops:career-ops`.
+كتابة `/career-ops` وحدها تعرض قائمة الأوامر في الواجهات التي تستخدمه. واللغة العادية تعمل في كل واجهة مدعومة. عند استخدامه كإضافة لـ Claude Code يكون الأمر `/career-ops:career-ops`.
 
 تشترك كلها في موجّه واحد هو `.agents/skills/career-ops/SKILL.md` وفي ملفات `modes/*.md` نفسها، لذا يتصرف الوضع بالطريقة نفسها أيًّا كانت الواجهة التي تشغّله. أوامر الشرطة المائلة غير مضمونة في Codex: اطلب بلغة عادية، أو شغّل موجّهًا واحدًا دون واجهة عبر `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). وتجد كيفية التشغيل في كل واجهة مدعومة، وأوامر التشغيل دون واجهة حيث تتوفر، وملاحظات الإعداد الخاصة بكل واجهة، في [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
