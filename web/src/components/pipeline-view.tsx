@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
@@ -73,7 +73,11 @@ export function PipelineView({
   const detailQuery = pipelineQuery(params.toString(), q);
   // The list entry has to carry that search too. Otherwise Back compares the
   // return link with an older URL and opens a fresh list at the top.
-  function syncTypedSearch() {
+  function syncTypedSearch(event: MouseEvent<HTMLAnchorElement>) {
+    // A modified click leaves Pipeline open and opens the link elsewhere.
+    // replaceState would show the typed search while Next still has the old
+    // params, so the next sort deletes it. The other tab already has the href.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1) return;
     const next = listEntrySync(pathname, params.toString(), q);
     if (!next) return;
     const state = window.history.state;

@@ -44,6 +44,13 @@ test("a checklist returns to the pipeline entry behind the report", () => {
   const href = "/pipeline?tab=ALL&q=Fixture";
   assert.equal(previousMatchIndex(href, entries[2].url, 2, entries), 0);
   assert.equal(previousMatchIndex(href, entries[1].url, 1, entries), 0);
+  const apply = readFileSync(new URL("../../src/app/pipeline/[id]/apply/page.tsx", import.meta.url), "utf8");
+  assert.match(apply, /const query = pipelineQuery\(await searchParams\)/);
+  const suffixAt = apply.indexOf("const suffix = query ? `?${query}` : \"\"");
+  assert.ok(suffixAt > 0, "checklist links share one pipelineQuery suffix");
+  const links = apply.slice(suffixAt);
+  assert.match(links, /backHref=\{`\/pipeline\$\{suffix\}`\}/);
+  assert.match(links, /reportHref=\{`\/pipeline\/\$\{encodeURIComponent\(id\)\}\$\{suffix\}`\}/);
 });
 
 test("the closest matching list entry wins over an older one", () => {
@@ -80,6 +87,11 @@ test("the list, the studio, and the checklist walk back through the real entry",
   const pdf = readFileSync(new URL("./components/generate-pdf-button.tsx", root), "utf8");
   assert.match(pipeline, /listEntrySync\(pathname, params\.toString\(\), q\)/);
   assert.match(pipeline, /state\.__NA !== true/);
+  const syncAt = pipeline.indexOf("function syncTypedSearch");
+  const syncEnd = pipeline.indexOf("const lastUrlQ", syncAt);
+  const sync = pipeline.slice(syncAt, syncEnd);
+  const modifiedAt = sync.indexOf("event.button === 1) return");
+  assert.ok(modifiedAt > 0 && modifiedAt < sync.indexOf("history.replaceState"), "a modified click must return before replaceState");
   assert.match(back, /previousMatchIndex\(href, location\.href, current\.index/);
   assert.match(back, /window\.history\.go\(match - current\.index\)/);
   assert.match(pdf, /cv-studio\$\{listQuery \? `\?\$\{listQuery\}` : ""\}`/);
