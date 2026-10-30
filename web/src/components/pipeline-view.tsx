@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download } from "lucide-react";
@@ -23,6 +23,8 @@ import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
+import { offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -50,6 +52,10 @@ export function PipelineView({
   // intervening snapshots and discards it when the refresh transition settles.
   const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
   const [announcement, setAnnouncement] = useState("");
+  // Status saves outlive the virtual row. Pending keeps the chosen status if
+  // the row remounts mid-request. Failed is shown on the row, or above the
+  // table when that row is off screen.
+  const [heldSaves, setHeldSaves] = useState<ReturnType<typeof reduceHeldSave>>(() => new Map());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -130,6 +136,56 @@ export function PipelineView({
       (row) => companyPresentation(row).label,
     ) as Application[];
   }, [visibleApplications, tab, deferredQ, sort, minFilter]);
+
+  const filterKey = `${visibleTab}|${deferredQ}|${sort.key}|${sort.dir}|${minFilter ?? ""}|${filtered.length}`;
+  const [windowState, setWindowState] = useState<{ key: string; span: { start: number; end: number } } | null>(null);
+  const span = windowState?.key === filterKey ? windowState.span : initialTrackerWindow(filtered.length);
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
+  // lines at some widths, so the spacers use the height a mounted row has.
+  const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
+  const mountedRows = filtered.slice(span.start, span.end);
+  const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
+  const columnCount = SORT_KEYS.length + 1;
+
+  // A failed save for a row that is off screen renders above the table and
+  // moves it. Remeasure then. Scroll and resize do not fire for that change.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (el.hidden) return;
+      const rect = el.getBoundingClientRect();
+      // A failed save adds a line. A save in flight can wrap the status
+      // controls. Spacers stand in for a normal row, so neither sets the
+      // shared height.
+      let rowHeight = rowPx;
+      for (const row of el.querySelectorAll("tr[data-application-key]")) {
+        if (row.querySelector("[role='alert'], [aria-busy='true']")) continue;
+        rowHeight = row.getBoundingClientRect().height || rowPx;
+        break;
+      }
+      if (rowHeight !== rowPx) setRowPx(rowHeight);
+      const next = trackerWindow({
+        count: filtered.length,
+        rowHeight,
+        overscan: TRACKER_OVERSCAN,
+        tableTop: rect.top,
+        viewportHeight: window.innerHeight,
+      });
+      setWindowState((prev) => {
+        if (prev?.key === filterKey && prev.span.start === next.start && prev.span.end === next.end) return prev;
+        return { key: filterKey, span: next };
+      });
+    };
+    measure();
+    window.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [filterKey, filtered.length, rowPx, heldSaves]);
 
   const filteredKeys = filtered.map(applicationKey);
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
@@ -290,6 +346,16 @@ export function PipelineView({
         </div>
       )}
 
+      {offscreenFailures.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {offscreenFailures.map((failure) => (
+            <p key={failure.key} role="alert" className="text-xs text-red-500">
+              Application #{failure.n} was not saved. {failure.error}
+            </p>
+          ))}
+        </div>
+      )}
+
       {visibleTab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         <>
@@ -316,9 +382,9 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[44rem] text-sm">
+          <table aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
-              <tr>
+              <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
                   <input
                     type="checkbox"
@@ -350,14 +416,19 @@ export function PipelineView({
             </thead>
             {/* Keep editors mounted while query navigation is pending: sorting
                 must not discard an open editor or an in-flight status save. */}
-            <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
-              {filtered.map((r) => {
+            <tbody ref={bodyRef} className="divide-y divide-border" hidden={isPending} aria-busy={false}>
+              {span.start > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: span.start * rowPx, padding: 0, border: 0 }} />
+                </tr>
+              )}
+              {mountedRows.map((r, i) => {
                 const company = companyPresentation(r);
                 const key = applicationKey(r);
                 const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
                 const posting = postingHref(r.url);
                 return (
-                  <tr key={key} data-application-key={key} className="group transition-colors hover:bg-surface/40">
+                  <tr key={key} data-application-key={key} aria-rowindex={span.start + i + 2} className="group transition-colors hover:bg-surface/40">
                     <td className="w-8 px-3 py-3">
                       <input
                         type="checkbox"
@@ -374,12 +445,12 @@ export function PipelineView({
                     <td className="px-4 py-3 font-medium">
                       <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
                         <CompanyLogo name={company.logoName} size={20} />
-                        {company.label}
+                        <span className="block max-w-64 truncate" title={company.label}>{company.label}</span>
                       </Link>
                     </td>
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1}>{r.role}</Link>
+                      <Link href={detailHref} tabIndex={-1} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
                       {posting && (
                         <a
                           href={posting}
@@ -403,6 +474,15 @@ export function PipelineView({
                       current={r.status}
                       inline
                       applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+                      heldSave={heldSaves.get(key)}
+                      onHeldSave={(event) => {
+                        // A clear event has no application number. Adding one
+                        // makes the object fail the event union.
+                        const update = event.type === "clear"
+                          ? { type: "clear" as const, key }
+                          : { ...event, key, n: r.n };
+                        setHeldSaves((prev) => reduceHeldSave(prev, update));
+                      }}
                       onSaved={(status, restoreFocus) => {
                         // If this focused row leaves its tab, preserve a useful
                         // focus target. Do not interrupt someone using search.
@@ -422,6 +502,11 @@ export function PipelineView({
                   </tr>
                 );
               })}
+              {span.end < filtered.length && (
+                <tr aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: (filtered.length - span.end) * rowPx, padding: 0, border: 0 }} />
+                </tr>
+              )}
             </tbody>
             {isPending && (
               <tbody className="divide-y divide-border" aria-busy="true">
