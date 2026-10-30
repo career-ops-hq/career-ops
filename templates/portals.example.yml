@@ -1224,6 +1224,7 @@ search_queries:
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
+#   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
@@ -1341,6 +1342,10 @@ search_queries:
 # - name: Example InRecruiting Co
 #   careers_url: https://exampleco.intervieweb.it/it/career   # any <tenant>.intervieweb.it host
 #   max_pages: 40          # optional page cap (15 jobs/page, default 40, max 200)
+#   enabled: true
+#
+# - name: Example Keka Co
+#   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
 #   enabled: true
 #
 # - name: Example Paylocity Co
