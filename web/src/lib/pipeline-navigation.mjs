@@ -24,6 +24,17 @@ export function pipelineQuery(params, search) {
   return query.toString();
 }
 
+/** Detail URL for one tracker row. `search` is the text in the box right now,
+ * which can be ahead of the deferred value baked into the row link.
+ * @param {string} n
+ * @param {string | Record<string, string | string[] | undefined>} params
+ * @param {string} search
+ */
+export function trackerDetailHref(n, params, search) {
+  const query = pipelineQuery(params, search);
+  return `/pipeline/${encodeURIComponent(n)}${query ? `?${query}` : ""}`;
+}
+
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 export const PIPELINE_TABS = /** @type {const} */ ([
   "INBOX",
