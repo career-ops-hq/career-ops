@@ -117,6 +117,23 @@ test("malformed profile YAML is an error, not defaults the form can save", async
   });
 });
 
+test("a profile that is a list is an error, not defaults the form can save", async () => {
+  await withProfile(async (file) => {
+    const list = "- Denver\n- Remote\n";
+    writeFileSync(file, list);
+    const blocked = await GET();
+    assert.equal(blocked.status, 409);
+    const blockedBody = await blocked.json();
+    assert.equal(blockedBody.revision, undefined);
+    assert.equal(blockedBody.defaults, undefined);
+    assert.match(blockedBody.error, /named settings/);
+
+    const saved = await POST(post({ applied_first_days: 3 }));
+    assert.equal(saved.status, 409);
+    assert.equal(readFileSync(file, "utf8"), list);
+  });
+});
+
 test("a cadence save without a revision still merges", async () => {
   await withProfile(async (file) => {
     const saved = await POST(post({ applied_max_followups: 4 }));

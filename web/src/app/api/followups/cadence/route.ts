@@ -110,7 +110,12 @@ export async function GET() {
     let profile: Record<string, unknown> = {};
     try {
       const parsed = yaml.load(raw);
-      profile = isObj(parsed) ? parsed : {};
+      // A list or a single value is not a profile. Defaults here would look
+      // like the saved cadence, and a later save is refused anyway.
+      if (!isMapping(parsed)) {
+        return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value." }, { status: 409 });
+      }
+      profile = parsed as Record<string, unknown>;
     } catch {
       // A syntax error is not an empty profile. Defaults here would look
       // like the saved cadence, and a later save is refused anyway.
