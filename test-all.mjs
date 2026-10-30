@@ -10559,11 +10559,13 @@ if (statesSpec.includes('label: Speculative')) {
   fail('states.yml is missing the Speculative state');
 }
 
+// verify-pipeline.mjs and merge-tracker.mjs derive their canonical states and
+// aliases from templates/states.yml, so Speculative reaches them from there.
 const verifySpec = readFile('verify-pipeline.mjs');
-if (verifySpec.includes("'speculative'")) {
-  pass('verify-pipeline.mjs accepts speculative as canonical');
+if (verifySpec.includes('loadCanonicalStates(')) {
+  pass('verify-pipeline.mjs accepts speculative as canonical (via states.yml)');
 } else {
-  fail('verify-pipeline.mjs CANONICAL_STATUSES missing speculative');
+  fail('verify-pipeline.mjs no longer reads canonical states from states.yml');
 }
 
 const normSpec = readFile('normalize-statuses.mjs');
@@ -10581,10 +10583,10 @@ if (dedupSpec.includes("'speculative'")) {
 }
 
 const mergeSpec = readFile('merge-tracker.mjs');
-if (mergeSpec.includes("'Speculative'")) {
-  pass('merge-tracker.mjs accepts Speculative as canonical');
+if (mergeSpec.includes('loadCanonicalStates(')) {
+  pass('merge-tracker.mjs accepts Speculative as canonical (via states.yml)');
 } else {
-  fail('merge-tracker.mjs CANONICAL_STATES missing Speculative');
+  fail('merge-tracker.mjs no longer reads canonical states from states.yml');
 }
 
 // ── RESERVE-REPORT-NUM RANGE RESERVATION (#1426) ────────────────
