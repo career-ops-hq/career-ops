@@ -1,0 +1,57 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "career-ops",
+  "version": "1.38.0",
+  "description": "Open-source AI job search agent: finds openings at the companies you choose, scores each job posting against your CV (1-5, A-H report), tailors your CV and cover letter, preps interviews and tracks applications. Runs locally; you press Submit.",
+  "author": {
+    "name": "santifer",
+    "url": "https://santifer.io"
+  },
+  "homepage": "https://career-ops.org",
+  "repository": "https://github.com/career-ops-hq/career-ops",
+  "license": "MIT",
+  "keywords": [
+    "job-search",
+    "ai-job-search",
+    "job-search-agent",
+    "career",
+    "cv",
+    "resume",
+    "ats",
+    "cover-letter",
+    "interview-prep",
+    "job-application",
+    "open-source"
+  ],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "career-ops",
+        "shortDescription": "AI job search agent",
+        "longDescription": "career-ops is an open-source AI job search agent (MIT). It runs on your computer and keeps your CV, profile, reports and application tracker as plain files in a folder you own.\n\nUse it when you are looking for a job and want help to:\n- find new openings at the companies you choose, from their public career pages and job boards;\n- score each job posting against your CV from 1 to 5, with a structured A-H report, before you decide to apply;\n- tailor an ATS-friendly CV (PDF) and a cover letter for a specific posting;\n- prepare for interviews with STAR stories and company research;\n- track your applications and follow-ups.\n\nIt helps you fill in each application; you press Submit.\n\nOn first use it looks for a career-ops folder on your machine. If there is none, it asks before installing one with npx @santifer/career-ops init (Node.js required). No account and no telemetry: job listings are fetched from your machine, and the parts of your CV and the job descriptions you work on go to the AI model you use here, as part of the conversation.",
+        "developerName": "Santiago Fernández de Valderrama Aparicio",
+        "category": "Productivity",
+        "capabilities": [
+          "Find new openings at the companies you choose",
+          "Score a job posting against your CV (1-5, A-H report)",
+          "Tailor an ATS-friendly CV and cover letter for one job",
+          "Prepare for interviews with STAR stories",
+          "Track applications and follow-ups"
+        ],
+        "defaultPrompt": [
+          "Score this job posting against my CV and tell me if it's worth applying",
+          "Scan the companies I follow for new openings that fit my profile",
+          "Prepare me for my interview for this role"
+        ],
+        "websiteURL": "https://career-ops.org",
+        "supportURL": "https://github.com/career-ops-hq/career-ops/issues",
+        "privacyPolicyURL": "https://github.com/career-ops-hq/career-ops/blob/main/openai-directory/README.md#what-it-runs-sends-and-fetches",
+        "termsOfServiceURL": "https://github.com/career-ops-hq/career-ops/blob/main/LICENSE",
+        "brandColor": "#D5742E",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
+      }
+    }
+  }
+}
