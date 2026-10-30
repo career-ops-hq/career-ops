@@ -94,6 +94,23 @@ try {
   if (texts.get('1a') === `<p>${multi}</p>`) pass('readTextRows() honours the UTF-8 byte length of a text row (multi-byte payload intact)');
   else fail(`readTextRows() 1a = ${JSON.stringify(texts.get('1a'))}`);
 
+  // Two text rows back to back, with and without the newline between them: the
+  // second row's id must not swallow the separator, and a posting that points at
+  // the second row must get its description.
+  for (const [label, sep] of [['newline-separated', '\n'], ['adjacent', '']]) {
+    const two = readTextRows(`${textRow('1a', '<p>first</p>')}${sep}${textRow('1b', `<p>${multi}</p>`)}${sep}`);
+    if (two.get('1a') === '<p>first</p>' && two.get('1b') === `<p>${multi}</p>`) pass(`readTextRows() reads two ${label} text rows`);
+    else fail(`readTextRows() ${label}: ${JSON.stringify([...two])}`);
+  }
+  const twoRowBoard = pageWith([
+    `2:{"orgSlug":"acme","jobPostings":${JSON.stringify([posting({ richtextDescription: '$1b' })])}}`,
+    textRow('1a', '<p>first</p>'),
+    textRow('1b', '<p>second</p>'),
+  ].join('\n') + '\n');
+  const [second] = parseDeelBoard(twoRowBoard, { slug: 'acme', company: 'Acme' });
+  if (second?.description === 'second') pass('parseDeelBoard() resolves a description stored in the second of two text rows');
+  else fail(`second-row description = ${JSON.stringify(second?.description)}`);
+
   // ── parseDeelBoard ──────────────────────────────────────────────────────
   const html = pageWith(boardStream([
     posting(),

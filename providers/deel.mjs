@@ -131,6 +131,7 @@ export function readTextRows(stream) {
       const len = parseInt(hex, 16);
       texts.set(id, buf.toString('utf8', comma + 1, comma + 1 + len));
       o = comma + 1 + len;
+      if (buf[o] === 0x0a) o++; // newline between rows, when the stream has one
     } else {
       const nl = buf.indexOf(0x0a, colon + 1);
       o = nl < 0 ? buf.length : nl + 1;
