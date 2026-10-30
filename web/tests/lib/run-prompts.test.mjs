@@ -60,16 +60,24 @@ test("buildPrompt: the pdf prompt never tells the agent to save a file", () => {
   assert.ok(!/\.meta\.json/.test(prompt), "pdf prompt must not name the sidecar path");
 });
 
-test("buildPrompt: the pdf prompt offers both page formats", () => {
-  // Given the marker example once interpolated the parser's FALLBACK, which made
-  // the prompt read "choose letter for a US/Canada company, otherwise letter" —
-  // biasing every CV to one size. The tailoring rule and the fallback are separate.
+test("buildPrompt: the paper size follows modes/pdf.md's own rule, not a web-only one", () => {
   const prompt = buildPrompt({ kind: "pdf", ...ARGS });
 
-  // Then both spellings are shown, and the rule distinguishes them
-  assert.match(prompt, /format="a4"/);
-  assert.match(prompt, /format="letter"/);
-  assert.match(prompt, /letter for a US\/Canada company, otherwise a4/i);
+  // Then the agent is pointed at the mode's paper-format step (profile first,
+  // `auto` means country), and no fixed web rule competes with it
+  assert.match(prompt, /page_format and country exactly as modes\/pdf\.md's paper-format step says/);
+  assert.doesNotMatch(prompt, /"a4" otherwise/);
+});
+
+test("buildPrompt: the agent emits payload data, never agent-authored HTML", () => {
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS });
+  assert.match(prompt, /complete structured JSON payload/i);
+  assert.match(prompt, /Do not produce HTML/i);
+  assert.match(prompt, /never .*Markdown fences/i);
+  // The resolved template is named as something to read, never to fill
+  assert.match(prompt, /templates\/cv-template\.html, which you may read to see which sections it has slots for/);
+  assert.doesNotMatch(prompt, /placeholders with the tailored content/);
+  assert.ok(!prompt.includes("<!DOCTYPE html>"));
 });
 
 test("buildPrompt: the pdf prompt still pins tailoring to the real mode", () => {

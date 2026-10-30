@@ -153,22 +153,22 @@ End with EXACTLY one final line: VERDICT: {0-5 signal strength}/5 — {why it he
 Target: ${input}`;
   }
   if (kind === "pdf") {
-    // The agent tailors content only — it neither renders the PDF nor saves it.
+    // The agent tailors content only — it neither builds HTML, renders, nor saves.
     // Rendering moved to the backend because launching a real browser can hit a
     // sandbox escalation nobody is present to approve (#2172); SAVING moved for a
     // different reason (#2185): tool grants are tool-name-only, so the Write/Edit
     // this step used to need was unscoped, and a prompt injection in the posting
     // or the report — both of which land in this agent's context — could aim it at
     // cv.md or data/applications.md. The agent now emits the CV inline and the
-    // backend (a plain Node process, no CLI sandbox) writes and renders it, so
+    // backend (a plain Node process, no CLI sandbox) builds and renders it, so
     // pdf mode runs with no write tool at all.
-    return `${profileLine}You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
+    return `${profileLine}You are tailoring the user's ATS-optimized CV for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode's CONTENT step: follow modes/pdf.md's TAILORING rules and JSON payload schema exactly (do not improvise your own scoring or format). Apply its CONTENT rules — keyword injection, ordering, the competency grid, project selection, and its never-invent-a-skill rule. Its steps that shell out (the jd-skill-gap.mjs check) and its build/save/render steps are NOT performed on web runs; the platform handles output itself.
 1. Read modes/pdf.md, cv.md, ${profile}, and the evaluation report at ${JSON.stringify(reportFile ?? `reports/${input}-*.md`)} (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill ${safeCvTemplate(cvTemplate)}'s {{...}} placeholders with the tailored content. Use that exact file: the platform already resolved it from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step. ${CV_ENVELOPE_INSTRUCTION}
-4. Emit the envelope EXACTLY ONCE. The platform writes the HTML, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
+3. Produce the complete structured JSON payload documented in modes/pdf.md. Do not produce HTML, template placeholders, or escaped HTML entities; build-cv-html.mjs owns all HTML generation and escaping. The platform already resolved this run's template from cv.template through cv-templates.mjs, so do NOT run modes/pdf.md's own template-resolution step: it will fill ${safeCvTemplate(cvTemplate)}, which you may read to see which sections it has slots for. ${CV_ENVELOPE_INSTRUCTION}
+4. Emit the envelope EXACTLY ONCE. The platform writes the payload, builds the HTML from it, renders the PDF, and updates the tracker's PDF column itself, only after a confirmed successful render. Do not submit anything anywhere.
 
-After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete HTML envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
+After the envelope, end with EXACTLY one final line: VERDICT: {5 if the complete JSON payload envelope was emitted, else 1}/5 — {a one-line summary, ≤12 words}`;
   }
   if (kind === "cover") {
     // modes/cover.md stops five times to ask the candidate something. Step 6's

@@ -202,7 +202,7 @@ export function parseCodexEvent(line) {
     // Newline-terminate each message: Codex sends complete messages with NO
     // trailing newline ("hello", not "hello\n"), so consecutive messages would
     // otherwise concatenate mid-line downstream. That glued narration into one
-    // run-on log line AND broke pdf mode outright — the <<cv-html>> markers are
+    // run-on log line AND broke pdf mode outright — the <<cv-payload>> markers are
     // line-anchored by design (cv-envelope.mjs, fail-closed), so an envelope
     // message following unterminated narration parsed as "no envelope" and the
     // honesty gate failed a run whose CV was fully emitted.
@@ -455,7 +455,7 @@ export function timeoutMessage(killMs, kind) {
 /**
  * Structured CLIs stream each assistant message as text deltas with nothing
  * between messages. A tool call ends a message, so the next text starts on a new
- * line. Without the break, a <<cv-html>> opener that starts a new message lands
+ * line. Without the break, a <<cv-payload>> opener that starts a new message lands
  * mid-line after the previous message's prose, and parseCvEnvelope, which needs
  * the opener on its own line, reports no envelope.
  *

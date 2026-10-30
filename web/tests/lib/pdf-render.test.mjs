@@ -1,21 +1,26 @@
 // Tests for pdf-render.mjs using Node's built-in test runner.
 // Imports directly from pdf-render.mjs (the single source of truth) so the
 // test and production code can never drift out of sync. spawnFn is a fake
-// EventEmitter-based child process — no real generate-pdf.mjs/mark-pdf-
-// ready.mjs subprocess is ever spawned by these tests.
+// EventEmitter-based child process, except in the one case marked as running
+// the real build-cv-html.mjs end to end.
 //
 // Run:  node --test tests/lib/pdf-render.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   pdfRunOutcome,
-  writeCvHtml,
+  writeCvPayload,
+  spawnBuildCvHtml,
   spawnGeneratePdf,
+  DEFAULT_PDF_CHILD_TIMEOUT_MS,
+  QUICK_PDF_CHILD_TIMEOUT_MS,
   markTrackerReady,
   cleanupPdfScratch,
   renderAndMarkPdf,
@@ -41,7 +46,7 @@ function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null }
 }
 
 // spawnFn that dispatches based on the script path (args[0]) so a single
-// fake stands in for both generate-pdf.mjs and mark-pdf-ready.mjs calls.
+// fake stands in for build-cv-html.mjs, generate-pdf.mjs and mark-pdf-ready.mjs.
 function makeRouterSpawn(routes) {
   const calls = [];
   const spawnFn = (execPath, args, opts) => {
@@ -227,9 +232,15 @@ test("cleanupPdfScratch: a single file's removal failure logs but does not throw
 
 // ── renderAndMarkPdf ──
 
+const PAYLOAD = { candidate: { name: "Jane" }, summary: "Builder" };
+
+// The builder's JSON report, as build-cv-html.mjs prints it on success.
+const built = (pageFormat = "letter", stderr = "") => ({ exitCode: 0, stdout: JSON.stringify({ file: "cv.html", page_format: pageFormat }), stderr });
+
 function makePdfPaths(dir, reportNum) {
   mkdirSync(join(dir, "output"), { recursive: true });
   return {
+    payload: join(dir, `cv-web-${reportNum}.payload.json`),
     html: join(dir, `cv-web-${reportNum}.html`),
     finalPdf: join(dir, "output", `cv-jane-acme-2026-07-26.pdf`),
   };
@@ -241,20 +252,28 @@ test("renderAndMarkPdf: happy path -> rendered with no warnings, scratch cleaned
   const pdfPaths = makePdfPaths(dir, "1");
   writeFileSync(pdfPaths.html, "<html></html>");
   const { spawnFn, calls } = makeRouterSpawn({
+    "build-cv-html.mjs": built("a4"),
     "generate-pdf.mjs": { exitCode: 0 },
     "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "a4", reportNum: "1" });
+    const result = await renderAndMarkPdf({
+      spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD,
+      template: "templates/cv-template.ats.html", reportNum: "1",
+    });
 
     // Then it reports rendered with no warnings, and scratch is cleaned up
     assert.deepEqual(result, { kind: "rendered", warnings: [] });
     assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("cv-web-1.")), []);
     assert.equal(readFileSync(join(dir, "output", "cv-jane-acme-2026-07-26.html"), "utf8"), "<html></html>", "the CV Studio's source HTML is kept beside the PDF");
-    // ...and the format actually reached generate-pdf.mjs. The argv was only
-    // inspected on the failure path, so a hardcoded or defaulted format would pass
-    // while every US/Canada CV rendered on the wrong page size.
+    // The steps ran in order, and the builder got the payload and the run's template.
+    assert.deepEqual(calls.map((c) => c.args[0].split(/[\\/]/).pop()), ["build-cv-html.mjs", "generate-pdf.mjs", "mark-pdf-ready.mjs"]);
+    assert.deepEqual(calls[0].args.slice(1), [pdfPaths.payload, pdfPaths.html, join("/root", "templates/cv-template.ats.html")]);
+    // ...and the sheet the BUILDER resolved reached generate-pdf.mjs, so the body
+    // and the paper cannot disagree. The argv was only inspected on the failure
+    // path, so a hardcoded or defaulted format would pass while every CV rendered
+    // on the wrong page size.
     const renderCall = calls.find((c) => c.args.some((a) => String(a).includes("generate-pdf.mjs")));
     assert.ok(renderCall, "generate-pdf.mjs was never spawned");
     assert.ok(renderCall.args.includes("--format=a4"), `expected --format=a4, got ${renderCall.args.join(" ")}`);
@@ -269,16 +288,17 @@ test("renderAndMarkPdf: generate-pdf.mjs fails -> render-failed, mark-pdf-ready 
   const pdfPaths = makePdfPaths(dir, "3");
   writeFileSync(pdfPaths.html, "<html></html>");
   const { spawnFn, calls } = makeRouterSpawn({
+    "build-cv-html.mjs": built(),
     "generate-pdf.mjs": { exitCode: 1, stderr: "Refusing to write the PDF outside the project directory" },
     "mark-pdf-ready.mjs": { exitCode: 0 },
   });
   try {
     // When rendering
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "3" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "3" });
 
     // Then it reports render-failed with the render's stderr, never calls mark-pdf-ready, and still cleans scratch
     assert.deepEqual(result, { kind: "render-failed", error: "Refusing to write the PDF outside the project directory" });
-    assert.equal(calls.length, 1);
+    assert.ok(!calls.some((c) => c.args[0].endsWith("mark-pdf-ready.mjs")), "mark-pdf-ready.mjs must not run after a failed render");
     assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("cv-web-3.")), []);
     assert.deepEqual(readdirSync(join(dir, "output")), [], "a failed render keeps no HTML");
   } finally {
@@ -292,12 +312,13 @@ test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with a parseabl
   const pdfPaths = makePdfPaths(dir, "4");
   writeFileSync(pdfPaths.html, "<html></html>");
   const { spawnFn } = makeRouterSpawn({
+    "build-cv-html.mjs": built(),
     "generate-pdf.mjs": { exitCode: 0 },
     "mark-pdf-ready.mjs": { exitCode: 2, stdout: JSON.stringify({ error: "No tracker row links report #4", code: "not-found" }) },
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "4" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "4" });
 
     // Then the PDF is still reported rendered, but the warning carries mark-pdf-ready's specific error
     assert.equal(result.kind, "rendered");
@@ -314,12 +335,13 @@ test("renderAndMarkPdf: render succeeds but mark-pdf-ready fails with no parseab
   const pdfPaths = makePdfPaths(dir, "5");
   writeFileSync(pdfPaths.html, "<html></html>");
   const { spawnFn } = makeRouterSpawn({
+    "build-cv-html.mjs": built(),
     "generate-pdf.mjs": { exitCode: 0 },
     "mark-pdf-ready.mjs": { exitCode: 1, stderr: "unexpected crash" },
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "5" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "5" });
 
     // Then the PDF is still reported rendered, with the generic fallback
     // warning (no mark.data.error to quote) rather than the crash text
@@ -344,12 +366,13 @@ test("renderAndMarkPdf: successful render with stderr -> that stderr is surfaced
     "  - advisory phrase: world-class",
   ].join("\n");
   const { spawnFn } = makeRouterSpawn({
+    "build-cv-html.mjs": built(),
     "generate-pdf.mjs": { exitCode: 0, stderr },
     "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "6" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "6" });
 
     // Then the PDF is reported rendered and every stderr line reaches the caller,
     // one warning per line, rather than being collected and dropped
@@ -369,12 +392,13 @@ test("renderAndMarkPdf: successful render with empty stderr -> no warnings inven
   const pdfPaths = makePdfPaths(dir, "7");
   writeFileSync(pdfPaths.html, "<html></html>");
   const { spawnFn } = makeRouterSpawn({
+    "build-cv-html.mjs": built(),
     "generate-pdf.mjs": { exitCode: 0, stderr: "" },
     "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
   });
   try {
     // When rendering and marking
-    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, format: "letter", reportNum: "7" });
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "7" });
 
     // Then a clean run still reports zero warnings — blank lines must not
     // become empty warnings the user has to read past
@@ -384,65 +408,76 @@ test("renderAndMarkPdf: successful render with empty stderr -> no warnings inven
   }
 });
 
-// ── writeCvHtml (#2185) ──
+// ── writeCvPayload (#2185) ──
 //
-// The agent no longer writes the tailored CV — it emits it through the
-// <<cv-html>> envelope and the backend persists it here. These cases guard the
-// handover: the bytes must land verbatim, and a failed write must be reported
-// rather than swallowed — a silent failure would render a stale or missing file.
+// The agent no longer writes the tailored CV — it emits its payload through the
+// <<cv-payload>> envelope and the backend persists it here for build-cv-html.mjs.
+// A failed write must be reported rather than swallowed — a silent failure would
+// build from a stale or missing file.
 
-test("writeCvHtml: writes the html verbatim", () => {
-  // Given a tailored document with characters a re-encode would mangle
+test("writeCvPayload: writes the payload as JSON the builder can read back", () => {
+  // Given a payload with characters a re-encode would mangle
   const dir = makeScratchDir();
-  const html = '<!DOCTYPE html>\n<html><head><style>a>b{content:"<<"}</style></head><body>José — 5 &lt; 10</body></html>';
-  const paths = { html: join(dir, "cv-web-018.html"), finalPdf: join(dir, "out.pdf") };
+  const payload = { candidate: { name: "José <Admin>" }, summary: "R&D — 5 < 10, 東京", page_format: "auto", country: "DE" };
+  const paths = { payload: join(dir, "cv-web-018.payload.json"), html: join(dir, "cv-web-018.html") };
   try {
     // When persisting the parsed envelope
-    const result = writeCvHtml({ pdfPaths: paths, html });
+    const result = writeCvPayload({ pdfPaths: paths, payload });
 
-    // Then the file lands byte-exact. The page format is NOT written here — it
-    // goes straight to renderAndMarkPdf, so there is no sidecar to keep in sync.
+    // Then it round-trips unchanged, page_format and country included: the
+    // builder, not this step, decides the sheet
     assert.equal(result.ok, true);
-    assert.equal(readFileSync(paths.html, "utf8"), html);
-    assert.deepEqual(readdirSync(dir), ["cv-web-018.html"]);
+    assert.deepEqual(JSON.parse(readFileSync(paths.payload, "utf8")), payload);
+    assert.deepEqual(readdirSync(dir), ["cv-web-018.payload.json"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("writeCvHtml: an unwritable target reports failure instead of continuing", () => {
-  // Given an html path whose parent directory does not exist
+test("writeCvPayload: a shorter re-render leaves no trailing bytes", () => {
+  // Given a payload already on disk from a longer earlier run
   const dir = makeScratchDir();
-  const paths = {
-    html: join(dir, "no-such-dir", "cv.html"),
-    finalPdf: join(dir, "out.pdf"),
-  };
+  const paths = { payload: join(dir, "cv-web-9.payload.json"), html: join(dir, "cv-web-9.html") };
+  try {
+    writeCvPayload({ pdfPaths: paths, payload: { summary: "x".repeat(500) } });
+
+    // When a shorter payload is written to the same path
+    writeCvPayload({ pdfPaths: paths, payload: { summary: "y" } });
+
+    // Then the file parses as exactly the new payload
+    assert.deepEqual(JSON.parse(readFileSync(paths.payload, "utf8")), { summary: "y" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeCvPayload: an unwritable target reports failure instead of continuing", () => {
+  // Given a payload path whose parent directory does not exist
+  const dir = makeScratchDir();
+  const paths = { payload: join(dir, "no-such-dir", "cv.payload.json"), html: join(dir, "cv.html") };
   try {
     // When persisting
-    const result = writeCvHtml({ pdfPaths: paths, html: "<html></html>" });
+    const result = writeCvPayload({ pdfPaths: paths, payload: PAYLOAD });
 
-    // Then it fails fast and says why — the caller must not go on to render
+    // Then it fails fast and says why — the caller must not go on to build
     assert.equal(result.ok, false);
-    assert.match(result.error, /cv\.html/);
+    assert.match(result.error, /cv\.payload\.json/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("writeCvHtml: an error carrying no path still names a file", () => {
-  // Given a write that fails with a non-fs error — no `.path` property (e.g. an
-  // oversized-content RangeError). Without the fallback the user is told the CV
-  // could not be saved to "undefined".
+test("writeCvPayload: an error carrying no path still names a file", () => {
+  // Given a payload JSON.stringify refuses (a BigInt), which throws a TypeError
+  // with no `.path`. Without the fallback the user is told "undefined".
   const dir = makeScratchDir();
-  const paths = { html: join(dir, "cv.html"), finalPdf: join(dir, "out.pdf") };
+  const paths = { payload: join(dir, "cv.payload.json"), html: join(dir, "cv.html") };
   try {
-    // When persisting a value writeFileSync refuses to serialize
-    const result = writeCvHtml({ pdfPaths: paths, html: { not: "a string" } });
+    const result = writeCvPayload({ pdfPaths: paths, payload: { summary: 1n } });
 
-    // Then it fails naming the intended file rather than `undefined`
     assert.equal(result.ok, false);
     assert.ok(!result.error.includes("undefined"), `error names no file: ${result.error}`);
-    assert.match(result.error, /cv\.html/);
+    assert.match(result.error, /cv\.payload\.json/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -453,7 +488,7 @@ test("writeCvHtml: an error carrying no path still names a file", () => {
 // The honesty gate. It decides both whether anything is written and whether the
 // run is reported as success, so it must never call a run good on thin evidence.
 
-const OK_ENVELOPE = { ok: true, html: "<html></html>", format: "a4", warnings: [] };
+const OK_ENVELOPE = { ok: true, payload: PAYLOAD, warnings: [] };
 const GOOD = { envelope: OK_ENVELOPE, noOutputMessage: null, sawError: false, cleanExit: true, hasPaths: true };
 
 test("pdfRunOutcome: a clean run with a parsed envelope is the only success", () => {
@@ -516,27 +551,222 @@ test("pdfRunOutcome: a no-output verdict outranks an otherwise healthy envelope"
   assert.equal(outcome.message, "nothing came back");
 });
 
-test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
-  // Given the same report rendered twice, the second CV shorter than the first.
-  // route.ts clears no stale scratch file because this function is documented to
-  // rewrite the HTML before any render — a claim that rests entirely on
-  // writeFileSync truncating. Switch to an append flag, or to a write-then-rename
-  // helper, and every other test here stays green while the renderer reads the tail
-  // of a previous run's CV.
-  const dir = makeScratchDir();
-  const paths = { html: join(dir, "cv-web-018.html"), finalPdf: join(dir, "out.pdf") };
-  const long = `<!DOCTYPE html><html><body>${"X".repeat(4000)}</body></html>`;
-  const short = "<!DOCTYPE html><html><body>short</body></html>";
-  try {
-    // When the long document is written and then the short one to the same path
-    assert.equal(writeCvHtml({ pdfPaths: paths, html: long }).ok, true);
-    assert.equal(writeCvHtml({ pdfPaths: paths, html: short }).ok, true);
+// ── build step (#2505): build-cv-html.mjs is the one HTML writer ──
 
-    // Then the file is exactly the short document, with nothing left over
-    const onDisk = readFileSync(paths.html, "utf8");
-    assert.equal(onDisk, short);
-    assert.ok(!onDisk.includes("XXXX"), "trailing bytes from the earlier write survived");
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const SYNTHETIC_TIMEOUT_MS = 50;
+
+test("spawnGeneratePdf: a null format omits --format so generate-pdf.mjs resolves the size", async () => {
+  const { spawnFn, calls } = makeRouterSpawn({ "generate-pdf.mjs": { exitCode: 0 } });
+  const result = await spawnGeneratePdf({ spawnFn, execPath: "node", root: "/root", html: "x.html", finalPdf: "x.pdf", format: null, reportNum: "1" });
+  assert.equal(result.ok, true);
+  assert.ok(!calls[0].args.some((a) => String(a).startsWith("--format")), `unexpected --format in ${calls[0].args.join(" ")}`);
+});
+
+test("spawnBuildCvHtml: reads the sheet from the builder's report, and only a recognised one", async () => {
+  for (const [stdout, expected] of [
+    [JSON.stringify({ page_format: "a4" }), "a4"],
+    [JSON.stringify({ page_format: "letter" }), "letter"],
+    [JSON.stringify({ page_format: "auto" }), null],
+    [JSON.stringify({ file: "cv.html" }), null],
+    ["not json", null],
+  ]) {
+    const result = await spawnBuildCvHtml({ spawnFn: () => fakeChild({ stdout }), execPath: "node", root: "/r", payload: "p", html: "h" });
+    assert.equal(result.ok, true);
+    assert.equal(result.pageFormat, expected, `stdout ${stdout}`);
+  }
+});
+
+test("spawnBuildCvHtml: no template argument when none was resolved", async () => {
+  const { spawnFn, calls } = makeRouterSpawn({ "build-cv-html.mjs": built() });
+  await spawnBuildCvHtml({ spawnFn, execPath: "node", root: "/root", payload: "/s/p.json", html: "/s/cv.html" });
+  assert.deepEqual(calls[0].args.slice(1), ["/s/p.json", "/s/cv.html"]);
+  assert.equal(calls[0].opts.windowsHide, true);
+});
+
+test("spawnBuildCvHtml: nonzero exit, emitted error and synchronous throw are failures", async () => {
+  const nonzero = await spawnBuildCvHtml({ spawnFn: () => fakeChild({ exitCode: 1, stderr: "Invalid CV payload:\n  - experience[0]: missing required field company" }), execPath: "node", root: "/r", payload: "p", html: "h" });
+  assert.equal(nonzero.ok, false);
+  assert.match(nonzero.stderr, /missing required field company/);
+  const emitted = await spawnBuildCvHtml({ spawnFn: () => fakeChild({ spawnError: new Error("ENOENT") }), execPath: "node", root: "/r", payload: "p", html: "h" });
+  assert.match(emitted.stderr, /failed to start: ENOENT/);
+  const thrown = await spawnBuildCvHtml({ spawnFn: () => { throw new Error("EACCES"); }, execPath: "node", root: "/r", payload: "p", html: "h" });
+  assert.match(thrown.stderr, /failed to start: EACCES/);
+});
+
+/** A child that never exits on its own; `kill` records signals and runs `onKill`. */
+function hungChild(onKill) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.signals = [];
+  child.kill = (signal) => {
+    child.signals.push(signal);
+    return onKill(child, signal);
+  };
+  return child;
+}
+
+test("spawnBuildCvHtml: a hung child is timed out, and the result waits for its close", async () => {
+  // Given a child that exits only after it is signalled
+  let sawTerm;
+  const termSent = new Promise((r) => { sawTerm = r; });
+  const child = hungChild((_c, signal) => { if (signal === "SIGTERM") sawTerm(); return true; });
+  const pending = spawnBuildCvHtml({ spawnFn: () => child, execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS });
+  await termSent;
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  // Real time, not one microtask: a result that settled at SIGTERM must have
+  // had every chance to show up before this check.
+  await new Promise((r) => setTimeout(r, SYNTHETIC_TIMEOUT_MS * 2));
+  // Then nothing settles while the child may still be writing scratch files
+  assert.equal(settled, false, "settled before close: cleanup could race the child");
+  child.emit("close", null);
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, new RegExp(`timed out after ${SYNTHETIC_TIMEOUT_MS}ms`));
+  // ...even past the SIGKILL escalation: only close proves the child is gone
+  assert.deepEqual(child.signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("spawnBuildCvHtml: a child that ignores SIGTERM is escalated to SIGKILL", async () => {
+  const child = hungChild((c, signal) => {
+    if (signal === "SIGKILL") queueMicrotask(() => c.emit("close", null));
+    return true;
+  });
+  const result = await spawnBuildCvHtml({ spawnFn: () => child, execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS });
+  assert.equal(result.ok, false);
+  assert.deepEqual(child.signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("spawnBuildCvHtml: a signal-delivery error after the timeout is not treated as the child exiting", async () => {
+  // Given SIGTERM delivery fails (EPERM) and the child only exits on SIGKILL
+  const child = hungChild((c, signal) => {
+    queueMicrotask(() => (signal === "SIGTERM" ? c.emit("error", new Error("kill EPERM")) : c.emit("close", null)));
+    return signal === "SIGKILL";
+  });
+  const result = await spawnBuildCvHtml({ spawnFn: () => child, execPath: "node", root: "/r", payload: "p", html: "h", timeoutMs: SYNTHETIC_TIMEOUT_MS });
+  // Then it still escalates and reports the timeout, not the EPERM
+  assert.equal(result.ok, false);
+  assert.match(result.stderr, /timed out/);
+  assert.deepEqual(child.signals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("renderAndMarkPdf: builder fails -> build-failed, nothing rendered or marked, scratch cleaned", async () => {
+  // Given a payload the shared validator rejects
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "8");
+  const { spawnFn, calls } = makeRouterSpawn({
+    "build-cv-html.mjs": { exitCode: 1, stderr: "Invalid CV payload:\n  - education[0]: missing required field title" },
+    "generate-pdf.mjs": { exitCode: 0 },
+    "mark-pdf-ready.mjs": { exitCode: 0 },
+  });
+  try {
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "8" });
+    assert.equal(result.kind, "build-failed");
+    assert.match(result.error, /missing required field title/);
+    assert.deepEqual(calls.map((c) => c.args[0].split(/[\\/]/).pop()), ["build-cv-html.mjs"]);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("cv-web-8.")), [], "the payload was not cleaned up");
+    assert.deepEqual(readdirSync(join(dir, "output")), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: the builder's warnings reach the caller ahead of the renderer's", async () => {
+  // Given a template with no slot for a section the payload filled (#5908)
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "10");
+  writeFileSync(pdfPaths.html, "<html></html>");
+  const { spawnFn } = makeRouterSpawn({
+    "build-cv-html.mjs": built("letter", "Warning: awards: cv-template.min.html has no {{AWARDS}} slot, so 2 entries will not appear"),
+    "generate-pdf.mjs": { exitCode: 0, stderr: "CV is 3 pages; the allowed maximum is 2 pages." },
+    "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
+  });
+  try {
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "10" });
+    assert.equal(result.kind, "rendered");
+    assert.equal(result.warnings.length, 2);
+    assert.match(result.warnings[0], /no \{\{AWARDS\}\} slot/);
+    assert.match(result.warnings[1], /CV is 3 pages/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: a builder that reports no sheet fails closed instead of guessing the paper", async () => {
+  // Given a builder that exits 0 but whose report names no page size
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "11");
+  const { spawnFn, calls } = makeRouterSpawn({
+    "build-cv-html.mjs": { exitCode: 0, stdout: "{}" },
+    "generate-pdf.mjs": { exitCode: 0 },
+    "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
+  });
+  try {
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", root: "/root", pdfPaths, payload: PAYLOAD, reportNum: "11" });
+    // Then nothing renders: generate-pdf.mjs alone would resolve from fewer
+    // inputs than the builder did, and could print the body on the wrong sheet
+    assert.equal(result.kind, "build-failed");
+    assert.match(result.error, /page size/);
+    assert.deepEqual(calls.map((c) => c.args[0].split(/[\\/]/).pop()), ["build-cv-html.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the three bounded children fit the time route.ts leaves after the agent", () => {
+  // route.ts: maxDuration 800s, pdf agent killMs 600s. Build + render + mark,
+  // each with up to 1s kill grace, must end before the platform cutoff.
+  const worst = QUICK_PDF_CHILD_TIMEOUT_MS * 2 + DEFAULT_PDF_CHILD_TIMEOUT_MS + 3 * 1_000;
+  assert.ok(600_000 + worst < 800_000, `worst case ${worst}ms overruns the route budget`);
+});
+
+/** Spawn with the data root pointed at an empty scratch dir, so a developer's own profile and cv.md cannot steer the real builder. */
+function isolatedSpawn(dataRoot) {
+  return (cmd, args, opts) => spawn(cmd, args, { ...opts, env: { ...process.env, CAREER_OPS_ROOT: dataRoot, CAREER_OPS_PROFILE: "" } });
+}
+
+test("the real build-cv-html.mjs builds the web's payload, escapes once, and reports its sheet", async () => {
+  // End to end through the real builder: the web hands it the same JSON the CLI
+  // writes, and the builder is the only thing that turns text into markup.
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "12");
+  const payload = {
+    page_format: "a4",
+    candidate: { name: "Zoë <Admin>" },
+    summary: "R&D shipped <safe> systems — 東京",
+    competencies: ["Node & browser automation"],
+    skills: [{ category: "Languages", items: ["C++", "TypeScript"] }],
+  };
+  try {
+    assert.equal(writeCvPayload({ pdfPaths, payload }).ok, true);
+    const build = await spawnBuildCvHtml({ spawnFn: isolatedSpawn(dir), execPath: process.execPath, root: REPO_ROOT, payload: pdfPaths.payload, html: pdfPaths.html });
+    assert.equal(build.ok, true, build.stderr);
+    assert.equal(build.pageFormat, "a4");
+    const html = readFileSync(pdfPaths.html, "utf8");
+    assert.match(html, /Zoë &lt;Admin&gt;/);
+    assert.match(html, /R&amp;D shipped &lt;safe&gt; systems — 東京/);
+    assert.doesNotMatch(html, /&amp;lt;safe&amp;gt;/, "text was escaped twice");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the real builder resolves `auto` by the payload's country and reports that sheet", async () => {
+  // The case where the report matters most: the body width comes from the
+  // country, and the renderer must print on that same sheet (#4405, #5145)
+  for (const [country, sheet, width] of [["DE", "a4", "210mm"], ["US", "letter", "8.5in"]]) {
+    const dir = makeScratchDir();
+    const pdfPaths = makePdfPaths(dir, "13");
+    try {
+      writeCvPayload({ pdfPaths, payload: { ...PAYLOAD, page_format: "auto", country } });
+      const build = await spawnBuildCvHtml({ spawnFn: isolatedSpawn(dir), execPath: process.execPath, root: REPO_ROOT, payload: pdfPaths.payload, html: pdfPaths.html });
+      assert.equal(build.ok, true, build.stderr);
+      assert.equal(build.pageFormat, sheet, country);
+      assert.ok(readFileSync(pdfPaths.html, "utf8").includes(width), `${country}: body is not ${width} wide`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 });

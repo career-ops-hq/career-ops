@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { tmpdir } from "node:os";
-import { slugify, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
+import { slugify, pdfScratchPrefix, resolvePdfPaths } from "../../src/lib/pdf-paths.mjs";
 import { matchesTailoredCv } from "../../src/lib/apply/cv-match.mjs";
 import { pdfPathForReport } from "../../src/lib/apply/cv-selection.mjs";
 
@@ -19,6 +19,10 @@ test("slugify: lowercases and hyphenates", () => {
 
 test("slugify: trims leading/trailing hyphens", () => {
   assert.equal(slugify("  -Weird Name!- "), "weird-name");
+});
+
+test("pdfScratchPrefix is the canonical run-scoped cleanup prefix", () => {
+  assert.equal(pdfScratchPrefix("018"), "cv-web-018.");
 });
 
 // Given a career-ops root with a report on disk and a profile.yml naming the candidate
@@ -31,7 +35,7 @@ function makeRoot({ profileYaml } = {}) {
   return root;
 }
 
-test("resolvePdfPaths: happy path builds html + finalPdf from report + profile", () => {
+test("resolvePdfPaths: happy path builds payload + html + finalPdf from report + profile", () => {
   // Given a root with a resolvable report and a named candidate
   const root = makeRoot();
   const findReportFile = (input) => (input === "018" ? join(root, "reports", "018-acme-2026-07-01.md") : null);
@@ -42,6 +46,7 @@ test("resolvePdfPaths: happy path builds html + finalPdf from report + profile",
     // Then it returns deterministic scratch + final paths using the candidate/company slugs
     assert.equal(result.ok, true);
     assert.equal(result.paths.reportNum, "018");
+    assert.equal(result.paths.payload, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.payload.json"));
     assert.equal(result.paths.html, join(root, ".career-ops-web", "pdf-tmp", "cv-web-018.html"));
     assert.equal(result.paths.finalPdf, join(root, "output", "cv-jane-smith-018-acme-2026-07-26.pdf"));
   } finally {

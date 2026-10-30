@@ -28,7 +28,7 @@ test("Codex agent message becomes dashboard text, newline-terminated", () => {
   // Given: Codex sends complete messages with NO trailing newline ("hello", not
   // "hello\n"), so without termination consecutive messages glue mid-line —
   // which runs narration together in the log and breaks the line-anchored
-  // <<cv-html>> markers in pdf mode.
+  // <<cv-payload>> markers in pdf mode.
   const event = parseCodexEvent(JSON.stringify({
     type: "item.completed",
     item: { type: "agent_message", text: "VERDICT: 4.2/5 — strong fit" },
@@ -55,7 +55,10 @@ test("a cv envelope in its own Codex message survives preceding narration", () =
   }));
   const envelope = parseCodexEvent(JSON.stringify({
     type: "item.completed",
-    item: { type: "agent_message", text: '<<cv-html format="a4">>\n<!DOCTYPE html><html><body>CV</body></html>\n<</cv-html>>' },
+    item: {
+      type: "agent_message",
+      text: '<<cv-payload>>\n{"page_format":"a4","candidate":{"name":"Test"},"summary":"Summary","competencies":[],"skills":[]}\n<</cv-payload>>',
+    },
   }));
 
   // When: both flow through the same filter the route feeds via sendAgentText.
@@ -67,8 +70,8 @@ test("a cv envelope in its own Codex message survives preceding narration", () =
   // Then: the envelope parses — the run's CV is recovered, not refused.
   const result = filter.result();
   assert.equal(result.ok, true);
-  assert.equal(result.format, "a4");
-  assert.match(result.html, /<\/html>/);
+  assert.equal(result.payload.page_format, "a4");
+  assert.equal(result.payload.candidate.name, "Test");
 });
 
 test("Codex turn.started maps to a kind-agnostic working status", () => {

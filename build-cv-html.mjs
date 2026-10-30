@@ -2,14 +2,15 @@
 
 // Deterministic HTML CV renderer (#557 — the HTML twin of build-cv-latex.mjs).
 //
-// The agent reads cv.md + config/profile.yml, tailors the content, and writes a
-// compact JSON payload. This script merges that payload into the resolved CV
-// template (default templates/cv-template.html; pass a path resolved by
+// The agent reads cv.md + config/profile.yml and tailors the content into a
+// compact JSON payload. A CLI caller may save that payload directly; the web
+// backend saves the agent's parsed envelope. This script merges the payload into
+// the resolved CV template (default templates/cv-template.html; pass a path resolved by
 // cv-templates.mjs to honor config-selectable templates, #1691) — it owns every
 // tag, class, and the HTML escaping,
 // so the model never has to emit the full document. That moves the PDF step's
 // output tokens from full HTML markup down to the structured JSON payload while
-// producing byte-for-byte the same ATS-safe template the agent fills today.
+// producing the same ATS-safe template for every caller.
 //
 // The script does NOT parse cv.md / YAML: the authoritative read of the source
 // files stays in the agent (same contract as build-cv-latex.mjs / modes/latex.md).
@@ -862,6 +863,10 @@ async function writeAndReport(html, absOutput, payload, extra = {}) {
     file: basename(absOutput),
     path: absOutput,
     sizeKB: parseFloat((fileInfo.size / 1024).toFixed(1)),
+    // The sheet this body was laid out for, resolved by the same call renderHtml
+    // makes, so a caller can hand generate-pdf.mjs the SAME size (#4405) instead
+    // of resolving it a second time from inputs that may differ.
+    page_format: resolvePageFormat(payload.page_format, { profilePath: PROFILE_PATH, country: payload.country }),
     counts: {
       competencies: (payload.competencies || []).length,
       experienceEntries: (payload.experience || []).length,
@@ -1057,6 +1062,10 @@ async function runMarkdown(args) {
   process.exit(0);
 }
 
+/**
+ * Parse CLI arguments, validate the payload, and build or preview a CV.
+ * @returns {Promise<void>}
+ */
 async function main() {
   const args = process.argv.slice(2);
 
