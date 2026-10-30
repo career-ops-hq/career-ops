@@ -59,6 +59,10 @@ try {
     if (!inputLine || !inputLine.includes(join(dataRoot, 'output', 'cv.html'))) {
       throw new Error(`input was not the workspace file:\n${outsideText.trim().slice(0, 500)}`);
     }
+    const outputLine = outsideText.split('\n').find((line) => line.includes('Output:'));
+    if (!outputLine || !outputLine.includes(join(dataRoot, 'output', 'cv.pdf'))) {
+      throw new Error(`output was not the workspace file:\n${outsideText.trim().slice(0, 500)}`);
+    }
     if (outside.status !== 0) {
       if (!/browser|chromium|playwright|executable|Failed to launch/i.test(outsideText)) {
         throw new Error(`render failed before the browser:\n${outsideText.trim().slice(0, 500)}`);
