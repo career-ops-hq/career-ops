@@ -39,8 +39,24 @@ test("trackerEmptyMessage does not blame the search when the file has no rows", 
   assert.equal(empty.title, "No applications yet");
   assert.doesNotMatch(empty.detail, /clear the search/);
 
+  const emptySearch = trackerEmptyMessage({ shape: "empty", query: "Northwind", min: null, tab: "ALL" });
+  assert.equal(emptySearch.kind, "empty");
+  assert.doesNotMatch(emptySearch.detail, /clear the search/);
+
+  const emptyTab = trackerEmptyMessage({ shape: "empty", query: "", min: null, tab: "APPLIED" });
+  assert.equal(emptyTab.kind, "empty");
+  assert.doesNotMatch(emptyTab.detail, /clear the search/);
+
   const missing = trackerEmptyMessage({ shape: "missing", query: "", min: null, tab: "ALL" });
   assert.equal(missing.kind, "empty");
+
+  const missingSearch = trackerEmptyMessage({ shape: "missing", query: "Northwind", min: null, tab: "ALL" });
+  assert.equal(missingSearch.kind, "empty");
+  assert.doesNotMatch(missingSearch.detail, /clear the search/);
+
+  const missingTab = trackerEmptyMessage({ shape: "missing", query: "", min: null, tab: "APPLIED" });
+  assert.equal(missingTab.kind, "empty");
+  assert.doesNotMatch(missingTab.detail, /clear the search/);
 
   const bad = trackerEmptyMessage({ shape: "malformed", query: "", min: null, tab: "ALL" });
   assert.equal(bad.kind, "malformed");

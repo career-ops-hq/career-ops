@@ -1505,6 +1505,32 @@ export function resolveArtifactKind(explicit, outputPath) {
 }
 
 /**
+ * Infer the report number from the output or input file name when --report is
+ * missing. The number is a run of exactly three digits bounded by `-` or `_`
+ * in the file's basename (`cv-ana-042-acme-2026-10-30.pdf` -> `042`); the
+ * output name is tried first, then the input name. Directories are ignored.
+ *
+ * An ATS variant (an `ats` token in the name) is never inferred: modes/pdf.md
+ * renders it without --report on purpose, because an indexed ATS PDF would
+ * replace the styled CV the dashboard opens for that report.
+ *
+ * @param {string} [outputPath] - Destination PDF path.
+ * @param {string} [inputPath] - Source HTML path.
+ * @returns {{reportNum: string, from: string}|null} The number and the path it
+ *   came from, or null when neither name carries one.
+ */
+export function inferReportNumber(outputPath, inputPath) {
+  for (const p of [outputPath, inputPath]) {
+    const name = basename(p || '');
+    if (!name) continue;
+    if (/(^|[-_])ats([-_.]|$)/i.test(name)) return null;
+    const m = name.match(/[-_](\d{3})[-_]/);
+    if (m) return { reportNum: m[1], from: p };
+  }
+  return null;
+}
+
+/**
  * Merge one generated-PDF row into the manifest's existing data lines.
  *
  * The manifest holds one row per report number AND artifact kind, so a CV and
@@ -1830,6 +1856,18 @@ async function generatePDF() {
     console.error('mechanical markdown-to-HTML step by design. Run `/career-ops pdf` in your AI');
     console.error('CLI to drive the full flow end to end.');
     process.exit(1);
+  }
+
+  // No --report: take the 3-digit report number from the file names, the way
+  // modes/pdf.md names them (output/cv-{candidate}-{report}-{company}-...).
+  // Only for a single render; a batch carries reportNum per entry. Printed, so
+  // a wrong guess is visible; --report always wins.
+  if (!reportSupplied) {
+    const inferred = inferReportNumber(outputPath, inputPath);
+    if (inferred) {
+      reportNum = inferred.reportNum;
+      console.warn(`⚠️  No --report given: using report ${inferred.reportNum} from the file name "${basename(inferred.from)}". Pass --report=NNN to set it explicitly.`);
+    }
   }
 
   if (reportNum && !/^\d+$/.test(reportNum)) {
