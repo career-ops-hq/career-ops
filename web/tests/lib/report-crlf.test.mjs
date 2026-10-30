@@ -49,3 +49,12 @@ test("readReport and splitSections accept a lone CR line ending", () => {
   assert.match(sections.sections[0].heading, /Role summary/);
   assert.match(sections.sections[0].content, /warehouse/);
 });
+
+test("splitSections splits CRLF and CR text it gets directly", () => {
+  // pipeline-compare passes a report body straight to splitSections, without
+  // readReport, so splitSections has to handle the line endings on its own.
+  const lf = splitSections(LF);
+  assert.ok(lf.sections.length > 0);
+  assert.deepEqual(splitSections(LF.replace(/\n/g, "\r\n")), lf);
+  assert.deepEqual(splitSections(LF.replace(/\n/g, "\r")), lf);
+});
