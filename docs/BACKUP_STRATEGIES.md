@@ -19,7 +19,10 @@ By default your files sit inside the checkout, mixed in with code. career-ops ca
 and write all of them from a separate folder instead (see
 [External Data Directory](../README.md#external-data-directory-optional) and
 [`DATA_CONTRACT.md`](../DATA_CONTRACT.md#custom-data-directory)). Code, `modes/` and
-`node_modules/` stay in the checkout; everything in the User Layer moves.
+`node_modules/` stay in the checkout; everything in the User Layer moves, with one
+exception: `config/local-paths.txt`, if you have one, stays in the checkout because
+`update-system.mjs` reads it from there. It is not in the data root, so keep a copy of it
+with your backup.
 
 Once your data is in one folder, backing it up is one path, and none of the patterns
 below have to know which files under the checkout are yours.
@@ -28,35 +31,48 @@ Use a folder **outside** the checkout, for example `~/career-data`:
 
 ```bash
 cd ~/career-ops
-mkdir -p ~/career-data
+dest="$HOME/career-data"
 
-# Move the User Layer files and folders you actually have. Skip any that don't exist.
-for p in cv.md article-digest.md voice-dna.md portals.yml \
-         data reports output jds interview-prep documents writing-samples; do
-  [ -e "$p" ] && mkdir -p ~/career-data/"$(dirname "$p")" && mv "$p" ~/career-data/"$p"
-done
-mkdir -p ~/career-data/config ~/career-data/modes ~/career-data/batch
-for p in config/profile.yml config/cv-facts.json config/benchmarks.yml config/plugins.yml \
-         modes/_profile.md modes/_custom.md modes/_brief.md batch/tracker-additions; do
-  [ -e "$p" ] && mv "$p" ~/career-data/"$p"
-done
+(
+  # Refuse to merge into a folder that already has files in it.
+  if [ -e "$dest" ] && [ -n "$(ls -A "$dest")" ]; then
+    echo "Stopping: $dest already exists and is not empty." >&2
+    exit 1
+  fi
+  # Move the User Layer files and folders you actually have, skipping any that
+  # don't exist. Stop at the first move that fails.
+  for p in cv.md article-digest.md voice-dna.md portals.yml \
+           data reports output jds interview-prep documents writing-samples \
+           config/profile.yml config/cv-facts.json config/benchmarks.yml config/plugins.yml \
+           modes/_profile.md modes/_custom.md modes/_brief.md batch/tracker-additions; do
+    [ -e "$p" ] || continue
+    mkdir -p "$dest/$(dirname "$p")" && mv "$p" "$dest/$p" || exit 1
+  done
+  mkdir -p "$dest/config" "$dest/modes" "$dest/batch"
+) && {
+  # Moving whole folders also took their tracked scaffolds (.gitkeep, README.md).
+  # Those are system files; put them back in the checkout.
+  git ls-files --deleted -z | xargs -0 git checkout --
 
-# Moving whole folders also took their tracked scaffolds (.gitkeep, README.md).
-# Those are system files; put them back in the checkout.
-git ls-files --deleted -z | xargs -0 git checkout --
-
-# Point career-ops at it (the marker file is git-ignored).
-echo "$HOME/career-data" > .career-ops-data
-node doctor.mjs
-git status
+  # Only now point career-ops at the new folder (the marker file is git-ignored).
+  echo "$dest" > .career-ops-data
+  node doctor.mjs
+  git status
+}
 ```
+
+If the block stops, career-ops still reads from the checkout, because the marker file was
+not written. Move back anything it already moved into `~/career-data`, fix the cause, and
+run it again.
 
 `doctor.mjs` should report nothing missing; if it lists a file, it is still in the
 checkout or was never created. `git status` should be clean: your files are no longer
 in the checkout, and the scaffolds are back where they were.
 
-You can use `export CAREER_OPS_ROOT=~/career-data` instead of the marker file. The marker
-works without editing your shell profile, and every script and agent mode picks it up.
+You can use `export CAREER_OPS_ROOT=~/career-data` instead of the marker file
+(`CAREER_OPS_DATA_DIR` is an alias for it). Either variable takes precedence over the
+marker. The marker works without editing your shell profile, and every script and agent
+mode picks it up.
 
 ---
 
@@ -68,6 +84,8 @@ Versioned history, works across machines, and you already have Git.
 cd ~/career-data
 git init -b main
 git add -A
+# Check what you staged for API keys and tokens. No output means nothing was found.
+git grep --cached -nE 'sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|PRIVATE KEY-----'
 git commit -m "career-ops data"
 gh repo create career-data --private --source . --push
 gh repo view career-data --json visibility -q .visibility   # must print PRIVATE
@@ -85,7 +103,12 @@ cd ~/career-data && git add -A && git commit -m "backup $(date +%F)" && git push
 ```
 
 To schedule that, use the same tools as [scheduled scans](AUTOMATION.md) (cron, launchd,
-Task Scheduler) with the command above.
+Task Scheduler) with the command above. In a crontab, `%` has a special meaning, so escape
+it as `\%`:
+
+```bash
+0 20 * * * cd ~/career-data && git add -A && git commit -q -m "backup $(date +\%F)" && git push -q
+```
 
 **On a new machine** (or at the start of a cloud session):
 
@@ -105,8 +128,9 @@ every time, so clone the data repository at the start and push before you finish
 session's GitHub access must include the data repository.
 
 Keep secrets out of it: API keys belong in `.env` / `.career-ops.env` in the checkout,
-not in the data folder. Before the first push, a cheap check is
-`git grep -nE 'sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|PRIVATE KEY-----'`.
+not in the data folder. The `git grep --cached` line in the first block checks what you
+staged before anything is committed or pushed. Run it again after `git add -A` whenever
+you add files you did not write yourself.
 
 ---
 
