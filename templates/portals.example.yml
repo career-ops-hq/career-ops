@@ -1223,6 +1223,7 @@ search_queries:
 #   recruitee       <slug>.recruitee.com
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
+#   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
@@ -1285,6 +1286,7 @@ search_queries:
 #   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
+#   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #
@@ -1356,6 +1358,10 @@ search_queries:
 #
 # - name: Example Breezy Co
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
+#   enabled: true
+#
+# - name: Example Deel Board Co
+#   careers_url: https://jobs.deel.com/exampleco          # the tenant slug is the first path segment
 #   enabled: true
 #
 # - name: Example ClearCompany Co
@@ -1761,6 +1767,11 @@ search_queries:
 #   max_jobs: 100                         # optional (default 100, max 500)
 #   enabled: true                         # random 1-2s pause between pages
 #
+# - name: Example Bulldogjob              # Polish tech board, many employers
+#   careers_url: https://bulldogjob.pl/companies/jobs/s/role,devops/experienceLevel,medium/city,Remote  # auto-detected; any search URL
+#   max_pages: 5                          # optional page cap (50 jobs/page, default 25, max 100)
+#   enabled: true                         # 250ms pacing between pages
+#
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
 #   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67; applies to each pass below)
@@ -1921,6 +1932,7 @@ search_queries:
 #   ibm:
 #     country: Germany                      # optional facet filter
 #     categories: ["Software Engineering"]  # optional facet filter
+#   max_pages: 20         # optional page cap (30 jobs/page, default 20, max 300)
 #   enabled: true
 #
 # - name: SolidJobs — Engineering        # Polish multi-division job board
@@ -2830,10 +2842,8 @@ tracked_companies:
     enabled: true
 
   - name: Klarna
-    careers_url: https://www.klarna.com/careers/
-    scan_method: websearch
-    scan_query: 'site:klarna.com/careers "Engineer" OR "Backend" OR "Platform"'
-    notes: "Stockholm. Fintech. SPA at klarna.com/careers."
+    careers_url: https://jobs.deel.com/klarna
+    notes: "Stockholm. Fintech. Hosted on the Deel job board (jobs.deel.com/<slug>); the scanner reads it directly."
     enabled: true
 
   - name: Bolt
@@ -3377,6 +3387,11 @@ tracked_companies:
     notes: "PageUp. US tenants use the en-us locale segment. 367 postings when checked."
     enabled: false
 
+  - name: Freshworks
+    careers_url: https://careers.smartrecruiters.com/freshworks
+    notes: "SmartRecruiters. 123 postings when checked."
+    enabled: true
+
 # ── Job Boards ────────────────────────────────────────────────────────
 # Multi-employer aggregators. Unlike tracked_companies (one entry = one employer),
 # job boards return offers from many companies in a single API call.
@@ -3463,7 +3478,7 @@ job_boards:
     enabled: false
     notes: "Polish job board — Other specialists division"
 
-  # ── JustJoin.it / NoFluffJobs (Polish tech market) ────────────────────────
+  # ── JustJoin.it / NoFluffJobs / Bulldogjob (Polish tech market) ───────────
   # Public job-board APIs. Disabled by default; enable and rely on the global
   # title_filter/location_filter/salary_filter above for your target profile.
 
@@ -3478,6 +3493,12 @@ job_boards:
     provider: nofluffjobs
     enabled: false
     notes: "Polish tech job board — newest public postings"
+
+  - name: Bulldogjob
+    careers_url: https://bulldogjob.pl/companies/jobs
+    provider: bulldogjob
+    enabled: false
+    notes: "Polish tech job board — whole board; narrow it with a search URL from the site"
 
   # ── Jobs.cz / Prace.cz (Czech job portals) ─────────────────────────────────
   # Keyword search; keywords default to config/profile.yml target_roles.
