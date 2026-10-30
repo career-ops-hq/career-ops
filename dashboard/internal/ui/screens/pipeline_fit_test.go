@@ -118,6 +118,25 @@ func TestPipelineFitsNarrowTerminal(t *testing.T) {
 	}
 }
 
+func TestWideCompanyKeepsStatusOnOneRow(t *testing.T) {
+	i18n.SetLang("en")
+	apps := fitWidthApps()
+	// Seven ideographs are 14 cells. A rune cap of 12 would leave them whole.
+	apps[0].Company = "北風商事東京店"
+	apps[0].Role = "基盤設計担当主任"
+	m := NewPipelineModel(theme.NewTheme(""), apps, fitWidthMetrics(apps), t.TempDir(), 60, 24)
+	line := m.renderAppLine(apps[0], true)
+	if strings.Contains(line, "\n") {
+		t.Fatalf("wide company wrapped the row:\n%s", line)
+	}
+	if w := lipgloss.Width(line); w > 60 {
+		t.Errorf("row is %d cells wide, terminal is 60", w)
+	}
+	if !strings.Contains(line, "Eval") {
+		t.Errorf("status left the row: %q", line)
+	}
+}
+
 func TestKeysHelpFitsAndQDoesNotQuit(t *testing.T) {
 	i18n.SetLang("en")
 	m := NewPipelineModel(theme.NewTheme(""), fitWidthApps(), fitWidthMetrics(fitWidthApps()), t.TempDir(), 80, 24)
