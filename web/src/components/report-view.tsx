@@ -96,7 +96,7 @@ export function ReportView({
     <PageFrame className="max-w-3xl xl:max-w-5xl 2xl:max-w-[1600px]">
       <Link
         href={backHref}
-        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text"
+        className="inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-brand-text print:hidden"
       >
         <ArrowLeft className="size-4" /> Pipeline
       </Link>
@@ -114,7 +114,7 @@ export function ReportView({
           <p className="mt-2 text-xs text-muted">{meta.fields.find((field) => field.label === "Evaluation scope")?.value}</p>
         )}
 
-        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+        <div className="mt-4 flex flex-wrap items-center gap-2.5 print:hidden">
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company || meta?.title || id} pdfReady={pdfReady} />
           {app && report && <CoverDraftButton n={id} company={companyName} />}
@@ -145,7 +145,7 @@ export function ReportView({
         </div>
 
         {app && canDelete && (
-          <div className="mt-3">
+          <div className="mt-3 print:hidden">
             <DeleteFromTracker n={id} />
           </div>
         )}
@@ -202,7 +202,7 @@ export function ReportView({
                   {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
                 </div>
                 {reason && <p className="mt-4 text-[15px] font-medium leading-relaxed text-foreground">{reason}</p>}
-                <div className="mt-4">
+                <div className="mt-4 print:hidden">
                   <ApplyButton
                     n={id}
                     url={applyUrl}
@@ -243,8 +243,8 @@ export function ReportView({
                     <details key={i} className="group mt-3 overflow-hidden rounded-xl border border-border bg-surface/30">
                       <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover">
                         <span className="text-sm font-medium">{cleanHeading(s.heading)}</span>
-                        <span className="hidden truncate text-xs text-faint sm:inline">{sectionPreview(s.content)}</span>
-                        <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
+                        <span className="hidden truncate text-xs text-faint sm:inline print:hidden">{sectionPreview(s.content)}</span>
+                        <ChevronDown className="ml-auto size-4 shrink-0 text-faint transition-transform group-open:rotate-180 print:hidden" />
                       </summary>
                       <div className="report-prose border-t border-border px-4 py-3">
                         <ReportMarkdown>{s.content}</ReportMarkdown>
@@ -255,7 +255,7 @@ export function ReportView({
                 <PrepPack report={report} company={companyName} />
 
                 {machine.length > 0 && (
-                  <>
+                  <div className="print:hidden">
                     <div className="mt-6 flex items-center gap-3 text-[11px] uppercase tracking-[0.14em] text-faint">
                       <span className="h-px flex-1 bg-border" />
                       Technical details · for developers
@@ -272,7 +272,7 @@ export function ReportView({
                         </div>
                       </details>
                     ))}
-                  </>
+                  </div>
                 )}
               </div>
             );
@@ -286,7 +286,9 @@ export function ReportView({
               guessing one from the report would surface another company's
               history. */}
           {app?.company && <CompanyEvidence company={app.company} />}
-          <ScoreMethodology />
+          <div className="print:hidden">
+            <ScoreMethodology />
+          </div>
         </>
       ) : (
         <div className="mt-8 flex items-center gap-3 rounded-2xl border border-dashed border-border bg-surface/30 p-5 text-sm text-muted">

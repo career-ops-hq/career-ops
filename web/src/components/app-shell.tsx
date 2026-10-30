@@ -34,7 +34,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
       </a>
       <MobileNav followupsEnabled={followupsEnabled} />
       <div className="flex min-h-screen">
-        <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
+        <aside className="sticky top-0 hidden print:hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
@@ -84,10 +84,12 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
           </div>
         </aside>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>
-        <AssistantConsole />
-        <BackToTop />
-        <FirstScoreView />
-        <BetaBanner />
+        <div className="print:hidden">
+          <AssistantConsole />
+          <BackToTop />
+          <FirstScoreView />
+          <BetaBanner />
+        </div>
       </div>
       </ExploreProvider>
       </ApplyProvider>

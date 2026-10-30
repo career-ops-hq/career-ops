@@ -34,6 +34,7 @@ const STYLE = `
 .co-pulse{animation:co-pulse 1.6s ease-in-out infinite}
 @keyframes co-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){.co-mdrawer,.co-mscrim{transition:none}.co-pulse{animation:none}}
+@media print{.co-mnav,.co-mscrim,.co-mdrawer{display:none}}
 `;
 
 export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {

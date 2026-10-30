@@ -75,7 +75,7 @@ function StarCards({ header, rows }: { header: string[]; rows: string[][] }) {
                   <span className="block text-sm font-medium text-foreground">{req || story || `Story ${num}`}</span>
                   {req && story ? <span className="mt-0.5 block text-xs text-muted">{story}</span> : null}
                 </span>
-                <ChevronDown className="mt-0.5 size-4 shrink-0 text-faint transition-transform group-open:rotate-180" />
+                <ChevronDown className="mt-0.5 size-4 shrink-0 text-faint transition-transform group-open:rotate-180 print:hidden" />
               </summary>
               <dl className="grid gap-3 border-t border-border px-4 py-3 sm:grid-cols-2">
                 {fields.map((f) => {
