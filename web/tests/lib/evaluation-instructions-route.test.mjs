@@ -24,10 +24,15 @@ for (const reason of ["missing file", "incomplete instructions"]) {
   test(`focused instruction ${reason} is logged server-side with a generic 422 response`, async t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "co-focused-instruction-error-"));
     const previousRoot = process.env.CAREER_OPS_ROOT;
+    const previousCode = process.env.CAREER_OPS_CODE_ROOT;
     process.env.CAREER_OPS_ROOT = root;
+    // The fixture's modes/ and batch/ are system files, which the route reads from the code root.
+    process.env.CAREER_OPS_CODE_ROOT = root;
     t.after(() => {
       if (previousRoot === undefined) delete process.env.CAREER_OPS_ROOT;
       else process.env.CAREER_OPS_ROOT = previousRoot;
+      if (previousCode === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+      else process.env.CAREER_OPS_CODE_ROOT = previousCode;
       fs.rmSync(root, { recursive: true, force: true });
     });
     fs.mkdirSync(path.join(root, "modes"));
