@@ -38,7 +38,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       suppressHydrationWarning
       className={`${inter.variable} ${instrumentSerif.variable} ${instrumentSerifItalic.variable}`}
     >
-      <body className="font-sans antialiased">
+      <body className="font-sans antialiased" suppressHydrationWarning>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <RouteProgressHost />
         <ThemeProvider>
