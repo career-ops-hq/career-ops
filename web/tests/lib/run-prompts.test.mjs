@@ -434,7 +434,8 @@ test("buildPrompt: a codeRoot with unusual characters stays absolute, quoted per
   assert.ok(pdf.includes(JSON.stringify(`${codeRoot}/modes/pdf.md`)), "instruction paths are JSON-quoted data");
   const portal = buildPrompt({ kind: "fix-portal", ...ARGS, input: "Acme", codeRoot });
   assert.ok(
-    portal.includes(`node '/srv/José/it'\\''s ($HOME)/career-ops/verify-portals.mjs' --add "Acme"`),
+    // The apostrophe is escaped for the shell in use (see the test below).
+    portal.includes(`node '/srv/José/it${process.platform === "win32" ? "''" : "'\\''"}s ($HOME)/career-ops/verify-portals.mjs' --add "Acme"`),
     "the shell command single-quotes the path and escapes the embedded quote",
   );
 });

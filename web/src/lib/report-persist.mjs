@@ -165,11 +165,11 @@ export function trackerTsvLine({ num, today, company, role, score, reportFile, n
   return `${labels.join("\t")}\n${fields.join("\t")}\n`;
 }
 
-function spawnScript({ spawnFn, execPath, root, script, args = [], input = null }) {
+function spawnScript({ spawnFn, execPath, root, cwd = root, script, args = [], input = null }) {
   return new Promise((resolve) => {
     // windowsHide: see api/doctor/route.ts — a stale inherited console kills
     // every child with 0xC0000142 on Windows; never inherit one.
-    const child = spawnFn(execPath, [path.join(root, script), ...args], { cwd: root, windowsHide: true });
+    const child = spawnFn(execPath, [path.join(root, script), ...args], { cwd, windowsHide: true });
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (d) => { stdout += d.toString(); });
@@ -273,7 +273,9 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
     + (!evaluation.full ? `; Focused evaluation: ${evaluation.sections.join(", ") || "fit score only"}` : "");
 
   const written = await spawnScript({
-    spawnFn, execPath, root: coreRoot,
+    // The script lives in the checkout but writes under its cwd, which has to
+    // be the data root: merge-tracker.mjs reads the additions from there.
+    spawnFn, execPath, root: coreRoot, cwd: root,
     script: "persist-evaluation-report.mjs",
     input: JSON.stringify({
       markdown,
