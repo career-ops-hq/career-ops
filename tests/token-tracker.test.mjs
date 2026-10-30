@@ -83,6 +83,7 @@ try {
   // 8. MiniMax model rates include uncached input, cached input, and output
   const minimaxUsage = { prompt_tokens: 1000000, completion_tokens: 1000000, cached_tokens: 500000 };
   const minimaxCases = [
+    ['MiniMax-M3.1-Flash', 0.6825],
     ['MiniMax-M3', 2.76],
     ['MiniMax-M2.7', 1.38],
   ];

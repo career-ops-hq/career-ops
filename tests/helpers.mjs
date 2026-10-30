@@ -33,6 +33,11 @@ export const NODE = process.execPath;
 // CAREER_OPS_PIPELINE). A test that needs the override sets its own.
 process.env.CAREER_OPS_TRACKER = '';
 
+// A shell that opted into the shared PDF painter must not make the suite
+// attach to that painter or start one. Blanked rather than deleted, same as
+// the tracker override above. A test that wants the painter sets it itself.
+process.env.CAREER_OPS_PDF_SHARED = '';
+
 // The same rule for the data root itself, which is where everything else a
 // script reads and writes is resolved from (#5113). Left alone, the suite ran
 // against whatever the shell pointed at: with CAREER_OPS_ROOT exported the way
@@ -119,7 +124,7 @@ pinSandboxDataRoot();
  * @returns {NodeJS.ProcessEnv}
  */
 export function ownRootEnv(extra = {}) {
-  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...extra };
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_PDF_SHARED: '', ...extra };
 }
 
 let realRootChecked = false;
