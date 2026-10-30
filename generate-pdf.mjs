@@ -2481,12 +2481,20 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     if (budget.strictPages && pageCount > budget.maxPages) {
       const hadPrevious = existsSync(outputPath);
       // The first free name, so the draft never replaces a file already there:
-      // a CV can legitimately be named cv.overflow.pdf, or an earlier batch
-      // entry may have written it.
+      // a CV can legitimately be named cv.overflow.pdf, or another render may
+      // be writing it. 'wx' creates the file or fails with EEXIST in one step,
+      // so two concurrent renders cannot both claim the same name.
       const draftBase = outputPath.replace(/\.pdf$/i, '');
-      let draftPath = `${draftBase}.overflow.pdf`;
-      for (let n = 2; existsSync(draftPath); n++) draftPath = `${draftBase}.overflow-${n}.pdf`;
-      writeFileAtomic(draftPath, pdfBuffer);
+      let draftPath;
+      for (let n = 1; !draftPath; n++) {
+        const candidate = n === 1 ? `${draftBase}.overflow.pdf` : `${draftBase}.overflow-${n}.pdf`;
+        try {
+          writeFileSync(candidate, pdfBuffer, { flag: 'wx' });
+          draftPath = candidate;
+        } catch (err) {
+          if (err.code !== 'EEXIST') throw err;
+        }
+      }
       try {
         enforcePageBudget(pageCount, budget);
       } catch (err) {
