@@ -287,7 +287,7 @@ npm i -g @santifer/career-ops
 | Pi | `/skill:career-ops scan` |
 | Codex, Qwen, Cursor або будь-який інший підтримуваний CLI | Звичайною мовою: "Run the career-ops scan mode" |
 
-`/career-ops` без продовження показує меню команд у CLI, які його використовують. Звичайна мова працює в будь-якому підтримуваному CLI. Як плагін Claude Code команда має вигляд `/career-ops:career-ops`.
+`/career-ops` без продовження показує меню команд у CLI, які його використовують. Звичайна мова працює в будь-якому підтримуваному CLI. Якщо career-ops встановлено як плагін Claude Code, команда має вигляд `/career-ops:career-ops`.
 
 Усі вони мають один спільний роутер, `.agents/skills/career-ops/SKILL.md`, і ті самі файли `modes/*.md`, тому режим працює однаково в будь-якому CLI. Slash-команди в Codex не гарантовані: просіть звичайною мовою або запустіть один промпт у headless-режимі через `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Як запускати career-ops у кожному підтримуваному CLI, headless-команди там, де вони є, і нотатки щодо налаштування окремих CLI — у [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
@@ -300,7 +300,7 @@ npm i -g @santifer/career-ops
 | `pipeline` | Оцінює кожен URL, що чекає у вхідних |
 | `apply` | Заповнює форму заявки разом із вами, поле за полем. Зупиняється перед надсиланням |
 | `tracker` | На якому етапі кожна заявка |
-| `followup` | Які заявки час нагадати про себе, з чернетками |
+| `followup` | За якими заявками час нагадати про себе, з готовими чернетками |
 
 <details>
 <summary><b>Усі команди за етапами пошуку</b></summary>
@@ -312,7 +312,7 @@ npm i -g @santifer/career-ops
 | Команда | Що робить |
 | --- | --- |
 | [`scan`](modes/scan.md) | Сканує портали та знаходить нові вакансії |
-| [`discover`](modes/discover.md) | Перетворює список назв компаній на ATS-дошки, які можна сканувати, і додає їх до `portals.yml` (без токенів) |
+| [`discover`](modes/discover.md) | Перетворює список назв компаній на сторінки вакансій в ATS, які можна сканувати, і додає їх до `portals.yml` (без токенів) |
 | [`pipeline`](modes/pipeline.md) | Обробляє відкладені URL із вхідних (`data/pipeline.md`) |
 | [`triage`](modes/triage.md) | Швидка первинна оцінка «варто / не варто» за `modes/_brief.md` перед повною оцінкою (файлів не пише) |
 | [`batch`](modes/batch.md) | Оцінює багато вакансій паралельними headless-воркерами |
@@ -340,7 +340,7 @@ npm i -g @santifer/career-ops
 | [`cover`](modes/cover.md) | Супровідний лист за вставленим описом вакансії або за оціненим звітом (`cover {slug}`) |
 | [`email`](modes/email.md) | Чернетка офіційного листа-заявки. Лише чернетка: нічого не надсилає і не натискає |
 | [`contacto`](modes/contacto.md) | Знаходить менеджера з найму, рекрутера або колегу та готує чернетку повідомлення в LinkedIn |
-| [`apply`](modes/apply.md) | Живий помічник подання (Playwright з цього репозиторію). Не надсилає |
+| [`apply`](modes/apply.md) | Допомагає заповнити заявку в реальному часі (Playwright з цього репозиторію). Не надсилає |
 
 **Інтерв'ю**
 
@@ -350,7 +350,7 @@ npm i -g @santifer/career-ops
 | [`interview/plan`](modes/interview/plan.md) | План підготовки за часовими блоками до майбутнього інтерв'ю |
 | [`interview/practice`](modes/interview/practice.md) | Тренувальне інтерв'ю, по одному питанню, зі зворотним зв'язком |
 | [`interview/debrief`](modes/interview/debrief.md) | Розбір після інтерв'ю: закрити прогалини, передбачити наступний раунд |
-| [`interview-redflag`](modes/interview-redflag.md) | Аналізує тривожні ознаки роботодавця, перш ніж ви до нього приєднаєтеся |
+| [`interview-redflag`](modes/interview-redflag.md) | Аналізує тривожні ознаки роботодавця, перш ніж ви до нього влаштуєтеся |
 
 **Після заявки**
 
