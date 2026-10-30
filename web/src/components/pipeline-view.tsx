@@ -23,11 +23,15 @@ import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
+type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
 const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
+const VIEWS_KEY = "career-ops:pipeline-views";
+const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -54,6 +58,14 @@ export function PipelineView({
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState("");
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [viewError, setViewError] = useState("");
+  const [removalWarning, setRemovalWarning] = useState("");
+  const storageRejected = useRef(false);
+  const omittedWhileRejected = useRef(new Set<string>());
+  const pendingWhileRejected = useRef(new Set<string>());
   const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
@@ -98,6 +110,94 @@ export function PipelineView({
   useEffect(() => {
     if (!isPending) setPendingTab(null);
   }, [isPending]);
+
+  useEffect(() => {
+    try {
+      setViews(parseViews(localStorage.getItem(VIEWS_KEY) || "[]"));
+    } catch {
+      setViews([]);
+    }
+  }, []);
+
+  function writeSavedViews(action: "save" | "remove", next: SavedView[]) {
+    const payload = savedViewPayload(action, next);
+    if (payload == null) return false;
+    try {
+      localStorage.setItem(VIEWS_KEY, payload);
+      storageRejected.current = false;
+      omittedWhileRejected.current.clear();
+      pendingWhileRejected.current.clear();
+      setViewError("");
+      setRemovalWarning("");
+      return true;
+    } catch {
+      storageRejected.current = true;
+      if (action === "remove") setRemovalWarning(REMOVAL_WARNING);
+      else setViewError("This view stays on this page only.");
+      return false;
+    }
+  }
+
+  function mutationBase(extraOmitted: string[] = []) {
+    const omitted = [...omittedWhileRejected.current, ...extraOmitted];
+    const pending = [...pendingWhileRejected.current];
+    try {
+      const stored = parseViews(localStorage.getItem(VIEWS_KEY) || "[]");
+      return { stored, base: viewsForMutation(views, stored, storageRejected.current, omitted, pending) };
+    } catch {
+      // Disk could not be read, so keep the in-memory list rather than dropping unchanged views.
+      return { stored: [] as SavedView[], base: viewsForMutation(views, [], true, omitted) };
+    }
+  }
+
+  function saveCurrentView(name: string) {
+    const view = normalizeView({ name, tab, q, min: minFilter, sort: sort.key, dir: sort.dir });
+    if (!view) {
+      setViewError("Name the view first.");
+      return;
+    }
+    const { stored, base } = mutationBase();
+    const next = upsertView(base, view);
+    const added = base.some((item) => item.name === view.name) || next.length > base.length;
+    const allow = [...omittedWhileRejected.current];
+    const pending = [...pendingWhileRejected.current];
+    if (!added || !keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      setViewError("Remove a view first.");
+      return;
+    }
+    omittedWhileRejected.current = new Set(omissionAfterAttempt(allow, view.name, true));
+    setViews(next);
+    setNaming(false);
+    setDraftName("");
+    setViewError("");
+    if (!writeSavedViews("save", next)) pendingWhileRejected.current.add(view.name);
+  }
+
+  function removeSavedView(name: string) {
+    const allow = [...omittedWhileRejected.current, name];
+    const pending = [...pendingWhileRejected.current];
+    const { stored, base } = mutationBase([name]);
+    const next = removeView(base, name);
+    if (!keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      // One removal may not free room for every pending view. Remember it
+      // and wait for a later write that can keep those views.
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+      setViews((current) => current.filter((view) => view.name !== name));
+      setRemovalWarning(REMOVAL_WARNING);
+      return;
+    }
+    setViews(next);
+    if (!writeSavedViews("remove", next)) {
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+    }
+  }
+
+  function applySaved(view: SavedView) {
+    setQ(view.q);
+    setParams(viewUpdates(view));
+  }
 
   // The table filters on a deferred copy of the search text. The input shows
   // each keystroke at once; re-filtering and re-rendering every tracker row
@@ -239,6 +339,64 @@ export function PipelineView({
             </button>
           </div>
         )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {visibleTab !== "INBOX" && <label className="inline-flex items-center gap-2 text-xs text-muted">
+          Score
+          <select
+            aria-label="Minimum score"
+            value={minFilter ?? ""}
+            onChange={(event) => setParams({ min: event.target.value === "" ? null : event.target.value })}
+            className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground"
+          >
+            <option value="">Any</option>
+            {minFilter != null && !SCORE_FLOORS.includes(minFilter) && (
+              <option value={String(minFilter)}>{minFilter}+</option>
+            )}
+            {SCORE_FLOORS.map((floor) => (
+              <option key={floor} value={String(floor)}>{floor.toFixed(1)}+</option>
+            ))}
+          </select>
+        </label>}
+        {views.map((view) => {
+          const active = view.tab === tab && view.q === q && view.min === minFilter && view.sort === sort.key && view.dir === sort.dir;
+          return (
+            <span key={view.name} className={cn("inline-flex items-center rounded-full border", active ? "border-brand/40 bg-brand-soft" : "border-border bg-surface/60")}>
+              <button type="button" onClick={() => applySaved(view)} className="px-2.5 py-1 text-xs font-medium text-foreground">
+                {view.name}
+              </button>
+              <button type="button" aria-label={`Remove view ${view.name}`} onClick={() => removeSavedView(view.name)} className="px-1.5 text-xs text-faint hover:text-foreground">
+                ×
+              </button>
+            </span>
+          );
+        })}
+        {naming ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveCurrentView(draftName);
+            }}
+            className="inline-flex items-center gap-2"
+          >
+            <input
+              aria-label="View name"
+              value={draftName}
+              autoFocus
+              onChange={(event) => setDraftName(event.target.value)}
+              className="w-36 rounded-md border border-border bg-surface px-2 py-1 text-sm outline-none focus:border-brand/50"
+            />
+            <button type="submit" className="text-xs font-medium text-brand-text">Save</button>
+            <button type="button" onClick={() => { setNaming(false); setDraftName(""); setViewError(""); }} className="text-xs text-muted">Cancel</button>
+          </form>
+        ) : (
+          <button type="button" onClick={() => { setViewError(""); setNaming(true); }} className="rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted hover:text-foreground">
+            Save view
+          </button>
+        )}
+        {viewError && <span role="alert" className="text-xs text-red-500">{viewError}</span>}
+        {removalWarning && <span role="alert" className="text-xs text-red-500">{removalWarning}</span>}
       </div>
 
       {/* tabs */}
