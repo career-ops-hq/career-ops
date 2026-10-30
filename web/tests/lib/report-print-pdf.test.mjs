@@ -129,3 +129,38 @@ test("a wrapped sentence keeps its spaces when the line break drops them", () =>
   assert.ok(found);
   assert.deepEqual(found.outside, []);
 });
+
+function pageAt(fontObject, extra = []) {
+  const content = "BT /F1 12 Tf 1 0 0 1 72 700 Tm (HI) Tj ET";
+  return buildPdf([
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    stream("", content),
+    fontObject,
+    ...extra,
+  ]);
+}
+
+function widthsOf(fontObject, extra) {
+  const words = readPdfPages(pageAt(fontObject, extra)).flatMap((page) => page.words);
+  return words.map((word) => ({ text: word.text, xMin: word.xMin, xMax: word.xMax }));
+}
+
+test("a simple font and a Type3 font use their own width arrays", () => {
+  const expected = [
+    { text: "H", xMin: 72, xMax: 74.4 },
+    { text: "I", xMin: 74.4, xMax: 84 },
+  ];
+  const simple = widthsOf("<< /Type /Font /Subtype /TrueType /BaseFont /F /FirstChar 72 /LastChar 73 /Widths [200 800] >>");
+  const indirect = widthsOf("<< /Type /Font /Subtype /TrueType /BaseFont /F /FirstChar 72 /LastChar 73 /Widths 6 0 R >>", ["[200 800]"]);
+  const type3 = widthsOf("<< /Type /Font /Subtype /Type3 /BaseFont /F /FontMatrix [0.002 0 0 0.002 0 0] /FontBBox [0 0 1 1] /FirstChar 72 /LastChar 73 /Widths [100 400] >>");
+  for (const words of [simple, indirect, type3]) {
+    assert.equal(words.length, 2);
+    words.forEach((word, index) => {
+      assert.equal(word.text, expected[index].text);
+      assert.ok(Math.abs(word.xMin - expected[index].xMin) < 0.05, `${word.text} xMin ${word.xMin}`);
+      assert.ok(Math.abs(word.xMax - expected[index].xMax) < 0.05, `${word.text} xMax ${word.xMax}`);
+    });
+  }
+});

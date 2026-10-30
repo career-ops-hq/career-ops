@@ -247,6 +247,22 @@ function parseWidths(arr) {
   return widths;
 }
 
+function simpleWidths(doc, font) {
+  const listed = doc.resolve(font.Widths);
+  if (!Array.isArray(listed)) return new Map();
+  const first = typeof font.FirstChar === "number" ? font.FirstChar : 0;
+  // Type3 widths are in glyph space. FontMatrix[0] turns them into text
+  // space, and the painter counts thousandths of an em.
+  const matrix = doc.resolve(font.FontMatrix);
+  const scale = font.Subtype === "Type3" && Array.isArray(matrix) && typeof matrix[0] === "number" ? matrix[0] * 1000 : 1;
+  const widths = new Map();
+  listed.forEach((entry, index) => {
+    const width = doc.resolve(entry);
+    if (typeof width === "number") widths.set(first + index, width * scale);
+  });
+  return widths;
+}
+
 const LIGATURES = [
   ["\uFB03", "ffi"],
   ["\uFB04", "ffl"],
@@ -274,7 +290,7 @@ function loadFont(doc, fontValue) {
   return {
     cmap,
     codeWidth: twoByte ? 2 : 1,
-    widths: face.W ? parseWidths(face.W) : new Map(),
+    widths: face.W ? parseWidths(face.W) : simpleWidths(doc, font),
     dw: typeof face.DW === "number" ? face.DW : 1000,
     ascent: typeof descriptor?.Ascent === "number" ? descriptor.Ascent : 800,
     descent: typeof descriptor?.Descent === "number" ? descriptor.Descent : -200,
