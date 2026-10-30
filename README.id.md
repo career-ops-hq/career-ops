@@ -288,9 +288,9 @@ Tempel URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah l
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor, atau CLI lainnya | Bahasa biasa: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor, atau CLI lain yang didukung | Bahasa biasa: "Run the career-ops scan mode" |
 
-`/career-ops` tanpa tambahan apa pun menampilkan menu perintah di CLI yang memakainya. Bahasa biasa berfungsi di semua CLI. Sebagai plugin Claude Code, perintahnya adalah `/career-ops:career-ops`.
+`/career-ops` tanpa tambahan apa pun menampilkan menu perintah di CLI yang memakainya. Bahasa biasa berfungsi di semua CLI yang didukung. Sebagai plugin Claude Code, perintahnya adalah `/career-ops:career-ops`.
 
 Semuanya memakai satu router yang sama, `.agents/skills/career-ops/SKILL.md`, dan berkas `modes/*.md` yang sama, sehingga sebuah mode berperilaku sama di CLI mana pun. Perintah slash tidak dijamin di Codex: minta dengan bahasa biasa, atau jalankan satu prompt secara headless dengan `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Cara menjalankannya di setiap CLI yang didukung, perintah headless untuk CLI yang memilikinya, dan catatan penyiapan per CLI ada di [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
