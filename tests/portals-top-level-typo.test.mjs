@@ -15,6 +15,8 @@ const dir = mkdtempSync(join(tmpdir(), 'co-portal-typo-'));
 const typoFile = join(dir, 'portals.yml');
 const cleanFile = join(dir, 'clean.yml');
 const notesFile = join(dir, 'notes.yml');
+const experienceTypoFile = join(dir, 'experience-typo.yml');
+const experienceGoodFile = join(dir, 'experience-good.yml');
 
 const COMPANY = `  - name: "Example Co"
     careers_url: "https://boards.example.com/example"
@@ -24,6 +26,8 @@ const COMPANY = `  - name: "Example Co"
 writeFileSync(typoFile, `tracked_companys:\n${COMPANY}title_fliter:\n  positive: ["analyst"]\n`);
 writeFileSync(cleanFile, `tracked_companies:\n${COMPANY}`);
 writeFileSync(notesFile, `notes: "a private reminder, not a setting"\ntracked_companies: []\n`);
+writeFileSync(experienceTypoFile, `experiance_filter:\n  enabled: true\n  stretch_years: 1\n  action: label\ntracked_companies: []\n`);
+writeFileSync(experienceGoodFile, `experience_filter:\n  enabled: true\n  stretch_years: 1\n  action: label\ntracked_companies: []\n`);
 
 // Scan reads the tracker, pipeline, and scan history to dedupe. Point every
 // data path at the temp dir so a developer's own files never feed the run.
@@ -61,6 +65,28 @@ test('scan still accepts a correctly spelled company list and an unrelated note 
   const notes = run('scan.mjs', ['--dry-run', '--json'], { CAREER_OPS_PORTALS: notesFile });
   assert.equal(notes.status, 0, `${notes.stderr}\n${notes.stdout}`);
   assert.match(notes.stdout ?? '', /careerops\.scan\.receipt/);
+});
+
+test('scan refuses a one-letter miss of experience_filter and names that key', () => {
+  const r = run('scan.mjs', ['--dry-run', '--json'], { CAREER_OPS_PORTALS: experienceTypoFile });
+  const err = r.stderr ?? '';
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}\n${err}\n${r.stdout}`);
+  assert.match(err, /experiance_filter/);
+  assert.match(err, /experience_filter/);
+  assert.doesNotMatch(r.stdout ?? '', /careerops\.scan\.receipt/);
+});
+
+test('validate-portals accepts experience_filter and rejects experiance_filter', () => {
+  const bad = run('validate-portals.mjs', ['--file', experienceTypoFile], {});
+  const badOut = `${bad.stdout ?? ''}${bad.stderr ?? ''}`;
+  assert.equal(bad.status, 1, badOut);
+  assert.match(badOut, /experiance_filter/);
+  assert.match(badOut, /experience_filter/);
+
+  const good = run('validate-portals.mjs', ['--file', experienceGoodFile], {});
+  const goodOut = `${good.stdout ?? ''}${good.stderr ?? ''}`;
+  assert.equal(good.status, 0, goodOut);
+  assert.doesNotMatch(goodOut, /experiance_filter|unknown top-level key "experience_filter"/);
 });
 
 test('validate-portals reports the same misspelling as an error', () => {

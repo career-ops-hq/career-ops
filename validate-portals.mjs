@@ -208,6 +208,7 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'location_filter',
   'country_eligibility_filter',
   'salary_filter',
+  'experience_filter',
   'portal_prune_quiet_days',
   'max_posting_age_days',
   'trust_filter',
