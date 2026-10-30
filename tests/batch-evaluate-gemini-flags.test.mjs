@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseBatchArgs } from '../batch-evaluate-gemini.mjs';
+import { parseBatchArgs, pendingOfferIndices } from '../batch-evaluate-gemini.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const work = mkdtempSync(join(tmpdir(), 'co-batch-flags-'));
@@ -26,6 +26,17 @@ test('value flags read the same with a space or an equals sign', () => {
   const joined = parseBatchArgs(['--limit=1', '--concurrency=3', '--model=gemini-2.5-pro']);
   assert.deepEqual(spaced, { limit: 1, concurrency: 3, model: 'gemini-2.5-pro' });
   assert.deepEqual(joined, spaced);
+});
+
+test('--limit 1 selects one of two pending offers', () => {
+  const pipeline = [
+    '## Pending', '',
+    '- [ ] https://jobs.example.test/a | Kestrelwood Analytics | Data Analyst',
+    '- [ ] https://jobs.example.test/b | Pondmere Health | Analytics Engineer',
+    '- [x] https://jobs.example.test/c | Larchfield Co | Analytics Manager',
+  ];
+  assert.deepEqual(pendingOfferIndices(pipeline, parseBatchArgs(['--limit', '1']).limit), [2]);
+  assert.deepEqual(pendingOfferIndices(pipeline, parseBatchArgs([]).limit), [2, 3]);
 });
 
 test('no flags keep the defaults', () => {
@@ -47,7 +58,7 @@ test('--help prints usage before it looks for an API key', () => {
   assert.doesNotMatch(r.stderr, /GEMINI_API_KEY not found/);
 });
 
-for (const args of [['--limt', '1'], ['--limit', 'all'], ['--limit', '0'], ['--concurrency', 'two']]) {
+for (const args of [['--limt', '1'], ['--limit=1', '--limit', 'all'], ['--limit', 'all'], ['--limit', '0'], ['--concurrency', 'two']]) {
   test(`${args.join(' ')} is a usage error, not a full run`, () => {
     const r = run(args);
     assert.equal(r.status, 1);

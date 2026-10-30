@@ -121,6 +121,12 @@ const VALUE_FLAGS = ['--limit', '--concurrency', '--model'];
  */
 export function parseBatchArgs(args) {
   validateFlags(args, [...VALUE_FLAGS, '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  for (const flag of VALUE_FLAGS) {
+    if (args.filter((a) => a === flag || a.startsWith(`${flag}=`)).length > 1) {
+      console.error(`Error: ${flag} can be given only once`);
+      process.exit(1);
+    }
+  }
   const count = (flag, fallback) => {
     const raw = flagValue(args, flag);
     if (raw === undefined) return fallback;
@@ -135,6 +141,21 @@ export function parseBatchArgs(args) {
     concurrency: count('--concurrency', 2),
     model: flagValue(args, '--model'),
   };
+}
+
+/**
+ * Line numbers of the pending `- [ ]` offers, the first `limit` of them when
+ * limit is above 0.
+ *
+ * @param {string[]} pipelineLines - data/pipeline.md split into lines.
+ * @param {number} limit - From parseBatchArgs; 0 means every pending offer.
+ * @returns {number[]}
+ */
+export function pendingOfferIndices(pipelineLines, limit) {
+  const indices = pipelineLines
+    .map((l, i) => l.trim().startsWith('- [ ]') ? i : -1)
+    .filter(i => i !== -1);
+  return limit > 0 ? indices.slice(0, limit) : indices;
 }
 
 function setupEnvironment(modelArg) {
@@ -460,13 +481,7 @@ async function main() {
   }
 
   const pipelineLines = readFileSync(PATHS.pipeline, 'utf-8').split('\n');
-  const pendingIndices = pipelineLines
-    .map((l, i) => l.trim().startsWith('- [ ]') ? i : -1)
-    .filter(i => i !== -1);
-
-  if (limitCount > 0) {
-    pendingIndices.splice(limitCount);
-  }
+  const pendingIndices = pendingOfferIndices(pipelineLines, limitCount);
   if (pendingIndices.length === 0) {
     console.log("No pending [-] offers found in pipeline.md.");
     return;
