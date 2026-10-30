@@ -100,7 +100,7 @@ export function CvEditor() {
         </div>
       </div>
 
-      {error && <p role="alert" className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-400">{error}</p>}
       {saved && <p role="status" className="mt-3 text-sm text-muted">cv.md updated.</p>}
       {importing && <section id="cv-import" aria-label="Import CV" className="mt-6">
         <p className="mb-3 text-sm text-muted">Upload your CV, review the conversion, then update cv.md.{dirty && " Your unsaved edits stay in the editor until you update."}</p>

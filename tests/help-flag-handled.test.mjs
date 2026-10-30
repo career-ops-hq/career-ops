@@ -178,7 +178,7 @@ test('-h is accepted wherever --help is, and suppresses the same work', () => {
 const KNOWN_WITHOUT_HELP = new Set([
   'batch-evaluate-gemini.mjs', 'cv-templates.mjs',
   'generate-cover-letter.mjs', 'generate-pdf.mjs',
-  'match-star.mjs', 'openrouter-runner.mjs', 'plugins.mjs',
+  'match-star.mjs', 'openrouter-runner.mjs',
   'validate-plugin-registry.mjs', 'validate-untrusted-content-coverage.mjs',
   // generate-latex.mjs and verify-portals.mjs were here and have since been
   // fixed upstream; the ratchet's other end caught that on the rebase and

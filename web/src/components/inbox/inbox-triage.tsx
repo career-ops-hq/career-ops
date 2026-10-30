@@ -259,7 +259,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
   return (
     <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
-      {writeError && <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">{writeError}</p>}
+      {writeError && <p role="alert" className="mb-3 text-sm text-red-700 dark:text-red-400">{writeError}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
       <FacetChips
@@ -353,7 +353,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
           <div className="inline-flex max-w-full flex-wrap items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <div className="min-w-0 flex-1 break-words">
               <span className="text-muted" role="status">{undo.label}</span>
-              {undo.error && <p role="alert" className="text-red-600 dark:text-red-400">{undo.error}</p>}
+              {undo.error && <p role="alert" className="text-red-700 dark:text-red-400">{undo.error}</p>}
             </div>
             <button type="button" onClick={() => void handleUndo(undo)} disabled={undo.busy} aria-busy={Boolean(undo.busy)} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand-text disabled:opacity-50 max-sm:min-h-[44px]">
               <Undo2 className="size-3.5" /> {undo.busy ? "Undoing…" : undo.error ? "Retry undo" : "Undo"}

@@ -1223,6 +1223,7 @@ search_queries:
 #   recruitee       <slug>.recruitee.com
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
+#   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
@@ -1356,6 +1357,10 @@ search_queries:
 #
 # - name: Example Breezy Co
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
+#   enabled: true
+#
+# - name: Example Deel Board Co
+#   careers_url: https://jobs.deel.com/exampleco          # the tenant slug is the first path segment
 #   enabled: true
 #
 # - name: Example ClearCompany Co
@@ -2826,10 +2831,8 @@ tracked_companies:
     enabled: true
 
   - name: Klarna
-    careers_url: https://www.klarna.com/careers/
-    scan_method: websearch
-    scan_query: 'site:klarna.com/careers "Engineer" OR "Backend" OR "Platform"'
-    notes: "Stockholm. Fintech. SPA at klarna.com/careers."
+    careers_url: https://jobs.deel.com/klarna
+    notes: "Stockholm. Fintech. Hosted on the Deel job board (jobs.deel.com/<slug>); the scanner reads it directly."
     enabled: true
 
   - name: Bolt

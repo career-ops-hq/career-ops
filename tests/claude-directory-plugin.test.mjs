@@ -43,6 +43,10 @@ test('the manifest names the project, its license and the release version', () =
   assert.equal(manifest.license, 'MIT');
   assert.ok(manifest.description && manifest.author?.name, 'the directory warns without description and author');
   for (const key of ['hooks', 'mcpServers', 'lspServers']) assert.equal(manifest[key], undefined, `the thin plugin declares no ${key}`);
+  // Listing fields. The portal reads the icon only on the first save or submission, so it must be declared, not just present.
+  assert.equal(manifest.displayName, 'career-ops');
+  assert.equal(join(DIR, manifest.icon ?? ''), join(DIR, '.claude-plugin', 'icon.png'), 'plugin.json must point `icon` at .claude-plugin/icon.png');
+  for (const key of ['homepage', 'documentationUrl', 'supportUrl', 'privacyPolicyUrl']) assert.match(manifest[key] ?? '', /^https:\/\//, `${key} must be an https URL`);
 });
 
 test('every package launcher is pinned to an exact version, and career-ops to this release', () => {

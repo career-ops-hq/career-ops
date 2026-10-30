@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#이제-당신-차례">공&#8288;고&nbsp;하&#8288;나&#8288;로&nbsp;써&nbsp;보&#8288;기&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">전&#8288;체&nbsp;이&#8288;야&#8288;기&nbsp;읽&#8288;기&nbsp;→</a></p>
+<p align="center"><sub>터미널을 쓰고 싶지 않으신가요? <a href="https://career-ops.org/waitlist?ref=readme-ko-kr">웹 버전 대기자 명단에 등록하기&nbsp;→</a></sub></p>
 
 <br>
 

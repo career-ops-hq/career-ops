@@ -24,6 +24,8 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { parseOutputLanguage } from './profile-language.mjs';
 import {
   normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
@@ -87,6 +89,46 @@ function readSpendTier() {
   return 'standard';
 }
 
+
+const EVAL_MODES = new Set(['full', 'match', 'single-pass']);
+
+// `full` only when no --mode was given. An explicit --mode with no value or an
+// unknown value is an error: falling back to `full` would silently run (and
+// bill) the full evaluation for a user who asked for match mode.
+export function parseCliMode(args = process.argv.slice(2)) {
+  if (Array.isArray(args) && args.includes('--single-pass')) return 'match';
+  if (!hasFlag(args, '--mode')) return 'full';
+  const raw = flagValue(args, '--mode');
+  const mode = typeof raw === 'string' ? raw.trim() : '';
+  if (!mode || mode.startsWith('--')) {
+    throw new Error('--mode requires a value: full or match');
+  }
+  if (!EVAL_MODES.has(mode)) {
+    throw new Error(`Unknown --mode '${mode}'. Supported: full, match.`);
+  }
+  return mode === 'single-pass' ? 'match' : mode;
+}
+
+/**
+ * Normalizes legitimacy tier to one of canonical states:
+ * 'High Confidence', 'Proceed with Caution', or 'Suspicious'.
+ * Defaults to 'Proceed with Caution' on unknown or ambiguous input.
+ */
+export function parseLegitimacy(raw) {
+  if (!raw || typeof raw !== 'string') return 'Proceed with Caution';
+  const clean = raw.trim().replace(/^[*_`"']+|[*_`"']+$/g, '');
+  if (/^high(?:\s+confidence)?$/i.test(clean)) return 'High Confidence';
+  if (/^proceed(?:\s+with\s+caution)?$/i.test(clean)) return 'Proceed with Caution';
+  if (/^suspicious$/i.test(clean)) return 'Suspicious';
+  if (/suspicious/i.test(clean)) return 'Suspicious';
+  // "Not High Confidence" must not read as the label it negates.
+  if (/\b(?:not|no|never)\b|n't\b/i.test(clean)) return 'Proceed with Caution';
+  if (/proceed\s+with\s+caution/i.test(clean)) return 'Proceed with Caution';
+  if (/high\s+confidence/i.test(clean)) return 'High Confidence';
+  return 'Proceed with Caution';
+}
+
+
 function spendTierToModel(tier) {
   switch (tier) {
     case 'economy': return 'gemini-2.5-flash-lite';
@@ -129,8 +171,67 @@ async function nextReportNumber() {
 }
 
 let systemPromptTemplate;
+let currentEvalMode = 'full';
 
-function loadContext() {
+// Match mode never generates a PDF, so its reports say so instead of carrying
+// a "pending" status that nothing will resolve (as batch/batch-prompt-match.md).
+function isMatchMode() {
+  return currentEvalMode === 'match' || currentEvalMode === 'single-pass';
+}
+
+export function loadContext(mode = 'full') {
+  currentEvalMode = mode;
+  if (mode === 'match' || mode === 'single-pass') {
+    console.log('📂 Loading context for single-pass CV-match mode...');
+    const cvContent = readFile(PATHS.cv, 'cv.md');
+    // #5297: match mode never shows the model the user profile (_profile.md,
+    // _custom.md, the targeting or compensation in profile.yml), so none of it
+    // can move the score. The one setting it takes is language.output, which
+    // decides the prose language and not the score.
+    const languageSection = existsSync(PATHS.profileYml) ? `
+═══════════════════════════════════════════════════════
+OUTPUT LANGUAGE
+═══════════════════════════════════════════════════════
+Write all human-facing output (report prose and headings) in ${parseOutputLanguage(readFileSync(PATHS.profileYml, 'utf-8'))}, whatever the
+language of the job description. Keep the SCORE_SUMMARY field names and the LEGITIMACY labels
+exactly as specified below. The output language must not affect the match score.
+` : '';
+
+    systemPromptTemplate = `You are career-ops, an AI job search assistant evaluating a job offer in single-pass CV match mode.
+Your objective is to extract candidate CV facts and evaluate candidate alignment with the Job Description in a single, fast inference call to minimize token overhead, bypassing the multi-step reasoning chain (Blocks A through G).
+
+═══════════════════════════════════════════════════════
+CANDIDATE RESUME (cv.md)
+═══════════════════════════════════════════════════════
+${cvContent}
+${languageSection}
+═══════════════════════════════════════════════════════
+INSTRUCTIONS (CONDENSED SINGLE-PASS EVALUATION)
+═══════════════════════════════════════════════════════
+1. Extract candidate technical competencies, core domain experience, and seniority from the CV.
+2. Extract the primary role requirements and must-have qualifications from the Job Description.
+3. Compare the candidate's verified background directly to the requirements in a single pass:
+   - Identify Strong Matches, Partial Matches, and Critical Gaps.
+   - Calculate an overall Match Score from 1.0 to 5.0 (5.0 = ideal fit, 4.0 = strong match, 3.0 = acceptable, <3.0 = major gap).
+   - Detect the closest role archetype.
+   - Assess role legitimacy (High Confidence | Proceed with Caution | Suspicious):
+     * High Confidence: direct company posting, verified employer, transparent requirements.
+     * Proceed with Caution: agency/intermediary, missing company specifics, unstated compensation.
+     * Suspicious: suspicious domain, unverified recruiter, unrealistic claims or scam indicators.
+4. Output a concise markdown report with executive match summary, requirements matrix, and strengths/gaps.
+5. End with the exact machine-readable summary block:
+
+---SCORE_SUMMARY---
+COMPANY: <company name>
+ROLE: <role title>
+SCORE: <global score as decimal, e.g. 3.8>
+ARCHETYPE: <detected archetype>
+LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
+---END_SUMMARY---
+`;
+    return systemPromptTemplate;
+  }
+
   console.log('📂 Loading context files...');
   const sharedContext  = readFile(PATHS.shared, '_shared.md');
   const ofertaLogic    = readFile(PATHS.oferta, 'oferta.md');
@@ -189,6 +290,7 @@ ARCHETYPE: <detected archetype>
 LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 ---END_SUMMARY---
 `;
+  return systemPromptTemplate;
 }
 
 async function scrapeUrl(browser, url) {
@@ -296,12 +398,13 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     }
 
     console.log(`🧠 Calling Gemini (${modelName})...`);
-    const evaluationText = await _evaluate(`URL: ${url}\n\n${jdText}`);
+    let evaluationText = await _evaluate(`URL: ${url}\n\n${jdText}`);
 
     // Parse output
     if (/^---DEAD_POSTING---\s*$/m.test(evaluationText)) {
       return await resolveDeadPosting();
     }
+
 
     const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
     if (!summaryMatch) {
@@ -319,7 +422,7 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     const role = extract('ROLE');
     const score = extract('SCORE');
     const archetype = extract('ARCHETYPE');
-    const legitimacy = extract('LEGITIMACY');
+    const legitimacy = parseLegitimacy(extract('LEGITIMACY'));
 
     // Save
     mkdirSync(PATHS.reports, { recursive: true });
@@ -347,7 +450,7 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
 **Archetype:** ${archetype}
 **Score:** ${score}
 **Legitimacy:** ${legitimacy}
-**PDF:** pending
+**PDF:** ${isMatchMode() ? '❌' : 'pending'}
 **Tool:** Gemini (${modelName})\n
 ---\n
 ${withJdArchiveSection(evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim(), jdText).trimEnd()}\n`;
@@ -411,8 +514,15 @@ export async function finishPipelineBatch(pipelinePath, originals, results) {
 }
 
 async function main() {
+  let evalMode;
+  try {
+    evalMode = parseCliMode();
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
   setupEnvironment();
-  loadContext();
+  loadContext(evalMode);
 
   const limitArg = process.argv.find(a => a.startsWith("--limit="));
   const limitCount = limitArg ? parseInt(limitArg.split("=")[1], 10) : 0;
