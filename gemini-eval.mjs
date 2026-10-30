@@ -46,6 +46,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
+import { redactIfEnabled } from './utils/privacy-filter.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
@@ -370,9 +371,12 @@ for (const extraDir of extraModesDirs) {
   const extraContent = readFile(join(CODE_ROOT, extraDir, '_shared.md'), extraLabel);
   sharedContext += `\n\n--- Additional declared market: ${extraDir} (${extraLabel}) ---\n${extraContent}`;
 }
-const cvContent      = readFile(PATHS.cv,          'cv.md');
-const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
-const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
+// Opt-in privacy filter (privacy.redact_contact_info in config/profile.yml):
+// keep name/contact details out of the prompt sent to the model.
+const profileYmlRaw  = readFile(PATHS.profileYml,  'config/profile.yml');
+const cvContent      = redactIfEnabled(readFile(PATHS.cv,      'cv.md'),            profileYmlRaw);
+const profileContent = redactIfEnabled(readFile(PATHS.profile, 'modes/_profile.md'), profileYmlRaw);
+const profileYml     = redactIfEnabled(profileYmlRaw, profileYmlRaw);
 // _custom.md is optional: an absent file is a valid end state, so no warning.
 const customContent  = existsSync(PATHS.custom) ? stripBom(readFileSync(PATHS.custom, 'utf-8')).trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
