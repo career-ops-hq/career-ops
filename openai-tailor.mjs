@@ -23,6 +23,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
 import { readLockedSections } from './theme-style.mjs';
+import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -182,8 +183,11 @@ const sharedContext  = readFile(PATHS.shared, 'modes/_shared.md', false);
 // engines that read the eval-core _shared.md alone.
 const writingContext = readFile(PATHS.writing, 'modes/_writing.md', false);
 const pdfModeLogic   = readFile(PATHS.pdfMode, 'modes/pdf.md', false);
-const cvContent      = readFile(PATHS.cv, 'cv.md', true);
-const profileContent = readFile(PATHS.profile, 'config/profile.yml', true);
+// Opt-in privacy filter (privacy.redact_contact_info in config/profile.yml):
+// keep name/contact details out of the prompt sent to the model.
+const profileYmlRaw  = readFile(PATHS.profile, 'config/profile.yml', true);
+const cvContent      = redactIfEnabled(readFile(PATHS.cv, 'cv.md', true), profileYmlRaw);
+const profileContent = redactIfEnabled(profileYmlRaw, profileYmlRaw);
 const templateHtml   = readFile(PATHS.template, 'templates/cv-template.html', true);
 
 // ---------------------------------------------------------------------------
@@ -304,6 +308,10 @@ try {
 // Clean up markdown block wrapping if the LLM adds it despite instructions
 tailoredHtml = tailoredHtml.replace(/^\s*```(html)?\s*/i, '').replace(/\s*```\s*$/, '');
 
+// The model only saw placeholders when redaction is on; put the real name and
+// contact details back so the tailored CV never ships with "Candidate Name".
+tailoredHtml = restoreIfEnabled(tailoredHtml, profileYmlRaw);
+
 // ---------------------------------------------------------------------------
 // Save tailored HTML
 // ---------------------------------------------------------------------------
@@ -314,7 +322,7 @@ try {
 
   let candidateName = 'candidate';
   try {
-    const profile = loadYaml(profileContent);
+    const profile = loadYaml(profileYmlRaw);
     if (profile && profile.name) {
       candidateName = profile.name;
     }
