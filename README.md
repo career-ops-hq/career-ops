@@ -316,7 +316,7 @@ career-ops uses a shared command router. In CLIs that register slash commands, i
 /career-ops interview    → Interactive profile/CV onboarding interview
 /career-ops master-profile → Import, review, validate, and prepare selected Profile facts as CV bullets
 /career-ops intake    → Build or enrich your profile from documents/ (master CV, LinkedIn export; nothing written without confirm)
-/career-ops retro     → Review this session and keep what you taught it as rules (writes only the ids you accept)
+/career-ops retro     → Save the proposals, then apply only accepted ids to the rule files
 /career-ops eu-swe    → Calibrate a European SWE application before CV/apply/interview
 /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
 /career-ops interview/practice → Practice interview, one question at a time with feedback

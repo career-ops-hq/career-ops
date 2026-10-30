@@ -57,6 +57,7 @@ test('both menus describe oferta as A-G plus a conditional Block H', () => {
     assert.ok(line, `${label} lists oferta`);
     assert.match(line, /A-G/, label);
     assert.match(line, /at or above 4\.5/, label);
+    assert.match(line, /Block H at or above 4\.5/, label);
     assert.doesNotMatch(line, /only above/, label);
     assert.doesNotMatch(line, /A-F/, label);
     assert.doesNotMatch(line, /A to H/, label);
