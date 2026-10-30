@@ -251,15 +251,15 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
         </div>
         {phase === "error" &&
           (err === "needs-cli" ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-700 dark:text-amber-300">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-300">
               <AlertTriangle className="size-3.5 shrink-0" />
               <span>To convert a PDF, TeX or Word file, connect an AI CLI in Config. Paste or drop .md / .txt to start without one.</span>
-              <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-700 transition hover:bg-amber-500/30 dark:text-amber-200">
+              <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-800 transition hover:bg-amber-500/30 dark:text-amber-200">
                 Connect your AI CLI <ArrowRight className="size-3.5" />
               </Link>
             </div>
           ) : (
-            <p role="alert" className="flex items-center gap-1.5 text-[13px] text-amber-600 dark:text-amber-400">
+            <p role="alert" className="flex items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
               <AlertTriangle className="size-3.5 shrink-0" /> {err}
             </p>
           ))}
@@ -293,7 +293,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           <span
             className={cn(
               "ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-              readiness.scoreable ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+              readiness.scoreable ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : "bg-amber-500/10 text-amber-800 dark:text-amber-400",
             )}
           >
             {readiness.scoreable ? <Check className="size-3" /> : <AlertTriangle className="size-3" />}
@@ -301,7 +301,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           </span>
         )}
       </div>
-      {readiness?.hint && <p className="mb-2 text-[12px] text-amber-600 dark:text-amber-400">{readiness.hint}</p>}
+      {readiness?.hint && <p className="mb-2 text-[12px] text-amber-800 dark:text-amber-400">{readiness.hint}</p>}
       {saveErr && (
         <p role="alert" className="mb-2 flex items-center gap-1.5 text-[12px] text-red-500">
           <AlertTriangle className="size-3.5 shrink-0" /> {saveErr}

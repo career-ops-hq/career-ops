@@ -156,7 +156,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
           <Check aria-hidden="true" className="size-3" /> saved
         </span>
       )}
-      {error && <span id={`${id}-error`} role="alert" className="basis-full whitespace-normal text-xs text-red-600">{error}</span>}
+      {error && <span id={`${id}-error`} role="alert" className="basis-full whitespace-normal text-xs text-red-700 dark:text-red-400">{error}</span>}
     </span>
   );
 }

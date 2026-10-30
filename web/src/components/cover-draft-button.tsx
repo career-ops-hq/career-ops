@@ -69,7 +69,7 @@ export function CoverDraftButton({ n, company }: { n: string; company: string })
         <span className="inline-flex items-center gap-1">
           <Link
             href={`/jobs/${job.id}${jobQuery}`}
-            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
+            className="inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-800 transition-colors hover:bg-emerald-500/15 dark:text-emerald-400 max-sm:min-h-[44px]"
           >
             <FileText className="size-3.5" /> View cover letter draft
           </Link>
