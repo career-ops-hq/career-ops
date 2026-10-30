@@ -305,6 +305,39 @@ test("persistEvaluation: writes report + TSV, reserves, merges, releases", async
   }
 });
 
+test("persistEvaluation: with a separate checkout, every step runs from it with the data root as cwd", async () => {
+  const root = mkdtempSync(join(tmpdir(), "co-evalpersist-data-"));
+  const coreRoot = mkdtempSync(join(tmpdir(), "co-evalpersist-code-"));
+  writeFileSync(join(coreRoot, "pipeline-lock.mjs"), `export { withPipelineLock } from ${JSON.stringify(new URL("../../../pipeline-lock.mjs", import.meta.url).href)};\n`);
+  const { spawnFn, calls } = makeRouterSpawn({
+    "reserve-report-num.mjs": (args) => args.includes("--release")
+      ? { exitCode: 0 }
+      : { exitCode: 0, stdout: "035\n" },
+    "persist-evaluation-report.mjs": writerSpec(),
+    "merge-tracker.mjs": { exitCode: 0 },
+  });
+
+  try {
+    const result = await persistEvaluation({
+      spawnFn, execPath: "node", root, coreRoot, markdown: REPORT,
+      url: "https://acme.com/jobs/7", today: "2026-08-04",
+    });
+    assert.equal(result.ok, true);
+    const writer = calls.find((c) => basename(c.args[0]) === "persist-evaluation-report.mjs");
+    assert.equal(writer.args[0], join(coreRoot, "persist-evaluation-report.mjs"));
+    // Every step runs from the data root, so the writer and merge-tracker.mjs
+    // resolve the additions folder (and any relative override of it) alike.
+    assert.ok(calls.every((c) => c.opts.cwd === root), "every persist step runs with the data root as cwd");
+    assert.ok(calls.every((c) => c.args[0].startsWith(coreRoot)), "every persist script comes from the checkout");
+    assert.ok(existsSync(join(root, "reports", "035-acme-ai-2026-08-04.md")));
+    assert.ok(existsSync(join(root, "batch", "tracker-additions", "035-acme-ai.tsv")));
+    assert.equal(existsSync(join(coreRoot, "reports")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(coreRoot, { recursive: true, force: true });
+  }
+});
+
 test("persistEvaluation: a focused selection is recorded in the report and tracker notes", async () => {
   const root = mkdtempSync(join(tmpdir(), "co-evalpersist-focused-"));
   const { spawnFn } = makeRouterSpawn({
