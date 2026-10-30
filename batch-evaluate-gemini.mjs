@@ -24,7 +24,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import {
   normalizedTrackerScore, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
@@ -89,10 +89,23 @@ function readSpendTier() {
 }
 
 
+const EVAL_MODES = new Set(['full', 'match', 'single-pass']);
+
+// `full` only when no --mode was given. An explicit --mode with no value or an
+// unknown value is an error: falling back to `full` would silently run (and
+// bill) the full evaluation for a user who asked for match mode.
 export function parseCliMode(args = process.argv.slice(2)) {
   if (Array.isArray(args) && args.includes('--single-pass')) return 'match';
-  const mode = flagValue(args, '--mode');
-  return mode ? mode.trim() : 'full';
+  if (!hasFlag(args, '--mode')) return 'full';
+  const raw = flagValue(args, '--mode');
+  const mode = typeof raw === 'string' ? raw.trim() : '';
+  if (!mode || mode.startsWith('--')) {
+    throw new Error('--mode requires a value: full or match');
+  }
+  if (!EVAL_MODES.has(mode)) {
+    throw new Error(`Unknown --mode '${mode}'. Supported: full, match.`);
+  }
+  return mode === 'single-pass' ? 'match' : mode;
 }
 
 /**
@@ -107,6 +120,8 @@ export function parseLegitimacy(raw) {
   if (/^proceed(?:\s+with\s+caution)?$/i.test(clean)) return 'Proceed with Caution';
   if (/^suspicious$/i.test(clean)) return 'Suspicious';
   if (/suspicious/i.test(clean)) return 'Suspicious';
+  // "Not High Confidence" must not read as the label it negates.
+  if (/\b(?:not|no|never)\b|n't\b/i.test(clean)) return 'Proceed with Caution';
   if (/proceed\s+with\s+caution/i.test(clean)) return 'Proceed with Caution';
   if (/high\s+confidence/i.test(clean)) return 'High Confidence';
   return 'Proceed with Caution';
@@ -517,7 +532,13 @@ export async function finishPipelineBatch(pipelinePath, originals, results) {
 }
 
 async function main() {
-  const evalMode = parseCliMode();
+  let evalMode;
+  try {
+    evalMode = parseCliMode();
+  } catch (err) {
+    console.error(`❌ ${err.message}`);
+    process.exit(1);
+  }
   setupEnvironment();
   loadContext(evalMode);
 

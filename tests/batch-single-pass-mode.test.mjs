@@ -51,6 +51,16 @@ try {
   } else {
     fail('parseCliMode failed on standalone --single-pass=false');
   }
+
+  for (const bad of [['--mode'], ['--mode', '--limit=3'], ['--mode='], ['--mode', 'mach']]) {
+    let threw = false;
+    try { parseCliMode(bad); } catch { threw = true; }
+    if (threw) {
+      pass(`parseCliMode rejects ${JSON.stringify(bad)} instead of falling back to full`);
+    } else {
+      fail(`parseCliMode accepted ${JSON.stringify(bad)}`);
+    }
+  }
 } catch (err) {
   fail(`parseCliMode tests threw: ${err.message}`);
 }
@@ -167,6 +177,13 @@ try {
     pass('parseLegitimacy parses Suspicious variations');
   } else {
     fail('parseLegitimacy failed on Suspicious');
+  }
+
+  if (parseLegitimacy('Not High Confidence') === 'Proceed with Caution' &&
+      parseLegitimacy("isn't high confidence") === 'Proceed with Caution') {
+    pass('parseLegitimacy does not read a negated label as High Confidence');
+  } else {
+    fail('parseLegitimacy read a negated label as High Confidence');
   }
 
   if (parseLegitimacy('unknown') === 'Proceed with Caution' &&
