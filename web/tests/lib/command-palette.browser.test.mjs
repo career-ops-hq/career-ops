@@ -63,5 +63,16 @@ test("Ctrl+K jumps to a page or an application from anywhere", { skip: liveServe
   await page.keyboard.press("Escape");
   await combobox.waitFor({ state: "hidden" });
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Control+k");
+  const dialog = page.locator("dialog[open]");
+  await dialog.waitFor();
+  const box = await combobox.boundingBox();
+  assert.ok(box && box.width > 0 && box.height > 0, "Ctrl+K opens a visible palette below md");
+  assert.equal(await dialog.evaluate((el) => el.closest("aside") == null), true, "the dialog is not inside the hidden sidebar");
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "hidden" });
+  await page.getByRole("heading", { level: 1 }).waitFor();
+
   assert.deepEqual(errors, []);
 });

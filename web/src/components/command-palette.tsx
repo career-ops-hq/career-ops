@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -19,6 +20,8 @@ export function CommandPalette({ followupsEnabled }: { followupsEnabled: boolean
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const listId = useId();
+  const [canPortal, setCanPortal] = useState(false);
+  useEffect(() => setCanPortal(true), []);
   const shortcut = useSyncExternalStore(
     noSubscribe,
     () => (/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K"),
@@ -87,6 +90,7 @@ export function CommandPalette({ followupsEnabled }: { followupsEnabled: boolean
         )}
       </button>
 
+      {canPortal && createPortal(
       <dialog
         ref={dialogRef}
         onClick={(event) => {
@@ -140,7 +144,9 @@ export function CommandPalette({ followupsEnabled }: { followupsEnabled: boolean
           <p className="px-4 pb-4 pt-1 text-sm text-muted">No page or application matches {`"${query.trim()}"`}</p>
         )}
         {loading && applications.length === 0 && <p className="px-4 pb-3 text-xs text-faint">Loading applications</p>}
-      </dialog>
+      </dialog>,
+      document.body,
+      )}
     </>
   );
 }
