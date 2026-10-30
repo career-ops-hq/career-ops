@@ -314,6 +314,25 @@ try {
     fail(`a strict overflow replaced the existing PDF or lost its draft: ${keptRun.output.trim()}`);
   }
 
+  // The draft never replaces a file already at its name: a PDF legitimately
+  // called {name}.overflow.pdf survives, and the draft takes the next free name.
+  const takenPdf = join(sandbox, 'taken.pdf');
+  const takenDraftName = join(sandbox, 'taken.overflow.pdf');
+  const takenNextDraft = join(sandbox, 'taken.overflow-2.pdf');
+  writeFileSync(takenDraftName, 'ANOTHER GOOD PDF', 'latin1');
+  const takenRun = runPdf([input, takenPdf, '--max-pages=1', '--strict-pages']);
+  if (
+    takenRun.status !== 0 &&
+    readFileSync(takenDraftName, 'latin1') === 'ANOTHER GOOD PDF' &&
+    existsSync(takenNextDraft) &&
+    countPages(takenNextDraft) === 2 &&
+    takenRun.output.includes(`Rejected draft: ${takenNextDraft}`)
+  ) {
+    pass('a strict-overflow draft takes the next free name instead of replacing an existing file');
+  } else {
+    fail(`a strict-overflow draft replaced a file at its name: ${takenRun.output.trim()}`);
+  }
+
   const bareFlagPdf = join(sandbox, 'bare-max-pages.pdf');
   const bareFlag = runPdf([input, bareFlagPdf, '--max-pages'],
     { CAREER_OPS_PROFILE: join(sandbox, 'no-such-profile.yml') });

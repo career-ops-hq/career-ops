@@ -2480,7 +2480,12 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     // stops before success logs and manifest publication.
     if (budget.strictPages && pageCount > budget.maxPages) {
       const hadPrevious = existsSync(outputPath);
-      const draftPath = `${outputPath.replace(/\.pdf$/i, '')}.overflow.pdf`;
+      // The first free name, so the draft never replaces a file already there:
+      // a CV can legitimately be named cv.overflow.pdf, or an earlier batch
+      // entry may have written it.
+      const draftBase = outputPath.replace(/\.pdf$/i, '');
+      let draftPath = `${draftBase}.overflow.pdf`;
+      for (let n = 2; existsSync(draftPath); n++) draftPath = `${draftBase}.overflow-${n}.pdf`;
       writeFileAtomic(draftPath, pdfBuffer);
       try {
         enforcePageBudget(pageCount, budget);
