@@ -21,6 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -63,7 +64,8 @@ export function PipelineView({
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
   const sortKey: SortKey = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : "score";
-  const sort = { key: sortKey, dir: (params.get("dir") === "1" ? 1 : -1) as 1 | -1 };
+  const sortDir: 1 | -1 = params.get("dir") === "1" ? 1 : -1;
+  const sort = { key: sortKey, dir: sortDir };
 
   // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
   // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
@@ -110,29 +112,68 @@ export function PipelineView({
   // keystroke arrives, so typing no longer waits on the whole table.
   const deferredQ = useDeferredValue(q);
 
-  const filtered = useMemo(() => {
-    if (tab === "INBOX") return [];
-    let rows = visibleApplications;
-    if (tab !== "ALL") rows = rows.filter((r) => rowOnPipelineTab(r.status, tab));
-    if (minFilter != null) {
-      rows = rows.filter((r) => {
+  const query = deferredQ.trim();
+  const matchesFilters = useCallback(
+    (r: Application) => {
+      if (minFilter != null) {
         const n = scoreNum(r.score);
-        return !Number.isNaN(n) && n >= minFilter;
-      });
-    }
-    if (deferredQ.trim()) {
-      const needle = deferredQ.toLowerCase();
-      rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
-    }
-    // scoreNum is the real score parser (it handles the tracker's "4.2/5"
-    // cells); sortRows takes it rather than keeping a second copy (#4333).
-    return sortRows(
-      rows,
-      sort,
-      scoreNum,
-      (row) => companyPresentation(row).label,
-    ) as Application[];
-  }, [visibleApplications, tab, deferredQ, sort, minFilter]);
+        if (Number.isNaN(n) || n < minFilter) return false;
+      }
+      return !query || companySearchText(r).toLowerCase().includes(query.toLowerCase());
+    },
+    [minFilter, query],
+  );
+
+  const tabRows = useMemo(() => {
+    if (tab === "INBOX") return [];
+    if (tab === "ALL") return visibleApplications;
+    return visibleApplications.filter((r) => rowOnPipelineTab(r.status, tab));
+  }, [visibleApplications, tab]);
+
+  const filtered = useMemo(
+    () =>
+      // scoreNum is the real score parser (it handles the tracker's "4.2/5"
+      // cells); sortRows takes it rather than keeping a second copy (#4333).
+      sortRows(
+        tabRows.filter(matchesFilters),
+        { key: sortKey, dir: sortDir },
+        scoreNum,
+        (row) => companyPresentation(row).label,
+      ) as Application[],
+    [tabRows, matchesFilters, sortKey, sortDir],
+  );
+
+  const filtering = query !== "" || minFilter != null;
+  const tabLabel = tab === "ALL" ? null : tab.charAt(0) + tab.slice(1).toLowerCase();
+  // The empty state needs the All-tab match count. Memoize it with the same
+  // inputs as the table filter so a keystroke, while the deferred query is
+  // unchanged, does not scan the tracker again.
+  const matchesInAll = useMemo(
+    () => visibleApplications.filter(matchesFilters).length,
+    [visibleApplications, matchesFilters],
+  );
+  const emptyState =
+    filtered.length > 0
+      ? null
+      : trackerEmptyState({ tabLabel, query, minScore: minFilter, matchesInAll });
+  const searchInput = useRef<HTMLInputElement>(null);
+
+  function clearSearch() {
+    setQ("");
+    searchInput.current?.focus();
+  }
+
+  const empty =
+    emptyState &&
+    emptyStateView(emptyState, {
+      tabLabel,
+      query,
+      minFilter,
+      showAll: () => setParams({ tab: "ALL" }),
+      clearSearch,
+      clearMin: () => setParams({ min: null }),
+    });
+  const filterStatus = isPending || !filtering ? "" : empty ? empty.heading : `${filtered.length} of ${tabRows.length} shown`;
 
   const filteredKeys = filtered.map(applicationKey);
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
@@ -186,11 +227,30 @@ export function PipelineView({
             <div className="relative w-64 max-w-[40vw]">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
               <input
+                ref={searchInput}
+                type="search"
+                aria-label="Search applications"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && q) {
+                    e.preventDefault();
+                    setQ("");
+                  }
+                }}
                 placeholder="Search company or role…"
-                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-9 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 [&::-webkit-search-cancel-button]:appearance-none"
               />
+              {q && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={clearSearch}
+                  className="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-faint transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -253,6 +313,12 @@ export function PipelineView({
             <X className="size-3" />
           </button>
         </div>
+      )}
+
+      {visibleTab !== "INBOX" && (
+        <p role="status" className={cn("text-xs tabular-nums text-muted", empty ? "sr-only" : filterStatus && "mt-3")}>
+          {filterStatus}
+        </p>
       )}
 
       {visibleTab !== "INBOX" && selectedRows.length > 0 && (
@@ -433,11 +499,57 @@ export function PipelineView({
             )}
           </table>
         </div>
+      ) : trackerEmptyMessage({ shape: trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
+        <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
+          <h2 className="font-display text-lg">{empty?.heading}</h2>
+          {empty && empty.actions.length > 0 && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {empty.actions.map(({ label, run }, i) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={run}
+                  className={cn(
+                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/40",
+                    i === 0
+                      ? "border-brand/40 bg-brand-soft text-brand-text hover:bg-brand/15"
+                      : "border-border text-muted hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <EmptyTracker shape={trackerShape} query={deferredQ} min={minFilter} tab={tab} />
       )}
     </PageFrame>
   );
+}
+
+function emptyStateView(
+  state: TrackerEmptyState,
+  ctx: {
+    tabLabel: string | null;
+    query: string;
+    minFilter: number | null;
+    showAll: () => void;
+    clearSearch: () => void;
+    clearMin: () => void;
+  },
+): { heading: string; actions: { label: string; run: () => void }[] } {
+  const copy = trackerEmptyPresentation(state, { tabLabel: ctx.tabLabel, query: ctx.query, minScore: ctx.minFilter });
+  const run = {
+    "show-all": ctx.showAll,
+    "clear-search": ctx.clearSearch,
+    "clear-min": ctx.clearMin,
+  };
+  return {
+    heading: copy.heading,
+    actions: copy.actions.map((action) => ({ label: action.label, run: run[action.id] })),
+  };
 }
 
 function EmptyTracker({

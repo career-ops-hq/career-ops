@@ -19,11 +19,15 @@ test("the search input stays bound to the immediate value", () => {
 
 test("the row filter reads the deferred search value, not the keystroke value", () => {
   assert.match(src, /const deferredQ = useDeferredValue\(q\)/);
-  const start = src.indexOf("const filtered = useMemo(");
-  assert.ok(start !== -1, "filtered memo not found");
+  assert.match(src, /const query = deferredQ\.trim\(\)/);
+  const start = src.indexOf("const matchesFilters = useCallback(");
+  assert.ok(start !== -1, "row filter not found");
   const end = src.indexOf("]);", start);
-  const memo = src.slice(start, end + 3);
-  assert.match(memo, /deferredQ\.trim\(\)/);
-  assert.doesNotMatch(memo, /\bq\.trim\(\)|\bq\.toLowerCase\(\)/, "the filter still reads q directly");
-  assert.match(memo, /\[visibleApplications, tab, deferredQ, sort, minFilter\]/);
+  const predicate = src.slice(start, end + 3);
+  assert.match(predicate, /query\.toLowerCase\(\)/);
+  assert.doesNotMatch(predicate, /deferredQ\.toLowerCase\(\)/, "surrounding spaces in the raw value are not part of the match");
+  assert.doesNotMatch(predicate, /\bq\.trim\(\)|\bq\.toLowerCase\(\)/, "the filter still reads q directly");
+  assert.match(predicate, /\[minFilter, query\]/);
+  assert.doesNotMatch(predicate, /\[minFilter, query, deferredQ\]/);
+  assert.match(src, /tabRows\.filter\(matchesFilters\)/);
 });
