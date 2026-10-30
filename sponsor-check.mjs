@@ -786,11 +786,14 @@ export function extractTrackerCompanies(content) {
 /**
  * Employers named by a pipeline inbox list.
  *
- * `data/pipeline.md` rows are `- [ ] {url} | {company} | {role} | …`, so the
- * company is the second pipe-delimited field. A row with no company field (a
- * bare pasted URL, which is the documented minimum form) contributes nothing
- * rather than being parsed out of the URL's host — guessing an employer from a
- * multi-tenant ATS hostname is how the wrong entity gets checked.
+ * Pending rows are `- [ ] {url} | {company} | {role} | …`, but processed rows
+ * lead with a report number (`- [x] #143 | {url} | {company} | {role} | …`), so
+ * the company is the field *after the URL field*, not a fixed position. A row
+ * with no company field (a bare pasted URL, which is the documented minimum
+ * form) contributes nothing rather than being parsed out of the URL's host —
+ * guessing an employer from a multi-tenant ATS hostname is how the wrong entity
+ * gets checked. Pre-screen discards (`- [x] #-- | {url} | skipped (…)`) are
+ * skipped too: the field after their URL is a discard reason, not a company.
  *
  * @param {string} content - pipeline.md text.
  * @returns {{company: string, rows: object[]}[]}
@@ -802,12 +805,14 @@ export function extractPipelineCompanies(content) {
     const m = /^-\s*\[[^\]]*\]\s*(.+)$/.exec(line);
     if (!m) continue;
     const fields = m[1].split('|').map((f) => f.trim());
-    if (fields.length < 2) continue;
-    const company = fields[1];
-    if (!company || !/^https?:\/\//i.test(fields[0])) continue;
+    if (fields[0].startsWith('#--')) continue;
+    const urlIndex = fields.findIndex((f) => /^https?:\/\//i.test(f));
+    if (urlIndex < 0) continue;
+    const company = fields[urlIndex + 1];
+    if (!company) continue;
     const key = normalizeCompany(company) || company.toLowerCase();
     if (!seen.has(key)) seen.set(key, { company, rows: [] });
-    seen.get(key).rows.push({ url: fields[0], role: fields[2] || null });
+    seen.get(key).rows.push({ url: fields[urlIndex], role: fields[urlIndex + 2] || null });
   }
   return [...seen.values()];
 }

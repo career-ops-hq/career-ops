@@ -571,6 +571,20 @@ test('extractPipelineCompanies: reads the company field, never the ATS hostname'
   assert.ok(!companies.some((c) => c.company === 'Nope'), 'a row whose first field is not a URL is skipped');
 });
 
+test('extractPipelineCompanies: processed rows lead with #NNN, so the company follows the URL field', () => {
+  const companies = extractPipelineCompanies([
+    '- [ ] https://jobs.ashbyhq.com/wayve/abc | Wayve | AI Engineer | London',
+    '- [x] #143 | https://jobs.example.com/posting/789 | Acme Corp | AI PM | 4.2/5 | PDF ✅',
+    '- [x] #-- | https://jobs.example.com/posting/790 | skipped (pre-screen mismatch: seniority)',
+  ].join('\n'));
+  assert.deepEqual(companies.map((c) => c.company).sort(), ['Acme Corp', 'Wayve']);
+  const acme = companies.find((c) => c.company === 'Acme Corp');
+  assert.deepEqual(acme.rows, [{ url: 'https://jobs.example.com/posting/789', role: 'AI PM' }]);
+  const wayve = companies.find((c) => c.company === 'Wayve');
+  assert.deepEqual(wayve.rows, [{ url: 'https://jobs.ashbyhq.com/wayve/abc', role: 'AI Engineer' }]);
+  assert.ok(!companies.some((c) => /skipped/.test(c.company)), 'a pre-screen discard reason is not an employer');
+});
+
 test('extractCompanies: picks the extractor by content shape so --file takes either format', () => {
   assert.equal(extractCompanies(TRACKER_FIXTURE).source, 'tracker');
   assert.equal(extractCompanies(PIPELINE_FIXTURE).source, 'pipeline');
