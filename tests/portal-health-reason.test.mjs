@@ -69,5 +69,48 @@ test('verify reports the unknown provider and says it does not run a local parse
   assert.equal(byName['Typo Co'].status, 'missing');
   assert.match(byName['Typo Co'].reason, /unknown provider: greenhose/);
   assert.equal(byName['Silent Co'].status, 'skipped');
-  assert.match(byName['Silent Co'].reason, /scan_method/);
+  assert.match(byName['Silent Co'].reason, /scan_method: websearch/);
+  assert.match(byName['Silent Co'].reason, /does not verify/);
+});
+
+test('an unknown provider on a Greenhouse URL is missing and is not probed', async () => {
+  const { verifyCompanies } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
+  let fetches = 0;
+  const fetchJson = async () => {
+    fetches += 1;
+    return { jobs: [{ id: 1 }] };
+  };
+  const rows = await verifyCompanies([{
+    name: 'Typo Greenhouse',
+    careers_url: 'https://boards.greenhouse.io/typo',
+    provider: 'greenhose',
+    enabled: true,
+  }], {
+    providers, fetchJson, fetchText: deny, httpCtx: { fetchJson, fetchText: deny },
+  });
+  assert.equal(fetches, 0, 'the recognizable URL must not be probed');
+  assert.equal(rows[0].status, 'missing');
+  assert.match(rows[0].reason, /unknown provider: greenhose/);
+});
+
+test('a known provider still probes a recognizable ATS URL', async () => {
+  const { verifyCompanies } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
+  let fetches = 0;
+  const fetchJson = async () => {
+    fetches += 1;
+    return { jobs: [{ id: 1 }] };
+  };
+  const withGreenhouse = new Map(providers);
+  withGreenhouse.set('greenhouse', { id: 'greenhouse', detect: () => null, fetch: async () => [] });
+  const rows = await verifyCompanies([{
+    name: 'Live Co',
+    careers_url: 'https://boards.greenhouse.io/liveco',
+    provider: 'greenhouse',
+    enabled: true,
+  }], {
+    providers: withGreenhouse, fetchJson, fetchText: deny, httpCtx: { fetchJson, fetchText: deny },
+  });
+  assert.equal(fetches, 1);
+  assert.equal(rows[0].status, 'live');
+  assert.equal(rows[0].ats, 'greenhouse');
 });

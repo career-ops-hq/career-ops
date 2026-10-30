@@ -827,7 +827,8 @@ export async function probeProvider(entry, provider, baseCtx) {
 /**
  * Verify each enabled portals.yml entry's board is reachable.
  *
- * Two tiers, cheapest first:
+ * Two tiers, cheapest first. An explicit provider id the scanner does not
+ * load is reported before either tier, so a recognizable URL cannot hide the typo.
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each),
  *      with cross-probe suggestions when a slug 404s.
  *   2. Everything else is routed through the SAME provider plugins the scanner
@@ -874,6 +875,21 @@ export async function verifyCompanies(
  */
 async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) {
   const name = typeof company.name === 'string' ? company.name : '(unnamed)';
+  // scan.mjs rejects an unknown provider before it looks at the URL. Probing
+  // a Greenhouse URL first used to return live, and --strict never saw the typo.
+  let resolved = null;
+  if (providers && providers.size > 0) {
+    resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
+    if (resolved?.error) {
+      return {
+        name,
+        status: 'missing',
+        errorKind: 'unknown',
+        provider: typeof company.provider === 'string' ? company.provider : 'unknown',
+        reason: resolved.error,
+      };
+    }
+  }
   const match =
     parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
   // An Ashby entry that opts into the embed source (`ashby: { embed: true }`)
@@ -893,21 +909,10 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   }
 
   // Tier 2: hand the entry to the scanner's provider layer. Skip the
-  // local-parser provider — a health check must stay network-only and never
-  // execute a configured local command.
+  // local-parser provider. A health check must stay network-only and never
+  // execute a configured local command. The unknown-provider error was
+  // already returned above, before a recognizable URL could hide it.
   if (providers && providers.size > 0) {
-    const resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
-    // A typo in provider: used to take the same skip line as a URL nothing
-    // claims, and the error text was thrown away.
-    if (resolved?.error) {
-      return {
-        name,
-        status: 'missing',
-        errorKind: 'unknown',
-        provider: typeof company.provider === 'string' ? company.provider : 'unknown',
-        reason: resolved.error,
-      };
-    }
     if (resolved && resolved.provider) {
       const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
       return { name, ...probe };
@@ -926,7 +931,7 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   return {
     name,
     status: 'skipped',
-    reason: 'no provider matched. Name a provider this scanner loads, set a careers_url a provider detects, or set scan_method.',
+    reason: 'no provider matched. Name a provider this scanner loads, set a careers_url a provider detects, or set scan_method: websearch for the scan.mjs agent handoff. verify-portals does not verify that board.',
   };
 }
 
