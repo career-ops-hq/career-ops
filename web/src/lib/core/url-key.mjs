@@ -7,7 +7,7 @@
  * none, same as the core it mirrors (only the global `URL`).
  *
  * WHY A COPY EXISTS AT ALL: the live core lives in the user's career-ops
- * checkout and is resolved at runtime via careerOpsRoot() — unavailable to the
+ * checkout and is resolved at runtime via resolveCodeRoot() — unavailable to the
  * client bundle. Unlike normalize-text-key.mjs's split (a Node-only live
  * loader server-side, this mirror client-side), the URL key here is used to
  * build ONE Set server-side (assembleDedupContext, from data/scan-history.tsv)
@@ -105,6 +105,100 @@ export function normalizeUrl(raw) {
   }
 
   return u.toString();
+}
+
+// The posting-language rule below mirrors the core's LANGUAGE_PARAMS,
+// postingLanguageKey, postingScript, languageSubtag and postingUrlRelation
+// (url-key.mjs, root), so What's New suppression reads two language versions
+// of one posting the way the tracker does. Keep the bodies aligned with the
+// core; the parity tests in tests/lib/url-key.test.mjs reuse its cases. The
+// root file's docstrings carry the full rationale.
+
+// Query params naming the language a posting page renders in.
+export const LANGUAGE_PARAMS = ["language", "lang", "locale"];
+
+/**
+ * The posting a URL names, apart from the language it asks for.
+ *
+ * @param {unknown} raw - A posting URL (or any string).
+ * @returns {{key: string, language: string, script: string}} `key` is '' when
+ *   there is no key; `language` is '' when the URL names none.
+ */
+export function postingLanguageKey(raw) {
+  if (typeof raw !== "string") return { key: "", language: "", script: "" };
+  let u;
+  try { u = new URL(raw.trim()); } catch { return { key: normalizeUrl(raw), language: "", script: "" }; }
+  let language = "";
+  let script = "";
+  for (const name of [...u.searchParams.keys()]) {
+    if (!LANGUAGE_PARAMS.includes(name.toLowerCase())) continue;
+    if (!language) {
+      const raw = u.searchParams.get(name);
+      language = languageSubtag(raw);
+      script = postingScript(raw);
+    }
+    u.searchParams.delete(name);
+  }
+  return { key: normalizeUrl(u.href), language, script };
+}
+
+/**
+ * The script a posting language param names, or '' when the value does not
+ * say: an explicit script subtag, else the one an explicit region implies. A
+ * bare `zh` is never resolved to a script.
+ *
+ * @param {unknown} value - A language param value.
+ * @returns {string} A script subtag (`Hant`), or ''.
+ */
+export function postingScript(value) {
+  if (typeof value !== "string") return "";
+  const v = value.trim();
+  if (!v) return "";
+  let loc;
+  try { loc = new Intl.Locale(v.replace(/_/g, "-")); } catch { return ""; }
+  if (loc.script) return loc.script;
+  if (!loc.region) return "";
+  try { return loc.maximize().script || ""; } catch { return ""; }
+}
+
+/**
+ * A posting language reduced to its language subtag (`en-GB` → `en`); a value
+ * that does not parse is compared whole, case-folded.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function languageSubtag(value) {
+  if (typeof value !== "string") return "";
+  const v = value.trim();
+  if (!v) return "";
+  try {
+    return new Intl.Locale(v.replace(/_/g, "-")).language;
+  } catch {
+    return v.toLowerCase();
+  }
+}
+
+/**
+ * What two posting URLs say about whether they name the same posting:
+ * `'no-key'` (either side has no key), `'same'`, `'distinct'` (two pages, or
+ * one page in two known languages or scripts) or `'one-sided-language'` (one
+ * page with a language on one side only: proof of neither one posting nor two).
+ *
+ * @param {string} rawA
+ * @param {string} rawB
+ * @returns {'no-key'|'same'|'distinct'|'one-sided-language'}
+ */
+export function postingUrlRelation(rawA, rawB) {
+  const a = postingLanguageKey(rawA);
+  const b = postingLanguageKey(rawB);
+  if (!a.key || !b.key) return "no-key";
+  if (a.key !== b.key) return "distinct";
+  if (a.language === b.language) {
+    if (a.language && a.script && b.script && a.script !== b.script) return "distinct";
+    return "same";
+  }
+  return a.language && b.language ? "distinct" : "one-sided-language";
 }
 
 export default normalizeUrl;
