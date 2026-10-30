@@ -24,8 +24,13 @@ after(() => rmSync(work, { recursive: true, force: true, maxRetries: 10 }));
 const hook = join(work, 'fetch.mjs');
 writeFileSync(hook, `
 import { writeFileSync } from 'node:fs';
+const requests = [];
 globalThis.fetch = async (url, init) => {
-  writeFileSync(process.env.REQUEST_CAPTURE, JSON.stringify(JSON.parse(init.body)));
+  const body = JSON.parse(init.body);
+  requests.push(body);
+  writeFileSync(process.env.REQUEST_CAPTURE, JSON.stringify(requests));
+  const reject = process.env.REJECT_REPLY;
+  if (reject && (body.stream_options || process.env.REJECT_ALWAYS)) return new Response(reject, { status: 422 });
   const chunks = [
     { choices: [{ delta: { content: 'Fixture evaluation.' } }] },
     { choices: [{ delta: {}, finish_reason: 'stop' }] },
@@ -36,7 +41,7 @@ globalThis.fetch = async (url, init) => {
 };
 `);
 
-function evaluate(usageChunks) {
+function evaluate(usageChunks, extraEnv = {}, expectStatus = 0) {
   const capture = join(work, 'request.json');
   const r = spawnSync(process.execPath, [
     '--import', pathToFileURL(hook).href, join(ROOT, 'openai-eval.mjs'),
@@ -46,11 +51,12 @@ function evaluate(usageChunks) {
     env: {
       PATH: process.env.PATH, HOME: work, CAREER_OPS_ROOT: work,
       OPENAI_API_KEY: 'fixture-key', REQUEST_CAPTURE: capture,
-      USAGE_CHUNKS: JSON.stringify(usageChunks),
+      USAGE_CHUNKS: JSON.stringify(usageChunks), ...extraEnv,
     },
   });
-  assert.equal(r.status, 0, r.stderr);
-  return { stdout: r.stdout, request: JSON.parse(readFileSync(capture, 'utf-8')) };
+  assert.equal(r.status, expectStatus, r.stderr);
+  const requests = JSON.parse(readFileSync(capture, 'utf-8'));
+  return { stdout: r.stdout, requests, request: requests[0] };
 }
 
 test('the streamed request asks the endpoint to report usage', () => {
@@ -80,4 +86,22 @@ test('usage repeated on every chunk counts once, from the last chunk', () => {
 test('an endpoint that sends no usage still finishes and prints the footer', () => {
   const { stdout } = evaluate([]);
   assert.match(stdout, /evaluation:\s+\(zero-token by design\)/);
+});
+
+// Mistral answers an unknown request field with 422 and names it
+// (openai/openai-agents-python#442).
+const MISTRAL_422 = JSON.stringify({ detail: [{ type: 'extra_forbidden', loc: ['body', 'stream_options', 'include_usage'], msg: 'Extra inputs are not permitted' }] });
+
+test('an endpoint that rejects stream_options gets the request again without it', () => {
+  const { requests, stdout } = evaluate([], { REJECT_REPLY: MISTRAL_422 });
+  assert.equal(requests.length, 2);
+  assert.ok(requests[0].stream_options);
+  assert.equal(requests[1].stream_options, undefined);
+  assert.equal(requests[1].stream, true);
+  assert.match(stdout, /Fixture evaluation\./);
+});
+
+test('any other 422 is reported once, with no retry', () => {
+  const { requests } = evaluate([], { REJECT_REPLY: '{"error":"model not found"}', REJECT_ALWAYS: '1' }, 1);
+  assert.equal(requests.length, 1);
 });
