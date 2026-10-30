@@ -60,6 +60,7 @@ CV'ni uyarlar ve cevaplarının taslağını&nbsp;yazar. <strong>Gönder'e&nbsp;
 </p>
 
 <p align="center"><a href="#sıra-sende">Tek bir ilanla&nbsp;dene&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Hikâyenin tamamını&nbsp;oku&nbsp;→</a></p>
+<p align="center"><sub>Terminal kullanmamayı mı tercih edersin? <a href="https://career-ops.org/waitlist?ref=readme-tr">Web sürümü için bekleme listesine katıl&nbsp;→</a></sub></p>
 
 <br>
 
