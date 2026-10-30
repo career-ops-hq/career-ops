@@ -26,10 +26,12 @@ export function FirstRunHome() {
             Drop your CV. See who&apos;s hiring you in 60 seconds.
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-relaxed text-muted">
-            No account. Paste text or drop a .md or .txt file to start. A PDF or Word file only works with Claude Code,
-            chosen in <a href="/config" className="text-foreground underline-offset-2 hover:underline">Config</a>. The
-            market scan is <span className="text-foreground">free</span>. You only spend tokens when you choose to score
-            a role.
+            No account. Paste text or drop a .md / .txt file to start. A PDF needs an AI CLI in{" "}
+            <a href="/config" className="text-foreground underline-offset-2 hover:underline">
+              Config
+            </a>{" "}
+            first. The market scan is <span className="text-foreground">free</span>. You only spend tokens when you
+            choose to score a role.
           </p>
           <div className="mt-7">
             <CvIngest />

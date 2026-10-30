@@ -343,7 +343,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           <RotateCcw className="size-3.5" /> Start over
         </button>
         <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-faint">
-          <Lock className="size-3" /> Nothing is saved until you click Save.
+          <Lock className="size-3" /> {variant === "editor" ? "Save updates cv.md and backs up the previous version" : "Nothing is saved until you click Save."}
         </span>
       </div>
     </div>
