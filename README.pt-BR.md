@@ -287,9 +287,9 @@ Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere s
 | --- | --- |
 | Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
 | Pi | `/skill:career-ops scan` |
-| Codex, Qwen, Cursor ou qualquer outra CLI | Linguagem natural: "Run the career-ops scan mode" |
+| Codex, Qwen, Cursor ou qualquer outra CLI compatível | Linguagem natural: "Run the career-ops scan mode" |
 
-`/career-ops` sem nada depois mostra o menu de comandos nas CLIs que o usam. A linguagem natural funciona em todas as CLIs. Como plugin do Claude Code, o comando é `/career-ops:career-ops`.
+`/career-ops` sem nada depois mostra o menu de comandos nas CLIs que o usam. A linguagem natural funciona em todas as CLIs compatíveis. Como plugin do Claude Code, o comando é `/career-ops:career-ops`.
 
 Todas compartilham um único roteador, `.agents/skills/career-ops/SKILL.md`, e os mesmos arquivos `modes/*.md`, então um modo se comporta do mesmo jeito em qualquer CLI. Comandos com barra não são garantidos no Codex: peça em linguagem natural ou rode um prompt em modo headless com `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). Como rodar em cada CLI compatível, os comandos headless quando a CLI tem um e as notas de configuração de cada CLI estão em [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
