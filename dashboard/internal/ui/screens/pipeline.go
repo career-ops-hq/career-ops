@@ -188,7 +188,19 @@ const (
 	filterRejected   = "rejected"
 	filterDiscarded  = "discarded"
 	filterTop        = "top"
+	filterOther      = "other"
 )
+
+// canonicalPipelineStatus is a stage the pipeline already names. hold is
+// normalized to evaluated before this check, so it stays on that tab.
+func canonicalPipelineStatus(norm string) bool {
+	switch norm {
+	case "hired", "interview", "offer", "assessment", "responded", "applied", "evaluated", "skip", "rejected", "discarded":
+		return true
+	default:
+		return false
+	}
+}
 
 type pipelineTab struct {
 	filter string
@@ -207,6 +219,7 @@ func getPipelineTabs() []pipelineTab {
 		{filterSkip, i18n.Current.TabSkip},
 		{filterRejected, i18n.Current.TabRejected},
 		{filterDiscarded, i18n.Current.TabDiscarded},
+		{filterOther, i18n.Current.TabOther},
 	}
 }
 
@@ -640,19 +653,13 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		m.scrollOffset = 0
 
 	case "f", "right", "l":
-		m.activeTab++
-		if m.activeTab >= len(getPipelineTabs()) {
-			m.activeTab = 0
-		}
+		m.stepTab(1)
 		m.applyFilterAndSort()
 		m.cursor = 0
 		m.scrollOffset = 0
 
 	case "left", "h":
-		m.activeTab--
-		if m.activeTab < 0 {
-			m.activeTab = len(getPipelineTabs()) - 1
-		}
+		m.stepTab(-1)
 		m.applyFilterAndSort()
 		m.cursor = 0
 		m.scrollOffset = 0
@@ -1237,8 +1244,48 @@ func matchesSearch(app model.CareerApplication, query string) bool {
 	return false
 }
 
+// stepTab moves the active tab by delta, wrapping, and skips Other when that
+// bucket is empty so a clean tracker never lands on a blank tab.
+func (m *PipelineModel) stepTab(delta int) {
+	tabs := getPipelineTabs()
+	n := len(tabs)
+	if n == 0 || delta == 0 {
+		return
+	}
+	next := m.activeTab
+	for range n {
+		next += delta
+		if next >= n {
+			next = 0
+		} else if next < 0 {
+			next = n - 1
+		}
+		if tabs[next].filter == filterOther && m.countForFilter(filterOther) == 0 {
+			continue
+		}
+		m.activeTab = next
+		return
+	}
+}
+
+// clampActiveTab keeps the selection on a tab the tracker can show.
+func (m *PipelineModel) clampActiveTab() {
+	tabs := getPipelineTabs()
+	if len(tabs) == 0 {
+		m.activeTab = 0
+		return
+	}
+	if m.activeTab < 0 || m.activeTab >= len(tabs) {
+		m.activeTab = 0
+	}
+	if tabs[m.activeTab].filter == filterOther && m.countForFilter(filterOther) == 0 {
+		m.activeTab = 0
+	}
+}
+
 // applyFilterAndSort rebuilds the filtered list from apps.
 func (m *PipelineModel) applyFilterAndSort() {
+	m.clampActiveTab()
 	var filtered []model.CareerApplication
 
 	currentFilter := getPipelineTabs()[m.activeTab].filter
@@ -1252,6 +1299,10 @@ func (m *PipelineModel) applyFilterAndSort() {
 			filtered = append(filtered, app)
 		case filterTop:
 			if app.Score >= 4.0 && norm != "skip" {
+				filtered = append(filtered, app)
+			}
+		case filterOther:
+			if !canonicalPipelineStatus(norm) {
 				filtered = append(filtered, app)
 			}
 		default:
@@ -1552,6 +1603,9 @@ func (m PipelineModel) renderTabs() string {
 	var underParts []string
 
 	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterOther && m.countForFilter(filterOther) == 0 && i != m.activeTab {
+			continue
+		}
 		// Count items for this tab
 		count := m.countForFilter(tab.filter)
 		label := fmt.Sprintf(" %s (%d) ", tab.label, count)
@@ -1590,6 +1644,10 @@ func (m PipelineModel) countForFilter(filter string) int {
 			if app.Score >= 4.0 && norm != "skip" {
 				count++
 			}
+		case filterOther:
+			if !canonicalPipelineStatus(norm) {
+				count++
+			}
 		default:
 			if norm == filter {
 				count++
@@ -1616,6 +1674,18 @@ func (m PipelineModel) renderMetrics() string {
 		color := statusColors[status]
 		s := lipgloss.NewStyle().Foreground(color)
 		parts = append(parts, s.Render(fmt.Sprintf("%s:%d", statusLabel(status), count)))
+	}
+
+	other := 0
+	for status, count := range m.metrics.ByStatus {
+		if count == 0 || canonicalPipelineStatus(status) {
+			continue
+		}
+		other += count
+	}
+	if other > 0 {
+		s := lipgloss.NewStyle().Foreground(m.theme.Yellow)
+		parts = append(parts, s.Render(fmt.Sprintf("%s:%d", i18n.Current.StatusOther, other)))
 	}
 
 	return style.Render(strings.Join(parts, "  "))
