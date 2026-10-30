@@ -127,7 +127,6 @@ MAX_RETRIES=2
 MIN_SCORE=0
 SKIP_PDF=false
 MODE="full"
-SINGLE_PASS=false
 MODEL=""  # explicit override; otherwise resolved from the profile's spend_tier
 RESOLVED_MODEL=""
 RESOLVED_SPEND_TIER=""
@@ -260,13 +259,11 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"
       if [[ "$MODE" == "match" || "$MODE" == "single-pass" ]]; then
         MODE="match"
-        SINGLE_PASS=true
       fi
       shift 2
       ;;
     --single-pass)
       MODE="match"
-      SINGLE_PASS=true
       shift
       ;;
     --rate-limit-sleep)
@@ -1565,6 +1562,18 @@ process_offer() {
         if (( match_output_retries < max_match_output_retries && retries < MAX_RETRIES )); then
           match_output_retries=$((match_output_retries + 1))
           retries=$((retries + 1))
+          # Move the malformed attempt's artifacts aside first. Left in place,
+          # a retry with another slug leaves two reports on one number, and a
+          # retry that writes no report would pass the report-file check on the
+          # stale one. Same quarantine as the confirmation-hold path below.
+          local retry_quarantine="$LOGS_DIR/quarantine" retry_artifact
+          shopt -s nullglob
+          for retry_artifact in "$REPORTS_DIR/$report_num-"*.md "$TRACKER_DIR/$id.tsv"; do
+            [[ "$retry_artifact" == *-RESERVED.md ]] && continue
+            mkdir -p "$retry_quarantine"
+            mv "$retry_artifact" "$retry_quarantine/$id-match-retry-${retry_artifact##*/}"
+          done
+          shopt -u nullglob
           echo "    ⚠️  Malformed or missing match mode JSON summary (attempt $retries/$MAX_RETRIES); retrying once..."
           sleep 2
           continue
