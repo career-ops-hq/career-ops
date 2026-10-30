@@ -16,7 +16,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lstatSync, readFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listTree } from '../lib/walk-tree.mjs';
 
@@ -26,7 +26,8 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 const { version } = JSON.parse(read('package.json'));
 
 // links: 'reject' throws on a symlink: the directory needs regular files for everything the plugin loads.
-const files = listTree(DIR, { links: 'reject' }).map((path) => ({ path, rel: relative(DIR, path), st: lstatSync(path) }));
+const files = listTree(DIR, { links: 'reject' })
+  .map((path) => ({ path, rel: relative(DIR, path).split(sep).join('/'), st: lstatSync(path) }));
 
 test('the skill and the license are byte-identical copies of the canonical ones', () => {
   assert.equal(read('claude-directory/skills/career-ops/SKILL.md'), read('.agents/skills/career-ops/SKILL.md'),
