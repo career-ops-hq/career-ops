@@ -63,6 +63,7 @@ const SUITES = {
   "loading-transition": { url: "LOADING_TRANSITION_TEST_URL", root: "LOADING_TRANSITION_TEST_ROOT", fixture: "pipeline-status" },
   "mobile-nav-drawer": { url: "MOBILE_NAV_TEST_URL", fixture: "blank" },
   "pipeline-inline-status": { url: "PIPELINE_STATUS_TEST_URL", root: "PIPELINE_STATUS_TEST_ROOT", fixture: "pipeline-status" },
+  "pipeline-report-states": { url: "PIPELINE_REPORT_STATES_TEST_URL", root: "PIPELINE_REPORT_STATES_TEST_ROOT", fixture: "pipeline-report-states" },
   "pipeline-return": { url: "PIPELINE_RETURN_TEST_URL", root: "PIPELINE_RETURN_TEST_ROOT", fixture: "pipeline-status" },
   "skip-link": { url: "SKIP_LINK_TEST_URL", fixture: "blank" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },

@@ -48,6 +48,8 @@ test('every short blurb describes the same project in the same words', () => {
     ['package.json', pkg.description],
     ['.claude-plugin/plugin.json', JSON.parse(read('.claude-plugin/plugin.json')).description],
     ['.github/plugin/plugin.json', JSON.parse(read('.github/plugin/plugin.json')).description],
+    // claude-directory/.claude-plugin/plugin.json is left out on purpose: its description is the
+    // Claude plugin directory listing, worded for that page (tests/claude-directory-plugin.test.mjs).
     ['.claude-plugin/marketplace.json metadata', marketplace.metadata?.description],
     // Enumerated from the file, not from a count kept here: a marketplace with a
     // second plugin one day should widen this automatically.
