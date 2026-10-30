@@ -32,11 +32,11 @@ function post(body) {
   });
 }
 
-async function withProfile(fn) {
+async function withProfile(fn, { create = true } = {}) {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), "career-ops-cadence-")));
   mkdirSync(path.join(root, "config"));
   const file = path.join(root, "config", "profile.yml");
-  writeFileSync(file, PROFILE);
+  if (create) writeFileSync(file, PROFILE);
   writeFileSync(path.join(root, "config", "profile.example.yml"), "candidate:\n  full_name: Template Person\n");
   const saved = {
     root: process.env.CAREER_OPS_ROOT,
@@ -89,5 +89,42 @@ test("a cadence save without a revision still merges", async () => {
     const written = yaml.load(readFileSync(file, "utf8"));
     assert.equal(written.followup_cadence.applied_first_days, 12);
     assert.equal(written.followup_cadence.applied_max_followups, 4);
+  });
+});
+
+test("two tabs loaded before the profile exists: the second save is refused", async () => {
+  await withProfile(async (file) => {
+    const first = await (await GET()).json();
+    const second = await (await GET()).json();
+    assert.equal(typeof first.revision, "string");
+    assert.equal(first.revision.length > 0, true);
+    assert.equal(second.revision, first.revision);
+
+    const saved = await POST(post({ applied_first_days: 16, revision: first.revision }));
+    assert.equal(saved.status, 200);
+
+    const conflict = await POST(post({ applied_first_days: 9, revision: second.revision }));
+    assert.equal(conflict.status, 409);
+    const written = yaml.load(readFileSync(file, "utf8"));
+    assert.equal(written.followup_cadence.applied_first_days, 16);
+  }, { create: false });
+});
+
+test("a toggle returns the revision the next cadence save needs", async () => {
+  await withProfile(async (file) => {
+    const loaded = await (await GET()).json();
+    const toggled = await POST(post({ enabled: false, revision: loaded.revision }));
+    assert.equal(toggled.status, 200);
+    const toggledBody = await toggled.json();
+    assert.notEqual(toggledBody.revision, loaded.revision);
+
+    const stale = await POST(post({ enabled: true, revision: loaded.revision }));
+    assert.equal(stale.status, 409);
+
+    const saved = await POST(post({ applied_first_days: 20, revision: toggledBody.revision }));
+    assert.equal(saved.status, 200);
+    const written = yaml.load(readFileSync(file, "utf8"));
+    assert.equal(written.follow_ups.enabled, false);
+    assert.equal(written.followup_cadence.applied_first_days, 20);
   });
 });

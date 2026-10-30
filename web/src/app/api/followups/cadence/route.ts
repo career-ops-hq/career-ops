@@ -31,6 +31,11 @@ function textRevision(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
 }
 
+/** Revision for "config/profile.yml does not exist yet". Two tabs that both
+ *  load before the first save get this value, so the second save is refused
+ *  once the first one creates the file. A hash is hex, so it never equals this. */
+const ABSENT_REVISION = "absent";
+
 /**
  * PURE defaults, read from the core rather than copied (#2369).
  *
@@ -86,8 +91,9 @@ export async function GET() {
   const file = getProfilePath(careerOpsRoot());
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
   let enabled = true;
-  let revision: string | null = null;
+  let revision: string | null = ABSENT_REVISION;
   if (fs.existsSync(file)) {
+    revision = null;
     let profile: Record<string, unknown> = {};
     try {
       const raw = fs.readFileSync(file, "utf8");
@@ -138,6 +144,7 @@ export async function POST(req: Request) {
   let source = "";
   let currentRevision: string | null = null;
   if (!fs.existsSync(file)) {
+    currentRevision = ABSENT_REVISION;
     // First create: seed from the example so we never leave a cadence-only profile.
     try {
       source = fs.readFileSync(path.join(root, "config", "profile.example.yml"), "utf8");

@@ -100,12 +100,17 @@ export function CadenceSettings() {
       const res = await fetch("/api/followups/cadence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next }),
+        // Same revision check as save(). Without it a stale toggle skips the
+        // conflict check, and a toggle that lands leaves the form holding the
+        // old revision, so the next cadence save is refused.
+        body: JSON.stringify(revision ? { enabled: next, revision } : { enabled: next }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(typeof j.error === "string" ? j.error : "Could not save.");
+        if (res.status === 409) load();
       } else {
+        if (typeof j.revision === "string" && j.revision) setRevision(j.revision);
         setEnabled(next);
         // The nav is rendered on the server from the same setting. A router
         // refresh re-renders it without unloading running jobs.
