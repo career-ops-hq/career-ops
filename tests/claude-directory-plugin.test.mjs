@@ -96,7 +96,7 @@ test('the listing icon is a square PNG the directory accepts', () => {
 
 test('the README is long enough and says what the plugin runs, sends and fetches', () => {
   const readme = read('claude-directory/README.md');
-  const prose = readme.replace(/```[\s\S]*?```/g, '').replace(/<!--[\s\S]*?-->/g, '');
+  const prose = readme.replace(/```[\s\S]*?```/g, '').replaceAll('<!-- x-release-please-version -->', '');
   assert.ok(prose.split(/\s+/).filter(Boolean).length >= 40, 'the directory blocks a README under 40 words outside code blocks');
   for (const fact of ['npm registry', 'GitHub API', 'npm install', 'Chromium', 'portals.yml', 'https://career-ops.org/privacy']) {
     assert.ok(readme.includes(fact), `README no longer mentions ${fact}`);
