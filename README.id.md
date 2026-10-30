@@ -60,6 +60,7 @@ CV disesuaikan dan draf jawaban disiapkan. <strong>Anda&nbsp;yang&nbsp;menekan&n
 </p>
 
 <p align="center"><a href="#giliran-anda">Coba pada satu lowongan&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Baca cerita&nbsp;lengkapnya&nbsp;→</a></p>
+<p align="center"><sub>Lebih suka tidak memakai terminal? <a href="https://career-ops.org/waitlist?ref=readme-id">Gabung ke daftar tunggu versi web&nbsp;→</a></sub></p>
 
 <br>
 

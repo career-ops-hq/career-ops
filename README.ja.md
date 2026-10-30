@@ -60,6 +60,7 @@
 </p>
 
 <p align="center"><a href="#あなたの番">求人ひとつで試す&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">ス&#8288;ト&#8288;ー&#8288;リ&#8288;ー&#8288;の&#8288;全&#8288;文&#8288;を&#8288;読&#8288;む&nbsp;→</a></p>
+<p align="center"><sub>ターミナルは使いたくないですか？ <a href="https://career-ops.org/waitlist?ref=readme-ja">Web版のウェイトリストに登録する&nbsp;→</a></sub></p>
 
 <br>
 

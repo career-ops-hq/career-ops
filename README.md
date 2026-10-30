@@ -60,6 +60,7 @@ It tailors your CV and drafts your&nbsp;answers. <strong>You&nbsp;press&nbsp;Sub
 </p>
 
 <p align="center"><a href="#your-turn">Try it on one job&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Read the full&nbsp;story&nbsp;→</a></p>
+<p align="center"><sub>Prefer not to use a terminal? <a href="https://career-ops.org/waitlist?ref=readme-en">Join the waitlist for a web version&nbsp;→</a></sub></p>
 
 <br>
 
@@ -530,7 +531,8 @@ career-ops/
 ├── config/
 │   └── profile.example.yml      # Template for your profile
 ├── modes/                       # Skill modes
-│   ├── _shared.md               # Shared context (customize this)
+│   ├── _shared.md               # Shared context (system file; local edit kept unless apply --force)
+│   ├── _profile.md              # Your archetypes and framing (customize this)
 │   ├── oferta.md                # Single evaluation
 │   ├── pdf.md                   # PDF generation
 │   ├── cover.md                 # Cover letter generation

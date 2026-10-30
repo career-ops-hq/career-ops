@@ -1523,7 +1523,7 @@ npm run prepare:application -- --url https://boards.greenhouse.io/acme/jobs/123
 Cross-platform build wrapper for the Go TUI dashboard: picks the
 platform-correct output name (`career-dashboard.exe` on Windows, else
 `career-dashboard`), since a bare `go build -o` writes an extension-less
-binary on Windows. Requires Go 1.24+.
+binary on Windows. Requires Go 1.26+.
 
 ```bash
 npm run build:dashboard

@@ -62,6 +62,7 @@ Adapta tu CV y redacta tus&nbsp;respuestas. <strong>Tú&nbsp;pulsas&nbsp;Enviar.
 </p>
 
 <p align="center"><a href="#te-toca">Pruébalo con una oferta&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">Lee la historia&nbsp;completa&nbsp;→</a></p>
+<p align="center"><sub>¿Prefieres no usar la terminal? <a href="https://career-ops.org/es/waitlist?ref=readme-es">Apúntate a la lista de espera de la versión web&nbsp;→</a></sub></p>
 
 <br>
 
