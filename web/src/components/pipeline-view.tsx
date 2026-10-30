@@ -22,6 +22,7 @@ import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
+import { listEntrySync } from "@/lib/history-back.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 
@@ -70,6 +71,15 @@ export function PipelineView({
   const [q, setQ] = useState(params.get("q") ?? "");
   // Typing stays local, so include it explicitly when leaving the list.
   const detailQuery = pipelineQuery(params.toString(), q);
+  // The list entry has to carry that search too. Otherwise Back compares the
+  // return link with an older URL and opens a fresh list at the top.
+  function syncTypedSearch() {
+    const next = listEntrySync(pathname, params.toString(), q);
+    if (!next) return;
+    const state = window.history.state;
+    if (!state || state.__NA !== true) return;
+    window.history.replaceState(state, "", next);
+  }
   const lastUrlQ = useRef(params.get("q") ?? "");
   useEffect(() => {
     const urlQ = params.get("q") ?? "";
@@ -281,6 +291,7 @@ export function PipelineView({
           {selectedRows.length >= 2 && selectedRows.length <= COMPARE_MAX && (
             <Link
               href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}${detailQuery ? `&${detailQuery}` : ""}`}
+              onClick={syncTypedSearch}
               className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand-text"
             >
               Compare
@@ -370,19 +381,19 @@ export function PipelineView({
                       />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-                      <Link href={detailHref} tabIndex={-1} className="transition-colors group-hover:text-brand-text">
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="transition-colors group-hover:text-brand-text">
                         #{r.n}
                       </Link>
                     </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+                      <Link href={detailHref} onClick={syncTypedSearch} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
                         <CompanyLogo name={company.logoName} size={20} />
                         {company.label}
                       </Link>
                     </td>
                   <td className="px-4 py-3 text-muted">
                     <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1}>{r.role}</Link>
+                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch}>{r.role}</Link>
                       {posting && (
                         <a
                           href={posting}

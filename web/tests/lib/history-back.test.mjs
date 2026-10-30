@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { returnsToPrevious } from "../../src/lib/history-back.mjs";
+import { listEntrySync, previousMatchIndex, returnsToPrevious } from "../../src/lib/history-back.mjs";
 
 const current = "http://localhost:3000/pipeline/60?tab=ALL&sort=tracker&dir=1";
 const list = "http://localhost:3000/pipeline?tab=ALL&sort=tracker&dir=1";
@@ -32,4 +33,55 @@ test("with no previous entry the link navigates normally", () => {
 
 test("a previous entry on another origin is never returned to", () => {
   assert.equal(returnsToPrevious("/pipeline?tab=ALL&sort=tracker&dir=1", current, "https://elsewhere.example/pipeline?tab=ALL&sort=tracker&dir=1"), false);
+});
+
+test("a checklist returns to the pipeline entry behind the report", () => {
+  const entries = [
+    { url: "http://localhost:3000/pipeline?tab=ALL&q=Fixture" },
+    { url: "http://localhost:3000/pipeline/12?tab=ALL&q=Fixture" },
+    { url: "http://localhost:3000/pipeline/12/apply?tab=ALL&q=Fixture" },
+  ];
+  const href = "/pipeline?tab=ALL&q=Fixture";
+  assert.equal(previousMatchIndex(href, entries[2].url, 2, entries), 0);
+  assert.equal(previousMatchIndex(href, entries[1].url, 1, entries), 0);
+});
+
+test("the closest matching list entry wins over an older one", () => {
+  const entries = [
+    { url: "http://localhost:3000/pipeline?tab=ALL" },
+    { url: "http://localhost:3000/pipeline?tab=APPLIED" },
+    { url: "http://localhost:3000/pipeline/4?tab=APPLIED" },
+  ];
+  assert.equal(previousMatchIndex("/pipeline?tab=APPLIED", entries[2].url, 2, entries), 1);
+});
+
+test("a forward entry and a missing match stay normal navigations", () => {
+  const entries = [
+    { url: "http://localhost:3000/pipeline?tab=ALL" },
+    { url: "http://localhost:3000/pipeline/4?tab=ALL" },
+    { url: "http://localhost:3000/pipeline?tab=ALL" },
+  ];
+  assert.equal(previousMatchIndex("/pipeline?tab=ALL", entries[1].url, 1, entries), 0);
+  assert.equal(previousMatchIndex("/pipeline?tab=OTHER", entries[1].url, 1, entries), -1);
+  assert.equal(previousMatchIndex("/pipeline?tab=ALL", entries[0].url, 0, entries), -1);
+});
+
+test("a typed search is written onto the list entry only when the address bar lacks it", () => {
+  assert.equal(listEntrySync("/pipeline", "tab=ALL&sort=tracker&dir=1", "Fixture"), "/pipeline?tab=ALL&sort=tracker&dir=1&q=Fixture");
+  assert.equal(listEntrySync("/pipeline", "tab=ALL&sort=tracker&dir=1&q=Fixture", "Fixture"), "");
+  assert.equal(listEntrySync("/pipeline", "tab=ALL&q=Fixture", ""), "/pipeline?tab=ALL");
+});
+
+test("the list, the studio, and the checklist walk back through the real entry", () => {
+  const root = new URL("../../src/", import.meta.url);
+  const pipeline = readFileSync(new URL("./components/pipeline-view.tsx", root), "utf8");
+  const back = readFileSync(new URL("./components/back-link.tsx", root), "utf8");
+  const studio = readFileSync(new URL("./components/cv-studio/cv-studio.tsx", root), "utf8");
+  const pdf = readFileSync(new URL("./components/generate-pdf-button.tsx", root), "utf8");
+  assert.match(pipeline, /listEntrySync\(pathname, params\.toString\(\), q\)/);
+  assert.match(pipeline, /state\.__NA !== true/);
+  assert.match(back, /previousMatchIndex\(href, location\.href, current\.index/);
+  assert.match(back, /window\.history\.go\(match - current\.index\)/);
+  assert.match(pdf, /cv-studio\$\{listQuery \? `\?\$\{listQuery\}` : ""\}`/);
+  assert.match(studio, /pipelineQuery\(useSearchParams\(\)\.toString\(\)\)/);
 });

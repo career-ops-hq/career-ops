@@ -2,10 +2,12 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FileDown, Loader2, FileText, RotateCcw, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { pdfButtonState, type PdfFailure } from "@/lib/pdf-button-state.mjs";
+import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
@@ -13,6 +15,8 @@ import { pdfButtonState, type PdfFailure } from "@/lib/pdf-button-state.mjs";
 // becomes a "View tailored CV" link (served by /api/cv-pdf) + a regenerate icon.
 export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company: string; pdfReady: boolean }) {
   const { jobs, startJob } = useJobs();
+  const listQuery = pipelineQuery(useSearchParams().toString());
+  const studioHref = `/pipeline/${encodeURIComponent(n)}/cv-studio${listQuery ? `?${listQuery}` : ""}`;
   const job = useMemo(
     () => jobs.filter((j) => j.kind === "pdf" && j.input === n).sort((a, b) => b.startedAt - a.startedAt)[0],
     [jobs, n],
@@ -41,7 +45,7 @@ export function GeneratePdfButton({ n, company, pdfReady }: { n: string; company
           <FileText className="size-3.5" /> View tailored CV
         </a>
         <Link
-          href={`/pipeline/${encodeURIComponent(n)}/cv-studio`}
+          href={studioHref}
           className="inline-flex items-center justify-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-3 py-1 text-xs font-medium text-brand-text transition-colors hover:bg-brand-soft/70 max-sm:min-h-[44px]"
         >
           <SlidersHorizontal className="size-3.5" /> Review and customize
