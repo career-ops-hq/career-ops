@@ -7,11 +7,22 @@
 // dashboard/career-dashboard on Unix, dashboard/career-dashboard.exe on Windows.
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const out = process.platform === 'win32' ? 'career-dashboard.exe' : 'career-dashboard';
+
+// The minimum Go is go.mod's `go` line, read here so this message can't fall
+// behind it again (it said 1.24+ while go.mod required 1.26.0).
+function goFloor() {
+  try {
+    return readFileSync(join(root, 'dashboard', 'go.mod'), 'utf8').match(/^go\s+(\d+\.\d+)/m)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const result = spawnSync('go', ['build', '-o', out, '.'], {
   cwd: join(root, 'dashboard'),
@@ -20,7 +31,8 @@ const result = spawnSync('go', ['build', '-o', out, '.'], {
 
 if (result.error) {
   if (result.error.code === 'ENOENT') {
-    console.error('Go toolchain not found. Install Go 1.24+ from https://go.dev/dl/ and retry.');
+    const floor = goFloor();
+    console.error(`Go toolchain not found. Install Go ${floor ? `${floor}+ ` : ''}from https://go.dev/dl/ and retry.`);
   } else {
     console.error(`Build failed to start: ${result.error.message}`);
   }
