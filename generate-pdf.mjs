@@ -1324,7 +1324,7 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
     'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
 
   if (strictPages) {
-    throw new Error(`${message} (--strict-pages requested)`);
+    throw new Error(`${message} (strict page budget: --strict-pages or cv.strict_pages)`);
   }
 
   console.warn(`⚠️  ${message} Continuing because overflow is warning-only by default; use --strict-pages to reject it.`);
@@ -1745,6 +1745,14 @@ async function generatePDF() {
       kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
       batchManifestPath = arg.slice('--batch='.length);
+    } else if (arg === '--max-pages') {
+      // A flag missing its operand, not an absent flag. Left alone it falls
+      // through to the positional arms, and cv.max_pages from the profile would
+      // then set the budget the caller meant to set here (#6326). Marked
+      // supplied and made invalid, so the check below rejects it by name.
+      maxPagesSupplied = true;
+      maxPagesInput = '';
+      maxPages = NaN;
     } else if (arg.startsWith('--max-pages=')) {
       maxPagesSupplied = true;
       maxPagesInput = arg.slice('--max-pages='.length);
@@ -2460,20 +2468,35 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
+    // Read the root page-tree count so page-like text in streams is ignored.
+    const pageCount = countRenderedPdfPages(pdfBuffer);
+    const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false };
+
+    // A strict overflow must not replace the PDF already at outputPath. A
+    // caller that restores its own inputs on failure (CV Studio restores the
+    // edited HTML) would otherwise hold an HTML and a PDF from two revisions,
+    // and cv.strict_pages makes strict renders reachable from the web UI
+    // (#6326). The rejected render goes to a sibling draft for inspection and
+    // stops before success logs and manifest publication.
+    if (budget.strictPages && pageCount > budget.maxPages) {
+      const hadPrevious = existsSync(outputPath);
+      const draftPath = `${outputPath.replace(/\.pdf$/i, '')}.overflow.pdf`;
+      writeFileAtomic(draftPath, pdfBuffer);
+      try {
+        enforcePageBudget(pageCount, budget);
+      } catch (err) {
+        err.message += ` Rejected draft: ${draftPath} (${hadPrevious ? 'the existing PDF was left unchanged' : 'nothing was written to the output path'}).`;
+        throw err;
+      }
+    }
+
     // Write PDF only after rendering has completed. Renderer cleanup still runs
     // if an injected browser fails before producing a buffer. The atomic write
     // keeps the previous PDF intact if this write fails partway.
     writeFileAtomic(outputPath, pdfBuffer);
 
-    // Read the root page-tree count so page-like text in streams is ignored.
-    const pageCount = countRenderedPdfPages(pdfBuffer);
-
-    // Strict overflow leaves the draft on disk but stops before success logs
-    // and manifest publication. Default overflow warns and continues.
-    enforcePageBudget(pageCount, {
-      maxPages: opts.maxPages ?? 2,
-      strictPages: opts.strictPages ?? false,
-    });
+    // Default overflow warns and continues.
+    enforcePageBudget(pageCount, budget);
 
     console.log(`✅ PDF generated: ${outputPath}`);
     console.log(`📊 Pages: ${pageCount}`);

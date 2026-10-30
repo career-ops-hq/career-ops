@@ -270,12 +270,17 @@ try {
   }
 
   const strictOverflowPdf = join(sandbox, 'strict-overflow.pdf');
+  const strictOverflowDraft = join(sandbox, 'strict-overflow.overflow.pdf');
   const manifestBeforeStrictOverflow = readFileSync(manifest, 'utf-8');
   const strictOverflow = runPdf([input, strictOverflowPdf, '--max-pages=1', '--strict-pages']);
   if (
     strictOverflow.status !== 0 &&
-    existsSync(strictOverflowPdf) &&
-    countPages(strictOverflowPdf) === 2 &&
+    // #6326: the rejected render is kept as a sibling draft, never at the
+    // output path, so a previous good PDF there would survive.
+    !existsSync(strictOverflowPdf) &&
+    existsSync(strictOverflowDraft) &&
+    countPages(strictOverflowDraft) === 2 &&
+    strictOverflow.output.includes(`Rejected draft: ${strictOverflowDraft} (nothing was written to the output path)`) &&
     strictOverflow.output.includes('📐 Page budget: 1 (strict)') &&
     strictOverflow.output.includes('CV is 2 pages') &&
     strictOverflow.output.includes('allowed maximum is 1 page') &&
@@ -288,6 +293,38 @@ try {
     pass('generate-pdf rejects overflow only with --strict-pages');
   } else {
     fail(`generate-pdf strict page budget regressed: ${strictOverflow.output.trim()}`);
+  }
+
+  // A strict overflow re-rendering over an existing PDF keeps that PDF byte for
+  // byte. CV Studio restores only its HTML on a failed render, so a replaced
+  // PDF would leave the two describing different revisions.
+  const keptPdf = join(sandbox, 'kept-previous.pdf');
+  const keptDraft = join(sandbox, 'kept-previous.overflow.pdf');
+  writeFileSync(keptPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  const keptRun = runPdf([input, keptPdf, '--max-pages=1', '--strict-pages']);
+  if (
+    keptRun.status !== 0 &&
+    readFileSync(keptPdf, 'latin1') === 'PREVIOUS GOOD PDF' &&
+    existsSync(keptDraft) &&
+    countPages(keptDraft) === 2 &&
+    keptRun.output.includes(`Rejected draft: ${keptDraft} (the existing PDF was left unchanged)`)
+  ) {
+    pass('a strict overflow leaves the existing PDF at the output path unchanged');
+  } else {
+    fail(`a strict overflow replaced the existing PDF or lost its draft: ${keptRun.output.trim()}`);
+  }
+
+  const bareFlagPdf = join(sandbox, 'bare-max-pages.pdf');
+  const bareFlag = runPdf([input, bareFlagPdf, '--max-pages'],
+    { CAREER_OPS_PROFILE: join(sandbox, 'no-such-profile.yml') });
+  if (
+    bareFlag.status !== 0 &&
+    bareFlag.output.includes('Invalid --max-pages ""') &&
+    !existsSync(bareFlagPdf)
+  ) {
+    pass('a bare --max-pages with no value is rejected, not replaced by a profile budget');
+  } else {
+    fail(`a bare --max-pages was not rejected: ${bareFlag.output.trim()}`);
   }
 
   // #6326: with no flag, cv.max_pages / cv.strict_pages in config/profile.yml set
