@@ -60,8 +60,10 @@ const workDir = mkdtempSync(join(tmpdir(), 'cops-matchmode-'));
 const originalProfileYml = PATHS.profileYml;
 const originalCv = PATHS.cv;
 const originalProfile = PATHS.profile;
+const originalCustom = PATHS.custom;
 
 try {
+  PATHS.custom = join(workDir, '_custom.md');
   const dummyProfilePath = join(workDir, 'profile.yml');
   PATHS.profileYml = dummyProfilePath;
 
@@ -105,11 +107,18 @@ try {
     fail('match mode prompt missing CV facts');
   }
 
-  // Match mode prompt must NOT include profileContent or profileYml (relies strictly on CV evidence)
-  if (!matchPrompt.includes('TARGET ROLES & PREFERENCES') && !matchPrompt.includes('AI Engineer') && !matchPrompt.includes('spend_tier: standard')) {
-    pass('match mode prompt omits profileContent and profileYml (relies strictly on CV evidence)');
+  // Match mode loads the same profile files as full mode and as
+  // batch/batch-prompt-match.md: archetypes, targets and language.output.
+  if (matchPrompt.includes('CANDIDATE PROFILE & TARGETS (config/profile.yml)') && matchPrompt.includes('AI Engineer') && matchPrompt.includes('spend_tier: standard')) {
+    pass('match mode prompt includes profile.yml and _profile.md like full mode');
   } else {
-    fail('match mode prompt unexpectedly included profileContent or profileYml');
+    fail('match mode prompt missing profile.yml or _profile.md');
+  }
+
+  if (matchPrompt.includes('language.output')) {
+    pass('match mode prompt carries the language.output rule');
+  } else {
+    fail('match mode prompt missing the language.output rule');
   }
 
   // Full mode must retain profileContent and profileYml
@@ -132,6 +141,7 @@ try {
   PATHS.profileYml = originalProfileYml;
   PATHS.cv = originalCv;
   PATHS.profile = originalProfile;
+  PATHS.custom = originalCustom;
   rmSync(workDir, { recursive: true, force: true });
 }
 
