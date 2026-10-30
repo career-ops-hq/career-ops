@@ -13,6 +13,8 @@ const entrypoints = [
   '.kimi',
   '.opencode',
   '.qwen',
+  'claude-directory',
+  'openai-directory',
 ].map(dir => join(dir, 'skills', 'career-ops', 'SKILL.md'));
 
 function findProjectRoot(skillPath) {
