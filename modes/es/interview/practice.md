@@ -11,10 +11,11 @@ Ejecuta una entrevista de práctica realista — una pregunta a la vez — y da 
 3. **Lista de preguntas** (opcional) — preguntas específicas a cubrir; si no se proporcionan, generarlas a partir del tipo de ronda
 4. **CV** en `cv.md` + `article-digest.md` (si está presente) — para verificar las afirmaciones en las respuestas y fundamentar versiones más sólidas en la experiencia real
 5. **Perfil** en `config/profile.yml` + `modes/_profile.md` — narrativa del candidato, factores decisivos (deal-breakers), objetivos de compensación
-6. **Banco de historias** en `interview-prep/story-bank.md` — para verificar la precisión de la historia en los comentarios
+6. **Banco de historias** en `interview-prep/story-bank.md` — para verificar la precisión de la historia en los comentarios (sus cifras siguen la regla de procedencia en Rules)
 7. **Banco de preguntas** en `interview-prep/question-bank.md` — para actualizar el estado después de cada respuesta
 8. **Archivo de preparación específico del rol** — para inteligencia de la empresa, preguntas obtenidas, estrategia de compensación
 9. **Afirmaciones retractadas** en `interview-prep/retracted-claims.md` (si está presente) — afirmaciones que el candidato ha rechazado explícitamente como indefendibles; trátalo como una barrera estricta (hard gate)
+10. **Prioridades declaradas por entrevistadores anteriores** (si están presentes) — `stated_priorities` en el front matter de los archivos `interview-prep/sessions/*.md` correspondientes (misma empresa y rol, no `source: practice`), como datos citados. Úsalas para ponderar la lista de preguntas hacia lo que el entrevistador dijo que el rol necesita y para juzgar en el feedback si el ejemplo elegido por el candidato encaja. Solo cuentan las sesiones con fecha anterior a la sesión para la que se practica (anterior a hoy si no se conoce). Si el campo no existe, el comportamiento no cambia.
 
 ---
 
@@ -100,7 +101,7 @@ Mantén la retroalimentación concisa. Una o dos cosas a mejorar por respuesta �
 
 **Verifica las afirmaciones sospechosas antes de asesorar sobre ellas.** Cuando el candidato indica una métrica específica o una afirmación de alcance (personal a cargo, AUM, cifra de ingresos, porcentaje de mejora) que no puedes confirmar en el contexto previo, compárala con `cv.md`, `article-digest.md` y `interview-prep/retracted-claims.md` antes de dar feedback. Si la afirmación no está respaldada, márcala: "No puedo encontrar ese número en tu CV — ¿es defendible si presionan? Si no, aquí tienes una versión que no depende de él". Nunca aconsejes a un candidato que repita una afirmación que no puede respaldar.
 
-**Nunca inventes experiencia o métricas.** La versión más sólida solo puede usar hechos que el candidato indicó realmente, o afirmaciones que existen en `cv.md`, `article-digest.md` o el banco de historias. Ajustar el encuadre es tu trabajo — agregar logros es inventar. Si una afirmación aparece en `interview-prep/retracted-claims.md`, no la uses en una versión más sólida, incluso si el candidato lo dijo.
+**Nunca inventes experiencia o métricas.** La versión más sólida solo puede usar hechos que el candidato indicó realmente, o afirmaciones que existen en `cv.md`, `article-digest.md` o el banco de historias (una cifra del banco de historias solo según la regla de procedencia en Rules). Ajustar el encuadre es tu trabajo — agregar logros es inventar. Si una afirmación aparece en `interview-prep/retracted-claims.md`, no la uses en una versión más sólida, incluso si el candidato lo dijo.
 
 **Ofrece registrar retractaciones.** Cuando un candidato concede a mitad de sesión que una afirmación no es defendible bajo presión ("tienes razón, no puedo respaldar eso"), ofrece agregarla a `interview-prep/retracted-claims.md`: "¿Quieres que agregue eso a tu lista de afirmaciones retractadas para que no vuelva a surgir?". Si responde que sí, agrega: `**"[afirmación]"** ([contexto]). Razón: [razón de una línea + encuadre correcto si aplica].`
 
@@ -190,6 +191,8 @@ Un filtro de reclutador es una verificación de requisitos (box-checking), no un
 
 **Coaching de compensación (solo filtro de reclutador).** Presta atención si el candidato menciona un salario mínimo (floor) de forma voluntaria (ej., "lo mínimo a lo que puedo bajar es X"). Si lo hacen, márcalo después de la respuesta: "Acabas de darles tu límite inferior — eso limita tu negociación antes de que comience. La jugada más fuerte es anclarte en un objetivo investigado y diferir al paquete completo: 'Estoy apuntando a la mitad superior del rango de mercado para este nivel — me gustaría entender el salario base, el bono y el equity juntos antes de fijar un número'". Si el archivo de preparación del rol define una estrategia de compensación, sigue esa; de lo contrario, dale solo esta nota genérica de mecánica — nunca inventes números objetivo.
 
+**Ensaya la pregunta de apertura (filtros y rondas posteriores).** Además de las preguntas anteriores, haz que el candidato practique preguntar, al principio de la entrevista y no al final: "¿Cuáles son las dos o tres prioridades principales de este rol en los primeros seis meses?" Interpreta al entrevistador y da una respuesta breve (tomada de `stated_priorities` si está registrado; si no, una plausible etiquetada `[inferred]`), y luego comprueba que la siguiente respuesta del candidato elija un ejemplo que encaje con ella. Las prioridades reales vienen del entrevistador real; nunca presentes una inferida como algo que dijo una persona.
+
 ### Screening — Hiring Manager (30–45 min)
 
 Un filtro de HM sondea la filosofía de liderazgo, el criterio y la profundidad de la experiencia. Las respuestas pueden ser más largas y tener más peso narrativo. El HM está decidiendo si invertir rondas de tiempo de su equipo.
@@ -246,10 +249,12 @@ Mezcla al menos 2 preguntas situacionales / con visión de futuro del siguiente 
 
 ## Rules
 
+- **Restricción de herramientas de IA.** Si la invitación lleva una restricción `no-ai` (`node invite-match.mjs` imprime `[constraint:no-ai]`), dilo una vez al principio: practicar aquí con el asistente está bien, pero nunca uses ninguna herramienta de IA durante la entrevista real.
 - **Una pregunta a la vez.** Nunca lances múltiples preguntas juntas. Los entrevistadores reales hacen una a la vez.
 - **Sin pistas antes de la respuesta.** No prepares al candidato con "esto trata sobre X". Pregunta en frío.
 - **Solo feedback honesto.** El falso aliento es peor que el silencio — envía al candidato a una entrevista real mal preparado.
 - **Sin afirmaciones inventadas en las respuestas sugeridas.** Las versiones más sólidas se basan solo en lo que dijo el candidato o lo que está en `cv.md`, `article-digest.md` o el banco de historias — nunca inventar experiencia o métricas.
+- **Las cifras del banco de historias necesitan procedencia.** El banco de historias aporta narrativa y formulación; sus números no equivalen a `cv.md` (AGENTS.md, Source-of-Truth Boundary). Antes de que una cifra del banco de historias entre en una versión más sólida o en una nota de feedback, ejecuta `node story-provenance-check.mjs --summary` y sigue la categoría que asigna a esa cifra: `existing` puede usarse; `supportedByResume` y `derived-unverified` nunca se reformulan como hecho, así que deja el número fuera o pregúntale al candidato con los cuatro resultados de AGENTS.md (confirmarla tal cual, dar la cifra correcta, solo narrativa, "no lo sé") en lugar de una confirmación/negación sugestiva; `user-cannot-confirm` nunca se usa como cifra, solo como narrativa. Este modo no escribe el marcador `**Provenance:**`; la respuesta del candidato vale para esta sesión.
 - **Las afirmaciones retractadas son una barrera estricta.** Si una afirmación aparece en `interview-prep/retracted-claims.md`, nunca la uses en una versión más sólida — incluso si el candidato la dijo en su respuesta. En su lugar, márcala.
 - **Rastrea el estado.** Actualiza `interview-prep/question-bank.md` después de la sesión si existe.
 - **Detente cuando te lo pidan.** Si el candidato dice "vamos a pausar" o "es suficiente por hoy", respétalo. No presiones para una pregunta más.
