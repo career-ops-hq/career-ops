@@ -122,10 +122,12 @@ describe('set-status rejects a list of tracker numbers', () => {
   test('a legal suffix is not treated as a list of ids', () => {
     const sb = sandbox();
     try {
+      // "Acme, Inc." is a company name. It matches the Acme row once the
+      // legal suffix is dropped, so the preview names that row.
       const result = spawn(sb, ['Acme, Inc.', 'Applied', '--dry-run']);
-      assert.notEqual(result.status, 0);
+      assert.equal(result.status, 0, result.stderr);
       assert.doesNotMatch(result.stderr, /one command per/);
-      assert.match(result.stderr, /company matching/);
+      assert.match(result.stdout, /#3 Acme/);
     } finally {
       rmSync(sb.dir, { recursive: true, force: true });
     }
