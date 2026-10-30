@@ -1384,7 +1384,7 @@ process_offer() {
 
   # Build the prompt with placeholders replaced
   local prompt
-  if [[ "$MODE" == "match" ]]; then
+  if [[ "${MODE:-full}" == "match" ]]; then
     prompt="Process this job offer in single-pass CV match mode. Extract CV facts, score the match against the JD requirements in a single pass, output the report and tracker addition, and output final JSON. Do not generate PDF; write ❌ in the tracker PDF column and set \"pdf\": null in the final JSON."
   elif [[ "$SKIP_PDF" == "true" ]]; then
     prompt="Process this job offer. Run the pipeline: A-G evaluation + report .md + tracker line. Do not generate PDF; write ❌ in the tracker PDF column and set \"pdf\": null in the final JSON."
@@ -1529,7 +1529,7 @@ process_offer() {
     # In match mode, check if worker result JSON is malformed or missing required
     # fields (parsed_status or parsed_score). If so, retry once before finalizing
     # so a transient formatting glitch does not permanently fail or bypass gates.
-    if [[ "$MODE" == "match" && $exit_code -eq 0 ]]; then
+    if [[ "${MODE:-full}" == "match" && $exit_code -eq 0 ]]; then
       local worker_check_json
       worker_check_json=$(awk '
         /^```json[[:space:]]*$/ { in_block=1; block=""; next }
@@ -1714,7 +1714,7 @@ process_offer() {
     # or missing parsed_status or parsed_score (and not a human-confirmation hold
     # or dealbreaker skip), treat as a failed worker attempt so it cannot be
     # recorded as completed with score "-" or bypass --min-score.
-    if [[ "$MODE" == "match" && -z "$worker_failed_match" ]]; then
+    if [[ "${MODE:-full}" == "match" && -z "$worker_failed_match" ]]; then
       if [[ -z "$worker_result_json" || -z "$parsed" || -z "$parsed_status" ]]; then
         worker_failed_match="failed"
         worker_error_match="malformed or missing match mode JSON summary (parsed_status missing)"
@@ -1879,7 +1879,7 @@ process_offer() {
     fi
 
     # Defensive guard: in match mode, an offer must never complete without a valid numeric score.
-    if [[ "$MODE" == "match" ]] && ! is_decimal_number "$score"; then
+    if [[ "${MODE:-full}" == "match" ]] && ! is_decimal_number "$score"; then
       if (( retries < MAX_RETRIES )); then
         retries=$((retries + 1))
       fi
@@ -2147,7 +2147,7 @@ main() {
   fi
 
   echo "=== career-ops batch runner ==="
-  if [[ "$MODE" == "match" ]]; then
+  if [[ "${MODE:-full}" == "match" ]]; then
     echo "Mode: match (single-pass CV evaluation)"
   fi
   if (( LIMIT > 0 )); then
