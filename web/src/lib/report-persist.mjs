@@ -165,6 +165,10 @@ export function trackerTsvLine({ num, today, company, role, score, reportFile, n
   return `${labels.join("\t")}\n${fields.join("\t")}\n`;
 }
 
+// Scripts live in the checkout (`root` here is where the script is) but run
+// with the data root as cwd: persist-evaluation-report.mjs writes under its
+// cwd, and a relative override such as CAREER_OPS_ADDITIONS resolves against
+// it in every step, so the writer and merge-tracker.mjs agree on one folder.
 function spawnScript({ spawnFn, execPath, root, cwd = root, script, args = [], input = null }) {
   return new Promise((resolve) => {
     // windowsHide: see api/doctor/route.ts — a stale inherited console kills
@@ -212,7 +216,7 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
   if (!meta.ok) return meta;
 
   const reserved = await spawnScript({
-    spawnFn, execPath, root: coreRoot, script: "reserve-report-num.mjs",
+    spawnFn, execPath, root: coreRoot, cwd: root, script: "reserve-report-num.mjs",
   });
   if (!reserved.ok) {
     return { ok: false, error: `Could not reserve a report number: ${reserved.stderr || "reserve-report-num.mjs failed"}.` };
@@ -223,7 +227,7 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
   }
 
   const release = () => spawnScript({
-    spawnFn, execPath, root: coreRoot, script: "reserve-report-num.mjs", args: ["--release", num],
+    spawnFn, execPath, root: coreRoot, cwd: root, script: "reserve-report-num.mjs", args: ["--release", num],
   });
 
   // One release. A failed --release is not success: the sentinel would stay
@@ -273,8 +277,6 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
     + (!evaluation.full ? `; Focused evaluation: ${evaluation.sections.join(", ") || "fit score only"}` : "");
 
   const written = await spawnScript({
-    // The script lives in the checkout but writes under its cwd, which has to
-    // be the data root: merge-tracker.mjs reads the additions from there.
     spawnFn, execPath, root: coreRoot, cwd: root,
     script: "persist-evaluation-report.mjs",
     input: JSON.stringify({
@@ -295,7 +297,7 @@ export async function persistEvaluation({ spawnFn, execPath, root, coreRoot = ro
   }
 
   const merged = await spawnScript({
-    spawnFn, execPath, root: coreRoot, script: "merge-tracker.mjs",
+    spawnFn, execPath, root: coreRoot, cwd: root, script: "merge-tracker.mjs",
   });
   if (!merged.ok) {
     return finish(`The report was saved but merge-tracker.mjs failed: ${merged.stderr || "non-zero exit"}.`);
