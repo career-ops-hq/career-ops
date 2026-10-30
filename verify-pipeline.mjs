@@ -34,6 +34,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
+  extractReqNumber,
 } from './tracker-parse.mjs';
 import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
@@ -187,9 +188,27 @@ for (const e of entries) {
 }
 for (const [key, group] of companyRoleMap) {
   if (group.length > 1) {
-    warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
-      "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
-    dupes++;
+    let hasPossibleDuplicate = false;
+
+    for (let i = 0; i < group.length && !hasPossibleDuplicate; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const reqA = extractReqNumber(group[i].notes);
+        const reqB = extractReqNumber(group[j].notes);
+
+        // Distinct known requisition IDs mean distinct openings.
+        // Missing IDs are not enough to rule out a duplicate.
+        if (!reqA || !reqB || reqA === reqB) {
+          hasPossibleDuplicate = true;
+          break;
+        }
+      }
+    }
+
+    if (hasPossibleDuplicate) {
+      warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+      dupes++;
+    }
   }
 }
 if (dupes === 0) ok('No exact duplicates found');
