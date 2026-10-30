@@ -22,6 +22,7 @@ import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
 import { initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
+import { offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -49,6 +50,10 @@ export function PipelineView({
   // intervening snapshots and discards it when the refresh transition settles.
   const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
   const [announcement, setAnnouncement] = useState("");
+  // Status saves outlive the virtual row. Pending keeps the chosen status if
+  // the row remounts mid-request. Failed is shown on the row, or above the
+  // table when that row is off screen.
+  const [heldSaves, setHeldSaves] = useState(() => new Map());
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -143,6 +148,7 @@ export function PipelineView({
   // lines at some widths, so the spacers use the height a mounted row has.
   const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
   const mountedRows = filtered.slice(span.start, span.end);
+  const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
   const columnCount = SORT_KEYS.length + 1;
 
   useLayoutEffect(() => {
@@ -333,6 +339,16 @@ export function PipelineView({
         </div>
       )}
 
+      {offscreenFailures.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {offscreenFailures.map((failure) => (
+            <p key={failure.key} role="alert" className="text-xs text-red-500">
+              Application #{failure.n} was not saved. {failure.error}
+            </p>
+          ))}
+        </div>
+      )}
+
       {visibleTab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         <>
@@ -451,6 +467,10 @@ export function PipelineView({
                       current={r.status}
                       inline
                       applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+                      heldSave={heldSaves.get(key)}
+                      onHeldSave={(event) => {
+                        setHeldSaves((prev) => reduceHeldSave(prev, { ...event, key, n: r.n }));
+                      }}
                       onSaved={(status, restoreFocus) => {
                         // If this focused row leaves its tab, preserve a useful
                         // focus target. Do not interrupt someone using search.
