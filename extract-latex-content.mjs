@@ -12,7 +12,7 @@
  *   node extract-latex-content.mjs <source.tex> --out manifest.json
  */
 
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { resolve, basename } from 'path';
 import { buildManifest } from './lib/latex-content.mjs';
@@ -51,7 +51,19 @@ async function main() {
   const json = JSON.stringify(manifest, null, 2);
 
   if (outPath) {
-    await writeFile(resolve(outPath), json, 'utf-8');
+    const output = resolve(outPath);
+    const sourceMetadata = await stat(absPath);
+    let outputMetadata;
+    try {
+      outputMetadata = await stat(output);
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    if (outputMetadata && sourceMetadata.dev === outputMetadata.dev && sourceMetadata.ino === outputMetadata.ino) {
+      console.error('Manifest output must not replace the LaTeX source. Choose a separate output file.');
+      process.exit(1);
+    }
+    await writeFile(output, json, 'utf-8');
   }
   console.log(json);
   process.exit(manifest.supported ? 0 : 1);
