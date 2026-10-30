@@ -91,10 +91,16 @@ if (routedModes.length < 20) {
 const menu = skill.split('Show this menu:')[1]?.match(/```\n([\s\S]*?)\n```/)?.[1] ?? '';
 // `{JD}` is the auto-pipeline line, not a mode name.
 const menuInputs = [...menu.matchAll(/^  \/career-ops (\S+) +→/gm)].map((m) => m[1]).filter((input) => input !== '{JD}');
-const routeInputs = new Map([...skill.matchAll(/^\| `([^`]+)` \| `([^`]+)` \|$/gm)].map((m) => [m[1], m[2]]));
+// Rows may carry extra spacing; the two special rows (no arguments, a pasted JD)
+// are the only ones without a backticked input and mode.
+const routingSection = skill.split('## Mode Routing')[1]?.split('**Auto-pipeline')[0] ?? '';
+const routingRows = routingSection.split('\n').filter((line) => line.startsWith('|')).slice(2);
+const parsedRows = routingRows.map((row) => row.match(/^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/));
+const unparsedRows = routingRows.filter((row, i) => !parsedRows[i] && !/^\|\s*(\(empty|JD text)/.test(row));
+const routeInputs = new Map(parsedRows.filter(Boolean).map((m) => [m[1], m[2]]));
 
-if (menuInputs.length < 20 || routeInputs.size < 20) {
-  fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs)`);
+if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
+  fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs${unparsedRows.length ? `; unparsed rows: ${unparsedRows.join(' ')}` : ''})`);
 } else {
   // An alias such as `inbox` → `agent-inbox` needs no line of its own while
   // another input for the same mode is listed.
