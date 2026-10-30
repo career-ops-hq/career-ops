@@ -70,9 +70,10 @@ export function estimateCost(model, usage, provider) {
   }
 
   if (!rate) {
-    if (provider === 'openai') {
-      rate = RATES['gpt-4o-mini'];
-    } else if (provider === 'gemini') {
+    // No 'openai' fallback: openai-eval also talks to local OpenAI-compatible
+    // servers, and pricing an unknown model at gpt-4o-mini's rate would show a
+    // cost for a model that charges nothing. Unknown means "est. cost n/a".
+    if (provider === 'gemini') {
       rate = RATES['gemini-3.6-flash'];
     } else if (provider === 'claude' || provider === 'anthropic') {
       rate = RATES['claude-3-5-sonnet'];
