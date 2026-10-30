@@ -97,6 +97,12 @@ test("the list, the studio, and the checklist walk back through the real entry",
   assert.match(pdf, /cv-studio\$\{jobQuery\}`/);
   assert.match(pdf, /\/jobs\/\$\{state\.jobId\}\$\{jobQuery\}/);
   assert.match(pdf, /\/jobs\/\$\{failure\.jobId\}\$\{jobQuery\}/);
+  const cover = readFileSync(new URL("./components/cover-draft-button.tsx", root), "utf8");
+  assert.match(cover, /pipelineQuery\(useSearchParams\(\)\.toString\(\)\)/);
+  assert.match(cover, /\/jobs\/\$\{state\.jobId\}\$\{jobQuery\}/);
+  assert.match(cover, /\/jobs\/\$\{job\.id\}\$\{jobQuery\}/);
+  assert.match(cover, /\/jobs\/\$\{state\.failure\.jobId\}\$\{jobQuery\}/);
+  assert.doesNotMatch(cover, /\/jobs\/\$\{[^}]+\}`/);
   assert.match(studio, /pipelineQuery\(useSearchParams\(\)\.toString\(\)\)/);
   const compare = readFileSync(new URL("./app/pipeline/compare/page.tsx", root), "utf8");
   assert.match(compare, /\/pipeline\/\$\{c\.n\}\$\{reportQuery\}/);
