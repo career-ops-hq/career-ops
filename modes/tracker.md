@@ -21,9 +21,10 @@ With the optional Via column (intermediary channel, #1596) after Company:
 - The row's identity is its `#` (report number) — Company is display data and changes at most once, at reveal.
 - `Notes` is free text with one reserved segment: `posted: YYYY-MM-DD`, when the requisition went live. Write it as its own `;`-separated segment at the end of the note (`fintech, Leeds; posted: 2026-08-07`) and only from a pipeline entry's `| posted:` segment (`modes/pipeline.md`) — never from a guess. The dashboard reads it for the POSTED column (requisition age) and, having read it, excludes it from the last-contact calculation: a req going live is not an interaction with the company. Only a leading segment counts, so ordinary prose that happens to contain "posted" — "recruiter posted an update 2026-07-20" — stays a contact date, which is what it is.
 
-Possible states: `Evaluated` → `Applied` → `Responded` → `Assessment` → `Interview` → `Offer` / `Rejected` / `Discarded` / `SKIP`
+Possible states: `Evaluated` → (`Speculative`) → `Applied` → `Responded` → `Assessment` → `Interview` → `Offer` / `Rejected` / `Discarded` / `SKIP`
 
 - `Evaluated` = offer evaluated with report, pending decision
+- `Speculative` = create-a-role pitch from `gambit` is out (there is no posting); becomes `Applied`/`Responded` once the company engages
 - `Applied` = the candidate submitted their application
 - `Responded` = Company has responded (not yet interview)
 - `Assessment` = online assessment or asynchronous screening is in progress
