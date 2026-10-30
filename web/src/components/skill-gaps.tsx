@@ -175,7 +175,7 @@ function Caveats({ caveats }: { caveats: SkillGapModel["caveats"] }) {
 function Header() {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <GraduationCap className="size-4 text-brand" />
+      <GraduationCap className="size-4 text-brand-text" />
       <h2 className="font-display text-base text-landing">What keeps costing you roles</h2>
       <span className="text-xs text-faint">across your tracked evaluations</span>
     </div>

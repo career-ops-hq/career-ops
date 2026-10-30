@@ -21,6 +21,8 @@
           - .antigravitycli/skills/**
           - .grok/skills/**
           - .kimi/skills/**
+          # The thin plugin for the Claude plugin directory carries a copy of the router.
+          - claude-directory/skills/**
 
 "🔧 scripts":
   - changed-files:

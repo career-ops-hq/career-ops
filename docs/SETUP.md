@@ -44,8 +44,8 @@ browser storage:
 That also means a normal web-session branch push does **not** persist them to
 GitHub: a new cloud session starts from the repository again, without the
 ignored files from the previous VM. Keep a personal workflow in one session
-and move any output you need to secure storage before its environment expires.
-Never force-add these paths. For a durable workspace shared across many
+and move any output you need to secure storage before its environment expires
+([backup patterns](BACKUP_STRATEGIES.md)). Never force-add these paths. For a durable workspace shared across many
 sessions, use the local quick start below.
 
 ### Recommended — one command
