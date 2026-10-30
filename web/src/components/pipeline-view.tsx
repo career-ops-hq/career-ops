@@ -159,7 +159,14 @@ export function PipelineView({
     const measure = () => {
       if (el.hidden) return;
       const rect = el.getBoundingClientRect();
-      const rowHeight = el.querySelector("tr[data-application-key]")?.getBoundingClientRect().height || rowPx;
+      // A failed save adds a line to that one row. Spacers stand in for
+      // normal rows, so an error row must not set the shared height.
+      let rowHeight = rowPx;
+      for (const row of el.querySelectorAll("tr[data-application-key]")) {
+        if (row.querySelector("[role='alert']")) continue;
+        rowHeight = row.getBoundingClientRect().height || rowPx;
+        break;
+      }
       if (rowHeight !== rowPx) setRowPx(rowHeight);
       const next = trackerWindow({
         count: filtered.length,
