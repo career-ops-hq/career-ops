@@ -99,4 +99,50 @@ try {
     assert.match(exampleShape.stdout, /last_name\s+Quinn\n/);
     assert.ok(!exampleShape.stderr.includes('must be a scalar'));
   });
+
+  const rootEmailList = run([
+    'candidate:',
+    '  full_name: Avery Quinn',
+    'email:',
+    '  - avery@example.com',
+    '  - other@example.com',
+    '',
+  ].join('\n'));
+  check('a root email list is a scalar error when candidate omits email', () => {
+    assert.equal(rootEmailList.status, 1, describeSpawn(rootEmailList));
+    assert.match(rootEmailList.stderr, /profile field "email"/);
+    assert.match(rootEmailList.stderr, /must be a scalar value/);
+    assert.equal(rootEmailList.stdout, '');
+  });
+
+  const candidateEmail = run([
+    'candidate:',
+    '  full_name: Avery Quinn',
+    '  email: avery@example.com',
+    'email:',
+    '  - other@example.com',
+    '',
+  ].join('\n'));
+  check('candidate email wins over a root email list', () => {
+    assert.equal(candidateEmail.status, 0, describeSpawn(candidateEmail));
+    assert.ok(candidateEmail.stdout.includes('avery@example.com'));
+    assert.ok(!candidateEmail.stdout.includes('other@example.com'));
+    assert.ok(!candidateEmail.stderr.includes('must be a scalar'));
+  });
+
+  const omittedLocation = run([
+    'candidate:',
+    '  full_name: Avery Quinn',
+    '  email: avery@example.com',
+    'location:',
+    '  country: "United States"',
+    '  city: Denver',
+    '',
+  ].join('\n'));
+  check('a root location mapping stays skipped when candidate omits location', () => {
+    assert.equal(omittedLocation.status, 0, describeSpawn(omittedLocation));
+    assert.match(omittedLocation.stdout, /first_name\s+Avery\n/);
+    assert.ok(omittedLocation.stdout.includes('avery@example.com'));
+    assert.ok(!omittedLocation.stderr.includes('must be a scalar'));
+  });
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }
