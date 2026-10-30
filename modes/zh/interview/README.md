@@ -30,4 +30,5 @@
 | `interview-prep/question-bank.md` | 题库及短板跟踪（首次使用时创建） |
 | `interview-prep/interview-prep-guide.md` | 通用面试原则（可选） |
 | `interview-prep/{company}-{role}.md` | 特定岗位的准备文件 |
+| `interview-prep/sessions/*.md` | 每轮的面试记录；可选的 `stated_priorities` front matter（面试官表态的岗位优先事项），由复盘写入，供准备计划和模拟面试读取 |
 | `interview-prep/retracted-claims.md` | 候选人认为站不住脚的主张——在模拟面试和复盘中的硬性门槛（格式：`**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`） |
