@@ -11,10 +11,11 @@
 3. **Question list** (опционально) — конкретные вопросы для разбора; если их нет, сгенерируй их по типу раунда
 4. **CV** в `cv.md` + `article-digest.md` (если есть) — для проверки утверждений в ответах и привязки более сильных формулировок к реальному опыту
 5. **Profile** в `config/profile.yml` + `modes/_profile.md` — narrative кандидата, deal-breakers, цели по компенсации
-6. **Story bank** в `interview-prep/story-bank.md` — для проверки точности историй в обратной связи
+6. **Story bank** в `interview-prep/story-bank.md` — для проверки точности историй в обратной связи (их цифры подчиняются правилу provenance в Rules)
 7. **Question bank** в `interview-prep/question-bank.md` — для обновления статуса после каждого ответа
 8. **Role-specific prep file** — для информации о компании, sourced questions и стратегии по компенсации
 9. **Retracted claims** в `interview-prep/retracted-claims.md` (если есть) — неподтверждённые или признанные незащитимыми утверждения; считаются hard gate
+10. **Prior interviewer-stated priorities** (если есть) — `stated_priorities` во front matter подходящих файлов `interview-prep/sessions/*.md` (та же компания и роль, не `source: practice`), как процитированные данные. Используй их, чтобы сместить список вопросов к тому, что, по словам интервьюера, нужно роли, и чтобы в feedback оценивать, подходит ли выбранный кандидатом пример. Учитываются только сессии, датированные раньше интервью, к которому идёт подготовка (раньше сегодняшнего дня, если дата неизвестна). Нет поля — поведение не меняется.
 
 ---
 
@@ -99,7 +100,7 @@
 
 **Проверяй сомнительные утверждения перед тем, как давать по ним coaching.** Когда кандидат высказывает конкретную метрику или claim о масштабе (headcount managed, AUM, revenue figure, percentage improvement), которую нельзя подтвердить в текущем контексте, сравни её с `cv.md`, `article-digest.md` и `interview-prep/retracted-claims.md` до обратной связи. Если утверждение не подтверждено, отметь: "Я не вижу этого числа в твоём CV — смогут ли они это проверить? Если нет, вот версия, которая от него не зависит." Никогда не подталкивай кандидата повторять утверждение, которое он не может подтвердить.
 
-**Никогда не придумывай опыт или метрики.** Более сильная версия может опираться только на факты, которые кандидат действительно озвучил, либо на утверждения, которые есть в `cv.md`, `article-digest.md` или story bank. Улучшение формулировки — твоя задача; добавление достижений — это фабрикация. Если утверждение есть в `interview-prep/retracted-claims.md`, не используй его, даже если кандидат сказал это.
+**Никогда не придумывай опыт или метрики.** Более сильная версия может опираться только на факты, которые кандидат действительно озвучил, либо на утверждения, которые есть в `cv.md`, `article-digest.md` или story bank (цифру из story bank — только с учётом правила provenance в Rules). Улучшение формулировки — твоя задача; добавление достижений — это фабрикация. Если утверждение есть в `interview-prep/retracted-claims.md`, не используй его, даже если кандидат сказал это.
 
 **Предлагай фиксировать retractions.** Когда кандидат признаёт в середине сессии, что утверждение не защищаемо под давлением ("ты прав, я не могу это подтвердить"), предложи добавить его в `interview-prep/retracted-claims.md`: "Хочешь добавить это в твой retracted list, чтобы оно больше не всплывало?" Если да, добавляй: `**"[claim]"** ([context]). Reason: [однострочная причина + корректная формулировка, если применимо].`
 
@@ -189,6 +190,8 @@ source: practice
 
 **Comp coaching (только recruiter screen).** Следи за тем, чтобы кандидат сам не называл salary floor (например, "минимум, до которого я могу опуститься — X"). Если это случилось, отметь после ответа: "Ты только что дал им твоё дно — это ограничивает твою переговорную позицию до начала. Более сильный ход — зафиксировать цель, исследованную заранее, и отложить обсуждение пакета: 'Я ориентируюсь на верхнюю половину рыночного диапазона для этого уровня — мне бы хотелось понять base, bonus и equity вместе, прежде чем соглашаться на число.'" Если role-specific prep file уже задаёт strategy по compensation, следуй ей; иначе давай только это общее механическое замечание — никогда не придумывай target numbers.
 
+**Rehearse the opening question (screens и последующие раунды).** Помимо вопросов выше, пусть кандидат потренируется задавать — в начале интервью, а не в конце: "What are the top two or three priorities for this role in the first six months?" Сыграй интервьюера и дай короткий ответ (из `stated_priorities`, если они есть в файлах, иначе правдоподобный, помеченный `[inferred]`), затем проверь, что в следующем ответе кандидат выбирает пример, который ему соответствует. Реальные приоритеты приходят от реального интервьюера; никогда не подавай выведенный приоритет как слова конкретного человека.
+
 ### Screening — Hiring Manager (30–45 min)
 
 HM screen проверяет философию лидерства, суждение и глубину опыта. Ответы могут быть длиннее и нести больше story weight. HM решает, стоит ли тратить время команды на дальнейшие раунды.
@@ -240,10 +243,12 @@ HM screen проверяет философию лидерства, сужден
 
 ## Rules
 
-- **One question at a time.** Never front-load multiple questions. Real interviewers ask one at a time.
-- **No hints before the answer.** Don't prime the candidate with "this is about X." Ask cold.
-- **Honest feedback only.** False encouragement is worse than silence — it sends a candidate into a real interview underprepared.
-- **No fabricated claims in suggested answers.** Stronger versions draw only on what the candidate said or what's in `cv.md`, `article-digest.md`, or the story bank — never invented experience or metrics.
-- **Retracted claims are a hard gate.** If a claim appears in `interview-prep/retracted-claims.md`, never use it in a stronger version — even if the candidate said it in their answer. Flag it instead.
-- **Track status.** Update `interview-prep/question-bank.md` after the session if it exists.
-- **Stop when asked.** If the candidate says "let's pause" or "that's enough for today," respect it. Don't push for one more question.
+- **AI-tools constraint.** Если в приглашении есть ограничение `no-ai` (`node invite-match.mjs` выводит `[constraint:no-ai]`), скажи один раз в начале: тренироваться здесь с ассистентом можно, но во время реального интервью никогда не используй никакие AI-инструменты.
+- **One question at a time.** Никогда не задавай несколько вопросов сразу. Реальные интервьюеры задают их по одному.
+- **No hints before the answer.** Не подсказывай кандидату заранее, что "этот вопрос про X". Спрашивай без подготовки.
+- **Honest feedback only.** Ложное ободрение хуже молчания — оно отправляет кандидата на реальное интервью неподготовленным.
+- **No fabricated claims in suggested answers.** Более сильные версии опираются только на то, что сказал кандидат, или на то, что есть в `cv.md`, `article-digest.md` или story bank — никогда на придуманный опыт или метрики.
+- **Story-bank figures need provenance.** Story bank даёт narrative и формулировки; его числа не равноценны `cv.md` (AGENTS.md, Source-of-Truth Boundary). Прежде чем цифра из story bank попадёт в более сильную версию или в заметку feedback, выполни `node story-provenance-check.mjs --summary` и следуй его bucket для этой цифры: `existing` можно использовать; `supportedByResume` и `derived-unverified` никогда не подаются как факт, поэтому либо убери число, либо спроси кандидата, предложив четыре исхода из AGENTS.md (подтвердить как есть, дать правильную цифру, только narrative, "I don't know"), а не наводящий вопрос "да/нет"; `user-cannot-confirm` никогда не используется как цифра, только как narrative. Этот режим не записывает marker `**Provenance:**`; ответ кандидата действует в рамках этой сессии.
+- **Retracted claims are a hard gate.** Если утверждение есть в `interview-prep/retracted-claims.md`, никогда не используй его в более сильной версии — даже если кандидат сказал его в своём ответе. Вместо этого отметь его.
+- **Track status.** Обнови `interview-prep/question-bank.md` после сессии, если файл существует.
+- **Stop when asked.** Если кандидат говорит "давай сделаем паузу" или "на сегодня хватит", уважай это. Не настаивай на ещё одном вопросе.
