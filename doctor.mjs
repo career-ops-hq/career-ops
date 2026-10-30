@@ -21,6 +21,7 @@ import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { LINKEDIN_DOCTOR_LABEL, linkedInPluginFix } from './lib/linkedin-import.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -1186,7 +1187,11 @@ function checkPlugins(root) {
   for (const m of manifests) {
     const s = pluginStatus(m, cfg);
     lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
-    if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    if (s.configured && s.missingEnv.length) {
+      const paste = linkedInPluginFix(m.id);
+      if (paste) fixes.push(paste);
+      fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    }
   }
   const label = `Plugins: ${lines.join(', ')}`;
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
@@ -1320,6 +1325,7 @@ async function main() {
       ? [checkAutoDir('data'), checkPipelineFile(), checkAutoDir('output'), checkAutoDir('reports')]
       : []),
     checkPlugins(projectRoot),
+    { pass: true, label: LINKEDIN_DOCTOR_LABEL },
     // checkPrereq already explains the .env case when the profile is missing.
     prereqPresent(projectRoot, { path: 'config/profile.yml' }) ? checkEnvFileProfile(projectRoot) : null,
   ].filter(Boolean);

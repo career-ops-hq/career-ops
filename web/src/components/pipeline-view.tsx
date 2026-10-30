@@ -21,6 +21,7 @@ import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/l
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
@@ -307,6 +308,7 @@ export function PipelineView({
             </div>
           ) : (
             <>
+              <LinkedInPaste />
               <InboxTriage inbox={inbox} />
               {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
             </>

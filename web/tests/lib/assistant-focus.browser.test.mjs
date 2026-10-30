@@ -63,7 +63,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
     await target.waitFor();
     await tabTo(page, target);
     await page.keyboard.press("Enter");
-    await page.locator("textarea").waitFor();
+    await composer(page).waitFor();
     assert.equal(await panel(page).count(), 1);
   }
   const page = await pageFor();
