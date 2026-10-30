@@ -64,6 +64,11 @@ console.log('\n🧪 Testing lib/update-manifest.mjs (#5554)...');
   } else {
     fail(`SYSTEM_PATHS does not list ${MANIFEST_MODULE}, so installs would never receive a new list`);
   }
+  if (SYSTEM_PATHS.includes('batch/prefilter-url.mjs')) {
+    pass('the batch prefilter script is shipped by the updater manifest');
+  } else {
+    fail('SYSTEM_PATHS does not list batch/prefilter-url.mjs, so installs would not receive the prefilter');
+  }
   if (SYSTEM_PATHS[0] === '.gitattributes') {
     pass('.gitattributes stays the first entry');
   } else {
