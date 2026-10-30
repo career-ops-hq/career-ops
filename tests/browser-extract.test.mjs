@@ -170,6 +170,24 @@ try {
   } else {
     fail('jdHtmlToText should return "" for non-string input');
   }
+  // A bullet sits on its item's first text even when a line break or other
+  // markup comes first (`<li>\n<p>`, common in Greenhouse and Lever
+  // descriptions), not on a line holding only "-".
+  const leading = jdHtmlToText('<ul><li>\n<p>Own the roadmap</p>\n</li><li><div>\n<p>Ship</p></div></li><li><br>Review code</li><li>&nbsp;\r\n<span>Hire</span></li><li><p></p><p>Mentor</p></li></ul>');
+  if (leading === '- Own the roadmap\n\n- Ship\n\n- Review code\n- Hire\n- Mentor') {
+    pass('jdHtmlToText puts each bullet on its item\'s first text, past line breaks and markup');
+  } else {
+    fail(`jdHtmlToText leading markup => ${JSON.stringify(leading)}`);
+  }
+  // The skip stops at a list tag: an empty item keeps its bare "-" rather than
+  // taking the text after the list, or a nested item's.
+  const emptyItem = jdHtmlToText('<ul><li>Own</li><li></li></ul><p>Benefits</p>');
+  const listOnlyItem = jdHtmlToText('<ul><li><ul><li>Child</li></ul></li></ul>');
+  if (emptyItem === '- Own\n-\nBenefits' && listOnlyItem === '-\n- Child') {
+    pass('jdHtmlToText keeps an empty item\'s bullet off the text that follows it');
+  } else {
+    fail(`jdHtmlToText empty item => ${JSON.stringify(emptyItem)}, list-only item => ${JSON.stringify(listOnlyItem)}`);
+  }
 
   // normalizeWorkdayJob — same { url, title, text } contract as the scraped path
   const wdPayload = {
