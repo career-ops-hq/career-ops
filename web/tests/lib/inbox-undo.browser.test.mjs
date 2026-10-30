@@ -11,6 +11,46 @@ import { liveServerSkip } from "../helpers/live-server.mjs";
 const url = process.env.INBOX_UNDO_TEST_URL;
 const root = process.env.INBOX_UNDO_TEST_ROOT;
 
+test("Inbox jobs can move to a tracked status without scoring, and failed moves remain retryable", { skip: liveServerSkip("INBOX_UNDO_TEST_URL", "INBOX_UNDO_TEST_ROOT"), timeout: 60_000 }, async t => {
+  const origin = new URL(url);
+  assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
+  const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
+  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  assert.equal(fs.readFileSync(path.join(root, ".inbox-undo-fixture"), "utf8").trim(), "fictional-only");
+  const pipeline = path.join(root, "data/pipeline.md");
+  const posting = "https://example.com/fixture-move";
+  fs.appendFileSync(pipeline, `- [ ] ${posting} | Fixture Move | Research Intern | Toronto\n`);
+  t.after(() => fs.writeFileSync(pipeline, fs.readFileSync(pipeline, "utf8").split(/(?<=\n)/).filter(line => !line.includes(posting)).join("")));
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await page.goto(`${origin.origin}/pipeline`);
+  const row = page.locator("li:visible").filter({ hasText: "Fixture Move" });
+  const select = row.getByRole("combobox", { name: "Move Fixture Move Research Intern to status" });
+  await select.waitFor();
+  assert.equal(await select.locator('option[value="Evaluated"]').count(), 0);
+  await page.route("**/api/inbox/move", route => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "Fixture tracker busy" }) }));
+  await select.selectOption("Interview");
+  await page.getByRole("alert").filter({ hasText: "Fixture tracker busy" }).waitFor();
+  assert.equal(await row.isVisible(), true);
+  assert.ok(fs.readFileSync(pipeline, "utf8").includes(`[ ] ${posting}`));
+  await page.unroute("**/api/inbox/move");
+  await select.selectOption("Interview");
+  await page.getByRole("status").filter({ hasText: "Moved Fixture Move to Interview" }).waitFor();
+  await row.waitFor({ state: "detached" });
+  const tracker = path.join(root, "data/applications.md");
+  const saved = fs.readFileSync(tracker, "utf8");
+  assert.match(saved, /Fixture Move \| Research Intern \| — \| Interview/);
+  assert.ok(fs.readFileSync(pipeline, "utf8").includes(`[x] ${posting}`));
+  const repeat = await page.request.post(`${origin.origin}/api/inbox/move`, { data: { url: posting, status: "Interview" } });
+  assert.equal(repeat.status(), 200);
+  assert.equal(fs.readFileSync(tracker, "utf8").split("Fixture Move").length - 1, 1);
+  const invalid = await page.request.post(`${origin.origin}/api/inbox/move`, { data: { url: posting, status: "Evaluated" } });
+  assert.equal(invalid.status(), 400);
+  assert.deepEqual(fs.readdirSync(path.join(root, "reports")), []);
+});
+
 test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX_UNDO_TEST_URL", "INBOX_UNDO_TEST_ROOT"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
@@ -25,7 +65,7 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
   t.after(async () => { release(); await page.unrouteAll({ behavior: "wait" }); await browser.close(); });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const row = (company) => page.locator("li").filter({ hasText: company });
+  const row = (company) => page.locator("li:visible").filter({ hasText: company });
   const undo = () => page.getByRole("button", { name: "Undo", exact: true });
   const retry = () => page.getByRole("button", { name: "Retry undo", exact: true });
   const writeAlerts = () => page.getByRole("alert").filter({ hasText: /Could not skip|Some jobs could not be restored|Fixture .* busy/ });
@@ -52,7 +92,7 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
     await gate;
     await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Fixture pipeline busy" }) });
   });
-  await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").click({ noWaitAfter: true });
+  await row("Fixture Alpha").getByTitle("Hide from the inbox").click({ noWaitAfter: true });
   await undo().focus();
   await page.keyboard.press("Enter");
   const pending = page.getByRole("button", { name: "Undoing…", exact: true });
@@ -69,21 +109,21 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
   assert.equal(await retry().isVisible(), true);
   await page.unroute("**/api/inbox/skip");
   await retry().click();
-  await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").waitFor();
+  await row("Fixture Alpha").getByTitle("Hide from the inbox").waitFor();
   assert.ok(fs.readFileSync(pipeline, "utf8").includes("[ ] https://example.com/fixture-alpha"));
   assert.equal(await retry().count(), 0);
 
   // The last Skip refreshes the inbox to zero rows. Its Undo must stay mounted.
-  await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").click();
+  await row("Fixture Alpha").getByTitle("Hide from the inbox").click();
   await until(() => fs.readFileSync(pipeline, "utf8").includes("[x] https://example.com/fixture-alpha"));
   await page.setViewportSize({ width: 390, height: 844 });
-  await row("Fixture Beta").getByTitle("Skip — hide from the inbox").click();
+  await row("Fixture Beta").getByTitle("Hide from the inbox").click();
   await until(() => fs.readFileSync(pipeline, "utf8").includes("[x] https://example.com/fixture-beta"));
   await page.getByText("Your inbox is empty.", { exact: true }).waitFor();
   assert.equal(await undo().isVisible(), true);
   assert.equal(await undo().evaluate((el) => el.getBoundingClientRect().height >= 44), true);
   await undo().click();
-  await row("Fixture Beta").getByTitle("Skip — hide from the inbox").waitFor();
+  await row("Fixture Beta").getByTitle("Hide from the inbox").waitFor();
 
   async function resetInbox() {
     for (const company of ["alpha", "beta"]) {
@@ -92,7 +132,7 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
     }
     await page.evaluate(() => localStorage.removeItem("career-ops:hidden"));
     await page.reload();
-    await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").waitFor();
+    await row("Fixture Alpha").getByTitle("Hide from the inbox").waitFor();
   }
 
   await t.test("Undo waits for a failed Skip and restores the row without a stale error", async () => {
@@ -114,14 +154,14 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
       await route.continue();
     });
     try {
-      await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").click();
+      await row("Fixture Alpha").getByTitle("Hide from the inbox").click();
       await undo().click();
       releaseSkip();
       await until(() => undoRequests === 1);
       // Failure-handler completion is asserted deterministically in the unit
       // suite. This browser check covers request order and the restored UI.
       releaseUndo();
-      await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").waitFor();
+      await row("Fixture Alpha").getByTitle("Hide from the inbox").waitFor();
       assert.equal(await writeAlerts().count(), 0);
       assert.equal(await undo().count(), 0);
       assert.equal(undoRequests, 1);
@@ -163,11 +203,11 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
       assert.equal(await remaining.isEnabled(), true);
       assert.equal(requests, 2);
       await page.getByRole("alert").filter({ hasText: "Some jobs could not be restored" }).waitFor();
-      await row("Fixture Alpha").getByTitle("Skip — hide from the inbox").waitFor();
+      await row("Fixture Alpha").getByTitle("Hide from the inbox").waitFor();
       assert.equal(await row("Fixture Beta").count(), 0);
       await page.unrouteAll({ behavior: "wait" });
       await remaining.click();
-      await row("Fixture Beta").getByTitle("Skip — hide from the inbox").waitFor();
+      await row("Fixture Beta").getByTitle("Hide from the inbox").waitFor();
       assert.equal(await writeAlerts().count(), 0);
     } finally {
       release();

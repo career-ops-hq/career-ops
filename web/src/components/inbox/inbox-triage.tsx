@@ -49,6 +49,9 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [undo, setUndo] = useState<UndoNotice | null>(null);
   const [writeError, setWriteError] = useState("");
+  const [moving, setMoving] = useState<Set<string>>(() => new Set());
+  const movingUrls = useRef(new Set<string>());
+  const [moveNotice, setMoveNotice] = useState("");
   const [restoring, setRestoring] = useState(false);
   const [hasCli, setHasCli] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -196,6 +199,27 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     if (isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
+  const move = async (job: InboxJob, status: string) => {
+    if (movingUrls.current.has(job.url)) return;
+    movingUrls.current.add(job.url);
+    setMoving(new Set(movingUrls.current));
+    setWriteError("");
+    setMoveNotice("");
+    try {
+      const response = await fetch("/api/inbox/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: job.url, status }) });
+      const result = await response.json();
+      if (!response.ok || result.ok !== true) throw new Error(result.error || "Could not move this job.");
+      setShortlist((items) => items.filter((item) => item.url !== job.url));
+      setSelected((items) => new Set([...items].filter((url) => url !== job.url)));
+      setMoveNotice(`Moved ${job.company} to ${result.status}.`);
+      router.refresh();
+    } catch (cause) {
+      setWriteError(cause instanceof Error ? cause.message : "Could not move this job. Please try again.");
+    } finally {
+      movingUrls.current.delete(job.url);
+      setMoving(new Set(movingUrls.current));
+    }
+  };
   const skip = (job: InboxJob) => {
     setWriteError("");
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
@@ -260,6 +284,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   return (
     <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
       {writeError && <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">{writeError}</p>}
+      {moveNotice && <p role="status" className="mb-3 text-sm text-brand">{moveNotice}</p>}
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
       <FacetChips
@@ -320,6 +345,8 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               onToggleSelect={() => toggleSelect(e.job.url)}
               onSave={() => save(e.job)}
               onSkip={() => skip(e.job)}
+              onMove={(status) => void move(e.job, status)}
+              moving={moving.has(e.job.url)}
             />
           ))}
         </ul>

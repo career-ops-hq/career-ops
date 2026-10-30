@@ -35,7 +35,10 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 ## What works today
 
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
-  write back through the core's own scripts.
+  write back through the core's own scripts. URL-based Inbox jobs have a
+  **Move to…** action for recording a status such as Applied, Interview or Skip
+  without running an AI evaluation. These entries keep score and report absent;
+  Evaluated still requires scoring. The × button only hides an Inbox item.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Scheduled scans** — save local zero-token or full-dataset scans and run due

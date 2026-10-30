@@ -8,6 +8,8 @@
  * path aliases and Next-only modules.
  *
  * Everything here is pure: text in, rows out. No fs, no Next.
+ * Mirrored by core lib/pipeline-table.mjs for manual Inbox-to-tracker moves;
+ * pipeline-table-parity.test.mjs keeps the implementations identical.
  */
 
 /**

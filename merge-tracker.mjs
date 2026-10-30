@@ -312,6 +312,7 @@ function formatUrlCell(raw, previousCell = '') {
  *
  * @param {object} options
  * @param {string} options.appsFile - Tracker to merge into (canonical path, see resolveTrackerPath).
+ * @param {boolean} [options.createIfMissing=false] - Initialize an empty tracker under its lock before merging.
  * @param {string} [options.dataRoot] - Data root; defaults to the tracker's workspace root.
  * @param {string[]} [options.trackerLinkDirs] - Directories the missing-report
  *   check resolves report links from; defaults to the tracker's own directory.
@@ -1319,6 +1320,9 @@ export async function mergeTracker(options = {}) {
 
   async function mergeUnderLock() {
     // Read applications.md
+    if (!existsSync(APPS_FILE) && options.createIfMissing) {
+      writeFileAtomic(APPS_FILE, '# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL | Location |\n|---|------|---------|------|-------|--------|-----|--------|-------|-----|----------|\n');
+    }
     if (!existsSync(APPS_FILE)) {
       console.log('No applications.md found. Nothing to merge into.');
       return 0;

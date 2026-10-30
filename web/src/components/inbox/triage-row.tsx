@@ -5,11 +5,12 @@ import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
-import { unscoredInboxHref } from "@/lib/posting-url.mjs";
+import { postingUrl, unscoredInboxHref } from "@/lib/posting-url.mjs";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 import { inboxScoreTarget } from "@/lib/inbox-score-target.mjs";
+import { CANONICAL_STATES } from "@/lib/format";
 
 export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null };
 
@@ -35,6 +36,8 @@ export function TriageRow({
   onToggleSelect,
   onSave,
   onSkip,
+  onMove,
+  moving,
 }: {
   job: InboxJob;
   source: AtsSource | null;
@@ -45,6 +48,8 @@ export function TriageRow({
   onToggleSelect: () => void;
   onSave: () => void;
   onSkip: () => void;
+  onMove: (status: string) => void;
+  moving: boolean;
 }) {
   const ago = agoLabel(age);
   const target = inboxScoreTarget(scored);
@@ -95,6 +100,17 @@ export function TriageRow({
         </p>
       </div>
 
+      {postingUrl(job.url) && <select
+        value=""
+        disabled={moving}
+        aria-label={`Move ${job.company} ${job.role} to status`}
+        onChange={(event) => { if (event.target.value) onMove(event.target.value); }}
+        className="max-w-28 shrink-0 rounded-md border border-border bg-surface px-2 py-1.5 text-xs text-muted disabled:opacity-50 max-sm:min-h-[44px]"
+      >
+        <option value="" disabled>{moving ? "Moving…" : "Move to…"}</option>
+        {CANONICAL_STATES.filter((status) => status !== "Evaluated").map((status) => <option key={status} value={status}>{status === "SKIP" ? "Skip" : status}</option>)}
+      </select>}
+
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
       {evaluated && target.href ? (
         <Link href={target.href} className="flex shrink-0 items-center gap-1.5 text-xs">
@@ -113,6 +129,7 @@ export function TriageRow({
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
+            disabled={moving}
             onClick={onSave}
             title={shortlisted ? "In your shortlist" : "Save to shortlist"}
             aria-pressed={shortlisted}
@@ -126,8 +143,9 @@ export function TriageRow({
           </button>
           <button
             type="button"
+            disabled={moving}
             onClick={onSkip}
-            title="Skip — hide from the inbox"
+            title="Hide from the inbox"
             className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
           >
             <X className="size-4" />
