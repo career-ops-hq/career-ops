@@ -1,6 +1,7 @@
 // The English README project tree used to say modes/_shared.md was the file
-// to customize. That file is system-owned: an update replaces it. Personal
-// archetypes belong in modes/_profile.md (docs/CUSTOMIZATION.md, DATA_CONTRACT.md).
+// to customize. That file is a system file. A local edit is kept unless
+// update-system.mjs apply --force. Personal archetypes belong in
+// modes/_profile.md (docs/CUSTOMIZATION.md, DATA_CONTRACT.md).
 //
 // Run: node --test tests/readme-shared-layer.test.mjs
 
@@ -27,7 +28,8 @@ test('the README project tree sends customization to modes/_profile.md', () => {
   assert.ok(shared, 'project tree lists modes/_shared.md');
   assert.doesNotMatch(shared, /customize this/i);
   assert.match(shared, /system file/);
-  assert.match(shared, /replaced on update/);
+  assert.match(shared, /local edit kept unless apply --force/);
+  assert.doesNotMatch(shared, /replaced on update/);
 
   const profile = tree.split('\n').find((line) => line.includes('_profile.md'));
   assert.ok(profile, 'project tree lists modes/_profile.md');
