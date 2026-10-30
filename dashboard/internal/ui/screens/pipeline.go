@@ -704,7 +704,11 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 			if rel, found := m.newestPDF(app); !found {
 				m.flash = noPDFFlash
 			} else {
-				fullPath := m.pdfAbsPath(rel)
+				fullPath, err := m.pdfAbsPath(rel)
+				if err != nil {
+					m.flash = "Could not resolve CV PDF path: " + err.Error()
+					return m, nil
+				}
 				return m, func() tea.Msg {
 					return PipelineCopyPDFPathMsg{Path: fullPath}
 				}
@@ -1179,15 +1183,21 @@ func (m PipelineModel) newestPDF(app model.CareerApplication) (string, bool) {
 	return candidates[0], true // newest first
 }
 
-// pdfAbsPath turns a root-relative PDF path into an absolute one.
-func (m PipelineModel) pdfAbsPath(relPath string) string {
-	return filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath))
+// pdfAbsPath turns a root-relative PDF path into an absolute one. The
+// workspace root follows --path, which may be relative, so the joined path is
+// resolved against the working directory: a copied path must still work when
+// pasted into another app.
+func (m PipelineModel) pdfAbsPath(relPath string) (string, error) {
+	return filepath.Abs(filepath.Join(data.PDFWorkspaceRoot(m.careerOpsPath), filepath.FromSlash(relPath)))
 }
 
 // openPDFCmd emits a PipelineOpenPDFMsg for a root-relative PDF path.
 func (m PipelineModel) openPDFCmd(relPath string) tea.Cmd {
-	fullPath := m.pdfAbsPath(relPath)
+	fullPath, err := m.pdfAbsPath(relPath)
 	return func() tea.Msg {
+		if err != nil {
+			return PipelineOpenFailedMsg{Target: "CV PDF", Err: err.Error()}
+		}
 		return PipelineOpenPDFMsg{Path: fullPath}
 	}
 }

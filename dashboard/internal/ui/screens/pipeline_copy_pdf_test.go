@@ -50,6 +50,33 @@ func TestCopyPDFKeyEmitsNewestPDFPath(t *testing.T) {
 	}
 }
 
+func TestCopyPDFKeyPathIsAbsoluteWithRelativeCareerOpsPath(t *testing.T) {
+	root := t.TempDir()
+	writePDFFixture(t, root, "output/cv-jane-doe-globex-2026-06-05.pdf")
+	t.Chdir(filepath.Dir(root))
+	apps := []model.CareerApplication{
+		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
+	}
+	// --path accepts a relative directory; the clipboard must still get an
+	// absolute path, since it is pasted into other apps.
+	pm := newPDFTestModel(t, filepath.Base(root), apps)
+
+	_, cmd := pm.Update(keyMsg("y"))
+	if cmd == nil {
+		t.Fatal("expected a copy command")
+	}
+	msg, ok := cmd().(PipelineCopyPDFPathMsg)
+	if !ok {
+		t.Fatalf("expected PipelineCopyPDFPathMsg, got %T", cmd())
+	}
+	if !filepath.IsAbs(msg.Path) {
+		t.Fatalf("copied path %q is not absolute", msg.Path)
+	}
+	if !strings.HasSuffix(msg.Path, filepath.Join("output", "cv-jane-doe-globex-2026-06-05.pdf")) {
+		t.Fatalf("unexpected path %q", msg.Path)
+	}
+}
+
 func TestCopyPDFKeyNoPDFUsesSameFlashAsOpen(t *testing.T) {
 	apps := []model.CareerApplication{
 		{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
