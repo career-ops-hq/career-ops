@@ -2,6 +2,25 @@ import { keepIfInstalled, pickSoleInstalled } from "./cli-pick.mjs";
 
 export const CONFIG_KEY = "career-ops:config";
 
+// The browser's "storage" event only reaches OTHER tabs, so a Config write in
+// this tab would go unseen by panels already mounted here (the assistant kept
+// saying "no CLI configured" until a reload). Same-tab writers dispatch this.
+export const CONFIG_CHANGE_EVENT = "career-ops:config-change";
+
+// Deferred: Config persists from inside a setState updater, i.e. mid-render,
+// and a listener's setState there is "Cannot update a component while
+// rendering a different component".
+export function notifyConfigChange() {
+  if (typeof window === "undefined") return;
+  queueMicrotask(() => {
+    try {
+      window.dispatchEvent(new Event(CONFIG_CHANGE_EVENT));
+    } catch {
+      /* never break a settings write */
+    }
+  });
+}
+
 export function readSavedCliId(): string | null {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
@@ -20,6 +39,7 @@ export function persistCliId(cliId: string) {
       CONFIG_KEY,
       JSON.stringify({ ...prev, mode: prev.mode || "cli", cliId }),
     );
+    notifyConfigChange();
   } catch {
     /* quota / private mode */
   }

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
-import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
+import { notifyConfigChange, persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
 
 type Cli = {
@@ -94,6 +94,7 @@ export function ConfigForm() {
     // key/manual panel is unwired) and a secret must never sit in clear-text
     // localStorage. Keys belong in the user's own CLI/provider config.
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, logos }));
+    notifyConfigChange();
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }
