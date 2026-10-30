@@ -10,7 +10,7 @@ Reference files that demonstrate career-ops data formats and conventions. None o
 | `cv-technical-project-manager.md` | How to structure `cv.md` for technical project managers, agile delivery leads, and scrum masters with STAR metrics and governance proof points (Jordan Miller, PMP®) |
 | `resume-example.md` | Resume variant of `cv-example.md` -- same content, branded as "Resume" for US/industry markets. Use this as a structural guide when writing a resume (1–2 page targeted format) vs a CV (longer academic format) |
 | `article-digest-example.md` | How to write `article-digest.md` -- compact proof points with hero metrics, architecture summaries, and key decisions per project |
-| `sample-report.md` | The A-F evaluation report format produced by the evaluation pipeline, with all six blocks (Role Summary through Interview Plan) |
+| `sample-report.md` | A complete evaluation report in the current format: the header with Decision, Legitimacy and Work Auth, the `## Machine Summary` YAML, Blocks A-H, Verdict (lead), Risk Summary, Score Evidence, keyword coverage and the archived JD. It parses with the same readers real reports go through (`check-jd-archive.mjs`, `salary-gap.mjs`, the web report view) |
 | `ats-normalization-test.md` | Regression fixture for `generate-pdf.mjs` Unicode normalization -- lists every problematic codepoint and its ASCII-safe replacement |
 | `dual-track-engineer-instructor/` | Complete profile config for a candidate with two primary archetypes (engineer + instructor), including `cv.md`, `profile.yml`, and a README explaining when and how to use the dual-track pattern |
 
