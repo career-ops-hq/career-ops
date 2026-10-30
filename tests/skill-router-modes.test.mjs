@@ -89,8 +89,10 @@ if (routedModes.length < 20) {
 // after the evaluation grew to A-H (#6214). The per-mode loop above only knows
 // five hard-coded names, so compare the two lists in full.
 const menu = skill.split('Show this menu:')[1]?.match(/```\n([\s\S]*?)\n```/)?.[1] ?? '';
-// `{JD}` is the auto-pipeline line, not a mode name.
-const menuInputs = [...menu.matchAll(/^  \/career-ops (\S+) +→/gm)].map((m) => m[1]).filter((input) => input !== '{JD}');
+// The first word after `/career-ops` is the input, whatever arguments follow it.
+// `{JD}` is the auto-pipeline line, not a mode name, so it is checked on its own.
+const menuLines = [...menu.matchAll(/^  \/career-ops (\S+)/gm)].map((m) => m[1]);
+const menuInputs = menuLines.filter((input) => input !== '{JD}');
 // Rows may carry extra spacing; the two special rows (no arguments, a pasted JD)
 // are the only ones without a backticked input and mode.
 const routingSection = skill.split('## Mode Routing')[1]?.split('**Auto-pipeline')[0] ?? '';
@@ -107,6 +109,8 @@ if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
   fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs${unparsedRows.length ? `; unparsed rows: ${unparsedRows.join(' ')}` : ''})`);
 } else if (duplicateInputs.length) {
   fail(`routing table routes the same input more than once: ${duplicateInputs.join(', ')}`);
+} else if (!menuLines.includes('{JD}')) {
+  fail('discovery menu has no `/career-ops {JD}` auto-pipeline line');
 } else {
   // An alias such as `inbox` → `agent-inbox` needs no line of its own while
   // another input for the same mode is listed.
