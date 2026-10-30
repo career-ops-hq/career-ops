@@ -6,10 +6,10 @@
  * assertion that reads its answer from the module it pins compares the module to
  * itself and stays green whatever the module becomes (see page-format.test.mjs).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -23,8 +23,16 @@ import {
 } from '../lib/page-format.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
+// Every workspace this file makes, removed once its tests have run, failed
+// ones included.
+const workspaces = [];
+after(() => {
+  for (const dir of workspaces) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+});
+
 function workspace(pageFormat) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-page-format-auto-'));
+  workspaces.push(dir);
   for (const sub of ['config', 'data', 'output']) mkdirSync(join(dir, sub), { recursive: true });
   writeFileSync(
     join(dir, 'config', 'profile.yml'),
