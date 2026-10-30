@@ -21,6 +21,7 @@ export const NODE_DEFS = [
   { id: "tracked", label: "Tracked", rank: 0, tone: "neutral" },
   { id: "skip", label: "SKIP", rank: 1, tone: "danger" },
   { id: "evaluated", label: "Still evaluated", rank: 1, tone: "muted" },
+  { id: "speculative", label: "Speculative pitch", rank: 1, tone: "info" },
   { id: "other", label: "Other status", rank: 1, tone: "muted" },
   { id: "discardedEarly", label: "Discarded (no application recorded)", rank: 1, tone: "muted" },
   { id: "submitted", label: "Submitted", rank: 1, tone: "info" },
@@ -48,6 +49,7 @@ const SUBMITTED_OR_LATER = new Set(["APPLIED", "RESPONDED", "ASSESSMENT", "INTER
 const LEAVES = [
   "skip",
   "evaluated",
+  "speculative",
   "other",
   "discardedEarly",
   "waiting",
@@ -145,6 +147,8 @@ export function classifyLeaf(app, log) {
 
   if (status === "SKIP") return "skip";
   if (status === "EVALUATED") return "evaluated";
+  // A create-a-role pitch: live, but nothing has been submitted to a posting.
+  if (status === "SPECULATIVE") return "speculative";
   if (status === "APPLIED") return "waiting";
   if (status === "RESPONDED") return "screening";
   if (status === "ASSESSMENT") return "assessment";
@@ -186,6 +190,7 @@ export function buildPipelineSankey(apps, log = []) {
     tracked: rows.length,
     skip: counts.skip,
     evaluated: counts.evaluated,
+    speculative: counts.speculative,
     other: counts.other,
     discardedEarly: counts.discardedEarly,
     submitted,
@@ -207,6 +212,7 @@ export function buildPipelineSankey(apps, log = []) {
   const rawLinks = [
     { source: "tracked", target: "skip", value: values.skip },
     { source: "tracked", target: "evaluated", value: values.evaluated },
+    { source: "tracked", target: "speculative", value: values.speculative },
     { source: "tracked", target: "other", value: values.other },
     { source: "tracked", target: "discardedEarly", value: values.discardedEarly },
     { source: "tracked", target: "submitted", value: values.submitted },
