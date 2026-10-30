@@ -25,6 +25,7 @@ import { cn } from "@/lib/cn";
 import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
+import { followupsSummarySlot } from "@/lib/followups-summary-slot.mjs";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -228,7 +229,18 @@ export function FollowupsView() {
         </div>
       </div>
 
-      {meta && !filtering && <NarrativeCard meta={meta} entries={entries} />}
+      {followupsSummarySlot({
+        pending: !data,
+        filtering,
+        hasSummary: Boolean(meta),
+        due: (meta?.overdue ?? 0) + (meta?.urgent ?? 0),
+      }) === "reserved" ? (
+        <div className="mt-5 rounded-xl border border-transparent px-4 py-3 text-sm leading-5" aria-hidden="true">
+          <div className="h-10" />
+        </div>
+      ) : (
+        meta && !filtering && <NarrativeCard meta={meta} entries={entries} />
+      )}
 
       {/* urgency filter */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
@@ -251,9 +263,9 @@ export function FollowupsView() {
 
       {actionError && <p className="mt-3 text-xs text-red-500">{actionError}</p>}
 
-      {!data ? null : !data.available ? (
+      {data && !data.available ? (
         <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
-      ) : !isPending && filtered.length === 0 ? (
+      ) : data && !isPending && filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
         ) : (
@@ -289,8 +301,8 @@ export function FollowupsView() {
                 <th className="px-2.5 py-2.5 font-medium">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border" aria-busy={isPending}>
-              {isPending ? <FollowupsTableRowsSkeleton /> : filtered.map((e) => (
+            <tbody className="divide-y divide-border" aria-busy={!data || isPending}>
+              {!data || isPending ? <FollowupsTableRowsSkeleton /> : filtered.map((e) => (
                 <FollowupRow
                   key={e.num}
                   entry={e}
@@ -327,7 +339,7 @@ export function FollowupsView() {
 
       {/* Below the due list: a follow-up you can still send outranks a company
           that has already stopped replying. */}
-      <QuietCompanies />
+      {data && <QuietCompanies />}
 
       {dialogFor && <LogDialog entry={dialogFor} onClose={() => setDialogFor(null)} onLogged={refetch} />}
       {pinFor && <NextDateDialog entry={pinFor} onClose={() => setPinFor(null)} onChanged={refetch} />}
