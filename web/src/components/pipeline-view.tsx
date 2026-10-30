@@ -151,6 +151,8 @@ export function PipelineView({
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
   const columnCount = SORT_KEYS.length + 1;
 
+  // A failed save for a row that is off screen renders above the table and
+  // moves it. Remeasure then. Scroll and resize do not fire for that change.
   useLayoutEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
@@ -178,7 +180,7 @@ export function PipelineView({
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
-  }, [filterKey, filtered.length, rowPx]);
+  }, [filterKey, filtered.length, rowPx, heldSaves]);
 
   const filteredKeys = filtered.map(applicationKey);
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));

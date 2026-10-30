@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { trackerWindow } from "../../src/lib/tracker-window.mjs";
 
 // A desktop viewport with the table sitting under the page header.
@@ -35,4 +38,19 @@ test("a short list mounts every row", () => {
 
 test("an empty list mounts nothing", () => {
   assert.deepEqual(trackerWindow({ count: 0, ...FIRST_SCREEN }), { start: 0, end: 0 });
+});
+
+test("a notice above the table changes which rows belong on screen", () => {
+  const before = trackerWindow({ count: 1560, rowHeight: 57, overscan: 6, tableTop: -400, viewportHeight: 900 });
+  const after = trackerWindow({ count: 1560, rowHeight: 57, overscan: 6, tableTop: -360, viewportHeight: 900 });
+  assert.notDeepEqual(before, after);
+});
+
+test("the tracker remeasures when an off-screen save failure appears", () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/components/pipeline-view.tsx"), "utf8");
+  const start = src.indexOf("const rect = el.getBoundingClientRect()");
+  assert.ok(start > 0, "measurement not found");
+  const deps = src.slice(start).match(/\}, \[([^\]]+)\]/);
+  assert.ok(deps, "measurement dependencies not found");
+  assert.match(deps[1], /\bheldSaves\b/);
 });
