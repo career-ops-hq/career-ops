@@ -2374,7 +2374,7 @@ func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 		"responded":   m.theme.Blue,
 		"assessment":  m.theme.Mauve,
 		"evaluated":   m.theme.Text,
-		"speculative": m.theme.Mauve,
+		"speculative": m.theme.Pink,
 		"skip":        m.theme.Red,
 		"rejected":    m.theme.Subtext,
 		"discarded":   m.theme.Subtext,

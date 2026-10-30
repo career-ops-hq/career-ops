@@ -845,3 +845,17 @@ func TestGetStatusPairsUnrecognizedStatusFallsBackToStaticOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestSpeculativeHasItsOwnStatusColour(t *testing.T) {
+	m := NewPipelineModel(theme.NewTheme(""), nil, model.PipelineMetrics{}, t.TempDir(), 120, 30)
+	colours := m.statusColorMap()
+	spec, ok := colours["speculative"]
+	if !ok {
+		t.Fatal("speculative has no status colour")
+	}
+	for status, c := range colours {
+		if status != "speculative" && c == spec {
+			t.Fatalf("speculative shares its colour with %q", status)
+		}
+	}
+}
