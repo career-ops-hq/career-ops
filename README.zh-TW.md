@@ -62,6 +62,7 @@
 </p>
 
 <p align="center"><a href="#輪到你了">拿一個職缺試試&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">閱讀完整故事&nbsp;→</a></p>
+<p align="center"><sub>不想用終端機？ <a href="https://career-ops.org/waitlist?ref=readme-zh-tw">加入網頁版的候補名單&nbsp;→</a></sub></p>
 
 <br>
 

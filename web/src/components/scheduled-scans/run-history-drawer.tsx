@@ -66,7 +66,7 @@ export function RunHistoryDrawer({
                       ) : (
                         <XCircle className="size-4 text-rose-500" />
                       )}
-                      <span className={cn(tone === "success" ? "text-emerald-600 dark:text-emerald-400" : tone === "failed" ? "text-rose-500" : "text-muted")}>
+                      <span className={cn(tone === "success" ? "text-emerald-800 dark:text-emerald-400" : tone === "failed" ? "text-rose-500" : "text-muted")}>
                         {isSuccess ? "Success" : isRunning ? "Running" : isQueued ? "Queued" : isCancelled ? "Cancelled" : "Failed"}
                       </span>
                       {run.engine && (

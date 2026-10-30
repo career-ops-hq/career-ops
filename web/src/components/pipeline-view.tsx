@@ -18,6 +18,8 @@ import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
 import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
@@ -65,38 +67,33 @@ export function PipelineView({
   const sortKey: SortKey = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : "score";
   const sort = { key: sortKey, dir: (params.get("dir") === "1" ? 1 : -1) as 1 | -1 };
 
-  // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
-  // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const lastUrlQ = useRef(params.get("q") ?? "");
-  useEffect(() => {
-    const urlQ = params.get("q") ?? "";
-    if (urlQ !== lastUrlQ.current) {
-      lastUrlQ.current = urlQ;
-      setQ(urlQ);
-    }
-  }, [params]);
-
-  const setParams = useCallback(
+  // Search filters locally. The URL catches up once typing pauses, so a
+  // reload or the browser Back button still has it. Tab changes include the
+  // typed value immediately, before that pause.
+  const qRef = useRef(params.get("q") ?? "");
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
-      const sp = new URLSearchParams(params.toString());
-      for (const [k, v] of Object.entries(updates)) {
-        if (v == null || v === "") sp.delete(k);
-        else sp.set(k, String(v));
+      const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
+      if (qs === params.toString()) return false;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return true;
       }
-      const qs = sp.toString();
-      if (qs === params.toString()) return;
       if (Object.prototype.hasOwnProperty.call(updates, "tab")) {
         const nextTab = String(updates.tab ?? "INBOX").toUpperCase();
         if ((PIPELINE_TABS as readonly string[]).includes(nextTab)) setPendingTab(nextTab as Tab);
       }
       startRouteProgress();
       startNavigation(() => {
-        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+        router.replace(href, { scroll: false });
       });
+      return true;
     },
     [params, router, pathname, startNavigation],
   );
+  const { q, setQ, setParams } = useListSearch(params, commitParams, qRef);
 
   useEffect(() => {
     if (!isPending) setPendingTab(null);
@@ -109,10 +106,8 @@ export function PipelineView({
   const deferredQ = useDeferredValue(q);
   // The rendered link keeps the deferred search, so a keystroke does not
   // re-render every row. A click reads the box as it is now.
-  const qRef = useRef(q);
   const paramsRef = useRef(params.toString());
   const routerRef = useRef(router);
-  qRef.current = q;
   paramsRef.current = params.toString();
   routerRef.current = router;
   const detailQuery = pipelineQuery(params.toString(), deferredQ);
