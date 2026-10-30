@@ -65,8 +65,9 @@ jobs:
           # The module lives in dashboard/, so without this setup-go looks for
           # go.sum at the root, warns, and caches nothing.
           cache-dependency-path: dashboard/go.sum
-      # Skip the postinstall (npx playwright install chromium); the tests
-      # never launch a browser, so the ~170 MB download is pure CI overhead.
+      # Skip the postinstall (npx playwright install chromium): the ~170 MB
+      # download on three OSes would buy only the few suites that launch a
+      # browser, and those skip here and run in the tool-suites job instead.
       - run: npm install --ignore-scripts
       - run: node test-all.mjs --quick
       - name: Go dashboard tests
@@ -74,6 +75,11 @@ jobs:
         working-directory: dashboard
 
   cv-visual:
+    # Not a required check, so the merge queue never waits on it: a red queue
+    # run blocks nothing (14 failed in Oct-2026 and every one of those PRs
+    # merged on that same attempt). It still runs on every PR, where a red
+    # result is seen before the PR is queued (#5723).
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     # About 3 minutes, image build included. Limited for the test job's reason.
     timeout-minutes: 20
@@ -98,10 +104,39 @@ jobs:
             test-results/cv-visual-artifacts/
             test-results/cv-visual-results/
           if-no-files-found: ignore
+  tool-suites:
+    name: Browser and LaTeX suites
+    # The test job installs no browser and no TeX engine, so the suites that
+    # need one skip there and their checks ran on no job (#5756, #5758). This
+    # runs them in the cv-visual image, which has Chromium, Poppler and the CJK
+    # fonts; tectonic comes from the repo's pinned, checksummed installer and
+    # fetches its TeX bundle on the first compile. `--needs` selects the suites
+    # that declare those tools (tests/required-tools.mjs) and turns a missing
+    # tool into a failure instead of a skip. A job of its own rather than a
+    # step in cv-visual, so its result has its own check. Not a required
+    # check, so the merge queue would gain nothing from running it again.
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    # Image build plus the TeX bundle download. Limited for the test job's reason.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the canonical CV rendering environment
+        run: docker build --platform linux/amd64 --tag career-ops-cv-visual tests/cv-visual
+      - name: Run the suites that need Chromium or a TeX engine
+        run: |
+          docker run --rm --init --ipc=host --platform linux/amd64 \
+            --volume "$PWD:/work" --volume /work/node_modules \
+            career-ops-cv-visual \
+            sh -c 'npm install --ignore-scripts --package-lock=false && node install-latex-engine.mjs && node test-all.mjs --needs browser,latex'
   upgrade-gate:
     name: Upgrade regression gate
+    # Skipped in the merge queue for cv-visual's reason above.
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
-    # About 2 minutes. Limited for the test job's reason.
+    # About 3 minutes. Limited for the test job's reason.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -126,3 +161,25 @@ jobs:
         run: node upgrade-tests.mjs --user-layer-refusal
       - name: Failed npm install is reported, rollback reinstalls
         run: node upgrade-tests.mjs --failed-install
+      - name: A locally edited system file is kept, and replaced only with --force (#2337)
+        run: node upgrade-tests.mjs --local-edit
+      - name: Local-edit canary (an inverted --force branch must go red)
+        run: node upgrade-tests.mjs --local-edit-canary
+
+  dependency-audit:
+    name: Dependency audit
+    # Informative by design: the root has no tracked lockfile (ranges resolve
+    # at install time), so a newly published advisory in a third-party range
+    # must not turn required checks red on unrelated PRs (#5897).
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm install --ignore-scripts
+      - run: npm audit --audit-level=high

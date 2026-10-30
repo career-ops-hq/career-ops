@@ -15,6 +15,27 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=21 level=handle handle=gpirujo role="Staff Software Engineer" sector="Full remote agency" geo="Remote LATAM + EU" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/6249" -->
+### Hire #21
+
+> Landed a Staff Software Engineer role at Fluxon, ~5.5 weeks from first application to signed offer, through a 4-round interview process ending with a conversation with the CTO. Tar
+
+<a href="https://github.com/gpirujo"><img src="https://github.com/gpirujo.png?size=64" width="28" height="28" align="top" alt="@gpirujo"> **@gpirujo**</a> · Staff Software Engineer · Remote LATAM + EU · 5 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6249)
+
+<!-- hire n=20 level=handle handle=bluezeb12 role="Database Systems Engineer" sector="Contracting Firm" geo="remote US" weeks=9 link="https://github.com/career-ops-hq/career-ops/issues/5921" -->
+### Hire #20
+
+> Applied through career-ops targeting health tech and federal systems. The initial application opened up a referral for a remote contracting role as a Database Systems Engineer supp
+
+<a href="https://github.com/bluezeb12"><img src="https://github.com/bluezeb12.png?size=64" width="28" height="28" align="top" alt="@bluezeb12"> **@bluezeb12**</a> · Database Systems Engineer · remote US · 9 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5921)
+
+<!-- hire n=19 level=role role="Project Manager" sector="Mid Size Tech - Health" geo="Hibrid - Brazil" link="https://github.com/career-ops-hq/career-ops/issues/5786" -->
+### Hire #19
+
+> Career-Ops changed the game and completely switched my approach to jobhunt. Interviews started to appear because my career facts were being finally shown in my curriculum and I had
+
+**Project Manager** · Mid Size Tech - Health · Hibrid - Brazil · [story →](https://github.com/career-ops-hq/career-ops/issues/5786)
+
 <!-- hire n=18 level=handle handle=bravely role="Technical Lead Software Engineer" sector="Remote-first Health-tech Startup" geo="Remote US" weeks=22 link="https://github.com/career-ops-hq/career-ops/issues/5761" -->
 ### Hire #18
 

@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildHtml } from '../generate-cover-letter.mjs';
 import { assertFacts, verifyFacts } from '../verify-cv-facts.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const COVER_PDF_REGISTER = pathToFileURL(join(ROOT, 'tests', 'fixtures', 'cover-pdf-register.mjs')).href;
@@ -170,7 +171,7 @@ test('the fact-check CLI names only the files it read', () => {
       env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '' },
     });
     const text = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-    assert.equal(result.status, 1, text);
+    assert.equal(result.status, 1, describeSpawn(result, text));
     assert.match(text, /6 months/);
     assert.match(text, /cv\.md and article-digest\.md/);
     assert.doesNotMatch(text, /answers|this letter/);
@@ -214,17 +215,17 @@ function coverPayload(opening, extra = {}) {
 test('generate-cover-letter counts user_inputs as a source for this letter', () => {
   const blocked = runCover(coverPayload(PLAN));
   assert.match(blocked.text, /6 months/, blocked.text);
-  assert.notEqual(blocked.status, 0);
+  assert.notEqual(blocked.status, 0, describeSpawn(blocked));
 
   const passed = runCover(coverPayload(PLAN, { user_inputs: [PLAN] }));
-  assert.equal(passed.status, 0, passed.text);
+  assert.equal(passed.status, 0, describeSpawn(passed));
   assert.doesNotMatch(passed.text, /Fact check failed/, passed.text);
   assert.doesNotMatch(passed.text, /6 months/, passed.text);
 });
 
 test('generate-cover-letter counts an answers object as a source', () => {
   const passed = runCover(coverPayload(PLAN, { answers: { approach: PLAN, tone: 'direct' } }));
-  assert.equal(passed.status, 0, passed.text);
+  assert.equal(passed.status, 0, describeSpawn(passed));
   assert.doesNotMatch(passed.text, /Fact check failed/, passed.text);
   assert.doesNotMatch(passed.text, /6 months/, passed.text);
 });
@@ -232,13 +233,13 @@ test('generate-cover-letter counts an answers object as a source', () => {
 test('generate-cover-letter still blocks a number the candidate did not supply', () => {
   const blocked = runCover(coverPayload(INVENTED, { user_inputs: [PLAN], answers: { approach: PLAN } }));
   assert.match(blocked.text, /9 months/, blocked.text);
-  assert.notEqual(blocked.status, 0);
+  assert.notEqual(blocked.status, 0, describeSpawn(blocked));
 });
 
 test('the letter body is not a source for itself', () => {
   const blocked = runCover(coverPayload(PLAN, { user_inputs: ['I will start by reading the incident reviews.'] }));
   assert.match(blocked.text, /6 months/, blocked.text);
-  assert.notEqual(blocked.status, 0);
+  assert.notEqual(blocked.status, 0, describeSpawn(blocked));
 });
 
 test('cover mode tells the agent to pass those answers through as sources', () => {

@@ -71,6 +71,22 @@ check('every separator shape in the report splits into its keywords', () => {
   }
 });
 
+check('markdown backtick wrappers are stripped from keyword edges only', () => {
+  const wrapped = block('- `Python`, ``Kubernetes``, ```CI/CD```');
+  assert.deepEqual(extractKeywords(wrapped), ['Python', 'Kubernetes', 'CI/CD']);
+
+  // Punctuation outside a wrapper should not leave a trailing backtick behind.
+  const wrappedWithPunct = block('- `Python`.');
+  assert.deepEqual(extractKeywords(wrappedWithPunct), ['Python']);
+
+  const oneSided = block('- `Python\n- Kubernetes`\n- ``CI/CD');
+  assert.deepEqual(extractKeywords(oneSided), ['Python', 'Kubernetes', 'CI/CD']);
+
+  // Interior backticks remain part of the term text.
+  const interior = block('- stack `node` and `bun` runtimes');
+  assert.deepEqual(extractKeywords(interior), ['stack `node` and `bun` runtimes']);
+});
+
 check('a fenced keyword block is content, and its delimiters are not keywords', () => {
   // The biggest single shape in the report: 186 of 503 sections. A fence that
   // leaked its delimiter produced a keyword no CV can ever contain.
@@ -90,7 +106,17 @@ check('a fenced keyword block is content, and its delimiters are not keywords', 
   // next heading and the keywords after the opener are still read — exactly what
   // this did before the fix.
   const unclosed = '## Keywords extracted\n\n```\nSQL, Tableau\n\n## Verdict\n\nstrong fit\n';
-  assert.deepEqual(extractKeywords(unclosed), ['```', 'SQL', 'Tableau']);
+  assert.deepEqual(extractKeywords(unclosed), ['SQL', 'Tableau']);
+
+  // An unclosed fence opener with a language label is still a fence delimiter,
+  // not a keyword. Without this guard, cleanup could turn ```python into
+  // "python" and create a false ATS hit when the CV mentions Python.
+  const unclosedLang = '## Keywords extracted\n\n```python\nSQL, Tableau\n\n## Verdict\n\nstrong fit\n';
+  assert.deepEqual(extractKeywords(unclosedLang), ['SQL', 'Tableau']);
+
+  // A same-line fenced wrapper without a bullet is content, not a fence opener.
+  const sameLineWrapped = '## Keywords extracted\n\n```CI/CD```\n\n## Next\n';
+  assert.deepEqual(extractKeywords(sameLineWrapped), ['CI/CD']);
 });
 
 check('a thematic break inside a fenced list is skipped too', () => {
@@ -112,7 +138,7 @@ check('a shorter run of the same fence character does not close the fence', () =
   // keyword list. The discriminating marker is the "## " line below: inside the
   // fence it is content, outside it would end the section.
   const quoted = '## Keywords extracted\n\n````\nSQL\n```\n## not a heading\n````\n\n## Next\n';
-  assert.deepEqual(extractKeywords(quoted), ['SQL', '```', '## not a heading']);
+  assert.deepEqual(extractKeywords(quoted), ['SQL', '## not a heading']);
 
   // A longer closer still closes it, which is the CommonMark direction.
   const longer = '## Keywords extracted\n\n```\nSQL, Tableau\n`````\n\n## Next\n';
@@ -135,7 +161,7 @@ check('fence indentation decides what a delimiter is', () => {
   // length rule ACCEPTS it and indentation is the only thing that can reject it
   // — which is what makes this case isolate the indent bug.
   const indentedNoClose = `## Keywords extracted\n\n${B}\nSQL\n    ${B4}\n## not a heading\n${B}\n\n## Next\n`;
-  assert.deepEqual(extractKeywords(indentedNoClose), ['SQL', B4, '## not a heading']);
+  assert.deepEqual(extractKeywords(indentedNoClose), ['SQL', '## not a heading']);
 
   // The other half, and the reason this needed more than a one-line change: an
   // indented code block's own closer is indented too. Reading those delimiters

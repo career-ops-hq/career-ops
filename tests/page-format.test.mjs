@@ -153,7 +153,7 @@ test('injectPrintPageCss: the flagless sheet comes from the profile', () => {
       '',
     ].join('\n'));
     const res = spawnSync(NODE, [probe], { env: workspaceEnv(dir), encoding: 'utf-8' });
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.match(res.stdout, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[declared]};`), res.stdout + res.stderr);
   }
 });
@@ -172,7 +172,7 @@ test('build-cv-html: a payload with no page_format takes the profile width', () 
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.a4), `expected the a4 body width ${PAGE_WIDTHS.a4}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.letter), 'the letter body width leaked into an a4 render');
@@ -191,7 +191,7 @@ test('build-cv-html: a payload stating its own page_format outranks the profile'
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.letter), `expected the letter body width ${PAGE_WIDTHS.letter}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.a4), 'the a4 body width leaked into a letter render');

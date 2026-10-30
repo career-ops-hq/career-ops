@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 // The node_modules that actually serves the repo's packages. A worktree has
@@ -133,7 +134,7 @@ for (const mode of MODES) {
     env.PATH = join(f.dir, 'empty-bin');
 
     const result = run(f, 'batch-tailor.mjs', ['--min-score', '4.0'], env);
-    assert.equal(result.status, 1, result.output);
+    assert.equal(result.status, 1, describeSpawn(result));
     assert.ok(result.output.includes(`Report: ${report}`),
       `expected the data-root report to be handed to the worker:\n${result.output}`);
     assert.doesNotMatch(result.output, /decoy/, `batch-tailor read reports/ from the code root:\n${result.output}`);
@@ -159,7 +160,7 @@ for (const mode of MODES) {
   test(`cv-templates.mjs reads config/profile.yml from the data root (${mode})`, (t) => {
     const f = cvTemplatesFixture(t);
     const result = run(f, 'cv-templates.mjs', ['resolve', 'cv'], envFor(mode, f));
-    assert.equal(result.status, 0, result.output);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.equal(result.stdout.trim(), join(f.code, 'templates', 'cv-template.fancy.html'),
       'expected the data-root profile default, resolved against the code-root templates/');
   });
@@ -171,7 +172,7 @@ test('cv-templates.mjs: CAREER_OPS_PROFILE still overrides the data-root profile
   write(override, 'cv:\n  template: bold\n');
   const result = run(f, 'cv-templates.mjs', ['resolve', 'cv'],
     envFor('CAREER_OPS_ROOT', f, { CAREER_OPS_PROFILE: override }));
-  assert.equal(result.status, 0, result.output);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(result.stdout.trim(), join(f.code, 'templates', 'cv-template.bold.html'));
 });
 
@@ -191,7 +192,7 @@ for (const mode of MODES) {
 
     const result = run(f, 'openrouter-runner.mjs', ['apply', '9'],
       envFor(mode, f, { CAREER_OPS_MODEL: 'test/pinned:free' }), 'no\n');
-    assert.equal(result.status, 0, result.output);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.doesNotMatch(result.output, /Report not found/, `apply looked for reports/ off the code root:\n${result.output}`);
     assert.match(result.output, /scored 2\.0\/5/, result.output);
     assert.match(result.output, /Aborted\./, result.output);

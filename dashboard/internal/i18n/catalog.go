@@ -353,7 +353,7 @@ var En = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "SEARCH PROGRESS",
-	ProgressSummary: "%d tracked | %.1f avg score",
+	ProgressSummary: "%d tracked | %s avg score",
 	FunnelTitle:     "Pipeline Funnel",
 	ScoresTitle:     "Score Distribution",
 	RatesTitle:      "Conversion Rates",
@@ -520,7 +520,7 @@ var Tr = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "TAKİP İLERLEMESİ",
-	ProgressSummary: "%d takipte | %.1f ort. puan",
+	ProgressSummary: "%d takipte | %s ort. puan",
 	FunnelTitle:     "Pipeline Hunisi",
 	ScoresTitle:     "Puan Dağılımı",
 	RatesTitle:      "Dönüşüm Oranları",
@@ -687,7 +687,7 @@ var Es = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "PROGRESO DE BÚSQUEDA",
-	ProgressSummary: "%d en seguimiento | %.1f puntuación media",
+	ProgressSummary: "%d en seguimiento | %s puntuación media",
 	FunnelTitle:     "Embudo del proceso",
 	ScoresTitle:     "Distribución de puntuaciones",
 	RatesTitle:      "Tasas de conversión",

@@ -168,6 +168,22 @@ test('the block code is not a resolver-failure code', () => {
   assert.match(err.message, /127\.0\.0\.1/);
 });
 
+test('a name that resolves only to a sinkhole address gets the DNS-filter hint', () => {
+  for (const address of ['0.0.0.0', '::']) {
+    const err = blockedAddressError('jobs.example', address);
+    assert.match(err.message, /likely a DNS filter or sandbox/, address);
+    assert.equal(err.code, 'ECAREEROPS_BLOCKED_ADDRESS');
+  }
+  // Public addresses in the same answer don't stop it reading as a filter.
+  assert.match(blockedAddressError('jobs.example', '0.0.0.0', ['0.0.0.0', '203.0.113.7']).message, /DNS filter/);
+});
+
+test('a real private address or a literal 0.0.0.0 gets no DNS-filter hint', () => {
+  assert.doesNotMatch(blockedAddressError('evil.example', '127.0.0.1').message, /DNS filter/);
+  assert.doesNotMatch(blockedAddressError('mixed.example', '0.0.0.0', ['0.0.0.0', '10.0.0.5']).message, /DNS filter/);
+  assert.doesNotMatch(blockedAddressError('0.0.0.0', '0.0.0.0').message, /DNS filter/);
+});
+
 test('the context is entered only for provider requests', async () => {
   const { inProviderFetch } = await import(spec('providers/_ip-guard.mjs'));
   assert.equal(inProviderFetch(), false);

@@ -92,6 +92,7 @@ const PATHS = {
   evaluate:    join(CODE_ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
   cv:          join(DATA_ROOT, 'cv.md'),
   profile:     join(DATA_ROOT, 'modes', '_profile.md'),
+  custom:      join(DATA_ROOT, 'modes', '_custom.md'),
   profileYml:  getProfilePath(),
   reports:     join(DATA_ROOT, 'reports'),
   tracker:     resolveTrackerPath(DATA_ROOT),
@@ -372,6 +373,8 @@ for (const extraDir of extraModesDirs) {
 const cvContent      = readFile(PATHS.cv,          'cv.md');
 const profileContent = readFile(PATHS.profile,     'modes/_profile.md');
 const profileYml     = readFile(PATHS.profileYml,  'config/profile.yml');
+// _custom.md is optional: an absent file is a valid end state, so no warning.
+const customContent  = existsSync(PATHS.custom) ? stripBom(readFileSync(PATHS.custom, 'utf-8')).trim() : '';
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
@@ -383,6 +386,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   cvContent,
   profileYml,
   profileContent,
+  customContent,
   jdText,
   noCompress,
   maxTokens: 1_048_576, // gemini-2.5-flash context window

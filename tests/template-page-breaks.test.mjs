@@ -35,7 +35,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { relative, join, dirname } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { listTemplates } from '../cv-templates.mjs';
+import { listTemplates, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 
 console.log('\nCV template page-break control — no orphaned project tech line');
 
@@ -103,7 +103,7 @@ function emitsProjectTech(t) {
   return /project-tech/.test(readFileSync(partial, 'utf-8'));
 }
 
-const discovered = listTemplates('cv').filter((t) => t.format === 'html');
+const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html');
 
 if (discovered.length === 0) {
   fail('no HTML CV templates discovered — listTemplates("cv") returned nothing');

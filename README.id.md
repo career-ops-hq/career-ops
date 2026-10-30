@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Dibuat oleh <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Dibuat oleh <a href="https://github.com/santifer"><strong>@santifer</strong></a>, bersama&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders">700+ kontributor</a></p>
 
 <p align="center">
 <strong>Berbulan-bulan kirim CV tanpa&nbsp;kabar.</strong><br>
@@ -123,6 +123,8 @@ Heningnya kabar setelah Anda menekan tombol kirim bukanlah salah Anda. Cukup ban
 <br>
 
 Proses rekrutmen tidak akan membaik dengan sendirinya. Orang-orang yang menjalaninyalah yang bisa memperbaikinya—dan mereka sudah berkumpul di sini, saling mencocokkan catatan dan membantu mengatur konfigurasi satu sama lain.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=id" alt="Dinding animasi berisi avatar GitHub para kontributor, terisi sesuai urutan kedatangan sejak April 2026, dengan kotak berikutnya dibiarkan kosong." width="100%"></a></p>
 
@@ -327,25 +329,7 @@ Di Codex, ketersediaan *slash command* tidak selalu dijamin. Gunakan nama mode y
 
 ## Cara Kerjanya
 
-```
-Anda menempelkan URL atau deskripsi lowongan
-        │
-        ▼
-┌──────────────────┐
-│  Deteksi         │  Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Arketipe        │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  Evaluasi A-H    │  Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan
-│  (membaca cv.md) │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Laporan PDF Entri
-   .md  .pdf Tracker
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-id-dark.svg"><img src="docs/how-it-works-id-light.svg" alt="Anda menempelkan URL atau deskripsi lowongan → Deteksi Arketipe (Mengklasifikasikan: LLMOps / Agentic / PM / SA / FDE / Transformation) → Evaluasi A-H (membaca cv.md; Kecocokan, gap, riset kompensasi, cerita STAR, keabsahan lowongan) → Laporan (reports/*.md), PDF (output/*.pdf), Entri Tracker (data/applications.md)" width="760"></picture></p>
 
 ## Integrasi Antigravity CLI
 

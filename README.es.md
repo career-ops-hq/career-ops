@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">700+ contribuidores</a></p>
 
 <p align="center">
 <strong>Meses mandando CVs al&nbsp;silencio.</strong><br>
@@ -120,11 +120,13 @@ El silencio después de pulsar enviar no va contigo. Bastante gente vio lo mismo
   <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es"><img src="docs/manifesto-wall.svg" alt="Tres firmas del manifiesto CareerOps, con sus propias palabras" width="800"></a>
 </p>
 
-<p align="center"><sub>Cada firma es un commit que puedes auditar. <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es">Léelas todas, o añade la tuya →</a></sub></p>
+<p align="center"><sub>Cada firma es un commit que puedes auditar. <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es">Léelas todas, o añade la tuya →</a> · <a href="https://career-ops.org/es/manifesto?utm_source=readme&utm_content=es#what-is-ai-job-search">¿Qué es la búsqueda de empleo con IA?</a></sub></p>
 
 <br>
 
 La contratación no va a arreglarse sola. La gente que la sufre sí puede, y ya está en la sala, comparando notas y arreglándose los setups unos a otros.
+
+<a id="builders"></a>
 
 <p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=es" alt="Muro animado con los avatares de GitHub de quienes contribuyen, que se llena por orden de llegada desde abril de 2026 y deja libre la siguiente casilla." width="100%"></a></p>
 
@@ -324,25 +326,7 @@ En Codex los comandos de barra no están garantizados. Usa los mismos nombres de
 
 ## Cómo funciona
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Integración con Antigravity CLI
 

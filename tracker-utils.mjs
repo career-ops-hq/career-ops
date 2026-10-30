@@ -16,7 +16,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 // The lock protocol is lib/dir-lock.mjs, shared with every other core lock.
 // This module only picks the tracker's lock directory, timing and error.
 import { acquireDirLock } from './lib/dir-lock.mjs';
-import { normalizeTextKey, firstLinkTarget } from './tracker-parse.mjs';
+import { normalizeTextKey, firstLinkTarget, unwrapReportUrlToken } from './tracker-parse.mjs';
 
 /**
  * Minimum age before directory age alone may condemn an ownerless lock or
@@ -47,6 +47,83 @@ export function rebuildRow(parts) {
   const cells = parts.slice(1);
   if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
   return '| ' + cells.join(' | ') + ' |';
+}
+
+/**
+ * The path a Report cell links to, resolved under `reportsRoot` — or null when
+ * there is no link or the link escapes that root.
+ *
+ * Containment, not cosmetics. The tracker is user-editable, so a Report cell is
+ * untrusted input: stripping leading `../` alone still lets an embedded
+ * `reports/../../..` walk out of the tree. The path is resolved and asserted to
+ * stay under `reportsRoot`. No existence check — merge-tracker's same-file
+ * identity tier compares two cells this way without reading either file.
+ *
+ * @param {string} reportField - Raw Report cell.
+ * @param {string} reportsRoot - Workspace root the link is relative to.
+ * @returns {string|null}
+ */
+export function containedReportTarget(reportField, reportsRoot) {
+  const linkTarget = firstLinkTarget(reportField);
+  if (linkTarget == null) return null;
+  const reportPath = resolve(reportsRoot, linkTarget.trim().replace(/^(\.\.\/)+/, ''));
+  return reportPath.startsWith(reportsRoot + sep) ? reportPath : null;
+}
+
+/**
+ * containedReportTarget() plus an is-a-file check: the report a cell links to,
+ * or null when it is missing, a directory, or outside `reportsRoot`.
+ *
+ * existsSync alone accepts a directory, which would let a dedup tier treat two
+ * cells that resolve to the same directory as report-identical without ever
+ * reading a file.
+ *
+ * @param {string} reportField - Raw Report cell.
+ * @param {string} reportsRoot - Workspace root the link is relative to.
+ * @returns {string|null}
+ */
+export function containedReportFile(reportField, reportsRoot) {
+  const reportPath = containedReportTarget(reportField, reportsRoot);
+  if (!reportPath) return null;
+  if (!existsSync(reportPath) || !statSync(reportPath).isFile()) return null;
+  return reportPath;
+}
+
+/**
+ * The posting URL a report's `**URL:**` header names, unwrapped — or '' when
+ * there is no report or no header.
+ *
+ * Shared by merge-tracker.mjs and dedup-tracker.mjs, because the two must agree
+ * on which rows are the same posting. They did not: merge-tracker fell back to
+ * the report's URL when a row had no URL cell, dedup-tracker read only the
+ * cell, and the default nine-column tracker has no URL cell at all. So merge
+ * kept two genuinely different openings that dedup then deleted one of.
+ *
+ * `[ \t]*` NOT `\s*`: `\s` matches newlines, so an empty `**URL:**` header
+ * swallowed the line break and captured the NEXT header's text, minting the
+ * same bogus key for every such report. Deliberately NOT anchored to line
+ * start: AGENTS.md puts `**URL:**` INLINE in the header,
+ * `**Score:** 4.1/5 | **URL:** https://… | **Legitimacy:** High`, which a
+ * `^`-anchored pattern cannot see.
+ *
+ * Not validated as a URL here: a placeholder such as `**URL:** N/A` comes back
+ * as-is, and url-key.mjs decides. Its postingUrlRelation() gives a placeholder
+ * no key, so a guard reads it as unknown, never as a conflict; merge-tracker
+ * also refuses to write one into the URL column. Keeping url-key.mjs out of
+ * this module's imports is deliberate, since many fixtures copy this file
+ * without it.
+ *
+ * Read errors propagate, as they always did in merge-tracker: a report that
+ * exists and cannot be read stops the run rather than quietly reading as "no
+ * URL" inside a tool that deletes rows.
+ *
+ * @param {string|null} reportPath - From containedReportFile().
+ * @returns {string}
+ */
+export function reportUrlToken(reportPath) {
+  if (!reportPath) return '';
+  const m = readFileSync(reportPath, 'utf-8').match(/\*\*URL:\*\*[ \t]*(\S+)/);
+  return m ? unwrapReportUrlToken(m[1]) : '';
 }
 
 /**
@@ -219,11 +296,25 @@ export const MIN_STEM_CHARS = 3;
 export function companiesMatchIgnoringCorporateForm(a, b) {
   const ta = normalizeTextKey(a, ' ').split(' ').filter(Boolean);
   const tb = normalizeTextKey(b, ' ').split(' ').filter(Boolean);
+  return corporateFormTokensMatch(ta, tb);
+}
+
+/**
+ * True when two already-tokenized company names match as a corporate-form pair.
+ *
+ * Same rule as companiesMatchIgnoringCorporateForm(). The tokens are
+ * normalizeTextKey(name, ' ') split on spaces, so a caller that already built
+ * them for a row can compare pairs without running that key again. Equal
+ * lengths are either the exact tier's business or a genuine disagreement on a
+ * substantive token. An empty stem is the blind-employer `?` marker and every
+ * other punctuation-only cell, which must never match a named employer.
+ *
+ * @param {string[]} ta - Tokens of one company cell.
+ * @param {string[]} tb - Tokens of the other company cell.
+ * @returns {boolean}
+ */
+export function corporateFormTokensMatch(ta, tb) {
   const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
-  // Equal lengths are either the exact tier's business or a genuine
-  // disagreement on a substantive token. An empty stem is the blind-employer
-  // `?` marker and every other punctuation-only cell, which must never match a
-  // named employer.
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
@@ -882,6 +973,23 @@ export function resolveCanonicalState(input, states) {
 }
 
 /**
+ * A raw Status cell without the decoration legacy trackers carry: markdown
+ * bold and a trailing date (`**Applied**`, `Applied 2026-01-02`). What is left
+ * is the spelling states.yml resolves, a label or an alias, unchanged.
+ *
+ * The read side resolves a cell through this (resolveCanonicalStateId()), so a
+ * writer that copies a cell must strip it the same way. Otherwise it writes a
+ * value its own readers ranked as a known state but that
+ * resolveCanonicalState() reads as unknown.
+ *
+ * @param {*} input - Raw status cell from applications.md.
+ * @returns {string}
+ */
+export function stripStatusDecoration(input) {
+  return String(input ?? '').replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
+}
+
+/**
  * Resolve a raw tracker status CELL to its canonical lowercase state id.
  *
  * The read-side twin of resolveCanonicalState(): scripts that bucket or compare
@@ -897,8 +1005,7 @@ export function resolveCanonicalState(input, states) {
  * @returns {string|null} Canonical id (e.g. "interview"), or null when unknown.
  */
 export function resolveCanonicalStateId(input, states) {
-  const cell = String(input ?? '').replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '');
-  const label = resolveCanonicalState(cell, states);
+  const label = resolveCanonicalState(stripStatusDecoration(input), states);
   if (label === null) return null;
   return states.find(s => s.label === label).id.toLowerCase();
 }

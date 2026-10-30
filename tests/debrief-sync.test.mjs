@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { replaceNextPin } from '../followup-seed.mjs';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'debrief-sync.mjs');
 const SENTENCE = 'No on-site roles outside the home city';
@@ -141,7 +142,7 @@ const fullArgs = [
     writeFixture(root);
     const before = summary(root, 'followup-cadence.mjs', ['--summary']);
     check('an overdue pin is OVERDUE before the debrief command', () => {
-      assert.equal(before.status, 0, before.stderr);
+      assert.equal(before.status, 0, describeSpawn(before));
       assert.match(before.stdout, /OVERDUE/);
     });
 
@@ -158,7 +159,7 @@ const fullArgs = [
       assert.match(tracker, /\| Interview \|/);
       assert.equal((tracker.match(/Dealbreaker: No on-site roles outside the home city/g) || []).length, 1);
       const contacts = summary(root, 'contacts.mjs', ['--summary']);
-      assert.equal(contacts.status, 0, contacts.stderr);
+      assert.equal(contacts.status, 0, describeSpawn(contacts));
       assert.match(contacts.stdout, /Avery Quinn/);
       assert.match(contacts.stdout, /interviewer/);
       assert.match(contacts.stdout, /Casey Bloom/);
@@ -169,7 +170,7 @@ const fullArgs = [
       assert.match(tsv, /Avery Quinn\tNorthwind\tinterviewer\t\t\tavery\.quinn@northwind\.example/);
       assert.match(tsv, /Casey Bloom\tNorthwind\t\t\t\tcasey\.bloom@northwind\.example/);
       const cadence = summary(root, 'followup-cadence.mjs', ['--summary']);
-      assert.equal(cadence.status, 0, cadence.stderr);
+      assert.equal(cadence.status, 0, describeSpawn(cadence));
       assert.ok(FUTURE > localISO(new Date()));
       assert.doesNotMatch(cadence.stdout, /OVERDUE/);
       assert.ok(cadence.stdout.includes(FUTURE));
@@ -187,7 +188,7 @@ const fullArgs = [
       const contactsAfter = readRoot(root, 'data/contacts.tsv');
       const second = run(root, fullArgs);
       check('a second run keeps the note, the contacts, the pin, and the pin set date', () => {
-        assert.equal(second.status, 0, second.stderr);
+        assert.equal(second.status, 0, describeSpawn(second));
         const body = JSON.parse(second.stdout);
         assert.equal(body.wrote, false);
         assert.equal(readRoot(root, 'data/applications.md'), trackerAfter);
@@ -212,7 +213,7 @@ function refuses(label, args, mutate = {}) {
     const before = snapshot(root);
     const result = run(root, args);
     check(label, () => {
-      assert.notEqual(result.status, 0, result.stdout);
+      assert.notEqual(result.status, 0, describeSpawn(result));
       assert.deepEqual(snapshot(root), before);
     });
   } finally {
@@ -249,8 +250,8 @@ for (const [label, from, to] of [
     const first = run(root, ['--app', '7', '--dealbreaker', SENTENCE]);
     const second = run(root, ['--app', '7', '--dealbreaker', SENTENCE]);
     check(`${label}: the dealbreaker is recorded once and the summary still parses`, () => {
-      assert.equal(first.status, 0, first.stderr);
-      assert.equal(second.status, 0, second.stderr);
+      assert.equal(first.status, 0, describeSpawn(first));
+      assert.equal(second.status, 0, describeSpawn(second));
       assert.equal(JSON.parse(second.stdout).wrote, false);
       const doc = machineSummary(readRoot(root, REPORT_REL));
       assert.equal(doc.final_decision, 'Skip');
@@ -276,7 +277,7 @@ for (const [label, from, to] of [
     writeFileSync(reportPath, `${report}## After\n\nKeep this tail.\n`);
     const result = run(root, ['--app', '7', '--dealbreaker', DOLLAR_SENTENCE]);
     check('a dollar sign in the report is written literally', () => {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, describeSpawn(result));
       const next = readRoot(root, REPORT_REL);
       assert.ok(next.includes(DOLLAR_SENTENCE));
       assert.ok(next.includes('comp_note: "$$ range"'));
@@ -296,13 +297,13 @@ for (const [label, from, to] of [
       CAREER_OPS_FOLLOWUPS: custom,
     });
     check('a CAREER_OPS_FOLLOWUPS pin is the file the cadence summary reads', () => {
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, describeSpawn(result));
       assert.match(readFileSync(custom, 'utf8'), new RegExp(`^- next #7 ${FUTURE} `, 'm'));
       assert.match(readRoot(root, 'data/follow-ups.md'), /2026-02-01/);
       const cadence = summary(root, 'followup-cadence.mjs', ['--summary'], {
         CAREER_OPS_FOLLOWUPS: custom,
       });
-      assert.equal(cadence.status, 0, cadence.stderr);
+      assert.equal(cadence.status, 0, describeSpawn(cadence));
       assert.ok(cadence.stdout.includes(FUTURE));
       assert.doesNotMatch(cadence.stdout, /OVERDUE/);
     });

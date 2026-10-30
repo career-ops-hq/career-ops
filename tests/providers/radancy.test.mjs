@@ -217,6 +217,33 @@ try {
     fail(`radancy.parseLegacyResults() mixed locations = ${JSON.stringify(mixed)}`);
   }
 
+  // careers.arm.com: a job-card row whose location is a sibling
+  // <span class="location"> (a bare `location` class, no `job-location`), next to
+  // a category span that must not be read. A class that only starts with
+  // "location" (here a "location-label" with text) is not the location element.
+  const LEGACY_ARM = `
+<ul class="list-reset" id="search-results-jobs" data-results-count="426">
+<li class="job-card fs-start fs-middle fs-container custom-row-gap-1">
+  <a class="job-card__title fs-11 fs-m-11" href="/job/toronto/staff-security-architect/33099/91096676096" data-job-id="91096676096">Staff Security Architect</a>
+  <span class="location">Toronto, Canada</span>
+  <span class="category">Hardware Engineering</span>
+  <button type="button" class="js-save-job-btn button" data-job-id="91096676096" data-org-id="33099"><span class="sr-only">Save job</span></button>
+</li>
+<li class="job-card fs-start fs-middle fs-container custom-row-gap-1">
+  <a class="job-card__title fs-11 fs-m-11" href="/job/lund/graphics-engineer/33099/2" data-job-id="2">Graphics Engineer</a>
+  <span class="location-label">Location</span>
+  <span class="category">Software Engineering</span>
+</li>
+</ul>`;
+  const armRows = parseLegacyResults(LEGACY_ARM, 'https://careers.arm.com');
+  if (armRows.length === 2 && armRows[0].title === 'Staff Security Architect' && armRows[0].location === 'Toronto, Canada') {
+    pass('radancy.parseLegacyResults() reads a sibling <span class="location"> (careers.arm.com)');
+  } else {
+    fail(`radancy.parseLegacyResults() Arm rows = ${JSON.stringify(armRows)}`);
+  }
+  if (armRows[1]?.location === '') pass('radancy.parseLegacyResults() does not take a "location-label" class for the location');
+  else fail(`radancy.parseLegacyResults() Arm row 2 location = ${JSON.stringify(armRows[1]?.location)}`);
+
   // Legacy: Kaiser variant.
   const kpRows = parseLegacyResults(LEGACY_KP, 'https://www.kaiserpermanentejobs.org');
   if (kpRows.length === 1 && kpRows[0].title === 'Sales Representative II - Large Group' && kpRows[0].location === 'Denver, CO, Flexible, Full-time, Day') pass('radancy.parseLegacyResults() handles the Kaiser variant (no div / class / req span)');

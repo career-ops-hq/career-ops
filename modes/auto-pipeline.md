@@ -105,7 +105,7 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 - **Good fit?** → "I sit at the intersection of [A] and [B], which is exactly where this role lives."
 - **How did you hear?** → Honest: "Found through [portal/scan], evaluated against my criteria, and it scored highest."
 
-**Language**: Always in `language.output` (EN when unset), whatever the language of the JD. Apply `/tech-translate`.
+**Language**: Always in `language.output` (EN when unset), whatever the language of the JD.
 
 ## Step 5 — Update Tracker
 

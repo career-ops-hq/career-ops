@@ -455,11 +455,31 @@ function gradeFor(score) {
   return 'F';
 }
 
+// What each check needs in order to be judged (#5940). `structural` is valid on
+// an unrendered template: it reads markup and styling. `content` depends on what
+// the render payload fills in, so on a template it has no answer. The same two
+// scopes templates/ats-rules.yml gives atsLint's rules.
+const CHECK_SCOPE = {
+  'text-layer': 'content',
+  'section-headings': 'content',
+  'email-in-header-footer': 'content',
+  'email-missing': 'content',
+  'phone-missing': 'content',
+  'layout-tables': 'structural',
+  'multi-column': 'structural',
+  'absolute-positioning': 'structural',
+  'images-text-baked': 'content',
+  'images-non-photo': 'structural',
+  'fonts': 'structural',
+  'charset': 'structural',
+  'hidden-text': 'structural',
+};
+
 /**
  * Score a CV HTML string for ATS-friendliness.
  * @param {string} html
  * @param {{keywords?: string|string[], role?: string}} [opts]
- * @returns {{score:number, grade:string, issues:{severity:string,message:string}[], keywordCoverage:null|{total:number,found:number,percent:number,missing:string[]}}}
+ * @returns {{score:number, grade:string, issues:{id:string,scope:'structural'|'content',severity:string,message:string}[], keywordCoverage:null|{total:number,found:number,percent:number,missing:string[]}}}
  */
 function auditAts(html, opts = {}) {
   const text = extractVisibleText(html);
@@ -471,13 +491,13 @@ function auditAts(html, opts = {}) {
   const issues = [];
   let score = 0;
 
-  const add = (severity, message) => issues.push({ severity, message });
+  const add = (id, severity, message) => issues.push({ id, scope: CHECK_SCOPE[id], severity, message });
 
   // 1. Real, selectable text.
   if (text.length >= TEXT_MIN_CHARS) {
     score += WEIGHTS.text;
   } else {
-    add('critical', `Very little selectable text (${text.length} chars, expected >= ${TEXT_MIN_CHARS}). The CV may be image-based or rasterized; ATS parsers need a real text layer.`);
+    add('text-layer', 'critical', `Very little selectable text (${text.length} chars, expected >= ${TEXT_MIN_CHARS}). The CV may be image-based or rasterized; ATS parsers need a real text layer.`);
   }
 
   // 2. Standard section headings.
@@ -566,7 +586,7 @@ function auditAts(html, opts = {}) {
     .filter(re => re.test(headingBlob)).length;
   score += Math.min(5, bonus * 2);
   if (missing.length) {
-    add(missing.length >= 2 ? 'critical' : 'warning',
+    add('section-headings', missing.length >= 2 ? 'critical' : 'warning',
       `Missing standard section heading(s): ${missing.join(', ')}. ATS parsers key off recognizable headings (Experience, Education, Skills).`);
   }
 
@@ -593,12 +613,12 @@ function auditAts(html, opts = {}) {
   if (emailInBody) {
     score += 10;
   } else if (hasEmail) {
-    add('critical', 'Contact email appears only inside a semantic <header>/<footer> element; ATS routinely drop those regions, so the address is effectively unreachable. Move contact details into the main document body.');
+    add('email-in-header-footer', 'critical', 'Contact email appears only inside a semantic <header>/<footer> element; ATS routinely drop those regions, so the address is effectively unreachable. Move contact details into the main document body.');
   } else {
-    add('critical', 'No email address found. ATS and recruiters need a parseable contact email in the body of the CV.');
+    add('email-missing', 'critical', 'No email address found. ATS and recruiters need a parseable contact email in the body of the CV.');
   }
   if (hasPhone) score += 5;
-  else add('info', 'No phone number detected (optional, but many ATS intake forms expect one).');
+  else add('phone-missing', 'info', 'No phone number detected (optional, but many ATS intake forms expect one).');
 
   // 4. Single-column, no layout tables. `display:table` on a single element does
   // not reorder content, so it is deliberately NOT flagged (the template's
@@ -610,15 +630,15 @@ function auditAts(html, opts = {}) {
     + inlineStyles.filter(s => /position\s*:\s*absolute/i.test(s)).length;
   if (tableTags > 0) {
     layout -= 12;
-    add('critical', `Found ${tableTags} <table> element(s). Table-based layouts scramble the reading order ATS extractors follow; use a single-column flow.`);
+    add('layout-tables', 'critical', `Found ${tableTags} <table> element(s). Table-based layouts scramble the reading order ATS extractors follow; use a single-column flow.`);
   }
   if (multiColumn) {
     layout -= 8;
-    add('warning', 'CSS multi-column layout detected (column-count/columns). Single-column content parses most reliably.');
+    add('multi-column', 'warning', 'CSS multi-column layout detected (column-count/columns). Single-column content parses most reliably.');
   }
   if (absPos > 0) {
     layout -= 4;
-    add('warning', `Found ${absPos} absolutely-positioned element(s); absolute positioning can break ATS reading order.`);
+    add('absolute-positioning', 'warning', `Found ${absPos} absolutely-positioned element(s); absolute positioning can break ATS reading order.`);
   }
   score += Math.max(0, layout);
 
@@ -633,10 +653,10 @@ function auditAts(html, opts = {}) {
   const contentImgs = imgs.filter(tag => !/class\s*=\s*(?:"[^"]*\bcv-photo\b[^"]*"|'[^']*\bcv-photo\b[^']*')/i.test(tag));
   if (contentImgs.length > 0 && text.length < TEXT_LOW_WITH_IMG) {
     imageScore = 0;
-    add('critical', `Found ${contentImgs.length} content image(s) with little surrounding text (${text.length} chars). Text baked into images is invisible to ATS.`);
+    add('images-text-baked', 'critical', `Found ${contentImgs.length} content image(s) with little surrounding text (${text.length} chars). Text baked into images is invisible to ATS.`);
   } else if (contentImgs.length > 0) {
     imageScore -= 5;
-    add('warning', `Found ${contentImgs.length} non-photo image(s). Ensure no CV text (skills, headings, contact) is baked into images — ATS cannot read image text.`);
+    add('images-non-photo', 'warning', `Found ${contentImgs.length} non-photo image(s). Ensure no CV text (skills, headings, contact) is baked into images — ATS cannot read image text.`);
   }
   score += Math.max(0, imageScore);
 
@@ -655,14 +675,14 @@ function auditAts(html, opts = {}) {
     score += WEIGHTS.fonts;
   } else {
     score += Math.max(0, WEIGHTS.fonts - unsafeFonts.length * 3);
-    add('warning', `Non-standard font(s): ${unsafeFonts.map(describeFontName).join(', ')}. Prefer widely-supported, embeddable fonts (Arial, Helvetica, Calibri, Times New Roman, Georgia) for reliable ATS text extraction.`);
+    add('fonts', 'warning', `Non-standard font(s): ${unsafeFonts.map(describeFontName).join(', ')}. Prefer widely-supported, embeddable fonts (Arial, Helvetica, Calibri, Times New Roman, Georgia) for reliable ATS text extraction.`);
   }
 
   // 7. UTF-8 declared.
   if (/<meta[^>]*charset\s*=\s*["']?\s*utf-8/i.test(html)) {
     score += WEIGHTS.charset;
   } else {
-    add('warning', 'No <meta charset="utf-8"> declared. Declare UTF-8 so accented characters and symbols survive ATS text extraction.');
+    add('charset', 'warning', 'No <meta charset="utf-8"> declared. Declare UTF-8 so accented characters and symbols survive ATS text extraction.');
   }
 
   // 8. No hidden text / keyword stuffing. display:none / visibility:hidden /
@@ -695,7 +715,7 @@ function auditAts(html, opts = {}) {
   if (hiddenSignals.length === 0) {
     score += WEIGHTS.hidden;
   } else {
-    add('warning', `Possible hidden text / keyword stuffing (${hiddenSignals.join(', ')}). Hidden keywords are penalised by modern ATS and by recruiters who read the extracted text.`);
+    add('hidden-text', 'warning', `Possible hidden text / keyword stuffing (${hiddenSignals.join(', ')}). Hidden keywords are penalised by modern ATS and by recruiters who read the extracted text.`);
   }
 
   // Optional, advisory keyword coverage — never folded into the structural score.
@@ -732,6 +752,7 @@ export {
   extractVisibleText,
   extractHeadings,
   auditAts,
+  CHECK_SCOPE,
   gradeFor,
   isPass,
   normalizeKeywords,

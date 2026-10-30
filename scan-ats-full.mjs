@@ -5,9 +5,9 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR) and surfaces fresh
- * postings that match your portals.yml `title_filter` / `location_filter` —
- * no manual company curation needed.
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com) and
+ * surfaces fresh postings that match your portals.yml `title_filter` /
+ * `location_filter` — no manual company curation needed.
  *
  * Optional `title_filter_full` in portals.yml overrides `title_filter` for
  * THIS scanner only, so the keywords tuned for scan.mjs's curated company
@@ -27,7 +27,9 @@
  * curated corpus, so gating it would be redundant.
  *
  * Company directories come from the public job-board-aggregator dataset
- * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
+ * (github.com/Feashliaa/job-board-aggregator), except join.com's, which is
+ * read from join.com's own company sitemap. Each is cached in data/cache/ for
+ * 24h.
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -55,7 +57,7 @@ import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
-import { makeHttpCtx, fetchJson, fetchTextHead } from './providers/_http.mjs';
+import { makeHttpCtx, fetchJson, fetchText, fetchTextHead } from './providers/_http.mjs';
 import { withConnectionScope, withAbortScope } from './providers/_connection-scope.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
@@ -64,6 +66,10 @@ import ashby from './providers/ashby.mjs';
 import workday, { WORKDAY_TRUNCATED_REASON } from './providers/workday.mjs';
 import icims from './providers/icims.mjs';
 import bamboohr from './providers/bamboohr.mjs';
+import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.mjs';
+import join, { parseCompanySitemap } from './providers/join.mjs';
+import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
@@ -112,6 +118,17 @@ const CONCURRENCY = 20;
 // after a cooldown with no change to the dataset. The boards were never dead —
 // they were refused, and the matches on them were silently missed.
 const SINGLE_HOST_CONCURRENCY = 6;
+// recruiting.paylocity.com is also one host for every board, but throttles far
+// earlier: at SINGLE_HOST_CONCURRENCY a full sweep got HTTP 429 on 9,052 of
+// 10,252 boards. The provider retries a 429 with backoff; this keeps the sweep
+// from provoking one on nearly every board.
+const PAYLOCITY_CONCURRENCY = 2;
+// join.com's job list endpoint holds every client to about ten boards a second
+// across all tenants and answers faster requests with a rate-limit error,
+// which the provider retries with backoff. In sweeps of the same tenants, more
+// than two workers was no faster and, from four, lost boards whose retries ran
+// out.
+const JOIN_CONCURRENCY = 2;
 // A refusing resolver fails every lookup in milliseconds, so a sweep that
 // keeps going just feeds it (#2229). Stop after this many consecutive
 // resolver-level failures — high enough that a handful of unlucky boards
@@ -230,6 +247,25 @@ function saveDeadBoardsBestEffort(rows) {
   }
 }
 
+/**
+ * `ctx` with `provider`'s slice of the id cache as ctx.idCache, or `ctx` as is
+ * when there is no store (a caller that does not pass one, tests).
+ */
+export function withIdCache(ctx, idCaches, provider) {
+  return idCaches ? { ...ctx, idCache: idCaches.forProvider(provider?.id) } : ctx;
+}
+
+// Same rule for the provider id cache: a failed write costs later runs a
+// lookup, never this sweep's matches. It never rejects, so a checkpoint can
+// start it without awaiting.
+async function saveProviderIdCacheBestEffort(idCaches) {
+  try {
+    await idCaches.save();
+  } catch (err) {
+    console.error(`\n⚠ provider id cache write failed (${err.message}) — sweep continues`);
+  }
+}
+
 // Cheap content fingerprint of a source's company list. --resume relies on the
 // dataset order being byte-for-byte reproducible; a same-length regeneration
 // with different members would pass a bare length check and silently resume at
@@ -281,6 +317,17 @@ export function icimsHostCandidates(slug) {
   const prefixed = `careers-${s}.icims.com`;
   if (s.startsWith('careers-')) return [asIs];
   return s.includes('careers') ? [asIs, prefixed] : [prefixed, asIs];
+}
+
+// A Paylocity dataset row is a board GUID plus the company name. The dataset
+// stores names HTML-escaped ("A &amp; B"), so they are decoded here. An empty
+// name is kept empty: the provider then names the company from the board's
+// own title.
+export function paylocityEntry(row) {
+  const careersUrl = paylocityBoardUrl(row?.guid);
+  if (!careersUrl) return null;
+  const name = typeof row.name === 'string' ? decodeEntities(row.name).trim() : '';
+  return entryOnHost(name, careersUrl, h => h === 'recruiting.paylocity.com');
 }
 
 // Each source: the provider module that does the fetching, plus how to turn a
@@ -357,6 +404,32 @@ export const SOURCES = {
     dataset: `${DATASET_BASE}/bamboohr_companies.json`,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://${slug}.bamboohr.com/careers`, h => h === `${slug}.bamboohr.com`)
+      : null,
+  },
+  paylocity: {
+    provider: paylocity,
+    // Whole directory behind one host that throttles early — see PAYLOCITY_CONCURRENCY.
+    concurrency: PAYLOCITY_CONCURRENCY,
+    // One host means one keep-alive pool, so per-board connection scopes would
+    // only add a TLS handshake per board (see boardScope below).
+    singleHost: true,
+    // Entries are { guid, name, jobs } objects, not slugs. `jobs` is the
+    // dataset's count at snapshot time and does not decide whether a board is
+    // scanned: it is out of date by the time the sweep runs.
+    dataset: `${DATASET_BASE}/paylocity_companies_clean.json`,
+    toEntry: (row) => paylocityEntry(row),
+  },
+  join: {
+    provider: join,
+    // Whole directory behind one host that rate-limits — see JOIN_CONCURRENCY.
+    concurrency: JOIN_CONCURRENCY,
+    singleHost: true,
+    // job-board-aggregator has no join file; join.com publishes its own
+    // company directory, listed under `Sitemap:` in its robots.txt.
+    dataset: 'https://join.com/companies/sitemap.xml',
+    parseDataset: parseCompanySitemap,
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://join.com/companies/${slug}`, h => h === 'join.com')
       : null,
   },
 };
@@ -480,9 +553,13 @@ export function parseArgs(argv) {
 //   'stale' — network fetch failed; falling back to an expired cache
 //   'empty' — no data at all (no cache, fetch failed/non-array)
 // The status lets callers (and --json) distinguish a degraded scan from an empty one.
-async function loadCompanyList(name, url) {
-  mkdirSync(CACHE_DIR, { recursive: true });
-  const cacheFile = path.join(CACHE_DIR, `${name}.json`);
+//
+// A source with `parseDataset(text) → array` publishes its directory in some
+// other format (join: a sitemap). The text is parsed before it is cached, so
+// the cache file always holds the array, like every other source's.
+export async function loadCompanyList(name, url, parseDataset, { cacheDir = CACHE_DIR, fetchJsonFn = fetchJson, fetchTextFn = fetchText } = {}) {
+  mkdirSync(cacheDir, { recursive: true });
+  const cacheFile = path.join(cacheDir, `${name}.json`);
   if (existsSync(cacheFile)) {
     const ageHours = (Date.now() - statSync(cacheFile).mtimeMs) / 3_600_000;
     if (ageHours < CACHE_TTL_HOURS) {
@@ -490,7 +567,9 @@ async function loadCompanyList(name, url) {
     }
   }
   try {
-    const data = await fetchJson(url, { timeoutMs: 30_000 });
+    const data = typeof parseDataset === 'function'
+      ? parseDataset(await fetchTextFn(url, { timeoutMs: 30_000 }))
+      : await fetchJsonFn(url, { timeoutMs: 30_000 });
     if (Array.isArray(data)) {
       writeFileSync(cacheFile, JSON.stringify(data), 'utf-8');
       return { list: data, status: 'ok' };
@@ -822,9 +901,10 @@ const SEED_PROVIDERS = [greenhouse, lever, ashby];
  * @param {object}   ctx         HTTP context from makeHttpCtx().
  * @param {Set}      seenUrls    Shared dedup set (mutated in place).
  * @param {string}   label       Human-readable source label for logs.
+ * @param {object}   [idCaches]  Store from openProviderIdCache(); each provider gets its slice as ctx.idCache.
  * @returns {Promise<object[]>}  New job offers (same shape as ATS scan offers).
  */
-export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
+export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) {
   const source = SEED_SOURCES[seedId];
   if (!source) throw new Error(`runSeedScan: unknown seed "${seedId}"`);
 
@@ -862,7 +942,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
 
     let jobs;
     try {
-      jobs = await provider.fetch(entry, ctx);
+      jobs = await provider.fetch(entry, withIdCache(ctx, idCaches, provider));
     } catch (err) {
       errors++;
       if (opts.verbose) console.error(`  ✗ ${seedId}/${entry.name}: ${err.message}`);
@@ -901,8 +981,10 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label) {
  * Unsupported vendor labels stay in the local seed set but make no network
  * request. Known labels begin feeding the sweep automatically when a provider
  * with the same id is added later, without a tracker migration.
+ * `idCaches` (optional, from openProviderIdCache()) gives each provider its
+ * slice as ctx.idCache.
  */
-export async function runHistorySeedScan(seeds, providers, opts, ctx, processJobs) {
+export async function runHistorySeedScan(seeds, providers, opts, ctx, processJobs, idCaches) {
   const selected = opts.atsExplicit
     ? seeds.filter((seed) => opts.ats.includes(seed.vendor))
     : seeds;
@@ -950,7 +1032,7 @@ export async function runHistorySeedScan(seeds, providers, opts, ctx, processJob
       }
       const operation = { active: true };
       const operationPromise = (async () => {
-        const jobs = await provider.fetch(entry, ctx);
+        const jobs = await provider.fetch(entry, withIdCache(ctx, idCaches, provider));
         if (!operation.active) return;
         await processJobs(jobs, `${seed.vendor}-history`, provider, entry.name, () => operation.active);
       })();
@@ -1257,6 +1339,8 @@ async function main() {
     syntheticEntries: true,
     locationHints: config?.location_filter,
   };
+  // Each directory source hands its provider a slice of this store as ctx.idCache.
+  const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
   // The LOCAL calendar day, not the UTC one. This value lands in
   // scan-history.tsv's first_seen, which shouldDedupScanHistoryRow measures the
   // recheck window against using the local day (#3070). Stamping it in UTC put
@@ -1266,7 +1350,16 @@ async function main() {
   // Same defensive default as completedSources/counters below: a version-1
   // checkpoint that lost its offers array would otherwise set this to undefined
   // and throw on the next line, instead of degrading to an empty resume.
-  const newOffers = checkpoint?.offers || [];
+  //
+  // Minus the matches this data root already holds. A sweep the resolver
+  // breaker stopped saves its matches AND keeps its checkpoint (so --resume can
+  // finish the source), so by the time --resume reads them they are already in
+  // pipeline.md and scan-history: seeding them again appended every one a
+  // second time at this run's persist step. A match from a run that died
+  // before persisting is in neither file, so it is not in seenUrls and stays.
+  // Same token as the reseed below and the sweep's own dedup check.
+  const newOffers = (checkpoint?.offers || [])
+    .filter(o => !seenUrls.has(dedupTokenFor(o, providerForSource(o.source))));
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
   // Reseed with the SAME token a fresh dedup check would produce (provider
@@ -1436,7 +1529,7 @@ async function main() {
     // source finished before the checkpoint was written still contributed its
     // companies to the sweep, so it must still count toward the availability /
     // cap figures the final report and --json output show.
-    const { list, status } = await loadCompanyList(name, source.dataset);
+    const { list, status } = await loadCompanyList(name, source.dataset, source.parseDataset);
     datasetStatus[name] = status;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
@@ -1464,6 +1557,8 @@ async function main() {
     curEntries = entries.length; curDone = 0; curErrors = 0; curDeadSkipped = 0;
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
+    // This source's slice of the provider id cache (provider-id-cache.mjs).
+    const sourceCtx = { ...ctx, idCache: idCaches.forProvider(source.provider.id) };
     let errors = 0;
     let deadBoardsSkipped = 0;
     const deadBoards = loadDeadBoards(DEAD_BOARDS_PATH);
@@ -1508,7 +1603,7 @@ async function main() {
           // wants; where the provider can list a board cheaply, find that out
           // before downloading every posting body.
           if (typeof source.provider.fetchListing === 'function') {
-            const listing = await source.provider.fetchListing(entry, ctx);
+            const listing = await source.provider.fetchListing(entry, sourceCtx);
             if (!listingMayMatch(listing, { cutoff, titleFilter, companySlug: entry.name })) {
               if (!opts.includeUndated) droppedNoDate += undatedInListing(listing, cutoff);
               recordBoardResult(deadBoards, name, deadBoard, 200);
@@ -1516,7 +1611,7 @@ async function main() {
               return;
             }
           }
-          const jobs = await source.provider.fetch(entry, ctx);
+          const jobs = await source.provider.fetch(entry, sourceCtx);
           recordBoardResult(deadBoards, name, deadBoard, 200);
           consecutiveResolverFailures = 0;
           // Queued BEFORE the gate, deliberately: a board the gate cannot yet
@@ -1584,6 +1679,8 @@ async function main() {
       }
       if (done % CHECKPOINT_EVERY === 0 && !opts.dryRun) {
         saveDeadBoardsBestEffort(deadBoards);
+        // So a sweep that dies later keeps the ids it resolved so far.
+        void saveProviderIdCacheBestEffort(idCaches);
         writeCheckpoint({
           ...checkpointBase(),
           current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
@@ -1619,7 +1716,7 @@ async function main() {
         try {
           await boardScope(source, `${name}/${entry.name} (retry)`, COMPANY_TIMEOUT_MS, async (signal) => {
             retrySignal = signal;
-            const jobs = await source.provider.fetch(entry, ctx);
+            const jobs = await source.provider.fetch(entry, sourceCtx);
             recordBoardResult(deadBoards, name, boardKey(entry), 200);
             // Where a board deferred by the parallel sweep is actually decided.
             // A board the sweep already admitted is never gated here, and one
@@ -1662,7 +1759,10 @@ async function main() {
     }
     totalErrors += errors;
     totalRetiredBoardsSkipped += deadBoardsSkipped;
-    if (!opts.dryRun) saveDeadBoardsBestEffort(deadBoards);
+    if (!opts.dryRun) {
+      saveDeadBoardsBestEffort(deadBoards);
+      await saveProviderIdCacheBestEffort(idCaches);
+    }
     if (resolverOutage) {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
@@ -1712,7 +1812,7 @@ async function main() {
   if (historySeeds.length && !stoppedByOutage) {
     const providers = await loadProviders(PROVIDERS_DIR);
     log(`\n🌱 Application history — ${historySeeds.length} unique ATS board(s) derived locally...`);
-    const result = await runHistorySeedScan(historySeeds, providers, opts, ctx, processJobs);
+    const result = await runHistorySeedScan(historySeeds, providers, opts, ctx, processJobs, idCaches);
     totalCompaniesScanned += result.total;
     totalErrors += result.errors;
     log(`  done — ${result.total} board(s) probed, ${result.unsupported} without a scanner provider (${result.errors} errors)`);
@@ -1722,7 +1822,7 @@ async function main() {
   for (const seedId of opts.seeds) {
     const seedSource = SEED_SOURCES[seedId];
     log(`\n🌱 ${seedSource.label} (${seedId}-seed) — fetching portfolio...`);
-    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label);
+    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label, idCaches);
     if (result && result.offers) {
       totalCompaniesScanned += result.total || 0;
       totalErrors += result.errors || 0;
@@ -1730,6 +1830,9 @@ async function main() {
       log(`  done — ${result.total} companies probed, ${result.offers.length} matches (${result.errors} errors)`);
     }
   }
+  // The history and VC seed passes run after every directory source has
+  // saved, so what they resolved is saved here.
+  if (!opts.dryRun) await saveProviderIdCacheBestEffort(idCaches);
 
   const blacklistResult = filterBlacklistedOffers(newOffers, blacklist, { includeBlacklisted: opts.includeBlacklisted });
   let offers = blacklistResult.offers;

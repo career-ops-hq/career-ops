@@ -144,7 +144,7 @@ Before drafting answers, read the matched report's Block G fixed-term finding an
 - Never invent a duration, percentage premium, market rate, entitlement, severance/notice rule, or legal conclusion. This is a role-term reminder and a negotiation prompt, not legal advice.
 - If the report already contains the same reminder, do not duplicate its full prose; surface a one-line apply-time reminder with a link/reference to that report section.
 
-**Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially against scanner entries marked `**Verification:** unconfirmed (batch mode)` — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
+**Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially with entries from a scan run without `--verify`, which never checked them — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
 
 ## Step 1 — Detect the job
 

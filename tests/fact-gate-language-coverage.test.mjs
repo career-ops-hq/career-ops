@@ -148,13 +148,51 @@ test('German headcount, user, and engineering inflections fold to canonical noun
 });
 
 test('one recognised count silences the warning — the documented under-report', () => {
-  // French "sites" collides with the English noun, so the gate reaches one count
+  // A noun outside the lexicon next to one inside it: the gate reaches one count
   // and the rest stay invisible. Asserted so the limitation is a decision on
   // record rather than an accident, and so a future lexicon change that removes
   // this coincidence shows up here.
-  const r = verifyFacts('Encadré 45 collaborateurs sur 3 sites.', BARE);
+  const r = verifyFacts('Encadré 45 spécialistes sur 3 sites.', BARE);
   assert.equal(r.coverage, null);
-  assert.deepEqual([...r.invented], ['3 sites'], 'only the coincidental noun was read');
+  assert.deepEqual([...r.invented], ['3 sites'], 'only the listed noun was read');
+});
+
+test('French counts are read by the lexicon, so an inflation blocks', () => {
+  // French joined German with its own nouns in METRIC_NOUNS, folded to the
+  // English canonical noun. Before that, "45 collaborateurs" next to "3 sites"
+  // was the under-report case above: only the noun French shares with English
+  // was read.
+  const r = verifyFacts('Encadré 45 collaborateurs sur 3 sites et 4 équipes.', BARE);
+  assert.equal(r.verdict, 'block');
+  assert.deepEqual([...r.invented].sort(), ['3 sites', '4 teams', '45 employees']);
+  // The counts were read. The scope-verb check still skips French text, and
+  // says so; that is a separate English-only word list.
+  assert.notEqual(r.coverage?.reason, 'no-count-claims-recognized');
+
+  assert.deepEqual([...verifyFacts('Piloté 12 sous-traitants.', BARE).invented], ['12 contractors']);
+  // Feminine employee forms fold to the same noun as the masculine ones.
+  assert.deepEqual([...verifyFacts('Encadré 12 salariées.', BARE).invented], ['12 employees']);
+  assert.deepEqual([...verifyFacts('Encadré 7 employées.', BARE).invented], ['7 employees']);
+  assert.deepEqual([...verifyFacts('Déployé chez 120 utilisatrices dans 5 pays.', BARE).invented].sort(),
+    ['120 users', '5 countries']);
+  // PDF-extracted text often carries decomposed accents (e + U+0301).
+  assert.deepEqual([...verifyFacts('Encadré 4 équipes.'.normalize('NFD'), BARE).invented], ['4 teams']);
+});
+
+test('a French document checks against an English cv.md', () => {
+  // The common case: cv.md in English, a CV or cover letter generated in French
+  // (language.output: fr). Same facts pass; a changed number still blocks.
+  const dir = mkdtempSync(join(tmpdir(), 'fact-fr-'));
+  const source = join(dir, 'cv.md');
+  writeFileSync(source, 'Managed 45 employees across 3 sites and 4 teams; trained 12 interns.');
+  const opts = { ...BARE, sourcePaths: [source] };
+
+  const ok = verifyFacts('Encadré 45 salariés sur 3 chantiers et 4 équipes ; formé 12 stagiaires.', opts);
+  assert.deepEqual([...ok.invented], []);
+
+  const inflated = verifyFacts('Encadré 60 collaborateurs sur 3 sites.', opts);
+  assert.equal(inflated.verdict, 'block');
+  assert.deepEqual([...inflated.invented], ['60 employees']);
 });
 
 test('CJK is NOT covered by this detector, and that is recorded', () => {

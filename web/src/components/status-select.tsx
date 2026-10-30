@@ -102,7 +102,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
 
   const shown = inline && !busy ? current : status;
   const known = (CANONICAL_STATES as readonly string[]).includes(shown);
-  const buttonClass = "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-brand focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50 max-sm:size-11";
+  const buttonClass = "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-brand-text focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50 max-sm:size-11";
   const control = (
     <select
       ref={select}
@@ -152,7 +152,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved }:
       )}
       {busy && <span role="status" className="text-xs text-faint">saving…</span>}
       {saved && (
-        <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand">
+        <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand-text">
           <Check aria-hidden="true" className="size-3" /> saved
         </span>
       )}

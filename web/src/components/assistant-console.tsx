@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
@@ -23,6 +21,7 @@ import { StatusConfirmationCard, type StatusConfirmationPart } from "@/component
 import { StatusWriteError, writeAssistantStatus } from "@/lib/assistant-status-write.mjs";
 import { postAssistantWrite } from "@/lib/assistant-file-write.mjs";
 import { cn } from "@/lib/cn";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -36,7 +35,9 @@ type Part =
 type Msg = { role: "user" | "assistant"; parts: Part[] };
 type RequestFeedback = { id: number; phase: "working" | "ready" | "error"; announce: boolean };
 
-const CONFIG_KEY = "career-ops:config";
+const loadMarkdown = () => import("@/components/assistant-markdown");
+const AssistantMarkdown = lazy(loadMarkdown);
+
 const CHAT_KEY = "career-ops:chat";
 const SIZE_KEY = "career-ops:assistant-size";
 
@@ -278,7 +279,7 @@ export function AssistantConsole() {
     }
   }, [open]);
 
-  // selected CLI from Config (reacts to changes in other tabs)
+  // Selected CLI from Config, including saves in this tab.
   useEffect(() => {
     function read() {
       try {
@@ -289,8 +290,7 @@ export function AssistantConsole() {
       }
     }
     read();
-    window.addEventListener("storage", read);
-    return () => window.removeEventListener("storage", read);
+    return subscribeConfig(window, read);
   }, []);
 
   async function chatRequest(url: string, init?: RequestInit) {
@@ -823,11 +823,12 @@ export function AssistantConsole() {
         <button
           ref={openerRef}
           onClick={(e) => openAssistant(e.currentTarget)}
+          onPointerEnter={loadMarkdown}
+          onFocus={loadMarkdown}
           className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
-          aria-label="Open assistant"
         >
           <CoMark size={26} />
-          <span className="text-sm font-medium">Ask</span>
+          <span className="text-sm font-medium">Ask<span className="sr-only"> the assistant</span></span>
         </button>
       )}
 
@@ -922,9 +923,9 @@ export function AssistantConsole() {
                 <button
                   key={i}
                   onClick={() => send(s.send)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface/60 px-2.5 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand-text"
                 >
-                  <Sparkles className="size-3 text-brand/70" />
+                  <Sparkles className="size-3 text-brand-text/70" />
                   {s.label}
                 </button>
               ))}
@@ -1015,7 +1016,9 @@ function PartView({
     if (!part.text.trim()) return null;
     return (
       <div className="report-prose text-sm [&_*]:my-1 [&>:first-child]:mt-0 [&>:last-child]:mb-0">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+        <Suspense fallback={part.text}>
+          <AssistantMarkdown text={part.text} />
+        </Suspense>
       </div>
     );
   }
@@ -1035,7 +1038,7 @@ function PartView({
         job={job}
         variant="inline"
         trailing={
-          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand" aria-label={workerDetailsLabel(job)}>
+          <Link href={`/jobs/${job.id}`} className="text-faint transition-colors hover:text-brand-text" aria-label={workerDetailsLabel(job)}>
             <ArrowUpRight className="size-3.5" />
           </Link>
         }
@@ -1047,7 +1050,7 @@ function PartView({
     return (
       <div className="rounded-xl border border-border bg-surface/40 p-2.5">
         <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
-          <Sparkles className="size-3.5 text-brand" />
+          <Sparkles className="size-3.5 text-brand-text" />
           {part.jobIds.length} evaluations
           <span className="ml-auto tabular-nums text-faint">
             {workerBatchSummary(children, part.jobIds.length)}
@@ -1060,7 +1063,7 @@ function PartView({
               job={j}
               variant="inline"
               trailing={
-                <Link href={`/jobs/${j.id}`} className="text-faint transition-colors hover:text-brand" aria-label={workerDetailsLabel(j)}>
+                <Link href={`/jobs/${j.id}`} className="text-faint transition-colors hover:text-brand-text" aria-label={workerDetailsLabel(j)}>
                   <ArrowUpRight className="size-3.5" />
                 </Link>
               }

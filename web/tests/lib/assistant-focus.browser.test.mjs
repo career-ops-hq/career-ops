@@ -5,9 +5,10 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.ASSISTANT_FOCUS_TEST_URL;
-test("Assistant keyboard continuation, semantic context and modeless behavior", { skip: !url, timeout: 120_000 }, async (t) => {
+test("Assistant keyboard continuation, semantic context and modeless behavior", { skip: liveServerSkip("ASSISTANT_FOCUS_TEST_URL"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const responses = [];
@@ -55,7 +56,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
     }
     assert.fail("control is not keyboard reachable");
   }
-  const opener = (page) => page.getByRole("button", { name: "Open assistant", exact: true });
+  const opener = (page) => page.getByRole("button", { name: "Ask the assistant", exact: true });
   const composer = (page) => page.getByRole("textbox", { name: "Message to assistant", exact: true });
   const panel = (page) => page.getByRole("region", { name: "Assistant", exact: true });
   async function openWithKeyboard(page, target = opener(page)) {

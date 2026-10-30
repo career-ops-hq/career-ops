@@ -40,7 +40,6 @@
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
@@ -764,6 +763,74 @@ function displayTitle(raw) {
   const kept = points.slice(0, DISPLAY_TITLE_MAX - 1);
   while (kept.length > 0 && /\p{M}/u.test(kept[kept.length - 1])) kept.pop();
   return `${kept.join('')}…`;
+}
+
+// Application portals reported to reject longer values (#5629). Advisory only.
+const PORTAL_LENGTH_LIMIT = 64;
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', ndash: '–', mdash: '—' };
+
+// Plain text of the first <div> whose class list holds the whole token
+// `header-title`, in any attribute order. Tags inside it are skipped by a
+// character scan and entities are decoded in one pass, so no text is rebuilt
+// by repeated pattern replacement.
+function headlineText(html) {
+  for (const m of html.matchAll(/<div\b([^>]*)>/gi)) {
+    const cls = /(?:^|\s)class\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[1]);
+    const tokens = (cls?.[1] ?? cls?.[2] ?? '').split(/\s+/);
+    if (!tokens.includes('header-title')) continue;
+    const start = m.index + m[0].length;
+    // The matching </div>: count nested <div> opens and closes from here.
+    let depth = 1;
+    let end = html.length;
+    for (const t of html.slice(start).matchAll(/<(\/?)div\b[^>]*>/gi)) {
+      depth += t[1] ? -1 : 1;
+      if (depth === 0) { end = start + t.index; break; }
+    }
+    const inner = html.slice(start, end);
+    let text = '';
+    let inTag = false;
+    for (const ch of inner) {
+      if (ch === '<') inTag = true;
+      else if (ch === '>' && inTag) inTag = false;
+      else if (!inTag) text += ch;
+    }
+    return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, ref) => {
+      if (ref[0] === '#') {
+        const code = ref[1].toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      }
+      return NAMED_ENTITIES[ref.toLowerCase()] ?? whole;
+    }).trim();
+  }
+  return '';
+}
+
+/**
+ * Warn, never fail, when the CV headline or the output PDF filename is longer
+ * than some application portals accept (#5629). Reads the headline from the
+ * rendered header-title element, so it judges what actually prints.
+ *
+ * @param {string} html - The CV HTML about to be rendered.
+ * @param {string} outputPath - Destination PDF path (only the basename counts).
+ * @param {number} [limit] - Length above which a warning is printed.
+ * @returns {string[]} The warning messages printed (empty when none).
+ */
+export function warnLongPortalFields(html, outputPath, limit = PORTAL_LENGTH_LIMIT) {
+  const warnings = [];
+  const plain = headlineText(html);
+  if (plain) {
+    const len = [...plain].length;
+    if (len > limit) {
+      warnings.push(`CV headline is ${len} characters (limit ${limit}): "${displayTitle(plain)}". Some application portals reject longer values; aim for a job title plus two or three keywords.`);
+    }
+  }
+  const name = basename(outputPath || '');
+  const nameLen = [...name].length;
+  if (nameLen > limit) {
+    warnings.push(`Output filename is ${nameLen} characters (limit ${limit}): "${displayTitle(name)}". Some application portals reject longer file names; use a shorter name.`);
+  }
+  for (const w of warnings) console.warn(`⚠️  ${w}`);
+  return warnings;
 }
 
 /**
@@ -1554,7 +1621,7 @@ async function runFactGate(html, label) {
   // module is genuinely missing in a real workspace this throws and the render
   // fails, which is the correct direction to fail for a fact gate.
   const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
-  const factCheck = assertFacts(html, { label });
+  const factCheck = assertFacts(html, { label, ...factGateInputs() });
   // Ahead of the verdict, because it qualifies it: with no config the phrase
   // lists are empty, so a "passed" below covers metrics and facts only.
   if (factCheck.configMissing) {
@@ -1566,6 +1633,37 @@ async function runFactGate(html, label) {
   } else {
     console.log(`✅ Fact check passed: ${label}`);
   }
+}
+
+/**
+ * The files the fact gate checks a CV against, from the same workspace this
+ * render reads cv.md and the profile from.
+ *
+ * verify-cv-facts defaults to the DATA root's cv.md, article-digest.md and
+ * config/cv-facts.json. This module reads cv.md (the probe that decides
+ * whether the gate runs, and the section-order and locked-section guards) and
+ * config/profile.yml from workspaceRoot, which is a different directory
+ * whenever CAREER_OPS_TRACKER points outside the data root (#2471, #3169). With
+ * the defaults one render read two cv.md files: the guards and the run-or-skip
+ * decision used the workspace's, the fact check the data root's, so a number
+ * absent from the CV this render validated could still pass.
+ *
+ * @returns {{sourcePaths: string[], configPath: string}}
+ */
+function factGateInputs() {
+  return {
+    sourcePaths: [resolve(workspaceRoot, 'cv.md'), resolve(workspaceRoot, 'article-digest.md')],
+    configPath: resolve(workspaceRoot, 'config', 'cv-facts.json'),
+  };
+}
+
+/**
+ * Say that the fact gate did not run, rather than letting a render with no
+ * "Fact check" line read like one that passed. `--skip-fact-check` is the
+ * explicit opt-out and stays quiet.
+ */
+function warnFactGateNotRun() {
+  console.warn(`⚠️  Fact check did not run: no cv.md at ${resolve(workspaceRoot, 'cv.md')} — this CV was not checked against your sources.`);
 }
 
 /**
@@ -1795,6 +1893,8 @@ async function generatePDF() {
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
+  // After normalization, so the length is that of the text that prints.
+  warnLongPortalFields(html, outputPath);
   const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
   if (totalReplacements > 0) {
     const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
@@ -1802,7 +1902,10 @@ async function generatePDF() {
   }
 
   // Fact gate, on the normalized HTML: the document that actually prints.
-  if (!skipFactCheck && cvMarkdown) await runFactGate(html, basename(inputPath));
+  if (!skipFactCheck) {
+    if (cvMarkdown) await runFactGate(html, basename(inputPath));
+    else warnFactGateNotRun();
+  }
 
   return renderHtmlToPdf(html, outputPath, {
     format,
@@ -1883,6 +1986,8 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Once for the batch, not once per entry.
+  if (!globals.skipFactCheck && !cvMarkdown) warnFactGateNotRun();
   // Read one workspace profile for the batch. The working directory must not
   // choose a different theme from the single-document render.
   const profilePath = workspaceProfilePath();
@@ -1954,6 +2059,7 @@ async function runBatchFromManifest(manifestPath, globals) {
       validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       validateLockedSections(html, cvMarkdown, lockedKeys);
       html = normalizeTextForATS(html).html;
+      warnLongPortalFields(html, entryOutput);
       // Same gate, same guard and same place as the single render. A blocked
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
@@ -2078,6 +2184,11 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
+async function launchChromium(options) {
+  const { chromium } = await import('playwright');
+  return chromium.launch(options);
+}
+
 /**
  * Render an HTML string to a PDF file via headless Chromium.
  *
@@ -2104,7 +2215,33 @@ export async function inlineLocalFonts(html) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  // A passed launchBrowser is a test double and always paints in this process.
+  // The shared painter is only for the batch, which opts in with the env var,
+  // and the painter process itself must not dial its own socket.
+  if (!opts.launchBrowser
+    && process.env.CAREER_OPS_PDF_SHARED === '1'
+    && process.env.CAREER_OPS_PDF_SERVER_PROCESS !== '1') {
+    try {
+      const { renderViaSharedPdfServer } = await import('./lib/pdf-server.mjs');
+      const result = await renderViaSharedPdfServer(
+        html,
+        outputPath,
+        { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
+        fileURLToPath(import.meta.url),
+      );
+      console.log(`✅ PDF generated: ${result.outputPath}`);
+      console.log(`📊 Pages: ${result.pageCount}`);
+      // The painter's own warning goes nowhere, so repeat it here. A strict
+      // overflow already came back as an error.
+      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
+      console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);
+      return result;
+    } catch (err) {
+      if (err?.code !== 'PDF_SERVER_UNAVAILABLE') throw err;
+      console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
+    }
+  }
+  const launchBrowser = opts.launchBrowser || launchChromium;
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });
@@ -2320,7 +2457,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
  * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
  */
 export async function renderBatch(entries, opts = {}) {
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  const launchBrowser = opts.launchBrowser || launchChromium;
   const results = [];
   let browser = null;
   try {
@@ -2356,8 +2493,32 @@ export async function renderBatch(entries, opts = {}) {
   }
 }
 
+async function runPdfServer() {
+  const { startPdfServer } = await import('./lib/pdf-server.mjs');
+  const server = await startPdfServer({
+    rootDir: __dirname,
+    launchBrowser: launchChromium,
+    render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
+  });
+  if (server.alreadyRunning) return;
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close().then(() => process.exit(0), () => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+  await server.closed;
+}
+
 const isMain = isMainModule(import.meta.url);
-if (isMain) {
+if (isMain && process.argv[2] === '--pdf-server') {
+  runPdfServer().then(() => process.exit(0), (err) => {
+    console.error(`❌ PDF browser failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);
     process.exit(1);

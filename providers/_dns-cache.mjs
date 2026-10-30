@@ -266,7 +266,7 @@ export function createCachedLookup(realLookup, options = {}) {
         ? rest[0].map((entry) => entry && entry.address)
         : [rest[0]];
       const bad = addresses.find((address) => isBlockedAddress(address));
-      if (bad !== undefined && !isTrustedProxyLookup(hostname)) return callback(blockedAddressError(hostname, bad));
+      if (bad !== undefined && !isTrustedProxyLookup(hostname)) return callback(blockedAddressError(hostname, bad, addresses));
       return callback(err, ...rest);
     };
   }

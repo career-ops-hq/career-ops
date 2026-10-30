@@ -136,7 +136,7 @@ func (m ProgressModel) renderHeader() string {
 	if total > 0 {
 		totalCount = m.metrics.FunnelStages[0].Count
 	}
-	info := right.Render(fmt.Sprintf(i18n.Current.ProgressSummary, totalCount, m.metrics.AvgScore))
+	info := right.Render(fmt.Sprintf(i18n.Current.ProgressSummary, totalCount, avgScoreLabel(m.metrics.AvgScore)))
 
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(info) - 4
 	if gap < 1 {

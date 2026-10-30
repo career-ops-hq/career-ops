@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { ROOT, pass, fail } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-state-writers-')));
 mkdirSync(join(root, 'data'), { recursive: true });
 const hook = join(root, 'slow-ledger-read.mjs');
@@ -45,20 +46,20 @@ writeFileSync(statePath, JSON.stringify({ byReport: { '999': previous } }));
 try {
   const writers = await Promise.all(reports.map(n => child('hired-share.mjs', ['--report', n, '--mark', 'never'])));
   check('every concurrent never decision persists with existing marks', () => {
-    for (const r of writers) assert.equal(r.status, 0, r.stderr);
+    for (const r of writers) assert.equal(r.status, 0, describeSpawn(r));
     const state = JSON.parse(readFileSync(statePath, 'utf8')).byReport;
     for (const n of reports) assert.equal(state[n]?.status, 'never', `lost report ${n}`);
     assert.deepEqual(state['999'], previous);
   });
   const status = spawnSync(process.execPath, [join(ROOT, 'hired-share.mjs'), '--status'], { env, encoding: 'utf8' });
   check('status does not ask about a hire whose sharing was declined', () => {
-    assert.equal(status.status, 0, status.stderr);
+    assert.equal(status.status, 0, describeSpawn(status));
     assert.deepEqual(JSON.parse(status.stdout).askable, []);
   });
   const declinedBeforeDraft = JSON.parse(readFileSync(statePath, 'utf8')).byReport['1'];
   const draft = await child('hired-share.mjs', ['--report', '1']);
   check('drafting preserves a permanent decline and every other report', () => {
-    assert.equal(draft.status, 0, draft.stderr);
+    assert.equal(draft.status, 0, describeSpawn(draft));
     const state = JSON.parse(readFileSync(statePath, 'utf8')).byReport;
     assert.deepEqual(state['1'], declinedBeforeDraft);
     assert.equal(state['1'].status, 'never');
@@ -67,7 +68,7 @@ try {
   env.HISTORY_PATH = join(root, 'data', 'scan-history.tsv');
   writeFileSync(env.HISTORY_PATH, '2026-01-01\tfictional\n');
   const later = await child('hired-share.mjs', ['--report', '2', '--mark', 'later']);
-  assert.equal(later.status, 0, later.stderr);
+  assert.equal(later.status, 0, describeSpawn(later));
   const ready = join(root, 'draft-ready'), resume = join(root, 'draft-resume');
   const pendingDraft = child('hired-share.mjs', ['--report', '2'], { DRAFT_READY: ready, DRAFT_RESUME: resume });
   let declined;
@@ -78,19 +79,19 @@ try {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     const never = await child('hired-share.mjs', ['--report', '2', '--mark', 'never']);
-    assert.equal(never.status, 0, never.stderr);
+    assert.equal(never.status, 0, describeSpawn(never));
     declined = JSON.parse(readFileSync(statePath, 'utf8')).byReport['2'];
   } finally { writeFileSync(resume, 'resume'); }
   const finishedDraft = await pendingDraft;
   check('a draft finishing after a concurrent never preserves the exact decline', () => {
-    assert.equal(finishedDraft.status, 0, finishedDraft.stderr);
+    assert.equal(finishedDraft.status, 0, describeSpawn(finishedDraft));
     assert.deepEqual(JSON.parse(readFileSync(statePath, 'utf8')).byReport['2'], declined);
   });
   const allowed = await child('hired-share.mjs', ['--report', '3', '--mark', 'later']);
-  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.equal(allowed.status, 0, describeSpawn(allowed));
   const allowedDraft = await child('hired-share.mjs', ['--report', '3']);
   check('a draft still records drafted when the saved decision is later', () => {
-    assert.equal(allowedDraft.status, 0, allowedDraft.stderr);
+    assert.equal(allowedDraft.status, 0, describeSpawn(allowedDraft));
     assert.equal(JSON.parse(readFileSync(statePath, 'utf8')).byReport['3'].status, 'drafted');
   });
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }

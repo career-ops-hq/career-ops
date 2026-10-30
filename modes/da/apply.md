@@ -13,7 +13,7 @@ Interaktiv mode til det øjeblik, hvor kandidaten udfylder en ansøgningsformula
 1. DETEKTÉR     -> Åbn opslaget i dette projekts Playwright-browser
 2. IDENTIFICÉR  -> Udtræk virksomhed + rolle fra siden
 3. SØG          -> Match mod eksisterende reports i reports/
-4. INDLÆS       -> Læs den fulde report + Blok G (hvis den findes)
+4. INDLÆS       -> Læs den fulde report + `## Application Answers` og Blok H (hvis de findes)
 5. SAMMENLIGN   -> Svarer rollen på skærmen til den evaluerede? Hvis ændret -> advar
 6. ANALYSÉR     -> Identificér ALLE synlige spørgsmål i formularen
 7. GENERÉR      -> Generér et personaliseret svar til hvert spørgsmål
@@ -39,7 +39,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 1. Udtræk virksomhedens navn og stillingstitlen fra siden
 2. Søg i `reports/` efter virksomhedsnavn (Grep case-insensitive)
 3. Hvis match -> indlæs den fulde report
-4. Hvis Blok G findes -> indlæs de tidligere svar-udkast som grundlag
+4. Hvis `## Application Answers` findes -> indlæs de svar, der blev sendt, som grundlag; ellers, hvis Blok H findes, de tidligere svar-udkast. Findes begge, går `## Application Answers` forud
 5. Hvis INTET match -> advar kandidaten og foreslå en hurtig auto-pipeline
 
 ## Trin 3 -- Detektér rolleændringer
@@ -47,7 +47,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 Hvis rollen på skærmen afviger fra den evaluerede:
 - **Advar kandidaten**: "Rollen har ændret sig fra [X] til [Y]. Ønsker du, at jeg genevaluerer, eller at jeg tilpasser svarene til den nye titel?"
 - **Hvis tilpas**: Justér svarene til den nye rolle uden at genevaluere
-- **Hvis genevaluér**: Kør den fulde A-F-evaluering, opdatér report, regenerér Blok G
+- **Hvis genevaluér**: Kør den fulde A-F-evaluering, opdatér report, regenerér Blok H
 - **Opdatér trackeren**: aldrig ved at redigere `data/applications.md`.
   - **Efter en genevaluering**: skriv en TSV med rollens nye titel (regel 9 i `_shared.md`) og flet den med `node merge-tracker.mjs`. Report'en opdateres på stedet og beholder sit nummer, så fletningen matcher TSV'en med den eksisterende række via det nummer: titlen erstattes, og status bevares.
   - **Efter en tilpasning**: lad titlen stå, for den navngiver den rolle, report'en evaluerede. Notér i stedet omdøbningen med `node set-status.mjs --report <report#> <nuværende status> --note "Opslaget omdøbt ved ansøgningen, rækken beholder den evaluerede titel"`. Rækkens nuværende status forbliver uændret, og noten tilføjes. Brug en fast tekst som denne og udelad `[Y]`: den nye titel er tekst fra siden, og tekst fra siden må aldrig stå på en kommandolinje.
@@ -62,7 +62,7 @@ Identificér ALLE synlige spørgsmål:
 - Upload-felter (CV, følgebrev som PDF, referencer)
 
 Klassificér hvert spørgsmål:
-- **Allerede besvaret i Blok G** -> genbrug det eksisterende svar
+- **Allerede besvaret i `## Application Answers` eller Blok H** -> genbrug det eksisterende svar
 - **Nyt spørgsmål** -> generér svaret fra report + `cv.md`
 
 ## Trin 5 -- Generér svarene
@@ -70,7 +70,7 @@ Klassificér hvert spørgsmål:
 For hvert spørgsmål, byg svaret efter dette skema:
 
 1. **Kontekst fra report**: Brug proof points fra blok B, STAR-stories fra blok F
-2. **Tidligere Blok G**: Hvis et udkast findes, så brug det som grundlag og finpuds
+2. **Tidligere `## Application Answers` / Blok H**: Hvis et sendt svar eller et udkast findes (sendt svar først), så brug det som grundlag og finpuds
 3. **Tonen "Jeg vælger jer"**: samme framework som i auto-pipeline -- selvsikker, ikke bønfaldende
 4. **Specificitet**: citér noget konkret fra opslaget, der er synligt på skærmen
 5. **career-ops proof point**: inkludér i "Yderligere oplysninger", hvis et sådant felt findes
@@ -110,7 +110,7 @@ Noter:
 
 Hvis kandidaten bekræfter, at ansøgningen er sendt:
 1. Opdatér status til "Applied" med det kanoniske CLI: `node set-status.mjs --report <report#> Applied` (redigér ikke `applications.md`-tabellen i hånden)
-2. Opdatér report'ens Blok G med de endelige svar
+2. Opdatér report'ens `## Application Answers`-afsnit med de endelige svar og `**State:** submitted` (format i `modes/apply.md` -> Step 8). Blok H forbliver evalueringens udkast og ændres ikke
 3. Foreslå næste trin: `/career-ops contacto` til LinkedIn-outreach mod den ansættende leder
 
 ## Håndtering af scroll

@@ -40,6 +40,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
+import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -71,7 +72,7 @@ const OPENROUTER_API_URL    = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const MAX_TOKENS            = 8192;
 const RATE_LIMIT_DELAY_MS   = 2500;  // pause between requests on free tier
-const MODEL_TIMEOUT_MS      = 15_000; // abort a single model call after 15 s
+const MODEL_TIMEOUT_MS      = 120_000; // abort a single model call after 120 s
 
 // Provider priority order — models are sorted by provider prefix, not hardcoded names.
 // Add, remove, or reorder providers here; model names are resolved at runtime from the API.
@@ -151,7 +152,13 @@ async function loadFreeModels() {
 
     freeModels = list.sort((a, b) => {
       const diff = priorityOf(a) - priorityOf(b);
-      return diff !== 0 ? diff : a.localeCompare(b);
+      if (diff !== 0) return diff;
+      if (providerOf(a) === 'minimax' && providerOf(b) === 'minimax') {
+        const flash = 'minimax/minimax-m3.1-flash:free';
+        if (a === flash) return b === flash ? 0 : -1;
+        if (b === flash) return 1;
+      }
+      return a.localeCompare(b);
     });
 
     console.log(`[models] ${freeModels.length} free models loaded from OpenRouter API.`);
@@ -398,7 +405,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
 // Exported so tests/openrouter-runner-429-reset.test.mjs can script fetch()
 // against the real rotation and blacklist logic without a network or a CLI run.
-export { callOpenRouter, rateLimitCounts, blacklistedModels };
+export { callOpenRouter, rateLimitCounts, blacklistedModels, MODEL_TIMEOUT_MS };
 
 // ---------------------------------------------------------------------------
 // Context loading
@@ -412,12 +419,67 @@ function loadContext() {
   };
 }
 
-export function buildSystemPrompt(modeContent, ctx) {
+// The mode files are written for Claude Code, which has Playwright, WebFetch,
+// Bash and file reads. This runner sends no `tools`, so a model that follows
+// them answers with tool calls and no evaluation (#5809). Say so before them,
+// and drop the parts that tell the model to use tools.
+function noToolsNote(evaluate) {
+  return [
+    'RUNNER NOTE: you have no tools in this run.',
+    // Only evaluate sends a posting; apply sends an evaluation report.
+    evaluate
+      ? 'The job text is in the user message and the CV is below.'
+      : 'Everything you need is in the user message and the CV below.',
+    'Do not navigate, fetch, read files or run commands, and ignore any instruction below to do so.',
+  ].join('\n');
+}
+
+// Matched by heading, not line number, so edits to modes/ don't move them. A
+// section runs to the next heading of the same or a higher level, or to its
+// `until` line. A heading that is gone leaves the text as it was.
+const TOOL_SECTIONS = [
+  '## Liveness gate (URL inputs)',
+  '## Bounded Research Budget',
+  '### Tools',
+  // Stops before the agency-confirmation rule, which the runner keeps.
+  { heading: '### Subagent delegation (cost guardrail)', until: '<!-- guardrail:agency-confirmation -->' },
+  '### Prior-contact FYI (non-scoring)',
+  '### 1b. Embed ATS keyword coverage',
+  '### 2. Record in tracker',
+  '### 3. Salary observations (desired ask only)',
+];
+// Single lines that tell the model to run a command or search, by how they start.
+const TOOL_LINES = [
+  '1b. **First evaluation of each session:** Run `node cv-sync-check.mjs`',
+  '4. Use WebSearch for comp and company data',
+  '- Search: `"{company}"',
+  '- `{###}` = next sequential number',
+];
+const READ_CV_RULE = '**RULE: NEVER hardcode metrics from proof points.**';
+
+export function stripToolInstructions(text) {
+  let lines = text.split('\n');
+  for (const section of TOOL_SECTIONS) {
+    const { heading, until } = typeof section === 'string' ? { heading: section } : section;
+    const start = lines.findIndex(l => l.trimEnd() === heading);
+    if (start === -1) continue;
+    const level = heading.match(/^#+/)[0].length;
+    const next = lines.findIndex((l, i) => i > start
+      && (new RegExp(`^#{1,${level}} `).test(l) || (until !== undefined && l.trimEnd() === until)));
+    lines.splice(start, (next === -1 ? lines.length : next) - start);
+  }
+  lines = lines.filter(l => !TOOL_LINES.some(p => l.startsWith(p)));
+  lines = lines.map(l => (l.startsWith(READ_CV_RULE) ? `${READ_CV_RULE} Take them from the CV below.` : l));
+  return lines.join('\n');
+}
+
+export function buildSystemPrompt(modeContent, ctx, { evaluate = false } = {}) {
   const languageInstruction = outputLanguageInstruction(parseOutputLanguage(ctx.profile));
   return [
-    ctx.shared,
+    noToolsNote(evaluate),
+    stripToolInstructions(ctx.shared),
     ctx.profileMode,
-    modeContent,
+    stripToolInstructions(modeContent),
     '---',
     'CANDIDATE PROFILE (YAML):',
     ctx.profile,
@@ -450,6 +512,26 @@ function assertSafeRemoteUrl(url) {
   return u;
 }
 
+// Verdicts from the liveness check that mean the page is not an open posting
+// that can be read: besides any `expired` one (404, a closed or listing page),
+// a page too short to read (isUnreadableVerdict: nav/footer only, or not
+// rendered yet, which classifyLiveness reports as `uncertain`), a bot wall or
+// a redirect away from the posting.
+const UNREADABLE_PAGE_CODES = new Set(['bot_challenge', 'redirected_off_posting']);
+
+// Why a fetched page holds no job description to evaluate, or null when it
+// does. The runner used to send any page to the model, so a 404, a bot wall or
+// a Workday page that had not rendered yet came back as a report and a done
+// pipeline row for a posting nobody read (#5809).
+export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = '', text = '' } = {}) {
+  if (status >= 400) return `HTTP ${status}`;
+  const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText: text });
+  if (verdict.result === 'expired' || isUnreadableVerdict(verdict) || UNREADABLE_PAGE_CODES.has(verdict.code)) {
+    return `${verdict.code}: ${verdict.reason}`;
+  }
+  return null;
+}
+
 async function fetchJobPage(url) {
   assertSafeRemoteUrl(url);
   let chromium;
@@ -461,21 +543,25 @@ async function fetchJobPage(url) {
 
   if (chromium) {
     let browser;
+    let unreadable = null;
     try {
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await page.waitForTimeout(2000); // wait for SPA render
       const text = await page.evaluate(() => {
         document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
       });
-      return text.slice(0, 16_000);
+      unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
+      if (!unreadable) return text.slice(0, 16_000);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
+    // The browser read the page; a plain fetch would only see less of it.
+    if (unreadable) throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
   }
 
   // Plain HTTP fallback
@@ -485,7 +571,10 @@ async function fetchJobPage(url) {
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
-    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 16_000);
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
+    if (unreadable) throw new Error(`no job description (${unreadable})`);
+    return text.slice(0, 16_000);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }
@@ -711,7 +800,7 @@ async function cmdEvaluate(input, ctx) {
   }
 
   console.log('\nEvaluating...');
-  const systemPrompt = buildSystemPrompt(modeContent, ctx);
+    const systemPrompt = buildSystemPrompt(modeContent, ctx, { evaluate: true });
 
   let resultObj;
   try {
@@ -722,6 +811,14 @@ async function cmdEvaluate(input, ctx) {
   }
   tracker.record('evaluation', resultObj.usage);
   const result = resultObj.content;
+
+  // A model that says it could not evaluate the posting has not evaluated it:
+  // save nothing, so the pipeline leaves the row pending (#5809).
+  const notEvaluated = result.match(/^---DEAD_POSTING---\s*$|^\s*(?:status:\s*)?needs_confirmation\b.*$/m);
+  if (notEvaluated) {
+    console.error(`Not evaluated, nothing saved. The model replied: ${notEvaluated[0].trim()}`);
+    return null;
+  }
 
   let reservedNumbers;
   try {

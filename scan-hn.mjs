@@ -58,7 +58,15 @@ function loadPortals() {
 }
 
 function loadKeywords(portals) {
-  return portals?.hn_hiring?.keywords || ["Software Engineer"];
+  const keywords = portals?.hn_hiring?.keywords;
+  // One keyword written without list brackets (`keywords: Platform Engineer`)
+  // is a YAML scalar. buildTitleFilter reads only a list and drops anything
+  // else, so the scanner's only positive filter was gone and every HN post
+  // matched. This is scan-hn's own key, with no validator warning behind it
+  // (title_filter's bare-string case gets one in validate-portals), so the
+  // obvious reading is taken: one keyword.
+  if (typeof keywords === 'string' && keywords.trim()) return [keywords];
+  return keywords || ["Software Engineer"];
 }
 
 // hn_hiring.keywords is this scanner's positive list: a post's header line
@@ -160,7 +168,10 @@ async function main() {
         continue;
       }
       if (!extracted || !extracted.company || !extracted.title) { gate.markSeen(job); continue; }
-      const offer = { ...job, ...extracted, source: 'hn-hiring', postedAt: Date.now() };
+      // The provider's own postedAt (the comment's created_at), never the scan
+      // time: scan-history records it as posted_at, and a guessed date is
+      // worse than an absent one (modes/oferta.md).
+      const offer = { ...job, ...extracted, source: 'hn-hiring', postedAt: job.postedAt };
       // The blacklist and location filter judge what Gemini extracted; the
       // title filter reads the header line the keywords already matched.
       const judged = extracted.location === UNKNOWN_LOCATION ? { ...offer, location: job.location || '' } : offer;
@@ -173,7 +184,7 @@ async function main() {
     console.log(`⚠️ No AI key. Using keyword filtering mode...`);
     for (const job of rawJobs) {
       if (gate.check(job)) continue;
-      newOffers.push({ ...job, source: 'hn-hiring', postedAt: Date.now() });
+      newOffers.push({ ...job, source: 'hn-hiring' });
       console.log(`  ✅ Match: ${job.company}`);
     }
   }

@@ -24,17 +24,21 @@
  * script that already references `invite-match.mjs` (e.g. #1495's own
  * history) — left as a maintainer call, not blocking.
  *
+ * Also reports interview rules found in the invite (`constraints`, #5732):
+ * read-only tags like [constraint:no-ai]; --apply never writes them.
+ *
  * Run: node invite-match.mjs < invite.txt          (JSON to stdout)
  *      node invite-match.mjs --file invite.txt
  *      echo "..." | node invite-match.mjs --summary
  *      node invite-match.mjs --apply [--id N]      (rejection-classified matches only; advances status to Rejected)
+ *      node invite-match.mjs --no-clarification-draft   (omit the pre-interview clarification draft)
  *      node invite-match.mjs --self-test
  *
  * Issue #1495, #2098 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
@@ -62,12 +66,13 @@ const args = process.argv.slice(2);
 // validateFlags() (#2775). Order matters: the unrecognized-flag check runs
 // BEFORE the --help check, so `--help --bogus` still errors instead of
 // printing usage and exiting 0.
-const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--self-test', '--file', '--apply', '--id', '--no-clarification-draft', '--help', '-h'];
 const USAGE = `Usage:
   node invite-match.mjs < invite.txt          # JSON to stdout
   node invite-match.mjs --file invite.txt     # read invite text from a file
   node invite-match.mjs --summary             # human-readable summary instead of JSON
   node invite-match.mjs --apply [--id N]      # rejection-classified matches only; advances status to Rejected
+  node invite-match.mjs --no-clarification-draft  # invites only: omit the pre-interview clarification email draft
   node invite-match.mjs --self-test           # run the built-in self-test suite
   node invite-match.mjs --help                # print this usage block and exit
   node invite-match.mjs -h                    # same as --help`;
@@ -95,6 +100,7 @@ if (isMainModule(import.meta.url)) {
 
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+const noClarificationDraft = args.includes('--no-clarification-draft');
 const fileIdx = args.indexOf('--file');
 // Treat a following recognized flag (e.g. `--file --summary`) the same as a
 // missing value — otherwise it's silently accepted as the path and produces
@@ -650,6 +656,85 @@ export function classifyEmail(text) {
   return { classification: 'unknown', matchedPhrases: [], phraseStrength: null };
 }
 
+// --- Interview constraints (#5732) ---
+
+// Phrase matching only (zero-token, no network). Each detector is deliberately
+// narrow: "silence stays silence" -- a constraint is reported only when the
+// invite says it. Keys are stable; the tag form `[constraint:<key>]` mirrors
+// the `[process-friction]` convention parsed by process-quality.mjs.
+// A duration counts as the interview's length only when the text ties it to the
+// interview: a length verb or noun right before it ("lasts 30 minutes", "plan for
+// 45 minutes", "Duration: 30 minutes"), an adjective form ("a 45-minute interview",
+// "30 minutes long"), or a bracketed length ("(30 minutes)"). Other intervals --
+// "join 10 minutes early", "reply within 24 hours", "starts 30 minutes after the
+// assessment" -- have no such tie, so they never suppress length-not-stated.
+const LENGTH_CONTEXT = /\b(?:last|lasts|lasting|take|takes|taking|run|runs|running|duration|length|scheduled for|set for|plan for|allow|allot|allocate|expect|approximately|about|around|up to|for)\b[^.\n]{0,25}?\b\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\b/i;
+const LENGTH_ADJECTIVE = /\b\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\s*[-–]?\s*(?:long\b|(?:interview|call|conversation|session|meeting|chat|screen|screening|assessment)\b)/i;
+const LENGTH_BRACKETED = /\(\s*\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\s*\)/i;
+const LENGTH_NAMED = /\b(?:half|one|an)[-\s]hour\b/i;
+function statesDuration(text) {
+  // "The interview will be 30 minutes": an interview noun + copula + duration.
+  const copula = /\b(?:interview|call|conversation|session|meeting|chat|screen|screening|assessment)\s+(?:will\s+be|would\s+be|should\s+be|is|runs?)\s+(?:about\s+|around\s+|approximately\s+)?\d+(?:\.\d+)?\s*[-–]?\s*(?:minutes?|mins?|hours?|hrs?)\b/i;
+  return LENGTH_CONTEXT.test(text) || LENGTH_ADJECTIVE.test(text) || LENGTH_BRACKETED.test(text) || LENGTH_NAMED.test(text) || copula.test(text);
+}
+
+const NAME = "[\\p{Lu}][\\p{L}'.-]*(?:\\s+[\\p{Lu}][\\p{L}'.-]*){0,3}";
+const DASH = "\\s*[-\\u2013\\u2014,]\\s*";
+// "with Jordan Reyes - Director of X and Sam Ito - Manager of Y"
+const PANEL_LINE = new RegExp(`\\bwith\\s+(${NAME}${DASH}[^\\n]+)`, 'u');
+const PANEL_SPLIT = new RegExp(`\\s+and\\s+(?=${NAME}${DASH})`, 'u');
+const PANEL_DASH = new RegExp(DASH, 'u');
+
+const CONSTRAINT_DETECTORS = [
+  // The prohibition must sit in the same sentence as the AI-tool mention.
+  { key: 'no-ai', test: t => /\b(?:ai|artificial intelligence|chatgpt|copilot|generative)\b[^.\n]{0,120}\b(?:not (?:be )?(?:permitted|allowed)|(?<!\bnot\s)(?<!n't\s)(?<!\bno longer\s)(?:prohibited|forbidden)|not be used)\b/i.test(t)
+      || /\b(?:not (?:be )?(?:permitted|allowed)|prohibited|forbidden|may not use|do not use|must not use)\b[^.\n]{0,80}\b(?:ai|artificial intelligence|chatgpt|copilot)\b/i.test(t) },
+  { key: 'recorded', test: t => /\b(?:will|may) be (?:audio[- ]?|video[- ]?)?recorded\b|\bwe (?:will|may) record\b|\bthis (?:interview|call|session|meeting) is (?:being )?recorded\b/i.test(t) },
+  { key: 'no-recording', test: t => /\b(?:recording|recordings)\b[^.\n]{0,60}\b(?:not (?:be )?(?:permitted|allowed)|prohibited)\b|\b(?:do not|don't|may not|must not) (?:record|screenshot)\b|\bno recording\b/i.test(t) },
+  { key: 'camera-required', test: t => /\bcamera\b[^.\n]{0,40}\b(?:(?<!\bnot\s)(?<!n't\s)(?<!\bno longer\s)(?:required|mandatory)|must be on|on throughout)\b|\b(?:required|must|please) (?:to )?(?:have|keep|turn on|enable)\b[^.\n]{0,30}\b(?:camera|video on)\b|\bvideo (?:must be|required)\b/i.test(t) },
+  { key: 'test-link', test: t => /\b(?:test|check|try)\b[^.\n]{0,40}\b(?:link|connection|audio|video|setup)\b[^.\n]{0,40}\b(?:before(?:hand)?|ahead of|in advance|prior to)\b/i.test(t) },
+  { key: 'id-required', test: t => /\b(?:photo |government[- ]issued |valid )?(?:id|identification)\b[^.\n]{0,40}\b(?:(?<!\bnot\s)(?<!n't\s)(?<!\bno longer\s)required|must|will be (?:checked|verified|requested))\b|\b(?:bring|have|present|show)\b[^.\n]{0,40}\b(?:photo id|government[- ]issued id|identification)\b/i.test(t) },
+];
+
+// Untitled list: "with Jordan Reyes and Sam Ito" / "with A B, C D and E F".
+// Product and platform words are not interviewers.
+const PANEL_UNTITLED = new RegExp(`\\bwith\\s+(${NAME}(?:\\s*,\\s*(?:and\\s+)?|\\s+and\\s+|\\s*&\\s*)${NAME}(?:(?:\\s*,\\s*(?:and\\s+)?|\\s+and\\s+|\\s*&\\s*)${NAME})*)`, 'u');
+const NOT_A_PERSON = /\b(?:teams|zoom|google|meet|microsoft|webex|skype|outlook|calendar|link|phone|video|camera|team|hr|recruiter|us|me)\b/i;
+function extractPanel(text) {
+  const m = text.match(PANEL_LINE);
+  if (m) {
+    const people = m[1].replace(/[.\s]+$/, '').split(PANEL_SPLIT).map(p => p.trim()).filter(Boolean);
+    if (people.length >= 2) return people.map(p => p.split(PANEL_DASH)[0].trim());
+  }
+  const u = text.match(PANEL_UNTITLED);
+  if (!u) return null;
+  const names = u[1].split(/\s*,\s*(?:and\s+)?|\s+and\s+|\s*&\s*/).map(n => n.replace(/[.\s]+$/, '').trim()).filter(Boolean);
+  if (names.length < 2 || names.some(n => NOT_A_PERSON.test(n))) return null;
+  return names;
+}
+
+/**
+ * Extract the interview's rules from pasted invite text by phrase matching.
+ * Returns an array of `{key, tag, detail?}` in a fixed order. Keys: no-ai,
+ * recorded, no-recording, camera-required, test-link, id-required, panel
+ * (detail = names), length-not-stated. Empty/non-string input returns [];
+ * `length-not-stated` is only added when the text is non-empty and reads like
+ * an invite (so unrelated text does not gain a spurious constraint).
+ *
+ * @param {string} text
+ * @returns {Array<{key: string, tag: string, detail?: string}>}
+ */
+export function extractConstraints(text) {
+  if (!text || typeof text !== 'string') return [];
+  const out = [];
+  const add = (key, detail) => out.push({ key, tag: `[constraint:${key}]`, ...(detail ? { detail } : {}) });
+  for (const { key, test } of CONSTRAINT_DETECTORS) if (test(text)) add(key);
+  const panel = extractPanel(text);
+  if (panel) add('panel', panel.join('; '));
+  if (classifyEmail(text).classification === 'invite' && !statesDuration(text)) add('length-not-stated');
+  return out;
+}
+
 // --- Tracker loading ---
 function loadTracker(appsFile = APPS_FILE) {
   if (!existsSync(appsFile)) return [];
@@ -734,6 +819,150 @@ export function matchInvite(signals, trackerRows) {
   return scored;
 }
 
+// --- Pre-interview clarification draft (#6092) ---
+
+// Locale-keyed so a market mode can add its own wording later; English only for
+// now. Placeholders are literal bracketed text the candidate fills in.
+const CLARIFICATION_TEMPLATES = {
+  en: {
+    subject: (company, role) => `Questions ahead of the ${role} interview at ${company}`,
+    greeting: name => (name ? `Hello ${name},` : 'Hello,'),
+    intro: (company, role) =>
+      `Thank you for the invitation to interview for the ${role} position at ${company}. I am looking forward to it, and I would like to prepare well. Could you share a few details beforehand?`,
+    questions: [
+      'Who does this role report to?',
+      'What are the main deliverables expected in the first three months?',
+      'Is the posting the full scope of the role, or are there responsibilities beyond what it lists?',
+    ],
+    closing: 'Thank you, and I look forward to speaking with you.',
+    signoff: 'Best regards,\n[Your name]',
+  },
+};
+const PLACEHOLDER_COMPANY = '[company]';
+const PLACEHOLDER_ROLE = '[role]';
+
+const REPORTING_LINE_STATED = /\b(?:reports?\s+(?:directly\s+)?to|reporting\s+(?:line|to|structure)|you\s+will\s+report|will\s+report\s+to)\b/i;
+const DELIVERABLES_STATED = /\b(?:deliverables?|first\s+(?:three|3|90|ninety)\s+(?:months?|days?)|first\s+(?:quarter|90\s*days)|key\s+responsibilities|responsibilities\s+(?:include|are)|you\s+will\s+be\s+responsible)\b/i;
+
+// Text that came from the invite is untrusted: only ever let a short, plain
+// name through, never anything carrying a link, address, or line break.
+function safeName(value, maxLen) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > maxLen) return null;
+  if (!/^[\p{L}][\p{L}0-9 '&.,-]*$/u.test(v)) return null;
+  if (/https?|www\.|@/i.test(v)) return null;
+  return v;
+}
+
+// Tracker cells are the user's own data, so they get a wider allowlist than
+// invite-derived text (parentheses, slashes, digits, combining marks), with the
+// same hard stops: length, control characters, links and addresses.
+const TRACKER_NAME_RE = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} '&.,()+\/#:;\u{2019}\u{2013}\u{2014}-]*$/u;
+function safeTrackerName(value, maxLen) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > maxLen) return null;
+  if (/[\p{Cc}\u{2028}\u{2029}]/u.test(v)) return null;
+  if (!TRACKER_NAME_RE.test(v) || /https?|www\.|@/i.test(v)) return null;
+  return v;
+}
+
+// A contact name is used only when the invite names one in a place a sender
+// belongs: a From: line, or a sign-off followed by a name line. First name only.
+function extractContactName(text) {
+  const NAME_ONLY = /^[\p{Lu}][\p{L}'.-]*(?:\s+[\p{Lu}][\p{L}'.-]*){0,2}$/u;
+  // Sender labels that name a team or organisation, not a person. Deliberately
+  // not NOT_A_PERSON, whose "link" would reject real surnames.
+  const NOT_A_CONTACT = /\b(?:careers?|recruit(?:er|ers|ing|ment)|talent|hiring|resources|team|support|notifications?|hr|staffing)\b/i;
+  const firstName = raw => {
+    const t = raw.trim();
+    if (!NAME_ONLY.test(t) || NOT_A_CONTACT.test(t)) return null;
+    return safeName(t, 40)?.split(/\s+/)[0] ?? null;
+  };
+  const from = text.match(/^\s*from\s*:\s*([^\n<]+?)\s*(?:<[^>\n]*>)?\s*$/im);
+  const fromName = from ? firstName(from[1]) : null;
+  if (fromName) return fromName;
+  // A rejected From: label (e.g. a team) falls through to the sign-off.
+  const sign = text.match(/\n\s*(?:best(?: regards)?|kind regards|regards|thanks|thank you|sincerely|cheers)\s*,?\s*\n\s*([^\n]+)\s*(?:\n|$)/i);
+  return sign ? firstName(sign[1]) : null;
+}
+
+// The report cell is a markdown link; resolve it against each root in turn.
+// Reads only local .md files that stay inside one of those roots.
+function readReportHeader(reportCell, roots) {
+  const href = typeof reportCell === 'string' ? reportCell.match(/\]\(([^)\s]+)\)/)?.[1] : null;
+  if (!href || !href.toLowerCase().endsWith('.md') || /^[a-z]+:/i.test(href)) return '';
+  for (const root of roots) {
+    const full = resolve(root, href);
+    const rel = relative(root, full);
+    if (rel.startsWith('..') || isAbsolute(rel)) continue;
+    try {
+      if (existsSync(full)) return readFileSync(full, 'utf-8').split('\n').slice(0, 40).join('\n');
+    } catch { /* unreadable report: treat as no record */ }
+  }
+  return '';
+}
+
+/**
+ * Build the pre-interview clarification email draft (subject + body) for an
+ * invite-classified analysis. Pure and offline: reads only the analysis, the
+ * invite text, and (optionally) the matched row's report header. Never sends.
+ *
+ * Company/role come from the tracker row only when exactly one candidate
+ * matched with an exact company-name match; otherwise the role is left as a
+ * `[role]` placeholder rather than guessed.
+ *
+ * @param {object} analysis - Result of analyzeInvite (before clarificationDraft is added).
+ * @param {string} text - The pasted invite text.
+ * @param {{row?: object|null, readReport?: (row: object) => string, lang?: string}} [options]
+ * @returns {{subject: string|null, body: string|null, skipped: boolean, skipReason: string|null}|null}
+ */
+export function buildClarificationDraft(analysis, text, options = {}) {
+  if (!analysis || analysis.classification !== 'invite') return null;
+  const tpl = CLARIFICATION_TEMPLATES[options.lang] || CLARIFICATION_TEMPLATES.en;
+  const skip = reason => ({ subject: null, body: null, skipped: true, skipReason: reason });
+  const invite = typeof text === 'string' ? text : '';
+
+  const candidates = analysis.candidates || [];
+  const confident = candidates.length === 1 && candidates[0].nameScore === 1 ? candidates[0] : null;
+
+  if (confident && options.row) {
+    const row = options.row;
+    if (REPORTING_LINE_STATED.test(row.notes || '')) {
+      return skip(`tracker row #${row.num} notes already record a reporting line`);
+    }
+    const header = options.readReport ? options.readReport(row) : '';
+    if (REPORTING_LINE_STATED.test(header)) {
+      return skip(`report for tracker row #${row.num} already records a reporting line`);
+    }
+  }
+  if (REPORTING_LINE_STATED.test(invite) && DELIVERABLES_STATED.test(invite)) {
+    return skip('the invite already states the reporting line and deliverables');
+  }
+
+  let company = null;
+  let role = null;
+  if (confident) {
+    company = safeTrackerName(confident.company, 60);
+    role = safeTrackerName(confident.role, 80);
+  } else {
+    // No tracker fallback outside an exact single match.
+    company = safeName(analysis.signals?.company, 60);
+  }
+  company = company || PLACEHOLDER_COMPANY;
+  role = role || PLACEHOLDER_ROLE;
+
+  const lines = [
+    tpl.greeting(extractContactName(invite)), '',
+    tpl.intro(company, role), '',
+    ...tpl.questions.map((q, i) => `${i + 1}. ${q}`), '',
+    tpl.closing, '',
+    tpl.signoff,
+  ];
+  return { subject: tpl.subject(company, role), body: lines.join('\n'), skipped: false, skipReason: null };
+}
+
 /**
  * End-to-end: parse invite text, load the tracker, return ranked candidates
  * plus the signals that were extracted (so the caller/CLI can show what was
@@ -741,9 +970,10 @@ export function matchInvite(signals, trackerRows) {
  *
  * @param {string} text - Raw invite/rejection email text.
  * @param {Array<object>} [trackerRows] - Injectable for tests; defaults to loadTracker().
- * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>}}
+ * @param {{clarificationDraft?: boolean, readReport?: (row: object) => string}} [options] - clarificationDraft:false suppresses the draft (`--no-clarification-draft`); readReport is injectable for tests.
+ * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>, constraints: Array<{key: string, tag: string, detail?: string}>, clarificationDraft: object|null}}
  */
-export function analyzeInvite(text, trackerRows = null) {
+export function analyzeInvite(text, trackerRows = null, options = {}) {
   const signals = {
     company: extractCompany(text),
     date: extractDate(text),
@@ -754,10 +984,23 @@ export function analyzeInvite(text, trackerRows = null) {
     // unaffected.
     isAIInterviewer: isAIInterviewerPlatform(text),
   };
+  // Additive (#5732): top-level so every existing key keeps its shape.
+  const constraints = extractConstraints(text);
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
   const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
-  return { signals, classification, matchedPhrases, phraseStrength, candidates };
+  const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
+  // Additive (#6092): appended last so every existing key keeps its position.
+  // null unless the text is an invite and the draft was not suppressed.
+  let clarificationDraft = null;
+  if (options.clarificationDraft !== false) {
+    const row = candidates.length === 1 ? rows.find(r => r.num === candidates[0].appNumber) : null;
+    clarificationDraft = buildClarificationDraft(result, text, {
+      row,
+      readReport: options.readReport ?? (r => readReportHeader(r.report, [dirname(APPS_FILE), CAREER_OPS])),
+    });
+  }
+  return { ...result, clarificationDraft };
 }
 
 /**
@@ -871,6 +1114,18 @@ export function selectApplyTarget(result, idArg) {
 }
 
 // --- Summary mode ---
+function printClarificationDraft(draft) {
+  if (!draft) return;
+  if (draft.skipped) {
+    console.log(`  Clarification draft: skipped (${draft.skipReason})\n`);
+    return;
+  }
+  console.log('  Clarification draft (not sent -- review before sending):');
+  console.log(`  Subject: ${draft.subject}`);
+  for (const line of draft.body.split('\n')) console.log(`    ${line}`);
+  console.log('');
+}
+
 function printSummary(result) {
   console.log(`\n${'='.repeat(70)}`);
   console.log('  Interview Invite / Rejection Matcher — career-ops');
@@ -881,7 +1136,14 @@ function printSummary(result) {
   console.log(`  Extracted company:  ${result.signals.company || '(not found)'}`);
   console.log(`  Extracted date:     ${result.signals.date || '(not found)'}`);
   console.log(`  Extracted req ID:   ${result.signals.reqId || '(not found)'}`);
-  console.log(`  Extracted platform: ${result.signals.platform || '(not found)'}\n`);
+  console.log(`  Extracted platform: ${result.signals.platform || '(not found)'}`);
+  const constraints = result.constraints || [];
+  console.log(`  Constraints:        ${constraints.length ? constraints.map(c => c.tag + (c.detail ? ` (${c.detail})` : '')).join(' ') : '(none)'}`);
+  if (constraints.some(c => c.key === 'length-not-stated')) {
+    console.log('  Length not stated -- mark the calendar block as a guess.');
+  }
+  console.log('');
+  printClarificationDraft(result.clarificationDraft);
 
   if (!result.signals.company) {
     console.log('  Could not find a company name in the invite text — paste more context or check manually.\n');
@@ -957,7 +1219,7 @@ if (isMainModule(import.meta.url)) {
       text = readFileSync(0, 'utf-8'); // stdin
     }
 
-    const result = analyzeInvite(text);
+    const result = analyzeInvite(text, null, { clarificationDraft: !noClarificationDraft });
 
     if (applyMode) {
       // Scoped strictly to the Rejected transition (#2098) — never applies

@@ -6,11 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.INBOX_UNDO_TEST_URL;
 const root = process.env.INBOX_UNDO_TEST_ROOT;
 
-test("Inbox Undo remains retryable after failure", { skip: !url || !root, timeout: 120_000 }, async (t) => {
+test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX_UNDO_TEST_URL", "INBOX_UNDO_TEST_ROOT"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const relative = path.relative(os.tmpdir(), fs.realpathSync(root));

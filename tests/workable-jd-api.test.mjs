@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { normalizeWorkableJob, fetchJdViaKnownApi, JD_FETCHERS } from '../browser-extract.mjs';
 import { JD_TEXT_API_ATS } from '../liveness-api.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const FULL = 'https://apply.workable.com/fictional-employer/j/FIXTURE123/';
 const SHORT = 'https://apply.workable.com/j/FIXTURE123';
@@ -125,16 +126,16 @@ test('real CLIs use shared API dispatch: success and silent fetch-jd miss', () =
       { cwd: root, encoding: 'utf8', timeout: 10000, env: { ...process.env, FIXTURE_MISS: miss ? '1' : '' } });
     for (const url of [FULL, SHORT]) {
       const result = run('fetch-jd.mjs', [url]);
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, describeSpawn(result));
       assert.match(result.stdout, /Fixture & Engineer/);
       assert.match(result.stdout, /REQUIREMENTS_MARKER/);
       assert.match(result.stdout, /BENEFITS_MARKER/);
       const miss = run('fetch-jd.mjs', [url], true);
-      assert.equal(miss.status, 1);
+      assert.equal(miss.status, 1, describeSpawn(miss));
       assert.equal(miss.stdout, '');
       assert.equal(miss.stderr, '');
       const interactive = run('browser-extract.mjs', [url, '--mode', 'jd']);
-      assert.equal(interactive.status, 0, interactive.stderr);
+      assert.equal(interactive.status, 0, describeSpawn(interactive));
       assert.match(JSON.parse(interactive.stdout).text, /REQUIREMENTS_MARKER/);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }

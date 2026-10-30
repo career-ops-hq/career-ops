@@ -381,7 +381,14 @@ export function trackerRowIdentity(row) {
 // `Ref R2857957`. The label is required so we don't grab an unrelated number
 // (a salary figure, a date fragment) — only text explicitly tagged as a
 // req/job/posting/reference id counts.
-export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+//
+// One id-parameter name may sit between the label and the id (`job id gh_jid
+// 1234567`, where `gh_jid` is the Greenhouse parameter the id came from). The id
+// must contain a digit, so without this skip the parameter name ended the match
+// and the row lost its req id. Only named id parameters are skipped, never any
+// snake_case word: `job posted_at 2026-10-01` must not read the date as an id,
+// since two rows with different dates would then block a legitimate merge.
+export const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)(?:[\s:#-]+(?:gh_jid|(?:job|req|requisition|posting)_id)(?=[\s:#-]))?[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
 
 /**
  * Extract a req/job/posting number from a tracker Notes cell, if present.
@@ -790,11 +797,31 @@ export function normalizeTextKey(value, separator = '') {
  * `**URL:**` token. Punctuation first: `<https://…/job>,` must become the bare
  * URL, not `https://…/job>` (angle-first leaves the `>` when a comma follows).
  *
+ * A trailing `)` is stripped only while the token has more `)` than `(`. One
+ * that closes a `(` inside the URL is part of it: `…/eng-(remote)` must not
+ * become `…/eng-(remote`, which keys differently from the same posting's URL
+ * carried verbatim in a TSV and splits one posting into two tracker rows. The
+ * `)` of a wrapping `(see https://…/job)` has no partner and is still dropped.
+ *
  * @param {string} token
  * @returns {string}
  */
 export function unwrapReportUrlToken(token) {
-  return String(token).replace(/[),.;]+$/, '').replace(/^<|>$/g, '');
+  let url = String(token);
+  let depth = 0;
+  for (const ch of url) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+  }
+  for (;;) {
+    const last = url.at(-1);
+    if (last === ',' || last === '.' || last === ';') url = url.slice(0, -1);
+    else if (last === ')' && depth < 0) {
+      url = url.slice(0, -1);
+      depth++;
+    } else break;
+  }
+  return url.replace(/^<|>$/g, '');
 }
 
 /**
