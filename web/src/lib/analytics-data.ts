@@ -1,5 +1,6 @@
 import { parseReport } from "@/lib/format";
 import { readReport, type Application } from "@/lib/career-ops";
+import { machineSummarySection } from "@/lib/machine-summary-section.mjs";
 
 export type AnalyticsApplication = Application & {
   archetype: string;
@@ -78,7 +79,7 @@ function fallbackLocation(text: string): string {
 
 function reportArchetype(content: string, fallbackArchetype: string): string {
   const meta = parseReport(content);
-  const machine = content.match(/##\s+Machine Summary[\s\S]*?```(?:yaml)?\s*([\s\S]*?)```/i)?.[1] ?? content;
+  const machine = machineSummarySection(content).match(/^##\s+Machine Summary[\s\S]*?```(?:yaml)?\s*([\s\S]*?)```/i)?.[1] ?? content;
   const archetypeTable = content.match(/\*\*(?:Archetype detected|Archetype)\*\*\s*\|\s*([^|\n]+)/i)?.[1]?.replace(/\*+/g, "").trim() ?? "";
   return scalar(machine, "archetype_primary") || scalar(machine, "archetype") || archetypeTable || meta.fields.find((field) => field.label === "Archetype")?.value || fallbackArchetype;
 }
