@@ -1,5 +1,5 @@
 import { parseReport } from "@/lib/format";
-import { readReport, type Application } from "@/lib/career-ops";
+import { requestReportReader, type Application } from "@/lib/career-ops";
 
 export type AnalyticsApplication = Application & {
   archetype: string;
@@ -104,11 +104,8 @@ export function enrichAnalyticsApplication(app: Application, reportContent = "")
   };
 }
 
-function fromApplication(app: Application): AnalyticsApplication {
-  return enrichAnalyticsApplication(app, readReport(app.n)?.content ?? "");
-}
-
 /** Read-only enrichment of tracker rows for Analytics. */
 export function analyticsApplications(applications: Application[]): AnalyticsApplication[] {
-  return applications.map(fromApplication);
+  const readReport = requestReportReader();
+  return applications.map((app) => enrichAnalyticsApplication(app, readReport(app)?.content ?? ""));
 }
