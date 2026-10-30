@@ -241,6 +241,14 @@ cv:
   # cv.md stays the source of truth: the section-order guard still compares the
   # rendered CV against it, and still fails if they disagree.
   # sections: [skills, education, certifications, awards]
+  #
+  # (Optional) Page budget for every rendered CV PDF (#6326). Without it a CV
+  # may run to 2 pages, with a warning past that. Students, new graduates and
+  # early-career candidates usually want 1. strict_pages: true turns an
+  # overflow into a failed render instead of a warning. A --max-pages or
+  # --strict-pages flag on generate-pdf.mjs still wins for a single render.
+  # max_pages: 1
+  # strict_pages: true
 
   # Sections that the AI must never remove, shorten, or paraphrase during CV generation or tailoring.
   # (Enforced programmatically in HTML/PDF pipeline via build-cv-html and generate-pdf; LaTeX pipeline is not covered yet.)

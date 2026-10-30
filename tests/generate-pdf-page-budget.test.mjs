@@ -290,6 +290,87 @@ try {
     fail(`generate-pdf strict page budget regressed: ${strictOverflow.output.trim()}`);
   }
 
+  // #6326: with no flag, cv.max_pages / cv.strict_pages in config/profile.yml set
+  // the budget, so a one-page preference holds on every render path. Each case
+  // writes its own profile and points CAREER_OPS_PROFILE at it.
+  const profileDir = join(sandbox, 'profiles');
+  mkdirSync(profileDir, { recursive: true });
+  const withProfile = (name, cvBlock) => {
+    const path = join(profileDir, `${name}.yml`);
+    writeFileSync(path, `name: Test Candidate\ncv:\n${cvBlock}`, 'utf-8');
+    return { CAREER_OPS_PROFILE: path };
+  };
+
+  const profileStrictPdf = join(sandbox, 'profile-strict.pdf');
+  const manifestBeforeProfileStrict = readFileSync(manifest, 'utf-8');
+  const profileStrict = runPdf([input, profileStrictPdf],
+    withProfile('strict-one-page', '  max_pages: 1\n  strict_pages: true\n'));
+  if (
+    profileStrict.status !== 0 &&
+    profileStrict.output.includes('📐 Page budget: 1 (strict) — cv.max_pages and cv.strict_pages from config/profile.yml') &&
+    profileStrict.output.includes('CV is 2 pages') &&
+    !profileStrict.output.includes('✅ PDF generated') &&
+    readFileSync(manifest, 'utf-8') === manifestBeforeProfileStrict
+  ) {
+    pass('generate-pdf takes a strict one-page budget from config/profile.yml when no flag is passed');
+  } else {
+    fail(`generate-pdf ignored cv.max_pages / cv.strict_pages in the profile: ${profileStrict.output.trim()}`);
+  }
+
+  const profileWarnPdf = join(sandbox, 'profile-warn.pdf');
+  const profileWarn = runPdf([input, profileWarnPdf], withProfile('warn-one-page', '  max_pages: "1"\n'));
+  if (
+    profileWarn.status === 0 &&
+    profileWarn.output.includes('📐 Page budget: 1 (warning only) — cv.max_pages from config/profile.yml') &&
+    profileWarn.output.includes('CV is 2 pages') &&
+    manifestHasPdf(profileWarnPdf)
+  ) {
+    pass('a profile max_pages without strict_pages warns on overflow and still indexes the PDF (quoted "1" accepted)');
+  } else {
+    fail(`a warn-only profile budget regressed: ${profileWarn.output.trim()}`);
+  }
+
+  const flagWinsPdf = join(sandbox, 'flag-wins.pdf');
+  const flagWins = runPdf([input, flagWinsPdf, '--max-pages=2'],
+    withProfile('flag-wins', '  max_pages: 1\n  strict_pages: true\n'));
+  if (
+    flagWins.status === 0 &&
+    flagWins.output.includes('📐 Page budget: 2 (strict) — cv.strict_pages from config/profile.yml') &&
+    manifestHasPdf(flagWinsPdf)
+  ) {
+    pass('a --max-pages flag outranks cv.max_pages for that render');
+  } else {
+    fail(`--max-pages did not outrank cv.max_pages: ${flagWins.output.trim()}`);
+  }
+
+  const coverLetterPdf = join(sandbox, 'cover-letter.pdf');
+  const coverLetter = runPdf([input, coverLetterPdf, '--kind=cover'],
+    withProfile('cover-untouched', '  max_pages: 1\n  strict_pages: true\n'));
+  if (
+    coverLetter.status === 0 &&
+    coverLetter.output.includes('📐 Page budget: 2 (warning only)\n') &&
+    existsSync(coverLetterPdf)
+  ) {
+    pass('cv.max_pages / cv.strict_pages leave a cover letter on the default budget');
+  } else {
+    fail(`a cover letter picked up the CV page budget from the profile: ${coverLetter.output.trim()}`);
+  }
+
+  const invalidProfilePdf = join(sandbox, 'invalid-profile.pdf');
+  const invalidProfile = runPdf([input, invalidProfilePdf],
+    withProfile('invalid', '  max_pages: 0\n  strict_pages: "yes"\n'));
+  if (
+    invalidProfile.status === 0 &&
+    invalidProfile.output.includes('config/profile.yml cv.max_pages "0" is not a positive integer — ignoring it.') &&
+    invalidProfile.output.includes('config/profile.yml cv.strict_pages "yes" is not true or false — ignoring it.') &&
+    invalidProfile.output.includes('📐 Page budget: 2 (warning only)\n') &&
+    manifestHasPdf(invalidProfilePdf)
+  ) {
+    pass('an unusable cv.max_pages / cv.strict_pages is named and ignored, never fatal');
+  } else {
+    fail(`an invalid profile page budget was not reported and ignored: ${invalidProfile.output.trim()}`);
+  }
+
   // A redirected tracker defines a separate workspace. The renderer must allow
   // output there and honor an explicit manifest path instead of writing beside
   // the installed script.

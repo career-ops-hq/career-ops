@@ -48,6 +48,10 @@ it means the job description text of two listings from **different companies** i
 
 Yes. Set `cv.template` (and/or `cover_letter.template`) in `config/profile.yml` to the kebab-case name of a template file in `templates/` — a value of `modern` resolves to `templates/cv-template.modern.html` (cover letters use `templates/cover-letter-template.<name>.html`). Leave the field unset and career-ops falls back to the built-in default template (`templates/cv-template.html`). You can also pick a template per generation just by asking (e.g. "use the modern template"). See the commented `cv.template` / `cover_letter.template` fields in `config/profile.example.yml` for the full reference.
 
+## Can every CV be one page?
+
+Yes. Set `cv.max_pages: 1` in `config/profile.yml`, and add `cv.strict_pages: true` if a CV that runs over should fail instead of only warning. Every CV render then uses that budget: the `pdf` mode, auto-pipeline, batch workers and the web UI. A cover letter keeps the default. Students, new graduates and early-career candidates usually want this. Without the setting a CV may run to 2 pages, with a warning past that. A `--max-pages` or `--strict-pages` flag on `generate-pdf.mjs` still wins for a single render.
+
 ## Why does career-ops refuse to use a number from my story bank?
 
 Because a plausible number is not necessarily a verified one. Interview-prep documents are often drafted to match a particular job description, and their phrasing can later be absorbed into `interview-prep/story-bank.md`. Without a provenance check, a figure invented in one prep session can be repeated in the next, gradually turning into an apparent fact.

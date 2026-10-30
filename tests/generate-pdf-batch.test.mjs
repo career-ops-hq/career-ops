@@ -322,6 +322,31 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     fail(`all-success batch did not exit clean: status=${okBatch.status}\n${okBatch.output.trim()}`);
   }
 
+  // --- Test 3b (#6326): cv.max_pages / cv.strict_pages reach batch CV entries,
+  // the path batch workers use, and leave a cover letter on the default budget.
+  // The stub renders every document at 2 pages.
+  const budgetProfile = join(sandbox, 'budget-profile.yml');
+  writeFileSync(budgetProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n  strict_pages: true\n', 'utf-8');
+  const budgetManifest = join(sandbox, 'budget-batch.json');
+  writeFileSync(budgetManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/budget-cv.pdf', kind: 'cv' },
+    { input: 'c.html', output: 'out/budget-cover.pdf', kind: 'cover' },
+  ]), 'utf-8');
+  const budgetBatch = run([`--batch=${budgetManifest}`], { env: { CAREER_OPS_PROFILE: budgetProfile } });
+  let budgetResults = null;
+  try { budgetResults = JSON.parse(readFileSync(`${budgetManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    budgetBatch.status === 1 &&
+    Array.isArray(budgetResults) && budgetResults.length === 2 &&
+    budgetResults[0].ok === false && /allowed maximum is 1 page/.test(budgetResults[0].error || '') &&
+    budgetResults[1].ok === true &&
+    budgetBatch.output.includes('1 ok, 1 failed')
+  ) {
+    pass('a batch CV entry takes the profile page budget and a cover letter keeps the default');
+  } else {
+    fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
+  }
+
   // --- Test 4: a shared-browser launch failure yields a complete failed
   // manifest and exit 1, never an uncaught throw that skips the manifest ---
   const failManifest = join(sandbox, 'launchfail.json');

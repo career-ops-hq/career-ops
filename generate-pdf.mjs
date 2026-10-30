@@ -46,7 +46,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
-import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections } from './theme-style.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections, readCvPageBudget } from './theme-style.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -1711,7 +1711,7 @@ async function generatePDF() {
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
   let inputPath, outputPath, format = null, country = null, reportNum = '', allowReorder = false, allowNonChronological = false;
-  let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
+  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
@@ -1746,6 +1746,7 @@ async function generatePDF() {
     } else if (arg.startsWith('--batch=')) {
       batchManifestPath = arg.slice('--batch='.length);
     } else if (arg.startsWith('--max-pages=')) {
+      maxPagesSupplied = true;
       maxPagesInput = arg.slice('--max-pages='.length);
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
@@ -1786,6 +1787,15 @@ async function generatePDF() {
     process.exit(1);
   }
 
+  // #6326: cv.max_pages / cv.strict_pages in config/profile.yml, applied per
+  // document by pageBudgetFor(). Read once here so an unusable key is named
+  // once, not once per batch entry.
+  const flagBudget = { maxPages, maxPagesSupplied, strictPages };
+  const profileBudget = readCvPageBudget(workspaceProfilePath());
+  for (const problem of profileBudget.invalid || []) {
+    console.warn(`⚠️  config/profile.yml ${problem} — ignoring it.`);
+  }
+
   // Resolve the format before the batch branch, so a batch and a single render
   // inherit the same configured size and a bad --format fails the same way in
   // both. An explicit flag is still rejected loudly: falling through to the
@@ -1816,7 +1826,8 @@ async function generatePDF() {
 
   // Batch mode (#2384): render every document in the manifest through one
   // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
-  // --allow-nonchronological to all entries; each entry supplies its own
+  // --allow-nonchronological to all entries (a CV entry with no page flag
+  // takes the profile's cv.max_pages/cv.strict_pages, #6326); each entry supplies its own
   // input/output and may override format/reportNum. Takes no positional
   // input/output.
   if (batchManifestPath) {
@@ -1837,7 +1848,7 @@ async function generatePDF() {
       console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, maxPages, strictPages, allowReorder, allowNonChronological, skipFactCheck });
+    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck });
   }
 
   if (!inputPath || !outputPath) {
@@ -1897,7 +1908,9 @@ async function generatePDF() {
   console.log(`📄 Input:  ${inputPath}`);
   console.log(`📁 Output: ${outputPath}`);
   console.log(`📏 Format: ${format.toUpperCase()}`);
-  console.log(`📐 Page budget: ${maxPages}${strictPages ? ' (strict)' : ' (warning only)'}`);
+  const budget = pageBudgetFor(resolveArtifactKind(kindFlag, outputPath).kind, flagBudget, profileBudget);
+  const budgetSource = budget.fromProfile.length > 0 ? ` — ${budget.fromProfile.join(' and ')} from config/profile.yml` : '';
+  console.log(`📐 Page budget: ${budget.maxPages}${budget.strictPages ? ' (strict)' : ' (warning only)'}${budgetSource}`);
 
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
@@ -1951,10 +1964,37 @@ async function generatePDF() {
     reportNum,
     kind: kindFlag,
     inputPath,
-    maxPages,
-    strictPages,
+    maxPages: budget.maxPages,
+    strictPages: budget.strictPages,
     styleTokens: readStyleTokens(workspaceProfilePath()),
   });
+}
+
+/**
+ * The page budget for one document (#6326). A flag always wins. With none, a
+ * CV takes cv.max_pages / cv.strict_pages from config/profile.yml, so a
+ * one-page preference holds on every render path: agents, batch workers and
+ * the web UI all spawn this CLI, and none of them could remember the flag. A
+ * cover letter keeps the flag-or-default budget, since a cv.* key says nothing
+ * about it. Exported for tests.
+ *
+ * @param {string|null} kind - From resolveArtifactKind().
+ * @param {{maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}} flags
+ * @param {{maxPages?: number, strictPages?: boolean}} profile - From readCvPageBudget().
+ * @returns {{maxPages: number, strictPages: boolean, fromProfile: string[]}}
+ */
+export function pageBudgetFor(kind, flags, profile = {}) {
+  const budget = { maxPages: flags.maxPages, strictPages: flags.strictPages, fromProfile: [] };
+  if (kind !== 'cv') return budget;
+  if (!flags.maxPagesSupplied && profile.maxPages !== undefined) {
+    budget.maxPages = profile.maxPages;
+    budget.fromProfile.push('cv.max_pages');
+  }
+  if (!flags.strictPages && profile.strictPages === true) {
+    budget.strictPages = true;
+    budget.fromProfile.push('cv.strict_pages');
+  }
+  return budget;
 }
 
 /**
@@ -1974,7 +2014,7 @@ async function generatePDF() {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, flagFormat?: string|null, country?: string|null, maxPages: number, strictPages: boolean, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean}} globals
+ * @param {{format: string, flagFormat?: string|null, country?: string|null, flagBudget: {maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}, profileBudget: {maxPages?: number, strictPages?: boolean}, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -2102,6 +2142,7 @@ async function runBatchFromManifest(manifestPath, globals) {
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
       if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput));
+      const entryBudget = pageBudgetFor(resolveArtifactKind(entryKind, entryOutput).kind, globals.flagBudget, globals.profileBudget);
 
       entries.push({
         _idx: i,
@@ -2112,8 +2153,8 @@ async function runBatchFromManifest(manifestPath, globals) {
         reportNum: entryReport,
         kind: entryKind,
         inputPath: entryInput,
-        maxPages: globals.maxPages,
-        strictPages: globals.strictPages,
+        maxPages: entryBudget.maxPages,
+        strictPages: entryBudget.strictPages,
         styleTokens,
       });
     } catch (err) {
