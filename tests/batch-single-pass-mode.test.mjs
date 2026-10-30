@@ -181,12 +181,23 @@ try {
 
 
 // ── Test 3e: Verbatim JD archival in generated reports ────────────────────────
+// processOffer() reserves the report number in a child process
+// (reserve-report-num.mjs), which does not see the PATHS overrides. Point it at
+// the temp dir through its env vars too, so the test never touches the real
+// reports/, batch/batch-state.tsv or the tracker lock.
+const mockWork = mkdtempSync(join(tmpdir(), 'cops-jdarchive-'));
+const oldReports = PATHS.reports;
+const oldAdditions = PATHS.trackerAdditions;
+const oldReportsEnv = process.env.CAREER_OPS_REPORTS_DIR;
+const oldBatchStateEnv = process.env.CAREER_OPS_BATCH_STATE;
+const oldTrackerEnv = process.env.CAREER_OPS_TRACKER;
 try {
-  const mockWork = mkdtempSync(join(tmpdir(), 'cops-jdarchive-'));
-  const oldReports = PATHS.reports;
-  const oldAdditions = PATHS.trackerAdditions;
   PATHS.reports = join(mockWork, 'reports');
   PATHS.trackerAdditions = join(mockWork, 'tracker-additions');
+  mkdirSync(PATHS.reports, { recursive: true });
+  process.env.CAREER_OPS_REPORTS_DIR = PATHS.reports;
+  process.env.CAREER_OPS_BATCH_STATE = join(mockWork, 'batch-state.tsv');
+  process.env.CAREER_OPS_TRACKER = join(mockWork, 'applications.md');
 
   const rawJd = 'Verbatim Job Description: Software Engineer at Acme Corp. Must know Node.js, distributed systems, and CI/CD pipelines.';
   const mockBrowser = {
@@ -226,12 +237,18 @@ LEGITIMACY: High Confidence
   } else {
     fail('processOffer failed to write report file for JD archive test');
   }
-
-  PATHS.reports = oldReports;
-  PATHS.trackerAdditions = oldAdditions;
-  rmSync(mockWork, { recursive: true, force: true });
 } catch (err) {
   fail(`verbatim JD archival test threw: ${err.message}`);
+} finally {
+  PATHS.reports = oldReports;
+  PATHS.trackerAdditions = oldAdditions;
+  if (oldReportsEnv === undefined) delete process.env.CAREER_OPS_REPORTS_DIR;
+  else process.env.CAREER_OPS_REPORTS_DIR = oldReportsEnv;
+  if (oldBatchStateEnv === undefined) delete process.env.CAREER_OPS_BATCH_STATE;
+  else process.env.CAREER_OPS_BATCH_STATE = oldBatchStateEnv;
+  if (oldTrackerEnv === undefined) delete process.env.CAREER_OPS_TRACKER;
+  else process.env.CAREER_OPS_TRACKER = oldTrackerEnv;
+  rmSync(mockWork, { recursive: true, force: true });
 }
 
 // ── Test 4: batch/batch-runner.sh CLI flag parsing and prompt wiring ─────────
