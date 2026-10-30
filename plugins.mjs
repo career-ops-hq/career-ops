@@ -245,7 +245,7 @@ async function cmdRun(args) {
   if (hook === 'ingest' || hook === 'search') {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
-    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, timeoutMs: 300_000, pluginId: id }), id);
+    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
     const { jobs, counts } = admitPluginJobs(found, {
       id,
